@@ -22,6 +22,7 @@ from syn_domain.contexts.organization.domain.read_models.contribution_heatmap im
     HeatmapDayBucket,
 )
 from syn_domain.storable_text import pg_safe
+from syn_shared.pricing import parse_vendor_cost
 
 # WHAT THIS MODULE COSTS, AND WHY THAT IS THE POINT (#1253)
 #
@@ -373,9 +374,9 @@ class TimescaleHeatmapQuery:
             # would discard billing truth in favour of our pricing table -
             # which drifts: this session's vendor cost is $0.09440 and the
             # table reprices it at $0.0921.
-            vendor_cost = row.get("vendor_cost_usd")
+            vendor_cost = parse_vendor_cost(row.get("vendor_cost_usd"))
             if vendor_cost is not None:
-                day_cost.priced_cost += Decimal(str(vendor_cost))
+                day_cost.priced_cost += vendor_cost
                 continue
 
             # Priced as what ran when reported, else as what was requested

@@ -17,6 +17,7 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     recorded_model_select,
 )
 from syn_domain.storable_text import pg_safe
+from syn_shared.pricing import parse_vendor_cost
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -233,8 +234,7 @@ class _PageRows:
 
 def _row_sdk_cost(row: asyncpg.Record) -> Decimal | None:
     """The harness-reported cost for a row, when it has one."""
-    raw = row.get("sdk_cost")
-    return None if raw is None else Decimal(str(raw))
+    return parse_vendor_cost(row.get("sdk_cost"))
 
 
 def _pick_primary_model(token_totals_by_model: dict[str, int]) -> str | None:

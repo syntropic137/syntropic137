@@ -2,8 +2,10 @@ import { clsx } from 'clsx'
 import { GitBranch } from 'lucide-react'
 
 import { Card, CardContent, CardHeader } from '../../components'
+import { PhaseModelBadge } from '../../components/PhaseModelBadge'
 import { providerLabel } from '../../constants/agentProviders'
 import type { PhaseDefinition, PhaseMetrics } from '../../types'
+import { formatCostWithCoverage } from '../../utils/formatters'
 import { defaultPhaseStyle } from './workflowConstants'
 
 interface PhasePipelineProps {
@@ -11,6 +13,19 @@ interface PhasePipelineProps {
   phaseMetrics: PhaseMetrics[] | undefined
   selectedPhaseId?: string | null
   onPhaseSelect?: (phaseId: string) => void
+}
+
+function PhaseMetricLine({ metric }: { metric: PhaseMetrics }) {
+  return (
+    <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+      <span>{metric.total_tokens.toLocaleString()} tok</span>
+      {/* Unpriced work must not read as a confident $0 (#890); a running phase's cost is a lower bound (#1048). */}
+      <span title={metric.cost_in_progress ? 'Counted so far; this phase is still running' : undefined}>
+        {formatCostWithCoverage(metric.cost_usd, metric.unpriced_observation_count)}
+        {metric.cost_in_progress ? ' so far' : ''}
+      </span>
+    </div>
+  )
 }
 
 function PhaseCard({
@@ -54,15 +69,11 @@ function PhaseCard({
           {phase.description}
         </p>
       )}
-      <div className="mt-2 text-xs text-[var(--color-text-muted)]">
-        {providerLabel(phase.provider ?? phase.agent_type)}
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-muted)]">
+        <span>{providerLabel(phase.provider ?? phase.agent_type)}</span>
+        <PhaseModelBadge model={phase.model} modelDisplay={phase.model_display} />
       </div>
-      {phaseMetric && (
-        <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-          <span>{phaseMetric.total_tokens.toLocaleString()} tok</span>
-          <span>${Number(phaseMetric.cost_usd).toFixed(4)}</span>
-        </div>
-      )}
+      {phaseMetric && <PhaseMetricLine metric={phaseMetric} />}
     </div>
   )
 }

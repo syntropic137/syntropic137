@@ -26,6 +26,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
+    install_skill,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -100,8 +103,6 @@ _SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
     "codex": "codex",
     "gemini": "gemini-cli",
 }
-
-_SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
 # Baked delegation skills live in the agentic-primitives image under this root
 # (claude-cli manifest plugins.include: delegation). A delegation-enabled phase
@@ -650,26 +651,9 @@ class WorkspaceProvisionHandler:
         if skill_files:
             await workspace.inject_files(skill_files)
         for skill in phase.skills:
-            result = await workspace.execute(
-                [
-                    "skills",
-                    "add",
-                    f"/workspace/.syn-skills/{skill.skill_name}",
-                    "--agent",
-                    agent_key,
-                    "-y",
-                ],
-                timeout_seconds=_SKILL_INSTALL_TIMEOUT_SECONDS,
-                working_directory="/workspace",
+            await install_skill(
+                workspace, skill.skill_name, f"/workspace/.syn-skills/{skill.skill_name}", agent_key
             )
-            if result.exit_code != 0:
-                raise SkillInstallFailed.after_exit(
-                    skill.skill_name,
-                    agent_key,
-                    exit_code=result.exit_code,
-                    output=result.stderr or result.stdout or "",
-                    timed_out=result.timed_out,
-                )
         logger.info(
             "Installed %d skill(s) for agent %s in %s",
             len(phase.skills),
@@ -864,26 +848,9 @@ class WorkspaceProvisionHandler:
         if skill_name is None or agent_key is None:
             # allow_delegation is validated headless-only (claude/codex); defensive.
             return
-        result = await workspace.execute(
-            [
-                "skills",
-                "add",
-                f"{_DELEGATION_SKILL_ROOT}/{skill_name}",
-                "--agent",
-                agent_key,
-                "-y",
-            ],
-            timeout_seconds=_SKILL_INSTALL_TIMEOUT_SECONDS,
-            working_directory="/workspace",
+        await install_skill(
+            workspace, skill_name, f"{_DELEGATION_SKILL_ROOT}/{skill_name}", agent_key
         )
-        if result.exit_code != 0:
-            raise SkillInstallFailed.after_exit(
-                skill_name,
-                agent_key,
-                exit_code=result.exit_code,
-                output=result.stderr or result.stdout or "",
-                timed_out=result.timed_out,
-            )
         logger.info(
             "Installed baked delegation skill %s for agent %s in %s",
             skill_name,

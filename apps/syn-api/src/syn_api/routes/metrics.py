@@ -6,7 +6,9 @@ Provides aggregated dashboard metrics with optional per-phase breakdown.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -14,6 +16,7 @@ from pydantic import BaseModel, Field
 from syn_api._wiring import (
     ensure_connected,
     get_canonical_usage_query,
+    get_execution_cost_query,
     get_projection_mgr,
 )
 from syn_api.types import (
@@ -23,6 +26,10 @@ from syn_api.types import (
     Ok,
     Result,
 )
+from syn_shared.pricing import canonical_cost_usd
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.agent_sessions import CanonicalTotals
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,26 @@ class PhaseMetrics(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     cost_usd: Decimal = Decimal("0")
+    """What this phase cost, summed over every execution of the workflow.
+
+    Read from the same per-phase source the execution detail page uses
+    (``ExecutionCostQueryService``, Lane 2), so a workflow's per-phase cost
+    reconciles with the phases of its executions.
+    """
+    unpriced_observation_count: int = 0
+    """Observations in this phase that carried no usable rate (#890 contract).
+
+    Non-zero means ``cost_usd`` is incomplete: a lower bound, not the total. A
+    phase with ``cost_usd == 0`` and a non-zero count is UNKNOWN, not free.
+    """
+    cost_in_progress: bool = False
+    """True while any execution still has this phase open.
+
+    A running phase's cost is only attributed once its session summary lands;
+    until then ``cost_by_phase`` has no entry for it, so ``cost_usd`` omits the
+    run in flight. True means ``cost_usd`` is a lower bound "so far", never a
+    settled figure (the workflow-level form of #1048).
+    """
     duration_seconds: float | None = None
     """Seconds this phase has run in total, or ``None`` when nothing knows.
 
@@ -121,8 +148,66 @@ async def get_dashboard_metrics(
 # =============================================================================
 
 
-async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
-    """Return pre-aggregated per-phase metrics from the projection store (O(1) read)."""
+@dataclass(frozen=True)
+class _PhaseCost:
+    """One phase's cost across a workflow's executions, with its coverage."""
+
+    cost_usd: Decimal
+    unpriced_observation_count: int
+
+
+async def _phase_costs(execution_ids: set[str]) -> dict[str, _PhaseCost]:
+    """Per-phase cost summed across ``execution_ids``, keyed by phase id.
+
+    The same source and the same fields the execution detail page reads
+    (``cost_by_phase`` / ``unpriced_by_phase``), so the workflow view and the
+    execution view cannot disagree about what a phase cost.
+
+    Raises:
+        MetricsUnavailableError: the costs could not be read. Deliberately not
+            an empty mapping, which would render every phase as ``$0``.
+    """
+    if not execution_ids:
+        return {}
+    try:
+        costs = await get_execution_cost_query().list_for_ids(execution_ids)
+    except Exception as exc:
+        logger.warning("Failed to read per-phase execution costs", exc_info=True)
+        raise MetricsUnavailableError(
+            "phase costs are unavailable: the observability store could not be read"
+        ) from exc
+
+    cost_by_phase: dict[str, Decimal] = {}
+    unpriced_by_phase: dict[str, int] = {}
+    for execution in costs:
+        for phase_id, cost in execution.cost_by_phase.items():
+            cost_by_phase[phase_id] = cost_by_phase.get(phase_id, Decimal("0")) + cost
+        for phase_id, count in execution.unpriced_by_phase.items():
+            unpriced_by_phase[phase_id] = unpriced_by_phase.get(phase_id, 0) + count
+    return {
+        phase_id: _PhaseCost(
+            cost_usd=canonical_cost_usd(cost_by_phase.get(phase_id, Decimal("0"))),
+            unpriced_observation_count=unpriced_by_phase.get(phase_id, 0),
+        )
+        for phase_id in cost_by_phase.keys() | unpriced_by_phase.keys()
+    }
+
+
+_NO_PHASE_COST = _PhaseCost(cost_usd=Decimal("0"), unpriced_observation_count=0)
+
+
+async def _build_phase_metrics(workflow_id: str, execution_ids: set[str]) -> list[PhaseMetrics]:
+    """Per-phase metrics: tokens and durations from the projection, cost from Lane 2.
+
+    A failure to read the phase projection degrades to no phases (the
+    pre-existing behaviour). A failure to read COSTS does not: it raises
+    ``MetricsUnavailableError`` like the totals do, because a phase list whose
+    every cost is ``$0`` reads as fact.
+
+    Raises:
+        MetricsUnavailableError: the phase costs could not be read.
+    """
+    costs = await _phase_costs(execution_ids)
     await ensure_connected()
     try:
         manager = get_projection_mgr()
@@ -135,8 +220,11 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
                 input_tokens=phase.input_tokens,
                 output_tokens=phase.output_tokens,
                 total_tokens=phase.total_tokens,
-                # Lane 2: phase cost is enriched at the endpoint from execution_cost (#695)
-                cost_usd=Decimal("0"),
+                cost_usd=costs.get(phase.phase_id, _NO_PHASE_COST).cost_usd,
+                unpriced_observation_count=costs.get(
+                    phase.phase_id, _NO_PHASE_COST
+                ).unpriced_observation_count,
+                cost_in_progress=bool(phase.active_runs),
                 # Resolved at read time, by the phase itself: a running phase
                 # has no recorded duration to read back, and the 0.0 this used
                 # to pass through was the projection's seed value, not a
@@ -163,19 +251,34 @@ class MetricsUnavailableError(Exception):
     """
 
 
-async def _canonical_totals(workflow_id: str | None):
-    """Canonical token/cost totals, narrowed to one workflow when asked.
+async def _workflow_execution_ids(workflow_id: str) -> set[str]:
+    """Every execution id of one workflow, read once and shared by totals and phases.
+
+    Raises:
+        MetricsUnavailableError: the execution list could not be read.
+    """
+    try:
+        manager = get_projection_mgr()
+        summaries = await manager.workflow_execution_list.get_by_workflow_id(workflow_id)
+    except Exception as exc:
+        logger.warning("Failed to read executions for workflow %s", workflow_id, exc_info=True)
+        raise MetricsUnavailableError(
+            "usage totals are unavailable: the workflow's executions could not be read"
+        ) from exc
+    return {s.workflow_execution_id for s in summaries}
+
+
+async def _canonical_totals(execution_ids: set[str] | None) -> CanonicalTotals:
+    """Canonical token/cost totals, narrowed to a set of executions when given.
 
     Raises:
         MetricsUnavailableError: the totals could not be read.
     """
     try:
         query_svc = get_canonical_usage_query()
-        if workflow_id is None:
+        if execution_ids is None:
             return await query_svc.totals()
-        manager = get_projection_mgr()
-        summaries = await manager.workflow_execution_list.get_by_workflow_id(workflow_id)
-        return await query_svc.totals(execution_ids={s.workflow_execution_id for s in summaries})
+        return await query_svc.totals(execution_ids=execution_ids)
     except Exception as exc:
         logger.warning("Failed to read canonical usage totals", exc_info=True)
         raise MetricsUnavailableError(
@@ -198,7 +301,6 @@ async def get_metrics_endpoint(
         )
 
     m = result.value
-    phases = await _build_phase_metrics(workflow_id) if workflow_id else []
 
     # Tokens, cost and session count come from the ONE canonical definition, the same
     # one the activity heatmap reads (#932). They previously came from Lane 1
@@ -207,7 +309,13 @@ async def get_metrics_endpoint(
     # reality. Workflow/artifact counts stay on the projection: those are
     # domain lifecycle facts, not observed telemetry.
     try:
-        totals = await _canonical_totals(workflow_id)
+        if workflow_id:
+            execution_ids = await _workflow_execution_ids(workflow_id)
+            totals = await _canonical_totals(execution_ids)
+            phases = await _build_phase_metrics(workflow_id, execution_ids)
+        else:
+            totals = await _canonical_totals(None)
+            phases = []
     except MetricsUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
