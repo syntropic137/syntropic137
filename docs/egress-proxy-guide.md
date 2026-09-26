@@ -1,5 +1,15 @@
 # Adding Egress Proxy to Claude CLI Workspace
 
+> **HISTORICAL — the paths in this guide do not exist.**
+>
+> Every path here points into `lib/agentic-primitives/providers/workspaces/`.
+> That submodule was removed on 2026-09-25 when workspace publishing moved to
+> agentic-workspace, and the `egress-proxy` provider is present in NEITHER
+> repository - it had already been removed upstream before the migration, so
+> nothing was lost here.
+>
+> Kept as a record of the design. Do not follow the commands.
+
 **Goal:** Add network allowlist enforcement to existing Claude CLI container setup
 
 ## 🎯 Quick Summary

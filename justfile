@@ -85,7 +85,7 @@ onboard-dev *flags:
     # 6. Kick off workspace image build in background (if needed)
     #    Runs while the user does interactive GitHub App / Cloudflare setup.
     BUILD_PID=""
-    if ! docker image inspect agentic-workspace-claude-cli:latest >/dev/null 2>&1; then
+    if ! docker image inspect agentic-workspace-claude:latest >/dev/null 2>&1; then
         echo "🐳 Building workspace image in background..."
         just workspace-build > /tmp/syn-workspace-build.log 2>&1 &
         BUILD_PID=$!
@@ -648,13 +648,20 @@ workspace-build:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "🔨 Building workspace image from agentic-workspace..."
-    cd lib/agentic-workspace && uv run scripts/build-provider.py claude-cli
+    # --tag is explicit, and it has to be. Without it build-provider.py takes
+    # the name from the vendored provider manifest, which still reads
+    # `agentic-workspace-claude-cli` (AgentParadise/agentic-workspace#5), so
+    # the recipe built one tag and announced another, and the checks below
+    # inspected the third. Naming it here makes the built tag, the reported
+    # tag and the inspected tag one string.
+    cd lib/agentic-workspace && uv run scripts/build-provider.py claude-cli \
+        --tag agentic-workspace-claude:latest
     echo "✅ Image built: agentic-workspace-claude:latest"
 
 # List all workspace image versions
 workspace-versions:
     @echo "📦 Workspace image versions:"
-    @docker images agentic-workspace-claude-cli | head -20
+    @docker images agentic-workspace-claude | head -20
 
 # Smoke-test the image every deployment ACTUALLY pulls.
 #
@@ -2288,7 +2295,7 @@ _webhook-stop:
 _workspace-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    IMAGE="agentic-workspace-claude-cli:latest"
+    IMAGE="agentic-workspace-claude:latest"
 
     # Auto-init submodules if not yet initialized (worktree-safe)
     if [ ! -f lib/agentic-workspace/.git ] && [ ! -d lib/agentic-workspace/.git ]; then

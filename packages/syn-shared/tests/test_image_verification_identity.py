@@ -1,17 +1,21 @@
-"""The default signing identity must admit exactly two publishers.
+"""The default signing identity must admit exactly ONE publisher.
 
-Workspace image publishing is moving from agentic-primitives to
-agentic-workspace. During the cutover the default identity constraint admits
-both, because a running deployment pins digests built by the old publisher
-while the pins move in a separate change.
+Workspace image publishing MOVED from agentic-primitives to agentic-workspace.
+The default admitted both for the duration of that cutover; every pin now
+comes from agentic-workspace, so the retired publisher is no longer trusted by
+default. Trusting a signer nothing needs is the drift this constraint exists
+to prevent.
 
 Widening an identity constraint is the dangerous direction. These tests pin the
-whole admitted set: both real publisher identities match, and a list of
-near-miss identities does not. The near misses are the ones an alternation
-built by string concatenation actually gets wrong - a missing anchor makes a
-SAN match as a substring, and a stray group makes a different repository or
-workflow match. Asserting only that the two good identities pass would leave
-that entire class open.
+WHOLE admitted set: the one real publisher identity matches, and a list of
+near-miss identities does not. The near misses are the ones a hand-written
+identity actually gets wrong - a missing anchor makes a good SAN match as a
+substring of a longer one, and an unescaped dot makes a lookalike host match.
+Asserting only that the good identity passes would leave that class open.
+
+The retired agentic-primitives identities are in the REJECTED list on purpose.
+They were admitted during the cutover, so a regression that re-admits them
+would otherwise look like nothing.
 """
 
 from __future__ import annotations
@@ -36,12 +40,15 @@ _WORKSPACE_WORKFLOW = (
 )
 
 ADMITTED = [
-    f"{_PRIMITIVES_WORKFLOW}@refs/heads/main",
-    f"{_PRIMITIVES_WORKFLOW}@refs/heads/release",
     f"{_WORKSPACE_WORKFLOW}@refs/heads/release",
 ]
 
 REJECTED = [
+    # The RETIRED publisher. Admitted during the cutover, rejected now. An
+    # operator overriding SYN_WORKSPACE_DOCKER_IMAGE to an old digest must set
+    # the identity explicitly rather than have it trusted by default.
+    f"{_PRIMITIVES_WORKFLOW}@refs/heads/main",
+    f"{_PRIMITIVES_WORKFLOW}@refs/heads/release",
     # agentic-workspace publishes ONLY from the protected release branch.
     f"{_WORKSPACE_WORKFLOW}@refs/heads/main",
     f"{_WORKSPACE_WORKFLOW}@refs/tags/v1.0.0",
@@ -91,14 +98,31 @@ def test_fullmatch_and_search_agree() -> None:
 
 
 @pytest.mark.unit
-def test_default_setting_is_the_combined_identity() -> None:
-    """The shipped default must be the alternation, not one publisher."""
+def test_default_setting_is_the_new_publisher_only() -> None:
+    """The shipped default must be agentic-workspace, and only it."""
     settings = ImageVerificationSettings(
         _env_file=None,  # pyright: ignore[reportCallIssue]
     )
     assert settings.certificate_identity_regexp == WORKSPACE_IMAGE_IDENTITY_REGEXP
-    assert AGENTIC_PRIMITIVES_IDENTITY_REGEXP in WORKSPACE_IMAGE_IDENTITY_REGEXP
-    assert AGENTIC_WORKSPACE_IDENTITY_REGEXP in WORKSPACE_IMAGE_IDENTITY_REGEXP
+    assert WORKSPACE_IMAGE_IDENTITY_REGEXP == AGENTIC_WORKSPACE_IDENTITY_REGEXP
+    assert "agentic-primitives" not in WORKSPACE_IMAGE_IDENTITY_REGEXP, (
+        "the retired publisher is still trusted by default"
+    )
+
+
+@pytest.mark.unit
+def test_the_retired_identity_is_still_exported() -> None:
+    """Not trusted by default, but still SPELLED here.
+
+    An operator overriding SYN_WORKSPACE_DOCKER_IMAGE to an old
+    agentic-primitives digest needs its signer's identity. Deleting the
+    constant would leave them writing one by hand, which is how a wrong
+    identity constraint gets authored.
+    """
+    assert "agentic-primitives" in AGENTIC_PRIMITIVES_IDENTITY_REGEXP
+    assert re.match(
+        AGENTIC_PRIMITIVES_IDENTITY_REGEXP, f"{_PRIMITIVES_WORKFLOW}@refs/heads/release"
+    )
 
 
 @pytest.mark.unit

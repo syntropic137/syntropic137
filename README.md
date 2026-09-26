@@ -265,7 +265,7 @@ syntropic137/
 │   ├── syn-perf/                # Performance benchmarking
 │   └── openclaw-plugin/         # OpenClaw integration
 ├── lib/                         # Git submodules (our own projects)
-│   ├── agentic-primitives/      # Agent building blocks, isolation providers
+│   ├── agentic-workspace/       # Workspace images, isolation providers, event recording
 │   ├── event-sourcing-platform/ # Rust event store, Python SDK, VSA tool
 │   ├── syntropic137-claude-plugin/ # Claude Code plugin
 │   └── agent-paradise-standards-system/ # Architecture fitness functions

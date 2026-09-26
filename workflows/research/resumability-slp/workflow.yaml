@@ -1,0 +1,358 @@
+# Research: execution resumability as a fork, reviewed across leverage points
+#
+# WHY THIS EXISTS, AND WHY IT IS NOT sdlc-decision-record-v1.
+#
+# The existing decision record for resumability (exec-184da818e9e9) bundled a
+# per-phase DOLLAR BUDGET into the resume design, because the motivating
+# incident was a $77.35 runaway phase. The operator did not ask for a budget
+# feature, and the cap it proposed (C = $25) is wrong for phases that
+# legitimately run one to six hours. That record is therefore superseded on
+# scope: this one decides resumability ONLY.
+#
+# It also chose Path B - reopen the failed phase inside the SAME execution -
+# on the grounds that a new execution id needs exactly-once realization and
+# probe 3 found nothing provides it (uuid4 ids, no ProcessManager in
+# `orchestration`, no claim, no lease, no retry endpoint).
+#
+# The operator's model is a FORK: a new execution id, linked to its parent,
+# inheriting the parent's artifacts and input prompt, starting at the phase
+# that died. The exactly-once objection is weaker for a fork than the record
+# assumed, BUT only while resume is operator-initiated: two clicks produce two
+# visible forks rather than two writers on one stream. The moment anything
+# auto-resumes, the claim/lease problem returns. Testing that boundary is the
+# job of the experiment phase.
+#
+# EVERY PHASE DECLARES LEVERAGE-POINT SKILLS. Declared per phase rather than
+# relying on the workflow-scope block alone: scope injection covering every
+# phase is what workflows/validation/workflows/skills-injection exists to
+# prove, and a design decision of this size should not be the thing that finds
+# out it regressed. Per-phase declarations are readable back off the installed
+# definition.
+#
+# `software-leverage-review` is DELIBERATELY NOT USED. Its own SKILL.md states
+# it must be invoked via `claude -p` because it fans out 17 subagents and
+# "Claude Code's subagent-dispatch budget is one level deep, so an orchestrator
+# that is itself a subagent cannot fan out". A workflow phase IS that subagent,
+# so it would fail - at roughly $15-25 per attempt. The individual leverage
+# point skills are used instead.
+
+id: research-resumability-slp-v1
+name: "Research: execution resumability as a fork (leverage-point reviewed)"
+description: |
+  Decide how a failed, cancelled or interrupted workflow execution is resumed,
+  given the operator's fork model. Every phase is reviewed against software
+  leverage points. Budget enforcement is explicitly out of scope.
+type: research
+classification: complex
+
+requires_repos: true
+
+# Workflow scope: these reach every phase even where a phase adds its own.
+# The per-phase blocks below are additive, not a replacement.
+skills:
+  - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+  - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+
+phases:
+  - id: options
+    name: Frame the problem and research the paths
+    order: 1
+    execution_type: sequential
+    argument_hint: "[task]"
+    description: What resume can mean here, and what the codebase already supports.
+    input_artifacts: []
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    allowed_tools: [Read, Grep, Glob, Bash, Write]
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_template: |
+      # Frame resumability, and find what the code already gives you
+
+      $ARGUMENTS
+
+      ## The decision already taken by the operator, which you do NOT relitigate
+
+      A resume is a FORK:
+
+      - a NEW execution id, linked to the parent ("resume of", "fork of")
+      - it inherits the parent's ARTIFACTS and the original INPUT PROMPT, which
+        is all a phase has access to anyway
+      - the phase that failed or was cancelled is THROWN AWAY and restarts from
+        its beginning; there is no mid-phase continuation
+      - a CANCELLED execution IS resumable, on the same terms
+      - the parent execution is never mutated
+
+      ## Explicitly OUT OF SCOPE
+
+      Budget caps, `BudgetExceeded`, per-phase dollar limits, spend guards. A
+      previous decision record folded these in because the motivating incident
+      was a runaway phase. The operator did not ask for them and phases here
+      legitimately run one to six hours, so any cap would be a guess that turns
+      working runs into failures. If you find yourself designing a budget, stop:
+      that is a different feature and a different issue.
+
+      ## What to establish, with file:line evidence for every claim
+
+      1. What `WorkflowExecutionAggregate` already models. Read
+         `resume_execution`, `cancel_execution`, `interrupt_execution`,
+         `fail_execution` and the `on_execution_*` handlers. Which transitions
+         exist, which are reachable, and which are dead code today?
+      2. How an execution's artifacts are addressed, and whether a fork can
+         reference a parent's artifact ids without copying them. What breaks
+         if two executions point at one artifact?
+      3. What `WorkflowExecutionStartedEvent` actually records, and whether the
+         original input prompt is recoverable from the event stream alone. If
+         it is not, the fork cannot be reconstructed from events and that is a
+         finding, not a detail.
+      4. Whether anything in the read path assumes one execution produced its
+         own artifacts. `syn artifacts list`, the projections, the dashboard.
+      5. The quarantine ref work already on
+         `fix/1381-shutdown-preserves-in-flight-work`. What does it preserve,
+         where, and is any of it reusable by a fork?
+
+      ## The exactly-once question, which is the real risk
+
+      A fork creates a new execution id. Nothing in `orchestration` realizes an
+      id exactly once - no ProcessManager, no claim, no lease. Establish
+      whether that matters when resume is OPERATOR-INITIATED, and state the
+      precise condition under which it starts to matter.
+
+      Write `artifacts/output/options.md`. Every claim carries file:line. Mark
+      anything you could not verify as unverified rather than omitting it.
+
+  - id: attack-options
+    name: Attack the framing
+    order: 2
+    execution_type: sequential
+    description: A different model tries to break the framing before it is built on.
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    # No `allowed_tools`: codex enforces a FILESYSTEM SANDBOX, not a tool
+    # vocabulary, so a tool list is accepted and never applied. The loader
+    # rejects it rather than letting it read as scoping that is not there.
+    # `workspace-write` rather than `read-only` because the phase writes its
+    # own deliverable, and read-only cannot.
+    agent:
+      provider: codex
+      model: gpt-sol
+      sandbox: workspace-write
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_template: |
+      # Attack the framing in artifacts/output/options.md
+
+      Read it, then try to falsify it. You are not here to agree.
+
+      Attack in this order:
+
+      1. **Claims without evidence.** Every file:line citation - open it. A
+         right conclusion with an invented citation looks finished and is not.
+      2. **The fork's inheritance.** If a fork points at its parent's
+         artifacts, what happens when the parent is archived, deleted, or its
+         artifacts are garbage collected? Does the fork become unreadable?
+      3. **The exactly-once claim.** The framing argues operator-initiated
+         resume makes exactly-once a UI concern rather than a correctness one.
+         Find the case where that is false. Concurrent operators. A retried
+         HTTP request. A double-submit. A webhook-triggered resume.
+      4. **Cancelled-is-resumable.** An operator cancels to STOP something.
+         Construct the case where making that resumable does harm, and say
+         whether a guard is needed.
+      5. **Phase boundary correctness.** The fork restarts the failed phase
+         from its beginning. What if that phase already had side effects - a
+         pushed branch, an opened PR, an uploaded artifact? Re-running it does
+         what?
+
+      Do NOT design a budget feature; it is out of scope and saying so is not
+      a finding.
+
+      Write `artifacts/output/attack-options.md`. For each attack: does it
+      hold, what is the evidence, and what would have to change.
+
+  - id: decide
+    name: Choose the design and draft the plan
+    order: 3
+    execution_type: sequential
+    description: One design, with the attacks either answered or accepted.
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    allowed_tools: [Read, Grep, Glob, Bash, Write]
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_template: |
+      # Decide, and write the plan
+
+      Read both prior artifacts. Produce ONE design for the fork model.
+
+      Every attack from the previous phase is either answered with evidence or
+      accepted as a stated residual risk. Silently dropping one is the failure
+      mode here.
+
+      The design must specify:
+
+      1. The domain event(s) a fork emits, and on which stream. Name them.
+      2. How the linkage is stored and how it is read back. A parent must be
+         able to list its forks and a fork must name its parent.
+      3. Exactly which phases the fork inherits as completed, and how their
+         artifacts are addressed.
+      4. What happens on a double-submit, concretely.
+      5. Which end states are forkable. Justify each inclusion AND each
+         exclusion.
+      6. What is NOT solved, named plainly.
+
+      This platform is event-sourced. Aggregates decide; projections derive;
+      processors dispatch without business logic. A design that puts a decision
+      in a projection or a service is wrong here regardless of how well it
+      reads. State which aggregate owns the fork decision.
+
+      Write `artifacts/output/decision.md`, with a numbered implementation plan
+      whose steps are independently verifiable.
+
+  - id: review-decision
+    name: Cross-model review of the decision
+    order: 4
+    execution_type: sequential
+    description: A different model reviews the decision before any experiment.
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    # No `allowed_tools`: codex enforces a FILESYSTEM SANDBOX, not a tool
+    # vocabulary, so a tool list is accepted and never applied. The loader
+    # rejects it rather than letting it read as scoping that is not there.
+    # `workspace-write` rather than `read-only` because the phase writes its
+    # own deliverable, and read-only cannot.
+    agent:
+      provider: codex
+      model: gpt-sol
+      sandbox: workspace-write
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_template: |
+      # Review artifacts/output/decision.md before anything is built on it
+
+      Blocking findings only, plus the reasoning behind them.
+
+      Check specifically:
+
+      1. Does the design actually follow event-sourcing here, or does it
+         describe an imperative orchestrator wearing the vocabulary? Which
+         aggregate owns the decision, and is that where the rule lives?
+      2. Is every attack from phase 2 answered or explicitly accepted? List
+         any that were dropped.
+      3. Is the implementation plan verifiable step by step, or does it have
+         steps whose completion cannot be observed?
+      4. What shapes of input exist in production that this design does not
+         handle? A fork of a fork. A fork of an execution whose workflow
+         definition has since changed. A fork whose parent artifacts no longer
+         exist.
+      5. Cite file:line for anything you assert about the codebase, and open
+         every citation the decision makes.
+
+      Write `artifacts/output/review-decision.md`. If the decision is not
+      ready, say so in the first line.
+
+  - id: experiment
+    name: Try to falsify the decision by experiment
+    order: 5
+    execution_type: sequential
+    description: Run something real against the claims rather than reasoning further.
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    allowed_tools: [Read, Grep, Glob, Bash, Write, Edit]
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_template: |
+      # Falsify the decision with a real experiment
+
+      Reasoning has gone as far as it can. Run something.
+
+      Pick the claims whose failure would change the design, and test those.
+      Candidates, in rough order of value:
+
+      1. Can two appends at the same expected version both succeed? The prior
+         record cites `test_second_append_at_expected_version_zero_fails` as
+         passing. Verify that yourself rather than citing it.
+      2. Can an execution reference another execution's artifact ids and have
+         the read path serve them? Build the smallest case that answers this.
+      3. Is the original input prompt recoverable from
+         `WorkflowExecutionStartedEvent` alone? Replay and see.
+      4. What does the aggregate do today if you resume a CANCELLED execution?
+         Not what the code reads like - what it does.
+
+      Rules that make the result mean something:
+
+      - A test must reproduce the HAZARD, not a near miss. A near-miss input
+        fails safe for the wrong reason and certifies an open class as closed.
+      - Before asserting a mutation killed a test, assert the mutation APPLIED.
+        An unapplied mutation looks exactly like a killed one.
+      - Report what you measured, not what you expected. A falsified claim is
+        the most valuable output this phase can produce.
+
+      Write `artifacts/output/experiment.md`: what you ran, what happened, and
+      which claims survived.
+
+  - id: final
+    name: Final decision record
+    order: 6
+    execution_type: sequential
+    description: The record, amended by whatever the experiment falsified.
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    allowed_tools: [Read, Grep, Glob, Bash, Write]
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/documentation@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_template: |
+      # Write the decision record
+
+      Read every prior artifact. Amend the decision where the experiment
+      falsified it, and say WHICH claim was falsified and by what.
+
+      The record must contain:
+
+      1. The decision, in one paragraph, stated as an instruction.
+      2. What changed from the draft, and what forced each change. "No changes"
+         is only acceptable if the experiment falsified nothing, and then say so
+         explicitly.
+      3. The implementation plan, numbered and independently verifiable.
+      4. What this does NOT solve, named plainly. Mid-phase continuation is one;
+         there will be others.
+      5. Anything still needing operator ratification, with a recommendation
+         and the reason it is not yours to decide. Keep this list SHORT and
+         genuinely operator-level. The previous record put a dollar figure here
+         that the operator had not asked for; do not repeat that.
+
+      Do not include a budget feature. If the work surfaced a real need for
+      spend control, note it in one line as a SEPARATE future issue and move on.
+
+      Write `artifacts/output/decision-record.md`.

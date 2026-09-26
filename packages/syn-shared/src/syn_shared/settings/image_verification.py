@@ -25,16 +25,14 @@ The default is a regexp rather than an exact identity for two reasons:
 
 1. The agentic-primitives publishing branch moved from ``main`` to a protected
    ``release`` branch, so that identity admits either ref of that one workflow.
-2. Publishing is moving repository, from agentic-primitives to
-   agentic-workspace. During that cutover the default admits BOTH publishers,
-   because a running deployment pins digests built by the old one while the
-   pins move separately. Admitting only the new publisher would make every
-   already-pinned image fail closed for a reason unrelated to its
-   trustworthiness.
+2. Publishing MOVED repository, from agentic-primitives to agentic-workspace.
+   The default admitted both for the duration of that cutover; it now admits
+   agentic-workspace only, because every pin comes from there. The retired
+   identity is still exported for an operator overriding the image reference
+   to an old digest - see ``WORKSPACE_IMAGE_IDENTITY_REGEXP``.
 
-Both alternatives name one workflow in one repository, anchored end to end.
-Neither admits any other workflow, repository, or ref. See
-``WORKSPACE_IMAGE_IDENTITY_REGEXP`` for when to drop the old publisher.
+Each identity names one workflow in one repository, anchored end to end, and
+admits no other workflow, repository, or ref.
 
 Environment Variables:
     SYN_IMAGE_VERIFY_* - signature verification configuration
@@ -71,26 +69,22 @@ AGENTIC_WORKSPACE_IDENTITY_REGEXP = (
     r"@refs/heads/release$"
 )
 
-#: The identity constraint actually applied by default: either publisher.
+#: The identity constraint actually applied by default: agentic-workspace ONLY.
 #:
-#: Both are admitted on purpose, and only for the duration of the cutover. A
-#: running deployment pins digests built by agentic-primitives; the pins move
-#: to agentic-workspace digests in a separate change. If this admitted only
-#: the new publisher, shipping the code would make every already-pinned image
-#: fail verification and fail closed, taking workspaces down for a reason that
-#: has nothing to do with the images being untrustworthy.
+#: This admitted BOTH publishers during the cutover, so that a deployment still
+#: pinned to agentic-primitives digests kept verifying while the pins moved.
+#: That window is closed: every PINNED_DIGESTS entry now names an
+#: agentic-workspace-built image, which is the removal condition the cutover
+#: comment stated. Keeping the retired publisher would go on trusting a signer
+#: nothing needs, which is exactly the drift this constraint exists to prevent.
 #:
-#: Remove AGENTIC_PRIMITIVES_IDENTITY_REGEXP from this alternation once no
-#: PINNED_DIGESTS entry refers to an agentic-primitives-built image. Leaving
-#: it in place permanently would keep trusting a publisher that no longer
-#: needs to be trusted, which is exactly the drift this constraint exists to
-#: prevent.
-#:
-#: Each alternative keeps its own anchors, so the combined pattern still
-#: matches a whole SAN rather than a substring of one.
-WORKSPACE_IMAGE_IDENTITY_REGEXP = (
-    f"(?:{AGENTIC_PRIMITIVES_IDENTITY_REGEXP}|{AGENTIC_WORKSPACE_IDENTITY_REGEXP})"
-)
+#: AGENTIC_PRIMITIVES_IDENTITY_REGEXP is deliberately still exported. An
+#: operator who overrides ``SYN_WORKSPACE_DOCKER_IMAGE`` with an old
+#: agentic-primitives digest needs a spelling for its signer, and inventing one
+#: by hand is how a wrong constraint gets written. Set
+#: ``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` to it, or to an alternation
+#: of both, for that case only.
+WORKSPACE_IMAGE_IDENTITY_REGEXP = AGENTIC_WORKSPACE_IDENTITY_REGEXP
 
 #: Lowest cosign major version accepted by the verifier probe.
 #: v2 introduced ``--certificate-identity-regexp``; v3 is current and keeps it.
