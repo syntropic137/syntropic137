@@ -518,6 +518,18 @@ class SetupPhaseSecrets:
     git_author_name: str | None = None
     git_author_email: str | None = None
 
+    def __post_init__(self) -> None:
+        # Unset means "route it the usual way", so secrets built directly from
+        # repo tokens get the same gh credential `create` would have chosen -
+        # there is one routing rule, not one per constructor.
+        if self.gh_token is None:
+            self.gh_token = _gh_token_for_repo_under_work(self.repositories, self.repo_tokens)
+
+    @property
+    def has_github_credential(self) -> bool:
+        """Whether these secrets install any GitHub credential - for git or for gh."""
+        return bool(self.repo_tokens) or self.gh_token is not None
+
     @classmethod
     async def create(
         cls,
@@ -607,8 +619,7 @@ class SetupPhaseSecrets:
             git_author_email: Git author email (default: "test@example.com")
             repositories: Optional list of repo URLs (no tokens fetched)
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
-            gh_token: gh's credential; defaults to the first repo's token, which is
-                what `create` resolves for a phase whose repos all have one
+            gh_token: gh's credential; defaults to the one `create` would route to
             clone_repos: False to credential the repos without checking them out (#1187)
             can_open_pr: True to model a phase permitted to publish (#1197)
         """
@@ -624,7 +635,7 @@ class SetupPhaseSecrets:
         return cls(
             repo_tokens=tokens,
             repositories=repositories or [],
-            gh_token=gh_token if gh_token is not None else next(iter(tokens.values()), None),
+            gh_token=gh_token,
             clone_repos=clone_repos,
             can_open_pr=can_open_pr,
             claude_code_oauth_token=claude_code_oauth_token

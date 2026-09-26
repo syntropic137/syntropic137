@@ -9,6 +9,8 @@ Run: pytest -m unit packages/syn-adapters/src/syn_adapters/workspace_backends/se
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -31,6 +33,18 @@ from syn_adapters.workspace_backends.service.setup_phase_secrets import (
 # marker. Unmarked now means collected but run by no CI job, which the
 # census gate correctly refuses.
 pytestmark = pytest.mark.unit
+
+
+@dataclass(frozen=True)
+class _Minted:
+    """What `mint_agent_token` returns: the token, and when it expires (#725)."""
+
+    token: str
+    expires_at: datetime
+
+
+def _minted(token: str) -> _Minted:
+    return _Minted(token, datetime.now(UTC) + timedelta(hours=1))
 
 
 @pytest.mark.unit
@@ -477,7 +491,7 @@ class TestSetupPhaseSecretsCreate:
         """Two repos from same installation → one mint_agent_token call."""
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.return_value = "inst-1"
-        mock_client.mint_agent_token.return_value = "tok-inst1"
+        mock_client.mint_agent_token.return_value = _minted("tok-inst1")
 
         repos = [
             "https://github.com/org/repo-a",
@@ -501,7 +515,10 @@ class TestSetupPhaseSecretsCreate:
             secrets = await SetupPhaseSecrets.create(repositories=repos, require_github=True)
 
         # One token minted despite two repos
-        mock_client.mint_agent_token.assert_called_once_with("inst-1", can_open_pr=False)
+        # One token, scoped to both repos by name (#725).
+        mock_client.mint_agent_token.assert_called_once_with(
+            "inst-1", can_open_pr=False, repositories=["repo-a", "repo-b"]
+        )
         assert secrets.repo_tokens[repos[0]] == "tok-inst1"
         assert secrets.repo_tokens[repos[1]] == "tok-inst1"
 
@@ -516,7 +533,7 @@ class TestSetupPhaseSecretsCreate:
 
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.side_effect = fake_get_installation
-        mock_client.mint_agent_token.side_effect = lambda inst_id, **_: (
+        mock_client.mint_agent_token.side_effect = lambda inst_id, **_: _minted(
             "tok-a" if inst_id == "inst-a" else "tok-b"
         )
 

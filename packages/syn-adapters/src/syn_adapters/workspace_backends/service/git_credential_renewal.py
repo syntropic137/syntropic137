@@ -125,7 +125,7 @@ async def renew_git_credential(
             f"a fresh GitHub installation token could not be minted ({unmintable})"
         ) from unmintable
 
-    if not secrets.issued:
+    if not secrets.has_github_credential:
         # Nothing is credentialed - no repository token and no gh token - so
         # there is no credential to renew and nothing downstream depends on
         # one. Distinct from a renewal that was attempted and failed, and must
@@ -154,7 +154,7 @@ async def renew_git_credential(
     logger.info(
         "Renewed the git credential in workspace %s (expires_at=%s)",
         workspace.workspace_id,
-        min(token.expires_at for token in secrets.issued).isoformat(),
+        ledger.credential_expires_at.isoformat() if ledger.credential_expires_at else "unknown",
     )
     return secrets.issued
 
