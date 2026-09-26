@@ -497,7 +497,7 @@ class SetupPhaseSecrets:
     separates them. Before it, naming a repo meant both: the only way to skip
     the clone was to pass no repositories at all, which also dropped
     ~/.git-credentials and the gh hosts.yml entry - and, one layer up, made
-    ``_resolve_github_app_token`` fall back to the first installation, the
+    the (since removed, #725) ``_resolve_github_app_token`` fall back to the first installation, the
     exact multi-org misrouting #1129 fixed. A phase that talks to GitHub about
     a repo it does not need on disk had no way to say so.
 

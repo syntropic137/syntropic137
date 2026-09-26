@@ -70,9 +70,11 @@ The token injector is a separate service in `docker/token-injector/`.
 
 ### Passthrough (No Injection)
 
-GitHub credentials are provisioned during the setup phase (installation token
-stored in `~/.git-credentials` and `~/.config/gh/hosts.yml`). The proxy routes
-traffic but does not inject credentials.
+GitHub credentials are provisioned during the setup phase: a repo-scoped
+installation token stored in `~/.git-credentials` and `~/.config/gh/hosts.yml`
+(never `$GITHUB_TOKEN`), rewritten every 40 minutes while the agent runs and
+revoked at teardown (#725). The proxy routes traffic but does not inject
+credentials; a per-workspace GitHub credential sidecar is tracked by #725.
 
 | Host | Purpose |
 |------|---------|

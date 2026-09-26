@@ -41,8 +41,9 @@ This document describes how Syn137 securely integrates with GitHub using GitHub 
 │                         Agent Container                              │
 │                                                                     │
 │   Setup phase injects:                                              │
-│     ~/.git-credentials        (installation token, 1-hour TTL)     │
-│     ~/.config/gh/hosts.yml    (gh CLI auth)                        │
+│     ~/.git-credentials        (repo-scoped installation token)      │
+│     ~/.config/gh/hosts.yml    (gh CLI auth - NOT $GITHUB_TOKEN)     │
+│   Both rewritten every 40 min while the agent runs (#725).          │
 │                                                                     │
 │   Then secrets are CLEARED from environment.                        │
 │                                                                     │
@@ -95,19 +96,30 @@ jwt_token = jwt.encode(payload, pem_key, algorithm='RS256')
 
 - **What**: OAuth-style token for GitHub API access
 - **Lifetime**: 1 hour (GitHub enforced maximum)
-- **Scope**: Only repos where the app is installed
-- **Access**: Baked into agent container during setup phase, then environment is cleared
+- **Scope**: Only the repositories the workspace was provisioned for (named in the
+  token request), within one installation
+- **Access**: Written to `~/.git-credentials` and `~/.config/gh/hosts.yml` during
+  the setup phase, then the environment is cleared. Never an environment variable.
 
 ```python
 response = httpx.post(
     f'https://api.github.com/app/installations/{installation_id}/access_tokens',
     headers={'Authorization': f'Bearer {jwt_token}'},
+    json={'permissions': {...}, 'repositories': ['repo-a']},  # names, no owner
 )
 installation_token = response.json()['token']
 # Token format: ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-> **Note:** Installation tokens expire after 1 hour. For agent sessions exceeding 1 hour, token refresh is tracked in GitHub Issue #377.
+> **Renewal (#725, #1439).** Installation tokens expire after 1 hour, so while
+> the agent runs the platform renews the credential on a schedule: first at
+> T+40 min, then every 40 min, retrying every 3 min on failure. Renewal
+> rewrites `~/.git-credentials` and hosts.yml, so both `git` and `gh` pick up
+> the new token on their next call. If a token expires unrenewed, a
+> `git_credential_lapsed` observability event and a phase warning are emitted.
+> Old tokens are not revoked at renewal (a push in flight may be using one);
+> every unexpired token the workspace was issued is revoked at teardown. See
+> ADR-024's 2026-09-26 update.
 
 ## Security Controls
 
@@ -139,8 +151,10 @@ Only the API container has access to the PEM. Agent containers never see it.
 
 ### 2. Token Scoping
 
-Installation tokens are automatically scoped to:
-- Only repositories where the app is installed
+Installation tokens are scoped to:
+- Only the repositories the workspace was provisioned for. The token request
+  names them (#725); without that, a token reaches every repository the
+  installation covers
 - Only permissions granted to the app (contents, issues, PRs, etc.)
 - Only `pull_requests: read`, unless the phase holding the token declares
   `can_open_pr: true` in its workflow YAML (#1197)
@@ -148,8 +162,8 @@ Installation tokens are automatically scoped to:
 That last one is ours, not GitHub's. Publication is a capability a phase either
 holds or does not, and a phase that does not hold it gets a token that cannot
 call `POST /repos/{owner}/{repo}/pulls` - so `gh pr create` fails for it no
-matter what its prompt says, and no matter which of the two credential paths
-(`~/.config/gh/hosts.yml` or `$GITHUB_TOKEN`) it reaches for. It can still read
+matter what its prompt says. (`gh` reads only `~/.config/gh/hosts.yml`;
+`$GITHUB_TOKEN` is not set in agent containers, #725.) It can still read
 and check out pull requests, and still push branches.
 
 The reduced set is *derived* from `GET /app/installations/{id}` rather than
@@ -157,7 +171,7 @@ enumerated, because GitHub rejects a request for permissions the installation
 does not hold. See `syn_adapters.github.agent_token.mint_agent_token`.
 
 ```python
-# Example: Token can only access these repos
+# Example: a token for a workspace provisioned for these two repos
 {
     "permissions": {
         "contents": "write",
@@ -174,15 +188,21 @@ does not hold. See `syn_adapters.github.agent_token.mint_agent_token`.
 ### 3. Token Revocation
 
 ```python
-# 1. Automatic: Token expires after 1 hour (GitHub enforced)
+# 1. Automatic: every unexpired token a workspace was issued is revoked at
+#    teardown, after the quarantine push (#725). Best effort: the record of
+#    what was issued is in-process, so after an API crash the tokens simply
+#    expire.
 
-# 2. Emergency: Revoke a specific installation token
+# 2. Automatic: Token expires after 1 hour (GitHub enforced)
+
+# 3. Emergency: Revoke a specific installation token (the token authenticates
+#    its own revocation; 204 on success)
 httpx.delete(
-    f'https://api.github.com/installation/token',
-    headers={'Authorization': f'Bearer {installation_token}'},
+    'https://api.github.com/installation/token',
+    headers={'Authorization': f'token {installation_token}'},
 )
 
-# 3. Nuclear: Suspend entire GitHub App via GitHub.com UI
+# 4. Nuclear: Suspend entire GitHub App via GitHub.com UI
 ```
 
 ### 4. Network Isolation
@@ -190,7 +210,7 @@ httpx.delete(
 Agent containers run on a restricted Docker network (`agent-net`):
 
 - **Anthropic API**: Routed through shared Envoy proxy (`envoy-proxy:8081`). Agents hold a placeholder key (`proxy-managed`); the token injector (`ext_authz`) replaces it with the real credential. Direct calls to `api.anthropic.com` fail.
-- **GitHub API**: Passthrough — agents use the installation token baked into `~/.git-credentials` during setup. The token injector does not handle GitHub auth.
+- **GitHub API**: Passthrough — agents use the repo-scoped installation token in `~/.git-credentials` and `~/.config/gh/hosts.yml`, written during setup and rewritten by each renewal. The token injector does not handle GitHub auth; a per-workspace credential sidecar that would is tracked by #725 (Tier 1).
 - **Package registries**: Passthrough (pypi.org, npmjs.org, etc.)
 - **All other hosts**: Blocked by the Envoy allowlist (returns 403).
 
@@ -275,7 +295,7 @@ The token injector is an HTTP service implementing Envoy's `ext_authz` protocol.
 - **Anthropic API** — injects `x-api-key` (or `Authorization: Bearer` for OAuth) by replacing the `proxy-managed` placeholder
 
 **What it does NOT handle:**
-- **GitHub API** — passthrough. Agents use installation tokens from the setup phase.
+- **GitHub API** — passthrough. Agents use repo-scoped installation tokens written by the setup phase and renewed while they run (#725).
 - **Package registries** — passthrough (pypi.org, npmjs.org, etc.)
 
 ```
