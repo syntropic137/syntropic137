@@ -219,12 +219,11 @@ def get_workflow_repository() -> EventStoreRepository[WorkflowAggregate]:
 
 ## References
 
-- [event-sourcing-platform/event-store](../lib/event-sourcing-platform/event-store/README.md)
-- [event-sourcing Python SDK](../lib/event-sourcing-platform/event-sourcing/python/README.md)
-- [Event Store Server gRPC API](../lib/event-sourcing-platform/event-store/eventstore-proto/proto/eventstore.proto)
+- [event-sourcing-platform/event-store](../../lib/event-sourcing-platform/event-store/README.md)
+- [event-sourcing Python SDK](../../lib/event-sourcing-platform/event-sourcing/python/README.md)
+- [Event Store Server gRPC API](../../lib/event-sourcing-platform/event-store/eventstore-proto/proto/eventstore/v1/eventstore.proto)
 
 ---
 
 **Status**: Accepted  
 **Last Updated**: 2025-12-02
-

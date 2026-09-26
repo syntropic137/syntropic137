@@ -48,6 +48,7 @@ from syn_domain.contexts.agent_sessions._shared import (
 )
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_SESSION_USAGE_CTE,
+    CANONICAL_USAGE_EVENT_FILTER,
     price_canonical_row,
 )
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
@@ -66,6 +67,14 @@ from syn_domain.contexts.agent_sessions.import_ledger import (
     BilledUsage,
     ImportLedger,
     ImportLedgerPort,
+)
+from syn_domain.contexts.agent_sessions.recorded_model_rows import (
+    HAS_REQUESTED_MODEL_COLUMN,
+    REQUESTED_MODEL_COLUMN,
+    pick_primary_model,
+    recorded_model_from_row,
+    recorded_model_group_by,
+    recorded_model_select,
 )
 from syn_domain.contexts.agent_sessions.slices.canonical_totals import (
     CanonicalTotals,
@@ -97,6 +106,9 @@ from syn_domain.contexts.agent_sessions.slices.record_operation import (
     record_tool_completed,
     record_tool_started,
 )
+from syn_domain.contexts.agent_sessions.slices.record_operation.RecordOperationHandler import (
+    RecordOperationHandler,
+)
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import (
     CostCalculator,
 )
@@ -112,11 +124,17 @@ from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler
 )
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     PricedUsage,
+    RolloutDocument,
+    RolloutRecord,
     StoredTranscript,
+    model_from_rollout,
 )
 
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
+    "CANONICAL_USAGE_EVENT_FILTER",
+    "HAS_REQUESTED_MODEL_COLUMN",
+    "REQUESTED_MODEL_COLUMN",
     "AgentLaunch",
     "AgentLaunchedEvent",
     "AgentSessionAggregate",
@@ -136,6 +154,9 @@ __all__ = [
     "OperationType",
     "PricedUsage",
     "RecordOperationCommand",
+    "RecordOperationHandler",
+    "RolloutDocument",
+    "RolloutRecord",
     "SessionCompletedEvent",
     "SessionCostQueryService",
     "SessionStartedEvent",
@@ -149,6 +170,8 @@ __all__ = [
     "TokenMetrics",
     "TokenUsageData",
     "import_phase_delegates",
+    "model_from_rollout",
+    "pick_primary_model",
     "price_canonical_row",
     "record_error",
     "record_message_request",
@@ -157,4 +180,7 @@ __all__ = [
     "record_tool_blocked",
     "record_tool_completed",
     "record_tool_started",
+    "recorded_model_from_row",
+    "recorded_model_group_by",
+    "recorded_model_select",
 ]

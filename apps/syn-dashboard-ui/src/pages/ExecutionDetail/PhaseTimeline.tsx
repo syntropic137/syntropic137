@@ -2,10 +2,13 @@ import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Card, CardContent, CardHeader } from '../../components'
+import { Card, CardContent, CardHeader, ObservedModel } from '../../components'
+import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
+import { REFUSED, outcomeTone } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatTokens, liveDurationSeconds } from '../../utils/formatters'
+import { costByModelKeyLabel } from '../../utils/modelLabels'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 
 function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
@@ -18,11 +21,10 @@ function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, stri
     <div className="mt-2 space-y-1">
       {entries.map(({ model, cost }) => {
         const pct = totalCost > 0 ? (cost / totalCost) * 100 : 0
-        const shortName = model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
         return (
           <div key={model} className="space-y-0.5">
             <div className="flex items-center justify-between text-[10px]">
-              <span className="font-mono text-[var(--color-text-muted)]">{shortName}</span>
+              <span className="font-mono text-[var(--color-text-muted)]">{costByModelKeyLabel(model)}</span>
               <span className="text-[var(--color-text-secondary)]">
                 ${cost.toFixed(4)} &middot; {pct.toFixed(0)}%
               </span>
@@ -43,33 +45,25 @@ const statusIconColors: Record<string, string> = {
   completed: 'text-emerald-400',
   running: 'text-blue-400',
   failed: 'text-red-400',
+  [REFUSED]: 'text-amber-400',
   pending: 'text-slate-400',
 }
 
-function PhaseTokenSegment({ label, total, rows, accentColor }: {
-  label: string; total: number; accentColor: string
-  rows: { label: string; value: number; color?: string }[]
-}) {
-  return (
-    <div className="rounded-md border border-[var(--color-border)] overflow-hidden">
-      <div className={`flex items-center justify-between px-2 py-1 ${accentColor}`}>
-        <span className="font-medium">{label}</span>
-        <span className="text-[var(--color-text-secondary)]">{total.toLocaleString()}</span>
-      </div>
-      <div className="px-2 py-1 space-y-0.5">
-        {rows.map(r => (
-          <div key={r.label} className="flex justify-between">
-            <span className={r.color ?? ''}>{r.label}</span>
-            <span className={r.color ?? 'text-[var(--color-text-secondary)]'}>{r.value.toLocaleString()}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+/**
+ * How this phase is drawn, given what the RUN was classified as.
+ *
+ * The classification is a property of the execution, not of the phase - the
+ * server records it once, from the verdict of the phase that refused - so the
+ * timeline reads it from the execution and applies it to the failed phase,
+ * which is that phase. Every other phase on a refused run completed, so
+ * `outcomeTone` returns their status untouched and nothing else moves.
+ */
+function phaseTone(phase: Phase, execution: ExecutionDetailResponse): string {
+  return outcomeTone(phase.status, execution.failure_classification)
 }
 
-function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
-  const Icon = phaseStatusIcons[phase.status] ?? Clock
+function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: number }) {
+  const Icon = phaseStatusIcons[tone] ?? Clock
   const tokens = phaseTokenTotals(phase)
   // `duration_seconds` is nullable: the server returns null for a genuinely
   // unknown duration rather than a 0.0 that looks like a real measurement.
@@ -86,9 +80,16 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
   return (
     <>
       <div className="flex items-center gap-2">
-        <Icon className={clsx('h-4 w-4', statusIconColors[phase.status] ?? 'text-slate-400')} />
+        <Icon className={clsx('h-4 w-4', statusIconColors[tone] ?? 'text-slate-400')} />
         <span className="text-sm font-medium text-[var(--color-text-primary)]">{phase.name}</span>
       </div>
+      {/* The model that RAN, verbatim; the requested alias is secondary context only. */}
+      <ObservedModel
+        display={phase.model_display}
+        observed={phase.model}
+        requested={phase.requested_model}
+        className="mt-1 text-[10px] text-[var(--color-text-secondary)]"
+      />
       {phase.cost_by_model && Object.keys(phase.cost_by_model).length > 0 && (
         <PhaseModelBreakdown costByModel={phase.cost_by_model} />
       )}
@@ -109,24 +110,13 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
         <span className="text-[var(--color-border)]">&middot;</span>
         <span>{duration}</span>
       </div>
-      <div className="mt-2 space-y-1.5 text-xs text-[var(--color-text-muted)]">
-        <PhaseTokenSegment
-          label="In"
-          total={tokens.inputTokens + tokens.cacheReadTokens}
-          accentColor="bg-indigo-500/10 text-indigo-400"
-          rows={[
-            { label: 'Fresh', value: tokens.inputTokens },
-            { label: 'Cache read', value: tokens.cacheReadTokens, color: 'text-emerald-400' },
-          ]}
-        />
-        <PhaseTokenSegment
-          label="Out"
-          total={tokens.outputTokens + tokens.cacheCreationTokens}
-          accentColor="bg-violet-500/10 text-violet-400"
-          rows={[
-            { label: 'Output', value: tokens.outputTokens },
-            { label: 'Cache write', value: tokens.cacheCreationTokens, color: 'text-amber-400' },
-          ]}
+      <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+        <TokenInOut
+          variant="compact"
+          fresh={tokens.inputTokens}
+          cacheWrite={tokens.cacheCreationTokens}
+          cacheRead={tokens.cacheReadTokens}
+          output={tokens.outputTokens}
         />
       </div>
       {phase.agent_session_id && (
@@ -140,10 +130,10 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
   )
 }
 
-function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
+function PhaseCard({ phase, tone, now }: { phase: Phase; tone: string; now: number }) {
   const baseClasses = clsx(
     'flex min-w-[200px] flex-1 flex-col rounded-lg border p-4 transition-all',
-    phaseStatusColors[phase.status] ?? phaseStatusColors.pending,
+    phaseStatusColors[tone] ?? phaseStatusColors.pending,
   )
   if (phase.session_id) {
     return (
@@ -155,13 +145,13 @@ function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
         )}
         aria-label={`Open session for phase ${phase.name}`}
       >
-        <PhaseCardBody phase={phase} now={now} />
+        <PhaseCardBody phase={phase} tone={tone} now={now} />
       </Link>
     )
   }
   return (
     <div className={baseClasses}>
-      <PhaseCardBody phase={phase} now={now} />
+      <PhaseCardBody phase={phase} tone={tone} now={now} />
     </div>
   )
 }
@@ -243,7 +233,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
         <div className="flex items-stretch gap-2 overflow-x-auto pb-2">
           {phases.map((phase, idx) => (
             <div key={phase.workflow_phase_id} className="flex items-stretch">
-              <PhaseCard phase={phase} now={now} />
+              <PhaseCard phase={phase} tone={phaseTone(phase, execution)} now={now} />
               {idx < phases.length - 1 && (
                 <div className="mx-2 h-px w-8 self-center bg-[var(--color-border)]" />
               )}

@@ -171,7 +171,7 @@ phases:
     prompt_file: phases/review.md
     agent:
       provider: codex
-      model: gpt-5.6-sol      # name a concrete model id, not an alias
+      model: gpt-sol          # platform alias for gpt-6-sol
       sandbox: read-only      # codex enforces this, claude does not
 ```
 
@@ -184,7 +184,7 @@ it is handed, so it is a genuinely independent read of the work.
 | Field | Values | Default | Notes |
 |-------|--------|---------|-------|
 | `provider` | `claude`, `codex` | `claude` | The harness that drives the phase. The schema rejects any other value. |
-| `model` | provider model id | harness default | On codex, always name a concrete model id. See [Codex model ids and cost](#codex-model-ids-and-cost). |
+| `model` | provider model id or alias | `opus` (claude), `gpt-sol` (codex) | Defaults come from `SYN_DEFAULT_CLAUDE_MODEL` / `SYN_DEFAULT_CODEX_MODEL` and are recorded at install time. See [Codex model ids and cost](#codex-model-ids-and-cost). |
 | `sandbox` | `read-only`, `workspace-write`, `full-access` | `full-access` | Enforced on codex phases only. See [What `sandbox` actually does](#what-sandbox-actually-does). |
 | `allow_delegation` | `true`, `false` | `false` | Lets the phase's agent hand work to the other harness. Works in both directions. |
 
@@ -260,10 +260,15 @@ laptop cannot revoke, use a ChatGPT Business or Enterprise access token. See
 
 ### Codex model ids and cost
 
-Name a **concrete** model id on codex phases, such as `gpt-5.6-sol` rather than the
-`gpt-5.6` alias. Codex does not report its model on the wire, so the platform has
-nothing to price the run against if you leave `model` unset. The run then lands
-**unpriced** rather than wrongly priced, and no cost for it appears in your reports.
+On codex phases, write `gpt-sol` or a concrete model id such as `gpt-6-sol`.
+`gpt-sol` is a **platform** alias: codex has no aliases of its own, so the
+platform sends it to codex as `--model gpt-6-sol` and prices the run as
+`gpt-6-sol`. A codex phase that leaves `model` unset gets `gpt-sol` (or whatever
+`SYN_DEFAULT_CODEX_MODEL` names), recorded in the workflow when you install it.
+
+Other codex aliases, such as OpenAI's `gpt-5.6`, are not translated. Codex may
+reject them, and a model the platform has no rate for lands **unpriced** rather
+than wrongly priced.
 
 `vendor_cost_usd` is always null for codex phases. Token counts are still recorded
 for both harnesses.

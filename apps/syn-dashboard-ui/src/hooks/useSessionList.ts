@@ -57,7 +57,8 @@ function toSessionSummary(row: ApiSessionSummary): SessionSummary {
     execution_id: row.execution_id ?? null,
     phase_display: row.phase_display ?? null,
     agent_model: row.agent_model ?? null,
-    agent_model_display: row.agent_model_display ?? null,
+    agent_model_display: row.agent_model_display,
+    requested_model: row.requested_model ?? null,
     repos: row.repos ?? [],
     repos_display: row.repos_display ?? null,
     total_cost_usd: Number(row.total_cost_usd ?? 0),
@@ -83,11 +84,14 @@ export function useSessionList(): UseSessionListResult {
   const { sort, toggleSort, isDefault: isDefaultSort } = useSortUrlState(SESSION_SORT_CONFIG)
 
   const fetchPage = useCallback(
-    async (query: ListQuery): Promise<ListPage<SessionSummary>> => {
-      const response = await listSessions({
-        ...query,
-        workflow_id: workflowIdFilter || undefined,
-      })
+    async (query: ListQuery, signal?: AbortSignal): Promise<ListPage<SessionSummary>> => {
+      const response = await listSessions(
+        {
+          ...query,
+          workflow_id: workflowIdFilter || undefined,
+        },
+        signal,
+      )
       return {
         rows: (response.sessions ?? []).map(toSessionSummary),
         total: response.total,

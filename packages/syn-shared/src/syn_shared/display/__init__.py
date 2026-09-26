@@ -14,26 +14,34 @@ See: docs/adrs/ADR-064-observability-monitor-ui.md
 from __future__ import annotations
 
 from syn_shared.display.formatters import (
+    ALIAS_ARROW,
     EM_DASH,
     UNPRICED,
     compute_duration_seconds,
     format_cost,
     format_duration_seconds,
+    format_exit_code,
     format_model_compact,
+    format_model_definition,
     format_phase,
+    format_phase_model_definition,
     format_repos,
     format_tokens,
     resolve_duration_seconds,
 )
 
 __all__ = [
+    "ALIAS_ARROW",
     "EM_DASH",
     "UNPRICED",
     "compute_duration_seconds",
     "format_cost",
     "format_duration_seconds",
+    "format_exit_code",
     "format_model_compact",
+    "format_model_definition",
     "format_phase",
+    "format_phase_model_definition",
     "format_repos",
     "format_tokens",
     "resolve_duration_seconds",

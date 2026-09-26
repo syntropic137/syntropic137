@@ -1,0 +1,155 @@
+id: sdlc-retrospective-v1
+name: "SDLC: Retrospective - classify failures, autopsy the gates, prescribe the tests"
+description: >
+  Turn a window of failed executions into filed issues and named regression
+  tests. Five phases: gather the corpus, classify by cause and cost, find what
+  changed, work out why every gate passed, and prescribe the specific test that
+  would have caught it.
+type: analysis
+classification: standard
+requires_repos: true
+
+# WHY THIS EXISTS.
+#
+# On 2026-09-17 the platform spent $1,023.45 across 100 executions and lost
+# $413.28 of it - 40% - almost entirely to machinery around the phases rather
+# than to the work agents did. A deploy that afternoon removed one failure class
+# (7 runs -> 0) and created another (0 -> 6). Both facts were available in the
+# stored execution records within minutes of happening. Neither was noticed for
+# hours, because nobody was looking at failures as a population.
+#
+# The findings that mattered were not "this run failed". They were:
+#
+#   - six failures share one cause, and that cause did not exist yesterday
+#   - the cause is a contract we tightened on one side and documented on the
+#     other, with a test binding them that asserts the wrong direction
+#   - a fix that ships without a regression test will be re-broken
+#
+# None of those is reachable by reading one failed execution, which is what
+# ordinary debugging does. They need the population, the boundary, and the
+# gates - which is what this workflow walks.
+#
+# WHY THE GATE AUTOPSY IS ITS OWN PHASE.
+#
+# It is the phase that produces the durable output, and it is the one most
+# easily skipped. Writing "add a test for X" is cheap and nearly worthless: the
+# question is why the tests we ALREADY HAVE did not catch it, and the answer is
+# usually that one exists and points the wrong way. In the case above a test did
+# bind the prompt to its parser - it asserted that pasting the prompt after a
+# good report could not corrupt it, and never asserted that following the prompt
+# produces a parseable report. "Add a test" would have produced a second test
+# with the same blind spot.
+#
+# WHY IT DOES NOT FIX ANYTHING.
+#
+# The output is issues and test prescriptions, not diffs. A retrospective that
+# also implements will spend its budget on the first fix and never reach the
+# population-level findings, which are the reason to run it. Dispatch
+# sdlc-implement-v2 against what this files.
+
+phases:
+  # Phase ids are load-bearing: a later phase reads the previous one's output at
+  # artifacts/input/<phase-id>.md, so renaming a phase breaks the one after it.
+  - id: gather
+    name: Gather the failure corpus
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1200
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/gather.md
+
+  - id: classify
+    name: Classify by cause and attribute the cost
+    order: 2
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1800
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/classify.md
+
+  - id: bisect
+    name: Find what changed at the boundary
+    order: 3
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1800
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/bisect.md
+
+  # Runs on codex deliberately. This phase's job is to find the hole in work
+  # that already passed review, and the model that wrote the gates is the worst
+  # judge of why they did not fire.
+  - id: autopsy
+    name: Why every gate passed
+    order: 4
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    # No allowed_tools: this phase runs on codex, which enforces a filesystem
+    # sandbox rather than a tool vocabulary. A tool list here would be accepted
+    # and never applied, so the validator refuses it.
+    agent:
+      provider: codex
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
+    prompt_file: phases/autopsy.md
+
+  - id: file
+    name: File the issues and the test prescriptions
+    order: 5
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1200
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/file.md

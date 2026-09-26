@@ -24,7 +24,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture imp
     capture_phase_session,
 )
 from syn_shared.events import SESSION_SUMMARY
-from syn_shared.pricing import price_tokens
+from syn_shared.observed_model import REQUESTED_MODEL_KEY
+from syn_shared.pricing import cost_json_number, price_tokens
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -76,6 +77,7 @@ def _token_fields(usage: PricedUsage | None) -> Mapping[str, object]:
             "cache_creation_tokens": 0,
             "cache_read_tokens": 0,
             "model": None,
+            REQUESTED_MODEL_KEY: None,
         }
     return {
         "input_tokens": usage.uncached_input_tokens,
@@ -83,6 +85,10 @@ def _token_fields(usage: PricedUsage | None) -> Mapping[str, object]:
         "cache_creation_tokens": usage.cache_creation_tokens,
         "cache_read_tokens": usage.cache_read_tokens,
         "model": usage.model,
+        # A delegate's model comes from its own transcript and nothing asked
+        # for it; the key is written anyway because its presence marks the row
+        # as ADR-067-era for every reader.
+        REQUESTED_MODEL_KEY: None,
     }
 
 
@@ -98,6 +104,7 @@ def _summary_fields(usage: PricedUsage | None) -> Mapping[str, object]:
         return {
             **base,
             "model": None,
+            REQUESTED_MODEL_KEY: None,
             "total_input_tokens": 0,
             "total_output_tokens": 0,
             "cache_read_tokens": 0,
@@ -106,6 +113,10 @@ def _summary_fields(usage: PricedUsage | None) -> Mapping[str, object]:
     return {
         **base,
         "model": usage.model,
+        # A delegate's model comes from its own transcript and nothing asked
+        # for it; the key is written anyway because its presence marks the row
+        # as ADR-067-era for every reader.
+        REQUESTED_MODEL_KEY: None,
         "total_input_tokens": usage.uncached_input_tokens,
         "total_output_tokens": usage.output_tokens,
         "cache_read_tokens": usage.cache_read_tokens,
@@ -132,7 +143,7 @@ def _delegate_cost(usage: PricedUsage | None, session_id: str) -> float | None:
     )
     if not priced.is_priced or priced.cost is None:
         return None
-    return float(priced.cost)
+    return cost_json_number(priced.cost)
 
 
 def _coverage_gap_session_id(execution_id: str, phase_id: str) -> str:
@@ -302,6 +313,7 @@ async def import_delegates_for_phase(
                 "cache_creation_tokens": 0,
                 "cache_read_tokens": 0,
                 "model": None,
+                REQUESTED_MODEL_KEY: None,
                 "delegated": True,
                 "coverage_incomplete": True,
                 "captured_session_count": len(captured_ids),

@@ -26,6 +26,13 @@ already load-bearing - a later phase reads an earlier one at
 `artifacts/input/<phase-id>.md` - so tying the filename to the id means a rename
 breaks loudly in one place instead of silently in two.
 
+`just check-workflows` enforces both halves (`stale_phase_references`), because
+for a decade this was prose and a rename broke neither. The half that costs a
+run is the second: a prompt still naming the OLD id gets an empty input
+directory at run time, reads nothing, and reports on it anyway. #1298's
+`bootstrap` -> `premise` rename had a downstream prompt to fix in each of four
+workflows, and nothing would have said so.
+
 **3. One job per phase.**
 A phase that researches AND plans stops researching early, because writing the
 plan feels like progress. Separate phases also give each its own workspace,
@@ -34,7 +41,7 @@ money?" an answerable question rather than a guess.
 
 ## Which implementation workflow: `implement` or `quickfix`?
 
-Two workflows produce a PR. `sdlc-implement-v1` runs four phases with an
+Two workflows produce a PR. `sdlc-implement-v2` runs four phases with an
 independent cross-model verify. `sdlc-quickfix-v1` runs one phase and has no
 verification behind it at all.
 
@@ -116,6 +123,57 @@ recorded as ~one run in three. Removing the clone did not necessarily fix
 them, because the clone was never inside the budget that expired. If that
 phase still times out, look at the agent's own work.
 
+## `delivers_repo_changes`: which phases own a branch
+
+Every phase ends with the unpushed-work gate asking whether its workspace is
+holding anything that dying would erase (#1184). `git status` is the only
+evidence git has, and it cannot tell an agent's edit from a file a build tool
+rewrote: on exec-e7e34af42553 a `bootstrap` phase ran `cargo check`, `Cargo.lock`
+was rewritten, and the phase - which had done its job correctly, and whose
+deliverable was a markdown report - was failed, its lockfile churn quarantined,
+and a run resuming an hour of already-pushed work discarded (#1308).
+
+So the phase declares it, and the gate reads the declaration instead of
+guessing:
+
+    delivers_repo_changes: false   # my deliverable is a report
+    delivers_repo_changes: true    # my deliverable is a branch (the default)
+
+**The declaration alone does not exempt anything, and today it exempts
+nothing.** A phase that declares `false` still holds `Bash` and `Write`, so its
+word about what it will do is not evidence about what it can do - and trusting
+it would let an agent's real edit be destroyed by the very opt-out meant to
+protect a lockfile. The gate therefore requires the declaration AND proof, read
+from the mount table, that the repository is mounted read-only, so that a build
+tool's churn is the only thing an uncommitted change could be.
+
+**Production does not yet mount repositories read-only** (#1342). Until it
+does, that proof never holds, the exemption never applies, and a phase whose
+`cargo check` rewrites `Cargo.lock` fails exactly as it did before. Declare
+`false` anyway - it is correct, and it starts working the moment the mount
+lands - but do not expect it to prevent the failure today, and do not "fix" the
+gate by dropping the mount check, which would reopen the hole above.
+
+**Declare `false` on any phase whose output artifact is the deliverable** - a
+premise check, a review, a verify, a plan, an `open_pr` phase that
+only reads a ref. Across the workflows here that is every phase except
+`implement` and `quickfix`, which are the two that commit and push.
+
+**It does not exempt commits.** A phase that declares `false` and commits
+anyway still fails and is still quarantined: no build tool runs `git commit`,
+so a commit is an authoring act under any declaration. The declaration decides
+only what an UNCOMMITTED change means.
+
+**Do not reach for it to quiet a phase that legitimately edits.** A
+dependency-bump phase's lockfile churn IS its deliverable, and declaring `false`
+there is how that work gets silently destroyed - which is the failure #1184
+exists to prevent, arrived at from the other side.
+
+The default is `true`, so a phase that says nothing keeps being judged
+strictly. The cost of forgetting is a phase failed for a lockfile; the cost of
+defaulting the other way would be every phase anyone ever writes losing the
+gate.
+
 ## Naming
 
     sdlc-<purpose>-v<N>        id
@@ -161,6 +219,7 @@ is the property that matters.
 | directory | output | status |
 |---|---|---|
 | `research-plan/` | an implementation plan | built |
+| `decision-record/` | a decision among several paths, with its rationale, after trying to falsify it by experiment | built |
 | `implement/` | a PR implementing an approved plan | built |
 | `quickfix/` | a PR for a change with nothing to prove | built |
 | `tech-debt/` | a prioritised debt register | planned |

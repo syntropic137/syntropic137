@@ -23,6 +23,15 @@ from syn_api.types import (
     WorkflowSummary,
 )
 
+# Imported from the context's public surface, not its internals (ADR-062).
+from syn_domain.contexts.orchestration import (
+    FailureClassification,
+    ReportedFailureReason,
+    is_phase_id,
+)
+from syn_shared.agents import resolve_definition_model
+from syn_shared.display import format_phase_model_definition
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
         InputDeclarationDetail,
@@ -116,6 +125,25 @@ class ExecutionRunSummary(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    Same field, same meaning, as on `ExecutionSummaryResponse`, and here for
+    the reason that one is: this is the model behind Workflow Runs, which
+    renders the same rows the executions list does. Without it that page had
+    nothing to pass its badge, so every correct refusal on it read as a plain
+    red failure however classification-aware the badge became (#1367).
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `ExecutionSummaryResponse`: what the AGENT
+    SAID, beside the classification the platform measured and never folded
+    into it. Here for the same reason the field above is - this page renders
+    the same rows the executions list does, and a row that carries the
+    measurement without the report is the half that reads as more certain than
+    it is.
+    """
 
 
 class ExecutionRunListResponse(BaseModel):
@@ -150,29 +178,35 @@ class ExportManifestResponse(BaseModel):
 
 def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDefinitionResponse]:
     """Map domain PhaseDefinitionDetail objects to API response models."""
-    return [
-        PhaseDefinitionResponse(
-            phase_id=p.id,
-            name=p.name,
-            order=p.order,
-            description=p.description,
-            agent_type=p.agent_type,
-            prompt_template=p.prompt_template,
-            timeout_seconds=p.timeout_seconds or 300,
-            allowed_tools=list(p.allowed_tools),
-            argument_hint=p.argument_hint,
-            model=p.model,
-            provider=p.provider,
-            allow_delegation=p.allow_delegation,
-            claude_plugins=[_ref_response(r) for r in p.claude_plugins],
-            skills=[_ref_response(r) for r in p.skills],
-            execution_type=p.execution_type,
-            max_tokens=p.max_tokens,
-            input_artifact_types=list(p.input_artifact_types),
-            output_artifact_types=list(p.output_artifact_types),
-        )
-        for p in (raw_phases or [])
-    ]
+    return [_map_phase(p) for p in (raw_phases or [])]
+
+
+def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
+    """One phase; the model resolves by the same rule execution applies."""
+    resolution = resolve_definition_model(p.provider, p.model)
+    return PhaseDefinitionResponse(
+        phase_id=p.id,
+        name=p.name,
+        order=p.order,
+        description=p.description,
+        agent_type=p.agent_type,
+        prompt_template=p.prompt_template,
+        timeout_seconds=p.timeout_seconds or 300,
+        allowed_tools=list(p.allowed_tools),
+        argument_hint=p.argument_hint,
+        model=p.model,
+        resolved_model=resolution.concrete,
+        resolution_basis=resolution.alias.basis if resolution.alias else None,
+        model_display=format_phase_model_definition(resolution),
+        provider=p.provider,
+        allow_delegation=p.allow_delegation,
+        claude_plugins=[_ref_response(r) for r in p.claude_plugins],
+        skills=[_ref_response(r) for r in p.skills],
+        execution_type=p.execution_type,
+        max_tokens=p.max_tokens,
+        input_artifact_types=list(p.input_artifact_types),
+        output_artifact_types=list(p.output_artifact_types),
+    )
 
 
 def _map_input_declarations(
@@ -291,7 +325,6 @@ async def export_workflow(
 # -- Export helpers -----------------------------------------------------------
 
 _SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
-_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 # Characters that require quoting in YAML scalar values.
 _YAML_SPECIAL_RE = re.compile(r"[:{}\[\],&*?|>!%#@`\"\'\n]")
@@ -302,14 +335,14 @@ def _sanitize_slug(name: str) -> str:
     slug = name.lower().replace(" ", "-")
     slug = re.sub(r"[^a-z0-9._-]", "", slug)
     slug = slug.strip(".-")
-    if not slug or not _SAFE_SLUG_RE.match(slug):
+    if not slug or not _SAFE_SLUG_RE.fullmatch(slug):
         slug = "workflow"
     return slug
 
 
 def _validate_phase_id(phase_id: str) -> str:
     """Validate a phase ID is safe for use in file paths."""
-    if not _SAFE_ID_RE.match(phase_id):
+    if not is_phase_id(phase_id):
         msg = f"Phase ID contains unsafe characters: {phase_id!r}"
         raise ValueError(msg)
     return phase_id
@@ -795,6 +828,8 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 error_message=e.error_message,
+                failure_classification=e.failure_classification,
+                reported_failure_reason=e.reported_failure_reason,
             )
             for e in exec_result.value
         ],

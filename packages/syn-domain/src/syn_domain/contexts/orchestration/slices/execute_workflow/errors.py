@@ -6,12 +6,22 @@ Extracted from WorkflowExecutionEngine during M6 cleanup.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, NamedTuple
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+)
+from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        ReportedFailureReason,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+        AgentVerdict,
+    )
+    from syn_shared.diagnostics import SignalDeath
 
 
 def describe_exception(error: BaseException) -> str:
@@ -29,6 +39,93 @@ def describe_exception(error: BaseException) -> str:
     branch on which they got; that is the point.
     """
     return str(error).strip() or f"{type(error).__name__} (no message)"
+
+
+def exit_code_of(error: BaseException) -> int | None:
+    """The exit status of the process behind `error`, or None if nothing saw one.
+
+    THE ONE PLACE THAT DECIDES IT, for the reason `describe_exception` above is
+    the one place that decides a failure's description: the exit status reaches
+    four sinks, and a second reader of it is a second answer waiting to happen.
+
+    None is not 0. A phase that ran and exited cleanly and a phase nobody was
+    left alive to observe are opposite situations - the first needs no action
+    and the second needs a retry - and #1319 is what it costs to report them as
+    the same thing. So an exception that carries no status reports None, and
+    None is stored as absent the whole way to the API.
+
+    It reads an ATTRIBUTE rather than matching exception classes, and that is
+    deliberate: the exceptions that know a status do not and should not share a
+    base. `SkillInstallFailed` belongs to the skills hierarchy in `_shared`,
+    which slices may import but which may not import a slice back. An attribute
+    is the one contract both sides can honour without one of them depending on
+    the other, and it is opt-in - storing `self.exit_code` is the whole of it.
+
+    A `bool` is rejected because `isinstance(True, int)` is True and `exit_code
+    = True` is a mistake, not a status of 1.
+    """
+    code: object = getattr(error, "exit_code", None)
+    if isinstance(code, bool) or not isinstance(code, int):
+        return None
+    return code
+
+
+class NonZeroExitError(RuntimeError):
+    """A process a phase depended on exited non-zero, and this CARRIES the code.
+
+    THE FAILURE THIS EXISTS TO STOP (#1319). The exit status was known at the
+    moment of the raise and spent entirely on a message string - `RuntimeError(
+    f"... exit_code={code}")` - so the number reached an operator only as prose
+    inside a failure whose read model might never be queryable. Two containers
+    died during the read-model outage in #1318 and neither status was
+    recoverable afterwards, because the platform that destroyed them had
+    written the number nowhere durable.
+
+    0, 124 and -11 demand OPPOSITE responses - the run finished, the run hit
+    its budget and should continue, the run was killed and should be retried -
+    so "the status is unavailable" is the single answer that serves none of
+    them. Carrying it as an int is what lets `exit_code_of` put it on the
+    durable failure event rather than leaving it to be grepped out of a
+    sentence.
+
+    Subclasses `RuntimeError` because it replaces bare `RuntimeError`s at every
+    site that already knew a status; callers that catch the general failure
+    keep catching this one.
+    """
+
+    def __init__(self, message: str, *, exit_code: int) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+class ExitStatusUnavailableError(RuntimeError):
+    """The agent's process ended and NOTHING observed what it exited with.
+
+    THE LIE THIS REPLACES (#1319). The status was read off the workspace, and
+    the workspace reports None when no stream ever completed - a container
+    removed out from under us, a stream that never started, a backend that lost
+    the process. Every one of those fell through to `return 0`, so the case
+    where we know LEAST became indistinguishable from a clean exit. An operator
+    reading 0 concludes the phase finished and moves on; that is a lie they act
+    on, and it is worse than an error.
+
+    Deliberately carries NO `exit_code` attribute, which is not an omission but
+    the mechanism: `exit_code_of` reads that attribute and reports None without
+    it, so the durable failure event records the status as ABSENT. A durable
+    None is honest - it says "retry, nobody was watching" - and it is the one
+    answer that does not send someone the wrong way.
+
+    Subclasses `RuntimeError` alongside `NonZeroExitError` so every caller that
+    already catches a phase's failure catches this one too.
+    """
+
+    def __init__(self, phase_id: str, *, lines_seen: int) -> None:
+        super().__init__(
+            f"Agent exit status unavailable for phase {phase_id}: no completed stream "
+            f"reported one (lines={lines_seen}). The container may have been removed "
+            f"externally; the status is recorded as unknown rather than as a clean exit."
+        )
+        self.phase_id = phase_id
 
 
 class WorkflowNotFoundError(Exception):
@@ -134,6 +231,22 @@ class PhaseProducedNoDeclaredOutputError(Exception):
     question and stop. Only a declared-but-unproduced output is a failure, so
     an empty declaration is silence, not a violation.
 
+    WHAT IT NO LONGER MEANS (#1300). It stopped meaning "no file was written".
+    Three `implement` phases, $38.62, were discarded under this error having
+    already made the change and pushed the branch; they had simply not written
+    the report. `ArtifactCollector` now consults the agent's last message first
+    and stores THAT, marked, when there is one. So reaching this error means
+    both routes to the phase's conclusion were empty - nothing collectable on
+    disk and nothing said on the stream - which is a phase that really did
+    produce nothing.
+
+    "Nothing said on the stream" means nothing a downstream phase could act
+    on, not merely nothing at all (`is_usable_conclusion`). A phase whose only
+    closing message is "Done." or an unexplained refusal has reported nothing,
+    and storing that as its deliverable would hand the NEXT phase an artifact
+    it believes is a report and can build nothing on - a quieter failure than
+    this one, arriving one phase later.
+
     Raised from ArtifactCollector.collect_from_workspace, which is the one
     place holding both halves of the comparison: what the phase promised and
     what it actually wrote.
@@ -149,13 +262,113 @@ class PhaseProducedNoDeclaredOutputError(Exception):
         super().__init__(
             f"Phase '{phase_id}' ({phase_name}) declares output_artifacts "
             f"({', '.join(declared)}) but produced none: nothing collectable "
-            f"was written under artifacts/output/. The phase's contract is "
-            f"unmet, so the execution fails here rather than advancing as "
-            f"though it had succeeded."
+            f"was written under artifacts/output/, and its agent's last "
+            f"message reported nothing a later phase could act on, so there "
+            f"was nothing to recover from the transcript either (#1300). It "
+            f"was either empty or pure sign-off - check the session "
+            f"transcript for what it did say. The phase's contract is unmet, so the "
+            f"execution fails here rather than advancing as though it had "
+            f"succeeded."
         )
         self.phase_id = phase_id
         self.phase_name = phase_name
         self.declared = declared
+
+
+class PhaseReportedFailureError(Exception):
+    """A phase said it had failed, and is failed rather than completed (#1256).
+
+    THE FAILURE THIS EXISTS TO STOP. Every phase prompt ends with a mandatory
+    ``TASK_RESULT`` block, which is how a phase reports that it could not do
+    what it was asked. Nothing read it. The parsed result reached
+    ``StreamResult`` and stopped there, so a phase that had explicitly written
+    ``success: false`` was recorded as completed on its exit status alone -
+    and the block was located by scanning to the first ``}``, so a failure
+    explanation containing a brace was discarded before it even got that far.
+
+    Raised from the RUN_AGENT dispatch, on the same footing as a non-zero exit
+    code and for the same reason: both are the phase telling us it did not
+    succeed, and the only difference is which channel it used to say so.
+
+    ALSO RAISED FOR AN UNREADABLE REPORT. A block that cannot be read as a
+    verdict may be a failure report, and the direction that lets defects
+    through is to complete the phase anyway. `AgentVerdict.refusal` says which
+    of the two happened, in the words an operator needs.
+
+    TAKES THE VERDICT, NOT A RENDERED MESSAGE (#1357). The two things this
+    exception must carry - what an operator reads, and what the run's failure
+    tally records - are both answers the verdict already has, and a caller
+    handed the job of passing them separately is one edit away from passing a
+    refusal message beside a `PLATFORM` classification. Passing the verdict
+    itself makes that pair unrepresentable: there is one argument, and the
+    exception derives both from it.
+    """
+
+    def __init__(self, *, phase_id: str, verdict: AgentVerdict) -> None:
+        super().__init__(verdict.refusal(phase_id=phase_id))
+        self.phase_id = phase_id
+        #: What the PLATFORM makes this failure: a correct refusal, a report
+        #: nobody could read - which is none of the classes and is `PLATFORM`
+        #: (#1357) - or a failure nobody could classify (#1392). Decided by
+        #: `AgentVerdict.failure_classification`, never by the word below.
+        self.failure_classification = verdict.failure_classification
+        #: What the AGENT SAID caused it, carried verbatim and carried apart
+        #: (#1372, #1392). Every sink that records the classification records
+        #: this beside it, because an operator asking "why did this fail"
+        #: wants the phase's own word and a failure number must not be
+        #: computed from it. `None` when the phase named no reason this reader
+        #: knows, which is every failure written before #1372.
+        self.reported_failure_reason = verdict.reported_failure_reason
+
+
+class FailureAccount(NamedTuple):
+    """Everything the record says about WHY a run failed: the measurement, and the claim.
+
+    TWO FIELDS RATHER THAN TWO FUNCTIONS, for the reason
+    `PhaseReportedFailureError` takes a verdict rather than a rendered message
+    (#1392). These two are read together at every sink that records a failure,
+    and they are the pair that must never be mismatched: a call site free to
+    fetch one without the other is one edit away from storing a `task` the
+    agent never claimed, or a classification computed from a claim. Asked once,
+    answered once, carried together.
+    """
+
+    classification: FailureClassification
+    """What the PLATFORM says this failure was, and the only field a failure
+    number may be computed from."""
+
+    reported_reason: ReportedFailureReason | None
+    """What the AGENT SAID caused it, `None` when it said nothing this reader
+    knows. An operator reads it; nothing counts it."""
+
+
+def failure_account(error: BaseException) -> FailureAccount:
+    """What kind of failure `error` is, and what its phase said about it (#1357, #1372).
+
+    THE ONE PLACE THIS IS DECIDED, beside `describe_exception` and for the
+    identical reason: four sinks describe one failure, and a classification
+    re-derived at any of them is a classification that can disagree with the
+    others. A caller gets an answer and cannot tell how it was reached.
+
+    ONLY ONE KIND OF FAILURE CARRIES ITS OWN ACCOUNT, and the isinstance is
+    deliberate rather than a `getattr` for an attribute anything might grow.
+    Every member but `PLATFORM` is a positive claim about what happened, so
+    each is made only where the evidence is - the phase's own readable verdict
+    - and every other exception in the system, present and future, means the
+    platform failed and reported nothing. That is the direction of doubt
+    `FailureClassification` exists to hold: a new failure path that knows
+    nothing about this function is counted as a platform failure, which is
+    exactly what it is counted as today.
+
+    Widening the verdict's vocabulary did not widen this function's. An
+    exception is still either the one that carries a phase's own report or it
+    is a platform failure; what #1372 added is a second field to carry, and
+    #1392 is why it is a field of its own rather than a wider answer under the
+    first.
+    """
+    if isinstance(error, PhaseReportedFailureError):
+        return FailureAccount(error.failure_classification, error.reported_failure_reason)
+    return FailureAccount(FailureClassification.PLATFORM, None)
 
 
 class EmptyPhaseArtifactError(Exception):
@@ -169,22 +382,38 @@ class EmptyPhaseArtifactError(Exception):
     that a nine-minute verify phase produced nothing storable, which phase it
     was, and whether anything survived. This says all three.
 
-    Raised only after `recover_empty_artifact` has already declined, so
-    reaching this means BOTH routes to the phase's conclusion were empty: the
-    file it wrote and the last thing it said. That is a real "the agent
-    produced nothing", and failing is right.
+    Raised only after `recover_deliverable` has already declined, so reaching
+    this means BOTH routes to the phase's conclusion were empty: the file it
+    wrote and the last thing it said. That is a real "the agent produced
+    nothing", and failing is right.
 
-    THE THREE OUTCOMES ARE DELIBERATELY DISTINCT, because before #1195 two of
-    them were the same opaque `failed`:
+    THE FOUR OUTCOMES ARE DELIBERATELY DISTINCT, because before #1195 two of
+    them were the same opaque `failed` and before #1300 a third was discarded
+    outright:
 
-    - the phase wrote nothing collectable at all -> `PhaseProducedNoDeclaredOutputError`
+    - the phase wrote nothing collectable AND said nothing
+      -> `PhaseProducedNoDeclaredOutputError`
     - it wrote an empty file and had said nothing -> this
-    - it wrote an empty file but HAD said something -> no error; the phase
-      completes on the recovered content, and the artifact says so in its title
+    - it wrote an empty file but HAD said something -> no error (#1195)
+    - it wrote no file at all but HAD said something -> no error (#1300)
 
-    An operator distinguishes the first two by `phases[].error_message` and the
-    third by following `phases[].artifact_id` to an artifact whose title
+    The last two complete on recovered content and the artifact says so in its
+    title; they are told apart from each other, when it matters, by the banner
+    on the content and by `source_path` (`RECOVERED_SOURCE_PATH` only ever
+    means "no file was written").
+
+    An operator distinguishes the failures by `phases[].error_message` and the
+    recoveries by following `phases[].artifact_id` to an artifact whose title
     carries `RECOVERED_TITLE_MARKER`.
+
+    WHY RECOVERY DOES NOT ALSO FAIL THE PHASE. Failing would keep the declared
+    contract loudly visible, but it discards a run whose work is done and
+    forces it to be redone - which is the entire cost #1300 measured. The
+    contract stays visible in the record instead: the marker is in the title
+    the API serves, the banner is the first line of the content the NEXT phase
+    reads, and the recovery is logged as a warning naming the phase. A phase
+    that reached a conclusion is not a phase that produced nothing, and only
+    the latter is worth throwing a run away for.
     """
 
     def __init__(
@@ -198,7 +427,8 @@ class EmptyPhaseArtifactError(Exception):
             f"Phase '{phase_id}' ({phase_name}): THE ARTIFACT WAS EMPTY. It "
             f"wrote '{source_path}' and the file had no content, and nothing "
             f"could be recovered from the session transcript either - the "
-            f"agent's last message was empty too. The phase's conclusion, if "
+            f"agent's last message reported nothing a later phase could act "
+            f"on, being empty or pure sign-off. The phase's conclusion, if "
             f"it reached one, was not captured anywhere, so there is nothing "
             f"to store and the execution fails here."
         )
@@ -215,6 +445,12 @@ class FailedWorkspaceCommand:
     exit_code: int
     stderr: str
     timed_out: bool = False
+
+    #: What the backend saw at the moment it reaped a command that was KILLED,
+    #: including the kernel's account of the fault if it was reachable. Carried
+    #: here rather than looked up on demand because by the time this record is
+    #: rendered the workspace is usually gone (#1295).
+    signal_death: SignalDeath | None = None
 
 
 @dataclass(frozen=True)
@@ -314,8 +550,68 @@ def _render_quarantined_work(work: QuarantinedWork) -> list[str]:
         lines.append(f"    quarantined at {work.pushed_ref}")
         lines.append(f"    recover with: git fetch origin {work.pushed_ref}")
     else:
-        lines.append(f"    NOT RECOVERABLE: the quarantine push failed - {work.push_error}")
+        lines.append(f"    NOT RECOVERABLE: {work.push_error}")
     return lines
+
+
+class CredentialRenewalFailedError(Exception):
+    """This workspace's git credential is not known to be usable (#1393).
+
+    Raised by the adapter that mints and installs the credential, and caught
+    by both of its callers - neither of whom lets it end a phase on its own
+    (#1396). The startup rehearsal retries it a bounded number of times and
+    then keeps the credential the setup phase installed, because a mint that
+    failed is a statement about GitHub's availability, not about the token
+    minutes old in this container. The quarantine path logs it and pushes
+    anyway, because that token may still have minutes left and a push that
+    might work beats one that was never attempted.
+
+    It says nothing about whether the OLD credential still works. Nothing can:
+    the only way to find out is to spend it on a push, which is what both
+    callers go on to do - and at phase start, that push's own refusal is the
+    only thing that refuses the phase.
+    """
+
+
+class QuarantinePathUnusableError(Exception):
+    """This phase has no credential that reaches origin, so it is given no work (#1393).
+
+    THE HALF OF THE NET THAT CAN BE TESTED BEFORE THE FALL. The unpushed-work
+    guard's quarantine push runs exactly once per phase, at teardown, on a
+    phase that has already failed - so a workspace that cannot be given a
+    credential, or cannot reach ``origin`` at all, is invisible until the
+    moment the work is riding on it, and `exec-db6f687e991a` is what that
+    costs: a commit and nine modified files, correctly detected, correctly
+    pushed at, and refused.
+
+    So the same push is rehearsed at phase start with ``--dry-run``: same
+    remote, same ``refs/syn/lost`` namespace, same credential, no objects sent
+    and no ref created. Failing here ends the phase before its agent runs,
+    when the entire cost is the minute of provisioning already spent. That is
+    a deliberately worse trade than it first looks - a phase whose quarantine
+    push would have worked and whose dry run failed for some unrelated reason
+    is refused for nothing - and it is still the right one, because the
+    alternative is handing an hour of agent time to a workspace that has just
+    demonstrated it cannot give the work back.
+
+    WHAT IT DOES NOT MEAN (#1396): that the remote would ACCEPT the push. A
+    dry run stops before ``git-receive-pack``'s update phase, so no
+    ``pre-receive`` hook and no ruleset is consulted, and a remote that
+    declines ``refs/syn/lost`` declines it for the first time at teardown.
+    This error is therefore raised for a credential or a connection, never for
+    a policy - see `rehearse_quarantine_credential`, which is named for what
+    it can prove.
+    """
+
+    def __init__(self, *, phase_id: str, detail: str) -> None:
+        super().__init__(
+            f"Phase {phase_id!r} will not be run: the quarantine path it would "
+            f"depend on to hand work back cannot be used, so anything this phase "
+            f"then failed to push would be unrecoverable rather than merely "
+            f"unpushed. {detail}"
+        )
+        self.phase_id = phase_id
+        self.detail = detail
 
 
 class WorkspaceInspectionFailedError(Exception):
@@ -430,7 +726,11 @@ _REST_IS_UNVERIFIED: Final[str] = (
 
 def _why(failure: FailedWorkspaceCommand) -> str:
     """Why a command produced no answer, said the same way wherever it is said."""
-    return "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+    return (
+        "timed out, so it did not finish"
+        if failure.timed_out
+        else f"exited {format_exit_code(failure.exit_code)}"
+    )
 
 
 def _render_inspection_failure(
@@ -450,6 +750,11 @@ def _render_inspection_failure(
     ]
     if stderr:
         lines.append(f"  stderr: {stderr}")
+    # A killed command has no stderr worth reading - it never got to write one
+    # - so the diagnostic IS the explanation and goes where an operator reads
+    # first, not at the end behind the quarantine inventory (#1295).
+    if failure.signal_death is not None:
+        lines.append(failure.signal_death.describe())
     saved, lost = _by_durability(quarantined)
     lines.append(
         _INSPECTION_HEADLINE[bool(saved), bool(lost)].format(
@@ -537,6 +842,96 @@ def _render_quarantine_report(phase_id: str, quarantined: tuple[QuarantinedWork,
             saved=_repositories(len(saved)), lost=_repositories(len(lost))
         )
     )
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class SavedWork:
+    """What a workspace was holding when a TERMINAL path emptied it (#1231).
+
+    THE SAME FACTS `UnpushedWorkQuarantinedError` CARRIES, on the paths where
+    they are not a refusal. The completion gate can afford to raise: refusing
+    IS the outcome it wants, because a phase holding unsaved work must not
+    report ``completed``. A phase killed at its ``timeout_seconds``, or an
+    execution the user cancelled, has already failed for a reason of its own,
+    and an exception thrown while saving its work would replace that reason
+    with this one. So the same walk reports here as a value.
+
+    `unreadable` is why the walk stopped early, one line, and it is kept apart
+    from the records for the reason `ObservedBranches.unreadable` is: a walk
+    that could not finish has no verdict to give about the repositories it
+    never reached, and "we saved nothing" must never be printed for "we could
+    not look". Both empty means the walk finished and the workspace was holding
+    nothing - the ordinary case, and the one that prints no paragraph at all.
+    """
+
+    quarantined: tuple[QuarantinedWork, ...] = ()
+    unreadable: str | None = None
+
+    @property
+    def is_worth_reporting(self) -> bool:
+        """Whether there is anything true to say about this workspace.
+
+        False is the common case and must stay silent: a failing phase that was
+        holding nothing would otherwise be handed a paragraph about quarantine
+        refs that do not exist, which sends an operator looking for work nobody
+        lost.
+        """
+        return bool(self.quarantined or self.unreadable)
+
+
+#: What the terminal paths say about the work they saved, keyed exactly as
+#: ``_OBSERVED_HEADLINE`` is - ``(something was found, the walk stopped
+#: early)``. There is deliberately no ``(False, False)`` entry: nothing found
+#: and nothing unreadable is a workspace that was holding nothing, and
+#: ``is_worth_reporting`` keeps it out of the report rather than giving it a
+#: sentence.
+_SAVED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
+    (True, False): (
+        "  THIS WORKSPACE WAS HOLDING WORK NO REMOTE HAD, and it was pushed "
+        "out of the container before teardown rather than dying with it. It "
+        "is on no branch, no PR shows it and no reviewer is sent it - fetch "
+        "it by name:"
+    ),
+    (True, True): (
+        "  PART OF WHAT THIS WORKSPACE WAS HOLDING WAS SAVED and the attempt "
+        "then stopped ({unreadable}), so there may be more it never reached. "
+        "What it did get to:"
+    ),
+    (False, True): (
+        "  WHETHER THIS WORKSPACE WAS HOLDING ANYTHING IS UNKNOWN: the attempt "
+        "to save it stopped before any repository was read ({unreadable}). "
+        "That is not a report that nothing was lost, it is the absence of one."
+    ),
+}
+
+
+def describe_saved_work(work: SavedWork) -> str:
+    """Say what was pushed out of a dying workspace, in the words an operator reads.
+
+    Appended to the failure's or the cancellation's own reason rather than
+    replacing any of it, exactly as `describe_observed_branches` is: WHY the
+    execution ended and WHERE its work went are different questions, and the
+    first must stay as loud as it was.
+
+    Every sentence about durability comes from ``is_recoverable`` on the
+    records, through the same renderer and the same summary table the
+    completion gate prints, so a quarantine reported here cannot come to
+    describe itself differently from one reported there.
+    """
+    saved, lost = _by_durability(work.quarantined)
+    lines = [
+        _SAVED_HEADLINE[bool(work.quarantined), bool(work.unreadable)].format(
+            unreadable=work.unreadable
+        )
+    ]
+    lines.extend(line for record in (*saved, *lost) for line in _render_quarantined_work(record))
+    if work.quarantined:
+        lines.append(
+            _QUARANTINE_SUMMARY[bool(saved), bool(lost)].format(
+                saved=_repositories(len(saved)), lost=_repositories(len(lost))
+            )
+        )
     return "\n".join(lines)
 
 
@@ -631,9 +1026,13 @@ _OBSERVED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
         "never reached. What it did read:"
     ),
     # 4. The incident this exists for: something is there, and nothing said so.
+    #    Says "ended", not "failed": since #1300 this same report is also
+    #    carried by a phase that was SALVAGED rather than failed, and a
+    #    heading that announced a failure that did not happen would be the
+    #    misdescribed record #1300 exists to stop.
     (True, False): (
         "  THIS IS WHERE THIS WORKSPACE'S BRANCHES STOOD when the phase "
-        "failed, for {found}. Read from git at failure time and reported as "
+        "ended, for {found}. Read from git at that moment and reported as "
         "observations: nothing below says who moved a ref, because a ref does "
         "not record that. Nothing was pushed or published on the phase's "
         "behalf:"
@@ -694,7 +1093,7 @@ def _render_observed_branch(work: BranchObservation) -> list[str]:
     if work.unpushed_commits:
         lines.append(
             f"    {_commits(work.unpushed_commits)} here on no remote at all - "
-            f"lost with the workspace unless #1184 quarantined the branch"
+            f"the quarantine report above says where they went (#1231)"
         )
     return lines
 
@@ -720,11 +1119,19 @@ def _commits(count: int) -> str:
 
 
 def describe_observed_branches(work: ObservedBranches) -> str:
-    """Say where a failed phase's branches stand, in the words an operator reads.
+    """Say where a phase's branches stand, in the words an operator reads.
 
     Appended to the failure's own message rather than replacing it: WHY the
     phase failed and WHERE its repositories stand are different questions, and
     #1167's answer to the first must stay exactly as loud as it is.
+
+    TWO CALLERS SINCE #1300, and the second is why the wording below says
+    "ended" rather than "failed": a phase that wrote no file but said what it
+    had done is now SALVAGED rather than failed, and carries this report
+    inside its recovered artifact. That is not decoration - `_fail_execution`
+    is the only place the branch report was ever emitted, so a salvaged phase
+    would otherwise be the one case where the work survived and nothing named
+    where it was.
     """
     lines = [
         _OBSERVED_HEADLINE[bool(work.branches), bool(work.unreadable)].format(

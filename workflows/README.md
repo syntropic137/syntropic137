@@ -114,6 +114,17 @@ phases:
     # prompt_file: shared://summarize
 ```
 
+### Model defaults
+
+A phase that declares no `model` gets `opus` on claude phases and `gpt-sol`
+on codex phases. Operators override these with `SYN_DEFAULT_CLAUDE_MODEL` and
+`SYN_DEFAULT_CODEX_MODEL`. The default is recorded in the template at install
+time, so changing a setting affects only workflows installed afterwards.
+
+`gpt-sol` is a platform alias, not a codex one: it is stored as written, sent
+to codex as `--model gpt-6-sol`, and priced as `gpt-6-sol`. Codex has no alias
+feature, so other codex aliases are not translated.
+
 ## Prompt Substitution
 
 | Pattern | Source | Example |

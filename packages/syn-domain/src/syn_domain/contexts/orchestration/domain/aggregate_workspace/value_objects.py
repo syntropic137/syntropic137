@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import datetime
 
+    from syn_shared.diagnostics import SignalDeath
+
 # Register MappingProxyType for copy/pickle support — required because
 # Pydantic model_copy() and event sourcing deepcopy individual fields.
 copy._deepcopy_dispatch[MappingProxyType] = lambda x, _memo: MappingProxyType(dict(x))  # type: ignore[attr-defined]
@@ -308,6 +310,16 @@ class ExecutionResult:
     stdout_lines: int = 0
     stderr_lines: int = 0
     timed_out: bool = False
+
+    #: The diagnostic for a command that was KILLED rather than finished,
+    #: captured by the backend at the moment it reaped the process and carried
+    #: here because the reap removes the container and nothing can be read
+    #: afterwards (#1295, #1319). None whenever the command exited normally,
+    #: and also whenever a backend has no way to capture one - a double, or the
+    #: in-memory adapter - so a reader must treat None as "nothing was
+    #: captured" rather than as "it was not killed"; ``exit_code`` remains the
+    #: thing that says which.
+    signal_death: SignalDeath | None = None
 
 
 @dataclass(frozen=True)

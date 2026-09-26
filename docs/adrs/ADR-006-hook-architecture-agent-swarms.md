@@ -115,7 +115,4 @@ See project plans:
 
 ## References
 
-- [ADR-011: Analytics Middleware](../../lib/agentic-primitives/docs/adrs/011-analytics-middleware.md)
-- [ADR-014: Atomic Hook Architecture](../../lib/agentic-primitives/docs/adrs/014-wrapper-impl-pattern.md)
-- [Hook System Documentation](../../lib/agentic-primitives/docs/hooks/README.md)
-
+- [Hook System Documentation](../../lib/agentic-primitives/docs/architecture/hooks-system-overview.md)

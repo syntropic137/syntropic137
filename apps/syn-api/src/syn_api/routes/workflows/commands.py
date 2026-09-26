@@ -27,7 +27,9 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
+from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider
+from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -164,6 +166,15 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # can. Defaulting to False here means the failure mode of
                 # forgetting is a phase that cannot publish, not one that can.
                 can_open_pr=_as_bool(p.get("can_open_pr", False), "can_open_pr"),
+                # Dropping this silently re-arms the unpushed-work gate against
+                # a phase that declared it delivers no repository changes, so a
+                # build tool touching a tracked lockfile fails a phase that did
+                # its job (#1308). True is the field's own default, so
+                # forgetting it judges the phase strictly rather than leaving
+                # it unjudged.
+                delivers_repo_changes=_as_bool(
+                    p.get("delivers_repo_changes", True), "delivers_repo_changes"
+                ),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as
@@ -285,6 +296,7 @@ async def create_workflow(
     handler = CreateWorkflowTemplateHandler(
         repository=repository,
         event_publisher=publisher,
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     try:
@@ -409,7 +421,7 @@ class CreateWorkflowRequest(BaseModel):
         default=None,
         min_length=1,
         max_length=100,
-        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+        pattern=PHASE_ID_PATTERN,
     )
     name: str
     workflow_type: str = "custom"
@@ -675,6 +687,7 @@ async def update_phase_prompt(
     handler = UpdateWorkflowPhaseHandler(
         repository=repository,
         event_publisher=publisher,
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     try:
@@ -814,6 +827,7 @@ async def create_workflow_from_yaml(
     handler = CreateWorkflowTemplateHandler(
         repository=get_workflow_repo(),
         event_publisher=get_publisher(),
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     # Domain-invariant failures (invalid fields, empty phases) raise ValueError;

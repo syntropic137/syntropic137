@@ -42,7 +42,14 @@ export interface PhaseDefinition {
   timeout_seconds: number
   allowed_tools: string[]
   argument_hint: string | null
+  /** The model as DEFINED: often an alias (opus, gpt-sol). */
   model: string | null
+  /** Concrete id the alias resolves to; null when not an alias. Never what a run used. */
+  resolved_model?: string | null
+  /** "translated" (platform rewrites it, codex) or "expected" (the CLI picks, claude). */
+  resolution_basis?: 'translated' | 'expected' | null
+  /** e.g. "gpt-sol → gpt-6-sol"; the bare model otherwise. Render verbatim. */
+  model_display?: string | null
   provider: string | null
 }
 
@@ -89,8 +96,12 @@ export interface SessionSummary {
   phase_display: string | null
   status: string
   agent_provider: string | null
+  // Observed model id (ADR-067 D9); requested_model is what the definition asked for.
   agent_model: string | null
-  agent_model_display: string | null
+  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  agent_model_display: string
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
   repos: string[]
   repos_display: string | null
   total_tokens: number
@@ -113,6 +124,13 @@ export interface SessionSummary {
 
 export interface SessionResponse {
   id: string
+  /**
+   * Cache-read / cache-write rate relative to fresh input, as the API words it,
+   * verbatim. Null when the scope mixes models with different multipliers
+   * or a model is unpriced; optional for a server that predates the field.
+   */
+  cache_read_rate_display?: string | null
+  cache_write_rate_display?: string | null
   workflow_id: string | null
   workflow_name: string | null
   execution_id: string | null
@@ -120,7 +138,12 @@ export interface SessionResponse {
   phase_display: string | null
   milestone_id: string | null
   agent_provider: string | null
+  /** Observed model id (ADR-067 D9); null when none was observed. */
   agent_model: string | null
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
+  /** Explicit model id, or "unknown (requested: X)". Render verbatim. */
+  agent_model_display: string
   status: string
   input_tokens: number
   output_tokens: number
@@ -203,7 +226,16 @@ export interface PhaseMetrics {
   input_tokens: number
   output_tokens: number
   total_tokens: number
-  cost_usd: number
+  /** Decimal string, as the API serialises Decimal; never parse it into a float to add. */
+  cost_usd: string
+  /**
+   * Observations in this phase that carried no usable rate.
+   *
+   * Non-zero means `cost_usd` is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
+  /** True while a run of this phase is open: `cost_usd` is a lower bound "so far" (#1048). */
+  cost_in_progress: boolean
   /** Nullable: the API returns null when the duration is genuinely unknown. */
   duration_seconds: number | null
   artifact_count: number
@@ -261,7 +293,42 @@ export interface WorkflowExecutionSummary {
   total_phases: number
   total_tokens: number
   total_cost_usd: number
+  /**
+   * Why a `failed` run failed, as `ExecutionRunSummary` now carries it (#1367).
+   *
+   * Absent until this change, so Workflow Runs had nothing to pass its badge
+   * and every correct refusal on that page read as a plain red failure - the
+   * one surface a prop could not fix, because the server was not sending it.
+   *
+   * Optional, unlike on `ExecutionListItem`: this interface is hand-written
+   * rather than aliased to the generated schema, and a required field here
+   * would be a claim about the wire that only the generated type can make.
+   */
+  failure_classification?: FailureClassification
 }
+
+/**
+ * Why a `failed` run failed: the machinery broke, or the work was refused (#1357).
+ *
+ * Aliased to the generated enum rather than restated, so a member added on the
+ * server is a compile error here instead of a string this UI silently renders
+ * as an unhandled default.
+ */
+export type FailureClassification = components['schemas']['FailureClassification']
+
+/**
+ * What a failing phase SAID caused it, in its own word (#1392).
+ *
+ * A REPORT and not a measurement, which is why it is a separate type from
+ * `FailureClassification` rather than more members on it: the only thing
+ * corroborating anything here is that the process exited cleanly. Rendered as
+ * attribution - see `reportedFailureNote` - and never used to pick a colour.
+ *
+ * Aliased to the generated enum for the same reason the type above is: a word
+ * added on the server is a compile error here rather than a string this UI
+ * silently renders as an unhandled default.
+ */
+export type ReportedFailureReason = components['schemas']['ReportedFailureReason']
 
 /** Item in the global execution list (includes workflow_name + display fields) */
 export interface ExecutionListItem {
@@ -281,6 +348,16 @@ export interface ExecutionListItem {
   duration_seconds: number | null
   duration_display: string
   tool_call_count: number
+  /**
+   * Why this run failed, for a run that failed (#1357).
+   *
+   * `correct_refusal` is the agent reporting `success=false` and the platform
+   * recording it faithfully - the system WORKING - and it must not be rendered
+   * the same as the machinery breaking. `unclassified` is a run that ended
+   * before anything recorded the difference, which is every failure predating
+   * the field; it renders as a plain failure, which is what it has always been.
+   */
+  failure_classification: FailureClassification
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
@@ -326,7 +403,13 @@ export interface PhaseExecutionDetail {
   unpriced_observation_count: number
   started_at: string | null
   completed_at: string | null
+  /** Observed model id (ADR-067 D9); null when none was observed. */
   model: string | null
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
+  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  model_display: string
+  /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
 }
 
@@ -364,8 +447,35 @@ export interface ExecutionDetailResponse {
   unpriced_observation_count: number
   artifact_ids: string[]
   error_message: string | null
+  /**
+   * Why this run failed, for a run that failed (#1357).
+   *
+   * `correct_refusal` is the agent reporting `success=false` and the platform
+   * recording it faithfully - the system WORKING - and it must not be rendered
+   * the same as the machinery breaking. `unclassified` is a run that ended
+   * before anything recorded the difference, which is every failure predating
+   * the field; it renders as a plain failure, which is what it has always been.
+   */
+  failure_classification: FailureClassification
+  /**
+   * What the failing phase SAID caused it, in its own word (#1392).
+   *
+   * Optional and nullable because most runs have nothing here: a phase that
+   * named no cause, and every report written before the field existed, both
+   * arrive as absent. Shown as attribution beside the classification above -
+   * see `reportedFailureNote` - and never used to decide a colour, because
+   * the agent chose this word and nothing corroborates it.
+   */
+  reported_failure_reason?: ReportedFailureReason | null
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
+  /**
+   * Cache-read / cache-write rate relative to fresh input, as the API words it,
+   * verbatim. Null when the scope mixes models with different multipliers
+   * or a model is unpriced; optional for a server that predates the field.
+   */
+  cache_read_rate_display?: string | null
+  cache_write_rate_display?: string | null
   // Workspace info (ADR-021)
   workspace: WorkspaceInfo | null
 }

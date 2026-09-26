@@ -127,6 +127,8 @@ describe("conversations commands", () => {
         jsonResponse({
           session_id: "sess-001",
           model: "claude-sonnet-4-20250514",
+          requested_model: "sonnet",
+          model_display: "claude-sonnet-4-20250514",
           event_count: 42,
           total_input_tokens: 10000,
           total_output_tokens: 5000,
@@ -140,10 +142,27 @@ describe("conversations commands", () => {
       await handler({ positionals: ["sess-001"], values: {} });
       const out = stdout();
       expect(out).toContain("sess-001");
-      expect(out).toContain("claude-sonnet-4-20250514");
+      expect(out).toMatch(/Model:\s+claude-sonnet-4-20250514/);
+      expect(out).toMatch(/Requested:\s+sonnet/);
       expect(out).toContain("10,000");
       expect(out).toContain("5,000");
       expect(out).toContain("Read");
+    });
+
+    it("renders an unreported model as unknown with the request, never the alias as the model", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          session_id: "sess-legacy",
+          model: null,
+          requested_model: "opus",
+          model_display: "unknown (requested: opus)",
+        }),
+      );
+
+      await handler({ positionals: ["sess-legacy"], values: {} });
+      const out = stdout();
+      expect(out).toMatch(/Model:\s+unknown \(requested: opus\)/);
+      expect(out).not.toMatch(/Requested:/);
     });
 
     it("throws on missing session-id", async () => {

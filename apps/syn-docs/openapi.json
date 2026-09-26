@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.5.1"
+    "version": "0.30.0"
   },
   "paths": {
     "/workflows": {
@@ -800,7 +800,7 @@
           "execution"
         ],
         "summary": "Execute Workflow Endpoint",
-        "description": "Start workflow execution in background.",
+        "description": "Start workflow execution in background.\n\nReturns 409 while maintenance mode is active; no execution is started.",
         "operationId": "execute_workflow_endpoint_workflows__workflow_id__execute_post",
         "parameters": [
           {
@@ -1236,6 +1236,24 @@
             "description": "Filter by workflow ID"
           },
           {
+            "name": "execution_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the execution these sessions belong to. Every session carries one; before this existed the parameter was accepted and silently dropped, returning the whole collection (#1263).",
+              "title": "Execution Id"
+            },
+            "description": "Filter by the execution these sessions belong to. Every session carries one; before this existed the parameter was accepted and silently dropped, returning the whole collection (#1263)."
+          },
+          {
             "name": "status",
             "in": "query",
             "required": false,
@@ -1456,7 +1474,7 @@
           "artifacts"
         ],
         "summary": "List Artifacts Endpoint",
-        "description": "List artifacts with optional filtering.\n\nThe window is named after ``created_at`` because that is the timestamp an\nartifact has; the siblings bound ``started_at`` and spell it\n``started_after``. The validation is the same one (#1186): a bound with no\noffset is refused rather than guessed at.",
+        "description": "List artifacts with optional filtering.\n\n``execution_id`` is declared here rather than left to the client because an\nundeclared query parameter is dropped, not refused (#1306): a real id, a\nnonsense id and no filter at all returned the same unfiltered page, so \"this\nrun's deliverable\" resolved to whatever any run wrote most recently. The\nsame defect #1263 fixed on ``/sessions``, on the surface where it decides\nwhat a phase reads.\n\nThe window is named after ``created_at`` because that is the timestamp an\nartifact has; the siblings bound ``started_at`` and spell it\n``started_after``. The validation is the same one (#1186): a bound with no\noffset is refused rather than guessed at.",
         "operationId": "list_artifacts_endpoint_artifacts_get",
         "parameters": [
           {
@@ -1476,6 +1494,24 @@
               "title": "Workflow Id"
             },
             "description": "Filter by workflow ID"
+          },
+          {
+            "name": "execution_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by execution ID",
+              "title": "Execution Id"
+            },
+            "description": "Filter by execution ID"
           },
           {
             "name": "phase_id",
@@ -5381,10 +5417,825 @@
         }
       }
     },
+    "/maintenance": {
+      "get": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "Get Maintenance Mode",
+        "description": "Report whether new executions are being admitted.\n\nRead through to the durable store, never from process memory, so this\nanswers for the system rather than for this container.",
+        "operationId": "get_maintenance_mode_maintenance_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceModeResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "Set Maintenance Mode",
+        "description": "Pause or resume execution admission.\n\nReturns only once the state is durably stored AND every admission already\npart-way through deciding has finished deciding. That ordering is the whole\npoint: a caller holding this response knows not only that the flag is set\nbut that nothing is still on its way through the old answer, so there is no\nwindow on the setting side either.\n\nSet through the gate rather than the port, because the port can only store\nthe flag - it cannot hold the door while it does so.\n\nClearing is only done when the work the deploy paused has been woken, so a\nfailed announcement answers 503 and not 200 (#1387). Admission IS open by\nthen - the 503 body says so - but the triggers parked during the deploy are\nstill asleep and nothing else will re-offer them, so reporting success here\nwould close the deploy over work that never runs. Repeating the clear\nre-announces, which is why this is a retryable status and not a 500.",
+        "operationId": "set_maintenance_mode_maintenance_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMaintenanceModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceModeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/features": {
+      "get": {
+        "tags": [
+          "features"
+        ],
+        "summary": "Get Features",
+        "description": "Report which optional features are enabled on this deployment.",
+        "operationId": "get_features_features_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback/stats": {
+      "get": {
+        "tags": [
+          "stats"
+        ],
+        "summary": "Get Stats",
+        "description": "Get aggregate statistics for feedback items.",
+        "operationId": "get_stats_feedback_stats_get",
+        "parameters": [
+          {
+            "name": "app",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by app name",
+              "title": "App"
+            },
+            "description": "Filter by app name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackStats"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback": {
+      "get": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "List Feedback",
+        "description": "List all feedback items with optional filtering.",
+        "operationId": "list_feedback_feedback_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by status",
+              "title": "Status"
+            },
+            "description": "Filter by status"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by type",
+              "title": "Type"
+            },
+            "description": "Filter by type"
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by priority",
+              "title": "Priority"
+            },
+            "description": "Filter by priority"
+          },
+          {
+            "name": "app",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by app name",
+              "title": "App"
+            },
+            "description": "Filter by app name"
+          },
+          {
+            "name": "route",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the page path feedback was left on",
+              "title": "Route"
+            },
+            "description": "Filter by the page path feedback was left on"
+          },
+          {
+            "name": "subject_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by subject kind (execution, session, workflow, ...)",
+              "title": "Subject Kind"
+            },
+            "description": "Filter by subject kind (execution, session, workflow, ...)"
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the id of the object the page was about",
+              "title": "Subject Id"
+            },
+            "description": "Filter by the id of the object the page was about"
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only feedback created at or after this instant (ISO 8601)",
+              "title": "Created After"
+            },
+            "description": "Only feedback created at or after this instant (ISO 8601)"
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only feedback created strictly before this instant (ISO 8601)",
+              "title": "Created Before"
+            },
+            "description": "Only feedback created strictly before this instant (ISO 8601)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in comments",
+              "title": "Search"
+            },
+            "description": "Search in comments"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Items per page"
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Field to order by",
+              "default": "created_at",
+              "title": "Order By"
+            },
+            "description": "Field to order by"
+          },
+          {
+            "name": "desc",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Order descending",
+              "default": true,
+              "title": "Desc"
+            },
+            "description": "Order descending"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackList"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Create Feedback",
+        "description": "Create a new feedback item.",
+        "operationId": "create_feedback_feedback_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackItem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback/{feedback_id}": {
+      "get": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Get Feedback",
+        "description": "Get a single feedback item with media metadata.",
+        "operationId": "get_feedback_feedback__feedback_id__get",
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feedback Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackItemWithMedia"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Update Feedback",
+        "description": "Update a feedback item (status, priority, assignment, notes).",
+        "operationId": "update_feedback_feedback__feedback_id__patch",
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feedback Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackItem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Delete Feedback",
+        "description": "Delete a feedback item and all associated media.",
+        "operationId": "delete_feedback_feedback__feedback_id__delete",
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feedback Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback/{feedback_id}/media": {
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Upload Media",
+        "description": "Upload a media file (screenshot or voice note).",
+        "operationId": "upload_media_feedback__feedback_id__media_post",
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feedback Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_media_feedback__feedback_id__media_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaItem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback/{feedback_id}/media/{media_id}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Get Media",
+        "description": "Download a media file.",
+        "operationId": "get_media_feedback__feedback_id__media__media_id__get",
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feedback Id"
+            }
+          },
+          {
+            "name": "media_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Media Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Delete Media",
+        "description": "Delete a media file.",
+        "operationId": "delete_media_feedback__feedback_id__media__media_id__delete",
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feedback Id"
+            }
+          },
+          {
+            "name": "media_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Media Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDisabledResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Root",
-        "description": "Root endpoint with API info.",
+        "description": "Root endpoint with API info.\n\nReports a null release and ``version_status: \"unavailable\"`` rather than\nthe ``\"unknown\"`` sentinel it used to serve. It was a flat map of\nstrings, so it had nowhere to put a null and nothing to name the state\nwith \u2014 which made it the last surface still answering \"which build?\"\nwith a literal, the thing #1380 exists to remove (see ``RootResponse``).",
         "operationId": "root__get",
         "responses": {
           "200": {
@@ -5392,11 +6243,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Root  Get"
+                  "$ref": "#/components/schemas/RootResponse"
                 }
               }
             }
@@ -5415,9 +6262,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Health Health Get"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             }
@@ -5449,6 +6294,15 @@
         ],
         "title": "AddGlobalClaudePluginRequest",
         "description": "Request body for ``POST /claude-plugins/global`` (Phase A redesign).\n\nTakes the display name plus version of an already-registered plugin. The\nhandler looks the entry up in the lock projection and refuses to add\nanything that has not been registered first via\n``POST /claude-plugins/registrations``."
+      },
+      "AliasResolutionBasis": {
+        "type": "string",
+        "enum": [
+          "translated",
+          "expected"
+        ],
+        "title": "AliasResolutionBasis",
+        "description": "How confident an alias -> model id resolution is."
       },
       "ArtifactActionResponse": {
         "properties": {
@@ -5676,6 +6530,28 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Metadata"
+          },
+          "agent_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Provider"
+          },
+          "agent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Model"
           }
         },
         "type": "object",
@@ -5705,6 +6581,17 @@
               }
             ],
             "title": "Workflow Id"
+          },
+          "execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Id"
           },
           "phase_id": {
             "anyOf": [
@@ -5747,6 +6634,28 @@
               }
             ],
             "title": "Created At"
+          },
+          "agent_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Provider"
+          },
+          "agent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Model"
           }
         },
         "type": "object",
@@ -5787,6 +6696,24 @@
           "file"
         ],
         "title": "Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post"
+      },
+      "Body_upload_media_feedback__feedback_id__media_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "media_type": {
+            "$ref": "#/components/schemas/MediaType"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "media_type"
+        ],
+        "title": "Body_upload_media_feedback__feedback_id__media_post"
       },
       "BranchObservationInfo": {
         "properties": {
@@ -5847,6 +6774,64 @@
         ],
         "title": "BranchObservationInfo",
         "description": "One branch of a failed phase's workspace, as git had it (#1200).\n\nTHE ANSWER TO \"WHERE DO I LOOK\", made machine-readable. A phase can push\ncomplete work and still fail - most often because it wrote no deliverable,\nwhich #1167 correctly refuses to pass - and the failure then named no\nbranch, so nothing pointed at commits that were merged by hand twice in one\nday once a human found them.\n\nEVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is what the\nREMOTE ITSELF answered, asked while the workspace was still alive, and\n`remote_commit_at_phase_start` is where this clone's tracking ref pointed\nwhen the phase was handed that workspace. The two differing means the ref\nmoved. It does NOT mean this phase moved it, and no field here says so: a\npush carries no author, so the same evidence is produced by a concurrent\nprocess or a person. Two earlier versions of this claimed otherwise.\n\nA RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the\nrepository - the ref moved, or commits are sitting on no remote. The FIELD\nis three-valued and the two empty answers must not be merged: absent/null\nmeans nothing could look, `[]` means the workspace was read and every\nbranch is exactly where the phase found it. Only a moved ref can be\nrecovered by fetching."
+      },
+      "BuildInfo": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly \u2014 including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null."
+          },
+          "image_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Tag",
+            "description": "Container image tag this process was built from, stamped at image build time. Null when the build did not stamp one \u2014 which is a different fact from an unknown tag, and is reported as such."
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit",
+            "description": "Git commit the image was built from, stamped at image build time. Null when the build did not stamp one."
+          },
+          "version_status": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "unavailable"
+            ],
+            "title": "Version Status",
+            "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.",
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "version_status"
+        ],
+        "title": "BuildInfo",
+        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply and\nonly ``/health`` reports."
       },
       "CancelRequest": {
         "properties": {
@@ -6108,6 +7093,63 @@
         ],
         "title": "ClaudePluginLockResponse",
         "description": "A single lock entry (one ``(source_url, version)`` pair)."
+      },
+      "CodexAuthState": {
+        "type": "string",
+        "enum": [
+          "absent",
+          "ok",
+          "expiring",
+          "expired",
+          "unreadable"
+        ],
+        "title": "CodexAuthState",
+        "description": "Freshness of the configured codex credential."
+      },
+      "CodexAuthStatus": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/CodexAuthState"
+          },
+          "expires_in_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Hours",
+            "description": "Hours until the access token expires. Negative once expired."
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "Access token expiry, UTC."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Human-readable summary. Never contains token material."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "detail"
+        ],
+        "title": "CodexAuthStatus",
+        "description": "A non-secret description of the configured codex credential."
       },
       "ConditionRequest": {
         "properties": {
@@ -6452,6 +7494,17 @@
             ],
             "title": "Model"
           },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
           "success": {
             "anyOf": [
               {
@@ -6473,11 +7526,18 @@
               }
             ],
             "title": "Size Bytes"
+          },
+          "model_display": {
+            "type": "string",
+            "title": "Model Display",
+            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "readOnly": true
           }
         },
         "type": "object",
         "required": [
-          "session_id"
+          "session_id",
+          "model_display"
         ],
         "title": "ConversationMetadataResponse",
         "description": "Conversation index metadata."
@@ -6851,6 +7911,25 @@
           "status"
         ],
         "title": "CreateWorkflowResponse"
+      },
+      "DegradedReason": {
+        "type": "string",
+        "enum": [
+          "artifact_storage",
+          "claude_plugin_storage",
+          "skill_storage",
+          "conversation_storage",
+          "ui_feedback",
+          "subscription_coordinator",
+          "projection_catchup",
+          "projection_stalled",
+          "event_poller",
+          "check_run_poller",
+          "anthropic_api_key",
+          "github_app"
+        ],
+        "title": "DegradedReason",
+        "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
       },
       "DeleteWorkflowResponse": {
         "properties": {
@@ -7300,6 +8379,28 @@
             "title": "Unpriced Observation Count",
             "default": 0
           },
+          "cache_read_rate_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Rate Display"
+          },
+          "cache_write_rate_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Rate Display"
+          },
           "total_duration_seconds": {
             "anyOf": [
               {
@@ -7334,12 +8435,44 @@
             ],
             "title": "Error Message"
           },
+          "failure_classification": {
+            "$ref": "#/components/schemas/FailureClassification",
+            "default": "unclassified"
+          },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "repos": {
             "items": {
               "type": "string"
             },
             "type": "array",
             "title": "Repos"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Inputs"
           }
         },
         "type": "object",
@@ -7532,6 +8665,20 @@
               }
             ],
             "title": "Error Message"
+          },
+          "failure_classification": {
+            "$ref": "#/components/schemas/FailureClassification",
+            "default": "unclassified"
+          },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -7744,6 +8891,20 @@
             ],
             "title": "Error Message"
           },
+          "failure_classification": {
+            "$ref": "#/components/schemas/FailureClassification",
+            "default": "unclassified"
+          },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "repos": {
             "items": {
               "type": "string"
@@ -7814,6 +8975,17 @@
         "title": "ExportManifestResponse",
         "description": "Structured export of a workflow as a file manifest.\n\nEach key in ``files`` is a relative path; each value is the file content.\nThe CLI writes these to disk to produce an installable package or plugin."
       },
+      "FailureClassification": {
+        "type": "string",
+        "enum": [
+          "platform",
+          "task",
+          "correct_refusal",
+          "unclassified"
+        ],
+        "title": "FailureClassification",
+        "description": "Why a failed execution ended: the machinery, the request, or the work.\n\nTHE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`\nand nothing else, so a phase that did three phases of real work, found a\ngenuine defect and correctly declined to ship it sat in the same bucket as\na segfault. Of 221 recorded failures an unknown fraction were the platform\nworking exactly as designed, which made every failure rate and every\nlost-spend figure computed from `failed` an upper bound of unknown\ntightness - and made the product look broken to the operator least able to\ncheck.\n\nTHE EVIDENCE WAS ALREADY IN THE RECORD, it simply had nowhere to go: a\nphase that ends on its own agent's `TASK_RESULT success=false` report is a\ndifferent fact from one that ends on an exit status, a timeout or a parse\nfailure, and `AgentVerdict` already knows which happened at the moment the\nrun is failed. This is where that fact is written down.\n\nTHE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,\nwhich is what analysts already sort failures into by hand.\n\nWHY `task` IS A MEMBER, AND WHAT HAD TO ARRIVE BEFORE IT COULD BE (#1372).\nclassify.md's third class - \"the request was wrong, too big for a phase, or\nimpossible\" - is a judgement about the REQUEST, and the stored record did\nnot support it: the same exit code, the same error text and the same refusal\narise from a bad request and from a good one the platform mishandled.\nDeriving it from any of those would be a guess, so the member was left out\nwith the note that whoever added it had to bring the evidence with them.\n\nThe evidence was asked for - `TASK_RESULT` carries a typed `failure_reason`\nbeside `success`, and the prompt every phase is sent says which word to\nwrite - AND ASKING WAS NOT ENOUGH (#1392). The answer is the run's own\nword about itself, and the only thing standing behind it is that the\nprocess exited cleanly, which is evidence about the harness. So a phase\nthat had given up could write `task`, be believed, and leave the platform's\nfailure count by saying so. Nothing now reaches this member from a report:\nthe agent's word is recorded as `ReportedFailureReason`, beside the\nclassification and never as it, and this member waits for a source of\nevidence that is not the run being measured.\n\nTHE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep\nwhen changing anything here: every member but `PLATFORM` is a POSITIVE\nclaim, made only where the agent's own readable report is what ended the\nrun and only from the field that states it. Everything else - including a\nreport nobody could read - is `PLATFORM`. So a path that forgets to\nclassify itself lands on the answer the system already gave, the failure\ntally stays the upper bound it has always been, and no omission can ever\nmanufacture evidence that the system was working.\n\nOMISSION IS NOT A SIGNAL. A phase that reports failure and names no reason\nclassifies exactly as it did before the field existed - `CORRECT_REFUSAL`\n- because that is the answer the system already gave, a silent agent has\nsaid nothing new to move it, and every report already in the store was\nwritten by an agent that had no key to omit."
+      },
       "FailurePatternResponse": {
         "properties": {
           "error_type": {
@@ -7852,6 +9024,997 @@
         "type": "object",
         "title": "FailurePatternResponse",
         "description": "A recurring failure pattern within a system."
+      },
+      "FeatureDisabledDetail": {
+        "properties": {
+          "feature": {
+            "type": "string",
+            "title": "Feature",
+            "description": "The feature flag that governs this route."
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Human-readable explanation."
+          },
+          "enable_with": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable With",
+            "description": "The setting that enables the feature, when one exists."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "feature",
+          "reason"
+        ],
+        "title": "FeatureDisabledDetail",
+        "description": "Why a flag-gated route refuses to run."
+      },
+      "FeatureDisabledResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/FeatureDisabledDetail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "FeatureDisabledResponse",
+        "description": "Response from an installed route while its feature is disabled."
+      },
+      "FeaturesResponse": {
+        "properties": {
+          "ui_feedback": {
+            "type": "boolean",
+            "title": "Ui Feedback",
+            "description": "In-app feedback widget and /feedback routes (SYN_UI_FEEDBACK_ENABLED). When false the routes answer 404 and the dashboard never loads the widget.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FeaturesResponse",
+        "description": "Which optional features this deployment has switched on."
+      },
+      "FeedbackCreate": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "URL where feedback was created"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route",
+            "description": "React Router path if available"
+          },
+          "viewport_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewport Width",
+            "description": "Viewport width in pixels"
+          },
+          "viewport_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewport Height",
+            "description": "Viewport height in pixels"
+          },
+          "click_x": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Click X",
+            "description": "X coordinate of click"
+          },
+          "click_y": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Click Y",
+            "description": "Y coordinate of click"
+          },
+          "css_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Css Selector",
+            "description": "CSS selector of clicked element"
+          },
+          "xpath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xpath",
+            "description": "XPath of clicked element"
+          },
+          "component_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Name",
+            "description": "React component name"
+          },
+          "subject_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Kind of domain object the page was about (execution, session, ...)"
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Id",
+            "description": "Id of the domain object the page was about"
+          },
+          "feedback_type": {
+            "$ref": "#/components/schemas/FeedbackType",
+            "description": "Type of feedback",
+            "default": "bug"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment",
+            "description": "User's comment"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority",
+            "description": "Priority level",
+            "default": "medium"
+          },
+          "app_name": {
+            "type": "string",
+            "title": "App Name",
+            "description": "Name of the application"
+          },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version",
+            "description": "Version of the application"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "Browser user agent"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment",
+            "description": "Environment name (development, staging, production)"
+          },
+          "git_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Commit",
+            "description": "Git commit hash"
+          },
+          "git_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Branch",
+            "description": "Git branch name"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname",
+            "description": "Hostname where the app is running"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "app_name"
+        ],
+        "title": "FeedbackCreate",
+        "description": "Request model for creating feedback."
+      },
+      "FeedbackItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "viewport_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewport Width"
+          },
+          "viewport_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewport Height"
+          },
+          "click_x": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Click X"
+          },
+          "click_y": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Click Y"
+          },
+          "css_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Css Selector"
+          },
+          "xpath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xpath"
+          },
+          "component_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Name"
+          },
+          "subject_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Id"
+          },
+          "feedback_type": {
+            "$ref": "#/components/schemas/FeedbackType"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To"
+          },
+          "resolution_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Notes"
+          },
+          "app_name": {
+            "type": "string",
+            "title": "App Name"
+          },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "git_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Commit"
+          },
+          "git_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Branch"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "media_count": {
+            "type": "integer",
+            "title": "Media Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "feedback_type",
+          "status",
+          "priority",
+          "app_name",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "FeedbackItem",
+        "description": "Response model for a feedback item (without media)."
+      },
+      "FeedbackItemWithMedia": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "viewport_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewport Width"
+          },
+          "viewport_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewport Height"
+          },
+          "click_x": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Click X"
+          },
+          "click_y": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Click Y"
+          },
+          "css_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Css Selector"
+          },
+          "xpath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xpath"
+          },
+          "component_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Name"
+          },
+          "subject_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Id"
+          },
+          "feedback_type": {
+            "$ref": "#/components/schemas/FeedbackType"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To"
+          },
+          "resolution_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Notes"
+          },
+          "app_name": {
+            "type": "string",
+            "title": "App Name"
+          },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "git_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Commit"
+          },
+          "git_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Branch"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "media_count": {
+            "type": "integer",
+            "title": "Media Count",
+            "default": 0
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/MediaSummary"
+            },
+            "type": "array",
+            "title": "Media",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "feedback_type",
+          "status",
+          "priority",
+          "app_name",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "FeedbackItemWithMedia",
+        "description": "Response model for a feedback item with media metadata."
+      },
+      "FeedbackList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size",
+            "default": 50
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "FeedbackList",
+        "description": "Response model for listing feedback items."
+      },
+      "FeedbackStats": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "by_status": {
+            "$ref": "#/components/schemas/StatusCount"
+          },
+          "by_type": {
+            "$ref": "#/components/schemas/TypeCount"
+          },
+          "by_priority": {
+            "$ref": "#/components/schemas/PriorityCount"
+          },
+          "by_app": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By App"
+          }
+        },
+        "type": "object",
+        "title": "FeedbackStats",
+        "description": "Aggregate statistics for feedback items."
+      },
+      "FeedbackType": {
+        "type": "string",
+        "enum": [
+          "bug",
+          "feature",
+          "ui_ux",
+          "performance",
+          "question",
+          "other"
+        ],
+        "title": "FeedbackType",
+        "description": "Type of feedback."
+      },
+      "FeedbackUpdate": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Status"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New status"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Priority"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New priority"
+          },
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To",
+            "description": "Assignee"
+          },
+          "resolution_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Notes",
+            "description": "Notes about resolution"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment",
+            "description": "Updated comment"
+          }
+        },
+        "type": "object",
+        "title": "FeedbackUpdate",
+        "description": "Request model for updating feedback."
       },
       "GitEventData": {
         "properties": {
@@ -8347,6 +10510,85 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'healthy' while the process is alive and accepting writes."
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "description": "'full', or 'degraded' when some subsystem is impaired."
+          },
+          "build": {
+            "$ref": "#/components/schemas/BuildInfo",
+            "description": "Which build is answering (#1380)."
+          },
+          "degraded_reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DegradedReason"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reasons",
+            "description": "Every way this instance is up but not fully serving. Omitted entirely when there are none, which is how a reader tells 'nothing is wrong' from 'something is and it is not listed here'."
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Read-path health. Omitted when no subscription service is wired up at all, e.g. in offline mode."
+          },
+          "codex_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodexAuthStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Freshness of this instance's codex credential. Omitted when the probe could not run \u2014 a credential hint must never be able to take /health down."
+          },
+          "warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings",
+            "description": "Human-readable notes that need attention but do not degrade the instance. Omitted when there are none."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "mode",
+          "build"
+        ],
+        "title": "HealthResponse",
+        "description": "Payload of ``GET /health``.\n\nEVERY FIELD IS DECLARED AND EXTRAS ARE FORBIDDEN. An earlier cut of #1380\ntyped only ``build`` and left ``extra=\"allow\"`` for the probe blocks, which\nput ``additionalProperties: true`` in ``openapi.json`` and an\n``[key: string]: unknown`` index signature in the generated CLI types: the\nfields `syn health` actually reads were invisible to every generated\nconsumer, and a probe could change shape without the drift check noticing.\nThe probes own the shapes \u2014 ``CodexAuthStatus`` and ``ProjectionLag`` are\ndeclared at their source and referenced, not copied \u2014 but the fact that\n/health publishes them is this model's to state.\n\nABSENT OPTIONAL BLOCKS ARE OMITTED, not sent as null; see\n``_OmitsAbsentFields``."
+      },
       "HeatmapDayBucketResponse": {
         "properties": {
           "date": {
@@ -8436,6 +10678,176 @@
         ],
         "title": "InputDeclarationModel"
       },
+      "MaintenanceModeResponse": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "True when new execution admission is refused.",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Operator-supplied reason for the pause.",
+            "default": ""
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since",
+            "description": "When admission was paused. Null while admission is open."
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor",
+            "description": "Who set the current state.",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MaintenanceModeResponse",
+        "description": "Whether new workflow executions are being admitted (#1387).\n\n``active`` is the gate: while it is true every admission path refuses and\nthe deploy script may swap containers knowing nothing new can start.\nExecutions already running are unaffected."
+      },
+      "MediaItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "feedback_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Feedback Id"
+          },
+          "media_type": {
+            "$ref": "#/components/schemas/MediaType"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type"
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size"
+          },
+          "external_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Url"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "feedback_id",
+          "media_type",
+          "mime_type",
+          "created_at"
+        ],
+        "title": "MediaItem",
+        "description": "Response model for a media item."
+      },
+      "MediaSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type"
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "media_type",
+          "mime_type",
+          "created_at"
+        ],
+        "title": "MediaSummary",
+        "description": "Summary of a media item (without binary data)."
+      },
+      "MediaType": {
+        "type": "string",
+        "enum": [
+          "screenshot",
+          "voice_note"
+        ],
+        "title": "MediaType",
+        "description": "Type of media attachment."
+      },
       "MetricsResponse": {
         "properties": {
           "total_workflows": {
@@ -8512,6 +10924,26 @@
         ],
         "title": "MetricsResponse",
         "description": "Aggregated metrics response."
+      },
+      "ModelCostEntry": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "cost_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cost Usd",
+            "default": "0"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "title": "ModelCostEntry",
+        "description": "One model's share of a cost total."
       },
       "OperationInfo": {
         "properties": {
@@ -8870,6 +11302,74 @@
         "title": "PauseRequest",
         "description": "Request to pause an execution."
       },
+      "PhaseActivityInfo": {
+        "properties": {
+          "telemetry_available": {
+            "type": "boolean",
+            "title": "Telemetry Available",
+            "default": false
+          },
+          "operations_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operations Count"
+          },
+          "last_push_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Push At"
+          },
+          "seconds_since_last_push": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds Since Last Push"
+          },
+          "elapsed_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Seconds"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          }
+        },
+        "type": "object",
+        "title": "PhaseActivityInfo",
+        "description": "What a phase was DOING when it ended, and against what budget (#1262).\n\nTHE ANSWER TO \"was it busy or was it stuck\", for the one failure that\ncannot answer it itself. A phase killed on its deadline exits 124, and so\ndoes a phase that hung; the two need opposite responses - dispatch a\ncontinuation with a bigger budget, or do not pay for that run a second\ntime - and until this model existed nothing in the execution record\nseparated them. An operator had to open the transcript, and four runs in\none day were triaged without one.\n\nRead as a whole, the fields are the triage:\n\n* many operations and a push moments before the end - it was working, and\n  the budget was too short;\n* a handful of operations and no push for most of an hour - it stalled,\n  and a bigger budget buys another stalled hour;\n* ``elapsed_seconds`` at or past ``timeout_seconds`` - it reached its cap,\n  as against a 124 reported well inside the budget, which is some other\n  death wearing the same exit code.\n\nEvery field is a READING, never a verdict. Nothing here says \"stalled\":\nthat word is a judgement about intent, and these are four measurements\nthat let a reader make it.\n\nAND \"WE COULD NOT SEE\" IS A THIRD ANSWER, not a quiet fourth measurement.\nThe activity readings come from Lane 2, which fails soft, and a lookup that\nraised or found no database once produced zero operations and no push -\nwhich is precisely the shape of a stall. The feature built to stop an\noperator being told \"do not pay for this again\" on no evidence was\nmanufacturing exactly that signal out of its own outage.\n``telemetry_available`` says whether the timeline was read at all, and the\nreadings taken from it are null when it was not."
+      },
       "PhaseDefinitionResponse": {
         "properties": {
           "phase_id": {
@@ -8945,6 +11445,38 @@
               }
             ],
             "title": "Model"
+          },
+          "resolved_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Model"
+          },
+          "resolution_basis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AliasResolutionBasis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Display"
           },
           "provider": {
             "anyOf": [
@@ -9126,6 +11658,11 @@
             ],
             "title": "Error Message"
           },
+          "deliverable_recovered": {
+            "type": "boolean",
+            "title": "Deliverable Recovered",
+            "default": false
+          },
           "model": {
             "anyOf": [
               {
@@ -9136,6 +11673,17 @@
               }
             ],
             "title": "Model"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
           },
           "cost_by_model": {
             "additionalProperties": {
@@ -9158,6 +11706,17 @@
             ],
             "title": "Agent Session Ids"
           },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
           "observed_branches": {
             "anyOf": [
               {
@@ -9178,6 +11737,15 @@
             },
             "type": "array",
             "title": "Operations"
+          },
+          "activity": {
+            "$ref": "#/components/schemas/PhaseActivityInfo"
+          },
+          "model_display": {
+            "type": "string",
+            "title": "Model Display",
+            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -9189,7 +11757,9 @@
           "output_tokens",
           "cache_creation_tokens",
           "cache_read_tokens",
-          "total_tokens"
+          "total_tokens",
+          "requested_model",
+          "model_display"
         ],
         "title": "PhaseExecutionInfo"
       },
@@ -9227,6 +11797,16 @@
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Cost Usd",
             "default": "0"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
+          },
+          "cost_in_progress": {
+            "type": "boolean",
+            "title": "Cost In Progress",
+            "default": false
           },
           "duration_seconds": {
             "anyOf": [
@@ -9376,6 +11956,90 @@
         "type": "object",
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
+      },
+      "Priority": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ],
+        "title": "Priority",
+        "description": "Feedback priority level."
+      },
+      "PriorityCount": {
+        "properties": {
+          "low": {
+            "type": "integer",
+            "title": "Low",
+            "default": 0
+          },
+          "medium": {
+            "type": "integer",
+            "title": "Medium",
+            "default": 0
+          },
+          "high": {
+            "type": "integer",
+            "title": "High",
+            "default": 0
+          },
+          "critical": {
+            "type": "integer",
+            "title": "Critical",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "PriorityCount",
+        "description": "Count of items by priority."
+      },
+      "ProjectionLag": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as it appears in projection_checkpoints."
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position",
+            "description": "Global nonce this projection's checkpoint has reached. 0 when it has no checkpoint at all, which is what a projection looks like immediately after a version bump clears it."
+          },
+          "lag": {
+            "type": "integer",
+            "title": "Lag",
+            "description": "Events between position and the store head. Always > 0 here."
+          },
+          "checkpoint_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Age Seconds",
+            "description": "Seconds since this projection's checkpoint last moved. None when the projection has no checkpoint row yet. This is the evidence behind `stalled`, and the number to sample if the stall threshold needs revisiting."
+          },
+          "stalled": {
+            "type": "boolean",
+            "title": "Stalled",
+            "description": "True when this projection is behind the head and its checkpoint has not moved for longer than the stall threshold (120s by default): it is not working through a backlog, it is stuck.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "position",
+          "lag"
+        ],
+        "title": "ProjectionLag",
+        "description": "One projection's distance from the head of the event store."
       },
       "RegisterClaudePluginRequest": {
         "properties": {
@@ -10189,6 +12853,69 @@
         "title": "RepoSummaryResponse",
         "description": "Summary of a repo for list views."
       },
+      "ReportedFailureReason": {
+        "type": "string",
+        "enum": [
+          "task",
+          "platform",
+          "refused",
+          "unknown"
+        ],
+        "title": "ReportedFailureReason",
+        "description": "What a phase says CAUSED the failure it is reporting (#1372).\n\nTHE QUESTION THIS ANSWERS, and why it had to be asked rather than worked\nout. A readable ``success=false`` says THAT a phase failed and nothing\nmore, so every reported failure was recorded as a correct refusal - the\nsystem working - including the one whose agent had just written \"GH_TOKEN\nis not set\", which is the system not working, and the one that said the\ntask was impossible, which is neither. Those three take opposite responses:\nretry, fix the platform, rewrite the brief. An operator re-dispatching off\na record that cannot tell them apart spends a whole run to find out.\n\nTHE SPELLINGS ARE classify.md's, which is the vocabulary analysts already\nsort failures into by hand and the one `FailureClassification` was built\nfrom. Three words, closed, written here and nowhere else - a closed set in\none place is what separates a contract from the habit of adding one more\nstring every time a run is lost, and it is the definition the negative\ntests are written against.\n\nIT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,\nan exception message or an exit status to reach a member of this; the only\nway into one is a phase that wrote it.\n\nAND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A\nMEASUREMENT (#1392). This is the whole of what the type means, and the\nreason it is spelled `reported_failure_reason` everywhere it is carried:\nthe platform's only corroboration of anything written here is that the\nprocess exited cleanly and its stream arrived intact, which is evidence\nabout the HARNESS and not about whether the task was possible. A run that\nnamed itself ``task`` established nothing about the request; it said\nsomething about it. So the word travels the whole way to the operator - who\nwants to know what the agent said - and `FailureClassification`, which is\nwhat failure NUMBERS are computed from, is never decided by it. The one\nthing a phase can do to that record is WITHDRAW a claim; see\n`_corroborated_classification`, which holds the whole rule.\n\nAND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when\nediting anything here. This decides a LABEL on a failure already decided by\n``success``. A word nobody recognises, a sentence, a number, or no key at\nall all read as \"no reason given\" and leave the verdict exactly as it was.\nMaking a misspelling fatal would let a tally field refuse a finished run,\nwhich is #1324's defect bought back in exchange for nothing."
+      },
+      "RootResponse": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly \u2014 including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable name of this API."
+          },
+          "docs": {
+            "type": "string",
+            "title": "Docs",
+            "description": "Path to the interactive API documentation."
+          },
+          "health": {
+            "type": "string",
+            "title": "Health",
+            "description": "Path to the health endpoint, which reports the full build block plus read-path status."
+          },
+          "version_status": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "unavailable"
+            ],
+            "title": "Version Status",
+            "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.",
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "name",
+          "docs",
+          "health",
+          "version_status"
+        ],
+        "title": "RootResponse",
+        "description": "Payload of ``GET /`` \u2014 what this API is, and which build is serving it.\n\nTHE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was\na flat ``dict[str, str]`` whose version slot held the literal ``\"unknown\"``\nwhen metadata could not be read: a string in a version field, indistinguish-\nable to a client from a release actually called that, and exactly the defect\n#1380 was filed to remove \u2014 just at the endpoint nobody re-read. A typed\nresponse makes the absence a declared state instead of a word.\n\n``openapi.json``'s ``info.version`` remains the one place a sentinel is\nunavoidable; see the comment at that call in ``main.py``."
+      },
       "SSEHealthResponse": {
         "properties": {
           "status": {
@@ -10365,6 +13092,13 @@
             "type": "integer",
             "title": "Unpriced Observation Count",
             "default": 0
+          },
+          "unmeasured_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unmeasured Fields"
           },
           "is_finalized": {
             "type": "boolean",
@@ -10558,7 +13292,7 @@
             ],
             "title": "Agent Model"
           },
-          "agent_model_display": {
+          "requested_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -10567,7 +13301,7 @@
                 "type": "null"
               }
             ],
-            "title": "Agent Model Display"
+            "title": "Requested Model"
           },
           "repos": {
             "items": {
@@ -10676,6 +13410,28 @@
             "type": "object",
             "title": "Cost By Model"
           },
+          "cache_read_rate_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Rate Display"
+          },
+          "cache_write_rate_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Rate Display"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/OperationInfo"
@@ -10736,6 +13492,12 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Metadata"
+          },
+          "agent_model_display": {
+            "type": "string",
+            "title": "Agent Model Display",
+            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -10746,7 +13508,9 @@
           "milestone_id",
           "agent_provider",
           "agent_model",
-          "status"
+          "requested_model",
+          "status",
+          "agent_model_display"
         ],
         "title": "SessionResponse",
         "description": "Detailed session response.\n\nDisplay fields (``*_display``) are produced server-side so all clients\nshare identical human-readable output. Raw fields remain for programmatic\nconsumers.\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
@@ -10860,7 +13624,7 @@
             ],
             "title": "Agent Model"
           },
-          "agent_model_display": {
+          "requested_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -10869,7 +13633,7 @@
                 "type": "null"
               }
             ],
-            "title": "Agent Model Display"
+            "title": "Requested Model"
           },
           "repos": {
             "items": {
@@ -10972,6 +13736,12 @@
               }
             ],
             "title": "Completed At"
+          },
+          "agent_model_display": {
+            "type": "string",
+            "title": "Agent Model Display",
+            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -10980,7 +13750,9 @@
           "workflow_id",
           "phase_id",
           "status",
-          "agent_provider"
+          "agent_provider",
+          "requested_model",
+          "agent_model_display"
         ],
         "title": "SessionSummaryResponse",
         "description": "Summary of an agent session.\n\nDisplay fields (``*_display``) are produced server-side so all clients\n(dashboard, CLI, future UIs) share identical human-readable output. Raw\nfields remain for programmatic consumers; both are always present.\n\nTimestamps stay ISO 8601 UTC. Locale and relative-time formatting is the\nclient's job (it knows the viewer's time zone and when the response is\nactually rendered).\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
@@ -11028,6 +13800,36 @@
         ],
         "title": "SessionTokenMetrics",
         "description": "Token usage metrics for a session."
+      },
+      "SetMaintenanceModeRequest": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "True to refuse new executions, false to resume admitting."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Reason",
+            "description": "Why admission is paused; echoed back to every refused caller.",
+            "default": ""
+          },
+          "actor": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Actor",
+            "description": "Who is pausing. Free text - the deploy script sends its own name.",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "title": "SetMaintenanceModeRequest",
+        "description": "Set or clear maintenance mode (#1387).\n\nThe response is not sent until the state is durably persisted, so a caller\nthat has seen a 200 knows no further execution can be admitted."
       },
       "SkillDetailResponse": {
         "properties": {
@@ -11253,6 +14055,197 @@
         ],
         "title": "StateResponse",
         "description": "Response with execution state."
+      },
+      "Status": {
+        "type": "string",
+        "enum": [
+          "open",
+          "in_progress",
+          "resolved",
+          "closed",
+          "wont_fix"
+        ],
+        "title": "Status",
+        "description": "Feedback ticket status."
+      },
+      "StatusCount": {
+        "properties": {
+          "open": {
+            "type": "integer",
+            "title": "Open",
+            "default": 0
+          },
+          "in_progress": {
+            "type": "integer",
+            "title": "In Progress",
+            "default": 0
+          },
+          "resolved": {
+            "type": "integer",
+            "title": "Resolved",
+            "default": 0
+          },
+          "closed": {
+            "type": "integer",
+            "title": "Closed",
+            "default": 0
+          },
+          "wont_fix": {
+            "type": "integer",
+            "title": "Wont Fix",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "StatusCount",
+        "description": "Count of items by status."
+      },
+      "SubjectKind": {
+        "type": "string",
+        "enum": [
+          "execution",
+          "session",
+          "workflow",
+          "artifact",
+          "trigger"
+        ],
+        "title": "SubjectKind",
+        "description": "The kind of domain object a page was about when feedback was left.\n\nOne pair of columns (kind + id) rather than one column per entity: the\nhost app decides what its pages are about, and a new page type needs no\nmigration, no filter and no branch here."
+      },
+      "SubscriptionHealth": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "degraded",
+              "stalled",
+              "catching_up",
+              "unknown"
+            ],
+            "title": "Status",
+            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed."
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running",
+            "description": "Whether the subscription coordinator is running. Null when the probe failed and could not ask."
+          },
+          "projection_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Count",
+            "description": "How many projections the coordinator is driving."
+          },
+          "realtime_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realtime Enabled",
+            "description": "Whether a realtime (SSE) projection is attached."
+          },
+          "is_catching_up": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Catching Up",
+            "description": "True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable."
+          },
+          "is_stalled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Stalled",
+            "description": "True when a projection is behind the head and its checkpoint has stopped moving. Does NOT resolve on its own. Null when lag is unmeasurable."
+          },
+          "lag": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag",
+            "description": "Distance of the furthest-behind projection from the store head, in lag_unit. 0 means at the head; null means not measurable."
+          },
+          "lag_unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "events"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Unit",
+            "description": "Unit of lag: event-store global-nonce positions, not seconds."
+          },
+          "head_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Position",
+            "description": "Global nonce of the newest event in the store."
+          },
+          "lagging_projections": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ProjectionLag"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lagging Projections",
+            "description": "Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "SubscriptionHealth",
+        "description": "The read-path block of ``GET /health``: is the subscription up, and is it behind.\n\nFLAT, not nested, because that is the wire shape `syn health` and the deploy\nrunbook already read. The fields from ``running`` down are\n``CoordinatorSubscriptionService.get_status()``; the ones from\n``is_catching_up`` down are ``ReadModelLag``, spread into the same object by\n``lifecycle._describe_subscription_health``.\n\nEVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact\nrather than a default: ``lag is None`` means the coordinator is not up yet,\nso there is nothing whose progress could be measured \u2014 which is not the same\nas \"not behind\", and must not serialize as ``lag: 0``. When the probe itself\nfails, ``status`` is \"unknown\" and nothing else is known at all.\n\n``ReadModelLag``'s fields are restated here because the block is flat on the\nwire and a generated client has to be able to see them. That restatement is\nthe one place this model can drift from its producer, so\n``test_health_contract.py`` asserts the two field sets still match."
       },
       "SystemActionResponse": {
         "properties": {
@@ -12243,6 +15236,43 @@
         "title": "TriggerSummary",
         "description": "Summary of a trigger rule for list views."
       },
+      "TypeCount": {
+        "properties": {
+          "bug": {
+            "type": "integer",
+            "title": "Bug",
+            "default": 0
+          },
+          "feature": {
+            "type": "integer",
+            "title": "Feature",
+            "default": 0
+          },
+          "ui_ux": {
+            "type": "integer",
+            "title": "Ui Ux",
+            "default": 0
+          },
+          "performance": {
+            "type": "integer",
+            "title": "Performance",
+            "default": 0
+          },
+          "question": {
+            "type": "integer",
+            "title": "Question",
+            "default": 0
+          },
+          "other": {
+            "type": "integer",
+            "title": "Other",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "TypeCount",
+        "description": "Count of items by type."
+      },
       "UpdateArtifactRequest": {
         "properties": {
           "title": {
@@ -12828,8 +15858,7 @@
           },
           "top_models": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ModelCostEntry"
             },
             "type": "array",
             "title": "Top Models"
@@ -12881,7 +15910,8 @@
           "estimated_cost_usd": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -12937,11 +15967,27 @@
       "description": "Query execution records and details"
     },
     {
+      "name": "features",
+      "description": ""
+    },
+    {
+      "name": "feedback",
+      "description": ""
+    },
+    {
       "name": "github",
       "description": ""
     },
     {
       "name": "insights",
+      "description": ""
+    },
+    {
+      "name": "maintenance",
+      "description": ""
+    },
+    {
+      "name": "media",
       "description": ""
     },
     {
@@ -12970,6 +16016,10 @@
     },
     {
       "name": "sse",
+      "description": ""
+    },
+    {
+      "name": "stats",
       "description": ""
     },
     {

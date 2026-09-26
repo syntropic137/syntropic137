@@ -55,7 +55,7 @@ phases:
     prompt_file: phases/synthesis.md
     agent:
       provider: codex
-      model: gpt-5.6-sol
+      model: gpt-sol
       sandbox: read-only
 ```
 
@@ -129,7 +129,7 @@ A **session** is an agent's working period within an execution. It captures:
 
 Sessions are the primary unit of observability. When you debug a failed execution or analyze costs, you're looking at session data.
 
-Codex sessions are thinner than claude sessions. Tokens and the tool timeline are captured for both, but codex does not report its model on the wire, so a codex phase that does not name a concrete model id in its `agent` block is recorded unpriced. Vendor cost is always null for codex.
+Codex sessions are thinner than claude sessions. Tokens and the tool timeline are captured for both, but codex does not report its model on the wire, so the platform prices a codex phase from the model it asked codex to run: the phase's `model`, or the `gpt-sol` default (priced as `gpt-6-sol`). Vendor cost is always null for codex.
 
 ## Artifacts
 

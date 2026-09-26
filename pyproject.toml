@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.29.0"
+version = "0.30.0"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -37,6 +37,8 @@ dev = [
     "asyncpg>=0.31.0",
     "testcontainers>=4.13.3",
     "pyright>=1.1.408",
+    # Keep feedback available to API codegen and tests; production installs opt in.
+    "ui-feedback-api",
 ]
 
 [build-system]
@@ -73,6 +75,9 @@ event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/pyt
 agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging", editable = true }
 agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation", editable = true }
 agentic-events = { path = "lib/agentic-primitives/lib/python/agentic_events", editable = true }
+# Vendored in-tree module (ADR-016), not a submodule. Editable so the syn-api
+# integration and the module move together in one commit.
+ui-feedback-api = { path = "lib/ui-feedback/backend/ui-feedback-api", editable = true }
 
 [tool.ruff]
 target-version = "py312"

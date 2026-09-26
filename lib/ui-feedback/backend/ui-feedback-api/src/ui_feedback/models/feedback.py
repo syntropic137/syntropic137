@@ -37,6 +37,21 @@ class Priority(str, Enum):
     CRITICAL = "critical"
 
 
+class SubjectKind(str, Enum):
+    """The kind of domain object a page was about when feedback was left.
+
+    One pair of columns (kind + id) rather than one column per entity: the
+    host app decides what its pages are about, and a new page type needs no
+    migration, no filter and no branch here.
+    """
+
+    EXECUTION = "execution"
+    SESSION = "session"
+    WORKFLOW = "workflow"
+    ARTIFACT = "artifact"
+    TRIGGER = "trigger"
+
+
 class FeedbackCreate(BaseModel):
     """Request model for creating feedback."""
 
@@ -50,6 +65,14 @@ class FeedbackCreate(BaseModel):
     css_selector: str | None = Field(None, description="CSS selector of clicked element")
     xpath: str | None = Field(None, description="XPath of clicked element")
     component_name: str | None = Field(None, description="React component name")
+
+    # Subject context - what the page was ABOUT, if anything
+    subject_kind: SubjectKind | None = Field(
+        None, description="Kind of domain object the page was about (execution, session, ...)"
+    )
+    subject_id: str | None = Field(
+        None, max_length=200, description="Id of the domain object the page was about"
+    )
 
     # Feedback content
     feedback_type: FeedbackType = Field(default=FeedbackType.BUG, description="Type of feedback")
@@ -95,6 +118,9 @@ class FeedbackItem(BaseModel):
     css_selector: str | None = None
     xpath: str | None = None
     component_name: str | None = None
+
+    subject_kind: SubjectKind | None = None
+    subject_id: str | None = None
 
     feedback_type: FeedbackType
     comment: str | None = None

@@ -12,7 +12,34 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    computed_field,
+    model_serializer,
+)
+
+# Runtime imports, not TYPE_CHECKING ones: pydantic resolves these annotations
+# at class-construction time.
+#
+# FailureClassification: the whole point of reusing the DOMAIN enum here is that
+# the API and the CLI cannot grow a second spelling of the same vocabulary
+# (#1357). Imported from the context's public surface, not its internals
+# (ADR-062).
+#
+# The other three are republished by /health as its own fields, referenced
+# rather than restated - the probe that produces a shape is the only place
+# allowed to define it (#1380).
+from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
+from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
+from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_shared.agents import AliasResolutionBasis  # noqa: TC001
+from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
+from syn_shared.observed_model import format_observed_model
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -407,6 +434,22 @@ class PhaseDefinitionResponse(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
+    """The model as DEFINED: often a platform alias (``opus``, ``gpt-sol``)."""
+    resolved_model: ResolvedModelId | None = None
+    """The concrete id this phase will run as: the alias target, or the provider
+    default when ``model`` is unset or belongs to the other provider (the rule
+    execution applies). ``None`` when ``model`` is already concrete or unknown.
+    A definition-time expectation, not what a run used: runs report their
+    observed model (ADR-067 D9)."""
+    resolution_basis: AliasResolutionBasis | None = None
+    """``translated``: the platform rewrites the alias itself (codex), so the
+    target is what runs. ``expected``: the CLI resolves it (claude), so the
+    target is what the pinned CLI is expected to pick. ``None`` with no alias."""
+    model_display: str | None = None
+    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6-sol``, or
+    ``default → gpt-sol → gpt-6-sol`` when execution substitutes the
+    provider default; the bare model when there is nothing to resolve. Render
+    verbatim."""
     provider: str | None = None
     # Stored since #1012, readable since #1013. `allow_delegation` is
     # security-relevant -- it stages both agent auths -- so a caller must be
@@ -466,6 +509,48 @@ class ExecutionSummary(BaseModel):
     """
     tool_call_count: int = 0
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -502,8 +587,60 @@ class ExecutionDetail(BaseModel):
     """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    task: str | None = None
+    """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
+    with, or ``None`` if the workflow takes none (#1307)."""
+    inputs: dict[str, str] = Field(default_factory=dict)
+    """The full input set the run was dispatched with, including ``task`` and
+    the ``repos`` string the other fields are derived from.
+
+    Enough to re-dispatch the run: a caller retrying one that died on the
+    platform posts these back rather than reconstructing them from its own
+    notes (#1307)."""
 
 
 class SessionSummary(BaseModel):
@@ -542,11 +679,23 @@ class ArtifactSummary(BaseModel):
 
     id: str
     workflow_id: str | None = None
+    #: Which run produced it (#1306). The row has always carried it; the list
+    #: did not report it, so a client that asked for one execution's artifacts
+    #: could not tell from the answer whether it had got them. Reported as well
+    #: as filtered on, because a filter a client cannot verify is what the
+    #: silent drop looked like from outside.
+    execution_id: str | None = None
     phase_id: str | None = None
     artifact_type: str = ""
     title: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+    #: Who produced it (#1284). Same two facts as on ArtifactDetail, carried on
+    #: the row because the list is where "which models ran this execution's
+    #: phases" is asked. None on either means not reported, never "as
+    #: configured".
+    agent_provider: str | None = None
+    agent_model: ObservedModelId | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -826,6 +975,135 @@ class BranchObservationInfo(BaseModel):
     from "this phase is holding work no remote has"."""
 
 
+class PhaseActivityInfo(BaseModel):
+    """What a phase was DOING when it ended, and against what budget (#1262).
+
+    THE ANSWER TO "was it busy or was it stuck", for the one failure that
+    cannot answer it itself. A phase killed on its deadline exits 124, and so
+    does a phase that hung; the two need opposite responses - dispatch a
+    continuation with a bigger budget, or do not pay for that run a second
+    time - and until this model existed nothing in the execution record
+    separated them. An operator had to open the transcript, and four runs in
+    one day were triaged without one.
+
+    Read as a whole, the fields are the triage:
+
+    * many operations and a push moments before the end - it was working, and
+      the budget was too short;
+    * a handful of operations and no push for most of an hour - it stalled,
+      and a bigger budget buys another stalled hour;
+    * ``elapsed_seconds`` at or past ``timeout_seconds`` - it reached its cap,
+      as against a 124 reported well inside the budget, which is some other
+      death wearing the same exit code.
+
+    Every field is a READING, never a verdict. Nothing here says "stalled":
+    that word is a judgement about intent, and these are four measurements
+    that let a reader make it.
+
+    AND "WE COULD NOT SEE" IS A THIRD ANSWER, not a quiet fourth measurement.
+    The activity readings come from Lane 2, which fails soft, and a lookup that
+    raised or found no database once produced zero operations and no push -
+    which is precisely the shape of a stall. The feature built to stop an
+    operator being told "do not pay for this again" on no evidence was
+    manufacturing exactly that signal out of its own outage.
+    ``telemetry_available`` says whether the timeline was read at all, and the
+    readings taken from it are null when it was not.
+    """
+
+    telemetry_available: bool = False
+    """Whether this phase's Lane 2 timeline could be read at all.
+
+    False means NOTHING BELOW THAT COMES FROM THE TIMELINE WAS MEASURED - the
+    query raised, no database was reachable, or the phase never got a session
+    to record against. It is NOT a statement about the phase, which may have
+    been busy or stalled; it is a statement about this record.
+
+    It is a field of its own rather than being left to be inferred from a null
+    ``operations_count`` because ``last_push_at`` and
+    ``seconds_since_last_push`` cannot carry the distinction themselves: null
+    already means "no push was observed" there, and that is a real, and the
+    most expensive, reading. One flag answers for all three.
+
+    ``elapsed_seconds`` and ``timeout_seconds`` are unaffected - they come from
+    the execution record, not from telemetry - so a phase whose timeline is
+    unreadable can still be read against its cap. It is busy-versus-stalled
+    that is withheld, and only that.
+
+    It defaults to False so that an ``activity`` nobody summarised claims
+    nothing, rather than claiming an idle phase.
+    """
+
+    operations_count: int | None = None
+    """Operations this phase performed, as ``phases[].operations`` records them.
+
+    ``None`` when ``telemetry_available`` is False, and ``0`` only when the
+    timeline was read and held nothing. Both are answers and they are different
+    answers; the sentinel that would merge them is not worth inventing, because
+    zero is already a real one - a phase whose process never got anywhere did
+    make no calls, and that says the failure is upstream of the agent.
+
+    NOT ``len(operations)``, and the difference is not cosmetic: a tool call is
+    two rows there, a start and a completion, so the list's length is about
+    twice the work that happened, and was counted that way until #1061. This
+    counts the CALLS, folding both rows of one call together by
+    ``ToolOperation.call_identity``.
+
+    Populated on a phase that was killed, which is the only reason it is worth
+    serving: it is read per request from the Lane 2 timeline, where every row
+    was written as its line arrived, so a phase that made 300 calls and then
+    died reports 300. A field written only at a clean teardown would report
+    nothing for exactly the runs this exists to triage.
+    """
+
+    last_push_at: datetime | None = None
+    """When this phase last pushed, as the timeline observed it.
+
+    ``None`` means NO PUSH WAS OBSERVED - including a phase whose work was
+    never pushed at all, which is the strongest thing this model can say about
+    lost work. It is not "pushed at time zero", and it is not a claim the push
+    reached the remote: the observation is written when the push is initiated
+    (the pre-push hook, ADR-043), so this is when the phase last TRIED.
+
+    READ IT WITH ``telemetry_available``. The null above is an observation, and
+    it is only an observation when something observed: with the flag False
+    nothing looked, and no claim about pushing is being made here at all.
+
+    Covers the legacy ``git_push_started``/``git_push_completed`` spellings as
+    well as today's ``git_push``. A rule that knew one of the three would
+    answer "never pushed" for a session recorded under another, which is the
+    expensive direction to be wrong in - it reads as a stall.
+    """
+
+    seconds_since_last_push: float | None = None
+    """Seconds from ``last_push_at`` to the end of the phase.
+
+    The stall signal stated as the number an operator actually compares. "The
+    end" is the same instant ``elapsed_seconds`` measures to: the completion
+    for a phase that finished, and the moment of the read for one still
+    running, so a live phase's silence grows while a dead one's is frozen.
+
+    ``None`` when nothing was pushed - ``elapsed_seconds`` is then the whole
+    answer, because the silence is the entire phase - or when the phase has no
+    end to measure to, or when ``telemetry_available`` is False and there was
+    no timeline to find a push in.
+    """
+
+    elapsed_seconds: float | None = None
+    """How long the phase ran. The same measurement ``duration_seconds``
+    reports on the phase itself, restated beside the budget it has to be read
+    against, and taken from that one value rather than computed again.
+
+    ``None`` is genuinely unknown, never zero.
+    """
+
+    timeout_seconds: int | None = None
+    """The wall-clock budget the phase was given, from its workflow definition.
+
+    ``None`` means the run stated no phase definitions and nothing knows the
+    budget - not that there was none, and not zero.
+    """
+
+
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""
 
@@ -839,6 +1117,16 @@ class PhaseExecution(BaseModel):
     # already declares the field. This intermediate model was the one hop that
     # dropped it, so every failed phase surfaced error_message: null.
     error_message: str | None = None
+    deliverable_recovered: bool = False
+    """True when this phase completed on a deliverable recovered from its
+    transcript rather than the file it declared (#1195, #1300).
+
+    A salvaged phase COMPLETES - discarding a finished run over a missing
+    report is the cost #1300 measured - so `status` alone cannot distinguish
+    it, and this is the only field that can. It is here, on the record the API
+    serves, and not only on `PhaseCompletedEvent`, because a fact that reaches
+    no read model reaches no reader.
+    """
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -852,8 +1140,14 @@ class PhaseExecution(BaseModel):
     duration_seconds: float | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    model: str | None = None
-    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
+    model: ObservedModelId | None = None
+    """The model the harness REPORTED for this phase, or None (ADR-067 D9).
+
+    Never an alias: what the phase asked for is ``requested_model``.
+    """
+    requested_model: str | None = None
+    """The model the phase REQUESTED (often an alias such as ``opus``), or None."""
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.
@@ -871,6 +1165,16 @@ class PhaseExecution(BaseModel):
     none. Defaulting the first to the second reports a loss that did not happen
     (#1176).
     """
+    exit_code: int | None = None
+    """What this phase's process exited with, or null if nothing observed one.
+
+    The end of the chain the status travels: event -> projection record ->
+    read model -> here (#1319). `null` is "nothing observed a status" - which
+    includes every phase that did not fail - and is not the claim that it
+    exited 0. 124 means the phase reached its time budget and -11 that it was
+    killed, which is the distinction a client needs to decide between
+    continuing the work and retrying it.
+    """
     observed_branches: list[BranchObservationInfo] | None = None
     """Where this failed phase's branches stood when it died (#1200).
 
@@ -879,6 +1183,25 @@ class PhaseExecution(BaseModel):
     verifiably unchanged when in truth nothing looked.
     """
     operations: list[ToolOperation] = Field(default_factory=list)
+    activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
+    """What this phase was doing when it ended, summarised from `operations`
+    and the phase's budget (#1262).
+
+    Summarised HERE, one hop before the response, rather than at the response
+    boundary: the count has to fold a call's two rows together by
+    `ToolOperation.call_identity`, and that rule lives on the projection's
+    dataclass, which is the shape `_map_phase_detail` still holds and this
+    model no longer does.
+    """
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``model``."""
+        return format_observed_model(self.model, self.requested_model)
 
 
 class ExecutionDetailFull(BaseModel):
@@ -919,8 +1242,60 @@ class ExecutionDetailFull(BaseModel):
     started_at: datetime | str | None = None
     completed_at: datetime | str | None = None
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    task: str | None = None
+    """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
+    with, or ``None`` if the workflow takes none (#1307)."""
+    inputs: dict[str, str] = Field(default_factory=dict)
+    """The full input set the run was dispatched with, including ``task`` and
+    the ``repos`` string the other fields are derived from.
+
+    Enough to re-dispatch the run: a caller retrying one that died on the
+    platform posts these back rather than reconstructing them from its own
+    notes (#1307)."""
 
 
 class ControlResult(BaseModel):
@@ -968,13 +1343,25 @@ class SessionDetail(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
-    agent_model: str | None = None
-    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
+    agent_model: ObservedModelId | None = None
+    """The model the harness REPORTED doing most of this session's work, or None."""
+    requested_model: str | None = None
+    """The model the session REQUESTED (often an alias), or None (ADR-067 D9)."""
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     operations: list[ToolOperation] = Field(default_factory=list)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     duration_seconds: float | None = None
     error_message: str | None = None
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def agent_model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``agent_model``."""
+        return format_observed_model(self.agent_model, self.requested_model)
 
 
 # ---------------------------------------------------------------------------
@@ -996,6 +1383,20 @@ class ArtifactDetail(BaseModel):
     content_hash: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+    agent_provider: str | None = None
+    """Harness that ran the phase which produced this artifact (issue #1284).
+
+    None means no phase produced it, or it predates ArtifactCreated v6.
+    """
+    agent_model: ObservedModelId | None = None
+    """Model that harness ANNOUNCED while running, never the one requested.
+
+    This is the field a cross-model review reads to prove a DIFFERENT model
+    checked the work (#1284). None means the harness reported no model - true of
+    every codex phase today - and a client MUST render it as "not reported"
+    rather than falling back to the phase's configured model, which would look
+    like evidence and be none.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -1021,14 +1422,21 @@ class DashboardMetrics(BaseModel):
 
 
 class SessionCostData(BaseModel):
-    """Cost data for a single session."""
+    """Cost data for a single session.
+
+    Every field `SessionCostResponse` declares must appear here, or the
+    response advertises it and always serves its default (#1041). The two
+    field sets are compared in `test_dto_carries_every_response_field.py`.
+    """
 
     session_id: str
     execution_id: str | None = None
     workflow_id: str | None = None
     phase_id: str | None = None
+    workspace_id: str | None = None
     total_cost_usd: Decimal = Decimal("0")
     token_cost_usd: Decimal = Decimal("0")
+    compute_cost_usd: Decimal = Decimal("0")
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
@@ -1043,10 +1451,24 @@ class SessionCostData(BaseModel):
     tool_calls: int = 0
     turns: int = 0
     duration_ms: int = 0
-    cost_by_model: dict = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
+    tokens_by_tool: dict[str, int] = Field(default_factory=dict)
+    cost_by_tool_tokens: dict[str, Decimal] = Field(default_factory=dict)
     unpriced_observation_count: int = 0
     """Observations whose model had no rate; non-zero means cost is INCOMPLETE."""
+    unmeasured_fields: list[str] = Field(default_factory=list)
+    """Names of fields ON THIS MODEL whose value was never measured.
+
+    A field listed here holds its default, not a reading. Today that is always
+    ``compute_cost_usd``, ``tokens_by_tool`` and ``cost_by_tool_tokens``: no
+    read path can derive them from ``agent_events``.
+
+    It is a list of names rather than nulls on the fields themselves because a
+    null is as falsy as a zero, and a client writing ``x ?? 0`` erases the
+    distinction exactly the way #1041 erased these fields for a month. A
+    non-empty list is truthy and has to be read.
+    """
     is_finalized: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -1086,7 +1508,7 @@ class ExecutionCostData(BaseModel):
     A phase absent from ``cost_by_phase`` but present here cost an unknown
     amount; a phase in neither genuinely had no spend (#890).
     """
-    cost_by_model: dict = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0
@@ -1099,6 +1521,14 @@ class ExecutionCostData(BaseModel):
     completed_at: datetime | None = None
 
 
+class ModelCostEntry(BaseModel):
+    """One model's share of a cost total."""
+
+    model: CostModelKey
+    """A reported model id, or ``unattributed-model``. Never an alias."""
+    cost_usd: Decimal = Decimal("0")
+
+
 class CostSummary(BaseModel):
     """Overall cost summary across all executions."""
 
@@ -1108,7 +1538,7 @@ class CostSummary(BaseModel):
     total_tokens: int = 0
     """Sum of all four token components across executions (issue #873)."""
     total_tool_calls: int = 0
-    top_models: list[dict] = Field(default_factory=list)
+    top_models: list[ModelCostEntry] = Field(default_factory=list)
     top_sessions: list[dict] = Field(default_factory=list)
 
 
@@ -1177,7 +1607,10 @@ class ConversationMeta(BaseModel):
 
     session_id: str
     event_count: int = 0
-    model: str | None = None
+    model: ObservedModelId | None = None
+    """The model the harness REPORTED for this conversation, or None."""
+    requested_model: str | None = None
+    """The model the phase REQUESTED (often an alias), or None (ADR-067 D9)."""
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     tool_counts: dict = Field(default_factory=dict)
@@ -1188,6 +1621,15 @@ class ConversationMeta(BaseModel):
     workflow_id: str | None = None
     phase_id: str | None = None
     success: bool | None = None
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``model``."""
+        return format_observed_model(self.model, self.requested_model)
 
 
 # ---------------------------------------------------------------------------
@@ -1214,6 +1656,257 @@ class RealtimeHealth(BaseModel):
 
     active_executions: int = 0
     active_connections: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Build identity (#1380)
+# ---------------------------------------------------------------------------
+
+
+class _NamesTheRunningRelease(BaseModel):
+    """A response that reports which release of syn-api answered it.
+
+    MORE THAN ONE ENDPOINT HAS TO SAY THIS, so the pair that says it lives here
+    once. ``/health`` reports it inside ``build``; ``/`` reports it flat beside
+    the API's name. They are two views of one fact, and #1380 is what happens
+    when a fact about the running release gets a second home: ``main.py``'s
+    ``"0.5.1"`` and the installed package disagreed for twenty releases and
+    nobody noticed, because nothing required them to be derived from one place.
+
+    Subclass this to gain the pair; do not restate it. What a subclass adds is
+    whatever ELSE that endpoint reports — the image stamps, the links — never a
+    second opinion on the release or on whether it is readable.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: str | None = Field(
+        description="Installed release of the syn-api distribution, as reported by "
+        "importlib.metadata. This is the same string pyproject.toml ships, so it "
+        "identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). "
+        "Null when the distribution's metadata cannot be read, because there is no "
+        "honest release to report then and a plausible one would mislead; read "
+        "version_status to tell that case apart without inspecting the null.",
+    )
+
+    @computed_field(
+        description="Whether the running release could be read at all. 'installed' means "
+        "version names the distribution this process was installed from; 'unavailable' "
+        "means the distribution's metadata could not be read, version is null, and "
+        "nothing has been invented to fill it.",
+    )
+    @property
+    def version_status(self) -> Literal["installed", "unavailable"]:
+        """Derived, never passed in, so it cannot contradict ``version``.
+
+        The pair would otherwise be a second place to get the same fact wrong —
+        ``version: null`` beside ``version_status: "installed"`` is exactly the
+        kind of self-disagreement #1380 is about. It exists as a field anyway
+        because a caller should not have to infer meaning from a null: on
+        ``BuildInfo`` the neighbouring nulls mean "the image did not stamp
+        itself", which is a different fact, and only a named state says which
+        absence a reader is looking at.
+        """
+        return "unavailable" if self.version is None else "installed"
+
+
+class BuildInfo(_NamesTheRunningRelease):
+    """Which build is answering. Populated by ``syn_api.build_info``.
+
+    Reported in three places from that one source: this block on ``GET /health``,
+    the flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All
+    three used to be, or were derived from, a hardcoded literal that had drifted
+    twenty releases behind the installed package.
+
+    The release and its status come from ``_NamesTheRunningRelease``. What this
+    model adds is the two build-time stamps, which only an image can supply and
+    only ``/health`` reports.
+    """
+
+    image_tag: str | None = Field(
+        default=None,
+        description="Container image tag this process was built from, stamped at image "
+        "build time. Null when the build did not stamp one — which is a different "
+        "fact from an unknown tag, and is reported as such.",
+    )
+    commit: str | None = Field(
+        default=None,
+        description="Git commit the image was built from, stamped at image build time. "
+        "Null when the build did not stamp one.",
+    )
+
+
+class RootResponse(_NamesTheRunningRelease):
+    """Payload of ``GET /`` — what this API is, and which build is serving it.
+
+    THE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was
+    a flat ``dict[str, str]`` whose version slot held the literal ``"unknown"``
+    when metadata could not be read: a string in a version field, indistinguish-
+    able to a client from a release actually called that, and exactly the defect
+    #1380 was filed to remove — just at the endpoint nobody re-read. A typed
+    response makes the absence a declared state instead of a word.
+
+    ``openapi.json``'s ``info.version`` remains the one place a sentinel is
+    unavoidable; see the comment at that call in ``main.py``.
+    """
+
+    name: str = Field(description="Human-readable name of this API.")
+    docs: str = Field(description="Path to the interactive API documentation.")
+    health: str = Field(
+        description="Path to the health endpoint, which reports the full "
+        "build block plus read-path status."
+    )
+
+
+class _OmitsAbsentFields(BaseModel):
+    """A response model whose ``None`` fields are omitted rather than sent as null.
+
+    /health's optional blocks have always been ABSENT when they could not be
+    filled in, and callers read them that way: `syn health` branches on whether
+    ``subscription`` is there at all, and "no lag measurement" has to stay
+    distinguishable from ``lag: 0``, which is a measurement saying "at the head".
+
+    A model-level serializer rather than ``response_model_exclude_none``,
+    because that flag is recursive and would also delete ``build.image_tag`` and
+    ``build.commit`` — whose ``null`` is a deliberate answer meaning "this image
+    did not stamp itself", not an absence. Omission is correct for the models
+    that inherit this and wrong one level down, so it is spelled where it is
+    correct.
+    """
+
+    @model_serializer(mode="wrap")
+    def _omit_absent(self, handler: SerializerFunctionWrapHandler):
+        """Deliberately unannotated. Pydantic builds the SERIALIZATION schema from
+        a model serializer's return type, so writing ``-> dict[str, JsonValue]``
+        here replaces every declared property in ``openapi.json`` with
+        ``additionalProperties: {$ref: JsonValue}`` — re-opening the contract
+        this change exists to close, by the same mechanism and less visibly.
+        Left off, pydantic keeps the model's own schema. ``test_health_contract``
+        asserts the schema stays closed and named, which is what would catch an
+        annotation being helpfully added back.
+        """
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
+#: Every value ``subscription.status`` can take. The first four are
+#: ``read_path_health._ReadPathStatus``, which owns that vocabulary; "unknown"
+#: is added here because only /health can produce it — it is what the probe
+#: reports when it failed and has no verdict to publish.
+#: ``test_health_contract.py`` fails if those four ever stop being a subset.
+SubscriptionHealthStatus = Literal["healthy", "degraded", "stalled", "catching_up", "unknown"]
+
+
+class SubscriptionHealth(_OmitsAbsentFields):
+    """The read-path block of ``GET /health``: is the subscription up, and is it behind.
+
+    FLAT, not nested, because that is the wire shape `syn health` and the deploy
+    runbook already read. The fields from ``running`` down are
+    ``CoordinatorSubscriptionService.get_status()``; the ones from
+    ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
+    ``lifecycle._describe_subscription_health``.
+
+    EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
+    rather than a default: ``lag is None`` means the coordinator is not up yet,
+    so there is nothing whose progress could be measured — which is not the same
+    as "not behind", and must not serialize as ``lag: 0``. When the probe itself
+    fails, ``status`` is "unknown" and nothing else is known at all.
+
+    ``ReadModelLag``'s fields are restated here because the block is flat on the
+    wire and a generated client has to be able to see them. That restatement is
+    the one place this model can drift from its producer, so
+    ``test_health_contract.py`` asserts the two field sets still match.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: SubscriptionHealthStatus = Field(
+        description="Verdict on the read path: 'healthy', 'catching_up' during a replay "
+        "that ends by itself, 'stalled' for a projection that does not, 'degraded' "
+        "for a coordinator that is not running, or 'unknown' when the probe failed.",
+    )
+    running: bool | None = Field(
+        default=None,
+        description="Whether the subscription coordinator is running. Null when the probe "
+        "failed and could not ask.",
+    )
+    projection_count: int | None = Field(
+        default=None, description="How many projections the coordinator is driving."
+    )
+    realtime_enabled: bool | None = Field(
+        default=None, description="Whether a realtime (SSE) projection is attached."
+    )
+    is_catching_up: bool | None = Field(
+        default=None,
+        description="True while the coordinator is replaying history and some projection has "
+        "not reached the head. Reads may 404 for recently written aggregates. Ends "
+        "by itself. Null when the subscription is not up yet and lag is unmeasurable.",
+    )
+    is_stalled: bool | None = Field(
+        default=None,
+        description="True when a projection is behind the head and its checkpoint has stopped "
+        "moving. Does NOT resolve on its own. Null when lag is unmeasurable.",
+    )
+    lag: int | None = Field(
+        default=None,
+        description="Distance of the furthest-behind projection from the store head, in "
+        "lag_unit. 0 means at the head; null means not measurable.",
+    )
+    lag_unit: Literal["events"] | None = Field(
+        default=None, description="Unit of lag: event-store global-nonce positions, not seconds."
+    )
+    head_position: int | None = Field(
+        default=None, description="Global nonce of the newest event in the store."
+    )
+    lagging_projections: list[ProjectionLag] | None = Field(
+        default=None,
+        description="Every projection short of the head, furthest behind first. Empty when "
+        "all are at the head; null when lag is unmeasurable.",
+    )
+
+
+class HealthResponse(_OmitsAbsentFields):
+    """Payload of ``GET /health``.
+
+    EVERY FIELD IS DECLARED AND EXTRAS ARE FORBIDDEN. An earlier cut of #1380
+    typed only ``build`` and left ``extra="allow"`` for the probe blocks, which
+    put ``additionalProperties: true`` in ``openapi.json`` and an
+    ``[key: string]: unknown`` index signature in the generated CLI types: the
+    fields `syn health` actually reads were invisible to every generated
+    consumer, and a probe could change shape without the drift check noticing.
+    The probes own the shapes — ``CodexAuthStatus`` and ``ProjectionLag`` are
+    declared at their source and referenced, not copied — but the fact that
+    /health publishes them is this model's to state.
+
+    ABSENT OPTIONAL BLOCKS ARE OMITTED, not sent as null; see
+    ``_OmitsAbsentFields``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: str = Field(description="'healthy' while the process is alive and accepting writes.")
+    mode: str = Field(description="'full', or 'degraded' when some subsystem is impaired.")
+    build: BuildInfo = Field(description="Which build is answering (#1380).")
+    degraded_reasons: list[DegradedReason] | None = Field(
+        default=None,
+        description="Every way this instance is up but not fully serving. Omitted entirely "
+        "when there are none, which is how a reader tells 'nothing is wrong' from "
+        "'something is and it is not listed here'.",
+    )
+    subscription: SubscriptionHealth | None = Field(
+        default=None,
+        description="Read-path health. Omitted when no subscription service is wired up at "
+        "all, e.g. in offline mode.",
+    )
+    codex_auth: CodexAuthStatus | None = Field(
+        default=None,
+        description="Freshness of this instance's codex credential. Omitted when the probe "
+        "could not run — a credential hint must never be able to take /health down.",
+    )
+    warnings: list[str] | None = Field(
+        default=None,
+        description="Human-readable notes that need attention but do not degrade the "
+        "instance. Omitted when there are none.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1291,7 +1984,7 @@ class RepoCostResponse(BaseModel):
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     execution_count: int = 0
 
 
@@ -1424,7 +2117,7 @@ class SystemCostResponse(BaseModel):
     total_output_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     execution_count: int = 0
 
 
@@ -1600,7 +2293,7 @@ class GlobalCostResponse(BaseModel):
     total_cache_read_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     execution_count: int = 0
 
 
@@ -2038,3 +2731,87 @@ class SkillStorageStatsResponse(BaseModel):
         default=False,
         description="True if the backend returned a partial listing, so the counts are floors.",
     )
+
+
+class MaintenanceModeResponse(BaseModel):
+    """Whether new workflow executions are being admitted (#1387).
+
+    ``active`` is the gate: while it is true every admission path refuses and
+    the deploy script may swap containers knowing nothing new can start.
+    Executions already running are unaffected.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    active: bool = Field(
+        default=False,
+        description="True when new execution admission is refused.",
+    )
+    reason: str = Field(default="", description="Operator-supplied reason for the pause.")
+    since: datetime | None = Field(
+        default=None,
+        description="When admission was paused. Null while admission is open.",
+    )
+    actor: str = Field(default="", description="Who set the current state.")
+
+
+class SetMaintenanceModeRequest(BaseModel):
+    """Set or clear maintenance mode (#1387).
+
+    The response is not sent until the state is durably persisted, so a caller
+    that has seen a 200 knows no further execution can be admitted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    active: bool = Field(description="True to refuse new executions, false to resume admitting.")
+    reason: str = Field(
+        default="",
+        max_length=500,
+        description="Why admission is paused; echoed back to every refused caller.",
+    )
+    actor: str = Field(
+        default="",
+        max_length=200,
+        description="Who is pausing. Free text - the deploy script sends its own name.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Runtime feature flags (#105, ADR-016)
+# ---------------------------------------------------------------------------
+
+
+class FeaturesResponse(BaseModel):
+    """Which optional features this deployment has switched on."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ui_feedback: bool = Field(
+        default=False,
+        description=(
+            "In-app feedback widget and /feedback routes (SYN_UI_FEEDBACK_ENABLED). "
+            "When false the routes answer 404 and the dashboard never loads the widget."
+        ),
+    )
+
+
+class FeatureDisabledDetail(BaseModel):
+    """Why a flag-gated route refuses to run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    feature: str = Field(description="The feature flag that governs this route.")
+    reason: str = Field(description="Human-readable explanation.")
+    enable_with: str | None = Field(
+        default=None,
+        description="The setting that enables the feature, when one exists.",
+    )
+
+
+class FeatureDisabledResponse(BaseModel):
+    """Response from an installed route while its feature is disabled."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    detail: FeatureDisabledDetail

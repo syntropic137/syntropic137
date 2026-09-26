@@ -27,7 +27,7 @@ def _make_collector(
         execution_id="exec-1",
         phase_id="phase-1",
         workspace_id="ws-1",
-        agent_model="claude-haiku",
+        requested_model="claude-haiku",
     )
 
 
@@ -70,7 +70,10 @@ class TestObservabilityCollectorWithWriter:
         assert data["output_tokens"] == 50
         assert data["cache_creation_tokens"] == 10
         assert data["cache_read_tokens"] == 20
-        assert data["model"] == "claude-haiku"
+        # Nothing reported a model, so the row says unknown; the request is
+        # carried separately and never as `model` (ADR-067).
+        assert data["model"] is None
+        assert data["requested_model"] == "claude-haiku"
 
     @pytest.mark.anyio
     async def test_record_tool_started(self) -> None:
@@ -201,7 +204,8 @@ class TestObservabilityCollectorWithWriter:
         assert data["cache_read_tokens"] == 144509
         assert data["num_turns"] == 7
         assert data["duration_ms"] == 48000
-        assert data["model"] == "claude-haiku"
+        assert data["model"] is None
+        assert data["requested_model"] == "claude-haiku"
 
     @pytest.mark.anyio
     async def test_record_session_summary_noop_without_writer(self) -> None:
@@ -250,3 +254,122 @@ class TestObservabilityCollectorNullWriter:
         """has_writer reflects writer presence."""
         assert not _make_collector(writer=None).has_writer
         assert _make_collector(writer=AsyncMock()).has_writer
+
+
+@pytest.mark.unit
+class TestSawAgentActivity:
+    """The one witness that a phase's agent actually did something (#1303).
+
+    Retrying a busy upstream is only safe for a launch that never started, and
+    this flag is how that is known. Whether it is set decides whether a failed
+    phase is re-run, so each way of reaching it needs its own test - a path
+    that stops setting it would otherwise cost a duplicated phase, silently.
+
+    The list below is the point of the fact rather than an inventory of it. It
+    started as tool starts and completions alone, under the name
+    `saw_tool_use`, and every entry added since was a path an agent really took
+    and this collector really called "nothing happened": a hook-delivered tool
+    call, a subagent, a git commit scanned out of tool output.
+    """
+
+    def test_a_fresh_collector_has_seen_nothing(self) -> None:
+        assert not _make_collector(writer=AsyncMock()).saw_agent_activity
+
+    @pytest.mark.anyio
+    async def test_a_started_tool_is_activity(self) -> None:
+        collector = _make_collector(writer=AsyncMock())
+
+        await collector.record_tool_started("Bash", "t-1", "rm -rf build")
+
+        assert collector.saw_agent_activity
+
+    @pytest.mark.anyio
+    async def test_a_completed_tool_is_activity_even_with_no_start_behind_it(self) -> None:
+        """Codex can announce a `file_change` only on completion (#1064).
+
+        Counting starts alone would miss the tool op that already edited the
+        workspace, and the phase would be re-run over its own edits.
+        """
+        collector = _make_collector(writer=AsyncMock())
+
+        await collector.record_tool_completed("file_change", "t-1", success=True, output_preview="")
+
+        assert collector.saw_agent_activity
+
+    @pytest.mark.anyio
+    async def test_a_hook_event_is_activity(self) -> None:
+        """Claude reports some tool calls ONLY through the hook channel.
+
+        Those never reach `record_tool_started`, so while this method was the
+        one recorder that set nothing, a phase whose every tool call arrived
+        this way was indistinguishable from a phase that never started - and
+        was re-run over the edits, commits and pushes those calls had made.
+        """
+        collector = _make_collector(writer=AsyncMock())
+
+        await collector.record_hook_event(
+            {"event_type": "tool_execution_started", "context": {"tool_name": "Bash"}}
+        )
+
+        assert collector.saw_agent_activity
+
+    @pytest.mark.anyio
+    async def test_a_subagent_is_activity(self) -> None:
+        """A subagent is a whole agent run. A phase that started one has not
+        "never started", whether or not the parent `Task` event survived."""
+        collector = _make_collector(writer=AsyncMock())
+
+        await collector.record_subagent_started("reviewer", "t-1")
+
+        assert collector.saw_agent_activity
+
+    @pytest.mark.anyio
+    async def test_an_embedded_git_event_is_activity(self) -> None:
+        """Scanned out of a tool's OUTPUT, so the commit already happened."""
+        collector = _make_collector(writer=AsyncMock())
+
+        await collector.record_embedded_event(
+            "git_commit", {"context": {"git": {"sha": "abc1234"}}}
+        )
+
+        assert collector.saw_agent_activity
+
+    @pytest.mark.anyio
+    async def test_a_bare_note_is_activity(self) -> None:
+        """The stream processors' entry point, for the events with nothing
+        worth recording: a thinking-only turn, an unrecognised content block,
+        a codex item type this parser has never seen. No observation to store,
+        and still proof the model started."""
+        collector = _make_collector(writer=AsyncMock())
+
+        collector.note_agent_activity()
+
+        assert collector.saw_agent_activity
+
+    @pytest.mark.anyio
+    async def test_spending_tokens_alone_is_not_activity(self) -> None:
+        """The deliberate exclusion, and the one that keeps the retry possible.
+
+        A request that reached the model and was refused for capacity can carry
+        input tokens. That is a bill, not work to preserve - count it and the
+        busy-upstream retry #1303 exists for never fires at all.
+        """
+        collector = _make_collector(writer=AsyncMock())
+
+        await collector.record_token_usage(input_tokens=1200, output_tokens=0)
+
+        assert not collector.saw_agent_activity
+
+    @pytest.mark.anyio
+    async def test_activity_is_witnessed_with_no_writer_to_record_it(self) -> None:
+        """The flag is about what the AGENT did, not about who stored it.
+
+        A collector with no writer still runs a real agent against a real
+        workspace. Reading "no work" off a missing writer would make every such
+        phase retriable.
+        """
+        collector = _make_collector(writer=None)
+
+        await collector.record_tool_started("Bash", "t-1", "")
+
+        assert collector.saw_agent_activity

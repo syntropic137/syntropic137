@@ -1,0 +1,1428 @@
+"""#1256: a phase that reported failure must never be recorded as completed.
+
+The invariant, stated once: WHEN A PHASE RESULT CANNOT BE READ - unparseable,
+missing, or overwritten - THE OUTCOME IS FAILURE, NEVER COMPLETION. Absence of
+a verdict is not a verdict.
+
+Two production paths defeated it, and they are instances of one shape: a value
+that could not be read resolved to something success-like.
+
+  (1) The reader found the report's end with `raw.find("}")`, so the FIRST
+      brace in the JSON text ended it - including one inside a string. The
+      report below is verbatim from the issue: its `comments` mention
+      `dict{}`, the extraction stops mid-string, `json.loads` raises, and the
+      handler returned None. `TestTheReportIsReadAsJson` pins that a legal
+      string value containing a brace can no longer truncate it.
+
+  (2) The last message each phase said was held under its phase id alone,
+      while one processor is shared across concurrent dispatches (see
+      `BackgroundWorkflowDispatcher`). Two runs of a workflow share a phase id,
+      so the second run's message replaced the first's, and the first then
+      read a report that was not its own. `TestTwoExecutionsCannotOverwrite`
+      races two runs at the same phase id and shows the second cannot erase
+      the first.
+
+  (3) The fix for (1) located the block with `rfind`, so the TEXTUALLY last
+      marker won. A report whose own `comments` contain `TASK_RESULT:` was
+      therefore read from the mention inside its own string and became
+      UNREADABLE - a reported SUCCESS turned into a refusal. Same shape as (1),
+      opposite direction: the meaning of the report changed with what its
+      strings happened to say. `TestTheMarkerInsideAReportIsNotANewReport`
+      pins both directions together, because a fix for either one alone can
+      be had by giving up the other.
+
+  (4) The fix for (3) then took the last DECODABLE candidate, so a genuine
+      report lost to any JSON-shaped text after it - and the literal failure
+      example ships in every phase prompt, so a phase that reported success
+      and then explained the reporting format reported failure.
+      `TestTheBlockIsDelimitedNotLocated` pins that class shut.
+
+  (5) None of that ran. Both stream processors reduced the whole stream to one
+      mutable `_last_agent_message` BEFORE the parser saw anything, so a
+      complete, terminated `success: false` block followed by any later text -
+      "done", a sign-off, text with no report in it at all - was overwritten
+      and never parsed. The phase read NOT_REPORTED, which does not refuse,
+      and completed: the issue title unchanged, one hop above where it was
+      being fixed. `TestAReportSurvivesWhatIsSaidAfterIt` drives the real
+      processors over multi-event streams, and
+      `TestTwoReportsSettleByPrecedence` pins what two claims from one phase
+      mean, in both orders, so the undefined case is not left as the next
+      variant's hiding place.
+
+WHY THE FIXTURES ALL CARRY `TASK_RESULT_END` NOW. (1), (3) and (4) are three
+answers to one question the reader should never have been asking: WHERE, in
+this prose, is the payload. First, last and nearest-marker are all guesses, and
+each was defeated by text that legitimately looks like a payload. The block is
+therefore delimited instead of located, and these fixtures are written the way
+the prompt now tells an agent to write one. A fixture without the terminator
+would be testing the pre-#1256 contract.
+
+WHY A SINGLE-MESSAGE TEST WAS NEVER GOING TO BE ENOUGH EITHER, which is (5)
+in the same voice: every test here that hands a finished string to
+`AgentVerdict.from_agent_text` hands over the string the processor had already
+discarded. They pass against the broken state. Only a stream with a SECOND
+message reaches it.
+
+WHY A PARSER TEST WAS NEVER GOING TO BE ENOUGH. Before this change the parsed
+report had NO production consumer: it reached `StreamResult` and stopped there.
+So a phase reporting `success: false` completed whether or not the report
+parsed, and a test written with brace-free `comments` passed against the broken
+state. That is how this survived. The end-to-end proof that the verdict now
+decides the outcome lives in
+`tests/contexts/workflows/execute_workflow/test_reported_failure_is_not_completion.py`,
+which drives `processor.run()`; this file pins the two hops underneath it.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING, NamedTuple
+
+import pytest
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    AgentExecutionCompletedCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+    ReportedFailureReason,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    WorkflowExecutionAggregate,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    CodexStreamProcessor,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    EventStreamProcessor,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    TASK_RESULT_MARKER,
+    TASK_RESULT_TERMINATOR,
+    AgentVerdict,
+    VerdictReader,
+    VerdictStatus,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
+    SubagentTracker,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_codex_stream_processor import (
+    _NoopWorkspace,
+    _RecordingCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+    TokenAccumulator,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
+    render_workspace_prompt,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+# CI selects with `pytest -m unit`; without this the whole module is collected
+# by no job and can fail on main behind a green check (#825).
+pytestmark = pytest.mark.unit
+
+#: The issue's report, verbatim. Its `comments` contain a brace INSIDE the
+#: string, which is the whole defect: nothing about this JSON is malformed.
+REPORTED_FAILURE = (
+    'All done!\n\nTASK_RESULT: {"success": false, '
+    '"comments": "the handler returns dict{} not a model"}\n'
+    "TASK_RESULT_END"
+)
+
+#: The same report with the brace removed. It parsed correctly even before
+#: this change, so a test written with it proves nothing about #1256 - it is
+#: here only as the control that says the two differ in the brace and nothing
+#: else.
+REPORTED_FAILURE_NO_BRACE = (
+    'All done!\n\nTASK_RESULT: {"success": false, "comments": "the handler returns no model"}\n'
+    "TASK_RESULT_END"
+)
+
+
+class TestTheReportIsReadAsJson:
+    """A legal string value must not be able to truncate the report."""
+
+    def test_a_brace_inside_comments_does_not_truncate_the_report(self) -> None:
+        verdict = AgentVerdict.from_agent_text(REPORTED_FAILURE)
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.comments == "the handler returns dict{} not a model", (
+            "brace matching stopped at the brace inside the string and lost the report"
+        )
+        assert verdict.refuses_completion
+
+    def test_the_same_report_without_a_brace_reads_identically(self) -> None:
+        assert AgentVerdict.from_agent_text(REPORTED_FAILURE_NO_BRACE).status is (
+            VerdictStatus.FAILURE
+        )
+
+    def test_nested_objects_are_read_whole(self) -> None:
+        text = (
+            'TASK_RESULT: {"success": false, "comments": "x", "detail": {"phase": "verify"}}\n'
+            "TASK_RESULT_END"
+        )
+
+        assert AgentVerdict.from_agent_text(text).status is VerdictStatus.FAILURE
+
+    def test_prose_after_the_report_is_ignored(self) -> None:
+        text = 'TASK_RESULT: {"success": true, "comments": "done"}\nTASK_RESULT_END\n\nThanks!'
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert not verdict.refuses_completion
+
+    def test_a_success_restated_as_a_failure_is_a_failure(self) -> None:
+        """Renamed from `test_the_last_report_wins`: it no longer wins for that.
+
+        The assertion is unchanged and still required. What changed is the
+        reason - being LAST is no longer what decides it, so a test whose name
+        says so would pass while pinning a rule the module has stopped
+        following. `TestTwoReportsSettleByPrecedence` pins the reverse order.
+        """
+        text = (
+            'TASK_RESULT: {"success": true, "comments": "spoke too soon"}\nTASK_RESULT_END\n'
+            'TASK_RESULT: {"success": false, "comments": "the tests fail"}\nTASK_RESULT_END'
+        )
+
+        assert AgentVerdict.from_agent_text(text).status is VerdictStatus.FAILURE
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("TASK_RESULT: {not json at all\nTASK_RESULT_END", id="malformed"),
+            pytest.param('TASK_RESULT: ["success", false]\nTASK_RESULT_END', id="not-an-object"),
+            pytest.param(
+                'TASK_RESULT: {"comments": "forgot the verdict"}\nTASK_RESULT_END',
+                id="no-success-key",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": "false"}\nTASK_RESULT_END', id="success-is-a-string"
+            ),
+            pytest.param('TASK_RESULT: {"success": null}\nTASK_RESULT_END', id="success-is-null"),
+            pytest.param("TASK_RESULT:\nTASK_RESULT_END", id="marker-with-nothing-after-it"),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "forgot to close it"}',
+                id="block-never-terminated",
+            ),
+        ],
+    )
+    def test_a_report_that_cannot_be_read_refuses_completion(self, text: str) -> None:
+        """UNREADABLE, never SUCCESS. This is the class the two paths belong to.
+
+        `block-never-terminated` is the whole price of delimiting, and it is
+        paid in the safe direction: an agent that writes the marker and no
+        terminator has written something nobody can read as a verdict, so the
+        phase is refused rather than completed on a guess about which of the
+        text's JSON objects it meant.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_ENDoops',
+                id="terminator-with-a-suffix",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_ENDING',
+                id="terminator-is-a-prefix-of-a-longer-word",
+            ),
+        ],
+    )
+    def test_a_word_starting_with_the_terminator_is_not_the_terminator(self, text: str) -> None:
+        """`TASK_RESULT_ENDING` does not close a block, and used to.
+
+        The check was `str.startswith`, so any word sharing the terminator's
+        prefix closed the block. The grammar this module documents is a marker,
+        one JSON value and `TASK_RESULT_END` exactly; accepting a longer word
+        completes a phase on a report nobody terminated. Found by cross-model
+        review, not by the suite.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_END',
+                id="at-end-of-input",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_END\nsigning off',
+                id="followed-by-more-text",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_END.',
+                id="followed-by-punctuation",
+            ),
+        ],
+    )
+    def test_the_terminator_still_closes_a_block_at_a_real_boundary(self, text: str) -> None:
+        """The other half of the fix: tightening must not reject valid reports.
+
+        Without these the boundary rule could be made arbitrarily strict and
+        still pass - a test that only checks the rejections cannot see a fix
+        that rejects everything.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert not verdict.refuses_completion
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                'TASK_RESULT: {"success": "true", "comments": "done"} TASK_RESULT_END',
+                id="success-is-the-string-true",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": "false", "comments": "could not"} TASK_RESULT_END',
+                id="success-is-the-string-false",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": 1, "comments": "done"} TASK_RESULT_END',
+                id="success-is-a-number",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"comments": "no success key at all"} TASK_RESULT_END',
+                id="success-is-missing",
+            ),
+        ],
+    )
+    def test_success_must_be_a_json_boolean(self, text: str) -> None:
+        """A near-miss `success` is UNREADABLE, never a pass.
+
+        The reader validates the block with a strict pydantic model. Strict is
+        the load-bearing part: pydantic's default mode coerces `"true"` to
+        `True`, which would turn a malformed report into a COMPLETED phase -
+        the one direction this module exists to close. `"false"` is included
+        because it fails in the safe direction and would therefore hide a
+        regression in the other two if it were the only case tested.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(None, id="no-message-at-all"),
+            pytest.param("", id="empty-message"),
+            pytest.param("I have finished the work.", id="prose-with-no-marker"),
+        ],
+    )
+    def test_an_agent_that_never_reported_is_not_a_refusal(self, text: str | None) -> None:
+        """The deliberate limit of this change, pinned so a reader can see it.
+
+        Most phases say nothing structured, and treating silence as failure
+        would fail every one of them. NOT_REPORTED therefore still completes on
+        exit status; what the invariant forbids is a report that EXISTS and
+        cannot be read resolving to success.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.NOT_REPORTED
+        assert not verdict.refuses_completion
+
+    def test_the_refusal_names_the_phase_and_quotes_the_agent(self) -> None:
+        """An operator at 2am reads this line, not the stack trace above it."""
+        refusal = AgentVerdict.from_agent_text(REPORTED_FAILURE).refusal(phase_id="phase-001")
+
+        assert "phase-001" in refusal
+        assert "the handler returns dict{} not a model" in refusal
+
+
+#: The mirror of `REPORTED_FAILURE`, and just as well-formed: a report whose
+#: own `comments` quote the marker. Not exotic - it is what an agent explaining
+#: result parsing writes, so the runs most likely to hit it are the runs
+#: working on this module.
+REPORTED_SUCCESS_QUOTING_THE_MARKER = (
+    'TASK_RESULT: {"success": true, "comments": "the parser looks for TASK_RESULT: at the start"}\n'
+    "TASK_RESULT_END"
+)
+
+#: The issue's failure in the spelling the rework asked for. Kept separate from
+#: `REPORTED_FAILURE` so the two directions can be asserted side by side.
+REPORTED_FAILURE_SHORT = (
+    'TASK_RESULT: {"success": false, "comments": "returns dict{} not a model"}\nTASK_RESULT_END'
+)
+
+
+class TestTheMarkerInsideAReportIsNotANewReport:
+    """Reading a result is robust to the result's own vocabulary.
+
+    Both halves, together, because either one is trivially buyable with the
+    other: read the FIRST marker and the success below passes while
+    `test_the_last_report_wins` breaks; take the last readable block whatever
+    follows it and `test_an_unreadable_final_block_...` breaks. Only a reader
+    that knows where each report ENDS satisfies all three.
+    """
+
+    def test_a_success_quoting_the_marker_is_still_a_success(self) -> None:
+        """The defect: `rfind` read from the quotation inside `comments`."""
+        verdict = AgentVerdict.from_agent_text(REPORTED_SUCCESS_QUOTING_THE_MARKER)
+
+        assert verdict.status is VerdictStatus.SUCCESS, (
+            "the marker quoted inside comments was read as the start of a new "
+            "report, so a reported success became a refusal"
+        )
+        assert verdict.comments == "the parser looks for TASK_RESULT: at the start", (
+            "the verdict was read from somewhere other than the whole block"
+        )
+        assert not verdict.refuses_completion
+
+    def test_the_reported_failure_still_reads_as_a_failure(self) -> None:
+        """The original direction, unchanged. A fix that swaps them is not one."""
+        verdict = AgentVerdict.from_agent_text(REPORTED_FAILURE_SHORT)
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.comments == "returns dict{} not a model"
+        assert verdict.refuses_completion
+
+    def test_a_failure_quoting_the_marker_is_still_a_failure(self) -> None:
+        """Quoting the marker must not change the verdict in EITHER direction.
+
+        This one refused completion before the fix too - as UNREADABLE rather
+        than FAILURE - so it is here for the `comments`, which an operator
+        needs and which the truncated read destroyed.
+        """
+        verdict = AgentVerdict.from_agent_text(
+            'TASK_RESULT: {"success": false, "comments": "the TASK_RESULT: block was dropped"}\n'
+            "TASK_RESULT_END"
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.comments == "the TASK_RESULT: block was dropped"
+
+    def test_a_later_real_report_still_outvotes_one_that_quotes_the_marker(self) -> None:
+        """A quotation is skipped; a genuine second block is not."""
+        text = (
+            'TASK_RESULT: {"success": true, "comments": "I wrote TASK_RESULT: too early"}\n'
+            "TASK_RESULT_END\n"
+            'TASK_RESULT: {"success": false, "comments": "the tests fail"}\nTASK_RESULT_END'
+        )
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.comments == "the tests fail"
+
+    def test_an_unreadable_final_block_is_not_rescued_by_an_earlier_success(self) -> None:
+        """THE PROPERTY THIS FIX MAY NOT SPEND, pinned against itself.
+
+        Skipping a quotation must not become "take the last thing that
+        happened to parse". Neither block here is closed, so neither is a
+        report, and a message with no report in it that nonetheless wrote the
+        marker refuses - absence of a verdict is not a verdict.
+        """
+        text = 'TASK_RESULT: {"success": true, "comments": "green"}\nTASK_RESULT: {"success": fals'
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE, (
+            "an earlier unclosed block was allowed to answer for a later "
+            "unreadable one - the fail-closed half, traded away"
+        )
+        assert verdict.refuses_completion
+
+    def test_a_truncated_second_block_does_not_unmake_a_closed_first_one(self) -> None:
+        """THE ONE THING DELIMITING COSTS, named rather than left to be found.
+
+        Before this change any trailing marker refused, truncation and mention
+        alike. That is what turned real successes into refusals, because a
+        mention after a report is what an agent explaining its own reporting
+        writes. The two are the same bytes to any reader - `TASK_RESULT:`
+        followed by something that is not a closed value - so keeping the
+        refusal for the truncation keeps it for the mention, and defect (3) is
+        back in a wider spelling.
+
+        So a closed block stands and the unclosed text after it is prose. What
+        that gives up is narrow and reachable only by an agent that closed one
+        report and was then cut off writing a second, contradictory one: a
+        message that never arrives has no verdict in it to lose. What it does
+        NOT give up is the direction that matters - a CLOSED failure block
+        after a closed success still wins, which is `test_the_last_report_wins`.
+        """
+        text = (
+            'TASK_RESULT: {"success": true, "comments": "green"}\nTASK_RESULT_END\n'
+            'TASK_RESULT: {"success": fals'
+        )
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert verdict.comments == "green"
+
+    def test_a_quoted_marker_in_the_prose_before_the_report_is_skipped(self) -> None:
+        """Prose ahead of the block cannot outvote the block."""
+        text = (
+            "I was asked to explain TASK_RESULT: parsing.\n"
+            'TASK_RESULT: {"success": true, "comments": "explained it"}\nTASK_RESULT_END'
+        )
+
+        assert AgentVerdict.from_agent_text(text).status is VerdictStatus.SUCCESS
+
+    def test_a_marker_in_prose_AFTER_the_report_is_ignored(self) -> None:
+        """The limit the previous fix declared, removed rather than restated.
+
+        It refused this, on the reasoning that text after a block had no
+        delimiter to end it. The block now carries its own, so the report is
+        complete before the prose starts and the prose is what it looks like:
+        an agent describing what it did. Refusing it cost a rerun on every
+        phase articulate enough to mention the thing it had just written.
+        """
+        text = (
+            'TASK_RESULT: {"success": true, "comments": "done"}\nTASK_RESULT_END\n\n'
+            "I wrote the TASK_RESULT: block as instructed."
+        )
+
+        assert AgentVerdict.from_agent_text(text).status is VerdictStatus.SUCCESS
+
+
+def _result_fences(prompt: str) -> list[str]:
+    """Every fenced block of ``prompt`` that a reporting agent would copy.
+
+    Found the way an agent finds them - a code fence whose first line is the
+    marker - rather than by line number or by re-deriving the template. So this
+    reads whatever the prompt currently hands out, and a fence that stops
+    carrying its own terminator stops satisfying the tests below rather than
+    quietly still matching a copy of itself.
+    """
+    inside_fences = prompt.split("```")[1::2]
+    return [
+        block.strip() for block in inside_fences if block.strip().startswith(TASK_RESULT_MARKER)
+    ]
+
+
+def _the_fence_that_says(prompt: str, key_and_value: str) -> str:
+    """The one result fence of ``prompt`` whose JSON contains ``key_and_value``.
+
+    Since #1372 there is a fence per OUTCOME rather than per polarity, so the
+    tests below have to name which one they mean. They name it by the JSON the
+    prompt would have to stop handing out for the test to be about something
+    else - ``"success": true``, or the reason word - rather than by position,
+    which would silently re-point at a neighbour the next time a fence is added.
+
+    Raises if that is not exactly one fence: two would mean the prompt hands out
+    the same outcome twice, and none that the fence this test governs is gone.
+    """
+    matching = [fence for fence in _result_fences(prompt) if key_and_value in fence]
+    assert len(matching) == 1, f"expected one fence carrying {key_and_value!r}, got {matching}"
+    return matching[0]
+
+
+def _with_the_comments_replaced(fence: str, said: str) -> str:
+    """One fence edited the way the prompt says to edit it.
+
+    The instruction is to copy the block and replace the ``comments`` text, so
+    that is what this does - a substring swap of the template's sentence for the
+    agent's own - rather than rebuilding the JSON, which would test a block this
+    helper wrote instead of the one the prompt handed out.
+
+    The template sentence is read back out of the fence with the same decoder
+    the reader uses, so this cannot drift from whatever the prompt currently
+    says; it raises if the fence does not decode, which is the correct outcome
+    because that fence was not copyable in the first place.
+    """
+    payload = fence[len(TASK_RESULT_MARKER) : fence.index(TASK_RESULT_TERMINATOR)]
+    template_words = json.loads(payload.strip())["comments"]
+    return fence.replace(template_words, said)
+
+
+#: The prompt's failure example AS AN AGENT WRITES IT BACK: the fence filled in
+#: with a real reason and quoted without its terminator. This is the input the
+#: review found - syntactically perfect JSON of exactly the reported-failure
+#: shape, which an agent that reports success and then explains the format
+#: produces on its own.
+#:
+#: NOT derived from `render_workspace_prompt`, deliberately, and it no longer
+#: claims to be its bytes (it said "byte for byte" until #1324, by which time it
+#: was not). Two reasons. It is a HOSTILE SHAPE and not a quotation: what these
+#: tests need is decodable JSON with no terminator, and since #1324 the prompt's
+#: own `comments` is a `<...>` slot that does not decode at all - so the real
+#: bytes are a weaker input here than this, and pinning to them would quietly
+#: weaken three tests. And the live bytes are already read, by
+#: `test_the_whole_reporting_section_pasted_after_a_success_is_not_the_report`,
+#: which feeds the whole rendered section through the reader; that is where
+#: drift is caught. Deriving this as well would have coupled every test in this
+#: module to the prompt's fence shape at IMPORT time, so one prompt edit would
+#: collect zero tests instead of failing the one that governs it.
+THE_PROMPTS_FAILURE_EXAMPLE = (
+    'TASK_RESULT: {"success": false, '
+    '"comments": "Specific reason why — what was missing or what failed"}'
+)
+
+#: A real, closed success. Everything below appends hostile text to THIS and
+#: requires the verdict not to move.
+A_CLOSED_SUCCESS = 'TASK_RESULT: {"success": true, "comments": "opened PR #1258"}\nTASK_RESULT_END'
+
+
+class TestTheBlockIsDelimitedNotLocated:
+    """Nothing a message says after a report can become the report.
+
+    Three fixes located the payload - first marker, then last marker, then
+    last decodable candidate - and each was defeated by text that legitimately
+    looks like a payload, because the phase's own prompt carries the template.
+    There is no better guess available, so the block is delimited instead:
+    `TASK_RESULT_END` says which text the agent MEANT as its result, and
+    everything else is prose no matter how much it resembles one.
+
+    Each test here appends one of the demonstrated hostile shapes to a genuine
+    success. Against the previous reader every one of them lost the success -
+    to FAILURE where the trailing text decoded, to UNREADABLE where it did not.
+    """
+
+    def test_the_prompts_failure_example_quoted_after_a_success_is_not_the_report(
+        self,
+    ) -> None:
+        """The review's finding: success reported, then the format explained."""
+        text = (
+            f"{A_CLOSED_SUCCESS}\n\n"
+            "For reference, the block the prompt asks for is:\n"
+            f"{THE_PROMPTS_FAILURE_EXAMPLE}\n"
+        )
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS, (
+            "the prompt's own failure template, quoted after a genuine "
+            "success, was read as that phase's verdict"
+        )
+        assert verdict.comments == "opened PR #1258"
+        assert not verdict.refuses_completion
+
+    def test_a_marker_a_brace_and_a_nested_object_after_a_success_are_not_the_report(
+        self,
+    ) -> None:
+        """The rest of the demonstrated shapes, together, after the report."""
+        text = (
+            f"{A_CLOSED_SUCCESS}\n\n"
+            "I wrote the TASK_RESULT: block as instructed; the closing } sits "
+            'inside it, and a nested {"detail": {"phase": "verify"}} is legal '
+            "JSON that is not a verdict.\n"
+        )
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert verdict.comments == "opened PR #1258"
+
+    def test_the_same_template_quoted_BEFORE_the_report_does_not_win_either(self) -> None:
+        """Reading the FIRST candidate is the same defect from the other side.
+
+        The obvious answer to a lookalike that trails the report is to take
+        the leading one instead. It fails identically: an agent that says what
+        it will write before writing it has quoted the template first, and a
+        reported success becomes a failure just the same. Neither end is the
+        answer; the delimiter is.
+        """
+        text = (
+            "If I could not finish I would have to end with\n"
+            f"{THE_PROMPTS_FAILURE_EXAMPLE}\n"
+            f"but I did finish, so:\n{A_CLOSED_SUCCESS}\n"
+        )
+
+        assert AgentVerdict.from_agent_text(text).status is VerdictStatus.SUCCESS
+
+    def test_a_report_may_quote_the_terminator_inside_its_own_comments(self) -> None:
+        """The new token joins the old one inside the report's vocabulary.
+
+        `TASK_RESULT_END` is now something an agent has reason to write about,
+        so a report whose `comments` mention it must survive - which is defect
+        (3) of the module docstring, arriving at the token this change added.
+        """
+        text = (
+            'TASK_RESULT: {"success": true, "comments": '
+            '"the reader needs TASK_RESULT: and then TASK_RESULT_END"}\n'
+            "TASK_RESULT_END"
+        )
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert verdict.comments == "the reader needs TASK_RESULT: and then TASK_RESULT_END"
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_the_prompt_can_never_manufacture_a_completion(self, clone_repos: bool) -> None:
+        """THE EMITTER'S HALF OF THE CONTRACT, in the half that survives #1324.
+
+        This test used to require that the rendered prompt states NO verdict at
+        all - that the instructions are never themselves an obeyable block. That
+        held only while the examples were unparseable, and the price was charged
+        to every agent on every phase: a block nobody can copy as it stands is a
+        block somebody assembles wrongly, which is the run #1324 was opened for.
+        Since the fences are literal the prompt DOES state a verdict, because its
+        own failure example is now a complete block and FAILURE is the strongest
+        claim in the precedence.
+
+        What survives is the half with the teeth, and it is asserted here rather
+        than assumed: the prompt can only ever state a REFUSING one. Quoting
+        these bytes moves a verdict up the precedence, toward refusal, and never
+        toward completion - so the text the platform puts in front of every
+        phase cannot turn a phase that failed into one that completed, which is
+        the whole of #1256. A prompt that read SUCCESS here would do precisely
+        that, on the template's words rather than the agent's.
+
+        NOT_REPORTED would also be safe and is deliberately still allowed: it
+        completes nothing either. SUCCESS is the one answer that is not.
+        """
+        verdict = AgentVerdict.from_agent_text(render_workspace_prompt(clone_repos=clone_repos))
+
+        assert verdict.status is not VerdictStatus.SUCCESS, (
+            "the rendered prompt reports SUCCESS, so an agent that quotes its "
+            "own instructions completes the phase on the template's words"
+        )
+
+    def test_a_reported_failure_survives_the_whole_reporting_section_pasted_after_it(
+        self,
+    ) -> None:
+        """#1256's own invariant, against the worst lookalike there is.
+
+        A phase that reported failure and then pasted the instructions it was
+        given must still be failed. These are the one bytes the platform itself
+        puts in front of every phase, and since #1324 they contain complete
+        blocks of BOTH polarities - so if anything could talk a reported failure
+        back into a completion it would be this, and the precedence is what says
+        it cannot.
+        """
+        prompt = render_workspace_prompt(clone_repos=True)
+        reporting_section = prompt[prompt.index("## Task Result") :]
+
+        verdict = AgentVerdict.from_agent_text(
+            f"{REPORTED_FAILURE}\n\nThe rules I was working to:\n\n{reporting_section}"
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+
+    def test_a_success_that_pastes_its_whole_instructions_back_refuses_rather_than_completing(
+        self,
+    ) -> None:
+        """THE PRICE OF LITERAL FENCES, PAID IN THE SAFE DIRECTION AND STATED.
+
+        Until #1324's rework this asserted SUCCESS: an agent could report a
+        genuine success, paste its whole prompt afterwards, and keep its
+        verdict, because no fence in the prompt closed a block. Literal fences
+        end that, and the reason is not fixable by wording - a block that an
+        agent can copy verbatim IS a report's bytes, so pasting one is
+        indistinguishable from writing one. `_delimited_reports` has nothing
+        left to tell them apart with, by construction rather than by oversight.
+
+        So this outcome is a rerun, and it is written down as the accepted cost
+        rather than quietly left to be discovered. It is the fail-closed
+        direction: the phase is refused, never completed on words the agent did
+        not mean. The realistic shape of this mistake - an agent EXPLAINING the
+        format in prose, terminator and all not reproduced - still keeps its
+        success, and that is
+        `test_the_prompts_failure_example_quoted_after_a_success_is_not_the_report`
+        directly above.
+        """
+        prompt = render_workspace_prompt(clone_repos=True)
+        reporting_section = prompt[prompt.index("## Task Result") :]
+
+        verdict = AgentVerdict.from_agent_text(
+            f"{A_CLOSED_SUCCESS}\n\nThe rules I was working to:\n\n{reporting_section}"
+        )
+
+        assert verdict.refuses_completion, (
+            "pasting the whole reporting section back completed the phase - the "
+            "prompt's closed failure example must refuse it instead"
+        )
+        assert verdict.status is VerdictStatus.FAILURE
+
+
+#: What the agent says about itself in the tests below. It is a sentence no
+#: template contains and no default could produce, so a verdict carrying it can
+#: only have come from the fence this prompt renders, edited as instructed.
+WHAT_THE_AGENT_DID = "gave the result block one fence that carries its own terminator"
+
+#: The exact words each fence ships with. Asserted on rather than ignored: a
+#: verdict carrying THESE is proof the JSON was read out of the prompt's own
+#: bytes and parsed, which is the thing #1324 is about. Under the `<...>` slot
+#: this rework replaces, the same copy decoded to nothing and `comments` held an
+#: excerpt of unreadable text instead.
+THE_SUCCESS_FENCE_SAYS = "Brief summary of what was accomplished"
+
+
+class _FenceMeans(NamedTuple):
+    """The whole of what one failure fence must produce, once it has been read.
+
+    Three facts about the same bytes, in one row, because they are only worth
+    anything together (#1392). `says` proves the JSON came out of the prompt's
+    own fence rather than a default; `reports` is the word the agent wrote;
+    `classifies_as` is what the PLATFORM records having heard it. Splitting
+    them across tables is what let the second and third be confused for each
+    other in the first place.
+    """
+
+    says: str
+    reports: ReportedFailureReason
+    classifies_as: FailureClassification
+
+
+#: One row per failure fence the prompt hands out. The `says` sentences are
+#: distinct, so a verdict carrying one can only have come from parsing THAT
+#: fence - the property `THE_SUCCESS_FENCE_SAYS` has, extended to the fences
+#: #1372 added.
+#:
+#: THE TWO RIGHT-HAND COLUMNS ARE THE CONTRACT #1392 REWROTE, and the shape of
+#: this table is the argument. `reports` differs for all four words; three of
+#: the four `classifies_as` are the same value. That is the fix, drawn: a word
+#: the agent CHOSE separates the runs in the record of what was SAID and moves
+#: the measurement only when it withdraws a claim. A change that let `task` or
+#: `platform` back into the third column would read as an improvement here -
+#: more answers, more distinctions - and would be the defect returning.
+THE_FAILURE_FENCES: dict[str, _FenceMeans] = {
+    "task": _FenceMeans(
+        says="Specific reason why — what about the request could not be done",
+        reports=ReportedFailureReason.TASK,
+        classifies_as=FailureClassification.CORRECT_REFUSAL,
+    ),
+    "platform": _FenceMeans(
+        says="Specific reason why — what was missing or what failed",
+        reports=ReportedFailureReason.PLATFORM,
+        classifies_as=FailureClassification.CORRECT_REFUSAL,
+    ),
+    "refused": _FenceMeans(
+        says="Specific reason why — what you found and why you stopped",
+        reports=ReportedFailureReason.REFUSED,
+        classifies_as=FailureClassification.CORRECT_REFUSAL,
+    ),
+    "unknown": _FenceMeans(
+        says="Specific reason why — what happened, and what you could not establish about it",
+        reports=ReportedFailureReason.UNKNOWN,
+        classifies_as=FailureClassification.UNCLASSIFIED,
+    ),
+}
+
+
+class TestTheFenceTheAgentIsHandedIsOneItCanWrite:
+    """THE INSTRUCTION AND THE READER, MADE TO AGREE BY CONSTRUCTION (#1324).
+
+    `test_the_prompt_hands_out_no_block_that_quoting_it_would_obey` above is
+    half a contract. It says the prompt must not hand out a block that PARSES,
+    and a prompt that said nothing at all about reporting would satisfy it
+    perfectly - which is nearly what happened: #1256 made `TASK_RESULT_END`
+    mandatory, the instruction was not updated, and the result was a prompt
+    whose only fence containing the terminator contained no JSON while the two
+    fences containing JSON contained no terminator. Both halves were true. An
+    agent still could not copy a complete block from either, because the parts
+    were in different fences and it had to assemble them. exec-138d516b91e8
+    wrote valid JSON, omitted the terminator, and lost a run that had done the
+    work.
+
+    The missing half is therefore not "the prompt mentions the terminator" -
+    the broken prompt did - but that ONE COPYABLE FENCE, filled in the one way
+    the prompt says to fill it, IS A VERDICT to the production reader. That is
+    asserted here by reading the fences out of the rendered prompt and feeding
+    them to `AgentVerdict`, so neither side can drift: reword the instruction
+    into something unwritable, or change what the reader accepts, and these
+    fail.
+
+    WHY THE FENCES ARE LITERALLY PARSEABLE, which is the rework #1324 needed and
+    the opposite of what this class said before. Keeping them unparseable - a
+    `<...>` slot in `comments` - buys one property: quoting the prompt can never
+    be mistaken for obeying it. It costs the property the issue is actually
+    about, because a fence that must be edited before it means anything is a
+    fence an agent can copy faithfully and still lose the run on, which is the
+    original defect wearing a different hat.
+
+    The two cannot be had together, and this is the fact to carry away from this
+    class: a fence copyable VERBATIM is byte-identical to a real report, and the
+    reader is delimited rather than located, so there is nothing left in the text
+    to tell a paste from a quotation. The trade is taken toward copyability
+    because the costs differ in kind - the slot charges every agent on every
+    phase, literal JSON charges only one that closes a second block it did not
+    mean - and because quoting can only ever move a verdict toward refusal.
+    `TestTheBlockIsDelimitedNotLocated` holds that last part down from both ends.
+    """
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_the_success_fence_copied_verbatim_is_a_readable_success(
+        self, clone_repos: bool
+    ) -> None:
+        """THE ACCEPTANCE CRITERION OF #1324, from the rendered bytes outward.
+
+        Copy the block the prompt hands out, substitute NOTHING, and the
+        production reader must call it a success. Neither the prompt before
+        #1324 nor the `<...>` slot that first answered it could satisfy this: the
+        first split the block across two fences, and the second decoded to
+        nothing at all until the agent edited it.
+
+        The `comments` assertion is what makes this proof rather than
+        coincidence. Those words exist only in the prompt's own bytes, so a
+        verdict carrying them can only have come from parsing the fence that was
+        extracted - not from a default, and not from a block this test wrote.
+        """
+        success_fence = _the_fence_that_says(
+            render_workspace_prompt(clone_repos=clone_repos), '"success": true'
+        )
+
+        verdict = AgentVerdict.from_agent_text(success_fence)
+
+        assert verdict.status is VerdictStatus.SUCCESS, (
+            "the success fence the prompt hands out is not a verdict as it "
+            "stands, so an agent that copies it exactly still loses its run"
+        )
+        assert verdict.comments == THE_SUCCESS_FENCE_SAYS
+        assert not verdict.refuses_completion
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    @pytest.mark.parametrize("reason", sorted(THE_FAILURE_FENCES))
+    def test_each_failure_fence_copied_verbatim_is_a_readable_failure(
+        self, reason: str, clone_repos: bool
+    ) -> None:
+        """And the fences that have to work even when nothing else did.
+
+        A failure fence is the one with teeth: a success that reads as
+        UNREADABLE costs a rerun, whereas a phase that reports failure in a
+        block nobody can read is the defect `phase_verdict` exists to stop,
+        arriving because the prompt taught an unreadable shape. #1372 made that
+        three fences instead of one, and every one of them carries the teeth.
+        """
+        failure_fence = _the_fence_that_says(
+            render_workspace_prompt(clone_repos=clone_repos),
+            f'"failure_reason": "{reason}"',
+        )
+
+        verdict = AgentVerdict.from_agent_text(failure_fence)
+
+        assert verdict.status is VerdictStatus.FAILURE, (
+            f"the {reason} fence the prompt hands out is not a verdict as it "
+            f"stands, so a phase that reports failure with it is not refused"
+        )
+        assert verdict.comments == THE_FAILURE_FENCES[reason].says
+        assert verdict.refuses_completion
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    @pytest.mark.parametrize("reason", sorted(THE_FAILURE_FENCES))
+    def test_each_failure_fence_copied_verbatim_carries_the_class_it_names(
+        self, reason: str, clone_repos: bool
+    ) -> None:
+        """THE ACCEPTANCE CRITERION OF #1372 AND #1392, from the rendered bytes outward.
+
+        The polarity above was already true before the reason key existed; what
+        this adds is that the fence an agent copies decides what the run is
+        RECORDED AS HAVING SAID, and - for the one word that withdraws a claim -
+        what it is recorded as. Both halves have to be asserted from the same
+        bytes, because the way this fails is not a fence that stops parsing - it
+        is a prompt that offers a word `ReportedFailureReason` does not read,
+        which leaves a perfectly readable failure carrying no reason at all and
+        looks exactly like working code.
+
+        THE TWO ASSERTIONS ARE NOT REDUNDANT, and #1392 is why. The reported
+        word is checked first because it is the one that differs per fence; the
+        classification is checked second because three of the four fences share
+        it, so that assertion alone would pass for a prompt whose `task` fence
+        had rotted into a word nobody reads. Together they say: the agent's word
+        survives, and it did not become a measurement on the way.
+        """
+        expected = THE_FAILURE_FENCES[reason]
+        failure_fence = _the_fence_that_says(
+            render_workspace_prompt(clone_repos=clone_repos),
+            f'"failure_reason": "{reason}"',
+        )
+
+        verdict = AgentVerdict.from_agent_text(failure_fence)
+
+        assert verdict.reported_failure_reason is expected.reports, (
+            f"the {reason} fence is read as reporting "
+            f"{verdict.reported_failure_reason!r}, so a phase that copied it "
+            f"exactly has its word dropped on the way to the operator (#1372)"
+        )
+        assert verdict.failure_classification is expected.classifies_as, (
+            f"the {reason} fence reads as "
+            f"{verdict.failure_classification.value!r}, so a phase that copied "
+            f"it exactly is recorded as a failure of the wrong kind (#1392)"
+        )
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_a_fence_edited_the_way_the_prompt_says_keeps_its_outcome(
+        self, clone_repos: bool
+    ) -> None:
+        """The other half of the instruction: copy it, then say what happened.
+
+        A block that only parses while it still carries the template's sentence
+        would be worse than useless - it would read back the template's words as
+        the agent's report. So replacing `comments`, which is the one edit the
+        prompt asks for, must leave a verdict of the same polarity carrying the
+        agent's own words.
+        """
+        success_fence = _the_fence_that_says(
+            render_workspace_prompt(clone_repos=clone_repos), '"success": true'
+        )
+
+        verdict = AgentVerdict.from_agent_text(
+            _with_the_comments_replaced(success_fence, WHAT_THE_AGENT_DID)
+        )
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert verdict.comments == WHAT_THE_AGENT_DID
+        assert not verdict.refuses_completion
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_there_is_exactly_one_fence_per_outcome(self, clone_repos: bool) -> None:
+        """One fence per OUTCOME, and nothing to assemble from elsewhere.
+
+        The invariant was never the number two - it was that an agent finds its
+        whole block in one place. #1372 made the outcomes four, because a
+        failure now names its cause and the causes go to different people, and
+        #1392 made them five by adding the word for "I could not tell"; the
+        count follows the outcomes rather than the other way round.
+
+        An EXTRA fence carrying the marker would mean the block is once again
+        split across places an agent has to combine, which is the defect itself;
+        a missing one would leave an outcome with no copyable form, which is how
+        the reason key would end up written by nobody.
+        """
+        prompt = render_workspace_prompt(clone_repos=clone_repos)
+        fences = _result_fences(prompt)
+
+        assert len(fences) == 1 + len(THE_FAILURE_FENCES), (
+            f"expected one fence per outcome, found {len(fences)}: {fences}"
+        )
+        _the_fence_that_says(prompt, '"success": true')
+        for reason in THE_FAILURE_FENCES:
+            _the_fence_that_says(prompt, f'"failure_reason": "{reason}"')
+        for fence in fences:
+            assert fence.endswith(TASK_RESULT_TERMINATOR), (
+                f"this fence does not carry its own terminator, so copying it "
+                f"cannot produce a readable report: {fence!r}"
+            )
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_no_fence_asks_the_agent_to_substitute_anything(self, clone_repos: bool) -> None:
+        """Nothing left in a fence for an agent to fill in, get wrong, or skip.
+
+        The defect #1324 names is a copyable block that is not copyable: a
+        placeholder where the JSON should be. It has had two spellings now - the
+        `<-- replace this` line that carried the terminator but no JSON, and the
+        `<"...">` slot inside otherwise-complete JSON - and both are the same
+        bug, so this pins the class rather than either spelling. A fence whose
+        JSON does not decode as it stands has a substitution hiding in it
+        somewhere, whatever it is punctuated with.
+        """
+        for fence in _result_fences(render_workspace_prompt(clone_repos=clone_repos)):
+            payload = fence[len(TASK_RESULT_MARKER) : fence.index(TASK_RESULT_TERMINATOR)]
+
+            json.loads(payload.strip())  # raises if anything in here is a placeholder
+
+            assert "<" not in fence and ">" not in fence, (
+                f"this fence still asks the agent to replace something, so "
+                f"copying it as instructed does not produce a report: {fence!r}"
+            )
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_the_fences_are_the_last_instruction_before_the_sign_off(
+        self, clone_repos: bool
+    ) -> None:
+        """The rule is about the LAST thing in the reply, so it is stated last.
+
+        An instruction that arrives after the block it governs is read after
+        the point it applied. Nothing may sit between the final fence and the
+        sign-off - not the failure-reason examples, not the consequence of
+        omitting the terminator, which is why both now come before them.
+        """
+        prompt = render_workspace_prompt(clone_repos=clone_repos)
+
+        after_the_last_fence = prompt[prompt.rindex("```") + len("```") :].strip()
+
+        assert TASK_RESULT_MARKER not in after_the_last_fence
+        assert "\n" not in after_the_last_fence, (
+            f"instructions follow the last result fence, so an agent reading in "
+            f"order meets them after the block they govern: {after_the_last_fence!r}"
+        )
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_the_cost_of_omitting_the_terminator_is_stated_before_the_fences(
+        self, clone_repos: bool
+    ) -> None:
+        """Stated where an agent that skims to the code block still reads it.
+
+        The old prompt put it in a paragraph BELOW the examples. An agent that
+        scans for the fence it has to copy never reaches that paragraph, so the
+        one consequence it most needed was in the one place it would not look.
+        """
+        prompt = render_workspace_prompt(clone_repos=clone_repos)
+        section = prompt[prompt.index("## Task Result") :]
+        before_the_first_fence = section[: section.index("```")]
+
+        assert TASK_RESULT_TERMINATOR in before_the_first_fence
+        assert "unreadable" in before_the_first_fence.lower(), (
+            "the consequence of dropping the terminator is not stated above the "
+            "fences, where an agent that skims to the code block would see it"
+        )
+
+
+#: A phase that reported failure and then kept talking. The second message
+#: carries NO report at all - which is the whole point: nothing about it is a
+#: competing claim, and it still buried the first one.
+CHATTER_AFTER_THE_REPORT = "done"
+
+
+def _claude_processor() -> EventStreamProcessor:
+    """The production processor, wired the way `AgentExecutionHandler` wires it."""
+    return EventStreamProcessor(
+        tokens=TokenAccumulator(),
+        subagents=SubagentTracker(),
+        observability=None,
+        controller=None,
+        execution_id="exec-A",
+        phase_id="implement",
+        session_id="s1",
+        workspace_id="ws-1",
+        agent_model=None,
+    )
+
+
+def _codex_processor() -> CodexStreamProcessor:
+    return CodexStreamProcessor(
+        tokens=TokenAccumulator(),
+        collector=_RecordingCollector(),
+        controller=None,
+        # See the note on the other construction in this file: no rollout,
+        # because these tests are about the verdict contract and not model
+        # identity (#1284).
+        rollout=None,
+        execution_id="exec-A",
+        phase_id="implement",
+        session_id="s1",
+        agent_model=None,
+    )
+
+
+def _claude_said(text: str) -> str:
+    """One assistant JSONL line carrying one text block."""
+    return json.dumps(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+    )
+
+
+def _codex_said(text: str) -> str:
+    """One codex `item.completed` line carrying an agent_message."""
+    return json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": text}})
+
+
+async def _claude_verdict(*lines: str) -> AgentVerdict:
+    async def stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    return (await _claude_processor().process_stream(stream(), _NoopWorkspace())).verdict
+
+
+async def _codex_verdict(*lines: str) -> AgentVerdict:
+    async def stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    return (await _codex_processor().process_stream(stream(), _NoopWorkspace())).verdict
+
+
+class TestAReportSurvivesWhatIsSaidAfterIt:
+    """(4): the report was read off whichever message came last, so a phase
+    that reported failure and then said one more word completed.
+
+    These drive the REAL processors over a multi-event stream, which is the
+    only place the defect was visible. Every test above this point hands a
+    finished string straight to `AgentVerdict.from_agent_text`, and the string
+    it hands over is the one the processor had already thrown away - so the
+    whole file passed against the broken state. A stream with exactly ONE
+    message still passes today and proves nothing; the second message is the
+    test.
+    """
+
+    @pytest.mark.asyncio
+    async def test_claude_still_refuses_after_the_agent_says_one_more_word(self) -> None:
+        verdict = await _claude_verdict(
+            _claude_said(REPORTED_FAILURE),
+            _claude_said(CHATTER_AFTER_THE_REPORT),
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE, (
+            "a complete, terminated failure report was dropped because the "
+            "agent kept talking - the phase would be recorded as completed"
+        )
+        assert verdict.refuses_completion
+        assert verdict.comments == "the handler returns dict{} not a model"
+
+    @pytest.mark.asyncio
+    async def test_codex_still_refuses_after_the_agent_says_one_more_word(self) -> None:
+        """The same shape on the other harness - not a copy left behind."""
+        verdict = await _codex_verdict(
+            _codex_said(REPORTED_FAILURE),
+            _codex_said(CHATTER_AFTER_THE_REPORT),
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+        assert verdict.comments == "the handler returns dict{} not a model"
+
+    @pytest.mark.asyncio
+    async def test_the_terminal_result_line_does_not_erase_the_report_either(self) -> None:
+        """The second overwrite hop, which is not the same line of code.
+
+        Claude's terminal `result` line overwrote the remembered message once
+        more, AFTER the assistant events had already been reduced to one. It
+        repeats the agent's final turn, so on a chatty phase it repeats the
+        chatter - fixing only the assistant branch would leave the report dead
+        at the very last line of the stream.
+        """
+        verdict = await _claude_verdict(
+            _claude_said(REPORTED_FAILURE),
+            _claude_said(CHATTER_AFTER_THE_REPORT),
+            json.dumps({"type": "result", "result": CHATTER_AFTER_THE_REPORT}),
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+
+    @pytest.mark.asyncio
+    async def test_a_report_only_the_result_line_carries_is_still_read(self) -> None:
+        """The other half of the same hop, and the one a fix can silently lose.
+
+        Reading at parse time means every place a message is taken from the
+        stream has to do it. This stream states the report ONLY on the terminal
+        `result` line - no assistant text at all, which is what a replayed or
+        truncated capture looks like - so it is the one shape that the previous
+        end-of-stream read got right and a partial fix would regress to
+        NOT_REPORTED.
+        """
+        verdict = await _claude_verdict(json.dumps({"type": "result", "result": REPORTED_FAILURE}))
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+
+    @pytest.mark.asyncio
+    async def test_a_chatty_success_is_still_a_success(self) -> None:
+        """THE HALF THIS FIX MAY NOT BUY ITSELF WITH, pinned against itself.
+
+        Refusing more is not the goal and is trivially achievable; defect (3)
+        was exactly that trade taken by accident. A phase that reported success
+        and then signed off must still complete.
+        """
+        verdict = await _claude_verdict(
+            _claude_said(
+                'TASK_RESULT: {"success": true, "comments": "all green"}\nTASK_RESULT_END'
+            ),
+            _claude_said(CHATTER_AFTER_THE_REPORT),
+        )
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert not verdict.refuses_completion
+
+
+class TestTwoReportsSettleByPrecedence:
+    """Two claims from one phase: FAILURE > SUCCESS > UNREADABLE > NOT_REPORTED.
+
+    An undefined case here is how the next variant of this bug arrives, so the
+    precedence is pinned in both directions and across both ways of splitting
+    the same reports up.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_reported_failure_is_not_taken_back_by_a_later_success(self) -> None:
+        """The direction "last wins" gets wrong, and the reason for a precedence.
+
+        `test_a_success_restated_as_a_failure_is_a_failure` covers the other
+        order. Both refuse, and that agreement IS the rule.
+        """
+        verdict = await _claude_verdict(
+            _claude_said(REPORTED_FAILURE),
+            _claude_said('TASK_RESULT: {"success": true, "comments": "fixed it"}\nTASK_RESULT_END'),
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+
+    def test_the_same_reports_settle_the_same_way_however_they_are_split(self) -> None:
+        """One message with two blocks, or two messages with one each.
+
+        The blocks and their order are identical; only the newline between
+        them moves. If these disagreed, an agent could change what it reported
+        by choosing where to break its output, which is the defect class this
+        issue is made of.
+        """
+        failure = 'TASK_RESULT: {"success": false, "comments": "the tests fail"}\nTASK_RESULT_END'
+        success = 'TASK_RESULT: {"success": true, "comments": "fixed it"}\nTASK_RESULT_END'
+
+        together = AgentVerdict.from_agent_text(f"{failure}\n{success}")
+        apart = VerdictReader()
+        apart.read(failure)
+        apart.read(success)
+
+        assert together.status is apart.verdict.status is VerdictStatus.FAILURE
+        assert together.comments == apart.verdict.comments == "the tests fail"
+
+    @pytest.mark.asyncio
+    async def test_quoting_the_marker_early_does_not_refuse_a_clean_success(self) -> None:
+        """SUCCESS > UNREADABLE, and why that step is not decoration.
+
+        Reading every message means reading the ones that merely TALK about
+        reporting - an agent restating its instructions writes the marker with
+        no block under it. Ranking a refusal above everything seen later makes
+        that mention fatal and turns a reported success into a refusal, which
+        is defect (3) again at stream scale. Found this way, by this test.
+        """
+        verdict = await _claude_verdict(
+            _claude_said("I will finish with TASK_RESULT: and a JSON object, as instructed."),
+            _claude_said(
+                'TASK_RESULT: {"success": true, "comments": "all green"}\nTASK_RESULT_END'
+            ),
+        )
+
+        assert verdict.status is VerdictStatus.SUCCESS, (
+            "an earlier MENTION of the marker refused a phase that went on to "
+            "report success properly"
+        )
+        assert not verdict.refuses_completion
+
+    @pytest.mark.asyncio
+    async def test_a_marker_never_followed_by_a_report_still_refuses(self) -> None:
+        """UNREADABLE > NOT_REPORTED - the price named in the module docstring.
+
+        The mention above is forgiven because a real report outranked it. With
+        no report anywhere, a botched block is all the phase said about itself,
+        and an unreadable claim may be a failure claim. Chatter afterwards does
+        not make it silence.
+        """
+        verdict = await _claude_verdict(
+            _claude_said('TASK_RESULT: {"success": false, "comments": "forgot to close it"}'),
+            _claude_said(CHATTER_AFTER_THE_REPORT),
+        )
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
+
+
+class TestTwoExecutionsCannotOverwrite:
+    """Two runs racing for the same phase id; neither can erase the other.
+
+    This used to be a property of a DICT KEY. `PhaseRuntime` held each run's
+    last message in memory, and #1256 fixed a phase-only key that let run B's
+    success report replace run A's failure - so run A recovered its deliverable
+    from a report that was not its own.
+
+    #1300 moved the value onto the event stream instead, and that changes the
+    guarantee from "the key is careful enough" to "there is no shared location
+    at all": the message is read off the EXECUTION'S OWN aggregate, and an
+    aggregate holds one execution's events by construction. A collision is
+    unrepresentable rather than merely avoided.
+
+    It also answers the question the in-memory version could not answer at any
+    key: what a process that did not hear the message reads back.
+    """
+
+    @staticmethod
+    def _finished(execution_id: str, said: str) -> WorkflowExecutionAggregate:
+        """An execution whose `implement` phase finished having said `said`."""
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+            StartExecutionCommand,
+        )
+
+        aggregate = WorkflowExecutionAggregate()
+        aggregate._handle_command(
+            StartExecutionCommand(
+                execution_id=execution_id,
+                workflow_id="wf-1",
+                workflow_name="W",
+                total_phases=1,
+                inputs={},
+            )
+        )
+        aggregate.agent_execution_completed(
+            AgentExecutionCompletedCommand(
+                execution_id=execution_id,
+                phase_id="implement",
+                session_id=f"s-{execution_id}",
+                exit_code=0,
+                last_agent_message=said,
+            )
+        )
+        return aggregate
+
+    def test_each_execution_reads_back_its_own_report(self) -> None:
+        a = self._finished("exec-A", REPORTED_FAILURE)
+        b = self._finished("exec-B", 'TASK_RESULT: {"success": true, "comments": "all green"}')
+
+        assert a.last_agent_message_for("implement") == REPORTED_FAILURE, (
+            "A recovered B's success report in place of its own failure"
+        )
+        assert b.last_agent_message_for("implement") != REPORTED_FAILURE
+
+    def test_the_order_the_two_runs_finish_in_does_not_matter(self) -> None:
+        """The interleaving the issue describes. There is no shared slot to race for."""
+        b = self._finished("exec-B", 'TASK_RESULT: {"success": true, "comments": "all green"}')
+        a = self._finished("exec-A", REPORTED_FAILURE)
+
+        assert a.last_agent_message_for("implement") == REPORTED_FAILURE
+        assert b.last_agent_message_for("implement") != REPORTED_FAILURE
+
+    def test_a_process_that_never_heard_the_message_still_reads_it(self) -> None:
+        """The restart case, which no in-memory key could have survived (#1300).
+
+        Rehydrating from the recorded events is what a process started after
+        the agent finished actually does, and it is the commonest form of the
+        "something went wrong" the salvage exists for.
+        """
+        original = self._finished("exec-A", REPORTED_FAILURE)
+
+        rebuilt = WorkflowExecutionAggregate()
+        rebuilt.rehydrate(list(original.get_uncommitted_events()))
+
+        assert rebuilt.last_agent_message_for("implement") == REPORTED_FAILURE
+
+    def test_a_phase_that_said_nothing_reads_back_none(self) -> None:
+        """Absence stays absence - never another phase's words."""
+        aggregate = self._finished("exec-A", REPORTED_FAILURE)
+
+        assert aggregate.last_agent_message_for("verify") is None
+
+
+class TestBothHarnessesReadTheSameContract:
+    """A TASK_RESULT means the same thing whichever CLI produced it."""
+
+    @pytest.mark.asyncio
+    async def test_codex_reports_the_same_failure_the_claude_reader_does(self) -> None:
+        """Codex used to hard-code no verdict at all, so this report vanished."""
+
+        async def stream() -> AsyncIterator[str]:
+            yield json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": REPORTED_FAILURE},
+                }
+            )
+
+        processor = CodexStreamProcessor(
+            tokens=TokenAccumulator(),
+            collector=_RecordingCollector(),
+            controller=None,
+            # No rollout: these tests are about the VERDICT contract, not model
+            # identity (#1284). None is the honest value for a synthetic stream
+            # with nothing on disk, and it exercises the path a phase takes when
+            # the harness announced no model.
+            rollout=None,
+            execution_id="exec-A",
+            phase_id="implement",
+            session_id="s1",
+            agent_model=None,
+        )
+
+        result = await processor.process_stream(stream(), _NoopWorkspace())
+
+        assert result.verdict.status is VerdictStatus.FAILURE
+        assert result.verdict.comments == "the handler returns dict{} not a model"

@@ -39,8 +39,10 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
+    PHASE_ID_PATTERN,
     RESERVED_INPUT_NAMES,
     WorkflowDefinition,
+    is_phase_id,
     validate_workflow_yaml,
 )
 from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
@@ -66,6 +68,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionStatus,
+    FailureClassification,
+    PhaseUsage,
+    ReportedFailureReason,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -107,7 +112,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
     announce_as,
     mint_wrapper_name,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    AttemptClock,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    CredentialRenewalFailedError,
     DuplicateExecutionError,
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
@@ -121,6 +130,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    salvage_stranded_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
@@ -151,14 +166,19 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
+    "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
+    # A phase's own verdict on itself - the type of `StreamResult.verdict` (#1256)
+    "AgentVerdict",
     # Commands
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    # The clock a phase's retry budget is measured on (#1303)
+    "AttemptClock",
     # Claude plugin types + errors (issue #726)
     "ClaudePluginError",
     "ClaudePluginInvalidName",
@@ -172,6 +192,7 @@ __all__ = [
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
+    "CredentialRenewalFailedError",
     # Errors
     "DuplicateExecutionError",
     # Value objects - execution
@@ -183,6 +204,7 @@ __all__ = [
     "ExecutionCostQueryService",
     "ExecutionStatus",
     "FailExecutionCommand",
+    "FailureClassification",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     # Aggregates
@@ -196,6 +218,9 @@ __all__ = [
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
+    # What a phase spent, as the failure path reports it (#1262)
+    "PhaseUsage",
+    "ReportedFailureReason",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "SecurityPolicy",
@@ -228,9 +253,11 @@ __all__ = [
     "WorkspaceAggregate",
     "announce_as",
     "build_command_from_definition",
+    "is_phase_id",
     "mint_wrapper_name",
     "render_workspace_prompt",
     "require_supported_execution_type",
+    "salvage_stranded_phase",
     "validate_phase_declarations",
     "validate_workflow_yaml",
 ]

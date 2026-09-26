@@ -1,8 +1,9 @@
 import { clsx } from 'clsx'
-import { Bot, Check, Clock, Cpu, Pencil, Save, Wrench, X } from 'lucide-react'
+import { Bot, Check, Clock, Pencil, Save, Wrench, X } from 'lucide-react'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import MarkdownViewer from '../../components/MarkdownViewer'
+import { PhaseModelBadge } from '../../components/PhaseModelBadge'
 import {
   AGENT_PROVIDER,
   PROVIDER_OPTIONS,
@@ -30,7 +31,7 @@ function PhaseMetaBadges({ phase }: { phase: PhaseDefinition }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="inline-flex items-center gap-1 rounded-md bg-violet-500/15 px-2 py-0.5 text-xs text-violet-300 ring-1 ring-inset ring-violet-500/25"><Bot className="h-3 w-3" />{providerLabel(phase.provider ?? phase.agent_type)}</span>
-      {phase.model && <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300 ring-1 ring-inset ring-blue-500/25"><Cpu className="h-3 w-3" />{phase.model}</span>}
+      <PhaseModelBadge model={phase.model} modelDisplay={phase.model_display} />
       {phase.timeout_seconds > 0 && <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300 ring-1 ring-inset ring-amber-500/25"><Clock className="h-3 w-3" />{phase.timeout_seconds}s</span>}
       {phase.allowed_tools?.length > 0 && <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-300 ring-1 ring-inset ring-emerald-500/25"><Wrench className="h-3 w-3" />{phase.allowed_tools.length} tools</span>}
       {phase.argument_hint && <span className="text-xs text-[var(--color-text-muted)]">{phase.argument_hint}</span>}
@@ -41,8 +42,16 @@ function PhaseMetaBadges({ phase }: { phase: PhaseDefinition }) {
 const inputClass = 'w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]'
 const textareaClass = 'min-h-[400px] w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 font-mono text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]'
 
-function ConfigFields({ provider, model, timeout, tools, onChange }: {
-  provider: string; model: string; timeout: string; tools: string
+/** What the SAVED model resolves to, shown only while model AND provider are unchanged:
+ * either edit changes what the save will resolve to. */
+function ModelResolutionHint({ edited, provider, phase }: { edited: string; provider: string; phase: PhaseDefinition }) {
+  const savedProvider = phase.provider || AGENT_PROVIDER.CLAUDE
+  if (!phase.resolved_model || edited !== (phase.model ?? '') || provider !== savedProvider) return null
+  return <p className="mt-1 text-xs text-[var(--color-text-muted)]" data-testid="model-resolution-hint">{phase.model_display}</p>
+}
+
+function ConfigFields({ phase, provider, model, timeout, tools, onChange }: {
+  phase: PhaseDefinition; provider: string; model: string; timeout: string; tools: string
   onChange: (field: string, value: string) => void
 }) {
   const selectedProvider = provider || AGENT_PROVIDER.CLAUDE
@@ -55,7 +64,7 @@ function ConfigFields({ provider, model, timeout, tools, onChange }: {
         </select>
       </div>
       {providerUsesModelField(selectedProvider) && (
-        <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Model</label><input type="text" value={model} onChange={(e) => onChange('editedModel', e.target.value)} placeholder="e.g. sonnet, opus" className={inputClass} /></div>
+        <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Model</label><input type="text" value={model} onChange={(e) => onChange('editedModel', e.target.value)} placeholder="e.g. opus, sonnet, gpt-sol" className={inputClass} /><ModelResolutionHint edited={model} provider={selectedProvider} phase={phase} /></div>
       )}
       <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Timeout (seconds)</label><input type="number" value={timeout} onChange={(e) => onChange('editedTimeout', e.target.value)} placeholder="300" className={inputClass} /></div>
       <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Allowed Tools</label><input type="text" value={tools} onChange={(e) => onChange('editedTools', e.target.value)} placeholder="Bash, Read, Write" className={inputClass} /></div>
@@ -95,7 +104,7 @@ export function PhasePromptEditor({ phase, workflowId, onSaved }: { phase: Phase
         <PhaseMetaBadges phase={phase} />
         {editor.isEditing ? (
           <div className="mt-4 space-y-4">
-            <ConfigFields provider={editor.editedProvider} model={editor.editedModel} timeout={editor.editedTimeout} tools={editor.editedTools} onChange={(f, v) => editor.setField(f as 'editedModel', v)} />
+            <ConfigFields phase={phase} provider={editor.editedProvider} model={editor.editedModel} timeout={editor.editedTimeout} tools={editor.editedTools} onChange={(f, v) => editor.setField(f as 'editedModel', v)} />
             <TabBar activeTab={editor.activeTab} onTabChange={(tab) => editor.setField('activeTab', tab)} />
             {editor.activeTab === 'write'
               ? <textarea value={editor.editedPrompt} onChange={(e) => editor.setField('editedPrompt', e.target.value)} className={textareaClass} placeholder="Enter prompt template..." />

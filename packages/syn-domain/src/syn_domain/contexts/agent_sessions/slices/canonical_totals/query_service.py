@@ -20,22 +20,34 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.canonical_usage import PricingResolver
 
 from syn_domain.contexts.agent_sessions.canonical_usage import (
+    CANONICAL_MODEL_COLUMNS,
     CANONICAL_SESSION_USAGE_CTE,
+    CANONICAL_USAGE_EVENT_FILTER,
     price_canonical_row,
 )
+from syn_domain.storable_text import pg_safe
+from syn_shared.pricing import canonical_cost_usd
 
 # Mirrors the heatmap's scoping so both read the same rows for the same
 # filter. Callers that pass no filter get all-time totals, which is what the
 # dashboard metric card wants.
-_SCOPED_EVENTS = """
+#
+# Narrowed to the two event types canonical usage reads (#1253). Three CTEs
+# read `scoped_events`, so PostgreSQL cannot inline it and materialises it
+# into a work table; unnarrowed, that work table was every agent_event ever
+# recorded, JSONB `data` blob included, to total the two types that carry
+# tokens. The session COUNT below is the only thing here that needs the other
+# types, and it reads them directly.
+_SCOPED_EVENTS = f"""
 scoped_events AS (
-    SELECT session_id, execution_id, event_type, data, time
+    SELECT session_id, event_type, data, time
     FROM agent_events
-    {execution_filter}
+    WHERE {CANONICAL_USAGE_EVENT_FILTER}
+      {{execution_filter}}
 )
 """
 
-_EXECUTION_FILTER = "WHERE execution_id = ANY($1)"
+_EXECUTION_FILTER = "AND execution_id = ANY($1)"
 
 # Grouped by model AND cost-nullness for the same reason every other canonical
 # query is: a group mixing priced and unpriced rows prices some of its tokens
@@ -44,14 +56,14 @@ _TOTALS_QUERY = f"""
 WITH {_SCOPED_EVENTS},
 {CANONICAL_SESSION_USAGE_CTE}
 SELECT
-    model,
+    {CANONICAL_MODEL_COLUMNS},
     SUM(vendor_cost_usd) AS vendor_cost_usd,
     SUM(input_tokens) AS input_tokens,
     SUM(output_tokens) AS output_tokens,
     SUM(cache_creation_tokens) AS cache_creation_tokens,
     SUM(cache_read_tokens) AS cache_read_tokens
 FROM canonical_usage
-GROUP BY model, (vendor_cost_usd IS NULL)
+GROUP BY {CANONICAL_MODEL_COLUMNS}, (vendor_cost_usd IS NULL)
 """
 
 # Counts every session the canonical source knows about, including ones that
@@ -61,7 +73,7 @@ GROUP BY model, (vendor_cost_usd IS NULL)
 _SESSION_COUNT_QUERY = """
 SELECT COUNT(DISTINCT session_id) AS sessions
 FROM agent_events
-{execution_filter}
+WHERE TRUE {execution_filter}
 """
 
 
@@ -106,11 +118,17 @@ class CanonicalUsageQueryService:
         return template.format(execution_filter=_EXECUTION_FILTER if filtered else "")
 
     async def totals(self, execution_ids: set[str] | None = None) -> CanonicalTotals:
-        """Canonical totals, optionally narrowed to a set of executions."""
+        """Canonical totals, optionally narrowed to a set of executions.
+
+            # agent_events holds every id in its stored (sanitised) form, because
+        # AgentEvent's validator applies pg_safe on the way in. A read binds text
+        # against those columns, so it has to ask for the same spelling or it
+        # matches nothing and reports that as "nothing was recorded" (#1241).
+        """
         filtered = execution_ids is not None
         totals_sql = self._render(_TOTALS_QUERY, filtered)
         sessions_sql = self._render(_SESSION_COUNT_QUERY, filtered)
-        args = [list(execution_ids)] if execution_ids is not None else []
+        args = [[pg_safe(eid) for eid in execution_ids]] if execution_ids is not None else []
 
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(totals_sql, *args)
@@ -133,7 +151,8 @@ class CanonicalUsageQueryService:
             output_tokens=output_tokens,
             cache_creation_tokens=cache_creation,
             cache_read_tokens=cache_read,
-            cost_usd=cost,
+            # A Decimal sum keeps its operands' exponent; report the canonical form.
+            cost_usd=canonical_cost_usd(cost),
             unpriced_tokens=unpriced,
             sessions=int(session_row["sessions"]) if session_row else 0,
         )

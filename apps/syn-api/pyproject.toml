@@ -1,6 +1,6 @@
 [project]
 name = "syn-api"
-version = "0.29.0"
+version = "0.30.0"
 description = "HTTP API server for the Syntropic137"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,9 @@ dependencies = [
     "asyncpg>=0.30.0",
     "agentic-logging",
 ]
+
+[project.optional-dependencies]
+feedback = ["ui-feedback-api"]
 
 [build-system]
 requires = ["uv_build>=0.9.13"]

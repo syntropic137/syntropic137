@@ -29,7 +29,7 @@ export function WorkflowMetrics({ workflow, metrics, artifactCount, executions, 
           value={executions.length}
           icon={Play}
           color="success"
-          subtitle="View all \u2192"
+          subtitle="View all →"
         />
       </Link>
       <MetricCard title="Sessions" value={metrics?.total_sessions ?? 0} icon={Play} />

@@ -30,6 +30,28 @@ one that touches the running host.
 
 ---
 
+## 0. The fast path: `just pit-stop`
+
+`scripts/pit_stop.sh` runs every step below for the direct path (3a), with a
+hard gate at each one, and aborts loudly on the first that fails:
+
+```bash
+just pit-stop 0.29.1-beta.5 --stage-only   # bump, build, verify, ship, repoint: safe while runs are in flight
+just pit-stop 0.29.1-beta.5 --swap-only    # wait for the drain, recreate api + gateway, verify
+just pit-stop 0.29.1-beta.5                # both, in one go
+just pit-stop 0.29.1-beta.5 --dry-run      # echo every mutating command; still run the read-only checks
+```
+
+**Stage early, swap late.** Everything except the swap is safe while executions
+run, so stage as soon as the content is merged; the swap is one `compose up`
+once the drain clears. The drain is the speed limit, because recreating the API
+destroys in-flight work (#1381). It needs `SYN_API_PASSWORD`; the host and API
+default to the selfhost VPS and can be overridden with `SYN_PIT_HOST` /
+`SYN_PIT_API`. It does not dispatch the final real-run check (section 5, step 5.3):
+do that yourself, and watch a PHASE reach `running`.
+
+The sections below remain the reference for what each stage does and why.
+
 ## 1. Drain check - first, last, and unskippable
 
 **Never recreate containers while executions are in flight.** Doing it on an
@@ -231,6 +253,16 @@ Those tags now exist **only in the host's docker daemon**. Nothing pushed them
 anywhere. That is the point of this path, and it is why
 [section 5, step 4](#step-4-recreate-branch-by-build-path) must not run
 `docker compose pull` after it.
+
+For a beta that updates the whole app stack, build all six images in the
+`release-local` matrix below from one committed checkout, using
+`--platform linux/amd64 --load` in place of its multi-architecture `--push`.
+Transfer all six tags in one `docker save | zstd | ssh 'zstd -d | docker load'`
+stream. Verify every tag on the host, then change the five running app image
+pins (`token-injector`, `sidecar-proxy`, `syn-collector`, `syn-api`,
+`syn-gateway`) together after pausing admission and draining executions.
+`syn-dashboard-ui` is built from the same commit for consistency; the running
+gateway serves the dashboard. This path uses no npm or GHCR publish.
 
 ### (b) Registry - for reproducibility, or a host you cannot reach
 

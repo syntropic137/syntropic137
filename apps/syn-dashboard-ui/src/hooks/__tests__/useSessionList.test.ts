@@ -22,6 +22,8 @@ const makeSessionSummary = (overrides = {}) => ({
   started_at: '2026-04-01T00:00:00Z',
   workflow_id: 'wf-1',
   total_tokens: 500,
+  agent_model_display: 'unknown',
+  requested_model: null,
   ...overrides,
 })
 
@@ -53,7 +55,6 @@ describe('useSessionList', () => {
         execution_id: null,
         phase_display: null,
         agent_model: null,
-        agent_model_display: null,
         repos: [],
         repos_display: null,
         total_cost_usd: 0,

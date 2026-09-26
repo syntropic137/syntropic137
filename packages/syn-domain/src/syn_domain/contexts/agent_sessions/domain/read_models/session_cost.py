@@ -3,7 +3,46 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
+
+from syn_shared.pricing import canonical_cost_usd
+
+
+class CostField(StrEnum):
+    """A ``SessionCost`` field that a read path either measures or does not.
+
+    Each member's VALUE is the field's own name, so a consumer holding one of
+    these knows exactly which number not to trust without a lookup table.
+
+    Exists because zero is not a truthful answer to "how much compute did this
+    session cost" when nothing ever measured compute. ``PricingStatus`` draws
+    that line for a single amount whose model has no rate (ADR-067 D3); this
+    draws it for a whole field that no producer in the system fills. Issue
+    #1041 stayed invisible for a month precisely because the dropped fields
+    arrived as plausible zeroes.
+
+    ``total_cost_usd`` and ``cost_by_model`` are absent because every read path
+    really does compute them. ``turns`` IS listed even though a read path can
+    measure it, because only one can: ``num_turns`` exists on a
+    ``session_summary`` event and nowhere else, so a session still running has
+    no turn count rather than zero turns. That is the whole distinction -
+    membership is per record, not per field.
+
+    ``cost_by_tool`` sits with ``compute_cost_usd`` rather than with
+    ``cost_by_model``, and the reason is easy to get backwards. Both cost maps
+    are populated by the projection from a ``SessionCostFinalized`` payload,
+    but only ``cost_by_model`` is ALSO derived by the read path, which prices
+    per model. No read path attributes cost to a tool, so on the read path -
+    the one the API actually serves (#532) - ``cost_by_tool`` is an empty dict
+    that reads as "this session used no tools".
+    """
+
+    COMPUTE_COST_USD = "compute_cost_usd"
+    TOKENS_BY_TOOL = "tokens_by_tool"
+    COST_BY_TOOL_TOKENS = "cost_by_tool_tokens"
+    COST_BY_TOOL = "cost_by_tool"
+    TURNS = "turns"
 
 
 def _coerce_decimal(value: str | Decimal | int | float | None, default: str = "0") -> Decimal:
@@ -30,6 +69,27 @@ def _coerce_decimal_dict(raw: dict[str, str | Decimal] | None) -> dict[str, Deci
     if not raw:
         return {}
     return {k: _coerce_decimal(v) for k, v in raw.items()}
+
+
+def _coerce_cost_fields(raw: object) -> frozenset[CostField]:
+    """Coerce stored field names back to ``CostField``.
+
+    A key absent from an older stored record means it predates the
+    distinction, and every one of these fields was unmeasured then too - so
+    absent coerces to the full set, not to the empty one. Empty would claim
+    the old record had measured them all, which is the silent zero this type
+    exists to prevent, restored via the persistence hop.
+    """
+    if raw is None:
+        return frozenset(CostField)
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return frozenset(CostField)
+    return frozenset(CostField(name) for name in raw if name in set(CostField))
+
+
+def _canonical_map(raw: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Each cost in *raw* in canonical form (see ``canonical_cost_usd``)."""
+    return {k: canonical_cost_usd(v) for k, v in raw.items()}
 
 
 @dataclass
@@ -102,9 +162,27 @@ class SessionCost:
     cost_by_tool_tokens: dict[str, Decimal] = field(default_factory=dict)
     """Token cost breakdown by tool (derived from tokens_by_tool)."""
 
-    # Model
+    # Model (ADR-067)
     agent_model: str | None = None
-    """Primary model used for this session (from CLI result event)."""
+    """The model the harness REPORTED doing most of this session's work.
+
+    None when no model was reported - never an alias. What the phase asked for
+    is ``requested_model``.
+    """
+
+    requested_model: str | None = None
+    """The model the workflow REQUESTED for this session (often an alias), or None."""
+
+    tokens_by_model: dict[str, int] = field(default_factory=dict)
+    """Tokens per OBSERVED model, the basis for ``agent_model``.
+
+    Kept by the in-memory projection so it picks the primary model by the
+    same most-tokens rule as the SQL read path; unreported-model tokens are
+    not in it.
+    """
+
+    tokens_by_requested_model: dict[str, int] = field(default_factory=dict)
+    """Tokens per REQUESTED model, the basis for ``requested_model``."""
 
     unpriced_observation_count: int = 0
     """Count of TOKEN_USAGE observations whose model was unknown/missing.
@@ -112,6 +190,22 @@ class SessionCost:
     These contribute zero cost to ``total_cost_usd`` (never priced as a
     default/guessed model - see issue #788). A non-zero count means the
     total is incomplete, not confidently wrong.
+    """
+
+    unmeasured_fields: frozenset[CostField] = field(default_factory=lambda: frozenset(CostField))
+    """Fields whose value on this record was never measured, only defaulted.
+
+    Defaults to EVERY member of ``CostField``, so a record is presumed not to
+    have measured them until a producer says otherwise via ``record_measured``.
+    That direction is the point: the failure mode of forgetting is then a field
+    that honestly reports itself unmeasured, rather than one that reports a
+    confident zero. #1041 was the second kind, and it survived a month of use.
+
+    Today no producer measures any of them - ``agent_events`` records no
+    per-tool token counts and there is no compute rate table - so this is the
+    full set on every read path. Emptying it is what a future producer of one
+    of these fields has to do, and until it does, a zero here means "nobody
+    counted", not "it was free".
     """
 
     # Status
@@ -123,6 +217,28 @@ class SessionCost:
 
     completed_at: datetime | None = None
     """When the session completed."""
+
+    def __post_init__(self) -> None:
+        """Hold every money field in canonical form (``canonical_cost_usd``).
+
+        Every read path builds this record fresh, so canonicalising here is
+        what keeps a harness's double noise (``0.30566780000000005``) and a
+        Decimal sum's trailing zeros out of every API response.
+        """
+        self.total_cost_usd = canonical_cost_usd(self.total_cost_usd)
+        self.token_cost_usd = canonical_cost_usd(self.token_cost_usd)
+        self.compute_cost_usd = canonical_cost_usd(self.compute_cost_usd)
+        self.cost_by_model = _canonical_map(self.cost_by_model)
+        self.cost_by_tool = _canonical_map(self.cost_by_tool)
+        self.cost_by_tool_tokens = _canonical_map(self.cost_by_tool_tokens)
+
+    def record_measured(self, cost_field: CostField) -> None:
+        """Declare that this record's value for *cost_field* was really computed.
+
+        Call it beside the assignment it vouches for; the two together are what
+        makes the number readable as a measurement rather than a default.
+        """
+        self.unmeasured_fields -= {cost_field}
 
     @property
     def total_tokens(self) -> int:
@@ -166,7 +282,11 @@ class SessionCost:
             cost_by_tool_tokens=_coerce_decimal_dict(data.get("cost_by_tool_tokens")),
             is_finalized=data.get("is_finalized", False),
             agent_model=data.get("agent_model"),
+            requested_model=data.get("requested_model"),
+            tokens_by_model=dict(data.get("tokens_by_model") or {}),
+            tokens_by_requested_model=dict(data.get("tokens_by_requested_model") or {}),
             unpriced_observation_count=data.get("unpriced_observation_count", 0),
+            unmeasured_fields=_coerce_cost_fields(data.get("unmeasured_fields")),
             started_at=_coerce_datetime(data.get("started_at")),
             completed_at=_coerce_datetime(data.get("completed_at")),
         )
@@ -196,7 +316,11 @@ class SessionCost:
             "cost_by_tool_tokens": {k: str(v) for k, v in self.cost_by_tool_tokens.items()},
             "is_finalized": self.is_finalized,
             "agent_model": self.agent_model,
+            "requested_model": self.requested_model,
+            "tokens_by_model": dict(self.tokens_by_model),
+            "tokens_by_requested_model": dict(self.tokens_by_requested_model),
             "unpriced_observation_count": self.unpriced_observation_count,
+            "unmeasured_fields": sorted(self.unmeasured_fields),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         SetupPhaseSecrets,
     )
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
+    from syn_domain.contexts.agent_sessions import RolloutDocument
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationHandle,
@@ -34,6 +35,13 @@ if TYPE_CHECKING:
         WorkspaceAggregate,
     )
 
+from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
+from syn_adapters.workspace_backends.service.git_credential_renewal import (
+    CredentialSource,
+)
+from syn_adapters.workspace_backends.service.git_credential_renewal import (
+    renew_git_credential as _renew_git_credential,
+)
 from syn_adapters.workspace_backends.service.managed_workspace_ops import (
     interrupt_container,
 )
@@ -64,6 +72,11 @@ class ManagedWorkspace:
     sidecar_handle: SidecarHandle | None
     _service: WorkspaceService = field(repr=False)
     _tokens_injected: bool = False
+    #: How this workspace's git credential was minted, recorded by the setup
+    #: phase so it can be minted AGAIN later (#1393). None until the setup
+    #: phase has run, and for a workspace with no repositories at all, which
+    #: has no credential to renew.
+    _credential_source: CredentialSource | None = None
 
     @property
     def path(self) -> Path:
@@ -241,7 +254,33 @@ class ManagedWorkspace:
         Returns:
             ExecutionResult from setup script
         """
+        # Remembered BEFORE the run, and from the secrets rather than from the
+        # caller: this object is what `renew_git_credential` re-mints from, and
+        # a copy of the answers taken anywhere else could disagree with the
+        # credential actually installed here (#1393).
+        self._credential_source = CredentialSource(
+            repositories=tuple(secrets.repositories), can_open_pr=secrets.can_open_pr
+        )
         return await _run_setup_phase(self, secrets, setup_script)
+
+    async def renew_git_credential(self) -> None:
+        """Replace this container's git credential with a freshly minted one.
+
+        Satisfies the domain's ``GitWorkspace``. Lives on the workspace because
+        the credential does: it is a file inside THIS container, and the token
+        in it is scoped to the repositories THIS workspace was provisioned
+        with. See `git_credential_renewal` for why it expires before the
+        container does.
+
+        Raises:
+            CredentialRenewalFailedError: the credential is not known to be
+                usable. A workspace whose setup phase never ran holds no
+                credential to renew and returns quietly instead - nothing
+                downstream of it can be depending on one.
+        """
+        if self._credential_source is None:
+            return
+        await _renew_git_credential(self, self._credential_source)
 
     async def _clear_secrets(self) -> None:
         """Clear all traces of secrets from the container.
@@ -249,6 +288,18 @@ class ManagedWorkspace:
         Delegates to setup_phase.clear_secrets(). See that module for details.
         """
         await clear_secrets(self)
+
+    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
+        """The rollout codex wrote for this session, or None if it cannot be read.
+
+        Satisfies ``CodexRolloutPort``. Lives on the workspace because the file
+        is INSIDE this container and outlives nothing: once the workspace is
+        torn down the only copy of what model codex ran is gone (#1284).
+
+        Delegates to codex_rollout.read_codex_rollout(). See that module for
+        why the codex layout is not restated there.
+        """
+        return await read_codex_rollout(self, native_session_id)
 
     async def interrupt(self) -> bool:
         """Send SIGINT to the Claude CLI process inside the container.

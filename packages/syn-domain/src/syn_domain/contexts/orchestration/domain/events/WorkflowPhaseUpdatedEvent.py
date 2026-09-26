@@ -25,5 +25,8 @@ class WorkflowPhaseUpdatedEvent(DomainEvent):
     # Optional config overrides (None = unchanged from previous state)
     model: str | None = None
     provider: str | None = None
+    # Provenance of ``model`` (see PhaseDefinition.model_defaulted). Optional
+    # so events written before it replay unchanged: None = unchanged.
+    model_defaulted: bool | None = None
     timeout_seconds: int | None = None
     allowed_tools: list[str] | None = None

@@ -6,20 +6,16 @@ import contextlib
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 
-from syn_adapters.workspace_backends.agentic.capture_observation import (
-    SESSION_CAPTURE_OBSERVATION,
-    read_agent_session_ids,
-)
 from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
+from syn_api.model_identity import cost_by_observed_model
 from syn_api.types import (
-    BranchObservationInfo,
     Err,
     ExecutionDetail,
     ExecutionDetailFull,
@@ -28,8 +24,8 @@ from syn_api.types import (
     Ok,
     PhaseExecution,
     Result,
-    ToolOperation,
 )
+from syn_domain import tool_call_counts
 from syn_domain.pagination import Page
 from syn_shared.display import (
     format_cost,
@@ -43,12 +39,17 @@ from .models import (
     ExecutionDetailResponse,
     ExecutionListResponse,
     ExecutionSummaryResponse,
-    PhaseExecutionInfo,
-    PhaseOperationInfo,
+)
+from .phase_mapping import (
+    _load_agent_session_ids,
+    _map_phase_detail,
+    _map_phase_to_response,
+    load_configured_models,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
+    from datetime import datetime
 
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
@@ -57,6 +58,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
     )
+
+    from .models import PhaseExecutionInfo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["executions"])
@@ -195,246 +198,10 @@ def _build_execution_summary_response(
         duration_display=format_duration_seconds(duration_seconds),
         tool_call_count=e.tool_call_count,
         error_message=e.error_message,
+        failure_classification=e.failure_classification,
+        reported_failure_reason=e.reported_failure_reason,
         repos=list(e.repos),
         repos_display=format_repos(e.repos),
-    )
-
-
-def _parse_iso(value: str) -> datetime | None:
-    """Parse an ISO datetime string, handling trailing 'Z' safely."""
-    raw = value.strip()
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(raw)
-    except ValueError:
-        logger.warning("Failed to parse datetime from value %r", value)
-        return None
-
-
-def _parse_dt(value: datetime | str | None) -> datetime | None:
-    """Normalise a datetime-or-string field to datetime."""
-    if value is None:
-        return None
-    return _parse_iso(value) if isinstance(value, str) else value
-
-
-async def _load_phase_operations(
-    manager: ProjectionManager,
-    session_id: str,
-) -> list[ToolOperation]:
-    """Load tool operations for a session, returning [] on failure."""
-    try:
-        tool_data = await manager.session_tools.get(session_id)
-        return [ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])]
-    except Exception:
-        logger.exception("Failed to load tool ops for session %s", session_id)
-        return []
-
-
-class _SessionCostData(NamedTuple):
-    cache_creation: int
-    cache_read: int
-    agent_model: str | None
-    cost_by_model: dict[str, Decimal]
-
-
-async def _load_session_cost(
-    manager: ProjectionManager, session_id: str, phase: PhaseExecutionDetail
-) -> _SessionCostData:
-    """Load session cost enrichment data (cache tokens, model info)."""
-    cache_creation = phase.cache_creation_tokens
-    cache_read = phase.cache_read_tokens
-    agent_model: str | None = None
-    cost_by_model: dict[str, Decimal] = {}
-    try:
-        sc = await manager.session_cost.get_session_cost(session_id)
-        if sc is not None:
-            if cache_creation == 0 and cache_read == 0:
-                cache_creation = sc.cache_creation_tokens
-                cache_read = sc.cache_read_tokens
-            agent_model = sc.agent_model
-            cost_by_model = dict(sc.cost_by_model)
-    except Exception:
-        logger.debug("Failed to load session cost for %s", session_id, exc_info=True)
-    return _SessionCostData(cache_creation, cache_read, agent_model, cost_by_model)
-
-
-async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | None]:
-    """Which agent-native session ids each of this execution's phases produced.
-
-    Keyed by the phase's ``session_id`` - the uuid4 the HOST assigns per phase
-    run. The values are the ids the AGENTS chose for themselves, which is a
-    disjoint namespace: the host never passes its id to the agent, so nothing
-    else in the system relates the two, and without this an execution cannot be
-    traced to the transcripts it produced (#1185).
-
-    A phase maps to MANY, because one phase yields several whenever it
-    delegates - a codex phase handing work to claude, a subagent, a resumed
-    thread.
-
-    THREE-VALUED, and the caller must keep it that way. ``[]`` means the
-    exporter looked and confirmed none; a MISSING KEY means nobody could tell
-    us, which is what ``dict.get`` already returns as ``None``. Collapsing the
-    two turns a version skew, or a telemetry outage, into a reported loss.
-
-    Lane 2, so it fails soft: an unreachable event store answers "we cannot
-    tell you" for every phase rather than failing a read of the domain truth,
-    which is in Lane 1 and unaffected.
-    """
-    try:
-        from syn_api._wiring import get_event_store_instance
-
-        # ONE query for the whole execution, not one per phase.
-        #
-        # ENVELOPE WARNING: `query_by_execution` FLATTENS the payload to the top
-        # level, where `query`/`query_recent_by_types` nest it under `data`. So
-        # the row IS the payload here, and passing `row["data"]` would read an
-        # absent key on every row - the same misreading that once made every
-        # healthy capture row report as UNKNOWN. Flattening is lossless for this
-        # payload because the write path strips the envelope's own key names
-        # from it (`RESERVED_OBSERVATION_KEYS`, then `_EXCLUDED_KEYS`), so a
-        # stored payload cannot shadow `session_id`.
-        rows = await get_event_store_instance().query_by_execution(
-            execution_id, event_type=SESSION_CAPTURE_OBSERVATION
-        )
-    except Exception:
-        logger.debug("Failed to load capture observations for %s", execution_id, exc_info=True)
-        return {}
-
-    by_session: dict[str, list[str] | None] = {}
-    for row in rows:
-        session_id = row.get("session_id")
-        if not isinstance(session_id, str) or not session_id:
-            continue
-        # Rows arrive newest first, so the first one wins: a phase re-probed
-        # after a retry is described by its most recent verdict.
-        if session_id not in by_session:
-            by_session[session_id] = read_agent_session_ids(row)
-    return by_session
-
-
-async def _map_phase_detail(
-    phase: PhaseExecutionDetail,
-    manager: ProjectionManager,
-    agent_sessions: dict[str, list[str] | None],
-) -> PhaseExecution:
-    """Map a domain phase to an API PhaseExecution.
-
-    ``agent_sessions`` is the execution-wide capture lookup from
-    ``_load_agent_session_ids``, passed in rather than fetched here so the
-    query runs once per execution instead of once per phase.
-    """
-    ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else []
-
-    if phase.session_id:
-        sc = await _load_session_cost(manager, phase.session_id, phase)
-    else:
-        sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
-
-    duration_seconds = resolve_duration_seconds(
-        phase.status,
-        started_at=phase.started_at,
-        completed_at=phase.completed_at,
-        recorded_seconds=phase.duration_seconds,
-    )
-
-    return PhaseExecution(
-        phase_id=phase.workflow_phase_id,
-        name=phase.name,
-        status=phase.status,
-        session_id=phase.session_id,
-        artifact_id=phase.artifact_id,
-        error_message=phase.error_message,
-        input_tokens=phase.input_tokens,
-        output_tokens=phase.output_tokens,
-        cache_creation_tokens=sc.cache_creation,
-        cache_read_tokens=sc.cache_read,
-        cost_usd=Decimal("0"),  # Lane 2: enriched via _enrich_costs from execution_cost (#695)
-        duration_seconds=duration_seconds,
-        started_at=_parse_dt(phase.started_at),
-        completed_at=_parse_dt(phase.completed_at),
-        model=sc.agent_model,
-        cost_by_model=sc.cost_by_model,
-        # `.get` on purpose: a phase with no capture row is "not reported",
-        # which is None - never [], which would claim a confirmed empty sweep.
-        agent_session_ids=agent_sessions.get(phase.session_id) if phase.session_id else None,
-        # None stays None for the same reason it does above: it means nothing
-        # read this phase's workspace, which is not the same statement as an
-        # empty list's "read it, and no branch had moved" (#1200).
-        observed_branches=(
-            None
-            if phase.observed_branches is None
-            else [
-                BranchObservationInfo(
-                    repo=w.repo,
-                    branch=w.branch,
-                    remote=w.remote,
-                    remote_commit=w.remote_commit,
-                    remote_commit_at_phase_start=w.remote_commit_at_phase_start,
-                    unpushed_commits=w.unpushed_commits,
-                )
-                for w in phase.observed_branches
-            ]
-        ),
-        operations=ops,
-    )
-
-
-def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
-    """Map an API PhaseExecution to an HTTP response model."""
-    operations = [
-        PhaseOperationInfo(
-            operation_id=op.observation_id,
-            operation_type=op.operation_type,
-            timestamp=str(op.timestamp) if op.timestamp else None,
-            tool_name=op.tool_name,
-            tool_use_id=op.tool_use_id,
-            # `None` here means the row carries no verdict (a tool that has
-            # only started), NOT that it went fine. It is rendered True
-            # because the dashboard reads this field as a strict boolean and
-            # would paint every in-flight operation red otherwise. What
-            # changed in #1196 is that a row which DID fail no longer arrives
-            # as None: `read_verdict` settles it to False upstream, so this
-            # default can no longer swallow a failure.
-            success=op.success if op.success is not None else True,
-            error_message=op.error_message,
-        )
-        for op in (phase.operations or [])
-    ]
-    return PhaseExecutionInfo(
-        phase_id=phase.phase_id,
-        name=phase.name,
-        status=phase.status,
-        session_id=phase.session_id,
-        artifact_id=phase.artifact_id,
-        error_message=phase.error_message,
-        input_tokens=phase.input_tokens,
-        output_tokens=phase.output_tokens,
-        cache_creation_tokens=phase.cache_creation_tokens,
-        cache_read_tokens=phase.cache_read_tokens,
-        total_tokens=phase.input_tokens
-        + phase.output_tokens
-        + phase.cache_creation_tokens
-        + phase.cache_read_tokens,
-        duration_seconds=phase.duration_seconds,
-        cost_usd=Decimal(str(phase.cost_usd)),
-        unpriced_observation_count=phase.unpriced_observation_count,
-        started_at=str(phase.started_at) if phase.started_at else None,
-        completed_at=str(phase.completed_at) if phase.completed_at else None,
-        model=phase.model,
-        cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
-        # Same model, passed through rather than rebuilt: this constructor is
-        # the hop that has dropped a field twice (#891, #1176), and a phase
-        # whose branch nobody knows about is exactly the thing this field
-        # exists to stop being invisible (#1200).
-        observed_branches=phase.observed_branches,
-        # Passed through verbatim, None included: this constructor re-lists
-        # every field by hand and is exactly the hop that drops one (#891,
-        # #1176). `or []` here would erase the not-reported/confirmed-none
-        # distinction the field exists to carry.
-        agent_session_ids=phase.agent_session_ids,
-        operations=operations,
     )
 
 
@@ -502,26 +269,32 @@ async def _load_execution_enrichment(
 
 
 async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
-    """Query tool_execution_completed counts from agent_events."""
+    """Tool calls per execution, read from the tally.
+
+    This used to be a ``COUNT(*)`` over ``agent_events`` filtered on
+    ``event_type``, which is in neither of that hypertable's compression keys
+    and so could only be answered by decompressing every segment of every
+    execution on the page - 4-30s for one page of the list this serves
+    (#1322). ``tool_call_counts`` keeps the number instead of deriving it.
+
+    Keyed by the execution id AS the tally holds it: the writer sanitises the
+    id (AgentEvent's validator), so both the ids bound here and the keys of the
+    returned mapping have to be in that spelling, or a caller looks its count
+    up under a name the result never carries (#1241).
+    """
     try:
+        from syn_adapters.postgres_text import pg_safe
         from syn_api._wiring import get_event_store_instance
 
+        execution_ids = [pg_safe(eid) for eid in execution_ids]
         event_store = get_event_store_instance()
         pool = event_store.pool
         if pool is None:
             return {}
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT execution_id, COUNT(*) AS cnt "
-                "FROM agent_events "
-                "WHERE execution_id = ANY($1) "
-                "  AND event_type = 'tool_execution_completed' "
-                "GROUP BY execution_id",
-                execution_ids,
-            )
-        return {row["execution_id"]: row["cnt"] for row in rows}
+            return await tool_call_counts.by_execution(conn, execution_ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
     except Exception:
-        logger.debug("Could not query tool counts from agent_events", exc_info=True)
+        logger.debug("Could not read tool counts from the tally", exc_info=True)
         return {}
 
 
@@ -591,6 +364,8 @@ def _to_execution_summary(
         total_output_tokens=s.total_output_tokens,
         total_cache_creation_tokens=s.total_cache_creation_tokens,
         total_cache_read_tokens=s.total_cache_read_tokens,
+        failure_classification=s.failure_classification,
+        reported_failure_reason=s.reported_failure_reason,
         total_cost_usd=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
         tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
@@ -663,7 +438,11 @@ async def get(
             unknown_duration_phase_count=duration.unknown_phase_count,
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
+            failure_classification=detail.failure_classification,
+            reported_failure_reason=detail.reported_failure_reason,
             repos=list(detail.repos),
+            task=detail.task,
+            inputs=dict(detail.inputs),
         )
     )
 
@@ -714,7 +493,7 @@ async def _enrich_costs(
         # breakdown that named only codex, and the difference was invisible.
         phase_models = exec_cost.models_by_phase.get(phase.phase_id)
         if phase_models:
-            phase.cost_by_model = dict(phase_models)
+            phase.cost_by_model = cost_by_observed_model(phase_models)
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
 
     return _EnrichedExecutionCost(
@@ -733,7 +512,11 @@ async def get_detail(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     agent_sessions = await _load_agent_session_ids(execution_id)
-    phases = [await _map_phase_detail(p, manager, agent_sessions) for p in detail.phases]
+    configured_models = await load_configured_models(manager, detail.workflow_id)
+    phases = [
+        await _map_phase_detail(p, manager, agent_sessions, configured_models)
+        for p in detail.phases
+    ]
     # Folded from the phases this response already carries, so the header total
     # and the timeline below it are the same numbers by construction.
     duration = _DurationTotal.over(p.duration_seconds for p in phases)
@@ -766,9 +549,13 @@ async def get_detail(
             started_at=detail.started_at,
             completed_at=detail.completed_at,
             error_message=detail.error_message,
+            failure_classification=detail.failure_classification,
+            reported_failure_reason=detail.reported_failure_reason,
             repos=list(detail.repos),
             total_duration_seconds=duration.seconds,
             unknown_duration_phase_count=duration.unknown_phase_count,
+            task=detail.task,
+            inputs=dict(detail.inputs),
         )
     )
 
@@ -807,6 +594,8 @@ async def list_active(
                     cost_by_execution, s.workflow_execution_id
                 ).unpriced_observation_count,
                 error_message=s.error_message,
+                failure_classification=s.failure_classification,
+                reported_failure_reason=s.reported_failure_reason,
                 repos=list(s.repos),
             )
             for s in active
@@ -873,6 +662,22 @@ async def list_executions_endpoint(
     )
 
 
+def _models_run(phases: list[PhaseExecutionInfo]) -> set[str]:
+    """Every model an execution's phases ran, for its cache rate labels.
+
+    A phase's ``cost_by_model`` keys are what it was priced as, including the
+    unattributed-model bucket (which has no rate, so it correctly blanks the
+    label). A phase with no breakdown yet contributes its reported model.
+    """
+    models: set[str] = set()
+    for phase in phases:
+        if phase.cost_by_model:
+            models.update(phase.cost_by_model)
+        elif phase.model:
+            models.add(phase.model)
+    return models
+
+
 @router.get("/executions/{execution_id}", response_model=ExecutionDetailResponse)
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
@@ -893,6 +698,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     total_cache_creation = sum(p.cache_creation_tokens for p in phases)
     total_cache_read = sum(p.cache_read_tokens for p in phases)
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
+    cache_rates = cache_rate_display(_models_run(phases))
     return ExecutionDetailResponse(
         workflow_execution_id=detail.workflow_execution_id,
         workflow_id=detail.workflow_id,
@@ -913,9 +719,15 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         ),
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
         unpriced_observation_count=detail.unpriced_observation_count,
+        cache_read_rate_display=cache_rates.cache_read_rate_display,
+        cache_write_rate_display=cache_rates.cache_write_rate_display,
         artifact_ids=artifact_ids,
         error_message=detail.error_message,
+        failure_classification=detail.failure_classification,
+        reported_failure_reason=detail.reported_failure_reason,
         repos=list(detail.repos),
         total_duration_seconds=detail.total_duration_seconds,
         unknown_duration_phase_count=detail.unknown_duration_phase_count,
+        task=detail.task,
+        inputs=dict(detail.inputs),
     )

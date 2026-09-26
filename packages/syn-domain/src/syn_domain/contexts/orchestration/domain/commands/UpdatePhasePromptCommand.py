@@ -28,5 +28,8 @@ class UpdatePhasePromptCommand(BaseModel):
     # Optional config overrides (None = keep existing value)
     model: str | None = None
     provider: str | None = None
+    # Set by UpdateWorkflowPhaseHandler when it normalises the phase's model,
+    # never by a caller. None = unchanged.
+    model_defaulted: bool | None = None
     timeout_seconds: int | None = None
     allowed_tools: list[str] | None = None

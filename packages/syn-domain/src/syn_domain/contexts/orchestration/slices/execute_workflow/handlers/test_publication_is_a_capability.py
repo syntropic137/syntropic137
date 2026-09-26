@@ -56,6 +56,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_shared.env_constants import ENV_GITHUB_TOKEN
 
 if TYPE_CHECKING:
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
@@ -129,8 +130,9 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
             inputs: dict[str, str],
             execution_id: str,
             repos: list[RepositoryRef],
+            admitted: AdmissionTicket | None = None,
         ) -> WorkflowExecutionResult:
-            del workflow_name, inputs, repos
+            del workflow_name, inputs, repos, admitted
             captured.extend(phases)
             return WorkflowExecutionResult(
                 workflow_id=workflow_id,
@@ -149,9 +151,14 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
     )
     await handler.handle(ExecuteWorkflowCommand(aggregate_id=definition.id))
 
-    assert [p.phase_id for p in captured] == ["bootstrap", "implement", "verify", "open_pr"], (
-        "the workflow's phase list changed; these assertions name phases by id"
-    )
+    assert [p.phase_id for p in captured] == [
+        "premise",
+        "implement",
+        "verify",
+        "fix",
+        "reverify",
+        "open_pr",
+    ], "the workflow's phase list changed; these assertions name phases by id"
     return {p.phase_id: p for p in captured}
 
 
@@ -248,7 +255,7 @@ class TestOnlyOpenPrCanPublish:
         assert f"oauth_token: {_PUBLISHING_TOKEN}" in provisioned.setup_script
         assert _SCOPED_TOKEN not in provisioned.setup_script
 
-    @pytest.mark.parametrize("phase_id", ["bootstrap", "implement", "verify"])
+    @pytest.mark.parametrize("phase_id", ["premise", "implement", "verify"])
     async def test_no_earlier_phase_asks_for_publication(self, phase_id: str) -> None:
         """Every mint this phase performs states it may not publish.
 

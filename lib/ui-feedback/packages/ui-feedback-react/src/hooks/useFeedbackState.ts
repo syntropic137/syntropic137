@@ -7,6 +7,7 @@ import type {
   FeedbackCreate,
   FeedbackItem,
   FeedbackState,
+  FeedbackSubject,
   LocationContext,
   MediaUpload,
 } from '../types';
@@ -20,6 +21,7 @@ export interface UseFeedbackStateOptions {
   gitCommit?: string;
   gitBranch?: string;
   hostname?: string;
+  subject?: FeedbackSubject | null;
   disabled?: boolean;
 }
 
@@ -32,11 +34,11 @@ export interface UseFeedbackStateResult {
   addMedia: (media: MediaUpload) => void;
   removeMedia: (index: number) => void;
   clearMedia: () => void;
-  submitFeedback: (data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname'>) => Promise<FeedbackItem>;
+  submitFeedback: (data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname' | 'subject_kind' | 'subject_id'>) => Promise<FeedbackItem>;
 }
 
 export function useFeedbackState({
-  api, appName, appVersion, environment, gitCommit, gitBranch, hostname, disabled,
+  api, appName, appVersion, environment, gitCommit, gitBranch, hostname, subject, disabled,
 }: UseFeedbackStateOptions): UseFeedbackStateResult {
   const [state, setState] = useState<FeedbackState>({
     isOpen: false, isFeedbackMode: false, locationContext: null, pendingMedia: [],
@@ -72,13 +74,14 @@ export function useFeedbackState({
   }, []);
 
   const submitFeedback = useCallback(
-    async (data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname'>): Promise<FeedbackItem> => {
+    async (data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname' | 'subject_kind' | 'subject_id'>): Promise<FeedbackItem> => {
       const item = await api.createFeedback({
         ...data,
         app_name: appName,
         app_version: appVersion,
         user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
         environment, git_commit: gitCommit, git_branch: gitBranch, hostname,
+        subject_kind: subject?.kind, subject_id: subject?.id,
       });
 
       for (const media of state.pendingMedia) {
@@ -88,7 +91,7 @@ export function useFeedbackState({
       closeModal();
       return item;
     },
-    [api, appName, appVersion, environment, gitCommit, gitBranch, hostname, state.pendingMedia, closeModal],
+    [api, appName, appVersion, environment, gitCommit, gitBranch, hostname, subject, state.pendingMedia, closeModal],
   );
 
   return {

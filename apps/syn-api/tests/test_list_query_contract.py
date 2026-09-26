@@ -127,6 +127,7 @@ async def _seed_session(
     status: str = "completed",
     started_at: str | None,
     workflow_id: str = "wf-1",
+    execution_id: str = "exec-1",
 ) -> None:
     from syn_api._wiring import ensure_connected, get_projection_mgr
 
@@ -138,6 +139,7 @@ async def _seed_session(
         {
             "id": row_id,
             "workflow_id": workflow_id,
+            "execution_id": execution_id,
             "agent_type": "claude",
             "status": status,
             "started_at": started_at,
@@ -153,6 +155,7 @@ async def _seed_artifact(
     artifact_type: str = "other",
     created_at: str | None,
     workflow_id: str = "wf-1",
+    execution_id: str = "ex-1",
     phase_id: str | None = "phase-1",
     name: str = "Deliverable",
 ) -> None:
@@ -172,7 +175,7 @@ async def _seed_artifact(
         {
             "id": row_id,
             "workflow_id": workflow_id,
-            "execution_id": "ex-1",
+            "execution_id": execution_id,
             "session_id": None,
             "phase_id": phase_id,
             "artifact_type": artifact_type,
@@ -239,11 +242,18 @@ class _ArtifactPage(NamedTuple):
 
     A ``Mapping[str, Any]`` would type nothing and spend the untyped-dicts
     budget to say less than this does. The page has four numbers and a facet
-    tally, and every assertion below is about one of them; the rows are only
-    ever asked for their ids, so that is what is kept.
+    tally, and every assertion below is about one of them; the rows are asked
+    for their id and the execution that produced them, so that is what is kept.
     """
 
     ids: list[str]
+    execution_ids: list[str | None]
+    """Each row's ``execution_id``, in row order.
+
+    Kept because ``?execution_id=`` cannot be verified from ids alone: a page
+    of the right length says nothing about which run it came from, which is
+    precisely how the ignored filter passed for an answer (#1306).
+    """
     total: int
     page: int
     page_size: int
@@ -255,6 +265,9 @@ async def _artifacts(**params: QueryValue) -> _ArtifactPage:
     body = await _get("syn_api.routes.artifacts", "/artifacts", **params)
     return _ArtifactPage(
         ids=[a["id"] for a in body["artifacts"]],
+        # By key, not `.get`: a row that stopped carrying its execution fails
+        # here instead of reading as an artifact no run produced (#1306).
+        execution_ids=[a["execution_id"] for a in body["artifacts"]],
         total=body["total"],
         page=body["page"],
         page_size=body["page_size"],
@@ -1214,3 +1227,100 @@ async def test_artifacts_the_excluded_count_survives_paging():
     assert len(last.ids) == 5
     assert last.total == 30
     assert last.excluded_undated == 7
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sessions_execution_id_selects_rows_over_http() -> None:
+    """`execution_id` must select rows, not be accepted and discarded (#1263).
+
+    THE DEFECT THIS PROTECTS. The parameter was undeclared, and FastAPI drops
+    an unknown query parameter silently, so a real id, a nonsense id and no
+    filter all returned the whole collection. Nothing 4xx'd, and the answer
+    looked like data.
+
+    WHY AT THIS LEVEL. The projection-level tests exercise `page()` directly,
+    which is BELOW the two hops where the defect actually lived: endpoint ->
+    `list_sessions`, and `list_sessions` -> `projection.page`. Removing either
+    forwarding argument recreates the silent drop while leaving every
+    projection test green - confirmed by mutation, 53 passed 0 failed. Only an
+    HTTP-level exercise sees what a client sees.
+    """
+    await _seed_session("s-a1", started_at=_at(1), execution_id="exec-a")
+    await _seed_session("s-a2", started_at=_at(2), execution_id="exec-a")
+    await _seed_session("s-b1", started_at=_at(3), execution_id="exec-b")
+
+    bogus = await _sessions(execution_id="exec-TOTALLY-BOGUS")
+    assert bogus["sessions"] == [], "a nonsense execution id returned rows"
+    assert bogus["total"] == 0, "a nonsense execution id returned a non-zero total"
+
+    only_a = await _sessions(execution_id="exec-a")
+    assert {s["id"] for s in only_a["sessions"]} == {"s-a1", "s-a2"}
+    assert only_a["total"] == 2
+
+    everything = await _sessions()
+    assert everything["total"] == 3, "omitting the filter must not narrow"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_artifacts_execution_id_selects_rows_over_http() -> None:
+    """`execution_id` must select rows, not be accepted and discarded (#1306).
+
+    THE DEFECT THIS PROTECTS. The parameter was undeclared, and FastAPI drops
+    an unknown query parameter silently, so a real id, a nonsense id and no
+    filter all returned the same unfiltered page. An agent asking for "this
+    run's deliverable" got whatever run wrote most recently, and nothing 4xx'd.
+
+    THE BOGUS ID IS THE ASSERTION THAT DECIDES IT. "A real id returns rows" was
+    true of the broken endpoint too - it returned every row - so only the empty
+    answer separates a filter that works from one that is ignored.
+
+    WHY OVER HTTP. The projection's `page()` already honoured `execution_id`
+    before this fix; the drop was at the two hops above it, endpoint ->
+    `list_artifacts` and `list_artifacts` -> `page()`. A test that calls the
+    projection, or the endpoint function directly, passes with either hop
+    deleted - an undeclared parameter is a `TypeError` in Python and a silent
+    success over the wire, and only the second is what a client experiences.
+    """
+    await _seed_artifact("a-x1", created_at=_at(1), execution_id="ex-x")
+    await _seed_artifact("a-x2", created_at=_at(2), execution_id="ex-x")
+    await _seed_artifact("a-y1", created_at=_at(3), execution_id="ex-y")
+
+    bogus = await _artifacts(execution_id="ex-TOTALLY-BOGUS")
+    assert bogus.ids == [], "a nonsense execution id returned rows"
+    assert bogus.total == 0, "a nonsense execution id returned a non-zero total"
+
+    only_x = await _artifacts(execution_id="ex-x")
+    assert set(only_x.ids) == {"a-x1", "a-x2"}
+    assert only_x.total == 2, "total must count the filtered collection, not all of it"
+
+    everything = await _artifacts()
+    assert everything.total == 3, "omitting the filter must not narrow"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_artifacts_rows_say_which_execution_produced_them() -> None:
+    """Each row reports its `execution_id`, so a client can check the filter (#1306).
+
+    Half of the same defect, and the half that made the other half invisible.
+    The rows carried no execution at all, so a client had no way to tell a
+    honoured filter from an ignored one on its own side - the page looked
+    identical either way. Reporting it is what makes the filter auditable
+    rather than merely trusted.
+
+    The values here could not arise from a default: `ex-x` and `ex-y` are
+    seeded distinctly and asserted per row, so a response model that declared
+    the field and an endpoint that never populated it - the exact hop this
+    codebase drops things at - fails here rather than answering `None` twice.
+    """
+    await _seed_artifact("a-x1", created_at=_at(1), execution_id="ex-x")
+    await _seed_artifact("a-y1", created_at=_at(2), execution_id="ex-y")
+
+    page = await _artifacts()
+
+    assert dict(zip(page.ids, page.execution_ids, strict=True)) == {
+        "a-x1": "ex-x",
+        "a-y1": "ex-y",
+    }

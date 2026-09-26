@@ -46,6 +46,11 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools:
       - Read
       - Grep
@@ -79,6 +84,11 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools:
       - Read
       - Grep
@@ -110,12 +120,19 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     agent:
       provider: codex
-      # The CONCRETE model id, not the `gpt-5.6` alias. An aliased or unnamed
-      # model resolves to no rate and the run completes UNPRICED (#892) - and an
-      # unpriced run is a lost data point in a cost experiment.
-      model: gpt-5.6-sol
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
     prompt_file: phases/cross-model-review.md
 
   - id: revise
@@ -127,6 +144,11 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools:
       - Read
       - Grep

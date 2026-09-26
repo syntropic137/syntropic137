@@ -7,12 +7,13 @@ obtain properly-configured domain handlers and projections.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort
@@ -29,8 +30,10 @@ if TYPE_CHECKING:
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
     from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
-    from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
+        SessionObservationPort,
+    )
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
@@ -79,6 +82,7 @@ if TYPE_CHECKING:
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
+from syn_adapters.projections.session_timeline_memory import get_in_memory_session_timeline
 
 # Re-exported, not defined here: joining the event publisher to the projection
 # manager needs neither half of this app, and the artifact backfill migration
@@ -102,6 +106,11 @@ from syn_adapters.storage.repositories import (
     get_workflow_execution_repository,
 )
 from syn_adapters.workspace_backends.service import WorkspaceService
+from syn_api._wiring_admission import (
+    BackgroundWorkflowDispatcher,
+    get_admission_gate,
+    get_maintenance_port,
+)
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared.agents import (
@@ -288,10 +297,9 @@ def _build_claude_command(
     prompt: str,
 ) -> list[str]:
     """Build the Claude CLI command for agent execution."""
-    # `AgentConfiguration.model` is `str | None` because a codex phase can
-    # leave it unset (see syn_shared.agents.DEFAULT_CLAUDE_MODEL).
-    # A claude-provider phase always resolves a concrete model (the domain
-    # default "haiku" when the YAML omits `model:`), so `None` here would
+    # `AgentConfiguration.model` is typed `str | None`, but a claude-provider
+    # phase always resolves a concrete model (the persisted template default,
+    # else syn_shared.agents.DEFAULT_CLAUDE_MODEL), so `None` here would
     # indicate a construction bug elsewhere, not a real "unset" case worth
     # silently tolerating - fail loudly instead of forwarding `--model None`.
     model = phase.agent_config.model
@@ -428,7 +436,7 @@ def _substitute_builtins(
 def _substitute_inputs(
     template: str,
     phase: ExecutablePhase,
-    inputs: dict[str, Any] | None,
+    inputs: Mapping[str, object] | None,
     phase_outputs: dict[str, str],
 ) -> str:
     """Layers 2a-2d: Replace workflow inputs, phase inputs, outputs, and $ARGUMENTS."""
@@ -469,7 +477,7 @@ async def _build_workspace_prompt(
     workflow_id: str,
     repo_url: str | None,
     phase_outputs: dict[str, str],
-    inputs: dict[str, Any] | None = None,
+    inputs: Mapping[str, object] | None = None,
 ) -> str:
     """Build the workspace prompt for a phase.
 
@@ -854,101 +862,6 @@ def get_controller() -> ExecutionController:
 logger = logging.getLogger(__name__)
 
 
-class BackgroundWorkflowDispatcher:
-    """Bridges WorkflowDispatchProjection → ExecuteWorkflowHandler.
-
-    - run_workflow() → handler.handle() bridge
-    - Fire-and-forget via asyncio.Task (never blocks projection loop)
-    - Tracks tasks for graceful shutdown
-    - Semaphore-bounded concurrency (Phase A2)
-    """
-
-    def __init__(self, handler: ExecuteWorkflowHandler, max_concurrent: int = 1) -> None:
-        """`max_concurrent` defaults to 1 for the same reason the setting does.
-
-        A caller that omits it used to get 5, which quietly reintroduced the
-        unsafe value the setting exists to avoid (#865). The safe value has to
-        be the one you get by saying nothing.
-        """
-        self._handler = handler
-        self._tasks: set[asyncio.Task[None]] = set()
-        self._semaphore = asyncio.Semaphore(max_concurrent)
-
-    async def run_workflow(
-        self,
-        workflow_id: str,
-        inputs: dict[str, str],
-        execution_id: str = "",
-        task: str | None = None,
-        repos: list[RepositoryRef] | None = None,
-    ) -> None:
-        # SYNCHRONOUS refusal, before the task exists (#1039). Everything after
-        # this line is fire-and-forget: `WorkflowDispatchProjection` awaits
-        # this method and then writes `status="dispatched"`, so anything that
-        # fails inside the task leaves a trigger record claiming a run that has
-        # no execution stream and never will. Raising HERE reaches the
-        # projection's `dispatch_exception` path, which marks the record
-        # `failed` - the state that is actually true.
-        await self._handler.validate_stored_declarations(workflow_id)
-
-        asyncio_task = asyncio.create_task(
-            self._run_with_semaphore(workflow_id, inputs, execution_id, task=task, repos=repos),
-            name=f"workflow-exec-{execution_id or workflow_id}",
-        )
-        self._tasks.add(asyncio_task)
-        asyncio_task.add_done_callback(self._tasks.discard)
-
-    async def _run_with_semaphore(
-        self,
-        workflow_id: str,
-        inputs: dict[str, str],
-        execution_id: str,
-        task: str | None = None,
-        repos: list[RepositoryRef] | None = None,
-    ) -> None:
-        async with self._semaphore:
-            await self._run(workflow_id, inputs, execution_id, task=task, repos=repos)
-
-    async def _run(
-        self,
-        workflow_id: str,
-        inputs: dict[str, str],
-        execution_id: str,
-        task: str | None = None,
-        repos: list[RepositoryRef] | None = None,
-    ) -> None:
-        from syn_domain.contexts.orchestration import (
-            DuplicateExecutionError,
-            ExecuteWorkflowCommand,
-        )
-
-        try:
-            cmd = ExecuteWorkflowCommand(
-                aggregate_id=workflow_id,
-                inputs=inputs or {},
-                repos=repos or [],
-                execution_id=execution_id or None,
-                task=task,
-            )
-            await self._handler.handle(cmd)
-        except DuplicateExecutionError:
-            logger.info(
-                "Duplicate dispatch for execution %s, already running",
-                execution_id,
-            )
-        except Exception:
-            logger.exception(
-                "Background workflow execution raised exception",
-                extra={"workflow_id": workflow_id, "execution_id": execution_id},
-            )
-
-    async def shutdown(self) -> None:
-        for task in list(self._tasks):
-            task.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-
-
 async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     """Single composition root for ExecuteWorkflowHandler.
 
@@ -976,6 +889,10 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
         workflow_repository=get_workflow_repository(),
         phase_plugin_resolver=resolution_service.resolve_for_phase,
         phase_skill_resolver=skill_resolution_service.resolve_for_phase,
+        # #1387: the backstop. Both admission paths refuse earlier and more
+        # informatively than this, but a path added later that only knows about
+        # the handler is still refused rather than silently admitted.
+        maintenance=get_maintenance_port(),
     )
 
 
@@ -985,7 +902,11 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     from syn_shared.settings import get_settings
 
     max_concurrent = get_settings().polling.max_concurrent_dispatches
-    return BackgroundWorkflowDispatcher(handler, max_concurrent=max_concurrent)
+    return BackgroundWorkflowDispatcher(
+        handler,
+        max_concurrent=max_concurrent,
+        maintenance=get_admission_gate(),
+    )
 
 
 class _NullSignalQueueAdapter:
@@ -1003,6 +924,26 @@ class _NullSignalQueueAdapter:
 
 def get_event_store_instance() -> AgentEventStore:
     """Return the AgentEventStore for TimescaleDB queries."""
+    return get_event_store()
+
+
+def get_session_observations() -> SessionObservationPort:
+    """Return the recorder a session's operations are written to (Lane 2).
+
+    Production: the AgentEventStore that owns the ``agent_events`` hypertable,
+    which ``SessionToolsProjection`` then queries. Test and offline: the
+    in-memory timeline, which IS that projection there.
+
+    Either way this returns the same object the read path reads, and that is
+    the whole point of the function existing. #1034 was a write and a read
+    wired to two different lanes with nothing connecting them, so the one
+    decision worth hiding behind a name is which lane a session operation
+    lives on.
+    """
+    from syn_shared.settings import get_settings
+
+    if get_settings().uses_in_memory_stores:
+        return get_in_memory_session_timeline()
     return get_event_store()
 
 

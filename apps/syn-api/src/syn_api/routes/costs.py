@@ -15,11 +15,13 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from syn_api._wiring import ensure_connected, get_execution_cost_query, get_session_cost_query
+from syn_api.model_identity import CostModelKey, cost_by_observed_model
 from syn_api.types import (
     CostSummary,
     Err,
     ExecutionCostData,
     MetricsError,
+    ModelCostEntry,
     Ok,
     Result,
     SessionCostData,
@@ -56,7 +58,9 @@ class SessionCostResponse(BaseModel):
     tool_calls: int = 0
     turns: int = 0
     duration_ms: float = 0
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
+    """Cost per REPORTED model id; ``unattributed-model`` holds cost whose model
+    no harness reported. Never keyed by an alias (ADR-067 D9)."""
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     tokens_by_tool: dict[str, int] = Field(default_factory=dict)
     cost_by_tool_tokens: dict[str, str] = Field(default_factory=dict)
@@ -64,6 +68,14 @@ class SessionCostResponse(BaseModel):
     """Observations whose model had no rate and so contributed no cost.
 
     Non-zero means this cost is INCOMPLETE, not that the work was free.
+    """
+    unmeasured_fields: list[str] = Field(default_factory=list)
+    """Names of fields on this response whose value was never measured.
+
+    Each entry names a field above that holds its default rather than a
+    reading - ``compute_cost_usd`` at ``0`` because nothing prices compute,
+    not because the session used none. Render those as unknown, never as zero
+    (#1041).
     """
     is_finalized: bool = False
     started_at: str | None = None
@@ -100,7 +112,9 @@ class ExecutionCostResponse(BaseModel):
     A phase listed here but missing from ``cost_by_phase`` cost an UNKNOWN
     amount; a phase in neither genuinely spent nothing (#890).
     """
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
+    """Cost per REPORTED model id; ``unattributed-model`` holds cost whose model
+    no harness reported. Never keyed by an alias (ADR-067 D9)."""
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0
@@ -122,7 +136,7 @@ class CostSummaryResponse(BaseModel):
     total_executions: int = 0
     total_tokens: int = 0
     total_tool_calls: int = 0
-    top_models: list[dict[str, Any]] = Field(default_factory=list)
+    top_models: list[ModelCostEntry] = Field(default_factory=list)
     top_sessions: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -142,8 +156,10 @@ def session_cost_to_data(c: SessionCost) -> SessionCostData:
         execution_id=c.execution_id,
         workflow_id=c.workflow_id,
         phase_id=c.phase_id,
+        workspace_id=c.workspace_id,
         total_cost_usd=Decimal(str(c.total_cost_usd)),
         token_cost_usd=Decimal(str(c.token_cost_usd)),
+        compute_cost_usd=Decimal(str(c.compute_cost_usd)),
         input_tokens=c.input_tokens,
         output_tokens=c.output_tokens,
         total_tokens=c.total_tokens,
@@ -152,9 +168,12 @@ def session_cost_to_data(c: SessionCost) -> SessionCostData:
         tool_calls=c.tool_calls,
         turns=c.turns,
         duration_ms=int(c.duration_ms),
-        cost_by_model=c.cost_by_model,
+        cost_by_model=cost_by_observed_model(c.cost_by_model),
         cost_by_tool=c.cost_by_tool,
+        tokens_by_tool=c.tokens_by_tool,
+        cost_by_tool_tokens=c.cost_by_tool_tokens,
         unpriced_observation_count=c.unpriced_observation_count,
+        unmeasured_fields=sorted(c.unmeasured_fields),
         is_finalized=c.is_finalized,
         started_at=c.started_at,
         completed_at=c.completed_at,
@@ -186,7 +205,7 @@ def execution_cost_to_data(c: ExecutionCost) -> ExecutionCostData:
         duration_ms=c.duration_ms,
         cost_by_phase=c.cost_by_phase,
         unpriced_by_phase=c.unpriced_by_phase,
-        cost_by_model=c.cost_by_model,
+        cost_by_model=cost_by_observed_model(c.cost_by_model),
         cost_by_tool=c.cost_by_tool,
         is_complete=c.is_complete,
         unpriced_observation_count=c.unpriced_observation_count,
@@ -342,8 +361,10 @@ def _session_cost_to_api(c: SessionCostData) -> SessionCostResponse:
         execution_id=c.execution_id,
         workflow_id=c.workflow_id,
         phase_id=c.phase_id,
+        workspace_id=c.workspace_id,
         total_cost_usd=Decimal(str(c.total_cost_usd)),
         token_cost_usd=Decimal(str(c.token_cost_usd)),
+        compute_cost_usd=Decimal(str(c.compute_cost_usd)),
         input_tokens=c.input_tokens,
         output_tokens=c.output_tokens,
         total_tokens=c.total_tokens,
@@ -354,7 +375,10 @@ def _session_cost_to_api(c: SessionCostData) -> SessionCostResponse:
         duration_ms=c.duration_ms,
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
         cost_by_tool={k: str(v) for k, v in (c.cost_by_tool or {}).items()},
+        tokens_by_tool=dict(c.tokens_by_tool or {}),
+        cost_by_tool_tokens={k: str(v) for k, v in (c.cost_by_tool_tokens or {}).items()},
         unpriced_observation_count=c.unpriced_observation_count,
+        unmeasured_fields=list(c.unmeasured_fields),
         is_finalized=c.is_finalized,
         started_at=str(c.started_at) if c.started_at else None,
         completed_at=str(c.completed_at) if c.completed_at else None,
@@ -510,6 +534,6 @@ async def get_cost_summary_endpoint() -> CostSummaryResponse:
         total_executions=s.total_executions,
         total_tokens=s.total_tokens,
         total_tool_calls=s.total_tool_calls,
-        top_models=s.top_models,
+        top_models=list(s.top_models),
         top_sessions=s.top_sessions,
     )

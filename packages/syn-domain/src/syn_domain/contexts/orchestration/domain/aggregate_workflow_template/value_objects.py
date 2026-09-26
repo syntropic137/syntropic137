@@ -162,12 +162,34 @@ class PhaseDefinition(BaseModel):
     by anything the agent is asked to do. See
     ``PhaseYamlDefinition.can_open_pr`` for why the default is False."""
 
+    delivers_repo_changes: bool = True
+    """Whether repository changes are part of this phase's deliverable (#1308).
+
+    Sourced from the workflow YAML ``delivers_repo_changes`` field, and read by
+    the unpushed-work gate to decide what an uncommitted change MEANS - a
+    deliverable that was never saved, or a build tool's side effect. See
+    ``PhaseYamlDefinition.delivers_repo_changes`` for why the gate cannot work
+    this out for itself."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     """Describes what $ARGUMENTS expects for this phase (e.g., '[task-description]')."""
 
     model: str | None = None
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
+
+    model_defaulted: bool = False
+    """Whether ``model`` was FILLED IN by the platform rather than declared.
+
+    Set by the install and phase-edit handlers, never by a caller. True means
+    the package declared no usable model and the operator's
+    ``SYN_DEFAULT_*_MODEL`` was applied. A reinstall reads it to tell an
+    unchanged undeclared model (a no-op) from a declared model the package has
+    since removed (a change). Events written before this field existed replay
+    as False, which is correct for them: their model was either declared or
+    ``None``. No production event ever persisted a defaulted model without
+    this flag - defaults were first persisted in the same change that added
+    it - so the False default cannot mislabel a real default."""
 
     provider: str | None = None
     """Per-phase agent provider override ('claude' or 'codex').

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
-# Runtime import: Pydantic resolves the field annotation below (noqa: TC001)
-from syn_api.types import BranchObservationInfo  # noqa: TC001
+# Runtime import: Pydantic resolves the field annotations below, and
+# `PhaseActivityInfo` is also called at runtime as a field default.
+from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
+from syn_api.types import BranchObservationInfo, PhaseActivityInfo
+from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
 from syn_shared.display import EM_DASH
+from syn_shared.observed_model import format_observed_model
 
 
 class PhaseOperationInfo(BaseModel):
@@ -65,8 +69,23 @@ class PhaseExecutionInfo(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
-    model: str | None = None
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    deliverable_recovered: bool = False
+    """True when this phase's deliverable was recovered from its transcript
+    rather than read off the file it declared (#1195, #1300).
+
+    The end of the chain the flag travels: event -> projection record -> read
+    model -> here. A client auditing which runs stood on a salvage reads this;
+    `status` says `completed` either way.
+    """
+    model: ObservedModelId | None = None
+    """The model the harness REPORTED for this phase, or null (ADR-067 D9).
+
+    Never an alias such as ``opus``: that is what the phase asked for, and it
+    is ``requested_model``. Null means nothing reported what ran.
+    """
+    requested_model: str | None
+    """The model the phase REQUESTED (often an alias), or null if not recorded."""
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.
@@ -83,6 +102,22 @@ class PhaseExecutionInfo(BaseModel):
     telemetry that was unreachable. ``[]`` means the sweep ran and confirmed
     none. Defaulting the first to the second reports a loss that did not happen
     (#1176).
+    """
+    exit_code: int | None = None
+    """What this phase's process exited with, or null if nothing observed one.
+
+    THE STATUS, NOT A SUMMARY OF IT (#1319). `status: failed` says the phase
+    did not succeed; this says how, and the three common answers need opposite
+    handling - 0 finished, 124 reached its time budget and the work should be
+    continued, a negative value was killed by that signal and should be
+    retried. Before this field the number existed only inside the prose of
+    `error_message`, and only while the read model was queryable at all.
+
+    THREE-VALUED, same contract as the fields around it: `null` means nothing
+    observed a status - every phase that did not fail, a phase stranded by an
+    API restart, a failure with no process behind it, an execution predating
+    the field - and is not the same claim as 0. A phase that SUCCEEDED says so
+    in `status`; this field is for the runs where that is not the answer.
     """
     observed_branches: list[BranchObservationInfo] | None = None
     """Where this phase's branches stood when it failed (#1200).
@@ -101,6 +136,27 @@ class PhaseExecutionInfo(BaseModel):
     carry that, so this reports the two readings and stops.
     """
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
+    activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
+    """What this phase was doing when it ended, and against what budget (#1262).
+
+    The four readings that tell a phase killed on its deadline from one that
+    hung - both exit 124, and they need opposite responses. `PhaseActivityInfo`
+    states what each one means and what its nulls do not mean.
+
+    Served so that an operator, or the agent triaging the run, can decide
+    without opening a transcript. `operations` below carries the same activity
+    row by row; this is the summary of it, and `operations_count` is
+    deliberately not that list's length.
+    """
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``model``."""
+        return format_observed_model(self.model, self.requested_model)
 
 
 class ExecutionDetailResponse(BaseModel):
@@ -132,6 +188,19 @@ class ExecutionDetailResponse(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
+    cache_read_rate_display: str | None = None
+    """How cache READS are billed relative to fresh input, e.g. ``"0.05x rate"``.
+
+    Derived from the price table for every model this scope ran. ``None`` when
+    no single multiplier is true: models that disagree (Opus 5.5 reads at 0.05x,
+    GPT-6-Sol at 0.1x), a model with no rate, or no model recorded yet. A
+    client must not substitute a constant; that is the bug this field replaced.
+    """
+    cache_write_rate_display: str | None = None
+    """How cache WRITES are billed relative to fresh input, e.g. ``"1.25x rate"``.
+
+    Same derivation and ``None`` contract as ``cache_read_rate_display``.
+    """
     total_duration_seconds: float | None = None
     """Wall-clock seconds across the execution's phases, including any still
     running. ``None`` means no phase had a resolvable duration -- unknown, not
@@ -145,7 +214,37 @@ class ExecutionDetailResponse(BaseModel):
     """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionDetail`: `platform` for
+    the machinery breaking, `correct_refusal` for a phase that reported
+    `success=false` and was recorded faithfully, `unclassified` for a run that
+    ended before anything recorded the difference. This is the model the HTTP
+    route actually returns, so a value that stops short of here never reaches
+    a client.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionDetail`: what the
+    AGENT SAID, beside the `failure_classification` the PLATFORM measured and
+    never folded into it. This is the model the HTTP route actually returns,
+    so a report that stops short of here never reaches a client - and a
+    dashboard with nothing to quote falls back to showing the measurement
+    alone, which is the state #1392 was opened about.
+    """
     repos: list[str] = Field(default_factory=list)
+    task: str | None = None
+    """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
+    with, or ``None`` if the workflow takes none (#1307)."""
+    inputs: dict[str, str] = Field(default_factory=dict)
+    """The full input set the run was dispatched with, including ``task`` and
+    the ``repos`` string the other fields are derived from.
+
+    Enough to re-dispatch the run: a caller retrying one that died on the
+    platform posts these back rather than reconstructing them from its own
+    notes (#1307)."""
 
 
 class ExecutionSummaryResponse(BaseModel):
@@ -183,6 +282,26 @@ class ExecutionSummaryResponse(BaseModel):
     duration_display: str = "—"
     tool_call_count: int = 0
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionSummary`: `platform` for
+    the machinery breaking, `correct_refusal` for a phase that reported
+    `success=false` and was recorded faithfully, `unclassified` for a run that
+    ended before anything recorded the difference. This is the model the HTTP
+    route actually returns, so a value that stops short of here never reaches
+    a client.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionDetail`: what the
+    AGENT SAID, beside the `failure_classification` the PLATFORM measured and
+    never folded into it. This is the model the HTTP route actually returns,
+    so a report that stops short of here never reaches a client - and a
+    dashboard with nothing to quote falls back to showing the measurement
+    alone, which is the state #1392 was opened about.
+    """
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None
 

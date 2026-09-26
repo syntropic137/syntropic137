@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import asyncpg
 from agentic_logging import get_logger
@@ -37,7 +38,9 @@ from syn_adapters.subscriptions.realtime_adapter import (
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from event_sourcing import EventStoreClient
+    from collections.abc import AsyncIterator
+
+    from event_sourcing import DomainEvent, EventEnvelope, EventStoreClient
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
 
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
@@ -48,6 +51,94 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
+
+#: How long :meth:`CoordinatorSubscriptionService.start` waits for the
+#: coordinator to open its subscription before giving up and FAILING. Only
+#: reached when the event store is unreachable or very slow, and then the
+#: coordinator's own backoff is already retrying.
+#:
+#: The cap is here so a store outage cannot hold up process start
+#: indefinitely - not so that ``start()`` can return without having done what
+#: it says. Returning normally here is what made "started" mean two different
+#: things, one of which silently reopens the race this wait exists to close;
+#: see :class:`SubscriptionNotLiveError`.
+_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS: Final[float] = 30.0
+
+
+class SubscriptionNotLiveError(RuntimeError):
+    """``start()`` could not reach the point after which an append arrives live.
+
+    Raised rather than logged, because the two outcomes need different things
+    from the caller and only the caller knows which it can do. For the API's
+    startup path the difference is the whole of #1387: a coordinator that is
+    live may be announced to, and a coordinator that is not must not be - an
+    announcement appended below the live boundary is read as backlog, and the
+    coordinator deliberately does not run a ProcessManager's processor side
+    for backlog. The event is stored, delivered, and then ignored forever.
+
+    Failing is not the same as losing the wake. ``SUBSCRIPTION_COORDINATOR`` is
+    a recoverable degradation, so the lifecycle reports it on ``/health`` and
+    its recovery loop retries ``_init_subscriptions`` - which announces on the
+    attempt that does reach the boundary. The alternative, warning and
+    continuing, reports a healthy API and announces into a gap where nothing
+    will act on it.
+    """
+
+
+class _SignalsWhenSubscribed:
+    """The store the coordinator reads, plus the one moment it does not report.
+
+    :class:`SubscriptionCoordinator` snapshots the store head and only then
+    subscribes, and it treats every event at or below that snapshot as
+    backlog - for which it deliberately does not run a ProcessManager's
+    processor side. So the call to ``subscribe()`` is exactly the point after
+    which an append is guaranteed to arrive live, and nothing else about the
+    coordinator is observable from out here.
+
+    Wrapping the store is how that moment is observed, because the coordinator
+    publishes no signal of its own and this repository cannot change it. The
+    order it depends on - head snapshot, then subscribe - is the coordinator's
+    documented catch-up boundary rather than an incidental detail, and
+    ``TestTheRestartWakeRacesTheCoordinator`` drives the real coordinator over
+    a real append so a change to that order fails there rather than silently
+    reopening the race.
+    """
+
+    def __init__(self, inner: EventStoreClient, subscribed: asyncio.Event) -> None:
+        self._inner = inner
+        self._subscribed = subscribed
+
+    def subscribe(self, from_global_nonce: int = 0) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        self._subscribed.set()
+        return self._inner.subscribe(from_global_nonce=from_global_nonce)
+
+    async def read_all(
+        self,
+        from_global_nonce: int = 0,
+        max_count: int = 100,
+        forward: bool = True,
+    ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]:
+        return await self._inner.read_all(
+            from_global_nonce=from_global_nonce,
+            max_count=max_count,
+            forward=forward,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SubscriptionServiceStatus:
+    """What this service can say about itself without measuring anything.
+
+    Read by ``/health`` and published there field for field, so these names are
+    part of that endpoint's contract. A frozen dataclass rather than a dict
+    because the consumer used to reach in by string key — ``status.get("running",
+    False)`` silently defaulted a missing field to "not running", which is the
+    worst possible guess for a health probe to make on its own behalf.
+    """
+
+    running: bool
+    projection_count: int
+    realtime_enabled: bool
 
 
 class CoordinatorSubscriptionService:
@@ -94,19 +185,21 @@ class CoordinatorSubscriptionService:
         self._coordinator_started_at: datetime | None = None
         self._subscription_task: asyncio.Task[None] | None = None
         self._running = False
+        #: Set once the coordinator has fixed its live boundary and subscribed.
+        self._subscribed = asyncio.Event()
 
     @property
     def is_running(self) -> bool:
         """Check if the subscription is running."""
         return self._running
 
-    def get_status(self) -> dict:
+    def get_status(self) -> SubscriptionServiceStatus:
         """Get service status for health checks."""
-        return {
-            "running": self._running,
-            "projection_count": len(self._projections),
-            "realtime_enabled": self._realtime_projection is not None,
-        }
+        return SubscriptionServiceStatus(
+            running=self._running,
+            projection_count=len(self._projections),
+            realtime_enabled=self._realtime_projection is not None,
+        )
 
     async def describe_read_model_lag(self) -> ReadModelLag | None:
         """How far the read models are behind, and which projection is worst.
@@ -175,7 +268,13 @@ class CoordinatorSubscriptionService:
     async def start(self) -> None:
         """Start the coordinator subscription service."""
         if self._running:
+            # Still waits. This is the method's other way out, and "started"
+            # has to mean the same thing on both of them: a second caller that
+            # returned here while the first was still in flight would be told
+            # the subscription was live before it was, which is the whole of
+            # #1387 finding B reached by a different door.
             logger.warning("Coordinator subscription service already running")
+            await self._wait_until_subscribed()
             return
 
         logger.info("Starting coordinator subscription service...")
@@ -213,8 +312,9 @@ class CoordinatorSubscriptionService:
 
         # Create coordinator
         self._coordinator_started_at = datetime.now(UTC)
+        self._subscribed = asyncio.Event()
         self._coordinator = SubscriptionCoordinator(
-            event_store=self._event_store,
+            event_store=_SignalsWhenSubscribed(self._event_store, self._subscribed),
             checkpoint_store=self._checkpoint_store,
             projections=all_projections,
         )
@@ -225,11 +325,68 @@ class CoordinatorSubscriptionService:
             self._run_coordinator(),
             name="coordinator-subscription",
         )
+        try:
+            await self._wait_until_subscribed()
+        except BaseException:
+            await self._abandon_failed_start()
+            raise
 
         logger.info(
             "Coordinator subscription service started",
             extra={"projection_count": len(all_projections)},
         )
+
+    async def _abandon_failed_start(self) -> None:
+        """Undo a ``start()`` that never reached its live boundary.
+
+        ``stop()`` is the only thing that cancels the coordinator task and
+        closes the checkpoint pool, and the caller cannot do it for us: a
+        ``start()`` that raises has not handed the service back, so nothing
+        upstream holds a reference to stop. The API's recovery loop builds a
+        brand new service on every retry, so a failed attempt that left its
+        task running would stack another coordinator - and another pool -
+        against the same store on each pass.
+
+        Best effort by design: a second failure while tearing down must not
+        replace the reason the start failed, which is what the caller acts on.
+        """
+        try:
+            await self.stop()
+        except Exception:
+            logger.exception("Could not stop the coordinator after a failed start")
+
+    async def _wait_until_subscribed(self) -> None:
+        """Do not return from ``start()`` until an append would arrive live.
+
+        Creating the coordinator's task is not the same as having started it.
+        Until that task has snapshotted the store head and subscribed, an
+        append races the snapshot and loses: it lands at or below the boundary,
+        is read as backlog, and the coordinator will not run a ProcessManager's
+        processor side for backlog. The event is delivered and then ignored.
+
+        That difference is invisible to the caller and decides whether the work
+        the append was meant to release ever moves. The restart wake for
+        maintenance mode announces immediately after ``start()`` returns
+        (#1387), so a trigger a deploy paused could still be stranded by the
+        restart that was supposed to release it. Rather than have every caller
+        learn what a live boundary is, ``start()`` means started.
+
+        Which is why the deadline raises. A timeout that logged and returned
+        would leave ``start()`` meaning "live" on one path and "a task exists"
+        on the other, with nothing at the call site able to tell them apart -
+        the original race, arriving thirty seconds later. Duration is not the
+        property; the state on return is.
+        """
+        try:
+            async with asyncio.timeout(_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS):
+                await self._subscribed.wait()
+        except TimeoutError:
+            raise SubscriptionNotLiveError(
+                f"Coordinator did not open its subscription within "
+                f"{_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS:.0f}s, so an event appended now "
+                f"would be read as historical and a ProcessManager woken by it would "
+                f"not run until the next live event"
+            ) from None
 
     async def _run_coordinator(self) -> None:
         """Run the coordinator with exponential-backoff reconnect on error."""
@@ -354,8 +511,9 @@ def create_coordinator_service(
     )
     from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
+    from syn_domain.tool_call_counts import ToolCallCountsProjection
 
-    # Create all checkpointed projections (24 total - bumped for #772)
+    # Create all checkpointed projections (25 total - bumped for #1322)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -398,6 +556,13 @@ def create_coordinator_service(
             GlobalClaudePluginsProjection(projection_store),
             # --- Skill injection (issue #772) ---
             SkillLockProjection(projection_store),
+            # --- Tool-call tally (issue #1322) ---
+            # Not fed by replay: each tool call is counted in the transaction
+            # that stores the event, so this is here for the rebuild half of
+            # the lifecycle. Registered means an operator rebuilding the read
+            # models recounts this table too; unregistered, it was the one
+            # they emptied and never refilled.
+            ToolCallCountsProjection(pool=pool),  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
         ],
     )
 

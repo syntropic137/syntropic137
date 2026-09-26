@@ -21,6 +21,7 @@ from syn_adapters.artifacts.bundle_context import (
     build_context_files,
     create_context_summary,
 )
+from syn_adapters.postgres_text import pg_safe
 
 if TYPE_CHECKING:
     from syn_adapters.object_storage.protocol import StorageProtocol
@@ -30,6 +31,7 @@ __all__ = [
     "build_context_files",
     "create_context_summary",
     "load_bundle_from_storage",
+    "resolve_storage_prefix",
     "save_bundle_to_storage",
 ]
 
@@ -68,21 +70,35 @@ async def save_bundle_to_storage(
     return uploaded_keys
 
 
-def _resolve_storage_prefix(
+def resolve_storage_prefix(
     bundle_id: str,
-    prefix: str | None,
-    workflow_id: str | None,
-    session_id: str | None,
+    prefix: str | None = None,
+    workflow_id: str | None = None,
+    session_id: str | None = None,
 ) -> str:
-    """Build the storage prefix from explicit prefix or component IDs."""
+    """The one place a bundle's object-storage prefix is spelled.
+
+    THE WRITE AND THE READ MUST PRODUCE THE SAME KEY, and until #1241 they
+    were two separate expressions: the upload used ``get_storage_prefix`` on
+    the in-memory bundle, the download rebuilt the prefix from ids the caller
+    passed in - and a caller reading those ids back out of Postgres has the
+    SANITISED spelling, because that is the only spelling Postgres can hold.
+    Different key, ``ObjectNotFoundError``, and a bundle that was uploaded
+    successfully reads as one that was never written. That is the MinIO/
+    Postgres desync this issue already closed once for conversations.
+
+    So the components are sanitised here, on both paths, and
+    ``ArtifactBundle.get_storage_prefix`` delegates to this rather than
+    repeating it. One expression cannot disagree with itself.
+    """
     if prefix:
         return prefix
     parts: list[str] = []
     if workflow_id:
-        parts.append(f"workflows/{workflow_id}")
+        parts.append(f"workflows/{pg_safe(workflow_id)}")
     if session_id:
-        parts.append(f"sessions/{session_id}")
-    parts.append(f"bundles/{bundle_id}")
+        parts.append(f"sessions/{pg_safe(session_id)}")
+    parts.append(f"bundles/{pg_safe(bundle_id)}")
     return "/".join(parts) + "/"
 
 
@@ -114,7 +130,7 @@ async def load_bundle_from_storage(
     """Load a bundle from object storage."""
     from syn_adapters.object_storage.protocol import DownloadError, ObjectNotFoundError
 
-    storage_prefix = _resolve_storage_prefix(bundle_id, prefix, workflow_id, session_id)
+    storage_prefix = resolve_storage_prefix(bundle_id, prefix, workflow_id, session_id)
     manifest_key = storage_prefix + "manifest.json"
     try:
         manifest_bytes = await storage.download(manifest_key)

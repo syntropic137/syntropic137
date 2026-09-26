@@ -1,4 +1,5 @@
 import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 import type { CommandDef } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
 import { BOLD, DIM, GREEN, RED, YELLOW, style } from "../output/ansi.js";
@@ -50,15 +51,54 @@ function readModelLines(subscription: Record<string, unknown>): string[] {
   return lines;
 }
 
+/** Which build answered. The release always; the image tag and commit only
+ * when the image build stamped them, since an unstamped build reports null and
+ * printing "commit: null" tells a reader nothing they can act on.
+ *
+ * THREE STATES, NOT TWO, and the third is the one that used to crash. `build`
+ * is required by the CURRENT schema, but this CLI ships to npm and the server
+ * is deployed separately, so a new CLI meets an old server routinely — and an
+ * old server's /health has no `build` key at all. `openapi-fetch` does no
+ * runtime validation, so the schema's guarantee is a compile-time one only:
+ * reading `build.image_tag` on that payload threw a TypeError before anything
+ * was printed, turning "is the new build live yet?" into a crash whose message
+ * named neither the server nor its version.
+ *
+ * So the absent block is a state with its own sentence. A server too old to
+ * report its build identity is not the same fact as a server that reported it
+ * as unreadable (`version: null`), and both are different again from a release
+ * we know — a reader chasing a rollout needs to tell all three apart. None of
+ * them is ever filled in with a plausible number: the whole point of #1380 is
+ * that a wrong release misleads a reader who a missing one would have sent
+ * looking. */
+function buildLine(build: components["schemas"]["BuildInfo"] | undefined): string {
+  if (!build) {
+    return "syn-api build identity not reported — this server predates /health carrying it (#1380)";
+  }
+  const stamps = [build.image_tag, build.commit].filter((s): s is string => Boolean(s));
+  const release = build.version ?? "release unknown (package metadata unavailable)";
+  return `syn-api ${release}` + (stamps.length > 0 ? ` (${stamps.join(", ")})` : "");
+}
+
 export const healthCommand: CommandDef = {
   name: "health",
   description: "Check API server health status",
   handler: async () => {
     const data = unwrap(await api.GET("/health"), "Health check");
 
-    // Health endpoint returns { [key: string]: string } in the spec
-    const status = data["status"] ?? "";
-    const mode = data["mode"] ?? "";
+    const status = data.status ?? "";
+    const mode = data.mode ?? "";
+
+    // FIRST, above the verdict. `syn health` is how an agent or an operator
+    // answers "is the new build live yet?", and until #1380 the API could not
+    // tell them: openapi.json claimed 0.5.1 against a 0.29.1b3 deployment and
+    // /health said nothing, leaving `docker inspect` over SSH as the only
+    // read. Printing it below a "Degraded" line would bury the answer in the
+    // case it is most needed.
+    // `data.build` is typed as always present and is not, against an older
+    // server; see buildLine. The cast is where that gap is acknowledged rather
+    // than somewhere it can be forgotten.
+    print(style(buildLine(data.build as components["schemas"]["BuildInfo"] | undefined), DIM));
 
     if (status === "healthy" && mode === "full") {
       print(style("Healthy", BOLD, GREEN) + " — all systems operational");

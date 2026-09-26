@@ -10,12 +10,18 @@ from __future__ import annotations
 
 import logging
 import re
+import signal
 from datetime import UTC, datetime
 from decimal import Decimal
+
+from syn_shared.agents import PhaseModelResolution, resolve_model_alias
 
 logger = logging.getLogger(__name__)
 
 EM_DASH = "\u2014"
+
+_NO_EXIT_STATUS = -1
+"""Sentinel every isolation provider uses for "no status was ever collected"."""
 
 
 def format_tokens(n: int | None) -> str:
@@ -254,7 +260,7 @@ def format_phase(phase_id: str | None) -> str | None:
     raw = phase_id.strip()
     if not raw:
         return raw
-    if _UUID_RE.match(raw):
+    if _UUID_RE.fullmatch(raw):
         return f"Phase {raw.split('-', 1)[0]}"
     words = raw.replace("_", " ").replace("-", " ").split()
     return " ".join(word.capitalize() for word in words) if words else raw
@@ -307,3 +313,112 @@ def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
     if len(items) == 1:
         return first
     return f"{first} +{len(items) - 1}"
+
+
+def format_exit_code(exit_code: int | None) -> str:
+    """Render a process exit status so nobody has to decode it by hand.
+
+    Callers hold an ``exit_code`` from the workspace isolation port and want to
+    put it in a message. That integer carries three different meanings and the
+    reader is expected to know which is which - so this decides, once, here:
+
+    ==========  =====================  =====================================
+    Value       Renders as             Means
+    ==========  =====================  =====================================
+    ``0``/``3`` ``"0"`` / ``"3"``      the process exited with that status
+    ``-11``     ``"-11 (SIGSEGV)"``    the process was killed by that signal
+    ``-1``      ``"-1 (no exit        no status was ever collected
+                status)"``
+    ==========  =====================  =====================================
+
+    A negative value is CPython's documented ``Popen.returncode`` convention:
+    ``-N`` means the child was terminated by signal ``N``. Issue #1295 is the
+    cost of not saying so - repeated ``exit -11`` reports that an operator had
+    to recognise as SIGSEGV unaided, on a failure class that was already
+    expensive.
+
+    ``None`` is the same fact arriving by the other route: CPython types a
+    ``returncode`` as ``int | None`` and leaves it ``None`` until the process
+    is reaped, so a caller holding one has no status either. Taking it here
+    rather than making every caller pick a stand-in keeps that decision in
+    one place.
+
+    ``-1`` is the exception, and it is not a signal. Every isolation provider
+    writes ``exit_code=-1`` as a sentinel for "we never got a status at all"
+    (a missing container, a timeout, a raised exception), so decoding it as
+    SIGHUP - which is what the arithmetic alone would say - would invent a
+    cause that never happened. Fabricating a plausible one on a diagnostic
+    path is worse than the bare number this replaces, so it is named for what
+    it is instead.
+
+    The signal is named and NOT described. ``signal.strsignal`` is the
+    obvious way to add "Segmentation fault" after the name and it is the
+    wrong one: its text comes from the host C library, so glibc says
+    ``"Segmentation fault"`` where macOS says ``"Segmentation fault: 11"``,
+    and both are localised. Asserting on that renders a test green on CI's
+    Linux and red on a macOS checkout of the same commit - which is where
+    this landed (#1331), and it teaches people that a local failure means
+    nothing. ``Signals(n).name`` is Python's own number-to-name mapping and
+    is stable everywhere, so it is the whole rendering. Do not reintroduce a
+    description, from ``strsignal`` or from a hand-kept table beside it.
+
+    Positive codes render exactly as before, so existing messages that carry
+    one are unchanged.
+
+    WHOSE status this is is a separate question and deliberately not answered
+    here: for a ``docker exec`` the negative code belongs to the local
+    ``docker`` client process, not to the command inside the container (a
+    contained process killed by a signal comes back as a POSITIVE ``128+N``).
+    That distinction is what #1295 turns on, but it depends on the caller's
+    transport, which a formatter cannot see.
+    """
+    if exit_code is None or exit_code == _NO_EXIT_STATUS:
+        return "no exit status" if exit_code is None else f"{exit_code} (no exit status)"
+    if exit_code >= 0:
+        return str(exit_code)
+    signal_number = -exit_code
+    try:
+        named = signal.Signals(signal_number)
+    except ValueError:
+        return f"{exit_code} (unknown signal {signal_number})"
+    return f"{exit_code} ({named.name})"
+
+
+ALIAS_ARROW = "\u2192"
+"""Separates a definition's alias from its resolved id (a right arrow, never
+an em dash)."""
+
+
+def format_model_definition(model: str | None) -> str | None:
+    """Render a DEFINED model with what its alias resolves to.
+
+    ``"gpt-sol" -> "gpt-sol \u2192 gpt-6-sol"``, ``"opus" -> "opus \u2192
+    claude-opus-5-5"``. A concrete or unknown id round-trips unchanged and
+    ``None`` stays ``None``. Definition surfaces only: a run-time surface shows
+    the OBSERVED model, never an alias target (ADR-067 D9).
+    """
+    resolution = resolve_model_alias(model)
+    if resolution is None:
+        return model
+    return f"{resolution.alias} {ALIAS_ARROW} {resolution.target}"
+
+
+#: Shown in place of a stored model that is unset.
+DEFAULT_MODEL_LABEL = "default"
+
+
+def format_phase_model_definition(resolution: PhaseModelResolution) -> str:
+    """Render a phase definition's model as the chain execution follows.
+
+    ``opus`` -> ``opus \u2192 claude-opus-5-5``; a stale ``opus`` on a codex
+    phase -> ``opus \u2192 gpt-sol \u2192 gpt-6-sol``; unset on codex ->
+    ``default \u2192 gpt-sol \u2192 gpt-6-sol``; a concrete id -> itself.
+    """
+    parts: list[str] = []
+    if resolution.substituted:
+        stored = (resolution.stored or "").strip()
+        parts.append(stored or DEFAULT_MODEL_LABEL)
+    parts.append(resolution.effective)
+    if resolution.alias is not None:
+        parts.append(resolution.alias.target)
+    return f" {ALIAS_ARROW} ".join(parts)

@@ -54,7 +54,7 @@ The selfhost stack runs as Docker Compose services on an internal bridge network
 | **event-store** | Rust gRPC event sourcing server | Custom (Rust) | 50051 |
 | **timescaledb** | PostgreSQL 16 + TimescaleDB (unified data store) | `timescale/timescaledb:2.29.2-pg16` | 5432 |
 | **redis** | Pub/sub + caching (AOF persistence) | `redis:7-alpine` | 6379 |
-| **minio** | S3-compatible object storage (artifacts, conversations) | `minio/minio` | 9000 |
+| **minio** | S3-compatible object storage (artifacts, conversations) | `ghcr.io/syntropic137/minio` (mirror, see below) | 9000 |
 | **cloudflared** | Cloudflare Tunnel for external access (optional) | `cloudflare/cloudflared` | — |
 | **envoy-proxy** | Shared Envoy proxy — injects API credentials into agent requests (ISS-43) | Custom (Envoy + token injector) | 8081 |
 | **workspace-*** | Dynamically spawned agent containers (Claude CLI inside Docker, on `agent-net`) | `agentic-workspace-claude-cli` | — |
@@ -290,6 +290,33 @@ These credentials are loaded by the shared Envoy proxy (`envoy-proxy` service) a
 |----------|----------|---------|-------------|
 | `MINIO_ROOT_USER` | No | `minioadmin` | MinIO root username. **Change for production.** |
 | `MINIO_ROOT_PASSWORD` | No | `minioadmin` | MinIO root password. **Change for production.** |
+
+#### MinIO image mirror
+
+MinIO no longer serves anonymous pulls: Docker Hub went first, then
+`quay.io/minio/minio` on 2026-09-24 (`unauthorized: access to the requested
+resource is not authorized`). Every fresh `compose up` and the post-merge smoke
+test failed on it. The compose files therefore pull
+`ghcr.io/syntropic137/minio`, an unmodified mirror of
+`RELEASE.2025-04-22T22-12-26Z`:
+
+| Platform | Manifest digest (identical to upstream) |
+|----------|-----------------------------------------|
+| linux/amd64 | `sha256:3f97c5651cb6662b880c787a232b6b34fec8d8922e08d6617b25d241a21164bb` |
+| linux/arm64 | `sha256:54d3d6a0a58fb25b4e9943d1db3828d3b4de44666f911381b4fda57175488194` |
+
+Upstream index `sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e`
+lists exactly those two manifests (plus linux/ppc64le, not mirrored). The
+mirror's own index is `sha256:bbac678936882e4033b6068efd0a19d103b219002d979087f7c5bd330172e00d`,
+built from them with `docker buildx imagetools create`. Same bytes as before,
+so existing `minio_data` volumes, the `sh` entrypoint and the `mc ready`
+healthcheck are unaffected. The binary is AGPL-3.0; source is
+`github.com/minio/minio` at the same tag.
+
+The GHCR package must stay **public**, or anonymous pulls fail with the same
+`unauthorized` error. There is no upstream to refresh from: MinIO publishes no
+community images any more, so a newer MinIO means building it from source (or
+moving to another S3-compatible store), not re-running a pull.
 
 ### Redis
 

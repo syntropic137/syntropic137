@@ -26,8 +26,11 @@ from syn_api._wiring import (
     get_subscription_coordinator,
     get_workflow_dispatcher,
 )
+from syn_api.build_info import get_build_info
+from syn_api.services.admission_announcement import announce_admission_if_open
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -35,7 +38,14 @@ from syn_api.services.reconciliation import (
     reconcile_orphaned_sessions,
 )
 from syn_api.services.seeding import seed_offline_data
-from syn_api.types import Err, LifecycleError, Ok, Result
+from syn_api.types import (
+    Err,
+    HealthResponse,
+    LifecycleError,
+    Ok,
+    Result,
+    SubscriptionHealth,
+)
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
@@ -50,13 +60,15 @@ if TYPE_CHECKING:
 
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
-    from syn_api._wiring import BackgroundWorkflowDispatcher
+    from syn_api._wiring_admission import BackgroundWorkflowDispatcher
     from syn_domain.contexts.github.services import (
         CheckRunIngestionService,
         GitHubEventIngestionScheduler,
     )
+    from syn_shared.codex_auth_status import CodexAuthStatus
 
 logger = logging.getLogger(__name__)
+SubscriptionHealthResult = tuple[SubscriptionHealth | None, tuple[DegradedReason, ...]]
 
 
 def _handle_recovery_task_exception(task: asyncio.Task[None]) -> None:
@@ -167,9 +179,9 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     for any recoverable failures.
     """
     # BEFORE the registry loop, deliberately (#1120). The registry starts the
-    # subscription coordinator and the GitHub pollers, and `coordinator.start()`
-    # returns as soon as it spawns its background task - so from that moment
-    # this process can dispatch NEW executions into `running`. Reconciling after
+    # subscription coordinator and the GitHub pollers, and once
+    # `coordinator.start()` returns the subscription is live - so from that
+    # moment this process can dispatch NEW executions into `running`. Reconciling after
     # that point means the reconcile query cannot tell work orphaned by the
     # previous process from work this one just started. Resolving the old world
     # before opening the door to a new one removes the race rather than
@@ -303,26 +315,43 @@ async def shutdown() -> Result[None, LifecycleError]:
         return Err(LifecycleError.CONNECTION_FAILED, message=str(e))
 
 
-async def health_check() -> Result[dict, LifecycleError]:
+async def health_check() -> Result[HealthResponse, LifecycleError]:
     """Check application health.
 
     Returns:
-        Ok(dict) with health status including mode (full/degraded).
+        Ok(HealthResponse) with the mode (full/degraded), the identity of the
+        running build, and whichever probe blocks could be filled in.
+
+    ASSEMBLED, NOT ENRICHED. Each probe returns what it found and this function
+    builds the response once, because ``HealthResponse`` is frozen and every
+    field on it is declared: a probe that used to add a key by string could add
+    one nothing had ever agreed to publish, which is how /health ended up with
+    an ``additionalProperties: true`` schema that named none of the fields its
+    own CLI reads.
     """
-    mode = "degraded" if _state.degraded_reasons else "full"
-    response: dict = {"status": "healthy", "mode": mode}
+    # Unconditional and never probed: an operator or an agent asking "which
+    # build is this?" must get an answer from a degraded deployment too, since
+    # that is precisely when the question gets asked (#1380).
+    subscription, read_path_reasons = await _describe_subscription_health()
+    degraded_reasons = [*_state.degraded_reasons, *read_path_reasons]
+    codex_auth = _describe_codex_auth_health()
+    warnings = [codex_auth.detail] if codex_auth is not None and codex_auth.needs_attention else []
 
-    if _state.degraded_reasons:
-        response["degraded_reasons"] = _state.degraded_reasons
+    return Ok(
+        HealthResponse(
+            status="healthy",
+            mode="degraded" if degraded_reasons else "full",
+            build=get_build_info(),
+            degraded_reasons=degraded_reasons or None,
+            subscription=subscription,
+            codex_auth=codex_auth,
+            warnings=warnings or None,
+        )
+    )
 
-    await _enrich_subscription_health(response, mode)
-    _enrich_codex_auth_health(response)
 
-    return Ok(response)
-
-
-def _enrich_codex_auth_health(response: dict) -> None:
-    """Add codex credential freshness to the health payload.
+def _describe_codex_auth_health() -> CodexAuthStatus | None:
+    """How fresh this instance's codex credential is, or None if it cannot be said.
 
     WHY HERE: a stale codex credential is invisible until a phase fails, and the
     failure names no credential. Every instance holds its own copy and expires
@@ -337,12 +366,10 @@ def _enrich_codex_auth_health(response: dict) -> None:
         from syn_shared.settings import get_settings
 
         secret = get_settings().codex_auth_json
-        status = describe_codex_auth(secret.get_secret_value() if secret else None)
-        response["codex_auth"] = status.model_dump(mode="json")
-        if status.needs_attention:
-            response.setdefault("warnings", []).append(status.detail)
+        return describe_codex_auth(secret.get_secret_value() if secret else None)
     except Exception:
         logger.debug("codex auth freshness probe failed", exc_info=True)
+        return None
 
 
 # ── Private helpers ─────────────────────────────────────────────────
@@ -556,8 +583,12 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
-async def _enrich_subscription_health(response: dict, mode: str) -> None:
-    """Add subscription coordinator status and read-model lag to the response.
+async def _describe_subscription_health() -> SubscriptionHealthResult:
+    """The read-path block of /health, and any degraded reasons it raises.
+
+    Returns ``(None, ())`` when no subscription service is wired up at all: the
+    caller omits the block entirely, which is a different statement from
+    reporting an unknown read path on a deployment that has one.
 
     WHY LAG BELONGS HERE. `running` alone is set once at start() and never moves,
     so during a projection rebuild this block reported `status: healthy` while
@@ -584,26 +615,24 @@ async def _enrich_subscription_health(response: dict, mode: str) -> None:
     so any failure degrades to reporting the subscription as unknown.
     """
     if _state.subscription_service is None:
-        return
+        return None, ()
 
     try:
         sub_status = _state.subscription_service.get_status()
         lag = await _state.subscription_service.describe_read_model_lag()
-        verdict = _judge_read_path(running=sub_status.get("running", False), lag=lag)
+        verdict = _judge_read_path(running=sub_status.running, lag=lag)
 
-        response["subscription"] = {
-            **sub_status,
-            "status": verdict.status,
-            **(lag.model_dump(mode="json") if lag is not None else {}),
-        }
-
-        if verdict.degraded_reasons:
-            response.setdefault("degraded_reasons", []).extend(verdict.degraded_reasons)
-            if mode == "full":
-                response["mode"] = "degraded"
+        health = SubscriptionHealth(
+            status=verdict.status,
+            running=sub_status.running,
+            projection_count=sub_status.projection_count,
+            realtime_enabled=sub_status.realtime_enabled,
+            **(lag.model_dump() if lag is not None else {}),
+        )
+        return health, verdict.degraded_reasons
     except Exception:
         logger.debug("subscription health probe failed", exc_info=True)
-        response["subscription"] = {"status": "unknown"}
+        return SubscriptionHealth(status="unknown"), ()
 
 
 # ── Service init functions ─────────────────────────────────────────
@@ -689,12 +718,25 @@ async def _init_subscriptions(state: LifecycleState) -> None:
         realtime_projection=realtime,
         execution_service=workflow_dispatcher,
     )
+    # Returns only once the coordinator has fixed its live boundary and
+    # subscribed, so the announcement below cannot land underneath it and be
+    # read as backlog (#1387). The wait lives in the service because "started"
+    # is its word to keep, not something each caller should have to arrange.
+    #
+    # It RAISES if it cannot get there, and that raise is deliberately not
+    # caught here. SUBSCRIPTION_COORDINATOR is recoverable, so the registry
+    # marks the API degraded, says so on /health, and the recovery loop calls
+    # this function again - announcing on the attempt that does reach the
+    # boundary. Continuing past a failed start would announce into a store
+    # nothing is listening to live and report the API healthy while doing it.
     await coordinator.start()
     # Only assign to state after coordinator starts successfully,
     # so a partial failure doesn't orphan the dispatcher.
     state.workflow_dispatcher = workflow_dispatcher
     state.subscription_service = coordinator
     logger.info("Subscription coordinator started")
+
+    await announce_admission_if_open()
 
 
 async def _shutdown_subscriptions(state: LifecycleState) -> None:
@@ -868,6 +910,12 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
         init_fn=_init_conversation_storage,
         recoverable=True,
         shutdown_fn=_shutdown_conversation_storage,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.UI_FEEDBACK,
+        init_fn=init_ui_feedback,
+        recoverable=True,
+        shutdown_fn=shutdown_ui_feedback,
     ),
     _ServiceEntry(
         reason=DegradedReason.SUBSCRIPTION_COORDINATOR,
