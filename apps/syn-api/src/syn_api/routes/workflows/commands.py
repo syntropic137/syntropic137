@@ -282,23 +282,29 @@ async def create_workflow(
         WorkflowTemplateConflictError,
     )
 
-    command = CreateWorkflowTemplateCommand(
-        aggregate_id=workflow_id or str(uuid4()),
-        name=name,
-        description=description or f"Workflow: {name}",
-        workflow_type=_resolve_workflow_type(workflow_type),
-        classification=_resolve_classification(classification),
-        repository_url=repository_url,
-        repository_ref=repository_ref,
-        phases=_build_phase_defs(phases),
-        project_name=project_name,
-        input_declarations=_build_input_declarations(input_declarations),
-        repos=repos or [],
-        requires_repos=requires_repos,
-        version=version,
-        source_digest=source_digest,
-        force=force,
-    )
+    # Inside the error handling: building the phases validates them (a
+    # non-bool flag, an unrunnable sandbox), and a ValueError raised here
+    # used to escape as a 500 instead of INVALID_INPUT (#1434).
+    try:
+        command = CreateWorkflowTemplateCommand(
+            aggregate_id=workflow_id or str(uuid4()),
+            name=name,
+            description=description or f"Workflow: {name}",
+            workflow_type=_resolve_workflow_type(workflow_type),
+            classification=_resolve_classification(classification),
+            repository_url=repository_url,
+            repository_ref=repository_ref,
+            phases=_build_phase_defs(phases),
+            project_name=project_name,
+            input_declarations=_build_input_declarations(input_declarations),
+            repos=repos or [],
+            requires_repos=requires_repos,
+            version=version,
+            source_digest=source_digest,
+            force=force,
+        )
+    except ValueError as e:
+        return Err(WorkflowError.INVALID_INPUT, message=str(e))
 
     await ensure_connected()
     repository = get_workflow_repo()
