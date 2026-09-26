@@ -43,16 +43,31 @@ _INSPECT_TIMEOUT_SECONDS = 120
 #: from the SAME build, because they ship alongside one submodule pointer.
 REVISION_LABEL = "org.opencontainers.image.revision"
 
+# Imported at module scope, not inside main(): `inspect_channel` needs the
+# expected repository name, and the repository invariant must not depend on
+# main() having run first.
+from syn_shared.settings.workspace_images import (  # noqa: E402
+    WorkspaceImageProvider,
+    workspace_image_name,
+)
+
 
 @dataclass(frozen=True)
 class ImageChannel:
-    """What an image says about itself."""
+    """What an image says about itself, plus where it was pinned FROM."""
 
     provider: str
     ref: str
     channel: str | None
     revision: str | None
     platforms: tuple[str, ...] = ()
+    #: The repository the pin resolves to, parsed from `ref`. Distinct from
+    #: the labels: the labels are what the image claims, this is where it
+    #: actually lives, and during a publisher cutover those can disagree.
+    repository: str = ""
+    #: The repository this provider is supposed to come from, from
+    #: `workspace_image_name`. Compared, never inferred from `ref`.
+    expected_repository: str = ""
 
     @property
     def ok(self) -> bool:
@@ -109,7 +124,15 @@ def agreed_label(labels_by_platform: dict[str, dict[str, str]], label: str) -> s
 
 #: The submodule whose source builds these images. The pins ship alongside this
 #: exact commit, so the build they came from must BE this commit.
-SUBMODULE_PATH = "lib/agentic-primitives"
+#:
+#: This is the PUBLISHING repository, which as of 2026-09-25 is
+#: agentic-workspace, not agentic-primitives. The two are vendored separately
+#: and on purpose: agentic-workspace builds and signs the images, while
+#: agentic-primitives still supplies the Python packages the uv workspace
+#: imports. Pointing this at the package submodule would compare a pin's
+#: revision against a repository that did not build it, and the check would
+#: fail for every correct pin.
+SUBMODULE_PATH = "lib/agentic-workspace"
 
 
 def submodule_gitlink(path: str = SUBMODULE_PATH) -> str:
@@ -152,12 +175,21 @@ def inspect_channel(provider: str, ref: str) -> ImageChannel:
         raise RuntimeError(msg)
     config = json.loads(result.stdout)
     by_platform = platform_labels(config)
+    # Repository = everything before the digest, with the registry and owner
+    # stripped. Split on "@" not ":", because a digest-pinned ref contains a
+    # colon inside the digest itself.
+    repository = ref.split("@", 1)[0].rsplit("/", 1)[-1]
     return ImageChannel(
         provider,
         ref,
         agreed_label(by_platform, CHANNEL_LABEL),
         agreed_label(by_platform, REVISION_LABEL),
         platforms=tuple(sorted(by_platform)),
+        repository=repository,
+        # `provider` is the enum NAME ("CLAUDE_CLI"), which is what every
+        # message in this file prints, not the value ("claude-cli"). Looked up
+        # by name deliberately; WorkspaceImageProvider(provider) raises.
+        expected_repository=workspace_image_name(WorkspaceImageProvider[provider]),
     )
 
 
@@ -176,6 +208,37 @@ def evaluate(results: list[ImageChannel], gitlink: str) -> tuple[int, list[str]]
         lines.append(
             f"  [{mark}] {r.provider:<12} channel={r.channel or '<none>':<8} revision={rev}"
         )
+
+    # ZEROTH: every pin points at the repository the publisher actually pushes.
+    #
+    # Added after a codex review of the publisher cutover. The channel and
+    # revision checks below say an image was built from the right source on the
+    # right branch; NEITHER says it came from the right REPOSITORY. During the
+    # cutover four repositories exist and all resolve:
+    #
+    #   agentic-workspace-claude        agentic-workspace-claude-cli
+    #   agentic-workspace-omni-agent    omni-agent-workspace
+    #
+    # A digest from the agentic-primitives pair carries channel=release and,
+    # for a same-commit build, could carry a matching revision. It would also
+    # pass cosign, because the identity constraint deliberately admits both
+    # publishers for the duration of the cutover. So every other control in
+    # the system says yes, and the wrong publisher's image runs.
+    #
+    # This is the gap that made the IMAGE_NAME_OVERRIDES inversion dangerous
+    # rather than merely fiddly, and it is checked here because this is the
+    # only gate that sees the reference a pin actually resolves to.
+    wrong_repo = [r for r in results if r.repository and r.repository != r.expected_repository]
+    if wrong_repo:
+        lines.append("")
+        lines.append("Pinned image(s) point at a repository this publisher does not push to:")
+        for r in wrong_repo:
+            lines.append(f"  {r.provider}: pinned {r.repository}, expected {r.expected_repository}")
+        lines.append("")
+        lines.append("A same-revision, release-channel digest from the OTHER publisher passes")
+        lines.append("every other check here and passes cosign while the cutover admits both")
+        lines.append("identities. Only the repository distinguishes them.")
+        return 1, lines
 
     # FIRST: every pin came through the protected release chain.
     bad = [r for r in results if not r.ok]
@@ -210,7 +273,7 @@ def evaluate(results: list[ImageChannel], gitlink: str) -> tuple[int, list[str]]
     # THIRD: that revision is the submodule we vendor.
     #
     # THIS IS OUR POLICY, NOT AN UPSTREAM CONTRACT. A codex review checked the
-    # upstream workflow: agentic-primitives documents `agentic.image.channel`,
+    # upstream workflow: the publishing repo documents `agentic.image.channel`,
     # but nothing upstream promises that `org.opencontainers.image.revision`
     # equals a consumer's gitlink - the label comes from docker/metadata-action's
     # implicit default rather than an explicit stamp. It is true today and we
@@ -238,7 +301,6 @@ def evaluate(results: list[ImageChannel], gitlink: str) -> tuple[int, list[str]]
 def main() -> int:
     from syn_shared.settings.workspace_images import (
         PINNED_DIGESTS,
-        WorkspaceImageProvider,
         workspace_image_ref,
     )
 

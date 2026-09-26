@@ -1,10 +1,28 @@
-"""Image names must match what agentic-primitives actually publishes.
+"""Image names must match what agentic-workspace actually publishes.
 
-A workspace image name is a cross-repo contract: agentic-primitives decides the
-repository name from ``image.tag`` in each provider manifest, and this repo has
-to reference the same string. Deriving it from a pattern is the tempting move
-and it is wrong - omni-agent publishes as ``omni-agent-workspace``, not
-``agentic-workspace-omni-agent``.
+A workspace image name is a cross-repo contract, and the authoritative source
+MOVED when publishing moved.
+
+Under agentic-primitives the repository name came from ``image.tag`` in each
+provider manifest, and this file read the manifests. Under agentic-workspace it
+does NOT: ``release-images.yml`` sets ``IMAGE:`` per publish job and pushes to
+exactly that, while the manifests still carry the old agentic-primitives
+values. As of release c5e34284 they disagree outright:
+
+    provider     manifest image.tag            published IMAGE
+    claude-cli   agentic-workspace-claude-cli  agentic-workspace-claude
+    omni-agent   omni-agent-workspace          agentic-workspace-omni-agent
+    toolchain    agentic-workspace-toolchain   agentic-workspace-toolchain
+
+So these tests read the WORKFLOW, which is what actually decides the
+repository a digest lands in. Reading the manifests would assert against
+strings nothing publishes, and would have "verified" two names that do not
+exist in the registry.
+
+The exception also moved: agentic-primitives made omni-agent the odd one out,
+agentic-workspace makes claude-cli the odd one out. A test that only checked
+"an override exists" would pass before and after while naming the wrong
+image.
 
 Getting it wrong fails at workspace provision time, in a container pull error
 far from the constant that caused it. These tests read the submodule manifests
@@ -27,70 +45,129 @@ from syn_shared.settings.workspace_images import (
     workspace_image_ref,
 )
 
-_PROVIDERS_DIR = (
-    Path(__file__).resolve().parents[3] / "lib" / "agentic-primitives" / "providers" / "workspaces"
+#: ``release-images.yml`` in the PUBLISHING repository is what decides the
+#: repository each digest is pushed to. Not the provider manifests: under
+#: agentic-workspace those still carry agentic-primitives names and disagree
+#: with what is published.
+_RELEASE_WORKFLOW = (
+    Path(__file__).resolve().parents[3]
+    / "lib"
+    / "agentic-workspace"
+    / ".github"
+    / "workflows"
+    / "release-images.yml"
 )
 
 
-def _manifest_image_tag(provider: WorkspaceImageProvider) -> str | None:
-    """Read ``image.tag`` from a provider manifest without a YAML dependency."""
-    manifest = _PROVIDERS_DIR / provider.value / "manifest.yaml"
-    if not manifest.is_file():
+def _published_repositories() -> dict[str, str] | None:
+    """``{provider: repository}`` as the publishing workflow declares it.
+
+    Each publish job sets ``PROVIDER:`` and ``IMAGE:`` in its ``env:`` block.
+    Pairing them positionally - the provider most recently seen owns the next
+    IMAGE - is enough for that shape and needs no YAML dependency.
+
+    Returns None when the submodule is not checked out.
+    """
+    if not _RELEASE_WORKFLOW.is_file():
         return None
-    in_image_block = False
-    for raw in manifest.read_text().splitlines():
-        if raw.startswith("image:"):
-            in_image_block = True
-            continue
-        if in_image_block:
-            if raw and not raw[0].isspace():
-                break  # dedented out of the image: block
-            stripped = raw.strip()
-            if stripped.startswith("tag:"):
-                return stripped.split(":", 1)[1].strip().strip("\"'")
-    return None
+    found: dict[str, str] = {}
+    provider: str | None = None
+    for raw in _RELEASE_WORKFLOW.read_text().splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("PROVIDER:"):
+            provider = stripped.split(":", 1)[1].strip().strip("\"'")
+        elif stripped.startswith("IMAGE:") and provider is not None:
+            ref = stripped.split(":", 1)[1].strip().strip("\"'")
+            found[provider] = ref.rsplit("/", 1)[-1]
+            provider = None
+    return found or None
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("provider", list(WorkspaceImageProvider))
-def test_image_name_matches_the_provider_manifest(provider: WorkspaceImageProvider) -> None:
-    tag = _manifest_image_tag(provider)
-    if tag is None:
-        pytest.skip(f"agentic-primitives manifest for {provider.value} not available")
+def test_image_name_matches_what_the_publisher_pushes(provider: WorkspaceImageProvider) -> None:
+    published = _published_repositories()
+    if published is None:
+        pytest.skip("lib/agentic-workspace is not checked out")
+    if provider.value not in published:
+        pytest.fail(
+            f"{provider.value}: no publish job in release-images.yml declares this "
+            f"provider. Declared providers: {sorted(published)}. Either the provider "
+            f"is not published at all - in which case it must not carry a pinned "
+            f"digest - or the workflow renamed its PROVIDER value."
+        )
 
-    assert workspace_image_name(provider) == tag, (
+    assert workspace_image_name(provider) == published[provider.value], (
         f"{provider.value}: this repo references {workspace_image_name(provider)!r} but "
-        f"agentic-primitives publishes {tag!r}. Add or correct an entry in "
-        f"IMAGE_NAME_OVERRIDES - do NOT change the derivation pattern, other "
+        f"agentic-workspace publishes {published[provider.value]!r}. Add or correct an "
+        f"entry in IMAGE_NAME_OVERRIDES - do NOT change the derivation pattern, other "
         f"providers depend on it."
     )
 
 
 @pytest.mark.unit
-class TestOmniIsTheKnownException:
-    """Pin the specific case that motivated the override map."""
+def test_every_published_provider_is_known_here() -> None:
+    """A provider the publisher ships but this repo does not model is a gap.
 
-    def test_omni_does_not_use_the_derived_name(self) -> None:
-        name = workspace_image_name(WorkspaceImageProvider.OMNI_AGENT)
-        assert name == "omni-agent-workspace"
-        assert name != "agentic-workspace-omni-agent"
+    The reverse of the test above. Without it, agentic-workspace could add a
+    fourth image and nothing here would notice, which is how toolchain sat
+    unpinned and unmodelled while it was already being built.
+    """
+    published = _published_repositories()
+    if published is None:
+        pytest.skip("lib/agentic-workspace is not checked out")
 
-    def test_omni_ref_is_fully_qualified(self) -> None:
+    known = {p.value for p in WorkspaceImageProvider}
+    unmodelled = sorted(set(published) - known)
+    assert not unmodelled, (
+        f"agentic-workspace publishes providers this repo does not model: "
+        f"{unmodelled}. Add them to WorkspaceImageProvider with a PINNED_DIGESTS "
+        f"entry, or record here why they are deliberately not consumed."
+    )
+
+
+@pytest.mark.unit
+class TestClaudeCliIsTheKnownException:
+    """Pin the specific case that motivates the override map.
+
+    Under agentic-workspace the odd one out is claude-cli, not omni-agent. The
+    exception swapped when publishing moved, so asserting only that *some*
+    override exists would have passed before and after while pointing at the
+    wrong image.
+    """
+
+    def test_claude_cli_does_not_use_the_derived_name(self) -> None:
+        name = workspace_image_name(WorkspaceImageProvider.CLAUDE_CLI)
+        assert name == "agentic-workspace-claude"
+        assert name != "agentic-workspace-claude-cli"
+
+    def test_claude_cli_ref_is_fully_qualified(self) -> None:
         # Assert the repository, not the whole reference. Refs are digest
-        # pinned, and a digest changes on every release; this test is about
-        # the image NAME being the unprefixed one.
-        ref = workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
-        assert ref.split("@")[0] == "ghcr.io/agentparadise/omni-agent-workspace"
+        # pinned and a digest changes on every release; this is about the NAME.
+        ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
+        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-claude"
         assert "@sha256:" in ref
+
+    def test_the_old_publishers_name_is_not_used(self) -> None:
+        """The agentic-primitives repositories still exist and still resolve.
+
+        Pulling one would succeed, and cosign would accept it while the
+        cutover admits both signing identities, so nothing downstream would
+        report the mistake. This is the assertion that catches it.
+        """
+        for provider in WorkspaceImageProvider:
+            name = workspace_image_name(provider)
+            assert name != "omni-agent-workspace"
+            assert name != "agentic-workspace-claude-cli"
 
 
 @pytest.mark.unit
 class TestDerivedProvidersUnchanged:
-    """The override map must not disturb providers that were already correct."""
+    """The override map must not disturb providers that are already correct."""
 
-    def test_claude_cli_still_derives(self) -> None:
-        ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
-        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-claude-cli"
+    def test_omni_agent_now_derives(self) -> None:
+        ref = workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
+        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-omni-agent"
         assert "@sha256:" in ref
 
 

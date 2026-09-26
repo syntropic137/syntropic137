@@ -24,7 +24,7 @@ Read `.claude/skills/onboarding/SKILL.md` for full context on prerequisites, det
 Run the environment detection checklist from the skill. Check each item and build a status report:
 
 - [ ] Docker running (`docker info`)
-- [ ] Git submodules initialized (`lib/agentic-primitives/.git` and `lib/event-sourcing-platform/.git` exist)
+- [ ] Git submodules initialized (`lib/agentic-workspace/.git` and `lib/event-sourcing-platform/.git` exist)
 - [ ] `.env` exists and has values (not just template)
 - [ ] `infra/.env` exists (selfhost only)
 - [ ] Required tools installed (uv, just, pnpm, node)

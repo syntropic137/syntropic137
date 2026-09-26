@@ -43,7 +43,7 @@ syntropic137/
 │   └── syn-tokens/                 # Secure token vending
 │
 ├── lib/                            # Git submodules
-│   ├── agentic-primitives/         # Composable agent blocks
+│   ├── agentic-workspace/         # Workspace images, isolation, event recording
 │   │   └── lib/python/             # Python libs (agentic_events, etc.)
 │   ├── event-sourcing-platform/    # Event sourcing infrastructure
 │   └── ui-feedback/                # UI feedback widget
@@ -191,7 +191,7 @@ uv run <command>        # Run arbitrary command in venv
 ### Architecture Understanding
 - **apps/**: CLI, Dashboard API, Dashboard UI
 - **packages/**: Domain models, adapters, shared utilities
-- **lib/**: Git submodules (agentic-primitives, event-sourcing-platform)
+- **lib/**: Git submodules (agentic-workspace, event-sourcing-platform)
 - **docker/**: Base + dev + test compose files
 - **workflows/**: YAML workflow definitions
 

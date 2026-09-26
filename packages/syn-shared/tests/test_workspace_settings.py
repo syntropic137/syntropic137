@@ -219,7 +219,7 @@ class TestWorkspaceImages:
     def test_default_image_is_ghcr(self) -> None:
         """Default image should reference GHCR, not a local-only name."""
         assert DEFAULT_WORKSPACE_IMAGE.startswith("ghcr.io/")
-        assert "omni-agent-workspace" in DEFAULT_WORKSPACE_IMAGE
+        assert "agentic-workspace-omni-agent" in DEFAULT_WORKSPACE_IMAGE
 
     def test_default_image_is_digest_pinned(self) -> None:
         """The default image must be immutable: a digest, never a tag.
@@ -267,7 +267,7 @@ class TestWorkspaceImages:
         )
 
         ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI, "2.1.76")
-        assert ref == "ghcr.io/agentparadise/agentic-workspace-claude-cli:2.1.76"
+        assert ref == "ghcr.io/agentparadise/agentic-workspace-claude:2.1.76"
 
     def test_workspace_image_ref_rejects_tag_and_digest(self) -> None:
         """Supplying both a tag and a digest is ambiguous, so it is an error."""
@@ -298,7 +298,7 @@ class TestWorkspaceImages:
             registry="registry.example.com",
             owner="myorg",
         )
-        assert ref == "registry.example.com/myorg/agentic-workspace-claude-cli:latest"
+        assert ref == "registry.example.com/myorg/agentic-workspace-claude:latest"
 
     def test_default_image_matches_settings(self) -> None:
         """WorkspaceSettings.docker_image default should match DEFAULT_WORKSPACE_IMAGE."""

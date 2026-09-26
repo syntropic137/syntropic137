@@ -13,10 +13,14 @@ publish silently changes what Syntropic137 runs. That is not a hypothetical: on
 2026-08-16 a regression in the workspace entrypoint reached a mutable tag and
 any deployment pulling in that window picked it up.
 
-Which upstream tag moves when is itself a trap, and it differs per branch.
-agentic-primitives publishes ``:edge`` and the commit SHA from ``main``, and
-moves ``:latest`` only from its ``release`` branch. So ``:latest`` is not
-"the newest image" - it can be considerably OLDER than what main has built.
+Which upstream tag moves when is itself a trap, and it differs per publisher.
+agentic-workspace, which publishes these images as of 2026-09-25, never
+publishes from ``main`` at all and never moves ``:latest``: only a push to its
+protected ``release`` branch publishes, and it tags the commit SHA plus the
+manifest and repo versions. agentic-primitives, the previous publisher, put
+``:edge`` and the commit SHA on ``main`` and moved ``:latest`` only from its
+own ``release`` branch, so ``:latest`` there was not "the newest image" and
+could be considerably OLDER than what main had built.
 On 2026-08-19 ``:latest`` for omni-agent still resolved to an image carrying
 agentic-session-exporter v0.1.1, which wrote an out-of-spec
 ``origin.environment``, while main had already built v0.2.1. A digest taken
@@ -40,11 +44,12 @@ build.
 To bump::
 
     docker buildx imagetools inspect \\
-        ghcr.io/agentparadise/agentic-workspace-claude-cli:latest
+        ghcr.io/agentparadise/agentic-workspace-claude:<commit sha>
 
 Take the top-level ``Digest:`` value (the multi-arch image index digest, not a
-per-platform manifest digest), record which agentic-primitives commit produced
-it, and open a PR. Signature verification
+per-platform manifest digest), record which agentic-workspace commit produced
+it, and open a PR. There is no ``:latest`` to inspect: the publisher never
+moves one, which is deliberate. Signature verification
 (``syn_adapters.workspace_backends.image_verification``) runs against the
 digest at provision time, so a bump to an unsigned or unexpectedly-built image
 fails closed rather than running.
@@ -60,7 +65,7 @@ It accepts any reference form. A registry reference is required to be
 digest-pinned; a registry tag is rejected, because verifying a tag does not
 establish what will actually be pulled.
 
-A locally built image (a bare name such as ``agentic-workspace-claude-cli:dev``)
+A locally built image (a bare name such as ``agentic-workspace-claude:dev``)
 is the supported local-development path, but it is not inferred from the
 reference: it must be turned on with
 ``SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true``, and the image must already exist
@@ -90,7 +95,7 @@ IMAGE_PREFIX: str = "agentic-workspace"
 class WorkspaceImageProvider(StrEnum):
     """Available workspace image providers.
 
-    Each provider corresponds to a Docker image built by agentic-primitives.
+    Each provider corresponds to a Docker image built by agentic-workspace.
     """
 
     CLAUDE_CLI = "claude-cli"
@@ -102,19 +107,52 @@ class WorkspaceImageProvider(StrEnum):
     rather than a side effect - its manifest treats one working harness as a
     broken image, not a degraded one.
 
-    Published as ``omni-agent-workspace``, NOT ``agentic-workspace-omni-agent``
-    - see IMAGE_NAME_OVERRIDES.
+    Published by agentic-workspace as ``agentic-workspace-omni-agent``, which
+    is the derived name, so it needs no override. It DID need one while
+    agentic-primitives published it as ``omni-agent-workspace``.
+    """
+
+    TOOLCHAIN = "toolchain"
+    """omni-agent plus a compile toolchain, for repositories whose own gates
+    build native code.
+
+    Adds a C compiler, rustup (the binary and proxies only - the toolchain
+    itself installs on first use from the repository's ``rust-toolchain.toml``),
+    pnpm through corepack, and bun. Everything omni carries is inherited
+    unchanged, so this is a superset rather than a variant: claude, codex, the
+    session exporter and the capability runtime are all the same.
+
+    Called ``buildfloor`` until 2026-09-25. Renamed before anything pinned it.
     """
 
 
-# Most providers publish as ``<IMAGE_PREFIX>-<provider>``. omni-agent does not:
-# agentic-primitives takes its repository name from ``image.tag`` in the
-# provider manifest, which reads ``omni-agent-workspace``, and its build matrix
-# publishes under exactly that. Deriving the name would silently produce
-# ``agentic-workspace-omni-agent``, which does not exist - the workspace would
-# fail to pull at provision time, far from this file.
+# Most providers publish as ``<IMAGE_PREFIX>-<provider>``. The authoritative
+# name is the ``IMAGE:`` env of the matching publish job in agentic-workspace's
+# ``release-images.yml``.
+#
+# It is NOT ``image.tag`` in the provider manifest. That was true under
+# agentic-primitives and is not true here: two of agentic-workspace's manifests
+# still carry the old agentic-primitives values and disagree with what is
+# actually pushed (AgentParadise/agentic-workspace#5). Trusting them would pin
+# ``agentic-workspace-claude-cli`` and ``omni-agent-workspace``, which this
+# publisher never pushes to.
+#
+# The override also moved when publishing moved, and it moved to the OTHER
+# provider:
+#
+#   provider     agentic-primitives            agentic-workspace
+#   omni-agent   omni-agent-workspace          agentic-workspace-omni-agent
+#   claude-cli   agentic-workspace-claude-cli  agentic-workspace-claude
+#   toolchain    (did not exist)               agentic-workspace-toolchain
+#
+# So omni-agent is now the derived name and needs no entry, while claude-cli is
+# the exception. This is not a rename of one repository: all of them exist, and
+# pulling the wrong one SUCCEEDS. cosign accepts it too, for as long as the
+# cutover admits both signing identities, so nothing downstream reports the
+# mistake. test_workspace_image_names.py asserts against the workflow for
+# exactly that reason.
 IMAGE_NAME_OVERRIDES: dict[WorkspaceImageProvider, str] = {
-    WorkspaceImageProvider.OMNI_AGENT: "omni-agent-workspace",
+    WorkspaceImageProvider.CLAUDE_CLI: "agentic-workspace-claude",
 }
 
 
@@ -131,11 +169,14 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # date; there is no single date for the whole table, because pins move
 # independently.
 #
-# BOTH pins below were taken on 2026-09-25 from the release-branch build run
-# 36159902844 of agentic-primitives 09887e6 (release PR #430), and both carry
-# agentic.image.channel=release and revision 09887e6 on linux/amd64 AND
-# linux/arm64. cosign verify passes for each against
-# AGENTIC_PRIMITIVES_IDENTITY_REGEXP.
+#                  Previous pins, for the record:
+#
+# The last pins built by agentic-primitives, taken on 2026-09-25 from its
+# release-branch build run 36159902844 at 09887e6 (release PR #430). Both
+# carried agentic.image.channel=release and revision 09887e6 on linux/amd64
+# AND linux/arm64, and cosign verify passed against
+# AGENTIC_PRIMITIVES_IDENTITY_REGEXP. These are the digests a deployment is
+# running until it picks up the cutover.
 #
 # omni-agent       omni-agent manifest 1.7.1. CLIs unchanged from 1.7.0 and
 #                  verified by running OUT OF THIS DIGEST on both
@@ -257,13 +298,48 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # Bump procedure: see the module docstring.
 # ---------------------------------------------------------------------------
 
+# PUBLISHER CUTOVER, 2026-09-25. The pins below are the first images published
+# by agentic-workspace rather than agentic-primitives. Taken from release-branch
+# run 36184892658 of agentic-workspace c5e34284 (release PR #4), and all carry
+# agentic.image.channel=release and revision c5e34284, read off the published
+# index. cosign verify passes for each against the combined identity in
+# syn_shared.settings.image_verification, using the agentic-workspace
+# alternative.
+#
+# omni-agent       omni-agent manifest 1.7.1, the SAME manifest version as the
+#                  agentic-primitives pin it replaces. Verified by running OUT
+#                  OF THIS DIGEST: "2.1.281 (Claude Code)", "codex-cli
+#                  0.156.1", "apss-session-exporter 0.5.0", and git, gh, jq,
+#                  uv, node and python3 all present. One behavioural
+#                  difference from the image it replaces: the Vercel Skills
+#                  CLI moves 1.5.14 -> 1.7.0. Skill installation is the only
+#                  thing that changes underneath a workflow.
+# toolchain       toolchain manifest 1.0.0, published for the FIRST time in
+#                  this run. The previous run built it but its arm64 compile
+#                  smoke failed, so it was pushed by digest and never signed or
+#                  tagged; fail-closed meant there was nothing to pin. Built
+#                  FROM the omni digest above, in the same run, and the
+#                  workflow verifies omni's signature before building on it.
+#                  Verified by running OUT OF THIS DIGEST:
+#                  "apss-session-exporter 0.5.0", plus cc, rustup, bun, pnpm,
+#                  corepack, claude, codex and skills all present.
+# claude-cli       claude-cli manifest 2.1.4, which is one patch BEHIND the
+#                  2.1.5 it replaces: agentic-workspace forked before that
+#                  manifest bump. Both CLIs are unchanged at claude 2.1.126 and
+#                  codex 0.144.6, read off the published labels, so there is no
+#                  functional regression. It still cannot run a default codex
+#                  phase - codex 0.144.6 predates gpt-6-sol - so codex phases
+#                  belong on omni-agent, exactly as before.
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:ed7c7f1ef3b2112c16c53ca71036bcdb18eb5a406f94ecc5daf5ac455bf11b19"
+            "sha256:decf374c17151165e0eac415f7cd120c928e8059b1591193152b9c77364a7560"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:a6ba94d71507384d33df7abe2050f7255bdae8b81dc5a37dbe92b7972f154773"
+            "sha256:89189b6c9cf67ac6a9b137fa7427990ca5535077e53e729a0ff4635053e6970d"
+        ),
+        WorkspaceImageProvider.TOOLCHAIN: (
+            "sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8"
         ),
     }
 )
@@ -282,6 +358,11 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
 PINNED_EXPORTER_VERSIONS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.OMNI_AGENT: "0.5.0",
+        # toolchain is built FROM the omni digest, so it inherits the exporter.
+        # Recorded from running the binary in the toolchain image anyway:
+        # inheritance is the reason to EXPECT a value, never the evidence for
+        # one, and a base-image bump could change it without changing omni.
+        WorkspaceImageProvider.TOOLCHAIN: "0.5.0",
     }
 )
 

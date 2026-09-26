@@ -137,3 +137,126 @@ class TestSubmoduleGitlink:
         """Empty stdout must fail closed, not read as 'no mismatch'."""
         with pytest.raises(RuntimeError, match="could not read the gitlink"):
             submodule_gitlink("no/such/path")
+
+
+# ---------------------------------------------------------------------------
+# The repository invariant (codex review of the publisher cutover)
+# ---------------------------------------------------------------------------
+#
+# The channel and revision checks say an image was built from the right source
+# on the right branch. NEITHER says it came from the right REPOSITORY. During
+# the cutover four repositories exist and all resolve:
+#
+#   agentic-workspace-claude       agentic-workspace-claude-cli
+#   agentic-workspace-omni-agent   omni-agent-workspace
+#
+# A same-commit build in the agentic-primitives pair carries channel=release
+# and a matching revision, and passes cosign, because the identity constraint
+# deliberately admits both publishers during the cutover. Every other control
+# says yes. Only the repository distinguishes them.
+
+_REV = "c5e34284bc28582152af85fdf6bf9f16b3db542c"
+
+
+def _repo_pin(provider: str, repository: str, expected: str, **kw: object) -> ImageChannel:
+    return ImageChannel(
+        provider,
+        f"ghcr.io/agentparadise/{repository}@sha256:" + "0" * 64,
+        kw.get("channel", "release"),  # type: ignore[arg-type]
+        kw.get("revision", _REV),  # type: ignore[arg-type]
+        repository=repository,
+        expected_repository=expected,
+    )
+
+
+@pytest.mark.unit
+class TestTheRepositoryInvariant:
+    def test_correct_repositories_pass(self) -> None:
+        code, _ = evaluate(
+            [
+                _repo_pin("CLAUDE_CLI", "agentic-workspace-claude", "agentic-workspace-claude"),
+                _repo_pin(
+                    "OMNI_AGENT",
+                    "agentic-workspace-omni-agent",
+                    "agentic-workspace-omni-agent",
+                ),
+            ],
+            _REV,
+        )
+        assert code == 0
+
+    def test_the_other_publishers_repository_is_rejected(self) -> None:
+        """Release channel, matching revision, wrong repository. Must fail."""
+        code, lines = evaluate(
+            [
+                _repo_pin("CLAUDE_CLI", "agentic-workspace-claude", "agentic-workspace-claude"),
+                _repo_pin(
+                    "OMNI_AGENT",
+                    "omni-agent-workspace",  # the agentic-primitives name
+                    "agentic-workspace-omni-agent",
+                ),
+            ],
+            _REV,
+        )
+        assert code == 1, (
+            "a same-revision, release-channel digest from the OTHER publisher passed; "
+            "it would also pass cosign while the cutover admits both identities"
+        )
+        assert any("omni-agent-workspace" in line for line in lines)
+        assert any("expected" in line for line in lines)
+
+    def test_the_old_claude_repository_is_rejected_too(self) -> None:
+        code, _ = evaluate(
+            [
+                _repo_pin(
+                    "CLAUDE_CLI",
+                    "agentic-workspace-claude-cli",  # the agentic-primitives name
+                    "agentic-workspace-claude",
+                ),
+            ],
+            _REV,
+        )
+        assert code == 1
+
+    def test_it_fires_before_the_channel_check(self) -> None:
+        """A wrong repository is reported as such, not as a channel problem.
+
+        Both are failures, but a reader told "not release channel" goes and
+        looks at the build, while the actual fault is the pin naming another
+        publisher's repository.
+        """
+        code, lines = evaluate(
+            [
+                _repo_pin(
+                    "OMNI_AGENT",
+                    "omni-agent-workspace",
+                    "agentic-workspace-omni-agent",
+                    channel="edge",
+                ),
+            ],
+            _REV,
+        )
+        assert code == 1
+        assert any("does not push to" in line for line in lines)
+
+    def test_an_unparsed_repository_does_not_silently_pass(self) -> None:
+        """Empty `repository` skips the check, so assert the skip is narrow.
+
+        The guard is `if r.repository`, so an unparsed reference cannot fail
+        this invariant. That is deliberate - it would otherwise fail every pin
+        on a parsing bug - but it means the OTHER invariants must still run.
+        """
+        code, _ = evaluate(
+            [
+                ImageChannel(
+                    "OMNI_AGENT",
+                    "not-a-ref",
+                    "edge",
+                    _REV,
+                    repository="",
+                    expected_repository="agentic-workspace-omni-agent",
+                )
+            ],
+            _REV,
+        )
+        assert code == 1, "channel check must still catch it when repository is unparsed"

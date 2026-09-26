@@ -32,7 +32,7 @@ _EXCLUDED = {
     # content. Excluding the whole directory hid 34 tests in lib/ui-feedback -
     # this guard institutionalising the very gap it exists to find.
     "lib/agent-paradise-standards-system",
-    "lib/agentic-primitives",
+    "lib/agentic-workspace",
     "lib/event-sourcing-platform",
     "lib/syntropic137-claude-plugin",
     # KNOWN GAPS, each with an issue. Listed rather than silently uncovered:

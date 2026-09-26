@@ -27,9 +27,9 @@
     "packages/syn-tokens/src",
     "packages/syn-perf/src",
     "lib/event-sourcing-platform/event-sourcing/python/src",
-    "lib/agentic-primitives/lib/python/agentic_events",
-    "lib/agentic-primitives/lib/python/agentic_isolation",
-    "lib/agentic-primitives/lib/python/agentic_logging"
+    "lib/agentic-workspace/lib/python/agentic_events",
+    "lib/agentic-workspace/lib/python/agentic_isolation",
+    "lib/agentic-workspace/lib/python/agentic_logging"
   ],
   "pythonVersion": "3.12",
   "venvPath": ".",
