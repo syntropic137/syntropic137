@@ -141,6 +141,114 @@ Existing endpoints updated:
 /executions/{exec_id}   → Execution detail with per-phase metrics
 ```
 
+### 7. Resuming a terminal execution is a FORK, not a mutation (2026-09-26)
+
+An execution that reached `FAILED`, `CANCELLED` or `INTERRUPTED` is terminal and
+stays terminal. Resuming it creates a **new execution** with a new id that
+records its parent, inherits the parent's contiguous prefix of completed phases
+and their artifacts, and begins at the phase that did not finish. The parent is
+never rewritten.
+
+This extends the separation this ADR already draws. A template is reusable, an
+execution is one run, so a resume is a NEW run that knows where it came from -
+not a second pass over an existing run's history. Sections 1-6 did not address
+terminal states at all, so nothing above is contradicted.
+
+**Why a fork rather than reopening the phase in place.** Reopening keeps one
+stream and needs no new identity, which is cheaper on paper. It also rewrites
+the history of a run someone has already read, and makes "what did execution X
+do" unanswerable afterwards. A fork keeps the audit trail intact and makes a bad
+resume visible as its own row rather than entangled with the original.
+
+**Ownership.** The PARENT aggregate decides whether a fork may exist and records
+`ExecutionForked` on its own stream. "Already forked" is a fact about the parent,
+and the parent stream's optimistic concurrency is the only race-free place to
+enforce it. Admission MUST NOT be decided from a projection - see the fail-opens
+below.
+
+**What is inherited.**
+
+| | Inherited | Measured |
+|---|---|---|
+| Completed phases (contiguous prefix) | yes, as `PhaseInherited` | - |
+| Their artifacts, by id | yes, ATTRIBUTED TO THE FORK | EXP2 |
+| The operator's inputs and task text | yes, byte-identical | EXP3 |
+| The rendered phase prompt | **no** | EXP3 |
+| The failed phase's work | no - it restarts from its beginning | - |
+| In-phase reasoning context | no, and this is a stated gap | - |
+
+**Artifact references are attributed to the fork at creation.** The tempting
+design is "artifacts are addressed by id, so a fork just names the parent's
+ids". Measured against this codebase, that does not work: the prior-phase
+injection path resolves artifacts THROUGH THE CONSUMING EXECUTION, so a fork
+naming a parent's artifact id receives nothing. Relinking the row to the fork
+makes injection succeed, which identifies the read path - not the id - as the
+constraint. The fork's opening append therefore attributes references to the
+inherited ids to itself. Artifacts remain immutable and are not copied; only the
+reference is new.
+
+This also removes a hazard a review raised. If the fork resolved inherited
+artifacts by querying the artifact list projection at start time, a projection
+that is merely LAGGING is indistinguishable from a deleted artifact, and a
+one-fork-per-parent rule would let that lag permanently consume the parent's
+only fork. Writing attribution at creation keeps the decision on the event
+stream, where lag cannot reach it.
+
+**The rendered prompt is not reproducible, and the contract says so.** The
+inputs round-trip byte-identically through the event store. The rendered prompt
+does not: the execution id is interpolated into it, so a fork re-rendering the
+same template differs from its parent by exactly that id. The `prompt_template`
+text is also absent from the start event, so a template edited between runs
+diverges further. The contract is "same inputs, re-rendered per fork", not "same
+prompt".
+
+**Which parents are forkable.**
+
+- `FAILED`, `INTERRUPTED`: yes.
+- `CANCELLED`: only on an explicit, separate operator action. A cancel is an
+  instruction to stop; treating it as another retryable terminal label defeats
+  it. The harm is concrete: an execution cancelled because it targeted the wrong
+  repository, or because its task carried a secret, must not be re-runnable by a
+  second operator or a queued retry without a fresh decision. Re-validate
+  repository authorization and inputs at that point, and never include
+  `CANCELLED` in automatic recovery.
+- `COMPLETED`, `RUNNING`, `PAUSED`, `NOT_STARTED`: not forkable.
+
+**A phase's failure is not a boundary for its external effects.** A phase can
+push a branch or open a pull request and then fail before its completion event
+is recorded, so re-running it from the beginning can repeat a non-repeatable
+effect. The intra-phase retry path already refuses on exactly this basis,
+permitting a retry only when the prior attempt did nothing observable. A fork
+applies the same rule: where the failed attempt left evidence of external
+effects, or left no readable evidence either way, the aggregate refuses unless
+the request acknowledges it.
+
+**Two fail-opens found while validating this, to be closed before a fork
+endpoint ships.** Both are pre-existing and independent of forking:
+
+1. The resume controller decides from the execution detail PROJECTION and never
+   loads the aggregate. Against a rehydrated `CANCELLED` execution the aggregate
+   rejects all twelve of its commands; the controller, handed a projection row
+   saying `paused`, returns success and queues a resume signal. A guard on a
+   terminal state is worthless if the route bypasses the aggregate.
+2. `stream_exists` returns `False` when the event store is UNREACHABLE, which is
+   indistinguishable from "no such stream". A pre-dispatch existence check built
+   on it passes when it cannot see, so it must fail closed.
+
+**Evidence.** Claims marked "measured" come from four experiments run against
+this codebase rather than reasoning about it, kept in
+`docs/experiments/resumability-fork/`: 200-way concurrent appends confirming
+that optimistic concurrency and `NoStream` each admit exactly one writer, and
+failing when `expected_version` is dropped so the guard is shown to be
+load-bearing; a fork holding a parent's artifact id receiving nothing from the
+injection path; the task surviving a round trip while the rendered prompt does
+not; and every aggregate command refused on a rehydrated cancelled execution
+while the HTTP route was not.
+
+**Deliberately unsolved.** Continuation WITHIN a phase. A fork restarts the
+unfinished phase from its beginning, so whatever reasoning context it had
+accumulated is lost. Bounding that loss is a separate concern, not decided here.
+
 ## Consequences
 
 ### Positive
