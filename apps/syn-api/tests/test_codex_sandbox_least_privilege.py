@@ -182,7 +182,8 @@ class TestTheWholePathFromYaml:
     test whose docstring claims more than it does is worse than no test.
     """
 
-    def test_yaml_read_only_reaches_the_codex_argv(self) -> None:
+    def test_yaml_declared_level_reaches_the_codex_argv(self) -> None:
+        # full-access: the only level YAML accepts since #1434.
         from syn_domain.contexts.orchestration._shared.workflow_definition import (
             WorkflowDefinition,
         )
@@ -200,15 +201,15 @@ phases:
     agent:
       provider: codex
       model: gpt-5.6-sol
-      sandbox: read-only
+      sandbox: full-access
 """
         )
         phase = definition.phases[0].to_domain()
-        assert phase.sandbox == "read-only", "dropped between YAML and PhaseDefinition"
+        assert phase.sandbox == "full-access", "dropped between YAML and PhaseDefinition"
 
         argv = _build_codex_command(
             "check the work",
             phase.model,
             _resolve_sandbox(phase.sandbox, phase_id=phase.phase_id),
         )
-        assert _sandbox_arg(argv) == "read-only"
+        assert _sandbox_arg(argv) == "danger-full-access"
