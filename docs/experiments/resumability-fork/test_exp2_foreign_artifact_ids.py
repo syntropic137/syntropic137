@@ -47,13 +47,24 @@ class _Repo:
 async def _world() -> tuple[InMemoryProjectionStore, ArtifactListProjection, ArtifactCollector]:
     store = InMemoryProjectionStore()
     proj = ArtifactListProjection(store)
-    await proj.on_artifact_created({
-        "artifact_id": ART, "workflow_id": "wf", "execution_id": P, "phase_id": "plan",
-        "artifact_type": "markdown", "title": "plan.md", "content": BODY,
-        "source_path": "deliverable.md", "is_primary_deliverable": True,
-    })
-    collector = ArtifactCollector(repository=_Repo(), content_storage=None,  # type: ignore[arg-type]
-                                  query_service=ArtifactQueryService(proj))
+    await proj.on_artifact_created(
+        {
+            "artifact_id": ART,
+            "workflow_id": "wf",
+            "execution_id": P,
+            "phase_id": "plan",
+            "artifact_type": "markdown",
+            "title": "plan.md",
+            "content": BODY,
+            "source_path": "deliverable.md",
+            "is_primary_deliverable": True,
+        }
+    )
+    collector = ArtifactCollector(
+        repository=_Repo(),
+        content_storage=None,  # type: ignore[arg-type]
+        query_service=ArtifactQueryService(proj),
+    )
     return store, proj, collector
 
 
@@ -63,8 +74,12 @@ async def _inject(collector: ArtifactCollector, execution_id: str) -> list[tuple
     # WorkflowExecutionProcessor.py:292-307), so the projection is the only source.
     ws = _Ws()
     await collector.inject_from_previous_phases_explicit(
-        workspace=ws, completed_phase_ids=["plan"], phase_outputs={},
-        execution_id=execution_id, phase_files={})
+        workspace=ws,
+        completed_phase_ids=["plan"],
+        phase_outputs={},
+        execution_id=execution_id,
+        phase_files={},
+    )
     return ws.injected
 
 
@@ -72,30 +87,40 @@ async def test_read_paths_for_a_foreign_artifact_id() -> None:
     store, proj, collector = await _world()
     aqs = ArtifactQueryService(proj)
 
-    control = await _inject(collector, P)          # the owning execution
-    hazard = await _inject(collector, F)           # the fork, same completed ids
+    control = await _inject(collector, P)  # the owning execution
+    hazard = await _inject(collector, F)  # the fork, same completed ids
     alias_f = await aqs.get_for_phase_injection(execution_id=F, completed_phase_ids=["plan"])
-    by_id = await proj.get_by_id(ART)              # GET /artifacts/{id} path
-    listed_f = await proj.query(execution_id=F)    # GET /artifacts?execution_id=F path
+    by_id = await proj.get_by_id(ART)  # GET /artifacts/{id} path
+    listed_f = await proj.query(execution_id=F)  # GET /artifacts?execution_id=F path
 
     # Execution detail: does it accept a foreign id on F's own stream?
     detail = WorkflowExecutionDetailProjection(store)
-    await detail.on_workflow_execution_started({"execution_id": F, "workflow_id": "wf",
-                                                "inputs": {}, "total_phases": 2})
-    await detail.on_phase_completed({"execution_id": F, "phase_id": "plan", "artifact_id": ART,
-                                     "input_tokens": 0, "output_tokens": 0})
+    await detail.on_workflow_execution_started(
+        {"execution_id": F, "workflow_id": "wf", "inputs": {}, "total_phases": 2}
+    )
+    await detail.on_phase_completed(
+        {
+            "execution_id": F,
+            "phase_id": "plan",
+            "artifact_id": ART,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+    )
     f_detail = await detail.get_by_id(F)
 
     print(f"\nEXP2 injection into P's next phase (control): {[p for p, _ in control]}")
     print(f"EXP2 injection into F's next phase (hazard):   {[p for p, _ in hazard]}")
     print(f"EXP2 prompt alias for F: {alias_f}")
-    print(f"EXP2 get_by_id({ART}): execution_id={by_id.execution_id if by_id else None} "
-          f"content_ok={bool(by_id and by_id.content == BODY)}")
+    print(
+        f"EXP2 get_by_id({ART}): execution_id={by_id.execution_id if by_id else None} "
+        f"content_ok={bool(by_id and by_id.content == BODY)}"
+    )
     print(f"EXP2 list artifacts for F: {[a.id for a in listed_f]}")
     print(f"EXP2 F detail artifact_ids: {f_detail.artifact_ids if f_detail else None}")
 
     assert BODY.encode() in [b for _, b in control]  # the path works for the owner
-    assert hazard == []                             # ...and silently gives F nothing
+    assert hazard == []  # ...and silently gives F nothing
     assert alias_f == {}
     assert by_id is not None and by_id.content == BODY
     assert listed_f == []

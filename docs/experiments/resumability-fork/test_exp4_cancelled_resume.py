@@ -66,14 +66,22 @@ async def _cancelled(client: MemoryEventStoreClient) -> None:
     agg = WorkflowExecutionAggregate()
     agg._handle_command(
         StartExecutionCommand(
-            execution_id=EID, workflow_id="wf", workflow_name="W", total_phases=2,
+            execution_id=EID,
+            workflow_id="wf",
+            workflow_name="W",
+            total_phases=2,
             inputs={"task": "t"},
-            phase_definitions=[PhaseDefinition(phase_id="p1", name="P1", order=1),
-                               PhaseDefinition(phase_id="p2", name="P2", order=2)],
+            phase_definitions=[
+                PhaseDefinition(phase_id="p1", name="P1", order=1),
+                PhaseDefinition(phase_id="p2", name="P2", order=2),
+            ],
         )
     )
-    agg._handle_command(StartPhaseCommand(execution_id=EID, workflow_id="wf", phase_id="p1",
-                                          phase_name="P1", phase_order=1))
+    agg._handle_command(
+        StartPhaseCommand(
+            execution_id=EID, workflow_id="wf", phase_id="p1", phase_name="P1", phase_order=1
+        )
+    )
     await repo.save_new(agg)
     agg._handle_command(CancelExecutionCommand(execution_id=EID, phase_id="p1", reason="stop"))
     await repo.save(agg)
@@ -85,26 +93,52 @@ def _all_commands() -> dict[str, object]:
         "Pause": PauseExecutionCommand(execution_id=EID, phase_id="p1"),
         "Cancel(again)": CancelExecutionCommand(execution_id=EID, phase_id="p1"),
         "Interrupt": InterruptExecutionCommand(execution_id=EID, phase_id="p1"),
-        "StartPhase(p2)": StartPhaseCommand(execution_id=EID, workflow_id="wf", phase_id="p2",
-                                            phase_name="P2", phase_order=2),
+        "StartPhase(p2)": StartPhaseCommand(
+            execution_id=EID, workflow_id="wf", phase_id="p2", phase_name="P2", phase_order=2
+        ),
         "RetryPhase(p1)": RetryPhaseCommand(execution_id=EID, phase_id="p1", reason="r"),
         "CompletePhase(p1)": CompletePhaseCommand(
-            execution_id=EID, workflow_id="wf", phase_id="p1", session_id=None, artifact_id=None,
-            input_tokens=1, output_tokens=1, cache_creation_tokens=0, cache_read_tokens=0,
-            total_tokens=2, duration_seconds=1.0),
+            execution_id=EID,
+            workflow_id="wf",
+            phase_id="p1",
+            session_id=None,
+            artifact_id=None,
+            input_tokens=1,
+            output_tokens=1,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+            total_tokens=2,
+            duration_seconds=1.0,
+        ),
         "ProvisionWorkspaceCompleted": ProvisionWorkspaceCompletedCommand(
-            execution_id=EID, phase_id="p1", workspace_id="ws"),
+            execution_id=EID, phase_id="p1", workspace_id="ws"
+        ),
         "AgentExecutionCompleted": AgentExecutionCompletedCommand(
-            execution_id=EID, phase_id="p1", session_id="s"),
+            execution_id=EID, phase_id="p1", session_id="s"
+        ),
         "ArtifactsCollected": ArtifactsCollectedCommand(
-            execution_id=EID, phase_id="p1", artifact_ids=["art-x"]),
+            execution_id=EID, phase_id="p1", artifact_ids=["art-x"]
+        ),
         "CompleteExecution": CompleteExecutionCommand(
-            execution_id=EID, completed_phases=1, total_phases=2, total_input_tokens=0,
-            total_output_tokens=0, total_cache_creation_tokens=0, total_cache_read_tokens=0,
-            duration_seconds=1.0, artifact_ids=[]),
+            execution_id=EID,
+            completed_phases=1,
+            total_phases=2,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_cache_creation_tokens=0,
+            total_cache_read_tokens=0,
+            duration_seconds=1.0,
+            artifact_ids=[],
+        ),
         "FailExecution": FailExecutionCommand(
-            execution_id=EID, error="e", error_type=None, failed_phase_id="p1",
-            completed_phases=0, total_phases=2, classification=next(iter(FailureClassification))),
+            execution_id=EID,
+            error="e",
+            error_type=None,
+            failed_phase_id="p1",
+            completed_phases=0,
+            total_phases=2,
+            classification=next(iter(FailureClassification)),
+        ),
     }
 
 
@@ -120,7 +154,7 @@ async def test_every_command_against_a_rehydrated_cancelled_execution() -> None:
             agg._handle_command(cmd)
             emitted = [type(e.event).__name__ for e in agg.get_uncommitted_events()]
             outcomes[name] = f"ACCEPTED -> {emitted} status={agg.status}"
-        except Exception as exc:  # noqa: BLE001 - measuring, not handling
+        except Exception as exc:  # measuring, not handling
             outcomes[name] = f"REJECTED {type(exc).__name__}: {exc}"
     for k, v in outcomes.items():
         print(f"EXP4 aggregate {k}: {v}")
@@ -130,16 +164,19 @@ async def test_every_command_against_a_rehydrated_cancelled_execution() -> None:
 async def test_resume_endpoint_path_on_cancelled_and_on_paused() -> None:
     store = InMemoryProjectionStore()
     proj = WorkflowExecutionDetailProjection(store)
-    await proj.on_workflow_execution_started({"execution_id": EID, "workflow_id": "wf",
-                                              "inputs": {"task": "t"}, "total_phases": 2})
+    await proj.on_workflow_execution_started(
+        {"execution_id": EID, "workflow_id": "wf", "inputs": {"task": "t"}, "total_phases": 2}
+    )
     await proj.on_execution_cancelled({"execution_id": EID, "phase_id": "p1", "reason": "stop"})
     signals = InMemorySignalQueueAdapter()
     ctl = ExecutionController(ProjectionControlStateAdapter(store), signals)
 
     res = await ctl.handle_command(ResumeExecution(execution_id=EID))
     queued = await signals.get_signal(EID)
-    print(f"EXP4 controller resume on cancelled: success={res.success} state={res.new_state} "
-          f"error={res.error!r} queued={queued}")
+    print(
+        f"EXP4 controller resume on cancelled: success={res.success} state={res.new_state} "
+        f"error={res.error!r} queued={queued}"
+    )
     assert res.success is False and queued is None
 
     # Control: prove the controller CAN say yes, so the refusal above is about

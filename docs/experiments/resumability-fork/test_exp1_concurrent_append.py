@@ -60,14 +60,20 @@ class Timed:
     def __getattr__(self, name: str) -> Any:  # noqa: ANN401
         return getattr(self._inner, name)
 
-    async def append_events(self, stream_name: str, events: Any, expected_version: Any = None) -> None:  # noqa: ANN401
+    async def append_events(
+        self, stream_name: str, events: object, expected_version: object = None
+    ) -> None:
+        # `object`, not `Any`: this wrapper only forwards these two, so it has
+        # no business asserting their shape, and `Any` would silence a real
+        # type error in the forwarding itself.
         if self.drop:
             expected_version = None
             self.mutated_calls += 1
         t0 = time.perf_counter()
         try:
-            await self._inner.append_events(stream_name=stream_name, events=events,
-                                            expected_version=expected_version)
+            await self._inner.append_events(
+                stream_name=stream_name, events=events, expected_version=expected_version
+            )
         finally:
             self.spans.append((t0, time.perf_counter()))
 
@@ -85,8 +91,15 @@ async def _client() -> tuple[str, Any]:
 
 def _started(eid: str, task: str) -> WorkflowExecutionAggregate:
     agg = WorkflowExecutionAggregate()
-    agg._handle_command(StartExecutionCommand(execution_id=eid, workflow_id="wf", workflow_name="W",
-                                              total_phases=1, inputs={"task": task}))
+    agg._handle_command(
+        StartExecutionCommand(
+            execution_id=eid,
+            workflow_id="wf",
+            workflow_name="W",
+            total_phases=1,
+            inputs={"task": task},
+        )
+    )
     return agg
 
 
@@ -116,8 +129,11 @@ async def _race_existing_stream(timed: Timed) -> tuple[str, bool, int]:
 async def _race_no_stream(timed: Timed) -> tuple[str, bool, int]:
     repo = EventStoreRepository(timed, WorkflowExecutionAggregate, "WorkflowExecution")
     eid = f"exec-{uuid.uuid4().hex[:12]}"
-    res = await asyncio.gather(repo.save_new(_started(eid, "first")),
-                               repo.save_new(_started(eid, "second")), return_exceptions=True)
+    res = await asyncio.gather(
+        repo.save_new(_started(eid, "first")),
+        repo.save_new(_started(eid, "second")),
+        return_exceptions=True,
+    )
     ok = sum(1 for r in res if r is None)
     errs = sorted(f"{type(r).__name__}" for r in res if r is not None)
     final = await repo.load(eid)
@@ -136,8 +152,10 @@ async def test_concurrent_appends_at_same_expected_version(race: Any) -> None:  
         outcomes[outcome] += 1
         overlaps += overlapped
         max_version = max(max_version, version)
-    print(f"\nEXP1 {kind} {race.__name__}: N={N} overlapped={overlaps} "
-          f"max_final_version={max_version} outcomes={dict(outcomes)}")
+    print(
+        f"\nEXP1 {kind} {race.__name__}: N={N} overlapped={overlaps} "
+        f"max_final_version={max_version} outcomes={dict(outcomes)}"
+    )
     double = sum(v for k, v in outcomes.items() if k.startswith("ok=2"))
     assert double == 0, f"BOTH appends succeeded {double} times"
 
@@ -163,6 +181,8 @@ async def test_stream_exists_when_store_unreachable() -> None:
     repo = EventStoreRepository(c, WorkflowExecutionAggregate, "WorkflowExecution")
     try:
         repo_exists: object = await repo.exists("exec-anything")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         repo_exists = f"raised {type(exc).__name__}"
-    print(f"\nEXP1 store unreachable: client.stream_exists={exists} repository.exists={repo_exists}")
+    print(
+        f"\nEXP1 store unreachable: client.stream_exists={exists} repository.exists={repo_exists}"
+    )

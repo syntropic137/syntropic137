@@ -57,15 +57,26 @@ class _Template:
 
 
 def _phase(prompt: str, static: str) -> ExecutablePhase:
-    return ExecutablePhase(phase_id="implement", name="Implement", order=2,
-                           prompt_template=prompt, inputs=[PhaseInput(name="style", value=static)])
+    return ExecutablePhase(
+        phase_id="implement",
+        name="Implement",
+        order=2,
+        prompt_template=prompt,
+        inputs=[PhaseInput(name="style", value=static)],
+    )
 
 
-V1 = _phase("[{{execution_id}}] Task: $ARGUMENTS\nRepo: {{repos}} ticket={{ticket}} style={{style}}\n"
-            "Plan: {{plan}}", "terse")
+V1 = _phase(
+    "[{{execution_id}}] Task: $ARGUMENTS\nRepo: {{repos}} ticket={{ticket}} style={{style}}\n"
+    "Plan: {{plan}}",
+    "terse",
+)
 # The template after an operator edit: same phase id, different words/default/static input.
-V2 = _phase("[{{execution_id}}] Implement carefully. $ARGUMENTS\nRepos: {{repos}} ticket={{ticket}} "
-            "style={{style}}\nPlan: {{plan}}", "verbose")
+V2 = _phase(
+    "[{{execution_id}}] Implement carefully. $ARGUMENTS\nRepos: {{repos}} ticket={{ticket}} "
+    "style={{style}}\nPlan: {{plan}}",
+    "verbose",
+)
 
 
 async def _client() -> object:
@@ -88,10 +99,19 @@ async def test_replay_started_event() -> None:
 
     eid = f"exec-{uuid.uuid4().hex[:12]}"
     agg = WorkflowExecutionAggregate()
-    agg._handle_command(StartExecutionCommand(
-        execution_id=eid, workflow_id="wf-1", workflow_name="W", total_phases=2, inputs=inputs,
-        phase_definitions=[PhaseDefinition(phase_id="plan", name="Plan", order=1),
-                           PhaseDefinition(phase_id="implement", name="Implement", order=2)]))
+    agg._handle_command(
+        StartExecutionCommand(
+            execution_id=eid,
+            workflow_id="wf-1",
+            workflow_name="W",
+            total_phases=2,
+            inputs=inputs,
+            phase_definitions=[
+                PhaseDefinition(phase_id="plan", name="Plan", order=1),
+                PhaseDefinition(phase_id="implement", name="Implement", order=2),
+            ],
+        )
+    )
     client = await _client()
     repo = EventStoreRepository(client, WorkflowExecutionAggregate, "WorkflowExecution")
     await repo.save_new(agg)
@@ -123,8 +143,10 @@ async def test_replay_started_event() -> None:
     print(f"EXP3 re-render, template v1, FORK id:   identical={as_fork_v1 == original}")
     print(f"EXP3 v1+fork id differs ONLY by the id: {as_fork_v1.replace(fork_id, eid) == original}")
     print(f"EXP3 re-render, template v2, FORK id:   identical={as_fork_v2 == original}")
-    print(f"EXP3 prompt_template text in event: {V1.prompt_template in repr(payload)}; "
-          f"static phase input 'terse' in event: {'terse' in repr(payload)}")
+    print(
+        f"EXP3 prompt_template text in event: {V1.prompt_template in repr(payload)}; "
+        f"static phase input 'terse' in event: {'terse' in repr(payload)}"
+    )
 
     assert replayed_inputs.get("task") == TASK
     assert same_tpl == original
