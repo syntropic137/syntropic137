@@ -2,347 +2,368 @@
 
 from __future__ import annotations
 
+import socket
+from typing import TYPE_CHECKING
+
 import pytest
+from event_sourcing import EventStoreRepository
+from event_sourcing.client.grpc_client import GrpcEventStoreClient
+from event_sourcing.client.memory import MemoryEventStoreClient
 
 from syn_adapters.control import (
     CancelExecution,
+    ControlCommand,
     ControlSignalType,
     ExecutionController,
-    ExecutionState,
-    ExecutionStateMachine,
     InjectContext,
-    InvalidTransitionError,
     PauseExecution,
     ResumeExecution,
 )
-from syn_adapters.control.adapters.memory import (
-    InMemoryControlStateAdapter,
-    InMemorySignalQueueAdapter,
-)
+from syn_adapters.control.adapters.memory import InMemorySignalQueueAdapter
 from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
+from syn_adapters.storage.repositories import RepositoryAdapter
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    CancelExecutionCommand,
+    CompleteExecutionCommand,
+    FailExecutionCommand,
+    InterruptExecutionCommand,
+    PauseExecutionCommand,
+    ResumeExecutionCommand,
+    StartExecutionCommand,
+    StartPhaseCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutionStatus,
+    FailureClassification,
+    PhaseDefinition,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    WorkflowExecutionAggregate,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from event_sourcing import EventStoreClient
+
+
+# =============================================================================
+# Executions recorded through the real aggregate and a real event stream. The
+# controller is handed nothing else: whatever it admits, it admits on the
+# aggregate's word.
+# =============================================================================
+
+
+def _executions(
+    client: EventStoreClient | None = None,
+) -> RepositoryAdapter[WorkflowExecutionAggregate]:
+    return RepositoryAdapter(
+        EventStoreRepository(
+            client or MemoryEventStoreClient(),
+            WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+            "WorkflowExecution",
+        )
+    )
+
+
+def _pause(agg: WorkflowExecutionAggregate) -> None:
+    agg.pause_execution(PauseExecutionCommand(execution_id=agg.id or "", phase_id="p1"))
+
+
+def _cancel(agg: WorkflowExecutionAggregate) -> None:
+    agg.cancel_execution(CancelExecutionCommand(execution_id=agg.id or "", phase_id="p1"))
+
+
+def _complete(agg: WorkflowExecutionAggregate) -> None:
+    agg.complete_execution(
+        CompleteExecutionCommand(
+            execution_id=agg.id or "",
+            completed_phases=1,
+            total_phases=1,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_cache_creation_tokens=0,
+            total_cache_read_tokens=0,
+            duration_seconds=1.0,
+            artifact_ids=[],
+        )
+    )
+
+
+def _fail(agg: WorkflowExecutionAggregate) -> None:
+    agg.fail_execution(
+        FailExecutionCommand(
+            execution_id=agg.id or "",
+            error="boom",
+            error_type=None,
+            failed_phase_id="p1",
+            completed_phases=0,
+            total_phases=1,
+            classification=FailureClassification.UNCLASSIFIED,
+        )
+    )
+
+
+def _interrupt(agg: WorkflowExecutionAggregate) -> None:
+    agg.interrupt_execution(InterruptExecutionCommand(execution_id=agg.id or "", phase_id="p1"))
+
+
+#: How to bring a started execution to each status an execution can be loaded in.
+_TO_STATUS: dict[ExecutionStatus, Callable[[WorkflowExecutionAggregate], None] | None] = {
+    ExecutionStatus.RUNNING: None,
+    ExecutionStatus.PAUSED: _pause,
+    ExecutionStatus.CANCELLED: _cancel,
+    ExecutionStatus.COMPLETED: _complete,
+    ExecutionStatus.FAILED: _fail,
+    ExecutionStatus.INTERRUPTED: _interrupt,
+}
+
+
+async def _record(
+    executions: RepositoryAdapter[WorkflowExecutionAggregate],
+    execution_id: str,
+    status: ExecutionStatus,
+) -> None:
+    """Write an execution's stream so that, rehydrated, it is in `status`."""
+    agg = WorkflowExecutionAggregate()
+    agg.start_execution(
+        StartExecutionCommand(
+            execution_id=execution_id,
+            workflow_id="wf",
+            workflow_name="W",
+            total_phases=1,
+            inputs={"task": "t"},
+            phase_definitions=[PhaseDefinition(phase_id="p1", name="P1", order=1)],
+        )
+    )
+    agg.start_phase(
+        StartPhaseCommand(
+            execution_id=execution_id,
+            workflow_id="wf",
+            phase_id="p1",
+            phase_name="P1",
+            phase_order=1,
+        )
+    )
+    step = _TO_STATUS[status]
+    if step is not None:
+        step(agg)
+    await executions.save_new(agg)
+
+    loaded = await executions.get_by_id(execution_id)
+    assert loaded is not None
+    assert loaded.status is status  # the precondition really holds, from the stream
+
+
+_REQUESTS: dict[ControlSignalType, Callable[[str], ControlCommand]] = {
+    ControlSignalType.PAUSE: lambda eid: PauseExecution(execution_id=eid, reason="r"),
+    ControlSignalType.RESUME: lambda eid: ResumeExecution(execution_id=eid),
+    ControlSignalType.CANCEL: lambda eid: CancelExecution(execution_id=eid, reason="r"),
+    ControlSignalType.INJECT: lambda eid: InjectContext(execution_id=eid, message="m"),
+}
+
+
+def _aggregate_command_accepted(agg: WorkflowExecutionAggregate, signal: ControlSignalType) -> bool:
+    """What the aggregate's own command handler does with the same request."""
+    eid = agg.id or ""
+    commands: dict[ControlSignalType, Callable[[], None]] = {
+        ControlSignalType.PAUSE: lambda: agg.pause_execution(
+            PauseExecutionCommand(execution_id=eid, phase_id="p1")
+        ),
+        ControlSignalType.RESUME: lambda: agg.resume_execution(
+            ResumeExecutionCommand(execution_id=eid, phase_id="p1")
+        ),
+        ControlSignalType.CANCEL: lambda: agg.cancel_execution(
+            CancelExecutionCommand(execution_id=eid, phase_id="p1")
+        ),
+    }
+    try:
+        commands[signal]()
+    except ValueError:
+        return False
+    return True
 
 
 @pytest.mark.unit
-class TestExecutionStateMachine:
-    """Tests for ExecutionStateMachine."""
+class TestAdmissionIsTheAggregatesDecision:
+    """ADR-014 section 7, fail-open 1: the controller must not decide on its own.
 
-    def test_initial_state_is_pending(self) -> None:
-        """New state machine starts in PENDING state."""
-        sm = ExecutionStateMachine()
-        assert sm.state == ExecutionState.PENDING
+    Before, it ran a private state machine over the execution detail projection,
+    so its answer could differ from the aggregate's whenever the projection
+    lagged. These tests hand it only an event stream, so there is nothing else
+    for it to be right about.
+    """
 
-    def test_can_start_with_custom_state(self) -> None:
-        """State machine can be initialized with a specific state."""
-        sm = ExecutionStateMachine(ExecutionState.RUNNING)
-        assert sm.state == ExecutionState.RUNNING
-
-    def test_valid_transition_pending_to_running(self) -> None:
-        """Can transition from PENDING to RUNNING."""
-        sm = ExecutionStateMachine()
-        assert sm.can_transition_to(ExecutionState.RUNNING)
-        sm.transition(ExecutionState.RUNNING)
-        assert sm.state == ExecutionState.RUNNING
-
-    def test_valid_transition_running_to_paused(self) -> None:
-        """Can transition from RUNNING to PAUSED."""
-        sm = ExecutionStateMachine(ExecutionState.RUNNING)
-        assert sm.can_pause()
-        sm.transition(ExecutionState.PAUSED)
-        assert sm.state == ExecutionState.PAUSED
-
-    def test_valid_transition_paused_to_running(self) -> None:
-        """Can transition from PAUSED to RUNNING (resume)."""
-        sm = ExecutionStateMachine(ExecutionState.PAUSED)
-        assert sm.can_resume()
-        sm.transition(ExecutionState.RUNNING)
-        assert sm.state == ExecutionState.RUNNING
-
-    def test_valid_transition_running_to_cancelled(self) -> None:
-        """Can transition from RUNNING to CANCELLED."""
-        sm = ExecutionStateMachine(ExecutionState.RUNNING)
-        assert sm.can_cancel()
-        sm.transition(ExecutionState.CANCELLED)
-        assert sm.state == ExecutionState.CANCELLED
-
-    def test_invalid_transition_raises_error(self) -> None:
-        """Invalid transitions raise InvalidTransitionError."""
-        sm = ExecutionStateMachine(ExecutionState.PENDING)
-        with pytest.raises(InvalidTransitionError):
-            sm.transition(ExecutionState.PAUSED)  # Can't pause from PENDING
-
-    def test_terminal_state_completed(self) -> None:
-        """COMPLETED is a terminal state."""
-        sm = ExecutionStateMachine(ExecutionState.COMPLETED)
-        assert sm.is_terminal
-        assert not sm.can_transition_to(ExecutionState.RUNNING)
-
-    def test_terminal_state_cancelled(self) -> None:
-        """CANCELLED is a terminal state."""
-        sm = ExecutionStateMachine(ExecutionState.CANCELLED)
-        assert sm.is_terminal
-        assert not sm.can_cancel()  # Can't cancel again
-
-    def test_terminal_state_failed(self) -> None:
-        """FAILED is a terminal state."""
-        sm = ExecutionStateMachine(ExecutionState.FAILED)
-        assert sm.is_terminal
-
-    def test_cannot_resume_from_non_paused_state(self) -> None:
-        """Can only resume from PAUSED state."""
-        sm = ExecutionStateMachine(ExecutionState.RUNNING)
-        assert not sm.can_resume()
-
-
-@pytest.mark.unit
-class TestInterruptedState:
-    """T-2: Tests for INTERRUPTED state transitions in ExecutionStateMachine."""
-
-    def test_running_can_transition_to_interrupted(self) -> None:
-        """RUNNING execution can be interrupted."""
-        sm = ExecutionStateMachine(ExecutionState.RUNNING)
-        sm.transition(ExecutionState.INTERRUPTED)
-        assert sm.state == ExecutionState.INTERRUPTED
-
-    def test_interrupted_is_terminal(self) -> None:
-        """INTERRUPTED is a terminal state (no further transitions)."""
-        sm = ExecutionStateMachine(ExecutionState.INTERRUPTED)
-        assert sm.is_terminal
-
-    def test_cannot_transition_from_interrupted_to_running(self) -> None:
-        """Cannot resume from INTERRUPTED state."""
-        sm = ExecutionStateMachine(ExecutionState.INTERRUPTED)
-        with pytest.raises(InvalidTransitionError):
-            sm.transition(ExecutionState.RUNNING)
-
-    def test_cannot_transition_from_interrupted_to_cancelled(self) -> None:
-        """Cannot cancel an already-interrupted execution."""
-        sm = ExecutionStateMachine(ExecutionState.INTERRUPTED)
-        with pytest.raises(InvalidTransitionError):
-            sm.transition(ExecutionState.CANCELLED)
-
-    def test_pending_cannot_interrupt(self) -> None:
-        """Cannot interrupt a PENDING execution (not yet running)."""
-        sm = ExecutionStateMachine(ExecutionState.PENDING)
-        with pytest.raises(InvalidTransitionError):
-            sm.transition(ExecutionState.INTERRUPTED)
-
-    def test_paused_can_interrupt_via_state_machine(self) -> None:
-        """PAUSED state can transition to INTERRUPTED.
-
-        Aligns the state machine with the aggregate, which allows interrupting
-        from both RUNNING and PAUSED states.
-        """
-        sm = ExecutionStateMachine(ExecutionState.PAUSED)
-        sm.transition(ExecutionState.INTERRUPTED)
-        assert sm.state == ExecutionState.INTERRUPTED
-
-
-class TestExecutionController:
-    """Tests for ExecutionController."""
-
-    @pytest.fixture
-    def state_adapter(self) -> InMemoryControlStateAdapter:
-        return InMemoryControlStateAdapter()
-
-    @pytest.fixture
-    def signal_adapter(self) -> InMemorySignalQueueAdapter:
-        return InMemorySignalQueueAdapter()
-
-    @pytest.fixture
-    def controller(
-        self, state_adapter: InMemoryControlStateAdapter, signal_adapter: InMemorySignalQueueAdapter
-    ) -> ExecutionController:
-        return ExecutionController(state_adapter, signal_adapter)
-
-    @pytest.mark.asyncio
-    async def test_pause_running_execution(
-        self, controller: ExecutionController, signal_adapter: InMemorySignalQueueAdapter
+    @pytest.mark.parametrize("status", list(_TO_STATUS))
+    @pytest.mark.parametrize(
+        "signal", [ControlSignalType.PAUSE, ControlSignalType.RESUME, ControlSignalType.CANCEL]
+    )
+    async def test_the_operator_gets_the_answer_the_command_will_get(
+        self, status: ExecutionStatus, signal: ControlSignalType
     ) -> None:
-        """Can pause a running execution."""
-        execution_id = "test-exec-1"
-        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
+        executions = _executions()
+        signals = InMemorySignalQueueAdapter()
+        await _record(executions, "exec-1", status)
+        agg = await executions.get_by_id("exec-1")
+        assert agg is not None
+        expected = _aggregate_command_accepted(agg, signal)
 
-        cmd = PauseExecution(execution_id=execution_id, reason="User requested")
-        result = await controller.handle_command(cmd)
+        result = await ExecutionController(executions, signals).handle_command(
+            _REQUESTS[signal]("exec-1")
+        )
+
+        assert result.success is expected
+        assert result.new_state == status.value
+        queued = await signals.get_signal("exec-1")
+        assert (queued is not None) is expected
+
+    async def test_a_cancelled_execution_refuses_every_request(self) -> None:
+        """EXP4's measurement, now through the controller: nothing is queued."""
+        executions = _executions()
+        signals = InMemorySignalQueueAdapter()
+        await _record(executions, "exec-c", ExecutionStatus.CANCELLED)
+        controller = ExecutionController(executions, signals)
+
+        for signal, request in _REQUESTS.items():
+            result = await controller.handle_command(request("exec-c"))
+            assert result.success is False, signal
+            assert result.new_state == "cancelled"
+        assert await signals.get_signal("exec-c") is None
+
+    async def test_a_paused_execution_resumes(self) -> None:
+        """The control: the controller can say yes, so the refusals are about state."""
+        executions = _executions()
+        signals = InMemorySignalQueueAdapter()
+        await _record(executions, "exec-p", ExecutionStatus.PAUSED)
+
+        result = await ExecutionController(executions, signals).handle_command(
+            ResumeExecution(execution_id="exec-p")
+        )
+
+        assert result.success is True
+        assert result.message == "Resume signal queued"
+        queued = await signals.get_signal("exec-p")
+        assert queued is not None
+        assert queued.signal_type == ControlSignalType.RESUME
+
+    @pytest.mark.parametrize("status", list(_TO_STATUS))
+    async def test_inject_is_refused_exactly_when_terminal(self, status: ExecutionStatus) -> None:
+        executions = _executions()
+        signals = InMemorySignalQueueAdapter()
+        await _record(executions, "exec-i", status)
+
+        result = await ExecutionController(executions, signals).handle_command(
+            InjectContext(execution_id="exec-i", message="m")
+        )
+
+        live = status in (ExecutionStatus.RUNNING, ExecutionStatus.PAUSED)
+        assert result.success is live
+        if not live:
+            assert "terminal" in (result.error or "").lower()
+
+    async def test_an_execution_with_no_stream_is_refused(self) -> None:
+        """No stream is not a pending execution. The old controller read a
+        missing row as PENDING, from which cancel and inject were admitted."""
+        signals = InMemorySignalQueueAdapter()
+        controller = ExecutionController(_executions(), signals)
+
+        for signal, request in _REQUESTS.items():
+            result = await controller.handle_command(request("exec-nope"))
+            assert result.success is False, signal
+            assert "not found" in (result.error or "")
+        assert await signals.get_signal("exec-nope") is None
+        assert await controller.get_state("exec-nope") is None
+
+    async def test_an_unreachable_event_store_is_refused(self) -> None:
+        """Fail closed: a request the controller cannot check is not admitted."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        client = GrpcEventStoreClient(address=f"127.0.0.1:{port}")
+        await client.connect()
+        signals = InMemorySignalQueueAdapter()
+        try:
+            result = await ExecutionController(_executions(client), signals).handle_command(
+                CancelExecution(execution_id="exec-1")
+            )
+        finally:
+            await client.disconnect()
+
+        assert result.success is False
+        assert await signals.get_signal("exec-1") is None
+
+
+@pytest.mark.unit
+class TestExecutionController:
+    """What an admitted request queues, and what the executor reads back."""
+
+    async def test_pause_carries_its_reason(self) -> None:
+        executions = _executions()
+        signals = InMemorySignalQueueAdapter()
+        await _record(executions, "exec-1", ExecutionStatus.RUNNING)
+
+        result = await ExecutionController(executions, signals).handle_command(
+            PauseExecution(execution_id="exec-1", reason="User requested")
+        )
 
         assert result.success
         assert result.message == "Pause signal queued"
-
-        # Check signal was queued
-        signal = await signal_adapter.dequeue(execution_id)
+        signal = await signals.dequeue("exec-1")
         assert signal is not None
         assert signal.signal_type == ControlSignalType.PAUSE
         assert signal.reason == "User requested"
 
-    @pytest.mark.asyncio
-    async def test_cannot_pause_paused_execution(self, controller: ExecutionController) -> None:
-        """Cannot pause an already paused execution."""
-        execution_id = "test-exec-2"
-        await controller.initialize_execution(execution_id, ExecutionState.PAUSED)
+    async def test_cancel_carries_its_reason(self) -> None:
+        executions = _executions()
+        signals = InMemorySignalQueueAdapter()
+        await _record(executions, "exec-1", ExecutionStatus.RUNNING)
 
-        cmd = PauseExecution(execution_id=execution_id)
-        result = await controller.handle_command(cmd)
-
-        assert not result.success
-        assert "Cannot pause" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_resume_paused_execution(
-        self, controller: ExecutionController, signal_adapter: InMemorySignalQueueAdapter
-    ) -> None:
-        """Can resume a paused execution."""
-        execution_id = "test-exec-3"
-        await controller.initialize_execution(execution_id, ExecutionState.PAUSED)
-
-        cmd = ResumeExecution(execution_id=execution_id)
-        result = await controller.handle_command(cmd)
-
-        assert result.success
-        assert result.message == "Resume signal queued"
-
-        # Check signal was queued
-        signal = await signal_adapter.dequeue(execution_id)
-        assert signal is not None
-        assert signal.signal_type == ControlSignalType.RESUME
-
-    @pytest.mark.asyncio
-    async def test_cannot_resume_running_execution(self, controller: ExecutionController) -> None:
-        """Cannot resume a running execution."""
-        execution_id = "test-exec-4"
-        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
-
-        cmd = ResumeExecution(execution_id=execution_id)
-        result = await controller.handle_command(cmd)
-
-        assert not result.success
-        assert "Cannot resume" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_cancel_running_execution(
-        self, controller: ExecutionController, signal_adapter: InMemorySignalQueueAdapter
-    ) -> None:
-        """Can cancel a running execution."""
-        execution_id = "test-exec-5"
-        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
-
-        cmd = CancelExecution(execution_id=execution_id, reason="Timed out")
-        result = await controller.handle_command(cmd)
+        result = await ExecutionController(executions, signals).handle_command(
+            CancelExecution(execution_id="exec-1", reason="Timed out")
+        )
 
         assert result.success
         assert result.message == "Cancel signal queued"
-
-        # Check signal was queued
-        signal = await signal_adapter.dequeue(execution_id)
+        signal = await signals.dequeue("exec-1")
         assert signal is not None
         assert signal.signal_type == ControlSignalType.CANCEL
         assert signal.reason == "Timed out"
 
-    @pytest.mark.asyncio
-    async def test_cancel_paused_execution(self, controller: ExecutionController) -> None:
-        """Can cancel a paused execution."""
-        execution_id = "test-exec-6"
-        await controller.initialize_execution(execution_id, ExecutionState.PAUSED)
+    async def test_inject_carries_its_message(self) -> None:
+        executions = _executions()
+        signals = InMemorySignalQueueAdapter()
+        await _record(executions, "exec-1", ExecutionStatus.RUNNING)
 
-        cmd = CancelExecution(execution_id=execution_id)
-        result = await controller.handle_command(cmd)
-
-        assert result.success
-
-    @pytest.mark.asyncio
-    async def test_cannot_cancel_completed_execution(self, controller: ExecutionController) -> None:
-        """Cannot cancel a completed execution."""
-        execution_id = "test-exec-7"
-        await controller.initialize_execution(execution_id, ExecutionState.COMPLETED)
-
-        cmd = CancelExecution(execution_id=execution_id)
-        result = await controller.handle_command(cmd)
-
-        assert not result.success
-        assert "Cannot cancel" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_inject_into_running_execution(
-        self, controller: ExecutionController, signal_adapter: InMemorySignalQueueAdapter
-    ) -> None:
-        """Can inject context into a running execution."""
-        execution_id = "test-exec-8"
-        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
-
-        cmd = InjectContext(execution_id=execution_id, message="New instructions", role="user")
-        result = await controller.handle_command(cmd)
+        result = await ExecutionController(executions, signals).handle_command(
+            InjectContext(execution_id="exec-1", message="New instructions", role="user")
+        )
 
         assert result.success
         assert result.message == "Context injection queued"
-
-        # Check signal was queued
-        signal = await signal_adapter.dequeue(execution_id)
+        signal = await signals.dequeue("exec-1")
         assert signal is not None
         assert signal.signal_type == ControlSignalType.INJECT
         assert signal.inject_message == "New instructions"
 
-    @pytest.mark.asyncio
-    async def test_cannot_inject_into_terminal_execution(
-        self, controller: ExecutionController
-    ) -> None:
-        """Cannot inject into a terminal execution."""
-        execution_id = "test-exec-9"
-        await controller.initialize_execution(execution_id, ExecutionState.COMPLETED)
+    async def test_get_state_reads_the_stream(self) -> None:
+        executions = _executions()
+        await _record(executions, "exec-1", ExecutionStatus.CANCELLED)
+        controller = ExecutionController(executions, InMemorySignalQueueAdapter())
 
-        cmd = InjectContext(execution_id=execution_id, message="Too late")
-        result = await controller.handle_command(cmd)
+        assert await controller.get_state("exec-1") is ExecutionStatus.CANCELLED
 
-        assert not result.success
-        assert "terminal" in (result.error or "").lower()
+    async def test_check_signal_consumes_the_signal(self) -> None:
+        executions = _executions()
+        await _record(executions, "exec-1", ExecutionStatus.RUNNING)
+        controller = ExecutionController(executions, InMemorySignalQueueAdapter())
 
-    @pytest.mark.asyncio
-    async def test_acknowledge_state_transition(
-        self, controller: ExecutionController, state_adapter: InMemoryControlStateAdapter
-    ) -> None:
-        """Executor can acknowledge state transitions."""
-        execution_id = "test-exec-10"
-        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
+        assert await controller.check_signal("exec-1") is None
+        await controller.handle_command(PauseExecution(execution_id="exec-1"))
 
-        # Acknowledge transition to PAUSED
-        await controller.acknowledge_state(execution_id, ExecutionState.PAUSED)
-
-        state = await controller.get_state(execution_id)
-        assert state == ExecutionState.PAUSED
-
-        # Verify persisted
-        persisted_state = await state_adapter.get_state(execution_id)
-        assert persisted_state == ExecutionState.PAUSED
-
-    @pytest.mark.asyncio
-    async def test_get_state(self, controller: ExecutionController) -> None:
-        """Can get current state for an execution."""
-        execution_id = "test-exec-11"
-        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
-
-        state = await controller.get_state(execution_id)
-        assert state == ExecutionState.RUNNING
-
-    @pytest.mark.asyncio
-    async def test_check_signal(self, controller: ExecutionController) -> None:
-        """Can check for pending signals."""
-        execution_id = "test-exec-12"
-        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
-
-        # No signals initially
-        signal = await controller.check_signal(execution_id)
-        assert signal is None
-
-        # Send pause command
-        cmd = PauseExecution(execution_id=execution_id)
-        await controller.handle_command(cmd)
-
-        # Now there should be a signal
-        signal = await controller.check_signal(execution_id)
+        signal = await controller.check_signal("exec-1")
         assert signal is not None
         assert signal.signal_type == ControlSignalType.PAUSE
-
-        # Signal should be consumed
-        signal = await controller.check_signal(execution_id)
-        assert signal is None
+        assert await controller.check_signal("exec-1") is None
 
 
 class _FakeTimingOutRedis:
@@ -371,37 +392,16 @@ class TestRedisSignalQueueFailOpen:
 
     @pytest.mark.asyncio
     async def test_check_signal_returns_none_on_redis_timeout(self) -> None:
-        state_adapter = InMemoryControlStateAdapter()
         signal_adapter = RedisSignalQueueAdapter(_FakeTimingOutRedis())  # type: ignore[arg-type]
-        controller = ExecutionController(state_adapter, signal_adapter)
-        execution_id = "test-exec-timeout"
-        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
+        controller = ExecutionController(_executions(), signal_adapter)
 
-        signal = await controller.check_signal(execution_id)
+        signal = await controller.check_signal("test-exec-timeout")
 
         assert signal is None
 
 
 class TestInMemoryAdapters:
     """Tests for in-memory adapter implementations."""
-
-    @pytest.mark.asyncio
-    async def test_state_adapter_save_and_get(self) -> None:
-        """State adapter can save and retrieve state."""
-        adapter = InMemoryControlStateAdapter()
-
-        await adapter.save_state("exec-1", ExecutionState.RUNNING)
-        state = await adapter.get_state("exec-1")
-
-        assert state == ExecutionState.RUNNING
-
-    @pytest.mark.asyncio
-    async def test_state_adapter_returns_none_for_unknown(self) -> None:
-        """State adapter returns None for unknown execution."""
-        adapter = InMemoryControlStateAdapter()
-
-        state = await adapter.get_state("unknown")
-        assert state is None
 
     @pytest.mark.asyncio
     async def test_signal_adapter_fifo_order(self) -> None:
