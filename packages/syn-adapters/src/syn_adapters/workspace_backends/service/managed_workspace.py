@@ -17,9 +17,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
+    from contextlib import AbstractAsyncContextManager
+    from datetime import datetime
     from pathlib import Path
 
+    from syn_adapters.workspace_backends.service.credential_keeper import CredentialLapse
+    from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
     from syn_adapters.workspace_backends.service.setup_phase_secrets import (
         SetupPhaseSecrets,
     )
@@ -36,12 +40,14 @@ if TYPE_CHECKING:
     )
 
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
+from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
     CredentialSource,
 )
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
     renew_git_credential as _renew_git_credential,
 )
+from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
 from syn_adapters.workspace_backends.service.managed_workspace_ops import (
     interrupt_container,
 )
@@ -77,6 +83,10 @@ class ManagedWorkspace:
     #: phase has run, and for a workspace with no repositories at all, which
     #: has no credential to renew.
     _credential_source: CredentialSource | None = None
+    #: Every GitHub token minted for this workspace, by any path (#725). What
+    #: the renewal task reads the installed credential's expiry from, and what
+    #: teardown revokes. In-process only - see `issued_tokens`.
+    _ledger: IssuanceLedger = field(default_factory=IssuanceLedger, repr=False)
 
     @property
     def path(self) -> Path:
@@ -261,9 +271,66 @@ class ManagedWorkspace:
         self._credential_source = CredentialSource(
             repositories=tuple(secrets.repositories), can_open_pr=secrets.can_open_pr
         )
-        return await _run_setup_phase(self, secrets, setup_script)
+        # `secrets.issued` is already in the ledger: `SetupPhaseSecrets.create`
+        # recorded each token as it was minted (#725).
+        result = await _run_setup_phase(self, secrets, setup_script)
+        if result.exit_code == 0:
+            self._ledger.installed(secrets.issued)
+        return result
 
-    async def renew_git_credential(self) -> None:
+    @property
+    def credential_expires_at(self) -> datetime | None:
+        """When the GitHub credential in this container expires, or None if it has none."""
+        return self._ledger.credential_expires_at
+
+    @property
+    def issued_tokens(self) -> tuple[IssuedToken, ...]:
+        """Every GitHub token minted for this workspace so far, oldest first."""
+        return self._ledger.issued
+
+    @property
+    def issuance_ledger(self) -> IssuanceLedger:
+        """Where a token minted for this workspace is recorded the moment it exists.
+
+        Handed to `SetupPhaseSecrets.create` so no failure between minting and
+        installing can strand a live token outside teardown's reach (#725).
+        """
+        return self._ledger
+
+    def keep_git_credential_fresh(
+        self, *, on_lapse: Callable[[CredentialLapse], Awaitable[None]]
+    ) -> AbstractAsyncContextManager[None]:
+        """Renew this workspace's credential on schedule while the block runs (#725).
+
+        Enter it as the agent starts and leave it as the agent stops; see
+        `credential_keeper` for the schedule and what ``on_lapse`` is told.
+        """
+        return keep_credential_fresh(self, on_lapse=on_lapse)
+
+    async def revoke_issued_credentials(self) -> None:
+        """Revoke every unexpired GitHub token minted for this workspace. Never raises.
+
+        For teardown, and only once nothing in the container can still need a
+        token: after the quarantine push. `WorkspaceService.create_workspace`
+        calls it on exit, which every phase path reaches after its guard has
+        run. Best effort across a crash - see `issued_tokens`.
+        """
+        if not self._ledger.issued:
+            return
+        try:
+            from syn_adapters.github import GitHubAppClient
+            from syn_shared.settings.github import GitHubAppSettings
+
+            async with GitHubAppClient(GitHubAppSettings()) as client:
+                await self._ledger.revoke_unexpired(client.revoke_installation_token)
+        except Exception:
+            logger.exception(
+                "Could not revoke the GitHub tokens issued to workspace %s; they stay "
+                "usable until they expire, at most an hour from issue.",
+                self.workspace_id,
+            )
+
+    async def renew_git_credential(self) -> tuple[IssuedToken, ...]:
         """Replace this container's git credential with a freshly minted one.
 
         Satisfies the domain's ``GitWorkspace``. Lives on the workspace because
@@ -272,6 +339,10 @@ class ManagedWorkspace:
         with. See `git_credential_renewal` for why it expires before the
         container does.
 
+        Returns:
+            The tokens it issued and installed, also recorded in this
+            workspace's ledger. Empty when there was nothing to renew.
+
         Raises:
             CredentialRenewalFailedError: the credential is not known to be
                 usable. A workspace whose setup phase never ran holds no
@@ -279,8 +350,8 @@ class ManagedWorkspace:
                 downstream of it can be depending on one.
         """
         if self._credential_source is None:
-            return
-        await _renew_git_credential(self, self._credential_source)
+            return ()
+        return await _renew_git_credential(self, self._credential_source, self._ledger)
 
     async def _clear_secrets(self) -> None:
         """Clear all traces of secrets from the container.

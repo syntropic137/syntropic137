@@ -1,22 +1,10 @@
-"""The injected GITHUB_TOKEN must belong to the repo under work (#1129).
+"""`_repo_full_names`: every stored repo shape reduces to one `owner/repo` (#1129).
 
-The original bug: `_resolve_github_app_token` took `installations[0]`, which was
-not the installation that owns this repo. Because `gh` prefers $GITHUB_TOKEN
-over the repo-scoped credential `setup_phase_secrets.py` writes to hosts.yml,
-injecting it REPLACED a working credential with one that could not reach the
-repository:
-
-    $ gh api /installation/repositories            # the injected token
-    {"total_count": 2, "repos": ["AgentParadise/agentic-primitives", ...]}
-    $ GH_TOKEN=<hosts.yml token> gh api /installation/repositories
-    {"total_count": 6, "repos": ["syntropic137/syntropic137", ...]}
-
-The first fix listed installations and matched account logins. Review found that
-reintroduced the same class by another route: `list_installations` issues one
-unpaginated request and GitHub pages that endpoint at 30, so an owner on page
-two matched nothing. So the question is now asked of GitHub directly, per repo -
-the same lookup the setup phase already uses, which is why the two credential
-paths can no longer disagree.
+These names are what `GH_REPO` is built from. The routing that picks WHICH
+installation's token `gh` gets used to live beside them, in the handler that
+injected it as GITHUB_TOKEN; since #725 it lives in `setup_phase_secrets`,
+which writes it to hosts.yml, and is tested there
+(`test_725_gh_credential_and_ledger.py` in syn-adapters).
 """
 
 from __future__ import annotations

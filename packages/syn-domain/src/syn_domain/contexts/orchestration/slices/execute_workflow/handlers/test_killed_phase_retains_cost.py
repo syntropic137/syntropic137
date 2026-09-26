@@ -15,6 +15,7 @@ at either end of the hop rather than the value crossing it.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from decimal import Decimal
 from typing import TYPE_CHECKING, cast
@@ -115,6 +116,9 @@ class _FakeWorkspace:
 
     async def interrupt(self) -> bool:
         return True
+
+    def keep_git_credential_fresh(self, **_kwargs: object) -> contextlib.nullcontext[None]:
+        return contextlib.nullcontext()
 
 
 def _assistant_turn(msg_id: str, input_tokens: int, output_tokens: int) -> str:

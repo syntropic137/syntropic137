@@ -38,7 +38,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
 from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from syn_adapters.control import ExecutionController
+    from syn_adapters.workspace_backends.service.credential_keeper import CredentialLapse
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
@@ -51,6 +54,35 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _credential_lapse_reporter(
+    phase_id: str, collector: ObservabilityCollector | None
+) -> Callable[[CredentialLapse], Awaitable[None]]:
+    """What the phase does when its git credential expires unrenewed (#725).
+
+    A phase warning, always, and an observability event when there is a
+    collector to take one. Never silent: an agent whose pushes are about to
+    fail is precisely what an operator watching this phase needs to hear.
+    """
+
+    async def report(lapse: CredentialLapse) -> None:
+        expired_at = lapse.expired_at.isoformat() if lapse.expired_at is not None else None
+        logger.warning(
+            "[PHASE %s] The agent's git credential expired at %s and was not renewed "
+            "(%d attempt(s), last error: %s). Pushes and gh calls will fail until a "
+            "renewal succeeds.",
+            phase_id,
+            expired_at or "an unknown time",
+            lapse.attempts,
+            lapse.last_error,
+        )
+        if collector is not None:
+            await collector.record_git_credential_lapsed(
+                expired_at=expired_at, attempts=lapse.attempts, last_error=lapse.last_error
+            )
+
+    return report
 
 
 def _detect_exit_code(
@@ -410,19 +442,27 @@ class AgentExecutionHandler:
         # observer being told by the stream which name to believe. That is the
         # whole of the forgery defence: `launch.wrapper_name` exists before
         # this stream does, so no line on it can become the name that counts.
+        #
+        # The credential is kept fresh for exactly as long as the agent runs
+        # (#725): an installation token lives an hour, a phase may not. The
+        # renewal task is this process's, not the event store's - after a
+        # crash the container it would renew is gone too.
         launch = AgentLaunchEvidence(on_launch)
         try:
-            stream_result = await processor.process_stream(
-                launch.observing(
-                    workspace.stream(
-                        claude_cmd,
-                        timeout_seconds=timeout_seconds,
-                        environment=agent_env,
-                        wrapper_name=launch.wrapper_name,
+            async with workspace.keep_git_credential_fresh(
+                on_lapse=_credential_lapse_reporter(todo.phase_id, collector)
+            ):
+                stream_result = await processor.process_stream(
+                    launch.observing(
+                        workspace.stream(
+                            claude_cmd,
+                            timeout_seconds=timeout_seconds,
+                            environment=agent_env,
+                            wrapper_name=launch.wrapper_name,
+                        ),
                     ),
-                ),
-                workspace,
-            )
+                    workspace,
+                )
         finally:
             await launch.settle(workspace.last_stream_exit_code)
 
