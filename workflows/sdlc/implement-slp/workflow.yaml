@@ -1,5 +1,23 @@
-id: sdlc-implement-v2
-name: "SDLC: Check the premise, implement, verify, fix, re-verify, open a PR (v2)"
+# sdlc-implement-v2 with software leverage point skills on EVERY phase.
+#
+# A separate id rather than an edit of sdlc-implement-v2, for two reasons.
+# `syn workflow install --force` printed "already installed" and then
+# "Installed 1 workflow(s)" WITHOUT replacing the stored definition, so the
+# skills never reached the platform while the command reported success. And
+# mutating a workflow other runs depend on to add skills is a change to their
+# behaviour, not just to mine.
+#
+# `software-leverage-review` is deliberately NOT used: its own SKILL.md
+# requires `claude -p` because it fans out 17 subagents, and "an orchestrator
+# that is itself a subagent cannot fan out". A workflow phase IS that subagent,
+# so it would fail at roughly $15-25 per attempt.
+#
+# The codex phases declare no `sandbox`: codex implements workspace-write with
+# bubblewrap, which cannot create a namespace in the workspace container
+# (syntropic137#1434). They inherit full-access, which is the level that works.
+
+id: sdlc-implement-slp-v1
+name: "SDLC: Implement with leverage-point review (v1)"
 description: >
   Take a well-specified issue to a reviewed pull request. Six phases: check the
   premise, make the change, verify it independently, fix what verification
