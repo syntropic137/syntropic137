@@ -14,7 +14,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from syn_adapters.github.client import GitHubAppClient, InstallationToken
 
@@ -39,15 +39,34 @@ class TokenRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    permissions: dict[str, str]
+    permissions: dict[str, str] | None = None
     """Permission name to level, spelled as GitHub spells them
-    (``pull_requests``, ``contents``, ...).
+    (``pull_requests``, ``contents``, ...). None asks for the installation's
+    full grant.
 
     Open-ended by necessity rather than by neglect: which permissions an
     installation holds is operator-configured, and GitHub rejects a request
     exceeding that set, so callers derive this from the installation instead
     of enumerating it - see ``agent_token.mint_agent_token``.
     """
+
+    repositories: list[str] | None = None
+    """Repository NAMES, without the owner, the token may reach (#725).
+
+    None reaches every repository the installation covers. An agent's token
+    names the repos its workflow works on, so a credential that outlives its
+    phase - or leaks from one - opens those and nothing else. GitHub takes
+    at most 500 and rejects a name the installation does not cover.
+    """
+
+    def body(self) -> dict[str, dict[str, str] | list[str]] | None:
+        """The JSON actually posted: absent fields are omitted, not sent as null.
+
+        No body at all when nothing is restricted, which is the documented
+        spelling of "the installation's full grant".
+        """
+        dumped = self.model_dump(exclude_none=True)
+        return dumped or None
 
 
 def check_token_response(response: httpx.Response, iid: str) -> None:
@@ -84,22 +103,15 @@ def check_token_response(response: httpx.Response, iid: str) -> None:
     response.raise_for_status()
 
 
-def parse_installation_token(
-    data: dict,
-    iid: str,
-    cached_tokens: dict[str, InstallationToken],
-    cache_key: str | None = None,
-) -> InstallationToken:
-    """Parse and cache an installation token from API response data.
+def parse_installation_token(data: dict, iid: str) -> InstallationToken:
+    """Parse an installation token from API response data.
+
+    Caching is the caller's decision (see ``get_installation_token``): a
+    token minted for an agent workspace must never be cached (#725).
 
     Args:
         data: JSON response from GitHub token endpoint
         iid: Installation ID, for the log line
-        cached_tokens: Token cache dict to update
-        cache_key: Cache entry to write. Defaults to ``iid``; a token minted
-            with a reduced permission set stores itself elsewhere so it is
-            never served to a caller that asked for the full one, or vice
-            versa (#1197).
 
     Returns:
         Parsed InstallationToken.
@@ -114,7 +126,6 @@ def parse_installation_token(
         permissions=data.get("permissions", {}),
         repository_selection=data.get("repository_selection", "all"),
     )
-    cached_tokens[cache_key if cache_key is not None else iid] = token
 
     logger.info(
         "Installation token generated (installation_id=%s, expires_at=%s, permissions=%s)",
@@ -126,19 +137,27 @@ def parse_installation_token(
     return token
 
 
-def _cache_key(iid: str, permissions: Mapping[str, str] | None) -> str:
-    """Cache slot for a token, distinguishing the permission set it carries.
+def _cache_key(
+    iid: str,
+    permissions: Mapping[str, str] | None,
+    repositories: Sequence[str] | None = None,
+) -> str:
+    """Cache slot for a token: (installation, repo set, permission set).
 
     Keying on the installation id alone was correct while every token was the
     installation's full grant. It stops being correct the moment two callers
     want different grants from one installation, which is what a
     non-publishing phase asks for (#1197): the cache would hand it whichever
-    token happened to be minted first.
+    token happened to be minted first. A repo-scoped token (#725) is the same
+    problem on the other axis: a token for repo A served to a caller asking
+    for repo B would 404 on B.
     """
-    if permissions is None:
-        return iid
-    scope = ",".join(f"{name}={level}" for name, level in sorted(permissions.items()))
-    return f"{iid}#{scope}"
+    key = iid
+    if permissions is not None:
+        key += "#" + ",".join(f"{name}={level}" for name, level in sorted(permissions.items()))
+    if repositories is not None:
+        key += "@" + ",".join(sorted(set(repositories)))
+    return key
 
 
 async def get_installation_token(
@@ -146,11 +165,12 @@ async def get_installation_token(
     installation_id: str | None = None,
     force_refresh: bool = False,
     permissions: Mapping[str, str] | None = None,
+    repositories: Sequence[str] | None = None,
 ) -> str:
     """Get a valid installation access token.
 
-    Tokens are cached per installation_id and permission set, and reused
-    until expired.
+    Tokens are cached per installation_id, repo set and permission set, and
+    reused until expired.
 
     Args:
         client: GitHubAppClient instance.
@@ -163,6 +183,8 @@ async def get_installation_token(
             grant. GitHub rejects a set that exceeds what the installation
             holds, so callers derive theirs from it rather than enumerating -
             see ``agent_token.mint_agent_token``.
+        repositories: Restrict the token to these repository names (without
+            the owner). None reaches every repo the installation covers.
 
     Returns:
         Installation access token string.
@@ -180,7 +202,7 @@ async def get_installation_token(
         )
         raise GitHubAuthError(msg)
     iid = installation_id
-    key = _cache_key(iid, permissions)
+    key = _cache_key(iid, permissions, repositories)
 
     # Return cached token if valid
     cached = client._cached_tokens.get(key)
@@ -192,23 +214,72 @@ async def get_installation_token(
         )
         return cached.token
 
-    logger.info("Generating new installation token for installation_id=%s", iid)
+    token = await request_installation_token(
+        client, iid, permissions=permissions, repositories=repositories
+    )
+    client._cached_tokens[key] = token
+    return token.token
+
+
+async def request_installation_token(
+    client: GitHubAppClient,
+    installation_id: str,
+    *,
+    permissions: Mapping[str, str] | None = None,
+    repositories: Sequence[str] | None = None,
+) -> InstallationToken:
+    """Mint a NEW installation token, bypassing and never writing the cache.
+
+    For a token whose life is owned by someone else - an agent workspace that
+    renews it and revokes it at teardown (#725). Caching those would be
+    wrong both ways: a renewal would be handed the token it is trying to
+    replace, and a revocation would kill a token another workspace had been
+    served from the cache.
+
+    Raises:
+        GitHubAuthError: If token generation fails.
+        GitHubRateLimitError: If rate limited.
+    """
+    from syn_adapters.github.client import GitHubAuthError
+
+    logger.info("Generating new installation token for installation_id=%s", installation_id)
 
     jwt_token = client._generate_jwt()
-    body = None if permissions is None else TokenRequest(permissions=dict(permissions))
+    request = TokenRequest(
+        permissions=None if permissions is None else dict(permissions),
+        repositories=None if repositories is None else list(repositories),
+    )
 
     try:
         response = await client._http.post(
-            f"/app/installations/{iid}/access_tokens",
+            f"/app/installations/{installation_id}/access_tokens",
             headers={"Authorization": f"Bearer {jwt_token}"},
-            json=None if body is None else body.model_dump(),
+            json=request.body(),
         )
 
-        check_token_response(response, iid)
+        check_token_response(response, installation_id)
 
-        token = parse_installation_token(response.json(), iid, client._cached_tokens, key)
-        return token.token
+        return parse_installation_token(response.json(), installation_id)
 
     except httpx.HTTPError as e:
         msg = f"HTTP error generating token: {e}"
         raise GitHubAuthError(msg) from e
+
+
+async def revoke_installation_token(client: GitHubAppClient, token: str) -> None:
+    """Revoke an installation token: ``DELETE /installation/token`` (#725).
+
+    Authenticated WITH the token being revoked - the endpoint takes no id,
+    the credential is the argument. Minting never revokes earlier tokens, so
+    without this every token a workspace was issued stays live for its full
+    hour after the workspace is gone.
+
+    Raises:
+        httpx.HTTPError: On transport failure or a non-2xx answer. An
+            already-expired or already-revoked token answers 401.
+    """
+    response = await client._http.delete(
+        "/installation/token",
+        headers={"Authorization": f"token {token}"},
+    )
+    response.raise_for_status()

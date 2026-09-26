@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_adapters.workspace_backends.service.credential_ledger import CredentialLedger
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
     CredentialSource,
     renew_git_credential,
@@ -131,7 +132,7 @@ async def test_a_renewal_that_worked_installs_the_script_and_takes_it_away_again
     """
     workspace = _Workspace()
 
-    await renew_git_credential(workspace, _SOURCE)
+    await renew_git_credential(workspace, _SOURCE, CredentialLedger())
 
     assert workspace.injected == [".setup/renew-credential.sh"]
     assert workspace.cleaned_up
@@ -155,7 +156,7 @@ async def test_a_workspace_that_will_not_take_the_script_is_a_renewal_that_faile
     the commit and pushing it - the work lost and no report of the loss.
     """
     with pytest.raises(CredentialRenewalFailedError) as raised:
-        await renew_git_credential(workspace, _SOURCE)
+        await renew_git_credential(workspace, _SOURCE, CredentialLedger())
 
     assert _PROVIDER_FAILED in str(raised.value), why
 
@@ -170,7 +171,7 @@ async def test_a_script_that_exited_non_zero_is_a_renewal_that_failed() -> None:
     workspace = _Workspace(exit_code=3, stderr="cannot write ~/.git-credentials")
 
     with pytest.raises(CredentialRenewalFailedError) as raised:
-        await renew_git_credential(workspace, _SOURCE)
+        await renew_git_credential(workspace, _SOURCE, CredentialLedger())
 
     assert "exited 3" in str(raised.value)
     assert "cannot write ~/.git-credentials" in str(raised.value)
@@ -194,7 +195,7 @@ async def test_a_credential_that_cannot_be_minted_is_a_renewal_that_failed(
     workspace = _Workspace()
 
     with pytest.raises(CredentialRenewalFailedError) as raised:
-        await renew_git_credential(workspace, _SOURCE)
+        await renew_git_credential(workspace, _SOURCE, CredentialLedger())
 
     assert "502 from api.github.com" in str(raised.value)
     assert workspace.injected == []
@@ -209,7 +210,7 @@ async def test_a_cleanup_that_failed_does_not_turn_a_good_renewal_into_a_bad_one
     """
     workspace = _Workspace(cleanup_raises=True)
 
-    await renew_git_credential(workspace, _SOURCE)
+    await renew_git_credential(workspace, _SOURCE, CredentialLedger())
 
     assert workspace.injected == [".setup/renew-credential.sh"]
 
@@ -226,7 +227,7 @@ async def test_a_cleanup_that_failed_does_not_get_to_replace_the_real_reason() -
     )
 
     with pytest.raises(CredentialRenewalFailedError) as raised:
-        await renew_git_credential(workspace, _SOURCE)
+        await renew_git_credential(workspace, _SOURCE, CredentialLedger())
 
     assert "exited 3" in str(raised.value)
     assert _PROVIDER_FAILED not in str(raised.value)

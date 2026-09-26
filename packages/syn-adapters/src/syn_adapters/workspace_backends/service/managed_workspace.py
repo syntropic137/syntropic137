@@ -17,7 +17,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
+    from datetime import datetime
     from pathlib import Path
 
     from syn_adapters.workspace_backends.service.setup_phase_secrets import (
@@ -36,6 +37,12 @@ if TYPE_CHECKING:
     )
 
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
+from syn_adapters.workspace_backends.service.credential_ledger import (
+    CredentialLedger,
+    IssuedToken,
+    Revocation,
+    revoke_with_github_app,
+)
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
     CredentialSource,
 )
@@ -74,9 +81,18 @@ class ManagedWorkspace:
     _tokens_injected: bool = False
     #: How this workspace's git credential was minted, recorded by the setup
     #: phase so it can be minted AGAIN later (#1393). None until the setup
-    #: phase has run, and for a workspace with no repositories at all, which
-    #: has no credential to renew.
+    #: phase has run, and for a workspace that was issued no GitHub token at
+    #: all, which has no credential to renew.
     _credential_source: CredentialSource | None = None
+    #: Every token issued to this workspace, by setup and by every renewal,
+    #: so teardown can revoke the ones still live (#725). In-process only:
+    #: see `credential_ledger` for why that is best effort across a crash.
+    _credential_ledger: CredentialLedger = field(default_factory=CredentialLedger)
+    #: How a token is revoked. The GitHub App client in production; a test
+    #: double in tests, which is the only reason this is a field.
+    _revoke_token: Callable[[str], Awaitable[None]] = field(
+        default=revoke_with_github_app, repr=False
+    )
 
     @property
     def path(self) -> Path:
@@ -257,13 +273,46 @@ class ManagedWorkspace:
         # Remembered BEFORE the run, and from the secrets rather than from the
         # caller: this object is what `renew_git_credential` re-mints from, and
         # a copy of the answers taken anywhere else could disagree with the
-        # credential actually installed here (#1393).
-        self._credential_source = CredentialSource(
-            repositories=tuple(secrets.repositories), can_open_pr=secrets.can_open_pr
-        )
-        return await _run_setup_phase(self, secrets, setup_script)
+        # credential actually installed here (#1393). Only when a token was
+        # issued: with none there is nothing to renew, and a renewal would
+        # otherwise mint one where setup deliberately had not (#725).
+        self._credential_ledger.record(secrets.issued_tokens)
+        if secrets.issued_tokens:
+            self._credential_source = CredentialSource(
+                repositories=tuple(secrets.repositories), can_open_pr=secrets.can_open_pr
+            )
+        result = await _run_setup_phase(self, secrets, setup_script)
+        if result.exit_code == 0:
+            self._credential_ledger.mark_installed(secrets.issued_tokens)
+        return result
 
-    async def renew_git_credential(self) -> None:
+    @property
+    def credential_expires_at(self) -> datetime | None:
+        """When the GitHub credential this workspace holds stops working (#725).
+
+        None when it holds none. What the phase-scoped renewal schedules
+        from; see ``CredentialLedger.expires_at``.
+        """
+        return self._credential_ledger.expires_at
+
+    async def revoke_issued_tokens(self) -> Revocation:
+        """Revoke every token issued to this workspace that is still live (#725).
+
+        Called once, at teardown, AFTER the quarantine push - which is itself
+        a mint site and must still hold a working token. Never raises; a
+        failed revocation is logged and the token dies within the hour.
+        """
+        revocation = await self._credential_ledger.revoke_unexpired(self._revoke_token)
+        if revocation.revoked or revocation.failed:
+            logger.info(
+                "Revoked %d GitHub token(s) for workspace %s (%d failed)",
+                len(revocation.revoked),
+                self.workspace_id,
+                len(revocation.failed),
+            )
+        return revocation
+
+    async def renew_git_credential(self) -> tuple[IssuedToken, ...]:
         """Replace this container's git credential with a freshly minted one.
 
         Satisfies the domain's ``GitWorkspace``. Lives on the workspace because
@@ -272,6 +321,10 @@ class ManagedWorkspace:
         with. See `git_credential_renewal` for why it expires before the
         container does.
 
+        Returns:
+            The tokens issued and installed (#725), already in this
+            workspace's ledger. Empty when there was nothing to renew.
+
         Raises:
             CredentialRenewalFailedError: the credential is not known to be
                 usable. A workspace whose setup phase never ran holds no
@@ -279,8 +332,10 @@ class ManagedWorkspace:
                 downstream of it can be depending on one.
         """
         if self._credential_source is None:
-            return
-        await _renew_git_credential(self, self._credential_source)
+            return ()
+        return await _renew_git_credential(
+            self, self._credential_source, self._credential_ledger
+        )
 
     async def _clear_secrets(self) -> None:
         """Clear all traces of secrets from the container.

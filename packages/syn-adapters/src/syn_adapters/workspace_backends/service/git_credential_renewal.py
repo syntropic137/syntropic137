@@ -22,6 +22,14 @@ on the second attempt. Minting a fresh one costs a single API call on a path
 that only runs when a phase is already ending, and it is unconditional:
 nothing here asks whether the token has expired, because an answer to that
 question would be a second thing that can be wrong.
+
+THE SAME RENEWAL NOW ALSO RUNS DURING THE PHASE (#725). The agent's own push
+and its `gh` calls hit the same wall one hour in, so the agent execution
+handler renews on a schedule while the agent runs (see the domain's
+`credential_keepalive`). Both callers come through here, so both write the
+same files through the same lines - git's per-repo entries AND gh's
+hosts.yml - and both report what they minted to the workspace's
+`CredentialLedger`, which revokes it at teardown.
 """
 
 from __future__ import annotations
@@ -33,6 +41,10 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration import CredentialRenewalFailedError
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.service.credential_ledger import (
+        CredentialLedger,
+        IssuedToken,
+    )
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -71,8 +83,17 @@ class CredentialSource:
     can_open_pr: bool
 
 
-async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSource) -> None:
+async def renew_git_credential(
+    workspace: ManagedWorkspace,
+    source: CredentialSource,
+    ledger: CredentialLedger,
+) -> tuple[IssuedToken, ...]:
     """Mint this workspace a fresh git credential and install it, or raise.
+
+    Returns:
+        The tokens it issued, now installed; empty when there was nothing to
+        renew. They are in ``ledger`` whether or not installing them worked:
+        a minted token is live at GitHub either way, so teardown must see it.
 
     Raises:
         CredentialRenewalFailedError: the credential in this container is not
@@ -97,19 +118,24 @@ async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSo
             # overwriting the very work being rescued.
             clone_repos=False,
             can_open_pr=source.can_open_pr,
-            require_github=bool(source.repositories),
+            # A source is only recorded when a credential was issued, so there
+            # is one to replace and failing to is always worth hearing about -
+            # for a repo-less workflow's gh credential as much as for git's.
+            require_github=True,
         )
     except Exception as unmintable:
         raise CredentialRenewalFailedError(
             f"a fresh GitHub installation token could not be minted ({unmintable})"
         ) from unmintable
 
-    if not secrets.repo_tokens:
+    ledger.record(secrets.issued_tokens)
+
+    if not secrets.repo_tokens and secrets.gh_token is None:
         # No repository is credentialed, so there is no credential to renew and
         # nothing downstream depends on one. Distinct from a renewal that was
         # attempted and failed, and must not be reported as one.
         logger.debug("No git credential to renew for workspace %s", workspace.workspace_id)
-        return
+        return ()
 
     try:
         result = await _install(workspace, secrets.build_credential_script())
@@ -124,7 +150,9 @@ async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSo
             f"the credential script exited {result.exit_code}: "
             f"{result.stderr.strip() or '(no stderr output)'}"
         )
+    ledger.mark_installed(secrets.issued_tokens)
     logger.info("Renewed the git credential in workspace %s", workspace.workspace_id)
+    return tuple(secrets.issued_tokens)
 
 
 async def _install(workspace: ManagedWorkspace, script: str) -> ExecutionResult:

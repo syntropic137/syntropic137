@@ -20,6 +20,14 @@ differently from ours - and would silently drop a capability the App gained
 later. Instead this asks the installation what it holds and downgrades the one
 permission that decides publication. Everything else passes through unchanged,
 which is what keeps `git push`, `gh pr checkout` and `gh issue view` working.
+
+WHY IT NAMES ITS REPOSITORIES, AND IS NEVER CACHED (#725). The token reaches
+only the repos the workflow works on, so a credential that leaks from a
+workspace, or outlives it, opens those and nothing else. It is minted fresh
+every time because the workspace that holds it renews it before its hour is up
+and revokes it at teardown: a cached token would hand a renewal the credential
+it is replacing, and a revocation would kill a token another workspace had
+been served.
 """
 
 from __future__ import annotations
@@ -27,10 +35,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_adapters.github.client_token import get_installation_token
+from syn_adapters.github.client_token import request_installation_token
 
 if TYPE_CHECKING:
-    from syn_adapters.github.client import GitHubAppClient
+    from collections.abc import Sequence
+
+    from syn_adapters.github.client import GitHubAppClient, InstallationToken
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +90,8 @@ async def mint_agent_token(
     installation_id: str,
     *,
     can_open_pr: bool,
-) -> str:
+    repositories: Sequence[str] = (),
+) -> InstallationToken:
     """Mint the installation token an agent phase will hold.
 
     Args:
@@ -89,17 +100,23 @@ async def mint_agent_token(
         can_open_pr: Whether this phase is the one permitted to publish.
             False downgrades publication to read-only; the phase keeps every
             other permission the installation grants.
+        repositories: ``owner/repo`` names the token may reach, all under
+            this installation. Empty means every repo the installation
+            covers - the repo-less workflow's gh credential, which has no
+            repo to name.
 
     Returns:
-        Installation access token string.
+        The minted token, with the expiry its renewal is scheduled from.
 
     Raises:
         Whatever the installation lookup or the token request raises. A phase
         whose credential cannot be scoped gets no credential: an unscoped
         token handed out because a lookup failed is the defect this closes.
     """
+    # GitHub takes repository NAMES here; the owner is the installation's.
+    names = [full_name.rsplit("/", 1)[-1] for full_name in repositories] or None
     if can_open_pr:
-        return await get_installation_token(client, installation_id)
+        return await request_installation_token(client, installation_id, repositories=names)
 
     granted = await _granted_permissions(client, installation_id)
     scoped = {
@@ -112,4 +129,6 @@ async def mint_agent_token(
         PUBLICATION_PERMISSION,
         scoped.get(PUBLICATION_PERMISSION, "not granted to this installation"),
     )
-    return await get_installation_token(client, installation_id, permissions=scoped)
+    return await request_installation_token(
+        client, installation_id, permissions=scoped, repositories=names
+    )

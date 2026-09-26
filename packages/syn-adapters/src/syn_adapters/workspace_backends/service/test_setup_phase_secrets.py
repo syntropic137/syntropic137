@@ -9,7 +9,11 @@ Run: pytest -m unit packages/syn-adapters/src/syn_adapters/workspace_backends/se
 from __future__ import annotations
 
 import shlex
-from unittest.mock import AsyncMock, MagicMock, patch
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,6 +24,9 @@ from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     _repo_full_name,
     _repo_name,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 # =============================================================================
 # _repo_name / _repo_full_name helpers
@@ -456,142 +463,202 @@ class TestRepoNameCollision:
         assert "x-access-token:tok-other@github.com/other-org/api-service" in script
 
 
+@dataclass(frozen=True)
+class _Minted:
+    token: str
+    expires_at: datetime
+
+
+class _FakeGitHubApp:
+    """The GitHubAppClient surface `SetupPhaseSecrets.create` uses, recorded.
+
+    A class rather than an AsyncMock because `create` enters it with
+    `async with`, and an AsyncMock's `__aenter__` hands back a different
+    mock that nothing configured.
+    """
+
+    def __init__(
+        self,
+        installations: dict[str, str] | None = None,
+        *,
+        installation_list: list[str] | None = None,
+    ) -> None:
+        # owner -> installation id; an owner missing here is not installed.
+        self._installations = installations or {}
+        self._installation_list = installation_list or []
+        self.mints: list[tuple[str, bool, tuple[str, ...]]] = []
+        self.closed = False
+
+    async def __aenter__(self) -> _FakeGitHubApp:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        self.closed = True
+
+    async def get_installation_for_repo(self, repo_full_name: str) -> str:
+        owner = repo_full_name.split("/")[0]
+        if owner not in self._installations:
+            raise LookupError(f"404: {repo_full_name} not in any installation")
+        return self._installations[owner]
+
+    async def list_installations(self) -> list[dict[str, str]]:
+        return [{"id": iid} for iid in self._installation_list]
+
+    async def mint_agent_token(
+        self,
+        installation_id: str,
+        *,
+        can_open_pr: bool,
+        repositories: Sequence[str] = (),
+    ) -> _Minted:
+        self.mints.append((installation_id, can_open_pr, tuple(repositories)))
+        return _Minted(
+            token=f"tok-{installation_id}-{len(self.mints)}",
+            expires_at=datetime(2026, 9, 26, 13, 0, tzinfo=UTC),
+        )
+
+
+@contextmanager
+def _github_app(app: _FakeGitHubApp, *, configured: bool = True) -> Iterator[None]:
+    with (
+        patch(
+            "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
+            return_value=(None, None),
+        ),
+        patch("syn_shared.settings.github.GitHubAppSettings") as MockSettings,
+        patch("syn_adapters.github.GitHubAppClient", return_value=app),
+    ):
+        MockSettings.return_value.is_configured = configured
+        MockSettings.return_value.bot_name = "syn-bot"
+        MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
+        yield
+
+
+def _hosts_yml_token(secrets: SetupPhaseSecrets) -> str | None:
+    """The oauth_token the script writes to gh's hosts.yml: what gh will use."""
+    for line in secrets.build_setup_script().splitlines():
+        if line.strip().startswith("oauth_token:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
 @pytest.mark.unit
 class TestSetupPhaseSecretsCreate:
     """Tests for SetupPhaseSecrets.create() multi-installation resolution."""
 
     @pytest.mark.anyio
-    async def test_no_repos_skips_github(self) -> None:
-        """Empty repositories list skips GitHub API entirely."""
-        with patch(
-            "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
-            return_value=(None, None),
-        ):
+    async def test_no_repos_and_no_app_skips_github(self) -> None:
+        """No repositories and no App configured: nothing is minted, nothing fails."""
+        app = _FakeGitHubApp()
+        with _github_app(app, configured=False):
             secrets = await SetupPhaseSecrets.create(repositories=[], require_github=False)
 
         assert secrets.repo_tokens == {}
         assert secrets.repositories == []
+        assert secrets.gh_token is None
+        assert app.mints == []
 
     @pytest.mark.anyio
     async def test_single_installation_single_token_call(self) -> None:
-        """Two repos from same installation → one mint_agent_token call."""
-        mock_client = AsyncMock()
-        mock_client.get_installation_for_repo.return_value = "inst-1"
-        mock_client.mint_agent_token.return_value = "tok-inst1"
-
+        """Two repos from same installation → one token, scoped to both (#725)."""
+        app = _FakeGitHubApp({"org": "inst-1"})
         repos = [
             "https://github.com/org/repo-a",
             "https://github.com/org/repo-b",
         ]
 
-        with (
-            patch(
-                "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
-                return_value=(None, None),
-            ),
-            patch("syn_shared.settings.github.GitHubAppSettings") as MockSettings,
-            patch(
-                "syn_adapters.github.GitHubAppClient",
-                return_value=mock_client,
-            ),
-        ):
-            MockSettings.return_value.is_configured = True
-            MockSettings.return_value.bot_name = "syn-bot"
-            MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
+        with _github_app(app):
             secrets = await SetupPhaseSecrets.create(repositories=repos, require_github=True)
 
-        # One token minted despite two repos
-        mock_client.mint_agent_token.assert_called_once_with("inst-1", can_open_pr=False)
-        assert secrets.repo_tokens[repos[0]] == "tok-inst1"
-        assert secrets.repo_tokens[repos[1]] == "tok-inst1"
+        # One token minted despite two repos, and it names both.
+        assert app.mints == [("inst-1", False, ("org/repo-a", "org/repo-b"))]
+        assert secrets.repo_tokens[repos[0]] == "tok-inst-1-1"
+        assert secrets.repo_tokens[repos[1]] == "tok-inst-1-1"
+        assert app.closed
 
     @pytest.mark.anyio
     async def test_multi_installation_two_token_calls(self) -> None:
         """Repos from different installations → separate token per installation."""
         repo_a = "https://github.com/org-a/repo-a"
         repo_b = "https://github.com/org-b/repo-b"
+        app = _FakeGitHubApp({"org-a": "inst-a", "org-b": "inst-b"})
 
-        async def fake_get_installation(full_name: str) -> str:
-            return "inst-a" if "org-a" in full_name else "inst-b"
-
-        mock_client = AsyncMock()
-        mock_client.get_installation_for_repo.side_effect = fake_get_installation
-        mock_client.mint_agent_token.side_effect = lambda inst_id, **_: (
-            "tok-a" if inst_id == "inst-a" else "tok-b"
-        )
-
-        with (
-            patch(
-                "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
-                return_value=(None, None),
-            ),
-            patch("syn_shared.settings.github.GitHubAppSettings") as MockSettings,
-            patch(
-                "syn_adapters.github.GitHubAppClient",
-                return_value=mock_client,
-            ),
-        ):
-            MockSettings.return_value.is_configured = True
-            MockSettings.return_value.bot_name = "syn-bot"
-            MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
+        with _github_app(app):
             secrets = await SetupPhaseSecrets.create(
                 repositories=[repo_a, repo_b], require_github=True
             )
 
-        assert mock_client.mint_agent_token.call_count == 2
-        assert secrets.repo_tokens[repo_a] == "tok-a"
-        assert secrets.repo_tokens[repo_b] == "tok-b"
+        assert app.mints == [
+            ("inst-a", False, ("org-a/repo-a",)),
+            ("inst-b", False, ("org-b/repo-b",)),
+        ]
+        assert secrets.repo_tokens[repo_a] == "tok-inst-a-1"
+        assert secrets.repo_tokens[repo_b] == "tok-inst-b-2"
+
+    @pytest.mark.anyio
+    async def test_a_repo_in_another_installation_never_gets_this_token(self) -> None:
+        """Repo scoping, seen from git: repo B's credential is not repo A's token.
+
+        The token for org-a names only org-a/repo-a, and the credential entry git
+        resolves for org-b/repo-b carries a different token entirely.
+        """
+        repo_a = "https://github.com/org-a/repo-a"
+        repo_b = "https://github.com/org-b/repo-b"
+        app = _FakeGitHubApp({"org-a": "inst-a", "org-b": "inst-b"})
+
+        with _github_app(app):
+            secrets = await SetupPhaseSecrets.create(
+                repositories=[repo_a, repo_b], require_github=True
+            )
+
+        token_a = secrets.repo_tokens[repo_a]
+        script = secrets.build_setup_script()
+        assert f"x-access-token:{token_a}@github.com/org-a/repo-a" in script
+        assert f"x-access-token:{token_a}@github.com/org-b/repo-b" not in script
+        by_token = {issued.token: issued.repositories for issued in secrets.issued_tokens}
+        assert by_token[token_a] == ("org-a/repo-a",)
+
+    @pytest.mark.anyio
+    async def test_every_minted_token_is_reported_as_issued(self) -> None:
+        """The setup mint site feeds the ledger (#725): one entry per token."""
+        app = _FakeGitHubApp({"org-a": "inst-a", "org-b": "inst-b"})
+
+        with _github_app(app):
+            secrets = await SetupPhaseSecrets.create(
+                repositories=[
+                    "https://github.com/org-a/x",
+                    "https://github.com/org-a/y",
+                    "https://github.com/org-b/z",
+                ],
+                require_github=True,
+            )
+
+        assert [
+            (issued.installation_id, issued.repositories) for issued in secrets.issued_tokens
+        ] == [("inst-a", ("org-a/x", "org-a/y")), ("inst-b", ("org-b/z",))]
+        assert {issued.token for issued in secrets.issued_tokens} == set(
+            secrets.repo_tokens.values()
+        )
 
     @pytest.mark.anyio
     async def test_fails_fast_on_installation_lookup_error(self) -> None:
         """Installation lookup failure propagates immediately (fail-fast)."""
-        mock_client = AsyncMock()
-        mock_client.get_installation_for_repo.side_effect = Exception(
-            "404: Repo not in any installation"
-        )
+        app = _FakeGitHubApp()
 
-        with (
-            patch(
-                "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
-                return_value=(None, None),
-            ),
-            patch("syn_shared.settings.github.GitHubAppSettings") as MockSettings,
-            patch(
-                "syn_adapters.github.GitHubAppClient",
-                return_value=mock_client,
-            ),
-        ):
-            MockSettings.return_value.is_configured = True
-            MockSettings.return_value.bot_name = "syn-bot"
-            MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
-            with pytest.raises(Exception, match="404"):
-                await SetupPhaseSecrets.create(
-                    repositories=["https://github.com/org/private-repo"],
-                    require_github=True,
-                )
+        with _github_app(app), pytest.raises(LookupError, match="404"):
+            await SetupPhaseSecrets.create(
+                repositories=["https://github.com/org/private-repo"],
+                require_github=True,
+            )
 
-        mock_client.mint_agent_token.assert_not_called()
+        assert app.mints == []
 
     @pytest.mark.anyio
     async def test_require_github_false_swallows_lookup_error(self) -> None:
         """require_github=False skips token on lookup failure (no exception)."""
-        mock_client = AsyncMock()
-        mock_client.get_installation_for_repo.side_effect = Exception("not installed")
+        app = _FakeGitHubApp()
 
-        with (
-            patch(
-                "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
-                return_value=(None, None),
-            ),
-            patch("syn_shared.settings.github.GitHubAppSettings") as MockSettings,
-            patch(
-                "syn_adapters.github.GitHubAppClient",
-                return_value=mock_client,
-            ),
-        ):
-            MockSettings.return_value.is_configured = True
-            MockSettings.return_value.bot_name = "syn-bot"
-            MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
+        with _github_app(app):
             secrets = await SetupPhaseSecrets.create(
                 repositories=["https://github.com/org/public-repo"],
                 require_github=False,
@@ -599,6 +666,7 @@ class TestSetupPhaseSecretsCreate:
 
         # No token fetched, but no exception
         assert secrets.repo_tokens == {}
+        assert secrets.issued_tokens == []
 
     @pytest.mark.anyio
     async def test_github_app_not_configured_raises_when_required(self) -> None:
@@ -608,18 +676,139 @@ class TestSetupPhaseSecretsCreate:
         )
 
         with (
-            patch(
-                "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
-                return_value=(None, None),
-            ),
-            patch("syn_shared.settings.github.GitHubAppSettings") as MockSettings,
+            _github_app(_FakeGitHubApp(), configured=False),
+            pytest.raises(GitHubAppNotConfiguredError),
         ):
-            MockSettings.return_value.is_configured = False
-            with pytest.raises(GitHubAppNotConfiguredError):
-                await SetupPhaseSecrets.create(
-                    repositories=["https://github.com/org/repo"],
-                    require_github=True,
-                )
+            await SetupPhaseSecrets.create(
+                repositories=["https://github.com/org/repo"],
+                require_github=True,
+            )
+
+
+@pytest.mark.unit
+class TestGhCredentialResolver:
+    """gh's hosts.yml token is chosen by one resolver, for setup and renewal (#725).
+
+    gh used to read a GITHUB_TOKEN env var routed by the repo under work
+    (#1129). The env var is gone; these pin that hosts.yml now carries the
+    token that routing would have picked.
+    """
+
+    _REPO_A = "https://github.com/org-a/repo-a"
+    _REPO_B = "https://github.com/org-b/repo-b"
+
+    @pytest.mark.anyio
+    async def test_two_installations_route_gh_to_the_primary_repo(self) -> None:
+        app = _FakeGitHubApp({"org-a": "inst-a", "org-b": "inst-b"})
+
+        with _github_app(app):
+            secrets = await SetupPhaseSecrets.create(
+                repositories=[self._REPO_A, self._REPO_B], require_github=True
+            )
+
+        assert _hosts_yml_token(secrets) == secrets.repo_tokens[self._REPO_A]
+
+    @pytest.mark.anyio
+    async def test_the_primary_repo_decides_even_when_listed_second_installation(
+        self,
+    ) -> None:
+        """Order is the workflow's, not the installation list's."""
+        app = _FakeGitHubApp({"org-a": "inst-a", "org-b": "inst-b"})
+
+        with _github_app(app):
+            secrets = await SetupPhaseSecrets.create(
+                repositories=[self._REPO_B, self._REPO_A], require_github=True
+            )
+
+        assert _hosts_yml_token(secrets) == secrets.repo_tokens[self._REPO_B]
+
+    @pytest.mark.anyio
+    async def test_an_uninstalled_primary_falls_through_to_the_next_repo(self) -> None:
+        app = _FakeGitHubApp({"org-b": "inst-b"})
+
+        with _github_app(app):
+            secrets = await SetupPhaseSecrets.create(
+                repositories=[self._REPO_A, self._REPO_B], require_github=False
+            )
+
+        assert _hosts_yml_token(secrets) == secrets.repo_tokens[self._REPO_B]
+
+    @pytest.mark.anyio
+    async def test_a_repo_less_workflow_gets_the_first_installation(self) -> None:
+        """Nine in-tree workflows have no repo; gh must still work for them."""
+        app = _FakeGitHubApp(installation_list=["inst-first", "inst-second"])
+
+        with _github_app(app):
+            secrets = await SetupPhaseSecrets.create(repositories=[], require_github=False)
+
+        assert app.mints == [("inst-first", False, ())]
+        assert _hosts_yml_token(secrets) == "tok-inst-first-1"
+        assert [issued.repositories for issued in secrets.issued_tokens] == [()]
+        # No repo means no git credential entry, only gh's.
+        assert "~/.git-credentials" not in secrets.build_setup_script()
+
+    @pytest.mark.anyio
+    async def test_a_repo_less_mint_failure_is_soft_at_setup(self) -> None:
+        class _Failing(_FakeGitHubApp):
+            async def list_installations(self) -> list[dict[str, str]]:
+                raise ConnectionError("github down")
+
+        with _github_app(_Failing()):
+            secrets = await SetupPhaseSecrets.create(repositories=[], require_github=False)
+
+        assert secrets.gh_token is None
+
+    @pytest.mark.anyio
+    async def test_a_repo_less_mint_failure_is_hard_at_renewal(self) -> None:
+        class _Failing(_FakeGitHubApp):
+            async def list_installations(self) -> list[dict[str, str]]:
+                raise ConnectionError("github down")
+
+        with _github_app(_Failing()), pytest.raises(ConnectionError):
+            await SetupPhaseSecrets.create(repositories=[], require_github=True)
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "repositories",
+        [
+            pytest.param([_REPO_A, _REPO_B], id="two-installations"),
+            pytest.param([], id="repo-less"),
+        ],
+    )
+    async def test_renewal_writes_gh_the_token_setup_would_route_to(
+        self, repositories: list[str]
+    ) -> None:
+        """Before and after renewal, gh holds the routed installation's CURRENT token.
+
+        The renewal script is what `renew_git_credential` runs; its hosts.yml
+        must carry the freshly minted token for the same installation the setup
+        script chose, never the superseded one.
+        """
+        app = _FakeGitHubApp(
+            {"org-a": "inst-a", "org-b": "inst-b"}, installation_list=["inst-a", "inst-b"]
+        )
+
+        with _github_app(app):
+            setup = await SetupPhaseSecrets.create(
+                repositories=repositories, require_github=bool(repositories)
+            )
+            renewed = await SetupPhaseSecrets.create(
+                repositories=repositories, clone_repos=False, require_github=True
+            )
+
+        before = _hosts_yml_token(setup)
+        after = next(
+            line.split(":", 1)[1].strip()
+            for line in renewed.build_credential_script().splitlines()
+            if line.strip().startswith("oauth_token:")
+        )
+        assert before is not None
+        assert after != before
+        installation_of = {
+            issued.token: issued.installation_id
+            for issued in [*setup.issued_tokens, *renewed.issued_tokens]
+        }
+        assert installation_of[after] == installation_of[before] == "inst-a"
 
 
 # =============================================================================

@@ -221,11 +221,17 @@ class GitWorkspace(Protocol):
 
     async def execute(self, command: list[str]) -> ExecutionResult: ...
 
-    async def renew_git_credential(self) -> None:
+    async def renew_git_credential(self) -> object:
         """Install a freshly minted credential, or raise `CredentialRenewalFailedError`.
 
         Says nothing about whether the credential it replaced still worked -
         see that error for why nothing can.
+
+        Returns what was issued, as ``object`` because nothing in this slice
+        reads it: the adapter returns its `IssuedToken`s so its own ledger can
+        revoke them (#725), and the domain has no business holding a token.
+        ``object`` rather than a domain type keeps a double that returns None
+        a valid workspace.
         """
         ...
 

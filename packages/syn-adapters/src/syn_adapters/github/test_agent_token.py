@@ -21,7 +21,11 @@ import httpx
 import pytest
 
 from syn_adapters.github.agent_token import mint_agent_token
-from syn_adapters.github.client_token import TokenRequest
+from syn_adapters.github.client_token import (
+    TokenRequest,
+    get_installation_token,
+    revoke_installation_token,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.github.client import GitHubAppClient, InstallationToken
@@ -49,8 +53,12 @@ class _FakeHttp:
 
     def __init__(self, granted: dict[str, str]) -> None:
         self._granted = granted
-        self.token_request_bodies: list[dict[str, dict[str, str]] | None] = []
+        self.token_request_bodies: list[_Body | None] = []
         self.minted = 0
+        # What GitHub remembers about each token it issued: the repo names it
+        # may reach, or None for every repo the installation covers.
+        self.scopes: dict[str, list[str] | None] = {}
+        self.revoked: list[str] = []
 
     def last_token_request(self) -> TokenRequest | None:
         """The most recent token request, parsed as the endpoint parses it.
@@ -64,6 +72,8 @@ class _FakeHttp:
         return None if body is None else TokenRequest.model_validate(body)
 
     async def get(self, path: str, headers: dict[str, str] | None = None) -> httpx.Response:
+        if path.startswith("/repos/"):
+            return self._repo_get(path, headers or {})
         assert path.startswith("/app/installations/")
         return httpx.Response(
             200,
@@ -75,7 +85,7 @@ class _FakeHttp:
         self,
         path: str,
         headers: dict[str, str] | None = None,
-        json: dict[str, dict[str, str]] | None = None,
+        json: _Body | None = None,
     ) -> httpx.Response:
         self.token_request_bodies.append(json)
         self.minted += 1
@@ -83,18 +93,43 @@ class _FakeHttp:
         # request with no body at all gets the installation's full set - which
         # is exactly the behaviour that let `implement` publish.
         requested = self.last_token_request()
-        effective = self._granted if requested is None else requested.permissions
+        effective = (
+            self._granted
+            if requested is None or requested.permissions is None
+            else requested.permissions
+        )
+        token = f"ghs_token_{self.minted}"
+        self.scopes[token] = None if requested is None else requested.repositories
         expires = datetime.now(UTC) + timedelta(hours=1)
         return httpx.Response(
             201,
             json={
-                "token": f"ghs_token_{self.minted}",
+                "token": token,
                 "expires_at": expires.isoformat().replace("+00:00", "Z"),
                 "permissions": effective,
                 "repository_selection": "selected",
             },
             request=httpx.Request("POST", path),
         )
+
+    async def delete(self, path: str, headers: dict[str, str] | None = None) -> httpx.Response:
+        assert path == "/installation/token"
+        token = (headers or {}).get("Authorization", "").removeprefix("token ")
+        self.revoked.append(token)
+        return httpx.Response(204, request=httpx.Request("DELETE", path))
+
+    def _repo_get(self, path: str, headers: dict[str, str]) -> httpx.Response:
+        """`GET /repos/{owner}/{repo}` as GitHub answers a scoped token: 404
+        for any repo the token was not issued for, exactly as if it did not
+        exist."""
+        token = headers.get("Authorization", "").removeprefix("token ")
+        repo = path.rstrip("/").split("/")[-1]
+        scope = self.scopes.get(token, [])
+        status = 200 if token not in self.revoked and (scope is None or repo in scope) else 404
+        return httpx.Response(status, request=httpx.Request("GET", path))
+
+
+_Body = dict[str, dict[str, str] | list[str]]
 
 
 class _FakeClient:
@@ -216,21 +251,115 @@ async def test_a_publishing_phase_does_not_hand_its_token_to_a_scoped_one() -> N
     publishing = await mint_agent_token(_as_client(fake), "42", can_open_pr=True)
     scoped = await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
 
-    assert scoped != publishing
+    assert scoped.token != publishing.token
     assert _requested_permissions(fake) is not None
     assert fake.http.minted == 2
 
 
 @pytest.mark.unit
-async def test_a_scoped_token_is_reused_rather_than_reminted() -> None:
-    """The cache still has to work, or every phase pays two API calls."""
+async def test_an_agent_token_is_never_served_from_the_cache() -> None:
+    """Every mint is a new token (#725).
+
+    This used to be the opposite test: a scoped token was reused rather than
+    reminted. It had to go once the workspace holding the token started
+    renewing and revoking it. A renewal served from the cache is handed the
+    token it is replacing, with the same expiry, and nothing is renewed; a
+    revocation at one workspace's teardown kills the token a concurrent
+    workspace on the same repo had been served.
+    """
     fake = _FakeClient()
 
     first = await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
     second = await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
 
-    assert first == second
-    assert fake.http.minted == 1
+    assert first.token != second.token
+    assert fake.http.minted == 2
+    assert fake._cached_tokens == {}
+
+
+@pytest.mark.unit
+async def test_the_token_request_names_the_repos_under_work() -> None:
+    """Repo-scoped minting (#725): the body carries repository NAMES.
+
+    GitHub's endpoint takes names without the owner - the owner is the
+    installation's - and spells the key `repositories`. Pinned as JSON for the
+    same reason as the permissions key above.
+    """
+    fake = _FakeClient({"contents": "write", "pull_requests": "write"})
+
+    await mint_agent_token(
+        _as_client(fake),
+        "42",
+        can_open_pr=False,
+        repositories=["acme/api", "acme/web"],
+    )
+
+    assert fake.http.token_request_bodies == [
+        {
+            "permissions": {"contents": "write", "pull_requests": "read"},
+            "repositories": ["api", "web"],
+        }
+    ]
+
+
+@pytest.mark.unit
+async def test_the_publishing_token_is_repo_scoped_too() -> None:
+    """Full permissions, but still only the named repos."""
+    fake = _FakeClient()
+
+    await mint_agent_token(_as_client(fake), "42", can_open_pr=True, repositories=["acme/api"])
+
+    assert fake.http.token_request_bodies == [{"repositories": ["api"]}]
+
+
+@pytest.mark.unit
+async def test_a_token_for_repo_a_cannot_reach_repo_b() -> None:
+    """What repo scoping buys, asked of (a mock of) GitHub rather than the body."""
+    fake = _FakeClient()
+
+    token = await mint_agent_token(
+        _as_client(fake), "42", can_open_pr=False, repositories=["acme/a"]
+    )
+
+    auth = {"Authorization": f"token {token.token}"}
+    assert (await fake.http.get("/repos/acme/a", headers=auth)).status_code == 200
+    assert (await fake.http.get("/repos/acme/b", headers=auth)).status_code == 404
+
+
+@pytest.mark.unit
+async def test_a_repo_less_token_names_no_repos() -> None:
+    """A workflow with no repo still needs gh; its token is installation-wide."""
+    fake = _FakeClient()
+
+    await mint_agent_token(_as_client(fake), "42", can_open_pr=True)
+
+    assert fake.http.token_request_bodies == [None]
+
+
+@pytest.mark.unit
+async def test_the_shared_cache_keys_on_the_repo_set() -> None:
+    """(installation, repo set, permissions): a token for A is never served for B."""
+    fake = _FakeClient()
+    client = _as_client(fake)
+
+    for_a = await get_installation_token(client, "42", repositories=["a"])
+    for_b = await get_installation_token(client, "42", repositories=["b"])
+    for_a_again = await get_installation_token(client, "42", repositories=["a"])
+
+    assert for_a != for_b
+    assert for_a_again == for_a
+    assert fake.http.minted == 2
+
+
+@pytest.mark.unit
+async def test_revocation_authenticates_with_the_token_it_revokes() -> None:
+    """`DELETE /installation/token` takes no id; the credential is the argument."""
+    fake = _FakeClient()
+    token = await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
+
+    await revoke_installation_token(_as_client(fake), token.token)
+
+    assert fake.http.revoked == [token.token]
 
 
 @pytest.mark.unit

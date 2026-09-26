@@ -459,6 +459,7 @@ class WorkspaceService:
 
         isolation_handle: IsolationHandle | None = None
         sidecar_handle: SidecarHandle | None = None
+        workspace: ManagedWorkspace | None = None
 
         try:
             isolation_handle, sidecar_handle = await provision_workspace(
@@ -491,6 +492,13 @@ class WorkspaceService:
             raise
 
         finally:
+            # Revoke every GitHub token this workspace was issued (#725). Here,
+            # after the caller's body has returned, because the quarantine push
+            # runs inside that body and needs a live token; and before the
+            # container is destroyed, though nothing in it matters any more.
+            # Never raises, so it cannot keep the container from being cleaned up.
+            if workspace is not None:
+                await workspace.revoke_issued_tokens()
             await cleanup_workspace(
                 self,
                 aggregate,
