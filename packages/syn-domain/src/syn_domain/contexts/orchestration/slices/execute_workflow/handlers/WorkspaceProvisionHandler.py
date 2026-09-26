@@ -616,11 +616,7 @@ class WorkspaceProvisionHandler:
             phase.agent_config.provider,
             phase.agent_config.allow_delegation,
         )
-        agent_env = (
-            await _build_agent_env(workspace, session_id)
-            if needs_claude_env
-            else {}
-        )
+        agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
         # OUTSIDE the branch above, deliberately. A codex phase gets an empty
         # agent env by design - it authenticates from ~/.codex/auth.json and
         # must not see claude credentials - so `_build_agent_env` is the one

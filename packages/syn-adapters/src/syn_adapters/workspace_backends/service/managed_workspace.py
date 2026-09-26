@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
     from syn_adapters.workspace_backends.service.credential_keeper import CredentialLapse
     from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
-
     from syn_adapters.workspace_backends.service.setup_phase_secrets import (
         SetupPhaseSecrets,
     )
@@ -41,10 +40,10 @@ if TYPE_CHECKING:
     )
 
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
+from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
     CredentialSource,
 )
-from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
     renew_git_credential as _renew_git_credential,
 )
