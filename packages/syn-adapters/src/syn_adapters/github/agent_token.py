@@ -20,6 +20,12 @@ differently from ours - and would silently drop a capability the App gained
 later. Instead this asks the installation what it holds and downgrades the one
 permission that decides publication. Everything else passes through unchanged,
 which is what keeps `git push`, `gh pr checkout` and `gh issue view` working.
+
+WHICH REPOSITORIES IT REACHES IS PART OF THE SAME ANSWER (#725). A phase is
+provisioned for named repositories, and the token is minted for exactly those.
+Before, it reached every repository the installation covers, so a credential
+issued for `org/a` could push to `org/b` - and, because minting a new token
+never revokes an old one, did so for its whole hour after the phase ended.
 """
 
 from __future__ import annotations
@@ -27,10 +33,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_adapters.github.client_token import get_installation_token
+from syn_adapters.github.client_token import installation_token
 
 if TYPE_CHECKING:
-    from syn_adapters.github.client import GitHubAppClient
+    from collections.abc import Collection
+
+    from syn_adapters.github.client import GitHubAppClient, InstallationToken
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +88,8 @@ async def mint_agent_token(
     installation_id: str,
     *,
     can_open_pr: bool,
-) -> str:
+    repositories: Collection[str] | None = None,
+) -> InstallationToken:
     """Mint the installation token an agent phase will hold.
 
     Args:
@@ -89,9 +98,13 @@ async def mint_agent_token(
         can_open_pr: Whether this phase is the one permitted to publish.
             False downgrades publication to read-only; the phase keeps every
             other permission the installation grants.
+        repositories: Repository names (no owner) the token may reach. None
+            only for a phase with no repository to scope to - a repo-less
+            workflow - which then reaches whatever the installation covers.
 
     Returns:
-        Installation access token string.
+        The installation token, with its expiry: the workspace records both,
+        so it knows when to renew and what to revoke (#725).
 
     Raises:
         Whatever the installation lookup or the token request raises. A phase
@@ -99,7 +112,7 @@ async def mint_agent_token(
         token handed out because a lookup failed is the defect this closes.
     """
     if can_open_pr:
-        return await get_installation_token(client, installation_id)
+        return await installation_token(client, installation_id, repositories=repositories)
 
     granted = await _granted_permissions(client, installation_id)
     scoped = {
@@ -112,4 +125,6 @@ async def mint_agent_token(
         PUBLICATION_PERMISSION,
         scoped.get(PUBLICATION_PERMISSION, "not granted to this installation"),
     )
-    return await get_installation_token(client, installation_id, permissions=scoped)
+    return await installation_token(
+        client, installation_id, permissions=scoped, repositories=repositories
+    )
