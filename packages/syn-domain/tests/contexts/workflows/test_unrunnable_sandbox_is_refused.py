@@ -10,7 +10,7 @@ stored template never sees the YAML validator.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from dataclasses import dataclass, field
 from typing import cast
 
 import pytest
@@ -25,6 +25,22 @@ from syn_shared.agents import UnrunnablePhaseSandboxError
 pytestmark = pytest.mark.unit
 
 UNRUNNABLE = ("read-only", "workspace-write")
+
+
+@dataclass(frozen=True)
+class _StoredPhase:
+    """The attributes `validate_phase_declarations` reads from a stored phase."""
+
+    phase_id: str
+    sandbox: str
+    provider: str = "codex"
+    execution_type: str = "sequential"
+    allowed_tools: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _StoredTemplate:
+    phases: list[_StoredPhase] = field(default_factory=list)
 
 
 def _yaml(provider: str, sandbox: str | None) -> str:
@@ -59,16 +75,6 @@ def test_authoring_accepts_the_runnable_level(provider: str, sandbox: str | None
 
 @pytest.mark.parametrize("sandbox", UNRUNNABLE)
 def test_a_stored_template_is_refused_at_the_execution_boundary(sandbox: str) -> None:
-    stored = SimpleNamespace(
-        phases=[
-            SimpleNamespace(
-                phase_id="review",
-                execution_type="sequential",
-                allowed_tools=(),
-                provider="codex",
-                sandbox=sandbox,
-            )
-        ]
-    )
+    stored = _StoredTemplate(phases=[_StoredPhase(phase_id="review", sandbox=sandbox)])
     with pytest.raises(UnrunnablePhaseSandboxError, match="review"):
         validate_phase_declarations(cast("object", stored))  # type: ignore[arg-type]
