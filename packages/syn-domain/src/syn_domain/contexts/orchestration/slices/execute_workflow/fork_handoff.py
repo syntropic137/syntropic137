@@ -74,6 +74,29 @@ async def inherited_outputs(
             raise InheritanceUnavailableError(msg)
         return cache
 
+    files = await _files_by_owner(query, origin)
+
+    # A phase can still resolve PARTIALLY - two artifact ids recorded, one of
+    # them gone - and this function CANNOT see that. `get_files_for_artifacts`
+    # returns files, `PhaseOutputFile` carries no artifact id, and one artifact is
+    # a directory of many files, so file count cannot be compared with id count
+    # in either direction. Detecting it needs the query to report which ids it
+    # resolved; #1460 tracks that. Refusing on a count here would be a false
+    # invariant, not a safer one.
+    for phase_id, phase_files in files.items():
+        cache.record(phase_id, phase_files[0].content if phase_files else None, phase_files)
+    return cache
+
+
+async def _files_by_owner(
+    query: ArtifactQueryServiceProtocol, origin: ForkOrigin
+) -> dict[str, list[PhaseOutputFile]]:
+    """Each inherited phase's files, asked of the execution that ran it (#1462).
+
+    One query per owner, since the artifact query filters on the execution id.
+    Raises `InheritanceUnavailableError` naming the owner that came back empty
+    for a phase that recorded artifact ids.
+    """
     wanted_by_owner: dict[str, dict[str, list[str]]] = {}
     for phase in origin.inherited_phases:
         wanted_by_owner.setdefault(origin.owner_of(phase), {})[phase.phase_id] = list(
@@ -91,17 +114,7 @@ async def inherited_outputs(
             )
             raise InheritanceUnavailableError(msg)
         files.update(found)
-
-    # A phase can still resolve PARTIALLY - two artifact ids recorded, one of
-    # them gone - and this function CANNOT see that. `get_files_for_artifacts`
-    # returns files, `PhaseOutputFile` carries no artifact id, and one artifact is
-    # a directory of many files, so file count cannot be compared with id count
-    # in either direction. Detecting it needs the query to report which ids it
-    # resolved; #1460 tracks that. Refusing on a count here would be a false
-    # invariant, not a safer one.
-    for phase_id, phase_files in files.items():
-        cache.record(phase_id, phase_files[0].content if phase_files else None, phase_files)
-    return cache
+    return files
 
 
 def inherited_phase_ids(origin: ForkOrigin | None) -> list[str]:
