@@ -140,6 +140,17 @@ def get_projection_mgr() -> ProjectionManager:
     return get_projection_manager()
 
 
+def get_artifact_query() -> ArtifactQueryService:
+    """The artifact read service, on its own.
+
+    Narrower than `get_execution_processor()` on purpose: a caller that only
+    needs to READ artifacts - resolving a fork's inheritance before admitting it,
+    for instance - should not drag the execution processor and therefore the
+    observability event store into a request that writes nothing through them.
+    """
+    return ArtifactQueryService(get_projection_manager().artifact_list)
+
+
 def _build_session_store(settings: Settings) -> HttpSessionStore | None:
     """The read side of the session store, or None when it is not configured.
 
