@@ -12,12 +12,16 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
+from event_sourcing import DomainEvent, EventEnvelope, EventMetadata, ProjectionResult
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.artifacts import PhaseOutputFile
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     ForkOrigin,
     InheritedPhase,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
     InheritanceUnavailableError,
@@ -237,3 +241,85 @@ class _ChildStarted:
     @property
     def forked_from(self) -> _Origin | None:
         return None if self.parent is None else _Origin(self.parent)
+
+
+class TestTheEventActuallyReachesTheSettle:
+    """The wiring, not just the method.
+
+    Written because a mutation proved it was missing: replacing the
+    `handle_event` dispatch with `pass` killed NO test, since every test above
+    calls `_settle_if_a_fork_started` directly. A method that works and is never
+    reached is the same as a method that does not work.
+    """
+
+    async def test_a_childs_start_envelope_settles_the_record(self) -> None:
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await manager._start(
+            ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+        )
+
+        result = await manager.handle_event(
+            _envelope("WorkflowExecutionStarted", _real_child_start(PARENT)),
+            _Checkpoints(),
+        )
+
+        assert result is ProjectionResult.SUCCESS
+        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        assert stored is not None
+        assert ForkStartRecord.model_validate(stored).status == "started", (
+            "the child's start event did not reach the settle"
+        )
+
+    async def test_the_started_event_type_is_subscribed(self) -> None:
+        """Handling it is moot if the coordinator never delivers it."""
+        subscribed = ForkStartProcessManager().get_subscribed_event_types()
+        assert subscribed is not None
+        assert "WorkflowExecutionStarted" in subscribed
+
+
+class _Checkpoints:
+    """Accepts a checkpoint and remembers nothing; the record is the assertion."""
+
+    async def save_checkpoint(self, checkpoint: object) -> None:
+        del checkpoint
+
+    async def get_checkpoint(self, projection_name: str) -> None:
+        del projection_name
+
+    async def delete_checkpoint(self, projection_name: str) -> None:
+        del projection_name
+
+
+def _real_child_start(parent: str) -> WorkflowExecutionStartedEvent:
+    """The child's ACTUAL start event, not a stand-in.
+
+    The envelope validates its event as a `DomainEvent`, and using the real one
+    also pins that `forked_from` is where the parent's id genuinely lives.
+    """
+    return WorkflowExecutionStartedEvent(
+        workflow_id="wf-1",
+        execution_id="exec-child",
+        workflow_name="Forked",
+        started_at=datetime.now(UTC),
+        total_phases=3,
+        inputs={},
+        forked_from=ForkOrigin(
+            parent_execution_id=parent,
+            inherited_phases=[InheritedPhase(phase_id="research", artifact_ids=["a1"])],
+            resume_phase_id="plan",
+        ),
+    )
+
+
+def _envelope(event_type: str, event: DomainEvent) -> EventEnvelope[DomainEvent]:
+    return EventEnvelope(
+        event=event,
+        metadata=EventMetadata(
+            aggregate_id="exec-child",
+            aggregate_type="WorkflowExecution",
+            aggregate_nonce=1,
+            event_type=event_type,
+            global_nonce=1,
+        ),
+    )
