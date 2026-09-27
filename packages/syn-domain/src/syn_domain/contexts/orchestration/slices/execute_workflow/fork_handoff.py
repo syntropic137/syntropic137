@@ -17,6 +17,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.artifacts import PhaseOutputFile
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
@@ -41,16 +42,18 @@ async def inherited_outputs(
 ) -> PhaseOutputCache:
     """The output cache a run starts with: empty, or a fork's inheritance.
 
-    Read by artifact id from the PARENT's execution, because that is where the
-    artifacts were stored and the child's own id finds none of them. The head
-    of each phase's files is its alias, as it is for a phase run live.
+    Read by artifact id from the execution that RAN each inherited phase,
+    because that is where its artifacts were stored (#1462). For a first fork
+    that is the parent; for a fork of a fork, a phase the parent itself
+    inherited is owned further up, and asking the parent finds nothing. The
+    head of each phase's files is its alias, as it is for a phase run live.
 
     Raises `InheritanceUnavailableError` rather than returning a short cache.
     Two ways that used to pass silently, both of which start a child whose
     resumed phase cannot see what it is resuming from:
 
     * no query service at all, while the origin names phases to inherit;
-    * a query that SUCCEEDS and returns nothing for a phase whose parent
+    * a query that SUCCEEDS and returns nothing for a phase whose owner
       recorded artifact ids - a deleted, expired or unreachable artifact.
 
     An inherited phase that recorded NO artifact ids is not one of those cases:
@@ -60,26 +63,34 @@ async def inherited_outputs(
     if origin is None or not origin.inherited_phases:
         return cache
 
-    wanted = {p.phase_id: list(p.artifact_ids) for p in origin.inherited_phases}
-    expected = {phase_id for phase_id, ids in wanted.items() if ids}
+    expected = sorted(p.phase_id for p in origin.inherited_phases if p.artifact_ids)
     if query is None:
         if expected:
             msg = (
                 f"Cannot hand fork of {origin.parent_execution_id} its inheritance: "
-                f"phase(s) {sorted(expected)} recorded artifacts and no artifact "
+                f"phase(s) {expected} recorded artifacts and no artifact "
                 "query service was wired to read them"
             )
             raise InheritanceUnavailableError(msg)
         return cache
 
-    files = await query.get_files_for_artifacts(origin.parent_execution_id, wanted)
-    unresolved = sorted(phase_id for phase_id in expected if not files.get(phase_id))
-    if unresolved:
-        msg = (
-            f"Cannot hand fork of {origin.parent_execution_id} its inheritance: "
-            f"phase(s) {unresolved} recorded artifacts that resolved to no files"
+    wanted_by_owner: dict[str, dict[str, list[str]]] = {}
+    for phase in origin.inherited_phases:
+        wanted_by_owner.setdefault(origin.owner_of(phase), {})[phase.phase_id] = list(
+            phase.artifact_ids
         )
-        raise InheritanceUnavailableError(msg)
+    files: dict[str, list[PhaseOutputFile]] = {}
+    for owner, wanted in wanted_by_owner.items():
+        found = await query.get_files_for_artifacts(owner, wanted)
+        unresolved = sorted(p for p, ids in wanted.items() if ids and not found.get(p))
+        if unresolved:
+            msg = (
+                f"Cannot hand fork of {origin.parent_execution_id} its inheritance: "
+                f"execution {owner}, which ran phase(s) {unresolved}, holds no files "
+                "for the artifact ids they recorded"
+            )
+            raise InheritanceUnavailableError(msg)
+        files.update(found)
 
     # A phase can still resolve PARTIALLY - two artifact ids recorded, one of
     # them gone - and this function CANNOT see that. `get_files_for_artifacts`

@@ -42,10 +42,16 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
     ExecutionStatus,
+    ForkOrigin,
+    InheritedPhase,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ForkExecutionCommand,
     WorkflowExecutionAggregate,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
+    InheritanceUnavailableError,
+    inherited_outputs,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
@@ -343,3 +349,66 @@ class TestAForkOfAForkReceivesTheOriginalParentsFiles:
         assert origin.parent_execution_id == CHILD
         (research,) = origin.inherited_phases
         assert origin.owner_of(research) == PARENT
+
+
+class TestStreamsWrittenBeforeTheOwnerWasRecorded:
+    """`origin_execution_id` is an event field, so old streams have none."""
+
+    def test_an_inherited_phase_without_one_is_owned_by_the_parent_named(self) -> None:
+        origin = ForkOrigin(
+            parent_execution_id=PARENT,
+            inherited_phases=[InheritedPhase(phase_id="research", artifact_ids=["art-1"])],
+            resume_phase_id="plan",
+        )
+        assert origin.owners() == {"research": PARENT}
+
+    async def test_a_fork_its_child_admitted_before_the_fix_still_starts(self) -> None:
+        """The admission #1462 stranded: recorded on the CHILD, naming no owner.
+
+        The child's own `forked_from` knows research came from the parent, so
+        the start names it rather than asking the child, which holds nothing.
+        """
+        executions, artifacts = _Executions(), _ProjectedArtifacts()
+        await TestAForkOfAForkReceivesTheOriginalParentsFiles()._child_failed_in_plan_too(
+            executions, artifacts
+        )
+        child = executions.streams[CHILD]
+        admitted = child._admitted_fork
+        child._admitted_fork = admitted.model_copy(
+            update={
+                "inherited_phases": [
+                    InheritedPhase(phase_id=p.phase_id, artifact_ids=p.artifact_ids)
+                    for p in admitted.inherited_phases
+                ]
+            }
+        )
+
+        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success())
+
+        assert await _start(executions, artifacts, CHILD, grandchild) == "completed"
+        assert grandchild.inputs["plan"] == EXPECTED_INPUT_TREE
+
+
+class TestARefusalNamesTheExecutionItAsked:
+    async def test_the_owner_is_named_not_the_parent(self) -> None:
+        """'Resolved to no files' sent operators to check artifacts that existed.
+
+        The refusal now says WHICH execution was asked, so a wrong owner is
+        visible on its face.
+        """
+        origin = ForkOrigin(
+            parent_execution_id=CHILD,
+            inherited_phases=[
+                InheritedPhase(
+                    phase_id="research", artifact_ids=["art-1"], origin_execution_id=PARENT
+                )
+            ],
+            resume_phase_id="plan",
+        )
+        empty = ArtifactQueryService(ArtifactListProjection(InMemoryProjectionStore()))
+
+        with pytest.raises(InheritanceUnavailableError) as refused:
+            await inherited_outputs(empty, origin)
+
+        assert f"execution {PARENT}, which ran phase(s) ['research']" in str(refused.value)
+        assert "resolved to no files" not in str(refused.value)

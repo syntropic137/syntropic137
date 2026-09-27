@@ -608,6 +608,17 @@ class InheritedPhase(BaseModel):
     """Every artifact the parent collected for this phase, in collection
     order. Empty is a real answer - a phase can complete having stored
     nothing - and not "unknown"."""
+    origin_execution_id: str | None = None
+    """The execution that RAN this phase, and so holds its artifacts (#1462).
+
+    Not always the parent: a fork of a fork inherits phases its parent itself
+    inherited, whose artifacts were only ever stored under the execution that
+    ran them. Carried rather than looked up, so the stream says whose output a
+    run is resting on.
+
+    None on every event written before #1462. Read it through
+    `ForkOrigin.owner_of`, never directly: absent means the parent the event
+    names, which is what it meant when those events were written."""
 
 
 @dataclass(frozen=True)
@@ -768,3 +779,15 @@ class ForkOrigin(BaseModel):
     #: these; their artifacts are the ones it hands forward.
     inherited_phases: list[InheritedPhase]
     resume_phase_id: str
+
+    def owner_of(self, phase: InheritedPhase) -> str:
+        """The execution holding ``phase``'s artifacts.
+
+        The one reading of `InheritedPhase.origin_execution_id`, so a stream
+        written before it existed replays as it was meant: owned by the parent.
+        """
+        return phase.origin_execution_id or self.parent_execution_id
+
+    def owners(self) -> dict[str, str]:
+        """Every inherited phase's owner, by phase id."""
+        return {p.phase_id: self.owner_of(p) for p in self.inherited_phases}

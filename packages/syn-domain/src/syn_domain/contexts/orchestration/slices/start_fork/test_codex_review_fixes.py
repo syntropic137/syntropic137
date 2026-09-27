@@ -86,7 +86,7 @@ class TestAForkWillNotStartWithoutItsInheritance:
     """
 
     async def test_a_recorded_artifact_that_resolves_to_nothing_refuses_the_start(self) -> None:
-        with pytest.raises(InheritanceUnavailableError, match="resolved to no files"):
+        with pytest.raises(InheritanceUnavailableError, match="holds no files for the artifact ids"):
             await inherited_outputs(_Query(answer={}), _origin(artifacts=["art-research"]))
 
     async def test_no_query_service_refuses_when_there_was_something_to_read(self) -> None:
@@ -441,7 +441,7 @@ class TestValidateResolvesTheInheritanceBeforeDispatch:
             _Executions(),  # pyright: ignore[reportArgumentType]
         )
 
-        with pytest.raises(InheritanceUnavailableError, match="resolved to no files"):
+        with pytest.raises(InheritanceUnavailableError, match="holds no files for the artifact ids"):
             await handler.validate(PARENT)
 
     async def test_a_resolvable_inheritance_passes_validate(self) -> None:

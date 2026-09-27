@@ -384,7 +384,11 @@ class TestInheritedPrefix:
 
         forked = _forked_event(store)
         assert forked.inherited_phases == [
-            InheritedPhase(phase_id="research", artifact_ids=["art-research-1", "art-research-2"])
+            InheritedPhase(
+                phase_id="research",
+                artifact_ids=["art-research-1", "art-research-2"],
+                origin_execution_id=PARENT,
+            )
         ]
         assert forked.resume_phase_id == "plan"
 
@@ -419,7 +423,11 @@ class TestInheritedPrefix:
         _fork(store)
 
         assert _forked_event(store).inherited_phases == [
-            InheritedPhase(phase_id="research", artifact_ids=["art-kept"])
+            InheritedPhase(
+                phase_id="research",
+                artifact_ids=["art-kept"],
+                origin_execution_id=PARENT,
+            )
         ]
 
     def test_nothing_completed_inherits_nothing_and_resumes_at_the_first_phase(self) -> None:
@@ -537,7 +545,11 @@ class TestACompletedPhaseCannotBeReentered:
         store = _Store(history)
         _fork(store)
         assert _forked_event(store).inherited_phases == [
-            InheritedPhase(phase_id="research", artifact_ids=["art-research"])
+            InheritedPhase(
+                phase_id="research",
+                artifact_ids=["art-research"],
+                origin_execution_id=PARENT,
+            )
         ]
 
     def test_a_second_completion_cannot_mix_two_attempts_artifacts(self) -> None:
@@ -647,7 +659,11 @@ class TestACompletedPhaseCannotBeReentered:
         store = _Store(history)
         _fork(store)
         assert _forked_event(store).inherited_phases == [
-            InheritedPhase(phase_id="research", artifact_ids=["art-kept"])
+            InheritedPhase(
+                phase_id="research",
+                artifact_ids=["art-kept"],
+                origin_execution_id=PARENT,
+            )
         ]
 
 
