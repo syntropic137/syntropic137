@@ -34,6 +34,7 @@ from event_sourcing import (
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
+    MAX_START_ATTEMPTS,
     OWED_STATUSES,
     ForkStartRecord,
     read_record,
@@ -161,11 +162,42 @@ class ForkStartProcessManager(ProcessManager):
             logger.info("Start of the fork of %s held: %s", parent, exc.mode.refusal_detail)
             await self._save(record.model_copy(update={"status": "paused"}))
             return False
-        except Exception as exc:
-            # Terminal: a start the aggregate refused will be refused again.
-            logger.exception("Could not start the fork of %s", parent)
+        except ValueError as exc:
+            # Terminal, and ONLY this. A `ValueError` here is the domain's own
+            # refusal - `fork_rules.refuse_fork`, `refuse_fork_start`, the
+            # aggregate's guards - and it is a function of recorded facts, so it
+            # will be refused identically for ever. Retrying spends money to be
+            # told the same thing.
+            logger.warning("The fork of %s may not start: %s", parent, exc)
             await self._save(
                 record.model_copy(update={"status": "failed", "status_reason": str(exc)})
+            )
+            return False
+        except Exception as exc:
+            # NOT terminal. A store that is down, a repository read that timed
+            # out, an artifact briefly unreachable - none of these say anything
+            # about whether this fork MAY start, and marking them `failed` threw
+            # away an admitted fork because of a blip (found by codex review).
+            #
+            # Deliberately typed rather than string-matched: the distinction is
+            # "did the domain refuse", and that is what the exception TYPE says.
+            # Bounded, so a permanent infrastructure fault still settles.
+            attempts = record.attempts + 1
+            exhausted = attempts >= MAX_START_ATTEMPTS
+            logger.exception(
+                "Could not start the fork of %s (attempt %d of %d)",
+                parent,
+                attempts,
+                MAX_START_ATTEMPTS,
+            )
+            await self._save(
+                record.model_copy(
+                    update={
+                        "status": "failed" if exhausted else "retryable",
+                        "status_reason": str(exc),
+                        "attempts": attempts,
+                    }
+                )
             )
             return False
         await self._save(record.model_copy(update={"status": "started", "status_reason": None}))

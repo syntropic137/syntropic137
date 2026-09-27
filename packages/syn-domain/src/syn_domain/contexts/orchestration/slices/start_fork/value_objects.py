@@ -10,10 +10,17 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 logger = logging.getLogger(__name__)
 
-ForkStartStatus = Literal["pending", "paused", "started", "failed"]
+ForkStartStatus = Literal["pending", "paused", "retryable", "started", "failed"]
 
-#: Statuses still owed a start. `paused` is reversible, never terminal.
-OWED_STATUSES: tuple[ForkStartStatus, ...] = ("pending", "paused")
+#: Statuses still owed a start. `paused` is reversible, never terminal, and
+#: `retryable` is a start that failed for a reason that may not recur.
+OWED_STATUSES: tuple[ForkStartStatus, ...] = ("pending", "paused", "retryable")
+
+#: How many times a start may be attempted before `retryable` becomes `failed`.
+#:
+#: A CEILING, not a tuning knob. Without one, a fork whose start fails the same
+#: way for ever is retried for ever, and each attempt can provision a workspace.
+MAX_START_ATTEMPTS = 3
 
 
 class ForkStartRecord(BaseModel):
@@ -30,6 +37,11 @@ class ForkStartRecord(BaseModel):
     status: ForkStartStatus = "pending"
     status_reason: str | None = None
     recorded_at: datetime
+
+    #: Starts attempted so far. Only counted for attempts that failed for a
+    #: reason worth retrying: a `paused` hold is not an attempt, because the
+    #: gate refused before anything was tried.
+    attempts: int = 0
 
 
 def read_record(row: object) -> ForkStartRecord | None:
