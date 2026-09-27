@@ -48,6 +48,13 @@ from event_sourcing import AutoDispatchProjection
 if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        ForkOrigin,
+    )
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+    read_fork_origin,
+)
 from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
     PhaseRetryScheduledEvent,
 )
@@ -199,6 +206,11 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         phase_defs = event_data.get("phase_definitions") or []
         if not phase_defs:
             return  # Legacy mode — no to-do list management
+
+        origin = read_fork_origin(event_data.get("forked_from"))
+        if origin is not None:
+            await self._start_fork(execution_id, origin)
+            return
 
         # Sort by order, take first phase
         sorted_phases = sorted(phase_defs, key=lambda p: p.get("order", 0))
@@ -442,6 +454,33 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 execution_id,
                 [new_todo],
                 _merge_progress(progress, {phase_id: new_rank}),
+            )
+
+    async def _start_fork(self, execution_id: str, origin: ForkOrigin) -> None:
+        """A fork's list starts at its resume phase, its inherited ones done.
+
+        Marked done rather than merely left out (ADR-014 s7): the phase's
+        highwater is what `get_pending` filters by, so an inherited phase is
+        closed here as the aggregate closes it, and no late or replayed event
+        can put a to-do for it back on the list.
+        """
+        resume = origin.resume_phase_id
+        provision = _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]
+        inherited = {p.phase_id: _RANK_PHASE_DONE for p in origin.inherited_phases}
+        async with self._lock_for(execution_id):
+            _items, progress = await self._read_state(execution_id)
+            if progress.get(resume, 0) >= provision:
+                return  # Replayed, and the run has moved on; leave it.
+            await self._save_state(
+                execution_id,
+                [
+                    TodoItem(
+                        execution_id=execution_id,
+                        action=TodoAction.PROVISION_WORKSPACE,
+                        phase_id=resume,
+                    )
+                ],
+                _merge_progress(progress, {**inherited, resume: provision}),
             )
 
     async def _clear_execution(self, execution_id: str) -> None:

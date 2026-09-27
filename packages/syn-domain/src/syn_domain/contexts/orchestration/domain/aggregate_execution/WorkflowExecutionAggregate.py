@@ -30,15 +30,33 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
+    StartForkCommand,
     StartPhaseCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_rules import (
     ForkRefused,
     decide_fork,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_start import (
+    fork_start_command,
+    fork_started_event,
+    refuse_fork_start,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
+    completed_event,
+    failed_event,
+    started_event,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
     evt,
     parse_phase_definitions,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+    AdmittedFork,
+    ForkOrigin,
+    StartPins,
+    read_admitted_fork,
+    read_start_pins,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
@@ -193,8 +211,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: rule fail OPEN - see `fork_rules.refuse_fork`.
         self._forked: bool = False
 
-        #: The child's id, for the refusal message only.
+        #: The child's id: for the refusal message, and the id its start is
+        #: built under - where a None refuses the start rather than naming one.
         self._fork_execution_id: str | None = None
+        self._admitted_fork = AdmittedFork()
+        #: What this run was started with, pinned so a fork of it runs the same
+        #: thing (#1454, #1457). Never read back from the workflow template.
+        self._pins = StartPins()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -333,130 +356,72 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Get the cancellation reason, if the execution was cancelled."""
         return self._cancel_reason
 
+    @property
+    def start_pins(self) -> StartPins:
+        """What this run pinned at start, including `forked_from` for a fork."""
+        return self._pins
+
+    @property
+    def fork_execution_id(self) -> str | None:
+        """The fork this run admitted, or None. The other half of `forked_from`."""
+        return self._fork_execution_id
+
+    def fork_start_command(self) -> StartForkCommand:
+        """The start of the fork this run admitted, from this stream alone."""
+        return fork_start_command(
+            parent_execution_id=self.id,
+            workflow_id=self._workflow_id or "",
+            workflow_name=self._workflow_name or "",
+            pins=self._pins,
+            forked=self._forked,
+            admitted=self._admitted_fork,
+        )
+
     @command_handler("StartExecutionCommand")
     def start_execution(self, command: StartExecutionCommand) -> None:
         """Handle StartExecutionCommand."""
-        from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
-            WorkflowExecutionStartedEvent,
-        )
-
         if self.id is not None:
             msg = "Execution already started"
             raise ValueError(msg)
 
         self._initialize(command.aggregate_id)
+        self._apply(started_event(command))
 
-        phase_defs_data: list[dict[str, Any]] | None = None
-        if command.phase_definitions:
-            phase_defs_data = [
-                {
-                    "phase_id": pd.phase_id,
-                    "name": pd.name,
-                    "order": pd.order,
-                    "timeout_seconds": pd.timeout_seconds,
-                }
-                for pd in command.phase_definitions
-            ]
+    @command_handler("StartForkCommand")
+    def start_fork(self, command: StartForkCommand) -> None:
+        """Handle StartForkCommand - start the run a parent's fork admitted.
 
-        event = WorkflowExecutionStartedEvent(
-            workflow_id=command.workflow_id,
-            execution_id=command.aggregate_id,
-            workflow_name=command.workflow_name,
-            started_at=datetime.now(UTC),
-            total_phases=command.total_phases,
-            inputs=command.inputs,
-            expected_completion_at=command.expected_completion_at,
-            phase_definitions=phase_defs_data,
-        )
-        self._apply(event)
+        Addressed to the CHILD's new stream. Its inherited phases are closed
+        from its first event on (`on_execution_started`), so no later command
+        can start one again: the child cannot re-run what it inherited.
+        """
+        if self.id is not None:
+            msg = "Execution already started"
+            raise ValueError(msg)
+        refusal = refuse_fork_start(command)
+        if refusal is not None:
+            raise ValueError(refusal)
+
+        self._initialize(command.aggregate_id)
+        self._apply(fork_started_event(command))
 
     @command_handler("CompleteExecutionCommand")
     def complete_execution(self, command: CompleteExecutionCommand) -> None:
         """Handle CompleteExecutionCommand."""
-        from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
-            WorkflowCompletedEvent,
-        )
-
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot complete execution in status {self._status}"
             raise ValueError(msg)
 
-        event = WorkflowCompletedEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            completed_at=datetime.now(UTC),
-            total_phases=command.total_phases,
-            completed_phases=command.completed_phases,
-            total_input_tokens=command.total_input_tokens,
-            total_output_tokens=command.total_output_tokens,
-            total_cache_creation_tokens=command.total_cache_creation_tokens,
-            total_cache_read_tokens=command.total_cache_read_tokens,
-            total_tokens=(
-                command.total_input_tokens
-                + command.total_output_tokens
-                + command.total_cache_creation_tokens
-                + command.total_cache_read_tokens
-            ),
-            total_duration_seconds=command.duration_seconds,
-            artifact_ids=command.artifact_ids,
-        )
-        self._apply(event)
+        self._apply(completed_event(command, self._workflow_id or ""))
 
     @command_handler("FailExecutionCommand")
     def fail_execution(self, command: FailExecutionCommand) -> None:
         """Handle FailExecutionCommand."""
-        from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
-            WorkflowFailedEvent,
-        )
-
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot fail execution in status {self._status}"
             raise ValueError(msg)
 
-        event = WorkflowFailedEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            failed_at=datetime.now(UTC),
-            failed_phase_id=command.failed_phase_id,
-            error_message=command.error,
-            error_type=command.error_type,
-            completed_phases=command.completed_phases,
-            total_phases=command.total_phases,
-            failed_phase_duration_seconds=command.failed_phase_duration_seconds,
-            # list() rather than a default, and None rather than []: the event
-            # has to preserve the difference between "read, and no branch had
-            # moved" and "nobody could read it" (#1200).
-            observed_branches=(
-                None if command.observed_branches is None else list(command.observed_branches)
-            ),
-            # Straight through, None included: "nothing observed a status" is
-            # a fact about the failure and coercing it to 0 would report a
-            # clean exit for a phase nobody watched (#1319).
-            exit_code=command.exit_code,
-            failed_phase_artifact_ids=list(command.failed_phase_artifact_ids),
-            # Spread into four named fields HERE, once, rather than carried as
-            # a nested object: every sibling `failed_phase_*` field on this
-            # event is flat, and the projection that reads them reads flat
-            # keys. The total is deliberately not a fifth field - it is derived
-            # from these four wherever it is wanted, so it cannot disagree with
-            # them (#1262).
-            failed_phase_input_tokens=command.failed_phase_usage.input_tokens,
-            failed_phase_output_tokens=command.failed_phase_usage.output_tokens,
-            failed_phase_cache_creation_tokens=command.failed_phase_usage.cache_creation_tokens,
-            failed_phase_cache_read_tokens=command.failed_phase_usage.cache_read_tokens,
-            # Straight from the command, never re-derived here (#1357). The
-            # only frame that could tell a correct refusal from a crash was the
-            # one holding the phase's own verdict, several hops upstream; an
-            # aggregate looking at `error_type` or at the message text would be
-            # guessing, and guessing is what put the distinction in prose.
-            failure_classification=command.classification,
-            # Beside it, never instead of it (#1392). The classification is
-            # what the platform measured; this is what the phase SAID, and the
-            # event is where the two stop being one frame's local variables and
-            # start being the record every read model is built from.
-            reported_failure_reason=command.reported_failure_reason,
-        )
-        self._apply(event)
+        self._apply(failed_event(command, self._workflow_id or ""))
 
     def _refuse_if_completed(self, phase_id: str, verb: str) -> None:
         """A completed phase's record is closed (#1453).
@@ -795,6 +760,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._phase_definitions = parse_phase_definitions(raw_defs)
         self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
         self._status = ExecutionStatus.RUNNING
+        self._pins = read_start_pins(event)
+        if self._pins.forked_from is not None:
+            self._inherit(self._pins.forked_from)
+
+    def _inherit(self, origin: ForkOrigin) -> None:
+        """Take over the parent's completed prefix as this run's own.
+
+        As completed, not as merely skipped: `_refuse_if_completed` then closes
+        each one to start, completion and collection alike, and a fork of THIS
+        run inherits them onward with the same artifacts.
+        """
+        for phase in origin.inherited_phases:
+            self._completed_phase_ids.add(phase.phase_id)
+            self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
+        self._completed_phases = len(origin.inherited_phases)
 
     @event_sourcing_handler("WorkflowCompleted")
     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:
@@ -942,3 +922,4 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """
         self._forked = True
         self._fork_execution_id = evt(event, "fork_execution_id")
+        self._admitted_fork = read_admitted_fork(event)
