@@ -30,8 +30,8 @@ Forked exec-43f430469266
 Follow it with: syn execution show exec-9a1c77e04b12
 ```
 
-If the run died *between* phases - the resumed phase never started - no flag is
-needed:
+If the resumed phase was **never attempted** - the run died between phases, and
+that phase had no earlier try - no flag is needed:
 
 ```bash
 syn execution fork exec-43f430469266
@@ -76,9 +76,18 @@ stopping at the first one that did not:
 
 - those phases are never re-run
 - their artifacts are handed to the resumed phase, so it reads its
-  predecessors' output exactly as it would have
+  predecessors' output
 - the resumed phase restarts **from its beginning** - there is no mid-phase
   resume
+
+<Callout type="warn">
+  The handoff is checked but not guaranteed complete. If a phase recorded two
+  artifacts and one has since gone, the fork is still admitted and the resumed
+  phase runs with part of what its predecessor produced. Detecting that needs the
+  artifact query to report which ids it resolved, which it does not yet do
+  (#1460). A phase whose artifacts resolve to **nothing** is caught and refuses
+  the fork.
+</Callout>
 
 A phase that completed *after* a gap is deliberately not inherited. Its output
 was built on a predecessor the fork is about to produce again, so carrying it
@@ -99,8 +108,10 @@ and the fork cannot silently change what the fork does.
 ## Two decisions you have to make out loud
 
 Each defaults to `false`, and each **applicable** condition is refused without
-its flag. A fork that needs neither decision - a failed run whose resumed phase
-never started - proceeds with no flags at all. Neither flag implies the other.
+its flag. A fork that needs neither decision - a failed run whose resumed phase was never
+attempted - proceeds with no flags at all. The test is whether that phase was
+ever *started*, including by an earlier retry, not whether it was the phase the
+failure named. Neither flag implies the other.
 
 ### A cancelled execution
 
@@ -148,9 +159,15 @@ workflow template.
 A parent can be forked **once**. Asking twice is refused and names the fork it
 already has, so a retried request cannot quietly create a second child.
 
-That is also why every refusal above is checked **before** the fork is recorded:
-a parent whose one fork was spent on a child that then failed to start cannot be
-forked again.
+That is why every refusal the platform can know **at admission** is checked
+before the fork is recorded: a parent whose one fork was spent on a child that
+then failed to start cannot be forked again.
+
+It is not a guarantee that the child will start. Admission is a point-in-time
+check, and a start can still fail afterwards - an artifact that disappears in
+between, a read model lagging the parent's own stream, maintenance closing, or an
+infrastructure fault. Those are retried and then recorded against the parent's
+fork, which is what the next section shows you how to inspect.
 
 ## Over the API
 
@@ -179,8 +196,44 @@ curl -X POST "$SYN_API_URL/api/v1/executions/exec-1234/fork" \
 | `409` | A refusal: the parent's status, a missing decision, a parent already forked, a snapshot the child cannot start from, or an inheritance that cannot be read. The reason is in `detail`. |
 | `503` | No unused execution id could be minted. Retry. |
 
-A refusal is 409 rather than 400 because it is a conflict with what the parent
-recorded, not a malformed request.
+A malformed body or field is **422** from request validation, and an
+infrastructure fault is **500**. A refusal is 409 rather than 400 because it is a
+conflict with what the parent recorded, not a malformed request.
+
+## If the child never appears
+
+A successful fork is an admission. If no child execution shows up, the record of
+why is on the parent's fork start entry - it is not lost:
+
+1. Look at the `fork_start` projection record for the parent. `pending`,
+   `paused`, `dispatched`, `retryable` and `failed` each mean something different,
+   and `status_reason` carries the last error.
+2. `dispatched` that never becomes `started` means the start was handed to a
+   background task and no child stream appeared. Check the coordinator and
+   dispatcher logs.
+3. `paused` means maintenance is closed. It resumes when admission reopens.
+4. `retryable` is being retried with a bounded number of attempts; `failed` has
+   spent them, and `status_reason` says what refused.
+5. Common causes worth checking in order: maintenance mode, artifact-list
+   projection lag, whether the inherited artifacts still exist, and event-store
+   errors.
+
+## Verifying it after a deploy
+
+Worth doing once on a disposable workflow after upgrading:
+
+1. Confirm `/openapi.json` contains `POST /executions/{execution_id}/fork`, and
+   that your `syn` build matches the API.
+2. Run a workflow that completes one phase and then fails inside the next. Note
+   the parent id and the completed phase's artifacts.
+3. Fork it with no flags. Expect **409** mentioning external effects, and confirm
+   the parent has no fork recorded.
+4. Fork it with `--acknowledge-external-effects`. Expect **200**, a new child id,
+   the right resume phase and inherited prefix. Fork the parent again and expect
+   **409** naming the fork it already has.
+5. Follow the child with `syn execution show <child-id>`: the inherited phases
+   should not re-run, the resumed phase should run with its predecessors' files
+   available, and the parent should still read `failed`.
 
 ## Forking for comparison
 
