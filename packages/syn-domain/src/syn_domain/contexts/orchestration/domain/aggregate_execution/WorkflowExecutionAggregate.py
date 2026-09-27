@@ -741,6 +741,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             phase_definitions=self._phase_definitions,
             completed_phase_ids=self._completed_phase_ids,
             phase_artifact_ids=self._phase_artifact_ids,
+            phase_owners=self._inherited_owners(),
             started_phase_ids=self._phase_attempts,
             command=command,
         )
@@ -768,12 +769,18 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
         As completed, not as merely skipped: `_refuse_if_completed` then closes
         each one to start, completion and collection alike, and a fork of THIS
-        run inherits them onward with the same artifacts.
+        run inherits them onward with the same artifacts - and with the
+        execution that holds them, which is not this one (#1462).
         """
         for phase in origin.inherited_phases:
             self._completed_phase_ids.add(phase.phase_id)
             self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
         self._completed_phases = len(origin.inherited_phases)
+
+    def _inherited_owners(self) -> dict[str, str]:
+        """Who holds the artifacts of each phase this run inherited, by phase id."""
+        origin = self._pins.forked_from
+        return {} if origin is None else origin.owners()
 
     @event_sourcing_handler("WorkflowCompleted")
     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:

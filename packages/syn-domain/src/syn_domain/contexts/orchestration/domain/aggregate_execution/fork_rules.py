@@ -53,6 +53,9 @@ def completed_prefix(
     phase_definitions: Sequence[PhaseDefinition],
     completed_phase_ids: frozenset[str] | set[str],
     phase_artifact_ids: Mapping[str, list[str]],
+    *,
+    execution_id: str,
+    phase_owners: Mapping[str, str],
 ) -> tuple[list[InheritedPhase], str | None]:
     """The phases a fork inherits, and the phase it resumes at.
 
@@ -71,6 +74,11 @@ def completed_prefix(
     total order by the time an execution can start. This function would be
     ambiguous without that, which is why the precondition is written down here
     rather than assumed.
+
+    Every inherited phase names the execution that holds its artifacts (#1462):
+    ``execution_id`` for a phase this run ran, or its owner from
+    ``phase_owners`` for one this run itself inherited. Without that a fork of a
+    fork asks its parent for artifacts only the grandparent ever stored.
     """
     inherited: list[InheritedPhase] = []
     for phase in phase_definitions:
@@ -80,6 +88,7 @@ def completed_prefix(
             InheritedPhase(
                 phase_id=phase.phase_id,
                 artifact_ids=list(phase_artifact_ids.get(phase.phase_id, [])),
+                origin_execution_id=phase_owners.get(phase.phase_id, execution_id),
             )
         )
     return inherited, None
@@ -180,6 +189,7 @@ def decide_fork(
     phase_definitions: Sequence[PhaseDefinition],
     completed_phase_ids: frozenset[str] | set[str],
     phase_artifact_ids: Mapping[str, list[str]],
+    phase_owners: Mapping[str, str],
     started_phase_ids: Mapping[str, int] | frozenset[str] | set[str],
     command: ForkExecutionCommand,
 ) -> ForkDecision:
@@ -205,7 +215,11 @@ def decide_fork(
         return ForkRefused(refusal)
 
     inherited, resume_phase_id = completed_prefix(
-        phase_definitions, completed_phase_ids, phase_artifact_ids
+        phase_definitions,
+        completed_phase_ids,
+        phase_artifact_ids,
+        execution_id=execution_id or "",
+        phase_owners=phase_owners,
     )
     # Started means an agent may have acted. Nothing on this stream can show
     # that it did not: branch observations cover git refs only, and the evidence

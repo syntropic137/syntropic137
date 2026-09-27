@@ -106,6 +106,20 @@ def fork_start_command(
     if not fork_execution_id or not resume_phase_id:
         msg = f"Execution {parent_execution_id} admitted a fork its stream cannot name"
         raise ValueError(msg)
+    # An `ExecutionForked` written before #1462 names no owner for its phases,
+    # and one recorded on a fork's CHILD is exactly the admission that bug left
+    # unstartable: its inherited phases are owned further up. This stream knows
+    # who by its own `forked_from`, so the start names them rather than falling
+    # back to this execution, which holds none of their artifacts.
+    owners = {} if pins.forked_from is None else pins.forked_from.owners()
+    inherited = [
+        p
+        if p.origin_execution_id
+        else p.model_copy(
+            update={"origin_execution_id": owners.get(p.phase_id, parent_execution_id)}
+        )
+        for p in admitted.inherited_phases
+    ]
     return StartForkCommand(
         execution_id=fork_execution_id,
         workflow_id=workflow_id,
@@ -115,7 +129,7 @@ def fork_start_command(
         source_commits=list(pins.source_commits),
         forked_from=ForkOrigin(
             parent_execution_id=parent_execution_id,
-            inherited_phases=list(admitted.inherited_phases),
+            inherited_phases=inherited,
             resume_phase_id=resume_phase_id,
         ),
     )

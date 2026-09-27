@@ -251,8 +251,9 @@ class WorkflowExecutionProcessor:
         """Raise unless a fork's inherited outputs can be handed over.
 
         For a caller that must find that out BEFORE dispatching the start rather
-        than inside it: a refusal raised in the background task reaches only a
-        log line. `start_fork` calls this through the processor it already holds,
+        than inside it: a refusal raised in the background task is reported
+        after the record was already written `dispatched`, and a refusal known
+        before the dispatch is cheaper and clearer. `start_fork` calls this through the processor it already holds,
         rather than importing `fork_handoff` - a slice may not import another
         slice's modules, and depending on an injected collaborator is the way
         across that boundary.

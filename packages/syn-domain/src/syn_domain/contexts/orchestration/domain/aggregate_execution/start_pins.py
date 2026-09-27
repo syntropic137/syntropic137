@@ -22,17 +22,20 @@ event holds and the plain data an ADR-023 `GenericDomainEvent` hands back.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    INHERITED_PHASE_OWNERS,
     ExecutablePhase,
     ForkOrigin,
     InheritedPhase,
     PhaseDefinition,
     SourceCommit,
+    restore_owners,
 )
 
 if TYPE_CHECKING:
@@ -149,9 +152,14 @@ def read_source_commits(raw: object) -> list[SourceCommit]:
         return []
 
 
-def read_inherited_phases(raw: object) -> list[InheritedPhase]:
-    """The inherited prefix on a replayed `ExecutionForked`."""
-    return _INHERITED_PHASES.validate_python(raw or [])
+def read_inherited_phases(raw: object, owners: object) -> list[InheritedPhase]:
+    """The inherited prefix on a replayed `ExecutionForked`.
+
+    ``owners`` is what the event carried under `INHERITED_PHASE_OWNERS`. A typed
+    event has already put them back; a generic one (ADR-023) has not, and
+    dropping them here would lose #1462's fix on exactly that stream.
+    """
+    return _INHERITED_PHASES.validate_python(restore_owners(raw, owners) or [])
 
 
 def read_start_pins(event: DomainEvent) -> StartPins:
@@ -160,7 +168,7 @@ def read_start_pins(event: DomainEvent) -> StartPins:
         inputs=read_inputs(evt(event, "inputs")),
         pinned_phases=read_pinned_phases(evt(event, "pinned_phases")),
         source_commits=read_source_commits(evt(event, "source_commits")),
-        forked_from=read_fork_origin(evt(event, "forked_from")),
+        forked_from=read_fork_origin(evt(event, "forked_from"), evt(event, INHERITED_PHASE_OWNERS)),
     )
 
 
@@ -168,19 +176,26 @@ def read_admitted_fork(event: DomainEvent) -> AdmittedFork:
     """The fork a replayed `ExecutionForked` admitted, typed or generic."""
     return AdmittedFork(
         fork_execution_id=evt(event, "fork_execution_id"),
-        inherited_phases=read_inherited_phases(evt(event, "inherited_phases")),
+        inherited_phases=read_inherited_phases(
+            evt(event, "inherited_phases"), evt(event, INHERITED_PHASE_OWNERS)
+        ),
         resume_phase_id=evt(event, "resume_phase_id"),
     )
 
 
-def read_fork_origin(raw: object) -> ForkOrigin | None:
+def read_fork_origin(raw: object, owners: object) -> ForkOrigin | None:
     """Where this execution was forked from, or None for one that was not.
 
     Deliberately NOT forgiving, unlike the two readers above. Absent means "not
     a fork"; present-but-unreadable raises, because treating it as absent would
     replay a fork as a fresh run - one whose inherited phases are no longer
     closed, which is the fail-open this whole feature exists to prevent.
+
+    ``owners`` is what the start event carried beside ``raw`` under
+    `INHERITED_PHASE_OWNERS`, as for `read_inherited_phases`.
     """
     if raw is None:
         return None
+    if isinstance(raw, Mapping):
+        raw = {**raw, "inherited_phases": restore_owners(raw.get("inherited_phases"), owners)}
     return ForkOrigin.model_validate(raw)
