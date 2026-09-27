@@ -63,6 +63,14 @@ class _ForkHandler:
     async def handle(
         self, parent_execution_id: str, *, admitted: AdmissionTicket | None = None
     ) -> None:
+        # Idempotent per parent, because the real `StartForkHandler.handle` is:
+        # it returns early when the child already exists, and the child's id is
+        # fixed by the parent's `ExecutionForked` rather than minted per attempt.
+        # That matters now that a `dispatched` record stays OWED and is therefore
+        # re-offered on later processor passes - a fake that appended every time
+        # would report a double start the real one cannot perform.
+        if parent_execution_id in self.started:
+            return
         self.started.append(parent_execution_id)
         if admitted is not None:
             admitted.mark_visible()
@@ -142,7 +150,10 @@ class TestAnAdmittedFork:
         assert await fixture.manager.process_pending() == 1
         await fixture.drain()
 
-        assert (await fixture.record()).status == "started"
+        # `dispatched`, not `started`: the starter has been called, and nothing
+        # yet proves a child stream exists. Only the child's own
+        # `WorkflowExecutionStarted` settles that (#1459 review).
+        assert (await fixture.record()).status == "dispatched"
         assert fixture.forks.started == [PARENT]
 
     async def test_a_replayed_fork_does_not_reopen_a_started_record(
@@ -156,8 +167,8 @@ class TestAnAdmittedFork:
         await fixture.manager.process_pending()
         await fixture.drain()
 
-        assert (await fixture.record()).status == "started"
-        assert fixture.forks.started == [PARENT]
+        assert (await fixture.record()).status == "dispatched"
+        assert fixture.forks.started == [PARENT], "the fork was started twice"
 
 
 class TestAForkStartedWhileAdmissionIsPaused:
@@ -181,7 +192,7 @@ class TestAForkStartedWhileAdmissionIsPaused:
         await fixture.manager.process_pending()
         await fixture.drain()
 
-        assert (await fixture.record()).status == "started"
+        assert (await fixture.record()).status == "dispatched"
         assert fixture.forks.started == [PARENT]
 
 
