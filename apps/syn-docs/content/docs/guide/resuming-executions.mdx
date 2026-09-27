@@ -13,8 +13,12 @@ start throws all of that away and pays for it twice.
 completed and restarts at the **first phase that did not finish**. A run that dies in phase five of
 six costs you phase five onwards, not all six.
 
+A run usually dies **inside** a phase, and that phase may already have pushed or
+published something. Re-running it can repeat that, so the fork asks you to say
+you accept it:
+
 ```bash
-syn execution fork exec-43f430469266
+syn execution fork exec-43f430469266 --acknowledge-external-effects
 ```
 
 ```
@@ -22,7 +26,15 @@ Forked exec-43f430469266
   New execution: exec-9a1c77e04b12
   Resumes at:    implement
   Not re-run:    premise, plan
+  External effects acknowledged
 Follow it with: syn execution show exec-9a1c77e04b12
+```
+
+If the run died *between* phases - the resumed phase never started - no flag is
+needed:
+
+```bash
+syn execution fork exec-43f430469266
 ```
 
 ## A successful response means *admitted*
@@ -99,6 +111,13 @@ repository, or its task held a secret. Forking past that needs a fresh decision:
 syn execution fork exec-1234 --override-cancellation
 ```
 
+<Callout type="warn">
+  A fork inherits the parent's configuration and inputs, so it cannot correct
+  what the cancel was for. If the run was cancelled because it targeted the wrong
+  repository, or because its task held a secret, forking reproduces that. Start a
+  fresh execution instead.
+</Callout>
+
 ### A phase that may already have published something
 
 If the phase being restarted had started in the parent, it may already have
@@ -119,7 +138,7 @@ syn execution fork exec-1234 --acknowledge-external-effects
 | `completed` | No - nothing is left to run |
 | `running`, `paused` | No - forking would put two runs on one piece of work |
 
-Two conditions apply whatever the status. A run with **no unfinished phase** has
+Three conditions apply whatever the status. A run with **no unfinished phase** has
 nothing to resume and is refused. A run whose resumed phase had already started
 needs `--acknowledge-external-effects`. And a parent that pinned no phase
 configuration - an execution from before that was recorded - cannot be forked at
@@ -129,11 +148,15 @@ workflow template.
 A parent can be forked **once**. Asking twice is refused and names the fork it
 already has, so a retried request cannot quietly create a second child.
 
+That is also why every refusal above is checked **before** the fork is recorded:
+a parent whose one fork was spent on a child that then failed to start cannot be
+forked again.
+
 ## Over the API
 
 ```bash
 curl -X POST "$SYN_API_URL/api/v1/executions/exec-1234/fork" \
-  -u "admin:$SYN_API_PASSWORD" \
+  -u "${SYN_API_USER:-admin}:$SYN_API_PASSWORD" \
   -H 'Content-Type: application/json' \
   -d '{"override_cancellation": false, "acknowledge_external_effects": false}'
 ```
@@ -149,9 +172,15 @@ curl -X POST "$SYN_API_URL/api/v1/executions/exec-1234/fork" \
 }
 ```
 
-A refusal comes back as **409** with the reason, because it is a conflict with
-what the parent recorded rather than a malformed request. An execution that does
-not exist is **404**.
+| Code | Meaning |
+| --- | --- |
+| `200` | The fork was **admitted**. The child starts asynchronously. |
+| `404` | No such execution. |
+| `409` | A refusal: the parent's status, a missing decision, a parent already forked, a snapshot the child cannot start from, or an inheritance that cannot be read. The reason is in `detail`. |
+| `503` | No unused execution id could be minted. Retry. |
+
+A refusal is 409 rather than 400 because it is a conflict with what the parent
+recorded, not a malformed request.
 
 ## Forking for comparison
 
@@ -168,8 +197,9 @@ phase. That is future capability, not a switch you are missing.
   commit each repository was at **is** recorded on an execution, but the workspace
   still clones the default branch rather than checking out that commit, so two
   runs cannot be asserted to have seen the same code. And a fork inherits its
-  parent's configuration, so the only thing that differs between a parent and its
-  fork is which phases ran.
+  parent's configuration and inputs, so what can differ between a parent and its
+  fork is which phases ran, and - until #1458 - the code on the default branch at
+  the moment each one is provisioned.
 </Callout>
 
 ## See also

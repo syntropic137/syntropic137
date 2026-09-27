@@ -18,6 +18,7 @@ from event_sourcing import ConcurrencyConflictError
 from fastapi import HTTPException
 
 from syn_api.routes.executions.fork import ForkRequest, fork
+from syn_domain.contexts.artifacts import PhaseOutputFile
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CancelExecutionCommand,
     CompletePhaseCommand,
@@ -37,7 +38,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping, Sequence
 
 pytestmark = pytest.mark.unit
 
@@ -136,6 +137,41 @@ def _failed_after_research() -> WorkflowExecutionAggregate:
     return aggregate
 
 
+def _failed_inside_plan() -> WorkflowExecutionAggregate:
+    """Completed `research`, STARTED `plan`, then failed in it.
+
+    The common shape, and the one `_failed_after_research` does not cover: a run
+    usually dies inside a phase rather than between two. Because `plan` started,
+    its external effects are unacknowledged, so a fork with no flags is REFUSED -
+    which the guide's lead example got wrong until the workflow review of #1461
+    pointed it out.
+    """
+    aggregate = _started()
+    _complete_research(aggregate)
+    aggregate.start_phase(
+        StartPhaseCommand(
+            execution_id=PARENT,
+            workflow_id="wf-1",
+            phase_id="plan",
+            phase_name="Plan",
+            phase_order=2,
+        )
+    )
+    aggregate.fail_execution(
+        FailExecutionCommand(
+            execution_id=PARENT,
+            error="the harness died mid-phase",
+            error_type="AgentError",
+            failed_phase_id="plan",
+            completed_phases=1,
+            total_phases=len(PHASES),
+            classification=FailureClassification.UNCLASSIFIED,
+        )
+    )
+    aggregate.mark_events_as_committed()
+    return aggregate
+
+
 def _still_running() -> WorkflowExecutionAggregate:
     aggregate = _started()
     aggregate.mark_events_as_committed()
@@ -211,10 +247,43 @@ class _Executions:
         return execution_id in self.taken
 
 
-def _point_wiring_at(executions: _Executions, monkeypatch: pytest.MonkeyPatch) -> None:
+class _ArtifactQuery:
+    """Resolves the inherited artifacts, or deliberately does not.
+
+    The endpoint reads these BEFORE admitting a fork, so a query that resolves
+    nothing is not a test-setup detail - it is the case where the parent's
+    artifacts have gone, which must refuse rather than spend the fork.
+    """
+
+    def __init__(self, *, resolves: bool = True) -> None:
+        self.resolves = resolves
+        self.asked: list[str] = []
+
+    async def get_files_for_artifacts(
+        self, execution_id: str, phase_artifact_ids: Mapping[str, Sequence[str]]
+    ) -> dict[str, list[PhaseOutputFile]]:
+        self.asked.append(execution_id)
+        if not self.resolves:
+            return {}
+        return {
+            phase_id: [PhaseOutputFile(source_path=None, content=f"{phase_id} output")]
+            for phase_id, ids in phase_artifact_ids.items()
+            if ids
+        }
+
+
+def _point_wiring_at(
+    executions: _Executions,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    artifacts: _ArtifactQuery | None = None,
+) -> _ArtifactQuery:
     import syn_api._wiring as wiring
 
+    query = artifacts or _ArtifactQuery()
     monkeypatch.setattr(wiring, "get_workflow_execution_repository", lambda: executions)
+    monkeypatch.setattr(wiring, "get_artifact_query", lambda: query)
+    return query
 
 
 @pytest.fixture
@@ -404,3 +473,73 @@ class TestTheFlagsAreSeparateDecisions:
 
 def test_the_event_carries_a_timestamp_the_api_does_not_invent() -> None:
     assert datetime.now(UTC).tzinfo is UTC
+
+
+class TestTheCommonFailureShapeNeedsTheAcknowledgement:
+    """Workflow review of #1461, U1.
+
+    A run usually dies INSIDE a phase. That phase started, so re-running it may
+    repeat whatever it published - and the fork is refused until the operator
+    says so. Every earlier test here used a parent that failed BETWEEN phases,
+    which is why the suite was green while the documented common case failed.
+    """
+
+    async def test_a_fork_with_no_flags_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        executions = _Executions(_failed_inside_plan())
+        _point_wiring_at(executions, monkeypatch)
+
+        with pytest.raises(HTTPException) as refused:
+            await fork(PARENT, ForkRequest())
+
+        assert refused.value.status_code == 409
+        assert "external effects" in str(refused.value.detail).lower()
+        assert executions.saved == []
+
+    async def test_it_is_admitted_once_the_effects_are_acknowledged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        executions = _Executions(_failed_inside_plan())
+        _point_wiring_at(executions, monkeypatch)
+
+        response = await fork(PARENT, ForkRequest(acknowledge_external_effects=True))
+
+        assert response.resume_phase_id == "plan"
+        assert response.inherited_phase_ids == ["research"]
+        assert response.external_effects_acknowledged is True
+        assert executions.saved == [PARENT]
+
+
+class TestAForkIsRefusedWhenItsInheritanceCannotBeRead:
+    """Workflow review of #1461, U2.
+
+    The parent's artifacts are what the resumed phase reads. If they have gone,
+    admitting the fork spends the parent's ONE fork on a child that can never
+    start, with nothing recording why - and the endpoint's docstring used to
+    promise that could not happen while checking only half of it.
+    """
+
+    async def test_a_vanished_artifact_refuses_and_writes_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        executions = _Executions(_failed_after_research())
+        query = _point_wiring_at(executions, monkeypatch, artifacts=_ArtifactQuery(resolves=False))
+
+        with pytest.raises(HTTPException) as refused:
+            await fork(PARENT, ForkRequest())
+
+        assert refused.value.status_code == 409
+        assert "inheritance" in str(refused.value.detail).lower()
+        assert executions.saved == [], "the parent's one fork was spent on an unstartable child"
+        assert query.asked == [PARENT], "the parent's artifacts were never looked up"
+
+    async def test_a_resolvable_inheritance_is_admitted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        executions = _Executions(_failed_after_research())
+        query = _point_wiring_at(executions, monkeypatch)
+
+        response = await fork(PARENT, ForkRequest())
+
+        assert response.inherited_phase_ids == ["research"]
+        assert query.asked == [PARENT]
+        assert executions.saved == [PARENT]

@@ -87,8 +87,9 @@ async def _free_child_id(executions: WorkflowExecutionRepositoryPort, attempts: 
 async def fork(execution_id: str, request: ForkRequest) -> ForkResponse:
     """Admit a fork of ``execution_id``, or raise why not.
 
-    The refusals are the parent's own (`fork_rules.refuse_fork`) plus the
-    child's (`fork_start.refuse_fork_start`), and BOTH are checked before
+    The refusals are the parent's own (`fork_rules.refuse_fork`) and the child's
+    two - the pinned snapshot (`fork_start.refuse_fork_start`) and whether the
+    inheritance can actually be read - and ALL of them are checked before
     anything is written. A parent admits exactly one fork, so recording an
     admission the child cannot act on would spend that one fork on a run that
     never starts - the caller would be told yes and get nothing.
@@ -98,10 +99,12 @@ async def fork(execution_id: str, request: ForkRequest) -> ForkResponse:
     """
     from event_sourcing import ConcurrencyConflictError
 
-    from syn_api._wiring import get_workflow_execution_repository
+    from syn_api._wiring import get_artifact_query, get_workflow_execution_repository
     from syn_domain.contexts.orchestration import (
         ExecutionForkedEvent,
         ForkExecutionCommand,
+        InheritanceUnavailableError,
+        inherited_outputs,
         refuse_fork_start,
     )
 
@@ -135,12 +138,25 @@ async def fork(execution_id: str, request: ForkRequest) -> ForkResponse:
     if forked is None:  # pragma: no cover - the handler emits it or raises
         raise HTTPException(status_code=500, detail="The fork was admitted but not recorded")
 
-    # STILL UNCOMMITTED here, which is the point: the child's own refusal is
+    # STILL UNCOMMITTED here, which is the point: the child's refusals are
     # checked against the aggregate in memory, so a fork the child could not
     # start is never written and the parent's one fork is not spent on it.
-    start_refusal = refuse_fork_start(parent.fork_start_command())
+    #
+    # BOTH of the child's start-time refusals, not one. `refuse_fork_start`
+    # compares the inheritance against the pinned snapshot; resolving the
+    # inheritance is a separate question - the artifacts may be gone, expired or
+    # briefly unreachable - and checking only the first admitted a 200 for a fork
+    # that could never start, spending the parent's single fork for good.
+    command = parent.fork_start_command()
+    start_refusal = refuse_fork_start(command)
     if start_refusal is not None:
         raise HTTPException(status_code=409, detail=start_refusal)
+    try:
+        await inherited_outputs(get_artifact_query(), command.forked_from)
+    except InheritanceUnavailableError as exc:
+        # The artifacts the resumed phase would read cannot be handed over. A
+        # conflict with recorded state, like every other refusal here.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     try:
         await executions.save(parent)

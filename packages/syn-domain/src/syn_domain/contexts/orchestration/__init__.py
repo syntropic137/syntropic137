@@ -135,6 +135,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
     ExecuteWorkflowHandler,
     validate_phase_declarations,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
+    InheritanceUnavailableError,
+    inherited_outputs,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
 )
@@ -229,6 +233,7 @@ __all__ = [
     "HandlerResult",
     # Value objects - workspace
     "ImageManifest",
+    "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
@@ -272,6 +277,7 @@ __all__ = [
     "WorkspaceAggregate",
     "announce_as",
     "build_command_from_definition",
+    "inherited_outputs",
     "is_phase_id",
     "mint_wrapper_name",
     "refuse_fork_start",
