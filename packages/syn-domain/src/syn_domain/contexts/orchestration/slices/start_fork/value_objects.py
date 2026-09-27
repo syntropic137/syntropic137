@@ -10,11 +10,21 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 logger = logging.getLogger(__name__)
 
-ForkStartStatus = Literal["pending", "paused", "retryable", "started", "failed"]
+ForkStartStatus = Literal["pending", "paused", "retryable", "dispatched", "started", "failed"]
 
-#: Statuses still owed a start. `paused` is reversible, never terminal, and
-#: `retryable` is a start that failed for a reason that may not recur.
-OWED_STATUSES: tuple[ForkStartStatus, ...] = ("pending", "paused", "retryable")
+#: Statuses still owed a start.
+#:
+#: `paused` is reversible, never terminal. `retryable` is a start that failed for
+#: a reason that may not recur. `dispatched` is the subtle one: the start was
+#: handed to a background task and NOTHING yet proves a child exists. Marking
+#: that `started` lost admitted forks whose process died between spawning the
+#: task and writing the child's first event - the parent had admitted a fork, no
+#: child stream existed, and the to-do was no longer owed (codex review of
+#: #1459). It stays owed until the child's own `WorkflowExecutionStarted` says
+#: otherwise; re-offering is safe because `StartForkHandler.handle` returns early
+#: when the child already exists, and the child's id is fixed by the parent's
+#: `ExecutionForked` rather than minted per attempt.
+OWED_STATUSES: tuple[ForkStartStatus, ...] = ("pending", "paused", "retryable", "dispatched")
 
 #: How many times a start may be attempted before `retryable` becomes `failed`.
 #:

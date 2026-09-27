@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.artifacts import PhaseOutputFile
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     ForkOrigin,
@@ -133,23 +134,6 @@ class TestAnInfrastructureBlipDoesNotDiscardAnAdmittedFork:
 
 
 @dataclass
-class _Store:
-    rows: dict[str, dict[str, object]] = field(default_factory=dict)
-
-    async def save(self, projection: str, key: str, row: dict[str, object]) -> None:
-        del projection
-        self.rows[key] = row
-
-    async def query(self, projection: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        del projection
-        return [r for r in self.rows.values() if r.get("status") == filters.get("status")]
-
-    async def delete_all(self, projection: str) -> None:
-        del projection
-        self.rows.clear()
-
-
-@dataclass
 class _Starter:
     raising: Exception
 
@@ -160,7 +144,96 @@ class _Starter:
 
 async def _run_start(record: ForkStartRecord, *, raising: Exception) -> ForkStartRecord:
     """One `_start` against a starter that raises, returning what was stored."""
-    store = _Store()
+    store = InMemoryProjectionStore()
     manager = ForkStartProcessManager(fork_starter=_Starter(raising), store=store)
     await manager._start(record)
-    return ForkStartRecord.model_validate(store.rows[PARENT])
+    stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+    assert stored is not None, "the attempt recorded nothing"
+    return ForkStartRecord.model_validate(stored)
+
+
+class TestADispatchIsNotAStart:
+    """Finding 1. The crash window between spawning a start and a child existing.
+
+    `ForkStarter.start_fork` hands the work to a background task and returns, so
+    marking the record `started` at that point recorded a child that might never
+    be written. A process death in between left the parent having admitted a
+    fork, no child stream, and nothing owed - the fork was simply lost.
+
+    Re-offering is safe, which is what makes "stay owed" the right answer rather
+    than a bespoke recovery path: the child's id is fixed by the parent's
+    `ExecutionForked`, and `StartForkHandler.handle` returns early when that
+    child already exists.
+    """
+
+    @staticmethod
+    def _record(status: str = "pending") -> ForkStartRecord:
+        return ForkStartRecord(
+            parent_execution_id=PARENT,
+            recorded_at=datetime.now(UTC),
+            status=status,  # pyright: ignore[reportArgumentType]
+        )
+
+    def test_dispatched_is_still_owed(self) -> None:
+        from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
+            OWED_STATUSES,
+        )
+
+        assert "dispatched" in OWED_STATUSES, (
+            "a dispatch that has not produced a child must be re-offered"
+        )
+
+    async def test_a_successful_dispatch_records_dispatched_not_started(self) -> None:
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        assert await manager._start(self._record()) is True
+
+        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        assert stored is not None
+        assert ForkStartRecord.model_validate(stored).status == "dispatched"
+
+    async def test_the_childs_own_start_event_settles_it(self) -> None:
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await manager._start(self._record())
+
+        await manager._settle_if_a_fork_started(_ChildStarted(PARENT))
+
+        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        assert stored is not None
+        assert ForkStartRecord.model_validate(stored).status == "started"
+
+    async def test_an_ordinary_execution_starting_settles_nothing(self) -> None:
+        """A run that is not a fork carries no `forked_from` and owes nothing."""
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await manager._start(self._record())
+
+        await manager._settle_if_a_fork_started(_ChildStarted(None))
+
+        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        assert stored is not None
+        assert ForkStartRecord.model_validate(stored).status == "dispatched"
+
+
+class _Spawning:
+    """A starter that returns without producing a child, as the real one does."""
+
+    async def start_fork(self, parent_execution_id: str) -> None:
+        del parent_execution_id
+
+
+@dataclass
+class _Origin:
+    parent_execution_id: str
+
+
+@dataclass
+class _ChildStarted:
+    """A `WorkflowExecutionStarted` as the process manager reads it."""
+
+    parent: str | None
+
+    @property
+    def forked_from(self) -> _Origin | None:
+        return None if self.parent is None else _Origin(self.parent)

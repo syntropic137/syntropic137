@@ -52,7 +52,11 @@ _EXECUTION_FORKED = "ExecutionForked"
 #: admission reopens rather than when the next fork happens to arrive.
 _ADMISSION_OPEN = AdmissionOpenEvent.event_type
 
-_SUBSCRIBED_EVENTS = {_EXECUTION_FORKED, _ADMISSION_OPEN}
+#: The CHILD's own start. A fork start is only finished when the child stream
+#: exists, and this event is the only thing that says so.
+_EXECUTION_STARTED = "WorkflowExecutionStarted"
+
+_SUBSCRIBED_EVENTS = {_EXECUTION_FORKED, _EXECUTION_STARTED, _ADMISSION_OPEN}
 
 
 class ForkStarter(Protocol):
@@ -105,6 +109,8 @@ class ForkStartProcessManager(ProcessManager):
         try:
             if event_type == _EXECUTION_FORKED:
                 await self._record_fork(envelope.metadata.aggregate_id)
+            elif event_type == _EXECUTION_STARTED:
+                await self._settle_if_a_fork_started(envelope.event)
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
                     projection_name=self.PROJECTION_NAME,
@@ -200,8 +206,30 @@ class ForkStartProcessManager(ProcessManager):
                 )
             )
             return False
-        await self._save(record.model_copy(update={"status": "started", "status_reason": None}))
+        # `dispatched`, NOT `started`: `start_fork` hands the work to a task and
+        # returns, so nothing here has seen a child. The child's own
+        # `WorkflowExecutionStarted` is what settles this record.
+        await self._save(record.model_copy(update={"status": "dispatched", "status_reason": None}))
         return True
+
+    async def _settle_if_a_fork_started(self, event: DomainEvent) -> None:
+        """Mark the parent's start done, once its CHILD says it started.
+
+        A fact settles the to-do, not a dispatch. Pure and replay-safe: it writes
+        a projection row and nothing else, so replaying the stream re-derives the
+        same statuses without starting anything.
+        """
+        if self._store is None:
+            return
+        origin = getattr(event, "forked_from", None)
+        parent = getattr(origin, "parent_execution_id", None)
+        if not parent:
+            return
+        row = await self._store.get(self.PROJECTION_NAME, str(parent))
+        record = read_record(row) if row is not None else None
+        if record is None or record.status == "started":
+            return
+        await self._save(record.model_copy(update={"status": "started", "status_reason": None}))
 
     async def _save(self, record: ForkStartRecord) -> None:
         assert self._store is not None
