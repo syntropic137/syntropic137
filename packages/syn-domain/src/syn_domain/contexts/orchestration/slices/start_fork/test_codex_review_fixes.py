@@ -16,9 +16,16 @@ from event_sourcing import DomainEvent, EventEnvelope, EventMetadata, Projection
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.artifacts import PhaseOutputFile
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    StartForkCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     ForkOrigin,
     InheritedPhase,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    AgentConfiguration,
+    ExecutablePhase,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
@@ -29,6 +36,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff impo
 )
 from syn_domain.contexts.orchestration.slices.start_fork.ForkStartProcessManager import (
     ForkStartProcessManager,
+)
+from syn_domain.contexts.orchestration.slices.start_fork.StartForkHandler import (
+    StartForkHandler,
 )
 from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
     DISPATCH_GRACE,
@@ -57,11 +67,13 @@ class _Query:
     """Returns exactly what it is told to, so a MISS can be expressed."""
 
     answer: dict[str, list[PhaseOutputFile]] = field(default_factory=dict)
+    asked: list[str] = field(default_factory=list)
 
     async def get_files_for_artifacts(
         self, execution_id: str, phase_artifact_ids: Mapping[str, Sequence[str]]
     ) -> dict[str, list[PhaseOutputFile]]:
-        del execution_id, phase_artifact_ids
+        del phase_artifact_ids
+        self.asked.append(execution_id)
         return self.answer
 
 
@@ -411,3 +423,88 @@ async def _status(store: InMemoryProjectionStore) -> str:
     row = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
     assert row is not None
     return ForkStartRecord.model_validate(row).status
+
+
+class TestValidateResolvesTheInheritanceBeforeDispatch:
+    """Where the refusal has to happen, proved by driving `validate` itself.
+
+    A mutation exposed this as untested: replacing the `inherited_outputs` call
+    in `StartForkHandler.validate` with `pass` killed nothing, because every
+    inheritance test called `inherited_outputs` directly. The point of the change
+    is WHERE it is called - synchronously, before the dispatcher spawns anything -
+    so the test has to go through `validate`.
+    """
+
+    async def test_a_vanished_artifact_is_refused_synchronously(self) -> None:
+        handler = StartForkHandler(
+            _Processor(query=_Query(answer={})),  # pyright: ignore[reportArgumentType]
+            _Executions(),  # pyright: ignore[reportArgumentType]
+        )
+
+        with pytest.raises(InheritanceUnavailableError, match="resolved to no files"):
+            await handler.validate(PARENT)
+
+    async def test_a_resolvable_inheritance_passes_validate(self) -> None:
+        query = _Query(
+            answer={"research": [PhaseOutputFile(source_path=None, content="the parent's work")]}
+        )
+        handler = StartForkHandler(
+            _Processor(query=query),  # pyright: ignore[reportArgumentType]
+            _Executions(),  # pyright: ignore[reportArgumentType]
+        )
+
+        await handler.validate(PARENT)
+        assert query.asked, "validate did not consult the artifact query at all"
+
+
+@dataclass
+class _Processor:
+    """Stands in for the processor, for the one thing validate reads off it."""
+
+    query: _Query
+
+    @property
+    def artifact_query(self) -> _Query:
+        return self.query
+
+
+class _Executions:
+    """A parent that admitted a fork of one inherited phase with one artifact."""
+
+    async def get_by_id(self, aggregate_id: str) -> _Parent:
+        del aggregate_id
+        return _Parent()
+
+
+def _phase(phase_id: str, order: int) -> ExecutablePhase:
+    """A pinned phase, so `refuse_fork_start` passes and the inheritance check
+    is what the test actually reaches."""
+    return ExecutablePhase(
+        phase_id=phase_id,
+        name=phase_id.title(),
+        order=order,
+        agent_config=AgentConfiguration(),
+        prompt_template=f"{phase_id} as pinned",
+        output_artifact_types=(),
+        timeout_seconds=1800,
+    )
+
+
+class _Parent:
+    def fork_start_command(self) -> StartForkCommand:
+        return StartForkCommand(
+            execution_id="exec-child",
+            workflow_id="wf-1",
+            workflow_name="Forked",
+            inputs={},
+            pinned_phases=[
+                _phase("research", 1),
+                _phase("plan", 2),
+            ],
+            source_commits=[],
+            forked_from=ForkOrigin(
+                parent_execution_id=PARENT,
+                inherited_phases=[InheritedPhase(phase_id="research", artifact_ids=["a1"])],
+                resume_phase_id="plan",
+            ),
+        )
