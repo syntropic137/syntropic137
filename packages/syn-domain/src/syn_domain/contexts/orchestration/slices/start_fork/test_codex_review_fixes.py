@@ -49,6 +49,10 @@ from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from syn_domain.contexts.orchestration.slices.start_fork.ForkStartProcessManager import (
+        StartFailureReporter,
+    )
+
 pytestmark = pytest.mark.unit
 
 PARENT = "exec-parent"
@@ -86,7 +90,9 @@ class TestAForkWillNotStartWithoutItsInheritance:
     """
 
     async def test_a_recorded_artifact_that_resolves_to_nothing_refuses_the_start(self) -> None:
-        with pytest.raises(InheritanceUnavailableError, match="holds no files for the artifact ids"):
+        with pytest.raises(
+            InheritanceUnavailableError, match="holds no files for the artifact ids"
+        ):
             await inherited_outputs(_Query(answer={}), _origin(artifacts=["art-research"]))
 
     async def test_no_query_service_refuses_when_there_was_something_to_read(self) -> None:
@@ -154,8 +160,10 @@ class TestAnInfrastructureBlipDoesNotDiscardAnAdmittedFork:
 class _Starter:
     raising: Exception
 
-    async def start_fork(self, parent_execution_id: str) -> None:
-        del parent_execution_id
+    async def start_fork(
+        self, parent_execution_id: str, *, on_failure: StartFailureReporter
+    ) -> None:
+        del parent_execution_id, on_failure
         raise self.raising
 
 
@@ -233,11 +241,85 @@ class TestADispatchIsNotAStart:
         assert ForkStartRecord.model_validate(stored).status == "dispatched"
 
 
+class TestALateReportFromTheTask:
+    """#1463's report arrives from a task that runs the WHOLE child.
+
+    So it can land after the child's start event settled the record, or after a
+    later dispatch replaced it. Either way it speaks for nothing current, and
+    `_save` would let `failed` replace `started` - erasing a start that happened.
+    """
+
+    @staticmethod
+    def _record() -> ForkStartRecord:
+        return ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+
+    async def test_it_does_not_unsettle_a_child_that_started(self) -> None:
+        store = InMemoryProjectionStore()
+        starter = _Reporting()
+        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        await manager._start(self._record())
+        await manager._settle_if_a_fork_started(_ChildStarted(PARENT))
+
+        assert starter.on_failure is not None
+        await starter.on_failure(ValueError("the child's second phase was refused"))
+
+        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        assert stored is not None
+        assert ForkStartRecord.model_validate(stored).status == "started"
+
+    async def test_it_does_not_speak_for_a_later_dispatch(self) -> None:
+        store = InMemoryProjectionStore()
+        first, second = _Reporting(), _Reporting()
+        await ForkStartProcessManager(fork_starter=first, store=store)._start(self._record())
+        await ForkStartProcessManager(fork_starter=second, store=store)._start(self._record())
+
+        assert first.on_failure is not None
+        await first.on_failure(ConnectionError("from the first task"))
+
+        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        assert stored is not None
+        saved = ForkStartRecord.model_validate(stored)
+        assert (saved.status, saved.attempts) == ("dispatched", 0)
+
+    async def test_a_current_report_is_recorded(self) -> None:
+        store = InMemoryProjectionStore()
+        starter = _Reporting()
+        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        await manager._start(self._record())
+
+        assert starter.on_failure is not None
+        await starter.on_failure(ConnectionError("store down"))
+
+        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        assert stored is not None
+        saved = ForkStartRecord.model_validate(stored)
+        assert (saved.status, saved.attempts, saved.status_reason) == (
+            "retryable",
+            1,
+            "store down",
+        )
+
+
+@dataclass
+class _Reporting:
+    """A starter that spawns, keeping the reporter its task would call."""
+
+    on_failure: StartFailureReporter | None = None
+
+    async def start_fork(
+        self, parent_execution_id: str, *, on_failure: StartFailureReporter
+    ) -> None:
+        del parent_execution_id
+        self.on_failure = on_failure
+
+
 class _Spawning:
     """A starter that returns without producing a child, as the real one does."""
 
-    async def start_fork(self, parent_execution_id: str) -> None:
-        del parent_execution_id
+    async def start_fork(
+        self, parent_execution_id: str, *, on_failure: StartFailureReporter
+    ) -> None:
+        del parent_execution_id, on_failure
 
 
 @dataclass
@@ -441,7 +523,9 @@ class TestValidateResolvesTheInheritanceBeforeDispatch:
             _Executions(),  # pyright: ignore[reportArgumentType]
         )
 
-        with pytest.raises(InheritanceUnavailableError, match="holds no files for the artifact ids"):
+        with pytest.raises(
+            InheritanceUnavailableError, match="holds no files for the artifact ids"
+        ):
             await handler.validate(PARENT)
 
     async def test_a_resolvable_inheritance_passes_validate(self) -> None:

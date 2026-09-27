@@ -32,7 +32,10 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
-    from syn_domain.contexts.orchestration.slices.start_fork import StartForkHandler
+    from syn_domain.contexts.orchestration.slices.start_fork import (
+        StartFailureReporter,
+        StartForkHandler,
+    )
 
 from syn_adapters.storage import get_event_store_client
 from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
@@ -206,30 +209,38 @@ class BackgroundWorkflowDispatcher:
             raise RuntimeError(msg)
         return self._fork_handler
 
-    async def start_fork(self, parent_execution_id: str) -> AdmissionTicket | None:
+    async def start_fork(
+        self, parent_execution_id: str, *, on_failure: StartFailureReporter
+    ) -> AdmissionTicket | None:
         """Start the child a forked parent admitted, behind the same gate.
 
         Bridges ForkStartProcessManager -> StartForkHandler (ADR-014 s7) with
         `run_workflow`'s shape and for its reasons: the refusals - a closed
         gate (#1387), a child that may not start (#1454) - are raised HERE,
         synchronously, where the to-do list can still record them; the start
-        itself runs as a task that shares the execution semaphore.
+        itself runs as a task that shares the execution semaphore, and what
+        fails in there is handed to ``on_failure`` (#1463).
         """
         fork_handler = await self._resolved_fork_handler()
         if self._maintenance is None:
             await fork_handler.validate(parent_execution_id)
-            self._spawn_fork(parent_execution_id, None)
+            self._spawn_fork(parent_execution_id, None, on_failure)
             return None
         await self._maintenance.refuse_early()
         await fork_handler.validate(parent_execution_id)
         async with self._maintenance.admitting() as ticket:
-            self._spawn_fork(parent_execution_id, ticket)
+            self._spawn_fork(parent_execution_id, ticket, on_failure)
             return ticket
 
-    def _spawn_fork(self, parent_execution_id: str, ticket: AdmissionTicket | None) -> None:
+    def _spawn_fork(
+        self,
+        parent_execution_id: str,
+        ticket: AdmissionTicket | None,
+        on_failure: StartFailureReporter,
+    ) -> None:
         """`_spawn`, for a fork start: the lease is ended by the task."""
         asyncio_task = asyncio.create_task(
-            self._start_fork_with_semaphore(parent_execution_id, ticket),
+            self._start_fork_with_semaphore(parent_execution_id, ticket, on_failure),
             name=f"fork-start-{parent_execution_id}",
         )
         self._tasks.add(asyncio_task)
@@ -237,18 +248,43 @@ class BackgroundWorkflowDispatcher:
         guarantee_settled(ticket, asyncio_task)
 
     async def _start_fork_with_semaphore(
-        self, parent_execution_id: str, admitted: AdmissionTicket | None
+        self,
+        parent_execution_id: str,
+        admitted: AdmissionTicket | None,
+        on_failure: StartFailureReporter,
     ) -> None:
         fork_handler = await self._resolved_fork_handler()
         with carrying(admitted):
             async with self._semaphore:
                 try:
                     await fork_handler.handle(parent_execution_id, admitted=admitted)
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "Background fork start raised exception",
                         extra={"parent_execution_id": parent_execution_id},
                     )
+                    # A log alone left the to-do `dispatched` and re-offered for
+                    # ever, counting no attempt and recording no reason (#1463).
+                    # The record decides what the failure means; this only
+                    # delivers it.
+                    await self._report_fork_failure(parent_execution_id, on_failure, exc)
+
+    @staticmethod
+    async def _report_fork_failure(
+        parent_execution_id: str, on_failure: StartFailureReporter, exc: Exception
+    ) -> None:
+        """Hand the failure over; a failure to record it is only logged.
+
+        Nothing awaits this task, so a raise here would vanish into the event
+        loop's handler instead.
+        """
+        try:
+            await on_failure(exc)
+        except Exception:
+            logger.exception(
+                "Could not record the failed fork start",
+                extra={"parent_execution_id": parent_execution_id},
+            )
 
     async def run_workflow(
         self,

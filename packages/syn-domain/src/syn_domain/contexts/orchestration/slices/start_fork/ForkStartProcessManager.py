@@ -18,7 +18,9 @@ Zero business logic: WHAT the child runs is decided by the parent aggregate
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 from event_sourcing import (
@@ -63,6 +65,10 @@ _EXECUTION_STARTED = "WorkflowExecutionStarted"
 _SUBSCRIBED_EVENTS = {_EXECUTION_FORKED, _EXECUTION_STARTED, _ADMISSION_OPEN}
 
 
+#: Told how a start that had already been handed to a task went wrong.
+StartFailureReporter = Callable[[Exception], Awaitable[None]]
+
+
 class ForkStarter(Protocol):
     """Starts a forked parent's child behind the admission gate (#1387).
 
@@ -70,9 +76,16 @@ class ForkStarter(Protocol):
     admission decision and not from the absence of an exception - the same
     contract as `run_workflow` on the trigger path. Raises
     `MaintenancePausedError` synchronously when admission is closed.
+
+    The start itself runs AFTER this returns, so a failure there cannot be
+    raised to the caller. It is handed to ``on_failure`` instead, and a starter
+    must do so: swallowing it into a log left the record `dispatched` and
+    re-offered for ever, with no attempt counted and no reason (#1463).
     """
 
-    async def start_fork(self, parent_execution_id: str) -> AdmissionTicket | None: ...
+    async def start_fork(
+        self, parent_execution_id: str, *, on_failure: StartFailureReporter
+    ) -> AdmissionTicket | None: ...
 
 
 class ForkStartProcessManager(ProcessManager):
@@ -187,22 +200,65 @@ class ForkStartProcessManager(ProcessManager):
         # overwriting the settle, after which nothing would ever settle it again
         # because an existing child emits no second start (codex review of
         # #1459).
-        await self._save(
-            record.model_copy(
-                update={
-                    "status": "dispatched",
-                    "status_reason": None,
-                    "dispatched_at": datetime.now(UTC),
-                }
-            )
+        dispatched = record.model_copy(
+            update={
+                "status": "dispatched",
+                "status_reason": None,
+                "dispatched_at": datetime.now(UTC),
+            }
         )
+        await self._save(dispatched)
         try:
-            await self._starter.start_fork(parent)
-        except MaintenancePausedError as exc:
+            await self._starter.start_fork(
+                parent, on_failure=partial(self._record_task_failure, record, dispatched)
+            )
+        except Exception as exc:
+            await self._record_failure(record, exc)
+            return False
+        return True
+
+    async def _record_task_failure(
+        self, record: ForkStartRecord, dispatched: ForkStartRecord, exc: Exception
+    ) -> None:
+        """A failure reported from inside the start's task, if it still applies.
+
+        Only while the store still holds THIS dispatch. The task runs the whole
+        child, so its failure can arrive after the child's start event settled
+        the record `started` - and `_save` lets one conclusion replace another,
+        so writing `failed` then would erase a start that happened. Nor may a
+        stale task speak for a later dispatch of the same parent.
+        """
+        assert self._store is not None
+        current = read_record(
+            await self._store.get(self.PROJECTION_NAME, record.parent_execution_id)
+        )
+        if current is None or current != dispatched:
+            logger.warning(
+                "Start of the fork of %s failed after its record moved on to %s",
+                record.parent_execution_id,
+                None if current is None else current.status,
+                exc_info=exc,
+            )
+            return
+        await self._record_failure(record, exc)
+
+    async def _record_failure(self, record: ForkStartRecord, exc: Exception) -> None:
+        """What a failed start means for its record, wherever it failed.
+
+        One classification for both places a start can fail: synchronously, out
+        of `start_fork`, and inside the task it spawned, reported back through
+        `on_failure` (#1463). Two would drift, and the in-task one used to be a
+        log line that counted nothing.
+
+        ``record`` is the one this attempt was dispatched from, so ``attempts``
+        counts from what was true before it.
+        """
+        parent = record.parent_execution_id
+        if isinstance(exc, MaintenancePausedError):
             logger.info("Start of the fork of %s held: %s", parent, exc.mode.refusal_detail)
             await self._save(record.model_copy(update={"status": "paused"}))
-            return False
-        except ValueError as exc:
+            return
+        if isinstance(exc, ValueError):
             # Terminal, and ONLY this. A `ValueError` here is the domain's own
             # refusal - `fork_rules.refuse_fork`, `refuse_fork_start`, the
             # aggregate's guards - and it is a function of recorded facts, so it
@@ -212,35 +268,33 @@ class ForkStartProcessManager(ProcessManager):
             await self._save(
                 record.model_copy(update={"status": "failed", "status_reason": str(exc)})
             )
-            return False
-        except Exception as exc:
-            # NOT terminal. A store that is down, a repository read that timed
-            # out, an artifact briefly unreachable - none of these say anything
-            # about whether this fork MAY start, and marking them `failed` threw
-            # away an admitted fork because of a blip (found by codex review).
-            #
-            # Deliberately typed rather than string-matched: the distinction is
-            # "did the domain refuse", and that is what the exception TYPE says.
-            # Bounded, so a permanent infrastructure fault still settles.
-            attempts = record.attempts + 1
-            exhausted = attempts >= MAX_START_ATTEMPTS
-            logger.exception(
-                "Could not start the fork of %s (attempt %d of %d)",
-                parent,
-                attempts,
-                MAX_START_ATTEMPTS,
+            return
+        # NOT terminal. A store that is down, a repository read that timed out,
+        # an artifact briefly unreachable - none of these say anything about
+        # whether this fork MAY start, and marking them `failed` threw away an
+        # admitted fork because of a blip (found by codex review).
+        #
+        # Deliberately typed rather than string-matched: the distinction is "did
+        # the domain refuse", and that is what the exception TYPE says. Bounded,
+        # so a permanent infrastructure fault still settles.
+        attempts = record.attempts + 1
+        exhausted = attempts >= MAX_START_ATTEMPTS
+        logger.error(
+            "Could not start the fork of %s (attempt %d of %d)",
+            parent,
+            attempts,
+            MAX_START_ATTEMPTS,
+            exc_info=exc,
+        )
+        await self._save(
+            record.model_copy(
+                update={
+                    "status": "failed" if exhausted else "retryable",
+                    "status_reason": str(exc),
+                    "attempts": attempts,
+                }
             )
-            await self._save(
-                record.model_copy(
-                    update={
-                        "status": "failed" if exhausted else "retryable",
-                        "status_reason": str(exc),
-                        "attempts": attempts,
-                    }
-                )
-            )
-            return False
-        return True
+        )
 
     async def _settle_if_a_fork_started(self, event: DomainEvent) -> None:
         """Mark the parent's start done, once its CHILD says it started.
