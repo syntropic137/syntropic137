@@ -7,6 +7,7 @@ away because a store blinked.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -299,6 +300,60 @@ class TestALateReportFromTheTask:
             "store down",
         )
 
+    @pytest.mark.parametrize(
+        ("attempts", "failure"),
+        [
+            (0, ValueError("the child's second phase was refused")),
+            (MAX_START_ATTEMPTS - 1, ConnectionError("the last attempt's store was down")),
+        ],
+        ids=["refused", "attempts-spent"],
+    )
+    async def test_a_start_that_lands_between_its_read_and_its_write_survives(
+        self, monkeypatch: pytest.MonkeyPatch, attempts: int, failure: Exception
+    ) -> None:
+        """The interleaving the verification of #1466 reproduced.
+
+        The report reads the record, finds THIS dispatch, and writes `failed` -
+        two store operations. The child's start event settled `started` in
+        between, and the write erased it; an existing child emits no second
+        start, so nothing ever put it back. The settle is forced into exactly
+        that gap: after the report's read of `dispatched`, before its write.
+        Both ways a report concludes `failed` are driven, since `failed` is the
+        only status that could replace `started`.
+        """
+        store = InMemoryProjectionStore()
+        starter = _Reporting()
+        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        await manager._start(self._record().model_copy(update={"attempts": attempts}))
+
+        read = store.get
+        settles: list[asyncio.Task[ProjectionResult]] = []
+
+        async def settle_after_the_report_reads(projection: str, key: str):
+            row = await read(projection, key)
+            if not settles and row is not None and row.get("status") == "dispatched":
+                settles.append(
+                    asyncio.create_task(
+                        manager.handle_event(
+                            _envelope("WorkflowExecutionStarted", _real_child_start(PARENT)),
+                            _Checkpoints(),
+                        )
+                    )
+                )
+                # Let the settle run to completion if nothing holds it back. A
+                # transition that is atomic holds it until this read's write.
+                await asyncio.wait(settles, timeout=0.2)
+            return row
+
+        monkeypatch.setattr(store, "get", settle_after_the_report_reads)
+
+        assert starter.on_failure is not None
+        await starter.on_failure(failure)
+        assert settles, "the interleaving was never reached, so nothing was tested"
+        assert await settles[0] is ProjectionResult.SUCCESS
+
+        assert await _status(store) == "started"
+
 
 @dataclass
 class _Reporting:
@@ -461,6 +516,35 @@ class TestTheSequencesTheSecondReviewNamed:
         await manager._save(self._pending().model_copy(update={"status": "retryable"}))
 
         assert await _status(store) == "failed"
+
+    async def test_no_conclusion_replaces_a_start(self) -> None:
+        """`started` is a fact about the child's stream, `failed` a judgment.
+
+        A failure reported by ANY path - including one with no dispatch to
+        compare against - must not erase a child that exists, since that child
+        emits no second start event to put the record back.
+        """
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await manager._save(self._pending().model_copy(update={"status": "started"}))
+
+        await manager._save(
+            self._pending().model_copy(update={"status": "failed", "status_reason": "late"})
+        )
+
+        assert await _status(store) == "started"
+
+    async def test_the_child_starting_still_settles_a_failed_record(self) -> None:
+        """The converse: a start that happened anyway is the truth."""
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await manager._save(
+            self._pending().model_copy(update={"status": "failed", "status_reason": "refused"})
+        )
+
+        await manager._settle_if_a_fork_started(_real_child_start(PARENT))
+
+        assert await _status(store) == "started"
 
     async def test_a_dispatch_in_flight_is_not_re_offered_within_the_grace(self) -> None:
         """Each re-offer takes an admission ticket and a task that waits for a

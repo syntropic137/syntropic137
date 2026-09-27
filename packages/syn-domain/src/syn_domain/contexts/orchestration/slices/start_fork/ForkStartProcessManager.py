@@ -17,6 +17,7 @@ Zero business logic: WHAT the child runs is decided by the parent aggregate
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -48,8 +49,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Statuses no later write may walk backwards.
-_SETTLED = frozenset({"started", "failed"})
+
+def _may_replace(current: str, proposed: str) -> bool:
+    """Whether a record in ``current`` may be overwritten with ``proposed``.
+
+    `started` and `failed` are conclusions no later write may walk backwards.
+
+    `started` replaces anything and nothing replaces it: the child's stream
+    exists, which is a durable fact, and an existing child emits no second start
+    event to restore a record that lost it. `failed` yields only to that fact.
+    """
+    if current == "started":
+        return False
+    if current == "failed":
+        return proposed == "started"
+    return True
+
 
 _EXECUTION_FORKED = "ExecutionForked"
 
@@ -101,6 +116,13 @@ class ForkStartProcessManager(ProcessManager):
     ) -> None:
         self._starter = fork_starter
         self._store = store
+        # Every write is a read of the current record, a decision, then a save:
+        # separate store operations with an await between each. Without this,
+        # a child's start could settle `started` inside that gap and the save
+        # erase it (verification of #1466). The store offers no conditional
+        # write, so the transition is made atomic here, where every writer of
+        # this projection runs.
+        self._transition = asyncio.Lock()
 
     def get_name(self) -> str:
         return self.PROJECTION_NAME
@@ -224,25 +246,19 @@ class ForkStartProcessManager(ProcessManager):
 
         Only while the store still holds THIS dispatch. The task runs the whole
         child, so its failure can arrive after the child's start event settled
-        the record `started` - and `_save` lets one conclusion replace another,
-        so writing `failed` then would erase a start that happened. Nor may a
-        stale task speak for a later dispatch of the same parent.
+        the record `started`. Nor may a stale task speak for a later dispatch of
+        the same parent. The check is made by `_save`, in the same transition
+        as the write, so nothing can land between them.
         """
-        assert self._store is not None
-        current = read_record(
-            await self._store.get(self.PROJECTION_NAME, record.parent_execution_id)
-        )
-        if current is None or current != dispatched:
-            logger.warning(
-                "Start of the fork of %s failed after its record moved on to %s",
-                record.parent_execution_id,
-                None if current is None else current.status,
-                exc_info=exc,
-            )
-            return
-        await self._record_failure(record, exc)
+        await self._record_failure(record, exc, only_over=dispatched)
 
-    async def _record_failure(self, record: ForkStartRecord, exc: Exception) -> None:
+    async def _record_failure(
+        self,
+        record: ForkStartRecord,
+        exc: Exception,
+        *,
+        only_over: ForkStartRecord | None = None,
+    ) -> None:
         """What a failed start means for its record, wherever it failed.
 
         One classification for both places a start can fail: synchronously, out
@@ -251,12 +267,12 @@ class ForkStartProcessManager(ProcessManager):
         log line that counted nothing.
 
         ``record`` is the one this attempt was dispatched from, so ``attempts``
-        counts from what was true before it.
+        counts from what was true before it. ``only_over`` is handed to `_save`.
         """
         parent = record.parent_execution_id
         if isinstance(exc, MaintenancePausedError):
             logger.info("Start of the fork of %s held: %s", parent, exc.mode.refusal_detail)
-            await self._save(record.model_copy(update={"status": "paused"}))
+            await self._save(record.model_copy(update={"status": "paused"}), only_over=only_over)
             return
         if isinstance(exc, ValueError):
             # Terminal, and ONLY this. A `ValueError` here is the domain's own
@@ -266,7 +282,8 @@ class ForkStartProcessManager(ProcessManager):
             # told the same thing.
             logger.warning("The fork of %s may not start: %s", parent, exc)
             await self._save(
-                record.model_copy(update={"status": "failed", "status_reason": str(exc)})
+                record.model_copy(update={"status": "failed", "status_reason": str(exc)}),
+                only_over=only_over,
             )
             return
         # NOT terminal. A store that is down, a repository read that timed out,
@@ -293,7 +310,8 @@ class ForkStartProcessManager(ProcessManager):
                     "status_reason": str(exc),
                     "attempts": attempts,
                 }
-            )
+            ),
+            only_over=only_over,
         )
 
     async def _settle_if_a_fork_started(self, event: DomainEvent) -> None:
@@ -315,20 +333,34 @@ class ForkStartProcessManager(ProcessManager):
             return
         await self._save(record.model_copy(update={"status": "started", "status_reason": None}))
 
-    async def _save(self, record: ForkStartRecord) -> None:
+    async def _save(
+        self, record: ForkStartRecord, *, only_over: ForkStartRecord | None = None
+    ) -> None:
         """Write the record, never walking a settled one backwards.
 
         `started` and `failed` are conclusions; a later write of an earlier
-        status is always a stale one racing them, so it is dropped. Monotonic
-        rather than "last write wins", because last-write-wins is what let a
-        dispatch overwrite the child's own start.
+        status is always a stale one racing them, so it is dropped (`_may_replace`).
+        Monotonic rather than "last write wins", because last-write-wins is what
+        let a dispatch overwrite the child's own start. With ``only_over``, the
+        write happens only while the store still holds exactly that record.
+
+        The read and the write are one transition under `_transition`; checked
+        and written apart, a write could land between them and be overwritten.
         """
         assert self._store is not None
-        if record.status not in _SETTLED:
+        async with self._transition:
             current = read_record(
                 await self._store.get(self.PROJECTION_NAME, record.parent_execution_id)
             )
-            if current is not None and current.status in _SETTLED:
+            if only_over is not None and current != only_over:
+                logger.warning(
+                    "Not recording %s for the fork start of %s: its record moved on to %s",
+                    record.status,
+                    record.parent_execution_id,
+                    None if current is None else current.status,
+                )
+                return
+            if current is not None and not _may_replace(current.status, record.status):
                 logger.debug(
                     "Not walking the fork start of %s back from %s to %s",
                     record.parent_execution_id,
@@ -336,9 +368,9 @@ class ForkStartProcessManager(ProcessManager):
                     record.status,
                 )
                 return
-        await self._store.save(
-            self.PROJECTION_NAME, record.parent_execution_id, record.model_dump(mode="json")
-        )
+            await self._store.save(
+                self.PROJECTION_NAME, record.parent_execution_id, record.model_dump(mode="json")
+            )
 
     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
         """The parent's id: it admits at most one fork."""
