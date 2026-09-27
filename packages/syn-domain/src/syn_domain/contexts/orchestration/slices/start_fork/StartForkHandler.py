@@ -103,11 +103,11 @@ class StartForkHandler:
             raise ValueError(refusal)
         # The inheritance is resolved HERE, synchronously, for the reason in the
         # docstring above. `inherited_outputs` also runs inside the background
-        # start, before the child's stream opens - but a raise there reaches only
-        # the dispatcher's `except Exception: logger.exception`, leaving the to-do
-        # `dispatched` and re-offered for ever with nothing recording why (codex
-        # review of #1459). Resolving it here means a vanished artifact is a
-        # refusal the to-do list can see and classify.
+        # start, before the child's stream opens, and a raise there now reaches
+        # the to-do list through the dispatcher's `on_failure` (#1463) - but only
+        # after a task was spent and a start was queued behind the semaphore
+        # (codex review of #1459). Resolving it here means a vanished artifact is
+        # refused before anything is dispatched.
         await self._processor.resolve_inheritance(command.forked_from)
 
     async def _command_for(self, parent_execution_id: str) -> StartForkCommand:

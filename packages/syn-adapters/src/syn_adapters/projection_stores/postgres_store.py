@@ -8,8 +8,10 @@ from datetime import datetime
 from typing import Any
 
 import asyncpg
+from pydantic import BaseModel
 
 from syn_adapters.postgres_text import pg_safe
+from syn_adapters.projection_stores.record_match import holds
 from syn_shared.settings import get_settings
 
 
@@ -119,6 +121,46 @@ class PostgresProjectionStore:
                 key,
                 self._serialize(data),
             )
+
+    async def save_if(
+        self, projection: str, key: str, record: BaseModel, *, expected: BaseModel | None
+    ) -> bool:
+        """Save only while the store still holds ``expected``. True if saved.
+
+        One transaction. An existing row is locked (`FOR UPDATE`) before it is
+        compared, so no other writer can change it between the comparison and
+        the update. For no row, the insert itself is the check: `ON CONFLICT DO
+        NOTHING` inserts nothing if another writer inserted first.
+        """
+        data = self._serialize(record.model_dump(mode="json"))
+        await self._ensure_table(projection)
+        key = pg_safe(key)
+        pool = await self._get_pool()
+        table_name = self._table_name(projection)
+
+        async with pool.acquire() as conn, conn.transaction():
+            if expected is None:
+                status = await conn.execute(
+                    f"""
+                    INSERT INTO {table_name} (id, data, updated_at)
+                    VALUES ($1, $2::jsonb, NOW())
+                    ON CONFLICT (id) DO NOTHING
+                """,
+                    key,
+                    data,
+                )
+                return status == "INSERT 0 1"
+            row = await conn.fetchrow(
+                f"SELECT data FROM {table_name} WHERE id = $1 FOR UPDATE", key
+            )
+            if row is None or not holds(self._deserialize(row["data"]), expected):
+                return False
+            await conn.execute(
+                f"UPDATE {table_name} SET data = $2::jsonb, updated_at = NOW() WHERE id = $1",
+                key,
+                data,
+            )
+            return True
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
         """Get a single projection record by key."""
