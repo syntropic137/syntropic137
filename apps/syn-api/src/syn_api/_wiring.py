@@ -885,6 +885,8 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     ``SkillResolutionService.resolve_for_phase`` so
     ``ExecutablePhase.skills`` is populated the same way.
     """
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
 
     processor = await get_execution_processor()
@@ -899,12 +901,16 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
         # informatively than this, but a path added later that only knows about
         # the handler is still refused rather than silently admitted.
         maintenance=get_maintenance_port(),
+        # #1457: every start records the commit each repository was at, so a
+        # fork of it can name the code its parent ran against.
+        commit_resolver=GitHubSourceCommitResolver(get_github_client),
     )
 
 
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
     handler = await get_execute_workflow_handler()
+    from syn_domain.contexts.orchestration.slices.start_fork import StartForkHandler
     from syn_shared.settings import get_settings
 
     max_concurrent = get_settings().polling.max_concurrent_dispatches
@@ -912,6 +918,13 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         handler,
         max_concurrent=max_concurrent,
         maintenance=get_admission_gate(),
+        # ADR-014 s7: the child of an admitted fork starts through this same
+        # gate and semaphore, reading everything it runs from its parent.
+        fork_handler=StartForkHandler(
+            await get_execution_processor(),
+            get_workflow_execution_repository(),
+            maintenance=get_maintenance_port(),
+        ),
     )
 
 

@@ -31,6 +31,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.source_commits import (
+    source_commits_for,
+)
 from syn_shared.agents import (
     AgentProvider,
     require_executable_provider,
@@ -57,6 +60,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
         ExecuteWorkflowCommand,
+    )
+    from syn_domain.contexts.orchestration.ports.SourceCommitResolverPort import (
+        SourceCommitResolverPort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
         WorkflowExecutionProcessor,
@@ -322,6 +328,7 @@ class ExecuteWorkflowHandler:
         phase_plugin_resolver: PhasePluginResolver | None = None,
         phase_skill_resolver: PhaseSkillResolver | None = None,
         maintenance: MaintenancePort | None = None,
+        commit_resolver: SourceCommitResolverPort | None = None,
     ) -> None:
         self._processor = processor
         self._workflow_repo = workflow_repository
@@ -340,6 +347,10 @@ class ExecuteWorkflowHandler:
         # ci/fitness/code_quality/test_execution_admission_names_the_gate.py - an
         # optional dependency nobody verifies is how a gate loses an entrance.
         self._maintenance = maintenance
+        # WHY optional (#1457): without one every commit is recorded as
+        # unknown, which is honest and forks exactly as before. Production
+        # passes the GitHub resolver.
+        self._commit_resolver = commit_resolver
 
     async def handle(
         self,
@@ -411,6 +422,7 @@ class ExecuteWorkflowHandler:
                 execution_id=execution_id,
                 repos=repos,
                 admitted=admitted,
+                source_commits=await source_commits_for(self._commit_resolver, repos),
             )
         except StreamAlreadyExistsError:
             logger.warning(

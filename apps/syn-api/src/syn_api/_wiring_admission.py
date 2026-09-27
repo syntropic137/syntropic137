@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
+    from syn_domain.contexts.orchestration.slices.start_fork import StartForkHandler
 
 from syn_adapters.storage import get_event_store_client
 from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
@@ -153,6 +154,7 @@ class BackgroundWorkflowDispatcher:
         handler: ExecuteWorkflowHandler,
         max_concurrent: int = 1,
         maintenance: AdmissionGate | None = None,
+        fork_handler: StartForkHandler | None = None,
     ) -> None:
         """`max_concurrent` defaults to 1 for the same reason the setting does.
 
@@ -168,6 +170,53 @@ class BackgroundWorkflowDispatcher:
         self._tasks: set[asyncio.Task[None]] = set()
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._maintenance = maintenance
+        self._fork_handler = fork_handler
+
+    async def start_fork(self, parent_execution_id: str) -> AdmissionTicket | None:
+        """Start the child a forked parent admitted, behind the same gate.
+
+        Bridges ForkStartProcessManager -> StartForkHandler (ADR-014 s7) with
+        `run_workflow`'s shape and for its reasons: the refusals - a closed
+        gate (#1387), a child that may not start (#1454) - are raised HERE,
+        synchronously, where the to-do list can still record them; the start
+        itself runs as a task that shares the execution semaphore.
+        """
+        if self._fork_handler is None:
+            msg = "This dispatcher was built without a StartForkHandler"
+            raise RuntimeError(msg)
+        if self._maintenance is None:
+            await self._fork_handler.validate(parent_execution_id)
+            self._spawn_fork(parent_execution_id, None)
+            return None
+        await self._maintenance.refuse_early()
+        await self._fork_handler.validate(parent_execution_id)
+        async with self._maintenance.admitting() as ticket:
+            self._spawn_fork(parent_execution_id, ticket)
+            return ticket
+
+    def _spawn_fork(self, parent_execution_id: str, ticket: AdmissionTicket | None) -> None:
+        """`_spawn`, for a fork start: the lease is ended by the task."""
+        asyncio_task = asyncio.create_task(
+            self._start_fork_with_semaphore(parent_execution_id, ticket),
+            name=f"fork-start-{parent_execution_id}",
+        )
+        self._tasks.add(asyncio_task)
+        asyncio_task.add_done_callback(self._tasks.discard)
+        guarantee_settled(ticket, asyncio_task)
+
+    async def _start_fork_with_semaphore(
+        self, parent_execution_id: str, admitted: AdmissionTicket | None
+    ) -> None:
+        assert self._fork_handler is not None
+        with carrying(admitted):
+            async with self._semaphore:
+                try:
+                    await self._fork_handler.handle(parent_execution_id, admitted=admitted)
+                except Exception:
+                    logger.exception(
+                        "Background fork start raised exception",
+                        extra={"parent_execution_id": parent_execution_id},
+                    )
 
     async def run_workflow(
         self,

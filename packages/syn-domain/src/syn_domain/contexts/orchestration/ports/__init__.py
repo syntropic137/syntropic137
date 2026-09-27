@@ -53,6 +53,9 @@ from syn_domain.contexts.orchestration.ports.ObservabilityServicePort import (
 from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
     SessionRepositoryPort,
 )
+from syn_domain.contexts.orchestration.ports.SourceCommitResolverPort import (
+    SourceCommitResolverPort,
+)
 from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
     WorkflowExecutionRepositoryPort,
 )
@@ -73,6 +76,7 @@ __all__ = [
     "GlobalClaudePluginRegistryRepositoryPort",
     "ObservabilityServicePort",
     "SessionRepositoryPort",
+    "SourceCommitResolverPort",
     "StoredClaudePluginTree",
     "WorkflowExecutionRepositoryPort",
     # Repository Ports

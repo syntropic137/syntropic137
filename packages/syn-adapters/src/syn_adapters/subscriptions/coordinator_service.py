@@ -498,6 +498,10 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.register_skill.projection import (
         SkillLockProjection,
     )
+    from syn_domain.contexts.orchestration.slices.start_fork import (
+        ForkStarter,
+        ForkStartProcessManager,
+    )
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
     )
@@ -513,7 +517,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
     from syn_domain.tool_call_counts import ToolCallCountsProjection
 
-    # Create all checkpointed projections (25 total - bumped for #1322)
+    # Create all checkpointed projections (26 total - bumped for ADR-014 s7)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -530,6 +534,12 @@ def create_coordinator_service(
                 store=projection_store,
                 budget_checker=cast("_BudgetChecker | None", budget_checker),
                 max_dispatches_per_hour=max_dispatches_per_hour,
+            ),
+            # ADR-014 s7: starts the child of each admitted fork. The same
+            # dispatcher as above, through its gated `start_fork`.
+            ForkStartProcessManager(
+                fork_starter=cast("ForkStarter | None", execution_service),
+                store=projection_store,
             ),
             TriggerQueryProjection(projection_store),
             # --- Agent sessions context ---

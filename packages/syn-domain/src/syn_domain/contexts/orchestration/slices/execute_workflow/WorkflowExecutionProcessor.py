@@ -320,6 +320,9 @@ class WorkflowExecutionProcessor:
         started_at = datetime.now(UTC)
         execution_id = aggregate.id or ""
         phase_map = {p.phase_id: p for p in phases}
+        # Before the stream opens: a fork whose inheritance cannot be read
+        # must not leave a child that exists and can never run its first phase.
+        phase_outputs = await inherited_outputs(self._artifact_query, origin)
         await self._journal.open(aggregate)
 
         # #1387: durable, therefore visible. From here the drain counts this
@@ -334,7 +337,6 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
         completed_phase_ids = inherited_phase_ids(origin)
-        phase_outputs = await inherited_outputs(self._artifact_query, origin)
         dispatch_ctx = _DispatchContext(inputs=inputs)
 
         try:
