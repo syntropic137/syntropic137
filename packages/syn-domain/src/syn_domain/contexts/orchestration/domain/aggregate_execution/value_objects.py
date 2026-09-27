@@ -679,6 +679,46 @@ def restore_owners(phases: object, owners: object) -> object:
     ]
 
 
+def payload_with_owners_restored(data: object) -> object:
+    """A stored event payload with each inherited phase's owner put back (#1462).
+
+    The whole restore step, so an EVENT file can declare its payload and hold no
+    logic: vsa forbids an event importing `collections.abc`, and the isinstance
+    guard this needs is exactly the kind of code that belongs beside the value
+    objects rather than in a declaration.
+
+    Anything that is not a payload carrying owners is returned untouched, so a
+    stream written before the owners existed validates exactly as it did.
+    """
+    if not isinstance(data, Mapping) or INHERITED_PHASE_OWNERS not in data:
+        return data
+    payload = dict(data)
+    owners = payload.pop(INHERITED_PHASE_OWNERS)
+    payload["inherited_phases"] = restore_owners(payload.get("inherited_phases"), owners)
+    return payload
+
+
+def payload_with_origin_owners_restored(data: object) -> object:
+    """As `payload_with_owners_restored`, for a payload whose phases sit inside
+    `forked_from` rather than at the top level (#1462).
+
+    Same reason for living here: the event file declares a payload and holds no
+    logic, because vsa forbids it importing `collections.abc` for the isinstance
+    guards this needs.
+    """
+    if not isinstance(data, Mapping) or INHERITED_PHASE_OWNERS not in data:
+        return data
+    payload = dict(data)
+    owners = payload.pop(INHERITED_PHASE_OWNERS)
+    origin = payload.get("forked_from")
+    if isinstance(origin, Mapping):
+        payload["forked_from"] = {
+            **origin,
+            "inherited_phases": restore_owners(origin.get("inherited_phases"), owners),
+        }
+    return payload
+
+
 @dataclass(frozen=True)
 class ExecutionMetrics:
     """Aggregated metrics for workflow execution.

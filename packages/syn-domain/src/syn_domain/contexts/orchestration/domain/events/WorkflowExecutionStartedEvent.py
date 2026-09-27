@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from typing import Any
 
@@ -15,7 +14,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ForkOrigin,
     SourceCommit,
     owners_to_carry,
-    restore_owners,
+    payload_with_origin_owners_restored,
 )
 
 #: Where the dispatched task lives inside ``inputs``.
@@ -74,17 +73,7 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     @classmethod
     def _restore_inherited_owners(cls, data: object) -> object:
         """Put each inherited phase's carried owner back into `forked_from` (#1462)."""
-        if not isinstance(data, Mapping) or INHERITED_PHASE_OWNERS not in data:
-            return data
-        payload = dict(data)
-        owners = payload.pop(INHERITED_PHASE_OWNERS)
-        origin = payload.get("forked_from")
-        if isinstance(origin, Mapping):
-            payload["forked_from"] = {
-                **origin,
-                "inherited_phases": restore_owners(origin.get("inherited_phases"), owners),
-            }
-        return payload
+        return payload_with_origin_owners_restored(data)
 
     @model_serializer(mode="wrap")
     def _carry_inherited_owners(self, handler: SerializerFunctionWrapHandler) -> object:
