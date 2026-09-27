@@ -17,7 +17,6 @@ Zero business logic: WHAT the child runs is decided by the parent aggregate
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -36,6 +35,7 @@ from event_sourcing import (
 
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
+from syn_domain.contexts._shared.transition import Transition
 from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
     DISPATCH_GRACE,
     MAX_START_ATTEMPTS,
@@ -122,7 +122,7 @@ class ForkStartProcessManager(ProcessManager):
         # erase it (verification of #1466). The store offers no conditional
         # write, so the transition is made atomic here, where every writer of
         # this projection runs.
-        self._transition = asyncio.Lock()
+        self._transition = Transition()
 
     def get_name(self) -> str:
         return self.PROJECTION_NAME
