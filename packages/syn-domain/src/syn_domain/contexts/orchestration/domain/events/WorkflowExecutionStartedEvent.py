@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from typing import Any
 
 from event_sourcing import DomainEvent, event
+from pydantic import SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    ExecutablePhase,  # noqa: TC001 - needed at runtime for Pydantic
-    ForkOrigin,  # noqa: TC001 - needed at runtime for Pydantic
-    SourceCommit,  # noqa: TC001 - needed at runtime for Pydantic
+    INHERITED_PHASE_OWNERS,
+    ExecutablePhase,
+    ForkOrigin,
+    SourceCommit,
+    owners_to_carry,
+    restore_owners,
 )
 
 #: Where the dispatched task lives inside ``inputs``.
@@ -64,3 +69,37 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: Set only on a fork: the parent, what it inherited and where it resumes
     #: (ADR-014 s7). The child's own record of "what was this a fork of".
     forked_from: ForkOrigin | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _restore_inherited_owners(cls, data: object) -> object:
+        """Put each inherited phase's carried owner back into `forked_from` (#1462)."""
+        if not isinstance(data, Mapping) or INHERITED_PHASE_OWNERS not in data:
+            return data
+        payload = dict(data)
+        owners = payload.pop(INHERITED_PHASE_OWNERS)
+        origin = payload.get("forked_from")
+        if isinstance(origin, Mapping):
+            payload["forked_from"] = {
+                **origin,
+                "inherited_phases": restore_owners(origin.get("inherited_phases"), owners),
+            }
+        return payload
+
+    @model_serializer(mode="wrap")
+    def _carry_inherited_owners(self, handler: SerializerFunctionWrapHandler) -> object:
+        """Carry phase owners beside `forked_from`, never inside it.
+
+        See `INHERITED_PHASE_OWNERS`: an older reader can replay this event
+        without them, and could not replay it with them nested. Only phases the
+        parent did not run itself are written, so neither a fresh start nor a
+        first fork writes the key at all.
+        """
+        payload = handler(self)
+        origin = self.forked_from
+        owners = (
+            {}
+            if origin is None
+            else owners_to_carry(origin.inherited_phases, origin.parent_execution_id)
+        )
+        return {**payload, INHERITED_PHASE_OWNERS: owners} if owners else payload

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
@@ -21,6 +22,9 @@ from syn_shared.agents import (
     AgentProvider,
     resolve_phase_model,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -608,7 +612,7 @@ class InheritedPhase(BaseModel):
     """Every artifact the parent collected for this phase, in collection
     order. Empty is a real answer - a phase can complete having stored
     nothing - and not "unknown"."""
-    origin_execution_id: str | None = None
+    origin_execution_id: str | None = Field(default=None, exclude=True)
     """The execution that RAN this phase, and so holds its artifacts (#1462).
 
     Not always the parent: a fork of a fork inherits phases its parent itself
@@ -616,9 +620,63 @@ class InheritedPhase(BaseModel):
     ran them. Carried rather than looked up, so the stream says whose output a
     run is resting on.
 
+    Never serialised as part of this model. It forbids extra fields, and so
+    did every release before this one: an event nesting the owner here could
+    not be read at all by a reader from before it, which is what a rollback
+    runs. The events carry it BESIDE their phases instead, under
+    `INHERITED_PHASE_OWNERS` (see `owners_to_carry`, `restore_owners`), where
+    such a reader loses only the owner.
+
     None on every event written before #1462. Read it through
     `ForkOrigin.owner_of`, never directly: absent means the parent the event
     names, which is what it meant when those events were written."""
+
+
+#: The key under which a fork's events carry the execution that ran each
+#: inherited phase (#1462), beside the phases rather than inside them.
+#:
+#: Why beside: every model a phase is nested in forbids extra fields, and so
+#: did the releases before this key existed. A reader from one of those - a
+#: rollback - fails on an unknown field INSIDE a forked origin, and that
+#: failure is deliberately fatal (`start_pins.read_fork_origin`). An unknown
+#: key at the top of an event only fails its typed validation, and ADR-023 then
+#: replays it as a `GenericDomainEvent`, whose readers ignore what they do not
+#: name. So that reader still replays the stream, and loses only the owner.
+#:
+#: Written only for a phase that the execution the event already names did not
+#: run, which is exactly the case the key exists for. A first fork writes none,
+#: so its events are identical to those written before the key existed.
+INHERITED_PHASE_OWNERS = "inherited_phase_owners"
+
+
+def owners_to_carry(phases: Sequence[InheritedPhase], named: str) -> dict[str, str]:
+    """What an event writes under `INHERITED_PHASE_OWNERS`, by phase id.
+
+    ``named`` is the execution the event already names as the phases' source -
+    the parent - which a phase without an entry is read as owned by anyway.
+    """
+    return {
+        p.phase_id: p.origin_execution_id
+        for p in phases
+        if p.origin_execution_id and p.origin_execution_id != named
+    }
+
+
+def restore_owners(phases: object, owners: object) -> object:
+    """Stored ``phases`` with the owner ``owners`` carried for each put back.
+
+    Operates on the stored shape: a list of plain phase payloads, before they
+    are validated. Anything else - a typed phase, which already has its owner,
+    or a payload with nothing carried - is returned as it came.
+    """
+    if not isinstance(phases, list) or not isinstance(owners, Mapping) or not owners:
+        return phases
+    return [
+        {**phase, "origin_execution_id": owners[phase["phase_id"]]}
+        if isinstance(phase, Mapping) and phase.get("phase_id") in owners
+        else phase
+        for phase in phases
+    ]
 
 
 @dataclass(frozen=True)

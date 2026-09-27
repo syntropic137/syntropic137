@@ -55,6 +55,9 @@ if TYPE_CHECKING:
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     read_fork_origin,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    INHERITED_PHASE_OWNERS,
+)
 from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
     PhaseRetryScheduledEvent,
 )
@@ -207,7 +210,9 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not phase_defs:
             return  # Legacy mode — no to-do list management
 
-        origin = read_fork_origin(event_data.get("forked_from"))
+        origin = read_fork_origin(
+            event_data.get("forked_from"), event_data.get(INHERITED_PHASE_OWNERS)
+        )
         if origin is not None:
             await self._start_fork(execution_id, origin)
             return

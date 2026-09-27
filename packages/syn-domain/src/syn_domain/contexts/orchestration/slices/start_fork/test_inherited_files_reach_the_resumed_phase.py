@@ -23,11 +23,21 @@ green:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import StreamAlreadyExistsError
+from event_sourcing import (
+    DomainEvent,
+    EventEnvelope,
+    EventMetadata,
+    GenericDomainEvent,
+    StreamAlreadyExistsError,
+    resolve_event_type,
+)
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
@@ -38,16 +48,28 @@ from syn_domain.contexts.artifacts.domain.services.artifact_query_service import
 from syn_domain.contexts.artifacts.slices.list_artifacts.projection import (
     ArtifactListProjection,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+    read_admitted_fork,
+    read_start_pins,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
     ExecutionStatus,
     ForkOrigin,
     InheritedPhase,
+    SourceCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ForkExecutionCommand,
     WorkflowExecutionAggregate,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
+    ExecutionForkedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
     InheritanceUnavailableError,
@@ -108,6 +130,22 @@ EXPECTED_INPUT_TREE = {
 }
 
 
+#: What the CHILD's plan writes, in a child that inherited research and ran plan
+#: itself. A second nonce, so a plan file in a later workspace can only have come
+#: from the child - the parent never completed plan.
+PLAN_NONCE = b"nonce 2c9e04b1 - written once, by the child's plan"
+PLAN_PRIMARY = b"# Plan\n\nwhat the child planned\n"
+PLAN_WRITES = (
+    ("artifacts/output/outline.md", PLAN_PRIMARY),
+    ("artifacts/output/steps/nonce.txt", PLAN_NONCE),
+)
+EXPECTED_PLAN_TREE = {
+    "artifacts/input/plan/outline.md": PLAN_PRIMARY,
+    "artifacts/input/plan/steps/nonce.txt": PLAN_NONCE,
+    "artifacts/input/plan.md": PLAN_PRIMARY,
+}
+
+
 def _phase(phase_id: str, order: int) -> ExecutablePhase:
     return ExecutablePhase(
         phase_id=phase_id,
@@ -121,12 +159,29 @@ def _phase(phase_id: str, order: int) -> ExecutablePhase:
 
 
 class _Executions:
-    """Every execution stream in the test, parent and descendants alike."""
+    """Every execution stream in the test, parent and descendants alike.
 
-    def __init__(self) -> None:
+    Every event is also kept as the JSON it would be stored as. With ``wire``,
+    a stream is READ back from that JSON, the way the event store hands it
+    back: typed where the payload validates, `GenericDomainEvent` where it does
+    not (ADR-023). That is the hop an owner can be dropped at while every
+    in-memory aggregate still holds it.
+    """
+
+    def __init__(self, *, wire: bool = False) -> None:
         self.streams: dict[str, WorkflowExecutionAggregate] = {}
+        self.written: dict[str, list[tuple[EventMetadata, str]]] = {}
+        self._wire = wire
 
     async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        # The type goes in the metadata on append, as the repository puts it.
+        self.written.setdefault(aggregate.id or "", []).extend(
+            (
+                e.metadata.model_copy(update={"event_type": e.event.event_type}),
+                json.dumps(e.event.model_dump(mode="json")),
+            )
+            for e in aggregate.get_uncommitted_events()
+        )
         self.streams[aggregate.id or ""] = aggregate
         aggregate.mark_events_as_committed()
 
@@ -136,7 +191,37 @@ class _Executions:
         await self.save(aggregate)
 
     async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
-        return self.streams.get(aggregate_id)
+        if not self._wire or aggregate_id not in self.streams:
+            return self.streams.get(aggregate_id)
+        return self.replayed(aggregate_id)
+
+    def replayed(self, aggregate_id: str) -> WorkflowExecutionAggregate:
+        """The stream as rehydrated from what was written, never the live object."""
+        fresh = WorkflowExecutionAggregate()
+        fresh.rehydrate(
+            [
+                EventEnvelope(event=_as_stored(metadata, payload), metadata=metadata)
+                for metadata, payload in self.written[aggregate_id]
+            ]
+        )
+        return fresh
+
+    def payload(self, aggregate_id: str, event_type: str) -> str:
+        """The one ``event_type`` payload written to ``aggregate_id``, as JSON."""
+        (found,) = [p for m, p in self.written[aggregate_id] if m.event_type == event_type]
+        return found
+
+
+def _as_stored(metadata: EventMetadata, payload: str) -> DomainEvent:
+    """An event as the gRPC store deserialises it (`_proto_to_envelope`)."""
+    event_type = metadata.event_type or ""
+    concrete = resolve_event_type(event_type)
+    if concrete is not None:
+        try:
+            return concrete.model_validate_json(payload)
+        except ValidationError:
+            pass
+    return GenericDomainEvent(event_type=event_type, **json.loads(payload))
 
 
 class _ProjectedArtifacts:
@@ -258,7 +343,8 @@ async def _parent_failed_in_plan(executions: _Executions, artifacts: _ProjectedA
 
 
 async def _fork(executions: _Executions, parent_id: str, fork_id: str) -> None:
-    parent = executions.streams[parent_id]
+    parent = await executions.get_by_id(parent_id)
+    assert parent is not None
     parent.fork_execution(
         ForkExecutionCommand(
             execution_id=parent_id, fork_execution_id=fork_id, acknowledge_external_effects=True
@@ -349,6 +435,235 @@ class TestAForkOfAForkReceivesTheOriginalParentsFiles:
         assert origin.parent_execution_id == CHILD
         (research,) = origin.inherited_phases
         assert origin.owner_of(research) == PARENT
+
+
+class TestAForkOfAChildThatRanAPhaseItself:
+    """Mixed ownership: the child INHERITED research and RAN plan, then failed.
+
+    Forking that child hands the grandchild two phases held by two different
+    executions - research by the parent, plan by the child - so an inheritance
+    read from any ONE execution is short a phase. Read back from the stored
+    JSON (``wire``), since the owners are what a serializer could drop.
+    """
+
+    @staticmethod
+    async def _child_ran_plan_and_failed_in_implement(
+        executions: _Executions, artifacts: _ProjectedArtifacts
+    ) -> None:
+        await _parent_failed_in_plan(executions, artifacts)
+        await _fork(executions, PARENT, CHILD)
+        child = _ReadsItsInputs(
+            FakeAgentExecutionHandler.scripted(
+                FakeAgentExecutionHandler.success(produces=list(PLAN_WRITES)),
+                FakeAgentExecutionHandler.failed(exit_code=1),
+            )
+        )
+        assert await _start(executions, artifacts, PARENT, child) == "failed"
+        assert list(child.inputs) == ["plan", "implement"]
+        await _fork(executions, CHILD, GRANDCHILD)
+
+    async def _grandchild(self) -> tuple[_Executions, _ReadsItsInputs, str]:
+        executions, artifacts = _Executions(wire=True), _ProjectedArtifacts()
+        await self._child_ran_plan_and_failed_in_implement(executions, artifacts)
+        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        status = await _start(executions, artifacts, CHILD, grandchild)
+        return executions, grandchild, status
+
+    async def test_each_phase_is_read_from_the_execution_that_produced_it(self) -> None:
+        _, grandchild, status = await self._grandchild()
+
+        assert status == "completed"
+        assert list(grandchild.inputs) == ["implement"]
+        assert grandchild.inputs["implement"] == EXPECTED_INPUT_TREE | EXPECTED_PLAN_TREE
+
+    async def test_the_stored_stream_names_each_owner(self) -> None:
+        executions, _, _ = await self._grandchild()
+
+        origin = executions.replayed(GRANDCHILD).start_pins.forked_from
+        assert origin is not None
+        assert origin.parent_execution_id == CHILD
+        assert origin.owners() == {"research": PARENT, "plan": CHILD}
+
+    async def test_the_childs_stored_admission_names_each_owner(self) -> None:
+        """The other event carrying owners, read back as the start reads it."""
+        executions, _, _ = await self._grandchild()
+
+        admitted = executions.replayed(CHILD).fork_start_command().forked_from
+        assert admitted.owners() == {"research": PARENT, "plan": CHILD}
+
+
+class TestThisReleaseReadsTheCarriedOwnersBack:
+    """Both ways this release loads what it wrote, each keeping the owners.
+
+    Typed is the normal path, and the key carried beside the phases must not
+    cost it: an event that stopped validating typed would silently replay
+    generically for ever. Generic (ADR-023) is what any OTHER validation
+    failure falls back to, and the owners must survive that too.
+    """
+
+    @staticmethod
+    async def _written() -> _Executions:
+        executions, artifacts = _Executions(wire=True), _ProjectedArtifacts()
+        await TestAForkOfAChildThatRanAPhaseItself._child_ran_plan_and_failed_in_implement(
+            executions, artifacts
+        )
+        await _start(
+            executions, artifacts, CHILD, _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        )
+        return executions
+
+    async def test_typed(self) -> None:
+        executions = await self._written()
+
+        forked = ExecutionForkedEvent.model_validate_json(
+            executions.payload(CHILD, "ExecutionForked")
+        )
+        started = WorkflowExecutionStartedEvent.model_validate_json(
+            executions.payload(GRANDCHILD, "WorkflowExecutionStarted")
+        )
+
+        assert {p.phase_id: p.origin_execution_id for p in forked.inherited_phases} == {
+            "research": PARENT,
+            "plan": None,  # the child ran it: the execution the event names
+        }
+        assert started.forked_from is not None
+        assert started.forked_from.owners() == {"research": PARENT, "plan": CHILD}
+
+    async def test_generic(self) -> None:
+        executions = await self._written()
+
+        forked = GenericDomainEvent(
+            event_type="ExecutionForked",
+            **json.loads(executions.payload(CHILD, "ExecutionForked")),
+        )
+        started = GenericDomainEvent(
+            event_type="WorkflowExecutionStarted",
+            **json.loads(executions.payload(GRANDCHILD, "WorkflowExecutionStarted")),
+        )
+
+        admitted = read_admitted_fork(forked).inherited_phases
+        assert {p.phase_id: p.origin_execution_id for p in admitted} == {
+            "research": PARENT,
+            "plan": None,
+        }
+        origin = read_start_pins(started).forked_from
+        assert origin is not None
+        assert origin.owners() == {"research": PARENT, "plan": CHILD}
+
+
+# --- what a release from BEFORE the owner reads -----------------------------
+#
+# The shapes below are frozen copies of these models as every release up to
+# v0.31 declared them, before `origin_execution_id` existed. They are what a
+# ROLLBACK reads with, so they must not be updated to match the current models:
+# the point is to keep reading with the old ones. `extra="forbid"` on all of
+# them, as it was.
+
+
+class _V031InheritedPhase(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    artifact_ids: list[str]
+
+
+class _V031ForkOrigin(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent_execution_id: str
+    inherited_phases: list[_V031InheritedPhase]
+    resume_phase_id: str
+
+
+class _V031ExecutionForked(DomainEvent):
+    workflow_id: str
+    execution_id: str
+    fork_execution_id: str
+    inherited_phases: list[_V031InheritedPhase]
+    resume_phase_id: str
+    forked_at: datetime
+    cancellation_overridden: bool = False
+    external_effects_acknowledged: bool = False
+
+
+class _V031WorkflowExecutionStarted(DomainEvent):
+    workflow_id: str
+    execution_id: str
+    workflow_name: str
+    started_at: datetime
+    total_phases: int
+    inputs: dict[str, str]
+    expected_completion_at: datetime | None = None
+    phase_definitions: list[object] | None = None
+    pinned_phases: list[ExecutablePhase] | None = None
+    source_commits: list[SourceCommit] | None = None
+    forked_from: _V031ForkOrigin | None = None
+
+
+def _v031_load(event_class: type[DomainEvent], event_type: str, payload: str) -> DomainEvent:
+    """How v0.31's store loads a payload: typed if it validates, else generic."""
+    try:
+        return event_class.model_validate_json(payload)
+    except ValidationError:
+        return GenericDomainEvent(event_type=event_type, **json.loads(payload))
+
+
+def _v031_read_origin(payload: str) -> _V031ForkOrigin:
+    """v0.31's `read_fork_origin`, on v0.31's load of a start event."""
+    event = _v031_load(_V031WorkflowExecutionStarted, "WorkflowExecutionStarted", payload)
+    return _V031ForkOrigin.model_validate(evt(event, "forked_from"))
+
+
+def _v031_read_admitted(payload: str) -> list[_V031InheritedPhase]:
+    """v0.31's `read_inherited_phases`, on v0.31's load of an `ExecutionForked`."""
+    event = _v031_load(_V031ExecutionForked, "ExecutionForked", payload)
+    return TypeAdapter(list[_V031InheritedPhase]).validate_python(evt(event, "inherited_phases"))
+
+
+class TestAReleaseBeforeTheOwnerReadsWhatThisOneWrites:
+    """The codex review of #1466: a ROLLBACK must still replay these streams.
+
+    The owner first went INSIDE `InheritedPhase`, and every model that nests it
+    forbids extra fields - so v0.31 could not read any fork this release wrote,
+    and a fork's origin that fails to read is deliberately fatal. It is carried
+    beside the phases instead. These read what the real flow wrote with the
+    frozen v0.31 shapes above.
+    """
+
+    async def test_a_first_fork_is_written_exactly_as_v031_wrote_it(self) -> None:
+        """Nothing new at all: v0.31 validates both events TYPED."""
+        executions, artifacts = _Executions(), _ProjectedArtifacts()
+        await _parent_failed_in_plan(executions, artifacts)
+        await _fork(executions, PARENT, CHILD)
+        await _start(
+            executions, artifacts, PARENT, _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        )
+
+        forked = executions.payload(PARENT, "ExecutionForked")
+        started = executions.payload(CHILD, "WorkflowExecutionStarted")
+
+        assert isinstance(_V031ExecutionForked.model_validate_json(forked), _V031ExecutionForked)
+        assert isinstance(
+            _V031WorkflowExecutionStarted.model_validate_json(started),
+            _V031WorkflowExecutionStarted,
+        )
+
+    async def test_v031_replays_a_mixed_fork_and_loses_only_the_owner(self) -> None:
+        executions, artifacts = _Executions(wire=True), _ProjectedArtifacts()
+        await TestAForkOfAChildThatRanAPhaseItself._child_ran_plan_and_failed_in_implement(
+            executions, artifacts
+        )
+        await _start(
+            executions, artifacts, CHILD, _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        )
+
+        admitted = _v031_read_admitted(executions.payload(CHILD, "ExecutionForked"))
+        origin = _v031_read_origin(executions.payload(GRANDCHILD, "WorkflowExecutionStarted"))
+
+        assert [p.phase_id for p in admitted] == ["research", "plan"]
+        assert origin.parent_execution_id == CHILD
+        assert [p.phase_id for p in origin.inherited_phases] == ["research", "plan"]
+        assert origin.resume_phase_id == "implement"
 
 
 class TestStreamsWrittenBeforeTheOwnerWasRecorded:
