@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING
 import pytest
 from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
-from event_sourcing.stores.memory_projection import MemoryProjectionStore
+
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent
@@ -94,7 +95,7 @@ class _ForkHandler:
 
 class _Fixture:
     def __init__(self) -> None:
-        self.store = MemoryProjectionStore()
+        self.store = InMemoryProjectionStore()
         self.checkpoints = MemoryCheckpointStore()
         self.forks = _ForkHandler()
         self.maintenance = AdmissionGate(InMemoryMaintenanceAdapter())

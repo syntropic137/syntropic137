@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 import asyncpg
+from pydantic import JsonValue
 
 from syn_adapters.postgres_text import pg_safe
 from syn_shared.settings import get_settings
@@ -119,6 +120,53 @@ class PostgresProjectionStore:
                 key,
                 self._serialize(data),
             )
+
+    async def save_if(
+        self,
+        projection: str,
+        key: str,
+        data: dict[str, JsonValue],
+        *,
+        expected: dict[str, JsonValue] | None,
+    ) -> bool:
+        """Save only while the stored row equals ``expected``. True if saved.
+
+        One transaction. An existing row is locked (`FOR UPDATE`) before it is
+        compared, so no other writer can change it between the comparison and
+        the update. It is compared as `get` would return it - through the same
+        `_deserialize` - so a row read with `get` and handed back as
+        ``expected`` matches exactly what was read. For no row, the insert
+        itself is the check: `ON CONFLICT DO NOTHING` inserts nothing if another
+        writer inserted first.
+        """
+        await self._ensure_table(projection)
+        key = pg_safe(key)
+        pool = await self._get_pool()
+        table_name = self._table_name(projection)
+
+        async with pool.acquire() as conn, conn.transaction():
+            if expected is None:
+                status = await conn.execute(
+                    f"""
+                    INSERT INTO {table_name} (id, data, updated_at)
+                    VALUES ($1, $2::jsonb, NOW())
+                    ON CONFLICT (id) DO NOTHING
+                """,
+                    key,
+                    self._serialize(data),
+                )
+                return status == "INSERT 0 1"
+            row = await conn.fetchrow(
+                f"SELECT data FROM {table_name} WHERE id = $1 FOR UPDATE", key
+            )
+            if row is None or self._deserialize(row["data"]) != expected:
+                return False
+            await conn.execute(
+                f"UPDATE {table_name} SET data = $2::jsonb, updated_at = NOW() WHERE id = $1",
+                key,
+                self._serialize(data),
+            )
+            return True
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
         """Get a single projection record by key."""

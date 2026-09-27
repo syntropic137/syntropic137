@@ -50,6 +50,8 @@ from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from pydantic import JsonValue
+
     from syn_domain.contexts.orchestration.slices.start_fork.ForkStartProcessManager import (
         StartFailureReporter,
     )
@@ -791,3 +793,165 @@ class _ReportingAll:
     ) -> None:
         del parent_execution_id
         self.reports.append(on_failure)
+
+
+class _HoldsOneRead(InMemoryProjectionStore):
+    """One store shared by every manager, able to pause ONE read after it reads.
+
+    Verification of #1466 found the fence above atomic only inside a manager: it
+    held a process-local lock across "read the record, decide, save", and two
+    managers - two API processes, or a restarted coordinator beside a draining
+    one - each hold their own. Pausing a manager between its read and its write
+    is how that gap is reached without a second process, and the snapshot is
+    what a database hands back: a copy of the row as it was when it was read.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self._armed = False
+        self.read = asyncio.Event()
+        self.release = asyncio.Event()
+
+    def hold_next_read(self) -> None:
+        self._armed = True
+
+    def stop_holding(self) -> None:
+        self._armed = False
+        self.release.set()
+
+    async def get(self, projection: str, key: str) -> dict[str, JsonValue] | None:
+        row = await super().get(projection, key)
+        if not self._armed:
+            return row
+        self._armed = False
+        snapshot = None if row is None else dict(row)
+        self.read.set()
+        await self.release.wait()
+        return snapshot
+
+
+class TestTwoManagersSharingOneStore:
+    """The same interleave as above, across managers that share no lock.
+
+    Each test holds one manager after it has read the record and before it has
+    written, lets another writer move the record on, then lets the held one
+    write. What the held one read is stale by then, and its write must not land.
+    """
+
+    @staticmethod
+    def _pending() -> ForkStartRecord:
+        return ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+
+    async def test_a_stale_dispatch_does_not_erase_the_attempt_the_other_counted(self) -> None:
+        store = _HoldsOneRead()
+        first_starter, second_starter = _ReportingAll(), _ReportingAll()
+        first = ForkStartProcessManager(fork_starter=first_starter, store=store)
+        second = ForkStartProcessManager(fork_starter=second_starter, store=store)
+        await first._save(self._pending())
+
+        # read, read
+        [first_read] = await first._owed_records()
+        [second_read] = await second._owed_records()
+        # the second begins its dispatch and reads `pending`, then is held
+        store.hold_next_read()
+        second_dispatch = asyncio.create_task(second._start(second_read))
+        await store.read.wait()
+        # the first dispatches, and its start fails and is counted
+        assert await first._start(first_read) is True
+        await first_starter.reports[0](ConnectionError("first start failed"))
+        # the second writes from what it read before all that
+        store.release.set()
+        dispatched_again = await second_dispatch
+
+        saved = await _stored(store)
+        assert (saved.status, saved.attempts, saved.status_reason) == (
+            "retryable",
+            1,
+            "first start failed",
+        )
+        assert dispatched_again is False
+        assert second_starter.reports == [], "the stale pass started a second child"
+
+    async def test_a_stale_dispatch_does_not_unsettle_a_child_that_started(self) -> None:
+        """The child's own start is the other writer of this row."""
+        store = _HoldsOneRead()
+        second_starter = _ReportingAll()
+        first = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        second = ForkStartProcessManager(fork_starter=second_starter, store=store)
+        await first._save(self._pending())
+
+        [second_read] = await second._owed_records()
+        store.hold_next_read()
+        second_dispatch = asyncio.create_task(second._start(second_read))
+        await store.read.wait()
+        await first._settle_if_a_fork_started(_ChildStarted(PARENT))
+        store.release.set()
+
+        assert await second_dispatch is False
+        assert (await _stored(store)).status == "started"
+        assert second_starter.reports == []
+
+    async def test_a_stale_failure_does_not_speak_for_the_others_dispatch(self) -> None:
+        """Both failure paths write through the same fence; this is the one a
+        task reports on, which is the one that can arrive late."""
+        store = _HoldsOneRead()
+        first_starter = _ReportingAll()
+        first = ForkStartProcessManager(fork_starter=first_starter, store=store)
+        second = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await first._save(self._pending())
+        assert await first._start(await _stored(store)) is True
+
+        # the first's failure reads its own dispatch, then is held
+        store.hold_next_read()
+        late_failure = asyncio.create_task(
+            first_starter.reports[0](ConnectionError("from the replaced attempt"))
+        )
+        await store.read.wait()
+        # the second dispatches again over what IT reads
+        replaced = await _stored(store)
+        assert await second._start(replaced) is True
+        redispatched = await _stored(store)
+        store.release.set()
+        await late_failure
+
+        assert await _stored(store) == redispatched
+        assert (redispatched.status, redispatched.attempts, redispatched.status_reason) == (
+            "dispatched",
+            0,
+            None,
+        )
+
+    async def test_a_replayed_fork_does_not_reset_the_attempt_the_other_counted(self) -> None:
+        """The first writer of the row, not only the later ones.
+
+        Both managers handle the same `ExecutionForked`. The second looked for
+        a record before the first had written one; by the time it writes, the
+        first has dispatched and counted a failed attempt. A fresh `pending`
+        written then would put the attempt count back to nothing.
+        """
+        store = _HoldsOneRead()
+        first_starter = _ReportingAll()
+        first = ForkStartProcessManager(fork_starter=first_starter, store=store)
+        second = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+
+        store.hold_next_read()
+        replay = asyncio.create_task(second._record_fork(PARENT))
+        # Held after reading "no record" - or finished already, when recording
+        # does not read first at all; either way, the first now moves on.
+        await asyncio.wait(
+            {replay, asyncio.create_task(store.read.wait())},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        store.stop_holding()
+        await first._record_fork(PARENT)
+        [owed] = await first._owed_records()
+        assert await first._start(owed) is True
+        await first_starter.reports[0](ConnectionError("first start failed"))
+        await replay
+
+        saved = await _stored(store)
+        assert (saved.status, saved.attempts, saved.status_reason) == (
+            "retryable",
+            1,
+            "first start failed",
+        )

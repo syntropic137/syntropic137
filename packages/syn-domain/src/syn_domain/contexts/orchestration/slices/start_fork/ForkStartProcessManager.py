@@ -31,11 +31,11 @@ from event_sourcing import (
     ProjectionCheckpoint,
     ProjectionCheckpointStore,
     ProjectionResult,
+    ProjectionStore,
 )
 
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
-from syn_domain.contexts._shared.transition import Transition
 from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
     DISPATCH_GRACE,
     MAX_START_ATTEMPTS,
@@ -45,7 +45,7 @@ from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
 )
 
 if TYPE_CHECKING:
-    from event_sourcing import ProjectionStore
+    from pydantic import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,35 @@ class ForkStarter(Protocol):
     ) -> AdmissionTicket | None: ...
 
 
+class ConditionalProjectionStore(ProjectionStore, Protocol):
+    """A projection store that can write a record only over the one it expects.
+
+    Every write here is a read of the current record, a decision, then a save,
+    and more than one process may be making them over the same row: two API
+    processes, or a restarting coordinator beside one still draining. A lock in
+    this class guards one instance only, so a stale write from another could
+    still land between the read and the save and walk the record back -
+    attempts and reason included (verification of #1466). The comparison and
+    the write must be one operation in the store, which is the only thing every
+    writer shares.
+    """
+
+    async def save_if(
+        self,
+        projection: str,
+        key: str,
+        data: dict[str, JsonValue],
+        *,
+        expected: dict[str, JsonValue] | None,
+    ) -> bool:
+        """Write ``data`` only while the stored row is exactly ``expected``.
+
+        ``expected`` is a row as `get` returned it, or None for "no row yet".
+        True if written; False, with nothing written, if the row had moved on.
+        """
+        ...
+
+
 class ForkStartProcessManager(ProcessManager):
     """Starts the child execution of every admitted fork."""
 
@@ -112,17 +141,10 @@ class ForkStartProcessManager(ProcessManager):
     def __init__(
         self,
         fork_starter: ForkStarter | None = None,
-        store: ProjectionStore | None = None,
+        store: ConditionalProjectionStore | None = None,
     ) -> None:
         self._starter = fork_starter
         self._store = store
-        # Every write is a read of the current record, a decision, then a save:
-        # separate store operations with an await between each. Without this,
-        # a child's start could settle `started` inside that gap and the save
-        # erase it (verification of #1466). The store offers no conditional
-        # write, so the transition is made atomic here, where every writer of
-        # this projection runs.
-        self._transition = Transition()
 
     def get_name(self) -> str:
         return self.PROJECTION_NAME
@@ -167,16 +189,22 @@ class ForkStartProcessManager(ProcessManager):
         """Write a pending record, unless this fork already has one.
 
         Never overwrites: a replay must not turn a started or failed record
-        back into a pending one.
+        back into a pending one, nor a counted attempt back into none. "Unless
+        it has one" is part of the write, not a read before it, so a second
+        manager replaying the same fork cannot reset a record the first has
+        since moved on.
         """
         if self._store is None or not parent_execution_id:
-            return
-        if await self._store.get(self.PROJECTION_NAME, parent_execution_id) is not None:
             return
         record = ForkStartRecord(
             parent_execution_id=parent_execution_id, recorded_at=datetime.now(UTC)
         )
-        await self._save(record)
+        await self._store.save_if(
+            self.PROJECTION_NAME,
+            parent_execution_id,
+            record.model_dump(mode="json"),
+            expected=None,
+        )
 
     async def process_pending(self) -> int:
         """PROCESSOR SIDE: start each owed child. Live-only, idempotent."""
@@ -341,34 +369,37 @@ class ForkStartProcessManager(ProcessManager):
         write happens only while the store still holds exactly that record: a
         compare-and-set, for every write made on behalf of one dispatch.
 
-        The read and the write are one transition under `_transition`; checked
-        and written apart, a write could land between them and be overwritten.
+        The decision is made over what was read, and the write lands only while
+        the store still holds exactly that (`save_if`), so no writer - in this
+        process or another - can slip between them. A write that loses decides
+        again over whatever beat it, because what beat it may be one it must
+        not overwrite.
         """
         assert self._store is not None
-        async with self._transition:
-            current = read_record(
-                await self._store.get(self.PROJECTION_NAME, record.parent_execution_id)
-            )
+        key = record.parent_execution_id
+        while True:
+            row = await self._store.get(self.PROJECTION_NAME, key)
+            current = read_record(row) if row is not None else None
             if only_over is not None and current != only_over:
                 logger.warning(
                     "Not recording %s for the fork start of %s: its record moved on to %s",
                     record.status,
-                    record.parent_execution_id,
+                    key,
                     None if current is None else current.status,
                 )
                 return False
             if current is not None and not _may_replace(current.status, record.status):
                 logger.debug(
                     "Not walking the fork start of %s back from %s to %s",
-                    record.parent_execution_id,
+                    key,
                     current.status,
                     record.status,
                 )
                 return False
-            await self._store.save(
-                self.PROJECTION_NAME, record.parent_execution_id, record.model_dump(mode="json")
-            )
-            return True
+            if await self._store.save_if(
+                self.PROJECTION_NAME, key, record.model_dump(mode="json"), expected=row
+            ):
+                return True
 
     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
         """The parent's id: it admits at most one fork."""

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import JsonValue
+
 from syn_adapters.in_memory import InMemoryAdapterError, assert_test_only
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.memory_store_helpers import (
@@ -64,6 +66,25 @@ class InMemoryProjectionStore:
         """Save or update a projection record."""
         self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(data.copy())
         self._update_state(projection)
+
+    async def save_if(
+        self,
+        projection: str,
+        key: str,
+        data: dict[str, JsonValue],
+        *,
+        expected: dict[str, JsonValue] | None,
+    ) -> bool:
+        """Save only while the stored row equals ``expected``. True if saved.
+
+        Atomic because nothing here awaits between the comparison and the
+        write, which is the property the Postgres store gets from a row lock.
+        """
+        if self._data.get(projection, {}).get(pg_safe(key)) != expected:
+            return False
+        self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(data.copy())
+        self._update_state(projection)
+        return True
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
         """Get a single projection record by key."""
