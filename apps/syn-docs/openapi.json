@@ -1208,6 +1208,66 @@
         }
       }
     },
+    "/executions/{execution_id}/fork": {
+      "post": {
+        "tags": [
+          "fork"
+        ],
+        "summary": "Fork Execution Endpoint",
+        "description": "Fork a failed or interrupted execution so it resumes where it stopped.",
+        "operationId": "fork_execution_endpoint_executions__execution_id__fork_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ForkRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions": {
       "get": {
         "tags": [
@@ -10016,6 +10076,68 @@
         "title": "FeedbackUpdate",
         "description": "Request model for updating feedback."
       },
+      "ForkRequest": {
+        "properties": {
+          "override_cancellation": {
+            "type": "boolean",
+            "title": "Override Cancellation",
+            "description": "Fork a CANCELLED parent. A cancel is an instruction to stop, so forking past it needs a fresh decision rather than inheriting the old one.",
+            "default": false
+          },
+          "acknowledge_external_effects": {
+            "type": "boolean",
+            "title": "Acknowledge External Effects",
+            "description": "Accept that the phase the fork restarts may already have pushed or published something in the parent, which re-running it repeats.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ForkRequest",
+        "description": "What an operator must decide before a fork is admitted.\n\nBoth flags default to the REFUSAL, because both exist to make an operator\nsay something out loud. Neither implies the other."
+      },
+      "ForkResponse": {
+        "properties": {
+          "parent_execution_id": {
+            "type": "string",
+            "title": "Parent Execution Id"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "resume_phase_id": {
+            "type": "string",
+            "title": "Resume Phase Id"
+          },
+          "inherited_phase_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Inherited Phase Ids"
+          },
+          "cancellation_overridden": {
+            "type": "boolean",
+            "title": "Cancellation Overridden"
+          },
+          "external_effects_acknowledged": {
+            "type": "boolean",
+            "title": "External Effects Acknowledged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parent_execution_id",
+          "execution_id",
+          "resume_phase_id",
+          "inherited_phase_ids",
+          "cancellation_overridden",
+          "external_effects_acknowledged"
+        ],
+        "title": "ForkResponse",
+        "description": "The fork that was admitted, and what the child will do."
+      },
       "GitEventData": {
         "properties": {
           "operation": {
@@ -15993,6 +16115,10 @@
     {
       "name": "feedback",
       "description": ""
+    },
+    {
+      "name": "fork",
+      "description": "Fork a failed execution so it restarts at the first phase that did not finish"
     },
     {
       "name": "github",

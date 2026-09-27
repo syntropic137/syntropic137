@@ -64,6 +64,10 @@ from syn_domain.contexts.orchestration.domain import (
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
+    ForkExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_start import (
+    refuse_fork_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -101,6 +105,9 @@ from syn_domain.contexts.orchestration.domain.commands import (
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
+    ExecutionForkedEvent,
+)
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
 )
@@ -127,6 +134,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
     validate_phase_declarations,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
+    InheritanceUnavailableError,
+    inherited_outputs,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
@@ -208,9 +219,11 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionForkedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
+    "ForkExecutionCommand",
     "ForkStartProcessManager",
     "ForkStartRecord",
     "ForkStarter",
@@ -220,6 +233,7 @@ __all__ = [
     "HandlerResult",
     # Value objects - workspace
     "ImageManifest",
+    "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
@@ -263,8 +277,10 @@ __all__ = [
     "WorkspaceAggregate",
     "announce_as",
     "build_command_from_definition",
+    "inherited_outputs",
     "is_phase_id",
     "mint_wrapper_name",
+    "refuse_fork_start",
     "render_workspace_prompt",
     "require_supported_execution_type",
     "salvage_stranded_phase",
