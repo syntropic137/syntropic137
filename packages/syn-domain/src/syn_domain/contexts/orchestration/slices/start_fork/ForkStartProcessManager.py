@@ -134,6 +134,44 @@ class ConditionalProjectionStore(ProjectionStore, Protocol):
         ...
 
 
+def _write_is_allowed(
+    *,
+    key: str,
+    unreadable: bool,
+    current: ForkStartRecord | None,
+    writing: ForkStartRecord,
+    only_over: ForkStartRecord | None,
+) -> bool:
+    """Whether `writing` may replace `current`, and why not when it may not.
+
+    Extracted from `_save` so that method is the retry loop and this is the
+    decision: three independent reasons to refuse a write is more branching than
+    one function should carry, and the loop re-asks this question every time it
+    loses a write.
+    """
+    if unreadable:
+        # Logged by `read_record`. Nothing can be decided over a record that
+        # cannot be read, and `process_pending` already skips it.
+        return False
+    if only_over is not None and current != only_over:
+        logger.warning(
+            "Not recording %s for the fork start of %s: its record moved on to %s",
+            writing.status,
+            key,
+            None if current is None else current.status,
+        )
+        return False
+    if current is not None and not _may_replace(current.status, writing.status):
+        logger.debug(
+            "Not walking the fork start of %s back from %s to %s",
+            key,
+            current.status,
+            writing.status,
+        )
+        return False
+    return True
+
+
 class ForkStartProcessManager(ProcessManager):
     """Starts the child execution of every admitted fork."""
 
@@ -377,25 +415,13 @@ class ForkStartProcessManager(ProcessManager):
         for _ in range(_MAX_LOST_WRITES):
             row = await self._store.get(self.PROJECTION_NAME, key)
             current = read_record(row) if row is not None else None
-            if row is not None and current is None:
-                # Logged by `read_record`. Nothing can be decided over a record
-                # that cannot be read, and `process_pending` already skips it.
-                return False
-            if only_over is not None and current != only_over:
-                logger.warning(
-                    "Not recording %s for the fork start of %s: its record moved on to %s",
-                    record.status,
-                    key,
-                    None if current is None else current.status,
-                )
-                return False
-            if current is not None and not _may_replace(current.status, record.status):
-                logger.debug(
-                    "Not walking the fork start of %s back from %s to %s",
-                    key,
-                    current.status,
-                    record.status,
-                )
+            if not _write_is_allowed(
+                key=key,
+                unreadable=row is not None and current is None,
+                current=current,
+                writing=record,
+                only_over=only_over,
+            ):
                 return False
             if await self._store.save_if(self.PROJECTION_NAME, key, record, expected=current):
                 return True
