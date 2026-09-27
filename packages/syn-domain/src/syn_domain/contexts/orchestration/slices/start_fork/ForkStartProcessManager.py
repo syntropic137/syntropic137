@@ -34,6 +34,7 @@ from event_sourcing import (
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
+    DISPATCH_GRACE,
     MAX_START_ATTEMPTS,
     OWED_STATUSES,
     ForkStartRecord,
@@ -44,6 +45,9 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
 logger = logging.getLogger(__name__)
+
+#: Statuses no later write may walk backwards.
+_SETTLED = frozenset({"started", "failed"})
 
 _EXECUTION_FORKED = "ExecutionForked"
 
@@ -152,16 +156,46 @@ class ForkStartProcessManager(ProcessManager):
     async def _owed_records(self) -> list[ForkStartRecord]:
         assert self._store is not None
         records: list[ForkStartRecord] = []
+        now = datetime.now(UTC)
         for status in OWED_STATUSES:
             for row in await self._store.query(self.PROJECTION_NAME, filters={"status": status}):
                 record = read_record(row)
-                if record is not None:
-                    records.append(record)
+                if record is None or not self._is_due(record, now):
+                    continue
+                records.append(record)
         return records
+
+    @staticmethod
+    def _is_due(record: ForkStartRecord, now: datetime) -> bool:
+        """Whether an owed record should be offered again NOW.
+
+        Only `dispatched` waits: its start is in flight, and the grace period is
+        what keeps a slow child from being dispatched on every pass. Everything
+        else owed - pending, paused, retryable - is due immediately, because
+        nothing is running for it.
+        """
+        if record.status != "dispatched" or record.dispatched_at is None:
+            return True
+        return now - record.dispatched_at >= DISPATCH_GRACE
 
     async def _start(self, record: ForkStartRecord) -> bool:
         assert self._starter is not None
         parent = record.parent_execution_id
+        # BEFORE the dispatch, not after. `start_fork` spawns a task and returns,
+        # so a child could open its stream and its start event settle this record
+        # to `started` while a later `dispatched` save was still in flight -
+        # overwriting the settle, after which nothing would ever settle it again
+        # because an existing child emits no second start (codex review of
+        # #1459).
+        await self._save(
+            record.model_copy(
+                update={
+                    "status": "dispatched",
+                    "status_reason": None,
+                    "dispatched_at": datetime.now(UTC),
+                }
+            )
+        )
         try:
             await self._starter.start_fork(parent)
         except MaintenancePausedError as exc:
@@ -206,10 +240,6 @@ class ForkStartProcessManager(ProcessManager):
                 )
             )
             return False
-        # `dispatched`, NOT `started`: `start_fork` hands the work to a task and
-        # returns, so nothing here has seen a child. The child's own
-        # `WorkflowExecutionStarted` is what settles this record.
-        await self._save(record.model_copy(update={"status": "dispatched", "status_reason": None}))
         return True
 
     async def _settle_if_a_fork_started(self, event: DomainEvent) -> None:
@@ -232,7 +262,26 @@ class ForkStartProcessManager(ProcessManager):
         await self._save(record.model_copy(update={"status": "started", "status_reason": None}))
 
     async def _save(self, record: ForkStartRecord) -> None:
+        """Write the record, never walking a settled one backwards.
+
+        `started` and `failed` are conclusions; a later write of an earlier
+        status is always a stale one racing them, so it is dropped. Monotonic
+        rather than "last write wins", because last-write-wins is what let a
+        dispatch overwrite the child's own start.
+        """
         assert self._store is not None
+        if record.status not in _SETTLED:
+            current = read_record(
+                await self._store.get(self.PROJECTION_NAME, record.parent_execution_id)
+            )
+            if current is not None and current.status in _SETTLED:
+                logger.debug(
+                    "Not walking the fork start of %s back from %s to %s",
+                    record.parent_execution_id,
+                    current.status,
+                    record.status,
+                )
+                return
         await self._store.save(
             self.PROJECTION_NAME, record.parent_execution_id, record.model_dump(mode="json")
         )

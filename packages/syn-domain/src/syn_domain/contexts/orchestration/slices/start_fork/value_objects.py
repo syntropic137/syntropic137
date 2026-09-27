@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime  # noqa: TC003 - pydantic resolves the annotation at runtime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -26,6 +26,16 @@ ForkStartStatus = Literal["pending", "paused", "retryable", "dispatched", "start
 #: `ExecutionForked` rather than minted per attempt.
 OWED_STATUSES: tuple[ForkStartStatus, ...] = ("pending", "paused", "retryable", "dispatched")
 
+#: How long a `dispatched` start is left alone before it is re-offered.
+#:
+#: The window between handing a start to a task and the child's own
+#: `WorkflowExecutionStarted` arriving. Re-offering inside it is not harmful in
+#: the aggregate - the child's id is fixed and the handler returns early - but it
+#: is not free either: each re-offer takes an admission ticket and a task that
+#: waits for a semaphore slot before discovering the child exists (codex review
+#: of #1459). So it waits.
+DISPATCH_GRACE = timedelta(minutes=5)
+
 #: How many times a start may be attempted before `retryable` becomes `failed`.
 #:
 #: A CEILING, not a tuning knob. Without one, a fork whose start fails the same
@@ -47,6 +57,12 @@ class ForkStartRecord(BaseModel):
     status: ForkStartStatus = "pending"
     status_reason: str | None = None
     recorded_at: datetime
+
+    #: When the start was handed to a background task, if it has been. A
+    #: `dispatched` record is only re-offered once this is older than
+    #: `DISPATCH_GRACE`, so a child that takes a while to write its first event
+    #: is not dispatched again on every processor pass.
+    dispatched_at: datetime | None = None
 
     #: Starts attempted so far. Only counted for attempts that failed for a
     #: reason worth retrying: a `paused` hold is not an attempt, because the

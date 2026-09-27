@@ -81,6 +81,13 @@ async def inherited_outputs(
         )
         raise InheritanceUnavailableError(msg)
 
+    # A phase can still resolve PARTIALLY - two artifact ids recorded, one of
+    # them gone - and this function CANNOT see that. `get_files_for_artifacts`
+    # returns files, `PhaseOutputFile` carries no artifact id, and one artifact is
+    # a directory of many files, so file count cannot be compared with id count
+    # in either direction. Detecting it needs the query to report which ids it
+    # resolved; #1460 tracks that. Refusing on a count here would be a false
+    # invariant, not a safer one.
     for phase_id, phase_files in files.items():
         cache.record(phase_id, phase_files[0].content if phase_files else None, phase_files)
     return cache

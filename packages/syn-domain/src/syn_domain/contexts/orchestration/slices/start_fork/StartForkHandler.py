@@ -34,6 +34,10 @@ if TYPE_CHECKING:
         WorkflowExecutionResult,
     )
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
+    inherited_outputs,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -101,6 +105,14 @@ class StartForkHandler:
         refusal = refuse_fork_start(command)
         if refusal is not None:
             raise ValueError(refusal)
+        # The inheritance is resolved HERE, synchronously, for the reason in the
+        # docstring above. `inherited_outputs` also runs inside the background
+        # start, before the child's stream opens - but a raise there reaches only
+        # the dispatcher's `except Exception: logger.exception`, leaving the to-do
+        # `dispatched` and re-offered for ever with nothing recording why (codex
+        # review of #1459). Resolving it here means a vanished artifact is a
+        # refusal the to-do list can see and classify.
+        await inherited_outputs(self._processor.artifact_query, command.forked_from)
 
     async def _command_for(self, parent_execution_id: str) -> StartForkCommand:
         parent = await self._executions.get_by_id(parent_execution_id)

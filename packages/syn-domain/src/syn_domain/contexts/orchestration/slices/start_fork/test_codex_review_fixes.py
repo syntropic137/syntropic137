@@ -8,7 +8,7 @@ away because a store blinked.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -31,6 +31,7 @@ from syn_domain.contexts.orchestration.slices.start_fork.ForkStartProcessManager
     ForkStartProcessManager,
 )
 from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
+    DISPATCH_GRACE,
     MAX_START_ATTEMPTS,
     ForkStartRecord,
 )
@@ -323,3 +324,90 @@ def _envelope(event_type: str, event: DomainEvent) -> EventEnvelope[DomainEvent]
             global_nonce=1,
         ),
     )
+
+
+class TestTheSequencesTheSecondReviewNamed:
+    """Round two of the #1459 review rejected round one's fixes. These are its
+    three sequences, each of which passed the previous tests."""
+
+    @staticmethod
+    def _pending() -> ForkStartRecord:
+        return ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+
+    async def test_a_settle_that_lands_first_is_not_overwritten(self) -> None:
+        """The race: `_start` used to save `dispatched` AFTER spawning.
+
+        The child could open its stream and its start event settle `started`
+        while that save was still in flight; the save then overwrote it, and
+        nothing settled it again because an existing child emits no second start
+        event. Here the settle is forced to land first and must survive.
+        """
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await manager._save(self._pending())
+
+        # The child's event arrives before anything writes `dispatched`.
+        await manager._settle_if_a_fork_started(_real_child_start(PARENT))
+        # A late dispatch write must not walk it back.
+        await manager._save(
+            self._pending().model_copy(
+                update={"status": "dispatched", "dispatched_at": datetime.now(UTC)}
+            )
+        )
+
+        assert await _status(store) == "started"
+
+    async def test_a_failed_record_is_not_walked_back_either(self) -> None:
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await manager._save(
+            self._pending().model_copy(update={"status": "failed", "status_reason": "refused"})
+        )
+
+        await manager._save(self._pending().model_copy(update={"status": "retryable"}))
+
+        assert await _status(store) == "failed"
+
+    async def test_a_dispatch_in_flight_is_not_re_offered_within_the_grace(self) -> None:
+        """Each re-offer takes an admission ticket and a task that waits for a
+        semaphore slot before finding the child - so a slow start must not be
+        dispatched on every pass."""
+        store = InMemoryProjectionStore()
+        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        await manager._save(
+            self._pending().model_copy(
+                update={"status": "dispatched", "dispatched_at": datetime.now(UTC)}
+            )
+        )
+
+        assert await manager.process_pending() == 0, "an in-flight start was dispatched again"
+
+    async def test_a_dispatch_stuck_past_the_grace_is_re_offered(self) -> None:
+        """The other half: the grace must not become a way to lose a fork."""
+        store = InMemoryProjectionStore()
+        starter = _Spawning()
+        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        await manager._save(
+            self._pending().model_copy(
+                update={
+                    "status": "dispatched",
+                    "dispatched_at": datetime.now(UTC) - DISPATCH_GRACE - timedelta(seconds=1),
+                }
+            )
+        )
+
+        assert await manager.process_pending() == 1
+
+    async def test_the_other_owed_statuses_are_due_at_once(self) -> None:
+        """Nothing is running for pending, paused or retryable, so none waits."""
+        for status in ("pending", "paused", "retryable"):
+            store = InMemoryProjectionStore()
+            manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+            await manager._save(self._pending().model_copy(update={"status": status}))
+            assert await manager.process_pending() == 1, f"{status} was not offered"
+
+
+async def _status(store: InMemoryProjectionStore) -> str:
+    row = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+    assert row is not None
+    return ForkStartRecord.model_validate(row).status

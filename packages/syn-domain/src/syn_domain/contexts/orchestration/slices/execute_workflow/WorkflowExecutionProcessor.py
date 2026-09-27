@@ -247,6 +247,12 @@ class WorkflowExecutionProcessor:
             inputs=inputs,
         )
 
+    @property
+    def artifact_query(self) -> ArtifactQueryServiceProtocol | None:
+        """The artifact reader, for a caller that must resolve an inheritance
+        BEFORE dispatching a fork start rather than inside it."""
+        return self._artifact_query
+
     async def run(
         self,
         workflow_id: str,
