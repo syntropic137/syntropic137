@@ -156,14 +156,11 @@ configuration - an execution from before that was recorded - cannot be forked at
 all, because what the child would run could then only be read from the current
 workflow template.
 
-<Callout type="warn">
-  **A forked child cannot itself be forked yet** (#1462), whenever the phases it
-  inherited carried artifacts. The child holds its inherited phases with the
-  *original* parent's artifact ids, and the check that resolves them looks under
-  the child's own id, so it finds nothing and refuses with 409. The refusal says
-  "artifacts that resolved to no files", which reads as though the artifacts are
-  gone - they are not, the lookup asks the wrong owner. Fork the original parent
-  again instead, or start a fresh execution.
+<Callout type="info">
+  **A forked child can itself be forked**, when it is otherwise eligible. Each
+  inherited phase's files are read from the execution that actually produced them,
+  which may be an earlier ancestor rather than the immediate parent, so a chain of
+  forks keeps reaching the right output (#1462).
 </Callout>
 
 A parent can be forked **once**. Asking twice is refused and names the fork it
@@ -178,12 +175,11 @@ check, and a start can still fail afterwards - an artifact that disappears in
 between, a read model lagging the parent's own stream, maintenance closing, or an
 infrastructure fault.
 
-A refusal raised **before** the start is dispatched is recorded against the
-parent's fork and settles after a bounded number of attempts. A failure raised
-**inside** the background start is currently only logged: the record stays
-`dispatched` and is re-offered every few minutes without ever settling (#1463).
-So a child that never appears may be retrying indefinitely rather than having
-given up.
+Those failures are recorded against the parent's fork, wherever they are raised.
+A transient one is retried up to the attempt limit and then settles as failed with
+the reason; a refusal the domain makes settles as failed immediately; and the
+child's own start event settles the record as started (#1463). So a child that
+never appears has a recorded reason rather than an indefinite retry.
 
 ## Over the API
 
@@ -227,10 +223,11 @@ process. If no child execution shows up:
 2. Check whether admission is closed. A held start resumes on its own when
    maintenance reopens.
 3. Check the API logs for `Background fork start raised exception` and for the
-   fork-start records the process manager writes. The start's own status - held,
-   retrying, given up, and why - is **not** currently readable through `syn` or
-   the API (#1464), so this step needs log or database access that a self-hosted
-   operator may not have. That gap is the reason the step reads this way.
+   fork-start records the process manager writes. The record does now carry the
+   outcome - held, retrying, given up, and the reason - but it is **not** readable
+   through `syn` or the API yet (#1464), so reaching it needs log or database
+   access that a self-hosted operator may not have. That gap is why this step
+   reads the way it does.
 4. Causes worth ruling out in order: maintenance mode, artifact-list projection
    lag, whether the inherited artifacts still exist, and event-store errors.
 
