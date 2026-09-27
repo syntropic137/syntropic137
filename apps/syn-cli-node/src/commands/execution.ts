@@ -8,7 +8,7 @@ import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
-import { style, BOLD, CYAN, DIM, RED } from "../output/ansi.js";
+import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCostWithCoverage, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
 
@@ -141,5 +141,59 @@ const showCommand: CommandDef = {
   },
 };
 
+
+type ForkResponse = components["schemas"]["ForkResponse"];
+
+const forkCommand: CommandDef = {
+  name: "fork",
+  description: "Fork a failed execution so it resumes from its last completed phase",
+  args: [{ name: "execution-id", description: "Execution to fork", required: true }],
+  options: {
+    "override-cancellation": {
+      type: "boolean",
+      description: "Fork a CANCELLED execution (a cancel is an instruction to stop)",
+    },
+    "acknowledge-external-effects": {
+      type: "boolean",
+      description: "Accept that re-running the resumed phase may repeat a push or publish",
+    },
+  },
+  handler: async (parsed: ParsedArgs) => {
+    const id = parsed.positionals[0];
+    if (!id) {
+      printError("execution-id is required");
+      printDim("Hint: run `syn execution list --status failed` to find one.");
+      throw new CLIError("Missing argument", 1);
+    }
+    const body = {
+      override_cancellation: Boolean(parsed.values["override-cancellation"]),
+      acknowledge_external_effects: Boolean(parsed.values["acknowledge-external-effects"]),
+    };
+    const data = unwrap<ForkResponse>(
+      await api.POST("/executions/{execution_id}/fork", {
+        params: { path: { execution_id: id } },
+        body,
+      }),
+      "Fork execution",
+    );
+
+    print(style(`Forked ${data.parent_execution_id}`, GREEN));
+    print(`  New execution: ${data.execution_id}`);
+    print(`  Resumes at:    ${data.resume_phase_id}`);
+    if (data.inherited_phase_ids.length > 0) {
+      print(`  Not re-run:    ${data.inherited_phase_ids.join(", ")}`);
+    } else {
+      printDim("  Nothing inherited - the fork starts from the first phase.");
+    }
+    if (data.cancellation_overridden) {
+      print(style("  Cancellation overridden", YELLOW));
+    }
+    if (data.external_effects_acknowledged) {
+      print(style("  External effects acknowledged", YELLOW));
+    }
+    printDim(`Follow it with: syn execution show ${data.execution_id}`);
+  },
+};
+
 export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions");
-executionGroup.command(listCommand).command(showCommand);
+executionGroup.command(listCommand).command(showCommand).command(forkCommand);

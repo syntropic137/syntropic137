@@ -64,6 +64,7 @@ from syn_domain.contexts.orchestration.domain import (
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
+    ForkExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -100,6 +101,9 @@ from syn_domain.contexts.orchestration.domain.commands import (
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
+    ExecutionForkedEvent,
 )
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
@@ -208,9 +212,11 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionForkedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
+    "ForkExecutionCommand",
     "ForkStartProcessManager",
     "ForkStartRecord",
     "ForkStarter",

@@ -1,0 +1,148 @@
+---
+title: Resuming Failed Executions
+description: Fork a failed execution so it restarts at the phase that stopped it, instead of paying for the phases that already succeeded
+---
+
+## The problem
+
+A six-phase workflow dies in phase five. Phases one to four succeeded, cost real
+money, and produced artifacts you still want. Re-running the workflow from the
+start throws all of that away and pays for it twice.
+
+**Forking** an execution creates a new run that inherits the phases that
+completed and restarts at the one that did not. A run that dies in phase five of
+six costs you phase five onwards, not all six.
+
+```bash
+syn execution fork exec-43f430469266
+```
+
+```
+Forked exec-43f430469266
+  New execution: exec-9a1c77e04b12
+  Resumes at:    implement
+  Not re-run:    premise, plan
+Follow it with: syn execution show exec-9a1c77e04b12
+```
+
+## Fork, not resume
+
+Syntropic137 has two different things that sound the same, and the distinction
+matters when you are reaching for one of them:
+
+| You want | Command | What happens |
+| --- | --- | --- |
+| Continue a **paused** run | `syn control resume <id>` | The same execution carries on |
+| Pick up a **failed** run | `syn execution fork <id>` | A **new** execution inherits the completed phases |
+
+A fork is a new execution with its own id. The parent stays exactly as it was -
+still failed, still showing what it did. Nothing is rewritten, so the record of
+what went wrong survives.
+
+## What the child inherits
+
+The fork inherits the **contiguous** run of phases that completed, in order,
+stopping at the first one that did not:
+
+- those phases are never re-run
+- their artifacts are handed to the resumed phase, so it reads its
+  predecessors' output exactly as it would have
+- the resumed phase restarts **from its beginning** - there is no mid-phase
+  resume
+
+A phase that completed *after* a gap is deliberately not inherited. Its output
+was built on a predecessor the fork is about to produce again, so carrying it
+forward would hand the child work resting on something that no longer holds.
+
+## What the child runs
+
+The child runs **what the parent ran**, not the workflow as it stands today.
+The full phase configuration - provider, model, prompt, timeouts - is pinned on
+the execution when it starts, so editing the workflow between the original run
+and the fork cannot silently change what the fork does.
+
+<Callout type="info">
+  If an inherited phase is missing from that pinned configuration, the fork is
+  refused rather than started on a guess.
+</Callout>
+
+## Two decisions you have to make out loud
+
+Both default to refusing, because both exist to make you say something
+deliberately. Neither implies the other.
+
+### A cancelled execution
+
+A cancel is an instruction to stop - possibly because the run targeted the wrong
+repository, or its task held a secret. Forking past that needs a fresh decision:
+
+```bash
+syn execution fork exec-1234 --override-cancellation
+```
+
+### A phase that may already have published something
+
+If the phase being restarted had started in the parent, it may already have
+pushed a branch, opened a pull request or published a package. Re-running it can
+repeat that. Nothing in the record can prove it did not, so you acknowledge it:
+
+```bash
+syn execution fork exec-1234 --acknowledge-external-effects
+```
+
+## What cannot be forked
+
+| Status | Forkable |
+| --- | --- |
+| `failed` | Yes |
+| `interrupted` | Yes |
+| `cancelled` | Only with `--override-cancellation` |
+| `completed` | No - nothing is left to run |
+| `running`, `paused` | No - forking would put two runs on one piece of work |
+
+A parent can be forked **once**. Asking twice is refused and names the fork it
+already has, so a retried request cannot quietly create a second child.
+
+## Over the API
+
+```bash
+curl -X POST "$SYN_API_URL/api/v1/executions/exec-1234/fork" \
+  -u "admin:$SYN_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  -d '{"override_cancellation": false, "acknowledge_external_effects": false}'
+```
+
+```json
+{
+  "parent_execution_id": "exec-1234",
+  "execution_id": "exec-9a1c77e04b12",
+  "resume_phase_id": "implement",
+  "inherited_phase_ids": ["premise", "plan"],
+  "cancellation_overridden": false,
+  "external_effects_acknowledged": false
+}
+```
+
+A refusal comes back as **409** with the reason, because it is a conflict with
+what the parent recorded rather than a malformed request. An execution that does
+not exist is **404**.
+
+## Forking for comparison
+
+Resuming a failed run is what forking pays for today, but it is the general
+primitive: a fork is a new execution that starts from the same baseline. The
+same mechanism is what lets you take one run and vary something deliberately -
+a different model, a changed phase - to compare the results.
+
+<Callout type="warn">
+  The commit each repository was at **is** recorded on an execution, but the
+  workspace still clones the default branch rather than checking out that commit.
+  Until that lands, two runs cannot be asserted to have seen the same code, so
+  treat comparisons across forks as indicative rather than controlled.
+</Callout>
+
+## See also
+
+- [Observability](/docs/guide/observability) - watching the forked run
+- [Core Concepts](/docs/guide/core-concepts) - executions, phases and artifacts
+- [`syn execution`](/docs/cli/execution) - the full command reference

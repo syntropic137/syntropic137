@@ -5,6 +5,29 @@ description: "List and inspect workflow executions"
 
 List and inspect workflow executions
 
+## `syn execution fork`
+
+Fork a failed execution so it resumes from its last completed phase
+
+```bash
+syn execution fork <execution-id> [options]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | Execution to fork |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--override-cancellation` | `boolean` | --- | Fork a CANCELLED execution (a cancel is an instruction to stop) |
+| `--acknowledge-external-effects` | `boolean` | --- | Accept that re-running the resumed phase may repeat a push or publish |
+
+---
+
 ## `syn execution list`
 
 List all workflow executions
