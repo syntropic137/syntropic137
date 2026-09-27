@@ -12,11 +12,15 @@
 
 ## Decisions (the spec)
 
-1. **Full rename, not surface-only.** The owner chose option (B): rename the domain, the events, the API and the CLI. Rationale, in their words: naming alignment is a maintainability property, and `fork` must be reserved as a canonical word in the bounded context's ubiquitous language.
-2. **`resume`** applies to an execution that did not finish: `failed`, `interrupted`, or `cancelled` (the last still requiring an explicit override).
-3. **`fork`** applies to any execution that has completed at least one phase - including a `completed` one - and copies it from a chosen completed phase. **Not built in this plan.** Task 9 files the issue.
-4. **The incumbent must move.** `ExecutionResumed` currently means un-pausing a paused execution. It becomes `ExecutionUnpaused`, freeing `resume`.
-5. **A ubiquitous language doc per bounded context is expected and missing.** `docs/architecture/es-glossary.md` covers ESP *patterns*; the ESP submodule has its own Axon-aligned vocabulary. Neither defines this system's domain terms. Task 1 creates the orchestration one; Task 2 explains the convention in AGENTS.md.
+Answered by the owner on 2026-09-27.
+
+1. **Full rename.** The domain, the events, the API and the CLI. Naming alignment is a maintainability property, and `fork` must be reserved as a canonical word in the bounded context's vocabulary.
+2. **`resume`** applies to an execution that did not finish: `failed`, `interrupted`, or `cancelled` (the last with an explicit override). It is the glossary term and the domain name.
+3. **`fork`** applies to any execution with at least one completed phase - including a `completed` one - copied from a CHOSEN completed phase. **Not built here.** Task 10 files it.
+4. **Pause is deleted, not renamed.** There is no working pause to preserve. Measured: zero `ExecutionPaused` events of 26,917 in production, and nothing in the execution path ever reads `ExecutionStatus.PAUSED` - the processor observes `CANCELLED` (WorkflowExecutionProcessor.py:374) and nothing else, so a paused execution keeps running. Cancel is the working mechanism and is sufficient. An earlier draft invented `unpause` to dodge a name collision with a feature that does not function; deleting is simpler and frees `resume` outright.
+5. **Every bounded context owns a ubiquitous language file**, and a QA check enforces it. This is standard DDD practice and was missing entirely: `es-glossary.md` covers ESP patterns, the ESP submodule has its own, and none of the five contexts had a vocabulary.
+6. **File naming standard: `<bounded-context>-ubiquitous-language.md`**, context name FIRST. So a search returns files whose names say which context they belong to, rather than five identically-named files. Location: `docs/architecture/`.
+7. **ESP must state the convention**, since this is an ESP-based system and the expectation is inherited from it. Task 10 opens the submodule note and an issue for a platform-level validator.
 
 ## Global Constraints
 
@@ -43,28 +47,29 @@ Five conditions the spec implies that no task's happy path exercises. Each has a
 
 ---
 
-### Task 1: The orchestration bounded context's ubiquitous language
+### Task 1: The validator - every bounded context owns a vocabulary
 
-The definitions are the spec for every later task, so they land first and get reviewed on their own.
+The QA check comes first, so the four missing vocabularies fail loudly rather than being forgotten.
 
 **Files:**
-- Create: `docs/architecture/orchestration-ubiquitous-language.md`
-- Modify: `docs/architecture/README.md` (link it)
-- Modify: `docs/architecture/es-glossary.md` (a pointer line: ESP patterns here, domain terms there)
-- Test: `ci/fitness/code_quality/test_ubiquitous_language_exists.py`
+- Create: `ci/fitness/code_quality/test_ubiquitous_language.py`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: the canonical spelling of every term later tasks rename to - `Resume`, `Fork`, `Inherited Phase`, `Resume Phase`, `Pin`, `Admission`, `Unpause`. Later tasks must match these exactly.
+- Produces: the file-naming standard `<bounded-context>-ubiquitous-language.md` under `docs/architecture/`, enforced. Task 2 satisfies it.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-"""The orchestration context must carry its own ubiquitous language.
+"""Every bounded context owns a ubiquitous language file.
 
-A bounded context whose vocabulary is not written down drifts: `fork` and
-`resume` were used interchangeably for one operation until 2026-09-27, and the
-word `fork` was spent on it. This test is why that cannot silently recur.
+Standard DDD practice, and inherited from the event-sourcing platform this
+system is built on: a bounded context is DEFINED by the language spoken inside
+it, so that language is an artifact and not folklore.
+
+Naming standard: `<bounded-context>-ubiquitous-language.md`, context name first,
+so a search returns files whose names say which context they belong to instead
+of five identically-named ones.
 """
 
 from __future__ import annotations
@@ -75,494 +80,369 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_DOC = Path("docs/architecture/orchestration-ubiquitous-language.md")
+_CONTEXTS = Path("packages/syn-domain/src/syn_domain/contexts")
+_DOCS = Path("docs/architecture")
 
-#: Every term the orchestration context commits to. A term added to the domain
-#: without a definition here is the drift this test exists to catch.
-_REQUIRED_TERMS = (
-    "## Execution",
-    "## Phase",
-    "## Workflow",
-    "## Resume",
-    "## Fork",
-    "## Inherited Phase",
-    "## Resume Phase",
-    "## Pin",
-    "## Admission",
-)
+#: Not a bounded context: shared value objects with no domain of their own.
+_NOT_A_CONTEXT = {"_shared"}
 
 
-def test_the_doc_exists() -> None:
-    assert _DOC.is_file(), f"{_DOC} is the canonical vocabulary and is missing"
-
-
-@pytest.mark.parametrize("term", _REQUIRED_TERMS)
-def test_every_committed_term_is_defined(term: str) -> None:
-    assert term in _DOC.read_text(), f"{term} is used in the domain and undefined in {_DOC}"
-
-
-def test_fork_is_reserved_and_says_so() -> None:
-    """`fork` names a capability that does not exist yet.
-
-    Until it does, the definition must say so, or a reader will assume the
-    behaviour is available and the word will be re-spent on resume.
-    """
-    body = _DOC.read_text()
-    fork_section = body[body.index("## Fork") :]
-    assert "not implemented" in fork_section.lower() or "not yet" in fork_section.lower(), (
-        "the Fork definition must state that the capability is reserved, not shipped"
+def _bounded_contexts() -> list[str]:
+    return sorted(
+        d.name
+        for d in _CONTEXTS.iterdir()
+        if d.is_dir() and not d.name.startswith("__") and d.name not in _NOT_A_CONTEXT
     )
+
+
+def test_there_are_contexts_to_check() -> None:
+    """A discovery bug that finds nothing would make every test below vacuous."""
+    assert len(_bounded_contexts()) >= 5, _bounded_contexts()
+
+
+@pytest.mark.parametrize("context", _bounded_contexts())
+def test_every_context_has_a_vocabulary(context: str) -> None:
+    doc = _DOCS / f"{context}-ubiquitous-language.md"
+    assert doc.is_file(), (
+        f"bounded context {context!r} has no ubiquitous language file. "
+        f"Expected {doc}. See AGENTS.md, 'Ubiquitous Language'."
+    )
+
+
+@pytest.mark.parametrize("context", _bounded_contexts())
+def test_every_vocabulary_names_its_context(context: str) -> None:
+    """A file that does not say which context it speaks for invites drift."""
+    doc = _DOCS / f"{context}-ubiquitous-language.md"
+    if not doc.is_file():
+        pytest.skip("covered by test_every_context_has_a_vocabulary")
+    head = doc.read_text()[:400]
+    assert context in head, f"{doc} must name {context!r} near the top"
+
+
+def test_no_vocabulary_is_orphaned() -> None:
+    """A vocabulary for a context that no longer exists is stale documentation."""
+    contexts = set(_bounded_contexts())
+    orphans = [
+        f.name
+        for f in _DOCS.glob("*-ubiquitous-language.md")
+        if f.name.removesuffix("-ubiquitous-language.md") not in contexts
+    ]
+    assert not orphans, f"vocabularies with no bounded context: {orphans}"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest ci/fitness/code_quality/test_ubiquitous_language_exists.py -v`
-Expected: FAIL, `docs/architecture/orchestration-ubiquitous-language.md is the canonical vocabulary and is missing`
+Run: `uv run pytest ci/fitness/code_quality/test_ubiquitous_language.py -v`
+Expected: FAIL for all five contexts, each naming the file it wants.
 
-- [ ] **Step 3: Write the document**
+- [ ] **Step 3: Commit the validator red**
 
-Create `docs/architecture/orchestration-ubiquitous-language.md`:
+The gate is the deliverable; it is committed before the documents so the gap is on record.
+
+```bash
+git add ci/fitness/code_quality/test_ubiquitous_language.py
+git commit -m "test(fitness): require a ubiquitous language file per bounded context
+
+Standard DDD practice, inherited from the ESP, and absent for all five
+contexts. Naming standard is <bounded-context>-ubiquitous-language.md so a
+search says which context each file speaks for. Red until Task 2."
+```
+
+---
+
+### Task 2: Write the five vocabularies
+
+**Files:**
+- Create: `docs/architecture/orchestration-ubiquitous-language.md` (full)
+- Create: `docs/architecture/agent_sessions-ubiquitous-language.md`
+- Create: `docs/architecture/github-ubiquitous-language.md`
+- Create: `docs/architecture/artifacts-ubiquitous-language.md`
+- Create: `docs/architecture/organization-ubiquitous-language.md`
+- Modify: `docs/architecture/README.md`, `docs/architecture/es-glossary.md`
+
+**Interfaces:**
+- Consumes: the naming standard from Task 1.
+- Produces: the canonical spellings later tasks rename to - `Resume`, `Fork` (reserved), `Inherited Phase`, `Resume Phase`, `Pin`, `Admission`.
+
+**Note on the four non-orchestration files.** Write them from the code that exists, not from imagination: read each context's `domain/` aggregates and events and define the terms actually used. Where a term's meaning is genuinely unclear from the code, write the entry with an explicit `**Unclear:**` line naming the question rather than inventing a definition. A vocabulary that guesses is worse than one that admits a gap.
+
+- [ ] **Step 1: Write the orchestration vocabulary**
+
+Create `docs/architecture/orchestration-ubiquitous-language.md` with the full content given in the appendix at the end of this plan ("Appendix A: orchestration vocabulary"). It defines Execution, Phase, Workflow, Resume, Fork (reserved), Inherited Phase, Resume Phase, Pin, Admission, and a "Words we do not use" section covering Branch, Retry and process-fork.
+
+- [ ] **Step 2: Write the other four, from their code**
+
+For each of `agent_sessions`, `github`, `artifacts`, `organization`:
+
+Run first: `ls packages/syn-domain/src/syn_domain/contexts/<ctx>/domain/` and read the aggregates and events. Then write the file with this shape:
 
 ```markdown
-# Ubiquitous Language: Orchestration
+# Ubiquitous Language: <context>
 
 ## Purpose
 
-The vocabulary of the `orchestration` bounded context. These words have exactly
+The vocabulary of the `<context>` bounded context. These words have exactly
 these meanings in code, in the API, in the CLI and in conversation. Where a term
 here disagrees with any other document, this one is canonical.
 
-This is the DOMAIN vocabulary. For event-sourcing patterns - Event, Aggregate,
-Projection, Processor - see `es-glossary.md`. For the event store's own
-vocabulary see `lib/event-sourcing-platform/docs-site/docs/event-store/concepts/ubiquitous-language.md`.
-A term belongs here when it names something this system's users talk about, and
-there when it names a mechanism the platform provides.
+For event-sourcing patterns - Event, Aggregate, Projection - see
+`es-glossary.md`. A term belongs here when it names something this context's
+users talk about, and there when it names a mechanism the platform provides.
 
-Every bounded context gets one of these. See AGENTS.md, "Ubiquitous Language".
+Every bounded context has one of these. See AGENTS.md, "Ubiquitous Language".
 
 ---
 
-## Execution
+## <Term>
 
-One run of one Workflow, identified by an `exec-` id, recorded as an event
-stream. An Execution is never rewritten: its history is the record of what
-happened, including how it ended.
-
-Terminal statuses are `completed`, `failed`, `cancelled` and `interrupted`.
-`running` and `paused` are live; `not_started` has produced nothing.
-
-## Phase
-
-One step of a Workflow inside an Execution, with its own agent, model, prompt
-and timeout. Phases run in a total order given by `order`, which
-`WorkflowDefinition.from_yaml` guarantees is unique per Workflow.
-
-A Phase is `completed` only when the Execution recorded it so. A Phase that
-started and did not complete has no partial credit: there is no mid-phase
-resume.
-
-## Workflow
-
-The definition a run is made from - its Phases and their configuration.
-Mutable: installing a Workflow replaces it. An Execution therefore PINS what it
-needs rather than reading the Workflow later.
-
-## Resume
-
-Continuing an Execution that DID NOT FINISH, by starting a new Execution that
-inherits the Phases already completed and restarts at the first one that did
-not.
-
-Applies to `failed` and `interrupted` on request, and to `cancelled` only with
-an explicit override - a cancel was a decision, and resuming past it needs a
-fresh one.
-
-The new Execution has its own id. The original stays exactly as it was,
-including its terminal status, and records that it was resumed. One resume per
-Execution.
-
-Resume is NOT un-pausing. See Unpause.
-
-## Fork
-
-Copying any Execution that has completed at least one Phase - INCLUDING a
-`completed` one - into a new Execution that starts from a CHOSEN completed
-Phase rather than from the first unfinished one.
-
-Where Resume derives its starting point, a Fork is given one. Where Resume
-carries the original configuration unchanged, a Fork is the operation that
-exists in order to vary something - a model, a prompt - against the same
-baseline.
-
-**Not implemented.** The word is reserved so that the capability can be built
-without renaming anything. Tracked in the Fork issue; until it ships, an
-operation that continues unfinished work is a Resume and is called one.
-
-## Inherited Phase
-
-A Phase a resumed Execution does not re-run, because the Execution it came from
-completed it. Carries the artifact ids that Phase produced, and the id of the
-Execution that actually produced them - which may be an ancestor further up a
-chain, not the immediate predecessor.
-
-## Resume Phase
-
-The Phase a resumed Execution starts at: the first Phase, in order, that the
-original did not complete. Restarted from its beginning.
-
-A Resume Phase that had already STARTED in the original may have pushed or
-published something, and re-running it repeats that; resuming such an Execution
-requires the operator to acknowledge it.
-
-## Pin
-
-A fact an Execution records about itself at start so that it can be reproduced
-without consulting anything mutable: the full runnable configuration of every
-Phase, and the commit each repository was at.
-
-A Pin is why a resumed Execution runs what the original ran even if the
-Workflow has been edited since.
-
-## Admission
-
-The decision that an operation may proceed, recorded before any work begins.
-Resuming an Execution is admitted or refused against the original's recorded
-state; the new Execution is then created and started by a background processor.
-
-An admitted resume is not a started one. The two are separate facts and a
-successful API response reports the first.
-
-## Unpause
-
-Returning a `paused` Execution to `running`. The SAME Execution continues - no
-new id, nothing inherited.
-
-Called Unpause, not Resume, because Resume means the other thing. Before
-2026-09-27 this operation was called resume, which is the collision this
-vocabulary exists to prevent.
-
-## Words we do not use
-
-- **Branch.** Reserved; no meaning assigned. If a chat-style "branch from here"
-  operation is ever wanted, this is where it gets defined.
-- **Retry.** Means a Phase attempt within one Execution
-  (`PhaseRetryScheduled`), never a new Execution.
-- **Fork, in the process sense.** `GRPC_ENABLE_FORK_SUPPORT` and
-  `os.fork` are unrelated to this vocabulary. Renames must not touch them.
+<What it is, in the context's own language. What it is NOT, where a
+neighbouring term could be confused with it.>
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+Minimum coverage per context, from the aggregates that exist:
+- `agent_sessions`: Session, Operation, Token Usage, Subagent
+- `github`: Installation, Trigger Rule, Normalized Event, Dedup Key, Check Run
+- `artifacts`: Artifact, Phase Output File, Primary Deliverable
+- `organization`: Organization, System, Repo
 
-Run: `uv run pytest ci/fitness/code_quality/test_ubiquitous_language_exists.py -v`
-Expected: PASS, 11 tests
+- [ ] **Step 3: Run test to verify it passes**
 
-- [ ] **Step 5: Link it from both neighbours**
+Run: `uv run pytest ci/fitness/code_quality/test_ubiquitous_language.py -v`
+Expected: PASS for all five contexts.
 
-In `docs/architecture/README.md`, add to the document list:
+- [ ] **Step 4: Link them from both neighbours**
 
-```markdown
-- [Ubiquitous Language: Orchestration](orchestration-ubiquitous-language.md) - the domain vocabulary of the orchestration bounded context. Canonical for Execution, Phase, Resume, Fork.
-```
-
-In `docs/architecture/es-glossary.md`, directly under `## Purpose`, add:
-
-```markdown
-This glossary covers event-sourcing PATTERNS. For the domain vocabulary of a
-bounded context - what an Execution or a Resume is - see that context's
-ubiquitous language, e.g. `orchestration-ubiquitous-language.md`.
-```
-
-- [ ] **Step 6: Run the docs gate**
-
-Run: `just check-docs-content`
-Expected: typography check passes (no em dashes)
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add docs/architecture/orchestration-ubiquitous-language.md \
-        docs/architecture/README.md docs/architecture/es-glossary.md \
-        ci/fitness/code_quality/test_ubiquitous_language_exists.py
-git commit -m "docs(architecture): write the orchestration context's ubiquitous language
-
-The vocabulary was never written down, and it cost the word `fork`: one
-operation was called both fork and resume until the two meanings were
-separated. This is the canonical source, with a test that fails when a
-committed term loses its definition."
-```
-
----
-
-### Task 2: Explain the convention in AGENTS.md
-
-**Files:**
-- Modify: `AGENTS.md` (new subsection after `### Bounded Contexts & Aggregates (ADR-020)`, which ends at line 249)
-- Test: `ci/fitness/code_quality/test_ubiquitous_language_exists.py` (extend)
-
-**Interfaces:**
-- Consumes: the file path created in Task 1.
-- Produces: nothing code depends on.
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `ci/fitness/code_quality/test_ubiquitous_language_exists.py`:
-
-```python
-def test_agents_md_explains_the_convention() -> None:
-    """A convention no one is told about is not a convention.
-
-    AGENTS.md is the primary context every agent and contributor reads; the
-    ubiquitous language is worthless if nothing points at it from there.
-    """
-    agents = Path("AGENTS.md").read_text()
-    assert "Ubiquitous Language" in agents, "AGENTS.md must explain the convention"
-    assert "orchestration-ubiquitous-language.md" in agents, (
-        "AGENTS.md must link the orchestration vocabulary"
-    )
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `uv run pytest ci/fitness/code_quality/test_ubiquitous_language_exists.py::test_agents_md_explains_the_convention -v`
-Expected: FAIL, `AGENTS.md must explain the convention`
-
-- [ ] **Step 3: Add the section to AGENTS.md**
-
-Insert after the Bounded Contexts table, before `### TODO/FIXME Standard`:
+In `docs/architecture/README.md`, add a section:
 
 ```markdown
 ### Ubiquitous Language
 
-Every bounded context has a written vocabulary, and it is canonical. This is
-inherited from the event-sourcing platform this system is built on: a bounded
-context is defined by the language spoken inside it, so that language is an
-artifact, not folklore.
+One per bounded context, canonical for that context's domain terms:
 
-| Scope | Document | Covers |
-|---|---|---|
-| ESP patterns | `docs/architecture/es-glossary.md` | Event, Aggregate, Projection, Processor, Bounded Context |
-| Event store | `lib/event-sourcing-platform/docs-site/docs/event-store/concepts/ubiquitous-language.md` | the store's own Axon-aligned terms |
-| `orchestration` | `docs/architecture/orchestration-ubiquitous-language.md` | Execution, Phase, Workflow, Resume, Fork, Pin, Admission |
+- [orchestration](orchestration-ubiquitous-language.md) - Execution, Phase, Resume, Fork, Pin
+- [agent_sessions](agent_sessions-ubiquitous-language.md) - Session, Operation, Subagent
+- [github](github-ubiquitous-language.md) - Installation, Trigger Rule, Dedup Key
+- [artifacts](artifacts-ubiquitous-language.md) - Artifact, Phase Output File
+- [organization](organization-ubiquitous-language.md) - Organization, System, Repo
 
-**Rules:**
-
-- A domain term used in code, the API or the CLI MUST be defined in its
-  context's vocabulary. `ci/fitness/code_quality/test_ubiquitous_language_exists.py`
-  fails when a committed term loses its definition.
-- One word, one meaning, per context. `resume` means continuing an Execution
-  that did not finish; un-pausing is `unpause`. The two were the same word
-  until 2026-09-27 and the ambiguity reached the CLI.
-- A word RESERVED for unbuilt work is still defined, and its definition says it
-  is unbuilt. `Fork` is reserved this way.
-- A context without a vocabulary file needs one written before its terms
-  spread. Four of the five contexts still lack theirs.
+`es-glossary.md` covers event-sourcing patterns, not domain terms.
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+In `es-glossary.md`, under `## Purpose`:
 
-Run: `uv run pytest ci/fitness/code_quality/test_ubiquitous_language_exists.py -v`
-Expected: PASS
+```markdown
+This glossary covers event-sourcing PATTERNS. For the domain vocabulary of a
+bounded context - what an Execution or a Resume is - see that context's file,
+named `<bounded-context>-ubiquitous-language.md` in this directory.
+```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the docs gate and commit**
 
 ```bash
-git add AGENTS.md ci/fitness/code_quality/test_ubiquitous_language_exists.py
-git commit -m "docs(agents): explain the ubiquitous language convention
+just check-docs-content
+git add docs/architecture/
+git commit -m "docs(architecture): a ubiquitous language for all five bounded contexts
 
-Inherited from the ESP: a bounded context is defined by the language spoken
-inside it, so the language is an artifact. Names the three scopes, the rules,
-and that four contexts still lack a vocabulary file."
+None existed. The orchestration one is written in full - it is the spec for the
+fork-to-resume rename - and the other four define the terms their code already
+uses, with explicit Unclear markers where the code did not settle a meaning
+rather than inventing one."
 ```
 
 ---
 
-### Task 3: Free the name - the incumbent becomes Unpause
-
-Runs before Task 4 so that `ExecutionResumed` is unoccupied when the resume concept takes it.
+### Task 3: Explain the convention in AGENTS.md
 
 **Files:**
-- Rename: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/ExecutionResumedEvent.py` to `ExecutionUnpausedEvent.py`
-- Modify: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/__init__.py`
-- Modify: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py` (the `resume_execution` handler and its `@event_sourcing_handler("ExecutionResumed")`)
-- Modify: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/commands.py` (`ResumeExecutionCommand` to `UnpauseExecutionCommand`)
-- Modify: `packages/syn-adapters/src/syn_adapters/control/commands.py` (`ResumeExecution`)
-- Modify: `apps/syn-api/src/syn_api/routes/executions/control.py` (`resume` service fn, `/resume` route)
-- Test: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/test_unpause.py`
+- Modify: `AGENTS.md` (after `### Bounded Contexts & Aggregates (ADR-020)`, which ends at line 249)
+- Modify: `ci/fitness/code_quality/test_ubiquitous_language.py` (extend)
+
+- [ ] **Step 1: Write the failing test**
+
+Append:
+
+```python
+def test_agents_md_explains_the_convention() -> None:
+    """A convention nobody is told about is not a convention.
+
+    AGENTS.md is the primary context every agent and contributor reads.
+    """
+    agents = Path("AGENTS.md").read_text()
+    assert "Ubiquitous Language" in agents
+    assert "-ubiquitous-language.md" in agents, "AGENTS.md must state the naming standard"
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `uv run pytest ci/fitness/code_quality/test_ubiquitous_language.py::test_agents_md_explains_the_convention -v`
+Expected: FAIL
+
+- [ ] **Step 3: Add the section**
+
+```markdown
+### Ubiquitous Language
+
+Every bounded context owns a written vocabulary, and it is canonical. This is
+inherited from the event-sourcing platform this system is built on: a bounded
+context is defined by the language spoken inside it, so that language is an
+artifact, not folklore.
+
+**File naming standard:** `docs/architecture/<bounded-context>-ubiquitous-language.md`.
+Context name FIRST, so a search returns files whose names say which context they
+speak for rather than five identically-named ones.
+
+| Scope | Document | Covers |
+|---|---|---|
+| ESP patterns | `docs/architecture/es-glossary.md` | Event, Aggregate, Projection, Processor |
+| Event store | `lib/event-sourcing-platform/docs-site/docs/event-store/concepts/ubiquitous-language.md` | the store's own Axon-aligned terms |
+| Each context | `docs/architecture/<context>-ubiquitous-language.md` | that context's domain terms |
+
+**Rules:**
+
+- A domain term used in code, the API or the CLI MUST be defined in its
+  context's vocabulary. `ci/fitness/code_quality/test_ubiquitous_language.py`
+  fails when a context has no file, when a file names no context, or when a
+  file outlives its context.
+- One word, one meaning, per context. `resume` means continuing an execution
+  that did not finish; there is no other resume.
+- A word RESERVED for unbuilt work is still defined, and says it is unbuilt.
+  `Fork` is reserved this way.
+- Where the code does not settle a term's meaning, the entry says
+  `**Unclear:**` and names the question. A vocabulary that guesses is worse
+  than one that admits a gap.
+```
+
+- [ ] **Step 4: Run to verify it passes, then commit**
+
+```bash
+uv run pytest ci/fitness/code_quality/test_ubiquitous_language.py -v
+git add AGENTS.md ci/fitness/code_quality/test_ubiquitous_language.py
+git commit -m "docs(agents): the ubiquitous language convention and its naming standard"
+```
+
+---
+
+### Task 4: Delete the pause noise
+
+Pause is write-only: it records an event and nothing in the execution path ever observes `ExecutionStatus.PAUSED`, so a paused execution keeps running. Cancel is the working mechanism. Deleting it frees the word `resume` outright.
+
+**Files:**
+- Delete: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/ExecutionPausedEvent.py`
+- Delete: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/ExecutionResumedEvent.py`
+- Modify: `.../domain/events/__init__.py`, `.../aggregate_execution/commands.py` (drop `PauseExecutionCommand`, `ResumeExecutionCommand`), `.../aggregate_execution/WorkflowExecutionAggregate.py` (drop `pause_execution`, `resume_execution`, their apply handlers, and `ExecutionStatus.PAUSED` from `accepts_control`)
+- Modify: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/value_objects.py` (drop `PAUSED` from `ExecutionStatus`)
+- Modify: `packages/syn-adapters/src/syn_adapters/control/commands.py`, `.../control/controller.py`, `.../control/__init__.py`, `.../projections/manager_event_map.py`
+- Modify: `apps/syn-api/src/syn_api/routes/executions/control.py` (drop `pause`, `resume`, both routes)
+- Modify: `apps/syn-cli-node/src/commands/control.ts` (drop `pauseCommand`, `resumeCommand`)
+- Test: `.../aggregate_execution/test_pause_is_gone.py`
 
 **Interfaces:**
-- Consumes: the spelling `Unpause` from Task 1.
-- Produces: `UnpauseExecutionCommand`, `ExecutionUnpausedEvent` (event_type `"ExecutionUnpaused"`), and the free name `ExecutionResumed` for Task 4.
+- Consumes: nothing.
+- Produces: the free names `resume_execution`, `ResumeExecutionCommand`, `ExecutionResumed`, `/executions/{id}/resume` for Task 5.
 
-- [ ] **Step 1: Find every occurrence before changing anything**
+- [ ] **Step 1: Confirm the premise before deleting anything**
 
-Run:
+Run and record:
 ```bash
-grep -rIn 'ExecutionResumed\|ResumeExecution\|resume_execution' \
-  --include='*.py' --include='*.ts' packages apps | grep -v generated
+grep -rIn 'ExecutionStatus.PAUSED' --include='*.py' packages apps | grep -v test
 ```
-Record the list. Every hit is either renamed in this task or belongs to Task 4's concept and does not exist yet.
+Expected: three hits, all inside `WorkflowExecutionAggregate.py` (the `accepts_control` check and the apply handler). If a hit appears in the execution path, **stop**: pause does something and this task's premise is wrong.
 
 - [ ] **Step 2: Write the failing test**
 
-Create `test_unpause.py`:
-
 ```python
-"""Un-pausing is Unpause, not Resume (ubiquitous language, 2026-09-27).
+"""Pause is deleted. Cancel is the mechanism that works.
 
-`resume` now means continuing an Execution that did not finish. This test pins
-the other operation to its own name so the two cannot collapse again.
+Pause recorded an event and queued a signal that nothing consumed: the
+processor observes CANCELLED and never PAUSED, so a paused execution kept
+running. Zero ExecutionPaused events existed in production across 26,917.
+Keeping it would have cost the word `resume`, which now names the operation
+that continues an execution which did not finish.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
-    PauseExecutionCommand,
-    UnpauseExecutionCommand,
-)
+from syn_domain.contexts.orchestration.domain.aggregate_execution import commands
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
-)
-from syn_domain.contexts.orchestration.domain.events.ExecutionUnpausedEvent import (
-    ExecutionUnpausedEvent,
 )
 
 pytestmark = pytest.mark.unit
 
-EXEC = "exec-unpause"
 
-
-def test_the_event_type_is_unpaused() -> None:
-    assert ExecutionUnpausedEvent.event_type == "ExecutionUnpaused"
-
-
-def test_unpausing_returns_the_same_execution_to_running(started_paused) -> None:  # noqa: ANN001
-    """The SAME execution continues: no new id, nothing inherited."""
-    aggregate = started_paused
-    aggregate.unpause_execution(UnpauseExecutionCommand(execution_id=EXEC, phase_id="plan"))
-
-    assert aggregate.status is ExecutionStatus.RUNNING
-    assert aggregate.id == EXEC, "unpausing must not mint a new execution id"
-
-
-def test_the_old_name_is_gone() -> None:
-    """A lingering alias is how one word regains two meanings."""
-    import syn_domain.contexts.orchestration.domain.aggregate_execution.commands as commands
-
-    assert not hasattr(commands, "ResumeExecutionCommand"), (
-        "ResumeExecutionCommand must not survive: `resume` is the other concept now"
+def test_the_status_is_gone() -> None:
+    assert not hasattr(ExecutionStatus, "PAUSED"), (
+        "a status nothing observes is a status that lies about the run"
     )
+
+
+@pytest.mark.parametrize("name", ["PauseExecutionCommand", "ResumeExecutionCommand"])
+def test_the_pause_commands_are_gone(name: str) -> None:
+    """`ResumeExecutionCommand` is reintroduced in the next task with the OTHER
+    meaning; it must not survive this one with the old one."""
+    assert not hasattr(commands, name), f"{name} must not survive the pause deletion"
+
+
+def test_cancel_survives() -> None:
+    assert hasattr(commands, "CancelExecutionCommand")
+    assert ExecutionStatus.CANCELLED.value == "cancelled"
 ```
 
-Add a `started_paused` fixture in the same file that starts an execution, starts `plan`, and pauses it via `PauseExecutionCommand`.
+- [ ] **Step 3: Run to verify it fails**
 
-- [ ] **Step 3: Run test to verify it fails**
+Run: `uv run pytest .../test_pause_is_gone.py -v`
+Expected: FAIL, `a status nothing observes is a status that lies about the run`
 
-Run: `uv run pytest packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/test_unpause.py -v`
-Expected: FAIL, `ModuleNotFoundError: ...ExecutionUnpausedEvent`
-
-- [ ] **Step 4: Rename the event**
+- [ ] **Step 4: Delete, following pyright out**
 
 ```bash
-git mv packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/ExecutionResumedEvent.py \
-       packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/ExecutionUnpausedEvent.py
-```
-
-In the moved file, rename the class to `ExecutionUnpausedEvent`, set `event_type` to `"ExecutionUnpaused"`, rename `resumed_at` to `unpaused_at`, and replace the docstring with one that says what it is and why it was renamed:
-
-```python
-"""ExecutionUnpaused event - a paused execution returned to running.
-
-Called Unpause and not Resume because `resume` names the other operation:
-continuing an execution that did not finish, by starting a new one. The two
-shared the word until 2026-09-27 and the ambiguity reached the CLI. See
-`docs/architecture/orchestration-ubiquitous-language.md`.
-"""
-```
-
-- [ ] **Step 5: Rename the command and the handler**
-
-In `commands.py`: `ResumeExecutionCommand` to `UnpauseExecutionCommand`, docstring updated the same way.
-
-In `WorkflowExecutionAggregate.py`: the command handler `resume_execution` to `unpause_execution`, its `@command_handler("ResumeExecutionCommand")` to `"UnpauseExecutionCommand"`, and the apply handler's `@event_sourcing_handler("ExecutionResumed")` to `"ExecutionUnpaused"` with `on_execution_resumed` to `on_execution_unpaused`.
-
-- [ ] **Step 6: Run test to verify it passes**
-
-Run: `uv run pytest packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/test_unpause.py -v`
-Expected: PASS
-
-- [ ] **Step 7: Follow the breakage out to the adapters and the API**
-
-Run: `uv run pyright` and fix every reported reference: `syn_adapters/control/commands.py` (`ResumeExecution` to `UnpauseExecution`), `syn_adapters/control/controller.py`, `apps/syn-api/src/syn_api/routes/executions/control.py`.
-
-In `control.py` the service function `resume` becomes `unpause`, and the route becomes:
-
-```python
-@router.post("/executions/{execution_id}/unpause", response_model=ControlResponse)
-async def unpause_execution_endpoint(execution_id: str) -> ControlResponse:
-    """Return a paused execution to running."""
-    execution_id = await _resolve_execution_id(execution_id)
-    result = await unpause(execution_id)
-    return await _handle_control_result(result, "unpause")
-```
-
-Keep the old path as an explicit alias so a scripted caller is not broken silently - this is Review Focus item 4:
-
-```python
-@router.post(
-    "/executions/{execution_id}/resume",
-    response_model=ControlResponse,
-    deprecated=True,
-    summary="Deprecated alias for unpause",
-)
-async def resume_execution_endpoint_deprecated(execution_id: str) -> ControlResponse:
-    """The pre-2026-09-27 name for unpause.
-
-    `resume` now means continuing an execution that did not finish, so this path
-    is the old meaning kept alive for one release. It does NOT resume a failed
-    execution - `POST /executions/{id}/resume` for that is Task 5's route, and
-    the two cannot share a path, which is why this one is deprecated rather than
-    reused.
-    """
-    return await unpause_execution_endpoint(execution_id)
-```
-
-**Note for the implementer:** that alias collides with Task 5's route on the same path and method. Resolve it in Task 5 by REMOVING this alias there, and mention the removal in Task 5's commit. Do not leave both.
-
-- [ ] **Step 8: Run the full gates**
-
-Run each and report:
-```bash
-just vsa-validate
-uv run ruff check . && uv run ruff format --check .
+git rm packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/ExecutionPausedEvent.py        packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/ExecutionResumedEvent.py
 uv run pyright
-uv run pytest -q -m unit
-uv run pytest ci/fitness -q
-just fitness-check
 ```
-Expected: all green, 0 failures.
+Remove every reference pyright reports, in this order: events `__init__`, aggregate handlers and commands, `ExecutionStatus.PAUSED`, the adapters, the API routes, the CLI commands. `manager_event_map.py` loses its `ExecutionPaused`/`ExecutionResumed` rows.
 
-- [ ] **Step 9: Commit**
+Leave untouched: `MaintenancePausedError` and the maintenance admission gate, and the resume-start record's `"paused"` status - both are different concepts.
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `uv run pytest .../test_pause_is_gone.py -v` then `uv run pytest -q -m unit`
+Expected: the new tests pass; any other failure is a real reference to remove, not a reason to keep pause.
+
+- [ ] **Step 6: Regenerate and check the surfaces**
 
 ```bash
-git add -u && git add packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/ExecutionUnpausedEvent.py \
-  packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/test_unpause.py
-git commit -m "refactor(orchestration)!: un-pausing is Unpause, not Resume
+just codegen && just check-openapi-drift
+cd apps/syn-cli-node && pnpm exec tsc --noEmit && cd ../..
+```
+Expected: no drift, CLI typechecks, `/pause` and control's `/resume` gone from the spec.
 
-Frees the word `resume` for the operation that continues an execution which did
-not finish. The rename is free: production holds zero ExecutionPaused and zero
-ExecutionResumed events out of 26,917, so no stored stream changes meaning and
-no upcaster is needed.
+- [ ] **Step 7: Run the full gates and commit**
 
-ExecutionResumed -> ExecutionUnpaused, ResumeExecutionCommand ->
-UnpauseExecutionCommand, POST /executions/{id}/resume -> /unpause with the old
-path kept as a deprecated alias for one release."
+```bash
+just vsa-validate && uv run pytest ci/fitness -q && just fitness-check
+git add -u && git add packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/test_pause_is_gone.py
+git commit -m "refactor(orchestration)!: delete pause, which never did anything
+
+Measured before deleting: zero ExecutionPaused events of 26,917 in production,
+and nothing in the execution path reads ExecutionStatus.PAUSED - the processor
+observes CANCELLED (WorkflowExecutionProcessor.py:374) and nothing else. A
+paused execution kept running, so the feature misled anyone who tried it.
+
+Cancel is the working mechanism and is sufficient. Deleting frees the word
+`resume` for the operation that continues an execution which did not finish,
+rather than inventing `unpause` to dodge a collision with a feature that does
+not function.
+
+Maintenance pause and the resume-start record's paused status are different
+concepts and are untouched. Pausing an execution for real is filed separately:
+it requires the processor to observe the status, which was never written."
 ```
 
 ---
 
-### Task 4: Take the name - the fork concept becomes Resume
+### Task 5: Take the name - the fork concept becomes Resume
 
 **Files:**
 - Rename: `.../domain/events/ExecutionForkedEvent.py` to `ExecutionResumedEvent.py`
@@ -575,7 +455,7 @@ path kept as a deprecated alias for one release."
 - Test: `.../aggregate_execution/test_legacy_event_shapes.py`
 
 **Interfaces:**
-- Consumes: the free name from Task 3; the spellings from Task 1.
+- Consumes: the free names from Task 4 (pause deleted); the spellings from Task 2.
 - Produces: `ResumeExecutionCommand` (the NEW meaning - execution_id, resume_execution_id, override_cancellation, acknowledge_external_effects), `ExecutionResumedEvent` (event_type `"ExecutionResumed"`, fields resume_execution_id, inherited_phases, resume_phase_id, resumed_at, cancellation_overridden, external_effects_acknowledged), `ResumeOrigin` (was `ForkOrigin`), `refuse_resume`, `decide_resume`, `ResumeRefused`/`ResumeAdmitted`, `ResumeStartRecord`.
 
 - [ ] **Step 1: Write the failing test for the legacy-shape hazard**
@@ -844,12 +724,11 @@ unrelated to this vocabulary."
 
 ---
 
-### Task 5: The API surface
+### Task 6: The API surface
 
 **Files:**
 - Rename: `apps/syn-api/src/syn_api/routes/executions/fork.py` to `resume.py`
 - Modify: `apps/syn-api/src/syn_api/routes/executions/__init__.py`
-- Modify: `apps/syn-api/src/syn_api/routes/executions/control.py` (REMOVE Task 3's deprecated `/resume` alias)
 - Modify: `scripts/extract_openapi.py` (the `fork` tag description becomes `resume`)
 - Rename: `apps/syn-api/tests/test_fork_endpoint.py` to `test_resume_endpoint.py`
 - Test: same file, plus a new case for Review Focus item 3
@@ -894,10 +773,6 @@ git mv apps/syn-api/tests/test_fork_endpoint.py apps/syn-api/tests/test_resume_e
 
 In `resume.py`: `ForkRequest` to `ResumeRequest`, `ForkResponse` to `ResumeResponse`, `fork()` to `resume()`, `fork_execution_endpoint` to `resume_execution_endpoint`, path to `/executions/{execution_id}/resume`, tag to `resume`, `_free_child_id` to `_free_resume_id`, and `parent_execution_id` in the response to `source_execution_id`. Update the module docstring to distinguish resume from unpause and to cite the ubiquitous language file.
 
-- [ ] **Step 4: Remove Task 3's alias**
-
-Delete `resume_execution_endpoint_deprecated` from `control.py`. Both cannot own `POST /executions/{id}/resume`, and the new meaning wins. `control.py` keeps only `/unpause`.
-
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `uv run pytest apps/syn-api/tests/test_resume_endpoint.py -v`
@@ -917,23 +792,21 @@ Expected: no drift; `/executions/{execution_id}/resume` present; `/fork` absent.
 git add -u && git add apps/syn-api/src/syn_api/routes/executions/resume.py apps/syn-api/tests/test_resume_endpoint.py
 git commit -m "refactor(api)!: POST /executions/{id}/resume replaces /fork
 
-And takes the path from control's un-pause, which moved to /unpause in the
-previous commit - the two meanings cannot share a path, so the one that means
-'continue what did not finish' keeps the word."
+The path is free because Task 4 deleted control's pause/resume, which never
+functioned. One route, one meaning."
 ```
 
 ---
 
-### Task 6: The CLI surface
+### Task 7: The CLI surface
 
 **Files:**
 - Modify: `apps/syn-cli-node/src/commands/execution.ts` (`forkCommand` to `resumeCommand`)
-- Modify: `apps/syn-cli-node/src/commands/control.ts` (`resumeCommand` to `unpauseCommand`, with `resume` as a hidden alias)
 - Create: `apps/syn-cli-node/tests/commands/resume.test.ts`
 
 **Interfaces:**
 - Consumes: the generated types from Task 5's `just codegen`.
-- Produces: `syn execution resume <id>`, `syn control unpause <id>`.
+- Produces: `syn execution resume <id>`. `syn control` no longer has pause or resume (deleted in Task 4).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1007,7 +880,7 @@ a script does not break silently, and its help points at the other verb."
 
 ---
 
-### Task 7: The documentation
+### Task 8: The documentation
 
 **Files:**
 - Rename: `apps/syn-docs/content/docs/guide/resuming-executions.mdx` (path already correct; content updated)
@@ -1071,7 +944,7 @@ built."
 
 ---
 
-### Task 8: The guard that keeps the word reserved
+### Task 9: The guard that keeps the word reserved
 
 **Files:**
 - Create: `ci/fitness/code_quality/test_reserved_domain_words.py`
@@ -1154,7 +1027,7 @@ process-fork comments, which are allow-listed by path and reason."
 
 ---
 
-### Task 9: File the Fork issue
+### Task 10: File the Fork issue
 
 **Files:** none. Produces a GitHub issue.
 
@@ -1217,18 +1090,247 @@ Add the issue number to the `## Fork` section of
 
 ---
 
+### Task 11: Make the convention explicit in the ESP, and file the validator
+
+The expectation is inherited from the platform, so the platform should state it. The submodule has its own release path, so this is a separate PR plus an issue.
+
+**Files:**
+- Modify (submodule): `lib/event-sourcing-platform/docs-site/docs/event-store/concepts/ubiquitous-language.md`
+- Produces: one submodule PR, one ESP issue.
+
+- [ ] **Step 1: Add the note to the ESP vocabulary doc**
+
+At the end of `lib/event-sourcing-platform/docs-site/docs/event-store/concepts/ubiquitous-language.md`:
+
+```markdown
+## Consuming systems own their own vocabularies
+
+This document is the EVENT STORE's vocabulary. It is not the vocabulary of a
+system built on it.
+
+A bounded context is defined by the language spoken inside it, so every bounded
+context in a consuming system owns a ubiquitous language file of its own,
+covering that context's domain terms rather than these platform mechanisms.
+
+**Recommended file naming:** `<bounded-context>-ubiquitous-language.md`, context
+name first, so a search across a repository returns files whose names say which
+context each one speaks for rather than N identically-named files.
+
+A consuming system that cannot point at a vocabulary per context has folklore
+where it should have an artifact. Syntropic137 enforces this with a QA check
+(`ci/fitness/code_quality/test_ubiquitous_language.py`) that fails when a
+context has no file, when a file names no context, or when a file outlives its
+context. ESP should ship that check so consumers inherit it rather than
+reinventing it - see the validator issue.
+```
+
+- [ ] **Step 2: Commit and push the submodule branch, open the PR**
+
+```bash
+cd lib/event-sourcing-platform
+git checkout -b docs/consuming-systems-own-vocabularies
+git add docs-site/docs/event-store/concepts/ubiquitous-language.md
+git commit -m "docs(ubiquitous-language): consuming systems own a vocabulary per bounded context
+
+This document is the event store's vocabulary, which consumers were reasonably
+reading as the only one required. A bounded context is defined by the language
+spoken inside it, so each one owns a file, and the naming standard puts the
+context first so a search says which is which."
+git push -u origin docs/consuming-systems-own-vocabularies
+gh pr create --title "docs(ubiquitous-language): consuming systems own a vocabulary per bounded context" --body "<the rationale above, plus: syn137 found all five of its contexts had no vocabulary, and the missing convention is why>"
+```
+
+Do NOT bump the submodule pointer in syn137 as part of this plan. A docs-only submodule change does not need to reach a running workspace, and bumping the pointer drags an image build into a rename.
+
+- [ ] **Step 3: File the validator issue on ESP**
+
+```bash
+gh issue create --repo syntropic137/event-sourcing-platform \
+  --title "Ship a ubiquitous-language validator so consumers inherit the convention" \
+  --body-file <path>
+```
+
+Body:
+
+```markdown
+A bounded context is defined by the language spoken inside it, so every context
+in a consuming system should own a ubiquitous language file. ESP documents the
+convention (see the vocabularies PR) but does not enforce it, so each consumer
+reinvents the check or - as Syntropic137 did - simply lacks it.
+
+Syntropic137 discovered on 2026-09-27 that ALL FIVE of its bounded contexts had
+no vocabulary file, and the absence had already cost a domain word: one
+operation was called both `fork` and `resume` until the meanings were separated,
+and `fork` had to be reclaimed.
+
+## What to ship
+
+A validator consumers can run as a QA gate, parameterised over the contexts it
+discovers rather than a hardcoded list:
+
+- every bounded context directory has `<context>-ubiquitous-language.md`;
+- every such file names its context near the top;
+- no vocabulary file outlives the context it speaks for;
+- the discovery itself is asserted non-empty, so a discovery bug cannot make the
+  whole gate vacuous.
+
+Syntropic137's working version is
+`ci/fitness/code_quality/test_ubiquitous_language.py` and is the obvious
+starting point - it is a plain pytest module with no syn137-specific imports
+beyond the contexts path, which would become configuration.
+
+## Why in ESP rather than per consumer
+
+The expectation is inherited from ESP: consumers adopt bounded contexts because
+ESP prescribes them. A convention ESP states but does not enforce is one every
+consumer discovers the hard way.
+```
+
+- [ ] **Step 4: Cross-link**
+
+Add the ESP issue reference to the `## Purpose` section of each syn137 vocabulary file and to the AGENTS.md section, so a reader knows the convention has a platform home. Commit.
+
+---
+
+## Appendix A: orchestration vocabulary
+
+The full content for `docs/architecture/orchestration-ubiquitous-language.md`, referenced by Task 2 Step 1.
+
+```markdown
+# Ubiquitous Language: orchestration
+
+## Purpose
+
+The vocabulary of the `orchestration` bounded context. These words have exactly
+these meanings in code, in the API, in the CLI and in conversation. Where a term
+here disagrees with any other document, this one is canonical.
+
+This is the DOMAIN vocabulary. For event-sourcing patterns - Event, Aggregate,
+Projection, Processor - see `es-glossary.md`. For the event store's own terms see
+`lib/event-sourcing-platform/docs-site/docs/event-store/concepts/ubiquitous-language.md`.
+A term belongs here when it names something this system's users talk about, and
+there when it names a mechanism the platform provides.
+
+Every bounded context has one of these. See AGENTS.md, "Ubiquitous Language".
+
+---
+
+## Execution
+
+One run of one Workflow, identified by an `exec-` id, recorded as an event
+stream. An Execution is never rewritten: its history is the record of what
+happened, including how it ended.
+
+Statuses: `not_started`, `running`, `completed`, `failed`, `cancelled`,
+`interrupted`. The last four are terminal. There is no paused state - see
+"Words we do not use".
+
+## Phase
+
+One step of a Workflow inside an Execution, with its own agent, model, prompt
+and timeout. Phases run in a total order given by `order`, which
+`WorkflowDefinition.from_yaml` guarantees is unique per Workflow.
+
+A Phase is completed only when the Execution recorded it so. A Phase that
+started and did not complete has no partial credit: there is no mid-phase
+resume.
+
+## Workflow
+
+The definition a run is made from - its Phases and their configuration.
+Mutable: installing a Workflow replaces it. An Execution therefore PINS what it
+needs rather than reading the Workflow later.
+
+## Resume
+
+Continuing an Execution that DID NOT FINISH, by starting a new Execution that
+inherits the Phases already completed and restarts at the first one that did
+not.
+
+Applies to `failed` and `interrupted` on request, and to `cancelled` only with
+an explicit override - a cancel was a decision, and resuming past it needs a
+fresh one.
+
+The new Execution has its own id. The original stays exactly as it was,
+including its terminal status, and records that it was resumed. One Resume per
+Execution.
+
+## Fork
+
+Copying any Execution that has completed at least one Phase - INCLUDING a
+`completed` one - into a new Execution that starts from a CHOSEN completed
+Phase rather than from the first unfinished one.
+
+Where Resume derives its starting point, a Fork is given one. Where Resume
+carries the original configuration unchanged, a Fork exists in order to vary
+something - a model, a prompt - against the same baseline.
+
+**Not implemented.** The word is reserved so the capability can be built without
+renaming anything. Until it ships, an operation that continues unfinished work
+is a Resume and is called one.
+
+## Inherited Phase
+
+A Phase a resumed Execution does not re-run, because the Execution it came from
+completed it. Carries the artifact ids that Phase produced, and the id of the
+Execution that actually produced them - which may be an ancestor further up a
+chain, not the immediate predecessor.
+
+## Resume Phase
+
+The Phase a resumed Execution starts at: the first Phase, in order, that the
+original did not complete. Restarted from its beginning.
+
+A Resume Phase that had already STARTED in the original may have pushed or
+published something, and re-running it repeats that, so resuming such an
+Execution requires the operator to acknowledge it.
+
+## Pin
+
+A fact an Execution records about itself at start so it can be reproduced
+without consulting anything mutable: the full runnable configuration of every
+Phase, and the commit each repository was at.
+
+A Pin is why a resumed Execution runs what the original ran even if the Workflow
+has been edited since.
+
+## Admission
+
+The decision that an operation may proceed, recorded before any work begins.
+Resuming is admitted or refused against the original's recorded state; the new
+Execution is then created and started by a background processor.
+
+An admitted Resume is not a started one. The two are separate facts and a
+successful API response reports the first.
+
+## Words we do not use
+
+- **Pause.** Deleted 2026-09-27. It recorded an event that nothing in the
+  execution path observed, so a paused Execution kept running. Cancel is the
+  mechanism that works. Pausing for real would require the processor to observe
+  the status, which was never written.
+- **Branch.** Reserved, no meaning assigned. If a chat-style "branch from here"
+  operation is ever wanted, this is where it gets defined.
+- **Retry.** A Phase attempt within one Execution (`PhaseRetryScheduled`), never
+  a new Execution.
+- **Fork, in the process sense.** `GRPC_ENABLE_FORK_SUPPORT` and `os.fork` are
+  unrelated to this vocabulary. Renames must not touch them.
+```
+
 ## Self-Review
 
-**Spec coverage.** Decision 1 (full rename) is Tasks 3-7. Decision 2 (resume applies to unfinished) is Task 1's definition plus the unchanged `RESUMABLE_STATUSES`. Decision 3 (fork spec) is Task 9. Decision 4 (incumbent moves) is Task 3. Decision 5 (ubiquitous language, AGENTS.md) is Tasks 1 and 2. No gaps.
+**Spec coverage.** Decision 1 (full rename) is Tasks 5-8. Decision 2 (resume = unfinished) is Task 2's definition plus the unchanged `RESUMABLE_STATUSES`. Decision 3 (fork spec) is Task 10. Decision 4 (delete pause) is Task 4. Decision 5 (vocabulary per context, enforced) is Tasks 1-3. Decision 6 (naming standard) is Task 1's validator and Task 3's AGENTS.md entry. Decision 7 (ESP states it) is Task 11. No gaps.
 
-**Placeholders.** None: every code step carries the code, every rename carries its old and new name, the identifier table is exhaustive, and the issue body is written out rather than described.
+**Placeholders.** The four non-orchestration vocabularies are the one place this plan does not hand over finished prose, deliberately: their terms must be read out of each context's aggregates rather than invented, so Task 2 Step 2 gives the file shape, the minimum term list per context, and an explicit instruction to mark a genuinely unclear term `**Unclear:**` instead of guessing. Everything else carries its content.
 
-**Type consistency.** `ResumeExecutionCommand` is used for the NEW meaning in Task 4 and consumed under that name in Task 5; Task 3 removes the old `ResumeExecutionCommand` before Task 4 creates it, which is why Task 3 runs first and why its test asserts the old name is absent. `ResumeOrigin`, `ResumeStartRecord`, `refuse_resume_start` and `decide_resume` are introduced in Task 4 and used in Tasks 5, 6 and 8 under exactly those names. `ResumeResponse.source_execution_id` is named in Task 5's Interfaces and used in Task 6's output.
+**Type consistency.** Task 4 removes `ResumeExecutionCommand` (old meaning) and its test asserts the absence; Task 5 reintroduces the name with the new meaning; Tasks 6-9 consume it under that name. `ResumeOrigin`, `ResumeStartRecord`, `refuse_resume_start`, `decide_resume` are introduced in Task 5 and used in 6, 7 and 9 exactly so. `ResumeResponse.source_execution_id` is named in Task 6's Interfaces and used in Task 7's output.
 
-**Review Focus coverage.** Item 1 and 2 are Task 4 Step 1. Item 3 is Task 5 Step 1. Item 4 is Task 6 Step 1 and the alias in Task 6 Step 4. Item 5 is Task 8.
+**Review Focus coverage.** Items 1 and 2 (legacy event shapes) are Task 5 Step 1. Item 3 (old fork path) is Task 6 Step 1. Item 4 has changed meaning now that pause is deleted rather than aliased: the risk is a caller of the deleted `POST /executions/{id}/pause` or `syn control resume`, and Task 4 Step 6 pins that the routes are gone from the spec, with the deletion called out as breaking in its commit. Item 5 (the word drifting back) is Task 9.
 
 ## Risks the executor must not smooth over
 
-- **The rename is only free while no events exist.** Measured 2026-09-27: zero `ExecutionPaused`, zero `ExecutionResumed`, zero `ExecutionForked` in production (26,917 events total; the fork route returns 404 on the deployment). If any appear before this merges, Task 4's discriminator is what saves the replay - do not delete it as unnecessary.
-- **`git mv` of `slices/start_fork` changes a slice path.** `vsa-validate` has opinions about slice structure; run it immediately after Step 6 of Task 4, not at the end.
-- **Four of five bounded contexts still have no vocabulary file.** Out of scope here, stated in AGENTS.md so it is visible rather than forgotten.
+- **The rename is only free while no events exist.** Measured 2026-09-27: zero `ExecutionPaused`, zero `ExecutionResumed`, zero `ExecutionForked` in production of 26,917 total, and the fork route returns 404 on the deployment. Task 5's payload-shape discriminator is what protects a replay if any appear before this merges. Do not delete it as unnecessary.
+- **Deleting pause is a breaking API and CLI change.** It is justified because the feature never functioned, not because nobody used it. Task 4 Step 1 re-confirms the premise before anything is removed and says to stop if a hit appears in the execution path.
+- **`git mv` of `slices/start_fork` changes a slice path.** `vsa-validate` has opinions about slice structure; run it immediately after the renames in Task 5, not at the end.
+- **The four non-orchestration vocabularies are written from code that this plan's author has not read.** Expect `**Unclear:**` entries and treat them as findings worth raising, not as failures of the task.
+- **Do not bump the ESP submodule pointer.** Task 11 is docs-only in the submodule; bumping drags an image build into a rename.
