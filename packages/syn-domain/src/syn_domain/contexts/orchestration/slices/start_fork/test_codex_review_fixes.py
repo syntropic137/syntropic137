@@ -459,13 +459,12 @@ class TestValidateResolvesTheInheritanceBeforeDispatch:
 
 @dataclass
 class _Processor:
-    """Stands in for the processor, for the one thing validate reads off it."""
+    """Stands in for the processor, for the one thing validate asks of it."""
 
     query: _Query
 
-    @property
-    def artifact_query(self) -> _Query:
-        return self.query
+    async def resolve_inheritance(self, origin: object) -> None:
+        await inherited_outputs(self.query, origin)  # pyright: ignore[reportArgumentType]
 
 
 class _Executions:

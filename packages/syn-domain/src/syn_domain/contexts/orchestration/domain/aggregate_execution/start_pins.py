@@ -29,8 +29,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
+    ForkOrigin,
     InheritedPhase,
     PhaseDefinition,
+    SourceCommit,
 )
 
 if TYPE_CHECKING:
@@ -41,36 +43,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class SourceCommit(BaseModel):
-    """The commit one repository was at when the execution started (#1457).
-
-    `sha` is None when nothing could resolve it - no GitHub access, a repository
-    that has since gone - and that is recorded as an honest "unknown" rather
-    than left out, so the repository list stays complete.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    #: `owner/name`, the canonical slug of `RepositoryRef`.
-    repository: str
-    sha: str | None = None
-
-
-class ForkOrigin(BaseModel):
-    """Where a forked execution came from (ADR-014 s7).
-
-    Copied from the parent's `ExecutionForked`, which is the decision; this is
-    the child recording which decision it is carrying out, so the child's own
-    stream answers "what was this a fork of" without reading the parent's.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    parent_execution_id: str
-    #: The parent's completed prefix, in phase order. The child never runs
-    #: these; their artifacts are the ones it hands forward.
-    inherited_phases: list[InheritedPhase]
-    resume_phase_id: str
+# Re-exported: `SourceCommit` and `ForkOrigin` now live in `value_objects`,
+# because the start EVENT carries them and a domain event may not import from an
+# aggregate's internals (vsa). Kept importable from here so the many modules that
+# read them alongside the other pins do not all have to move.
+__all__ = [
+    "AdmittedFork",
+    "ForkOrigin",
+    "SourceCommit",
+    "StartPins",
+]
 
 
 class StartPins(BaseModel):

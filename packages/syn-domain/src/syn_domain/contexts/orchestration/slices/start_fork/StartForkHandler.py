@@ -34,10 +34,6 @@ if TYPE_CHECKING:
         WorkflowExecutionResult,
     )
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
-    inherited_outputs,
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -112,7 +108,7 @@ class StartForkHandler:
         # `dispatched` and re-offered for ever with nothing recording why (codex
         # review of #1459). Resolving it here means a vanished artifact is a
         # refusal the to-do list can see and classify.
-        await inherited_outputs(self._processor.artifact_query, command.forked_from)
+        await self._processor.resolve_inheritance(command.forked_from)
 
     async def _command_for(self, parent_execution_id: str) -> StartForkCommand:
         parent = await self._executions.get_by_id(parent_execution_id)

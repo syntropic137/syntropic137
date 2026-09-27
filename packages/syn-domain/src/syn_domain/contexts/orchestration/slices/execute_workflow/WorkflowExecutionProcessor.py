@@ -247,11 +247,17 @@ class WorkflowExecutionProcessor:
             inputs=inputs,
         )
 
-    @property
-    def artifact_query(self) -> ArtifactQueryServiceProtocol | None:
-        """The artifact reader, for a caller that must resolve an inheritance
-        BEFORE dispatching a fork start rather than inside it."""
-        return self._artifact_query
+    async def resolve_inheritance(self, origin: ForkOrigin | None) -> None:
+        """Raise unless a fork's inherited outputs can be handed over.
+
+        For a caller that must find that out BEFORE dispatching the start rather
+        than inside it: a refusal raised in the background task reaches only a
+        log line. `start_fork` calls this through the processor it already holds,
+        rather than importing `fork_handoff` - a slice may not import another
+        slice's modules, and depending on an injected collaborator is the way
+        across that boundary.
+        """
+        await inherited_outputs(self._artifact_query, origin)
 
     async def run(
         self,
