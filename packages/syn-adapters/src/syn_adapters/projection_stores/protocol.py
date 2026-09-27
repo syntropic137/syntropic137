@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from event_sourcing import ProjectionReadStore, ProjectionStore
-from pydantic import JsonValue
+from pydantic import BaseModel
 
 __all__ = ["ProjectionReadStore", "ProjectionStore", "ProjectionStoreProtocol"]
 
@@ -41,18 +41,14 @@ class ProjectionStoreProtocol(ProjectionStore, Protocol):
         ...
 
     async def save_if(
-        self,
-        projection: str,
-        key: str,
-        data: dict[str, JsonValue],
-        *,
-        expected: dict[str, JsonValue] | None,
+        self, projection: str, key: str, record: BaseModel, *, expected: BaseModel | None
     ) -> bool:
-        """Write ``data`` only while the stored row is exactly ``expected``.
+        """Write ``record`` only while the store still holds ``expected``.
 
-        A compare-and-set, atomic in the store: ``expected`` is a row as `get`
-        returned it (None meaning "no row"), and the write happens only if the
-        row still equals it at the moment of writing. True if written.
+        A compare-and-set, atomic in the store: the stored row, read as
+        ``type(expected)``, must equal ``expected`` at the moment of writing
+        (`record_match.holds`); None means "only while there is no row". True
+        if written.
 
         A writer that reads, decides and then saves cannot make that atomic
         itself once more than one process writes the same row; a lock held by

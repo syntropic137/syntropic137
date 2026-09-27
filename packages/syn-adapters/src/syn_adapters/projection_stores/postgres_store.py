@@ -8,9 +8,10 @@ from datetime import datetime
 from typing import Any
 
 import asyncpg
-from pydantic import JsonValue
+from pydantic import BaseModel
 
 from syn_adapters.postgres_text import pg_safe
+from syn_adapters.projection_stores.record_match import holds
 from syn_shared.settings import get_settings
 
 
@@ -122,23 +123,16 @@ class PostgresProjectionStore:
             )
 
     async def save_if(
-        self,
-        projection: str,
-        key: str,
-        data: dict[str, JsonValue],
-        *,
-        expected: dict[str, JsonValue] | None,
+        self, projection: str, key: str, record: BaseModel, *, expected: BaseModel | None
     ) -> bool:
-        """Save only while the stored row equals ``expected``. True if saved.
+        """Save only while the store still holds ``expected``. True if saved.
 
         One transaction. An existing row is locked (`FOR UPDATE`) before it is
         compared, so no other writer can change it between the comparison and
-        the update. It is compared as `get` would return it - through the same
-        `_deserialize` - so a row read with `get` and handed back as
-        ``expected`` matches exactly what was read. For no row, the insert
-        itself is the check: `ON CONFLICT DO NOTHING` inserts nothing if another
-        writer inserted first.
+        the update. For no row, the insert itself is the check: `ON CONFLICT DO
+        NOTHING` inserts nothing if another writer inserted first.
         """
+        data = self._serialize(record.model_dump(mode="json"))
         await self._ensure_table(projection)
         key = pg_safe(key)
         pool = await self._get_pool()
@@ -153,18 +147,18 @@ class PostgresProjectionStore:
                     ON CONFLICT (id) DO NOTHING
                 """,
                     key,
-                    self._serialize(data),
+                    data,
                 )
                 return status == "INSERT 0 1"
             row = await conn.fetchrow(
                 f"SELECT data FROM {table_name} WHERE id = $1 FOR UPDATE", key
             )
-            if row is None or self._deserialize(row["data"]) != expected:
+            if row is None or not holds(self._deserialize(row["data"]), expected):
                 return False
             await conn.execute(
                 f"UPDATE {table_name} SET data = $2::jsonb, updated_at = NOW() WHERE id = $1",
                 key,
-                self._serialize(data),
+                data,
             )
             return True
 

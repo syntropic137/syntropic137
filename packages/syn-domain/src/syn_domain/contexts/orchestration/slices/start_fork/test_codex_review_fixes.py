@@ -50,7 +50,7 @@ from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from pydantic import JsonValue
+    from pydantic import BaseModel, JsonValue
 
     from syn_domain.contexts.orchestration.slices.start_fork.ForkStartProcessManager import (
         StartFailureReporter,
@@ -955,3 +955,30 @@ class TestTwoManagersSharingOneStore:
             1,
             "first start failed",
         )
+
+
+class _RefusesEveryWrite(InMemoryProjectionStore):
+    """A store whose compare-and-set never succeeds, whatever it holds."""
+
+    async def save_if(
+        self, projection: str, key: str, record: BaseModel, *, expected: BaseModel | None
+    ) -> bool:
+        del projection, key, record, expected
+        await asyncio.sleep(0)  # a real store yields, so a timeout can fire
+        return False
+
+
+async def test_a_store_that_refuses_every_write_is_reported_not_retried_for_ever() -> None:
+    """Deciding again after a lost write must end.
+
+    A bug in a store's comparison is the realistic way to get here - one was
+    written and caught while this fence was built, as a test run that hung.
+    """
+    manager = ForkStartProcessManager(fork_starter=_Spawning(), store=_RefusesEveryWrite())
+
+    written = await asyncio.wait_for(
+        manager._save(ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))),
+        timeout=5,
+    )
+
+    assert written is False

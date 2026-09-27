@@ -45,7 +45,7 @@ from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
 )
 
 if TYPE_CHECKING:
-    from pydantic import JsonValue
+    from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,12 @@ def _may_replace(current: str, proposed: str) -> bool:
 
 
 _EXECUTION_FORKED = "ExecutionForked"
+
+#: How many times one write decides again after losing its compare-and-set.
+#: Each loss means another writer's write landed, and a fork start has only a
+#: handful of writers, so running out means the store refuses what it holds,
+#: and that is reported rather than retried for ever.
+_MAX_LOST_WRITES = 8
 
 #: As on WorkflowDispatchProjection (#1387): subscribed for its side effect on
 #: the coordinator, so a start held back by maintenance is re-offered once
@@ -117,16 +123,12 @@ class ConditionalProjectionStore(ProjectionStore, Protocol):
     """
 
     async def save_if(
-        self,
-        projection: str,
-        key: str,
-        data: dict[str, JsonValue],
-        *,
-        expected: dict[str, JsonValue] | None,
+        self, projection: str, key: str, record: BaseModel, *, expected: BaseModel | None
     ) -> bool:
-        """Write ``data`` only while the stored row is exactly ``expected``.
+        """Write ``record`` only while the store still holds ``expected``.
 
-        ``expected`` is a row as `get` returned it, or None for "no row yet".
+        The stored row is read as ``type(expected)`` and compared as a model,
+        the way the caller compared it; None means "only while there is no row".
         True if written; False, with nothing written, if the row had moved on.
         """
         ...
@@ -199,12 +201,7 @@ class ForkStartProcessManager(ProcessManager):
         record = ForkStartRecord(
             parent_execution_id=parent_execution_id, recorded_at=datetime.now(UTC)
         )
-        await self._store.save_if(
-            self.PROJECTION_NAME,
-            parent_execution_id,
-            record.model_dump(mode="json"),
-            expected=None,
-        )
+        await self._store.save_if(self.PROJECTION_NAME, parent_execution_id, record, expected=None)
 
     async def process_pending(self) -> int:
         """PROCESSOR SIDE: start each owed child. Live-only, idempotent."""
@@ -377,9 +374,13 @@ class ForkStartProcessManager(ProcessManager):
         """
         assert self._store is not None
         key = record.parent_execution_id
-        while True:
+        for _ in range(_MAX_LOST_WRITES):
             row = await self._store.get(self.PROJECTION_NAME, key)
             current = read_record(row) if row is not None else None
+            if row is not None and current is None:
+                # Logged by `read_record`. Nothing can be decided over a record
+                # that cannot be read, and `process_pending` already skips it.
+                return False
             if only_over is not None and current != only_over:
                 logger.warning(
                     "Not recording %s for the fork start of %s: its record moved on to %s",
@@ -396,10 +397,15 @@ class ForkStartProcessManager(ProcessManager):
                     record.status,
                 )
                 return False
-            if await self._store.save_if(
-                self.PROJECTION_NAME, key, record.model_dump(mode="json"), expected=row
-            ):
+            if await self._store.save_if(self.PROJECTION_NAME, key, record, expected=current):
                 return True
+        logger.error(
+            "Not recording %s for the fork start of %s: lost %d writes in a row",
+            record.status,
+            key,
+            _MAX_LOST_WRITES,
+        )
+        return False
 
     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
         """The parent's id: it admits at most one fork."""

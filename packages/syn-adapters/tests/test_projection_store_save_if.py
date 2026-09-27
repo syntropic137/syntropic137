@@ -6,8 +6,10 @@ comparison and the write had to move into the store. These tests pin the two
 properties a caller relies on:
 
 * a row that moved on since it was read is not written over, and says so;
-* a row read with `get` and handed back unchanged DOES match - otherwise every
-  conditional write would fail and a caller that retries would spin.
+* a row that still holds what the caller read DOES match, compared as the model
+  the caller read it as - otherwise a row that round-trips with any difference
+  (a default filled in) would never match, and a caller that decides again
+  after losing would never stop losing.
 
 The Postgres store is driven against a connection double that holds one row and
 records every statement, because no database is reachable where unit tests run.
@@ -22,6 +24,7 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import BaseModel
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.projection_stores.postgres_store import PostgresProjectionStore
@@ -35,30 +38,45 @@ PROJECTION = "fork_start"
 KEY = "exec-parent"
 
 
+class _Record(BaseModel):
+    status: str
+    attempts: int = 0
+    status_reason: str | None = None
+
+
+PENDING = _Record(status="pending")
+DISPATCHED = _Record(status="dispatched")
+RETRYABLE = _Record(status="retryable", attempts=1, status_reason="blip")
+
+
 class TestInMemory:
-    async def test_writes_over_the_row_it_was_given(self) -> None:
+    async def test_writes_over_the_record_it_expected(self) -> None:
+        store = InMemoryProjectionStore()
+        await store.save(PROJECTION, KEY, PENDING.model_dump(mode="json"))
+
+        assert await store.save_if(PROJECTION, KEY, DISPATCHED, expected=PENDING)
+        assert await store.get(PROJECTION, KEY) == DISPATCHED.model_dump(mode="json")
+
+    async def test_refuses_a_record_that_moved_on(self) -> None:
+        store = InMemoryProjectionStore()
+        await store.save(PROJECTION, KEY, RETRYABLE.model_dump(mode="json"))
+
+        assert not await store.save_if(PROJECTION, KEY, DISPATCHED, expected=PENDING)
+        assert await store.get(PROJECTION, KEY) == RETRYABLE.model_dump(mode="json")
+
+    async def test_compares_the_record_not_its_spelling(self) -> None:
+        """A row written before a field existed still holds the record read from it."""
         store = InMemoryProjectionStore()
         await store.save(PROJECTION, KEY, {"status": "pending"})
-        read = await store.get(PROJECTION, KEY)
 
-        assert await store.save_if(PROJECTION, KEY, {"status": "dispatched"}, expected=read)
-        assert await store.get(PROJECTION, KEY) == {"status": "dispatched"}
-
-    async def test_refuses_a_row_that_moved_on(self) -> None:
-        store = InMemoryProjectionStore()
-        await store.save(PROJECTION, KEY, {"status": "pending"})
-        read = await store.get(PROJECTION, KEY)
-        await store.save(PROJECTION, KEY, {"status": "retryable", "attempts": 1})
-
-        assert not await store.save_if(PROJECTION, KEY, {"status": "dispatched"}, expected=read)
-        assert await store.get(PROJECTION, KEY) == {"status": "retryable", "attempts": 1}
+        assert await store.save_if(PROJECTION, KEY, DISPATCHED, expected=PENDING)
 
     async def test_expecting_no_row_writes_only_the_first(self) -> None:
         store = InMemoryProjectionStore()
 
-        assert await store.save_if(PROJECTION, KEY, {"status": "pending"}, expected=None)
-        assert not await store.save_if(PROJECTION, KEY, {"status": "reset"}, expected=None)
-        assert await store.get(PROJECTION, KEY) == {"status": "pending"}
+        assert await store.save_if(PROJECTION, KEY, PENDING, expected=None)
+        assert not await store.save_if(PROJECTION, KEY, _Record(status="reset"), expected=None)
+        assert await store.get(PROJECTION, KEY) == PENDING.model_dump(mode="json")
 
 
 class _Conn:
@@ -134,43 +152,29 @@ def _store(conn: _Conn) -> PostgresProjectionStore:
 
 class TestPostgres:
     async def test_locks_the_row_before_comparing_then_writes(self) -> None:
-        conn = _Conn({"status": "pending", "attempts": 0})
-        store = _store(conn)
-        read = await store.get(PROJECTION, KEY)
+        conn = _Conn({"status": "pending"})
 
-        assert await store.save_if(
-            PROJECTION, KEY, {"status": "dispatched", "attempts": 0}, expected=read
-        )
-        assert conn.log == ["read", "lock", "update"]
-        assert json.loads(str(conn.stored)) == {"status": "dispatched", "attempts": 0}
+        assert await _store(conn).save_if(PROJECTION, KEY, DISPATCHED, expected=PENDING)
+        assert conn.log == ["lock", "update"]
+        assert json.loads(str(conn.stored)) == DISPATCHED.model_dump(mode="json")
 
     async def test_writes_nothing_over_a_row_that_moved_on(self) -> None:
-        conn = _Conn({"status": "retryable", "attempts": 1, "status_reason": "blip"})
+        conn = _Conn(RETRYABLE.model_dump(mode="json"))
 
-        written = await _store(conn).save_if(
-            PROJECTION, KEY, {"status": "dispatched", "attempts": 0}, expected={"status": "pending"}
-        )
+        written = await _store(conn).save_if(PROJECTION, KEY, DISPATCHED, expected=PENDING)
 
         assert written is False
         assert conn.log == ["lock"], "a stale write reached the table"
-        assert json.loads(str(conn.stored)) == {
-            "status": "retryable",
-            "attempts": 1,
-            "status_reason": "blip",
-        }
+        assert json.loads(str(conn.stored)) == RETRYABLE.model_dump(mode="json")
 
     async def test_expecting_no_row_does_not_overwrite_one(self) -> None:
-        conn = _Conn({"status": "retryable", "attempts": 1})
+        conn = _Conn(RETRYABLE.model_dump(mode="json"))
 
-        written = await _store(conn).save_if(
-            PROJECTION, KEY, {"status": "pending", "attempts": 0}, expected=None
-        )
-
-        assert written is False
-        assert json.loads(str(conn.stored)) == {"status": "retryable", "attempts": 1}
+        assert not await _store(conn).save_if(PROJECTION, KEY, PENDING, expected=None)
+        assert json.loads(str(conn.stored)) == RETRYABLE.model_dump(mode="json")
 
     async def test_expecting_no_row_inserts_when_there_is_none(self) -> None:
         conn = _Conn(None)
 
-        assert await _store(conn).save_if(PROJECTION, KEY, {"status": "pending"}, expected=None)
-        assert json.loads(str(conn.stored)) == {"status": "pending"}
+        assert await _store(conn).save_if(PROJECTION, KEY, PENDING, expected=None)
+        assert json.loads(str(conn.stored)) == PENDING.model_dump(mode="json")
