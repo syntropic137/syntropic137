@@ -146,7 +146,7 @@ type ForkResponse = components["schemas"]["ForkResponse"];
 
 const forkCommand: CommandDef = {
   name: "fork",
-  description: "Fork a failed execution so it resumes from its last completed phase",
+  description: "Fork a failed execution so it restarts at the first phase that did not finish",
   args: [{ name: "execution-id", description: "Execution to fork", required: true }],
   options: {
     "override-cancellation": {

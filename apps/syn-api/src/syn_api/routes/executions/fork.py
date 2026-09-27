@@ -63,22 +63,43 @@ class ForkResponse(BaseModel):
     external_effects_acknowledged: bool
 
 
+async def _free_child_id(executions: object, attempts: int = 5) -> str:
+    """An execution id nothing else is using.
+
+    48 random bits rarely collide, but the consequence of one is bad enough to be
+    worth a lookup: the parent's single fork would be spent naming an execution
+    that already exists, and child start would see that stream and treat the fork
+    as already started - so the caller gets a success pointing at an unrelated
+    run (codex review of #1461).
+    """
+    exists = getattr(executions, "exists", None)
+    for _ in range(attempts):
+        candidate = f"exec-{uuid4().hex[:12]}"
+        if exists is None or not await exists(candidate):
+            return candidate
+    msg = "Could not mint an unused execution id for the fork"
+    raise HTTPException(status_code=503, detail=msg)
+
+
 async def fork(execution_id: str, request: ForkRequest) -> ForkResponse:
     """Admit a fork of ``execution_id``, or raise why not.
 
-    The refusals are the parent's own (`fork_rules.refuse_fork`): a status that
-    may not be forked, a cancel without an override, a started phase whose
-    effects are unacknowledged, a parent already forked. They surface as 409,
-    because each is a conflict with the parent's recorded state rather than a
-    malformed request.
-    """
-    from syn_api._wiring import get_workflow_execution_repository
+    The refusals are the parent's own (`fork_rules.refuse_fork`) plus the
+    child's (`fork_start.refuse_fork_start`), and BOTH are checked before
+    anything is written. A parent admits exactly one fork, so recording an
+    admission the child cannot act on would spend that one fork on a run that
+    never starts - the caller would be told yes and get nothing.
 
-    # Through the context's public API, not its internal subpaths: a deep
-    # import here is what `test_cross_context_public_api` forbids.
+    They surface as 409, because each is a conflict with the parent's recorded
+    state rather than a malformed request.
+    """
+    from event_sourcing import ConcurrencyConflictError
+
+    from syn_api._wiring import get_workflow_execution_repository
     from syn_domain.contexts.orchestration import (
         ExecutionForkedEvent,
         ForkExecutionCommand,
+        refuse_fork_start,
     )
 
     executions = get_workflow_execution_repository()
@@ -86,7 +107,7 @@ async def fork(execution_id: str, request: ForkRequest) -> ForkResponse:
     if parent is None:
         raise HTTPException(status_code=404, detail=f"No execution {execution_id}")
 
-    child_id = f"exec-{uuid4().hex[:12]}"
+    child_id = await _free_child_id(executions)
     try:
         parent.fork_execution(
             ForkExecutionCommand(
@@ -111,7 +132,26 @@ async def fork(execution_id: str, request: ForkRequest) -> ForkResponse:
     if forked is None:  # pragma: no cover - the handler emits it or raises
         raise HTTPException(status_code=500, detail="The fork was admitted but not recorded")
 
-    await executions.save(parent)
+    # STILL UNCOMMITTED here, which is the point: the child's own refusal is
+    # checked against the aggregate in memory, so a fork the child could not
+    # start is never written and the parent's one fork is not spent on it.
+    start_refusal = refuse_fork_start(parent.fork_start_command())
+    if start_refusal is not None:
+        raise HTTPException(status_code=409, detail=start_refusal)
+
+    try:
+        await executions.save(parent)
+    except ConcurrencyConflictError as exc:
+        # Another request forked this parent between our load and our save. The
+        # store refused the second write, so there is exactly one fork - but the
+        # caller needs to be told which, not handed a 500.
+        current = await executions.get_by_id(execution_id)
+        existing = getattr(current, "fork_execution_id", None) if current else None
+        detail = f"Execution {execution_id} was forked concurrently" + (
+            f" as {existing}" if existing else ""
+        )
+        raise HTTPException(status_code=409, detail=detail) from exc
+
     logger.info(
         "Fork of %s admitted as %s, resuming at %s",
         execution_id,

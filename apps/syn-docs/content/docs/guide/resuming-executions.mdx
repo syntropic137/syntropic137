@@ -1,6 +1,6 @@
 ---
 title: Resuming Failed Executions
-description: Fork a failed execution so it restarts at the phase that stopped it, instead of paying for the phases that already succeeded
+description: Fork a failed execution so it restarts at the first phase that did not finish, instead of paying for the phases that already succeeded
 ---
 
 ## The problem
@@ -10,7 +10,7 @@ money, and produced artifacts you still want. Re-running the workflow from the
 start throws all of that away and pays for it twice.
 
 **Forking** an execution creates a new run that inherits the phases that
-completed and restarts at the one that did not. A run that dies in phase five of
+completed and restarts at the **first phase that did not finish**. A run that dies in phase five of
 six costs you phase five onwards, not all six.
 
 ```bash
@@ -24,6 +24,24 @@ Forked exec-43f430469266
   Not re-run:    premise, plan
 Follow it with: syn execution show exec-9a1c77e04b12
 ```
+
+## A successful response means *admitted*
+
+The call returns once the fork has been **admitted and recorded on the parent**.
+The child execution is created and started by a background processor, so a
+success tells you the decision was accepted, not that the child is already
+running.
+
+Watch the child to see it start:
+
+```bash
+syn execution show <child-id>
+```
+
+If it never appears, the fork was admitted but its start was refused or is being
+retried. The platform records that against the parent's fork rather than losing
+it - a refusal that can only be known at start time (a vanished artifact, for
+instance) settles as failed after a bounded number of attempts.
 
 ## Fork, not resume
 
@@ -68,8 +86,9 @@ and the fork cannot silently change what the fork does.
 
 ## Two decisions you have to make out loud
 
-Both default to refusing, because both exist to make you say something
-deliberately. Neither implies the other.
+Each defaults to `false`, and each **applicable** condition is refused without
+its flag. A fork that needs neither decision - a failed run whose resumed phase
+never started - proceeds with no flags at all. Neither flag implies the other.
 
 ### A cancelled execution
 
@@ -94,11 +113,18 @@ syn execution fork exec-1234 --acknowledge-external-effects
 
 | Status | Forkable |
 | --- | --- |
-| `failed` | Yes |
-| `interrupted` | Yes |
+| `failed` | Yes, if a phase is left unfinished |
+| `interrupted` | Yes, if a phase is left unfinished |
 | `cancelled` | Only with `--override-cancellation` |
 | `completed` | No - nothing is left to run |
 | `running`, `paused` | No - forking would put two runs on one piece of work |
+
+Two conditions apply whatever the status. A run with **no unfinished phase** has
+nothing to resume and is refused. A run whose resumed phase had already started
+needs `--acknowledge-external-effects`. And a parent that pinned no phase
+configuration - an execution from before that was recorded - cannot be forked at
+all, because what the child would run could then only be read from the current
+workflow template.
 
 A parent can be forked **once**. Asking twice is refused and names the fork it
 already has, so a retried request cannot quietly create a second child.
@@ -129,16 +155,21 @@ not exist is **404**.
 
 ## Forking for comparison
 
-Resuming a failed run is what forking pays for today, but it is the general
-primitive: a fork is a new execution that starts from the same baseline. The
-same mechanism is what lets you take one run and vary something deliberately -
-a different model, a changed phase - to compare the results.
+Resuming a failed run is what forking pays for today. The same primitive is what
+comparison would be built on - a fork starts from a recorded baseline rather than
+from whatever the workflow says now - but **there is no way to vary anything yet.**
+
+A fork copies the parent's pinned phases and inputs exactly. The API accepts no
+overrides, so you cannot currently fork a run with a different model or an edited
+phase. That is future capability, not a switch you are missing.
 
 <Callout type="warn">
-  The commit each repository was at **is** recorded on an execution, but the
-  workspace still clones the default branch rather than checking out that commit.
-  Until that lands, two runs cannot be asserted to have seen the same code, so
-  treat comparisons across forks as indicative rather than controlled.
+  Two further limits matter if you are thinking about controlled comparisons. The
+  commit each repository was at **is** recorded on an execution, but the workspace
+  still clones the default branch rather than checking out that commit, so two
+  runs cannot be asserted to have seen the same code. And a fork inherits its
+  parent's configuration, so the only thing that differs between a parent and its
+  fork is which phases ran.
 </Callout>
 
 ## See also

@@ -66,6 +66,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     ForkExecutionCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_start import (
+    refuse_fork_start,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionStatus,
@@ -271,6 +274,7 @@ __all__ = [
     "build_command_from_definition",
     "is_phase_id",
     "mint_wrapper_name",
+    "refuse_fork_start",
     "render_workspace_prompt",
     "require_supported_execution_type",
     "salvage_stranded_phase",
