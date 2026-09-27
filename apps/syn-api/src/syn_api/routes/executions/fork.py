@@ -13,10 +13,14 @@ the parent aggregate a `ForkExecutionCommand` and saves; recording
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.ports import WorkflowExecutionRepositoryPort
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +67,7 @@ class ForkResponse(BaseModel):
     external_effects_acknowledged: bool
 
 
-async def _free_child_id(executions: object, attempts: int = 5) -> str:
+async def _free_child_id(executions: WorkflowExecutionRepositoryPort, attempts: int = 5) -> str:
     """An execution id nothing else is using.
 
     48 random bits rarely collide, but the consequence of one is bad enough to be
@@ -72,10 +76,9 @@ async def _free_child_id(executions: object, attempts: int = 5) -> str:
     as already started - so the caller gets a success pointing at an unrelated
     run (codex review of #1461).
     """
-    exists = getattr(executions, "exists", None)
     for _ in range(attempts):
         candidate = f"exec-{uuid4().hex[:12]}"
-        if exists is None or not await exists(candidate):
+        if not await executions.exists(candidate):
             return candidate
     msg = "Could not mint an unused execution id for the fork"
     raise HTTPException(status_code=503, detail=msg)
@@ -146,7 +149,7 @@ async def fork(execution_id: str, request: ForkRequest) -> ForkResponse:
         # store refused the second write, so there is exactly one fork - but the
         # caller needs to be told which, not handed a 500.
         current = await executions.get_by_id(execution_id)
-        existing = getattr(current, "fork_execution_id", None) if current else None
+        existing = current.fork_execution_id if current is not None else None
         detail = f"Execution {execution_id} was forked concurrently" + (
             f" as {existing}" if existing else ""
         )
