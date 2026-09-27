@@ -168,11 +168,27 @@ class _Starter:
         raise self.raising
 
 
+async def _offer(manager: ForkStartProcessManager, record: ForkStartRecord) -> bool:
+    """`_start` as `process_pending` calls it: on a record the store holds.
+
+    A pass only ever offers what it read, and `_start` dispatches only over
+    exactly that record, so a record must be stored before it can be offered.
+    """
+    await manager._save(record)
+    return await manager._start(record)
+
+
+async def _stored(store: InMemoryProjectionStore) -> ForkStartRecord:
+    row = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+    assert row is not None, "nothing was recorded"
+    return ForkStartRecord.model_validate(row)
+
+
 async def _run_start(record: ForkStartRecord, *, raising: Exception) -> ForkStartRecord:
     """One `_start` against a starter that raises, returning what was stored."""
     store = InMemoryProjectionStore()
     manager = ForkStartProcessManager(fork_starter=_Starter(raising), store=store)
-    await manager._start(record)
+    await _offer(manager, record)
     stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
     assert stored is not None, "the attempt recorded nothing"
     return ForkStartRecord.model_validate(stored)
@@ -212,7 +228,7 @@ class TestADispatchIsNotAStart:
     async def test_a_successful_dispatch_records_dispatched_not_started(self) -> None:
         store = InMemoryProjectionStore()
         manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
-        assert await manager._start(self._record()) is True
+        assert await _offer(manager, self._record()) is True
 
         stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
         assert stored is not None
@@ -221,7 +237,7 @@ class TestADispatchIsNotAStart:
     async def test_the_childs_own_start_event_settles_it(self) -> None:
         store = InMemoryProjectionStore()
         manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
-        await manager._start(self._record())
+        await _offer(manager, self._record())
 
         await manager._settle_if_a_fork_started(_ChildStarted(PARENT))
 
@@ -233,7 +249,7 @@ class TestADispatchIsNotAStart:
         """A run that is not a fork carries no `forked_from` and owes nothing."""
         store = InMemoryProjectionStore()
         manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
-        await manager._start(self._record())
+        await _offer(manager, self._record())
 
         await manager._settle_if_a_fork_started(_ChildStarted(None))
 
@@ -258,7 +274,7 @@ class TestALateReportFromTheTask:
         store = InMemoryProjectionStore()
         starter = _Reporting()
         manager = ForkStartProcessManager(fork_starter=starter, store=store)
-        await manager._start(self._record())
+        await _offer(manager, self._record())
         await manager._settle_if_a_fork_started(_ChildStarted(PARENT))
 
         assert starter.on_failure is not None
@@ -271,8 +287,9 @@ class TestALateReportFromTheTask:
     async def test_it_does_not_speak_for_a_later_dispatch(self) -> None:
         store = InMemoryProjectionStore()
         first, second = _Reporting(), _Reporting()
-        await ForkStartProcessManager(fork_starter=first, store=store)._start(self._record())
-        await ForkStartProcessManager(fork_starter=second, store=store)._start(self._record())
+        await _offer(ForkStartProcessManager(fork_starter=first, store=store), self._record())
+        # The later pass offers what IT reads: the first dispatch, past its grace.
+        await ForkStartProcessManager(fork_starter=second, store=store)._start(await _stored(store))
 
         assert first.on_failure is not None
         await first.on_failure(ConnectionError("from the first task"))
@@ -286,7 +303,7 @@ class TestALateReportFromTheTask:
         store = InMemoryProjectionStore()
         starter = _Reporting()
         manager = ForkStartProcessManager(fork_starter=starter, store=store)
-        await manager._start(self._record())
+        await _offer(manager, self._record())
 
         assert starter.on_failure is not None
         await starter.on_failure(ConnectionError("store down"))
@@ -324,7 +341,7 @@ class TestALateReportFromTheTask:
         store = InMemoryProjectionStore()
         starter = _Reporting()
         manager = ForkStartProcessManager(fork_starter=starter, store=store)
-        await manager._start(self._record().model_copy(update={"attempts": attempts}))
+        await _offer(manager, self._record().model_copy(update={"attempts": attempts}))
 
         read = store.get
         settles: list[asyncio.Task[ProjectionResult]] = []
@@ -405,8 +422,8 @@ class TestTheEventActuallyReachesTheSettle:
     async def test_a_childs_start_envelope_settles_the_record(self) -> None:
         store = InMemoryProjectionStore()
         manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
-        await manager._start(
-            ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+        await _offer(
+            manager, ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
         )
 
         result = await manager.handle_event(
@@ -675,3 +692,102 @@ class _Parent:
                 resume_phase_id="plan",
             ),
         )
+
+
+class TestTwoPassesOfferingTheSameRecord:
+    """The codex review of #1466: concurrent dispatches erased attempt history.
+
+    Two `process_pending` passes can both read the same owed record before
+    either writes. Each then wrote `dispatched` and spawned a start, and the
+    loser's write - of the record as it was BEFORE the winner's attempt - landed
+    over whatever the winner's attempt had since recorded. A `retryable` with
+    its attempt counted went back to `dispatched` with none, so the ceiling on
+    attempts could be walked back without limit.
+    """
+
+    @staticmethod
+    def _pending() -> ForkStartRecord:
+        return ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+
+    async def test_the_stale_dispatch_neither_lands_nor_starts(self) -> None:
+        store = InMemoryProjectionStore()
+        starter = _ReportingAll()
+        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        await manager._save(self._pending())
+
+        # read, read - both passes see the same pending record
+        [first_read] = await manager._owed_records()
+        [second_read] = await manager._owed_records()
+        # save - the first dispatches, and its start fails and is counted
+        assert await manager._start(first_read) is True
+        await starter.reports[0](ConnectionError("store blipped"))
+        # save - the second writes from what it read before all that
+        dispatched_again = await manager._start(second_read)
+
+        saved = await _stored(store)
+        assert (saved.status, saved.attempts, saved.status_reason) == (
+            "retryable",
+            1,
+            "store blipped",
+        )
+        assert dispatched_again is False
+        assert len(starter.reports) == 1, "the stale pass started a second child"
+
+    async def test_a_synchronous_failure_does_not_speak_for_a_later_dispatch(self) -> None:
+        """The other unfenced write: `start_fork` raising, after the record moved on.
+
+        While this attempt's `start_fork` was failing, a later pass dispatched
+        again. The failure belongs to the attempt that was replaced, and
+        recording it would put back an attempt count and reason the later
+        dispatch had already cleared.
+        """
+        store = InMemoryProjectionStore()
+        later = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+
+        class _RaisingAfterALaterDispatch:
+            async def start_fork(
+                self, parent_execution_id: str, *, on_failure: StartFailureReporter
+            ) -> None:
+                del parent_execution_id, on_failure
+                assert await later._start(await _stored(store)) is True
+                raise ConnectionError("from the replaced attempt")
+
+        manager = ForkStartProcessManager(fork_starter=_RaisingAfterALaterDispatch(), store=store)
+        assert await _offer(manager, self._pending()) is False
+        redispatched = await _stored(store)
+
+        assert (redispatched.status, redispatched.attempts, redispatched.status_reason) == (
+            "dispatched",
+            0,
+            None,
+        )
+
+    async def test_the_pass_that_read_the_current_record_still_dispatches(self) -> None:
+        """The converse, so the fence is not simply "never dispatch twice"."""
+        store = InMemoryProjectionStore()
+        starter = _ReportingAll()
+        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        await manager._save(self._pending())
+
+        [first_read] = await manager._owed_records()
+        assert await manager._start(first_read) is True
+        await starter.reports[0](ConnectionError("store blipped"))
+        [retry] = await manager._owed_records()
+        assert await manager._start(retry) is True
+
+        saved = await _stored(store)
+        assert (saved.status, saved.attempts) == ("dispatched", 1)
+        assert len(starter.reports) == 2
+
+
+@dataclass
+class _ReportingAll:
+    """A starter that spawns, keeping every reporter it was handed, in order."""
+
+    reports: list[StartFailureReporter] = field(default_factory=list)
+
+    async def start_fork(
+        self, parent_execution_id: str, *, on_failure: StartFailureReporter
+    ) -> None:
+        del parent_execution_id
+        self.reports.append(on_failure)

@@ -222,6 +222,12 @@ class ForkStartProcessManager(ProcessManager):
         # overwriting the settle, after which nothing would ever settle it again
         # because an existing child emits no second start (codex review of
         # #1459).
+        #
+        # And only over the record this pass READ. Two passes can both read the
+        # same owed record; the one that loses must not dispatch, and its stale
+        # write must not revert whatever the winner's start has since recorded -
+        # attempts and reason included, or the ceiling counts nothing (codex
+        # review of #1466).
         dispatched = record.model_copy(
             update={
                 "status": "dispatched",
@@ -229,35 +235,19 @@ class ForkStartProcessManager(ProcessManager):
                 "dispatched_at": datetime.now(UTC),
             }
         )
-        await self._save(dispatched)
+        if not await self._save(dispatched, only_over=record):
+            return False
         try:
             await self._starter.start_fork(
-                parent, on_failure=partial(self._record_task_failure, record, dispatched)
+                parent, on_failure=partial(self._record_failure, record, dispatched)
             )
         except Exception as exc:
-            await self._record_failure(record, exc)
+            await self._record_failure(record, dispatched, exc)
             return False
         return True
 
-    async def _record_task_failure(
-        self, record: ForkStartRecord, dispatched: ForkStartRecord, exc: Exception
-    ) -> None:
-        """A failure reported from inside the start's task, if it still applies.
-
-        Only while the store still holds THIS dispatch. The task runs the whole
-        child, so its failure can arrive after the child's start event settled
-        the record `started`. Nor may a stale task speak for a later dispatch of
-        the same parent. The check is made by `_save`, in the same transition
-        as the write, so nothing can land between them.
-        """
-        await self._record_failure(record, exc, only_over=dispatched)
-
     async def _record_failure(
-        self,
-        record: ForkStartRecord,
-        exc: Exception,
-        *,
-        only_over: ForkStartRecord | None = None,
+        self, record: ForkStartRecord, dispatched: ForkStartRecord, exc: Exception
     ) -> None:
         """What a failed start means for its record, wherever it failed.
 
@@ -267,12 +257,18 @@ class ForkStartProcessManager(ProcessManager):
         log line that counted nothing.
 
         ``record`` is the one this attempt was dispatched from, so ``attempts``
-        counts from what was true before it. ``only_over`` is handed to `_save`.
+        counts from what was true before it. The failure is written only while
+        the store still holds ``dispatched``, THIS attempt's dispatch, checked by
+        `_save` in the same transition as the write. Either path can report
+        late: the task runs the whole child, so its failure can arrive after the
+        child's start settled the record, and while either path was failing a
+        later pass may have dispatched again. A failure speaks for its own
+        dispatch and never for whatever replaced it (codex review of #1466).
         """
         parent = record.parent_execution_id
         if isinstance(exc, MaintenancePausedError):
             logger.info("Start of the fork of %s held: %s", parent, exc.mode.refusal_detail)
-            await self._save(record.model_copy(update={"status": "paused"}), only_over=only_over)
+            await self._save(record.model_copy(update={"status": "paused"}), only_over=dispatched)
             return
         if isinstance(exc, ValueError):
             # Terminal, and ONLY this. A `ValueError` here is the domain's own
@@ -283,7 +279,7 @@ class ForkStartProcessManager(ProcessManager):
             logger.warning("The fork of %s may not start: %s", parent, exc)
             await self._save(
                 record.model_copy(update={"status": "failed", "status_reason": str(exc)}),
-                only_over=only_over,
+                only_over=dispatched,
             )
             return
         # NOT terminal. A store that is down, a repository read that timed out,
@@ -311,7 +307,7 @@ class ForkStartProcessManager(ProcessManager):
                     "attempts": attempts,
                 }
             ),
-            only_over=only_over,
+            only_over=dispatched,
         )
 
     async def _settle_if_a_fork_started(self, event: DomainEvent) -> None:
@@ -335,14 +331,15 @@ class ForkStartProcessManager(ProcessManager):
 
     async def _save(
         self, record: ForkStartRecord, *, only_over: ForkStartRecord | None = None
-    ) -> None:
-        """Write the record, never walking a settled one backwards.
+    ) -> bool:
+        """Write the record, never walking a settled one backwards. True if written.
 
         `started` and `failed` are conclusions; a later write of an earlier
         status is always a stale one racing them, so it is dropped (`_may_replace`).
         Monotonic rather than "last write wins", because last-write-wins is what
         let a dispatch overwrite the child's own start. With ``only_over``, the
-        write happens only while the store still holds exactly that record.
+        write happens only while the store still holds exactly that record: a
+        compare-and-set, for every write made on behalf of one dispatch.
 
         The read and the write are one transition under `_transition`; checked
         and written apart, a write could land between them and be overwritten.
@@ -359,7 +356,7 @@ class ForkStartProcessManager(ProcessManager):
                     record.parent_execution_id,
                     None if current is None else current.status,
                 )
-                return
+                return False
             if current is not None and not _may_replace(current.status, record.status):
                 logger.debug(
                     "Not walking the fork start of %s back from %s to %s",
@@ -367,10 +364,11 @@ class ForkStartProcessManager(ProcessManager):
                     current.status,
                     record.status,
                 )
-                return
+                return False
             await self._store.save(
                 self.PROJECTION_NAME, record.parent_execution_id, record.model_dump(mode="json")
             )
+            return True
 
     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
         """The parent's id: it admits at most one fork."""
