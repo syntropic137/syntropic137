@@ -156,6 +156,16 @@ configuration - an execution from before that was recorded - cannot be forked at
 all, because what the child would run could then only be read from the current
 workflow template.
 
+<Callout type="warn">
+  **A forked child cannot itself be forked yet** (#1462), whenever the phases it
+  inherited carried artifacts. The child holds its inherited phases with the
+  *original* parent's artifact ids, and the check that resolves them looks under
+  the child's own id, so it finds nothing and refuses with 409. The refusal says
+  "artifacts that resolved to no files", which reads as though the artifacts are
+  gone - they are not, the lookup asks the wrong owner. Fork the original parent
+  again instead, or start a fresh execution.
+</Callout>
+
 A parent can be forked **once**. Asking twice is refused and names the fork it
 already has, so a retried request cannot quietly create a second child.
 
@@ -166,8 +176,14 @@ then failed to start cannot be forked again.
 It is not a guarantee that the child will start. Admission is a point-in-time
 check, and a start can still fail afterwards - an artifact that disappears in
 between, a read model lagging the parent's own stream, maintenance closing, or an
-infrastructure fault. Those are retried and then recorded against the parent's
-fork, which is what the next section shows you how to inspect.
+infrastructure fault.
+
+A refusal raised **before** the start is dispatched is recorded against the
+parent's fork and settles after a bounded number of attempts. A failure raised
+**inside** the background start is currently only logged: the record stays
+`dispatched` and is re-offered every few minutes without ever settling (#1463).
+So a child that never appears may be retrying indefinitely rather than having
+given up.
 
 ## Over the API
 
@@ -202,21 +218,21 @@ conflict with what the parent recorded, not a malformed request.
 
 ## If the child never appears
 
-A successful fork is an admission. If no child execution shows up, the record of
-why is on the parent's fork start entry - it is not lost:
+A successful fork is an admission, and the child is started by a background
+process. If no child execution shows up:
 
-1. Look at the `fork_start` projection record for the parent. `pending`,
-   `paused`, `dispatched`, `retryable` and `failed` each mean something different,
-   and `status_reason` carries the last error.
-2. `dispatched` that never becomes `started` means the start was handed to a
-   background task and no child stream appeared. Check the coordinator and
-   dispatcher logs.
-3. `paused` means maintenance is closed. It resumes when admission reopens.
-4. `retryable` is being retried with a bounded number of attempts; `failed` has
-   spent them, and `status_reason` says what refused.
-5. Common causes worth checking in order: maintenance mode, artifact-list
-   projection lag, whether the inherited artifacts still exist, and event-store
-   errors.
+1. Check whether the child exists at all: `syn execution show <child-id>`, using
+   the `execution_id` the fork returned. If it is there, the start worked and the
+   problem is in the run rather than the fork.
+2. Check whether admission is closed. A held start resumes on its own when
+   maintenance reopens.
+3. Check the API logs for `Background fork start raised exception` and for the
+   fork-start records the process manager writes. The start's own status - held,
+   retrying, given up, and why - is **not** currently readable through `syn` or
+   the API (#1464), so this step needs log or database access that a self-hosted
+   operator may not have. That gap is the reason the step reads this way.
+4. Causes worth ruling out in order: maintenance mode, artifact-list projection
+   lag, whether the inherited artifacts still exist, and event-store errors.
 
 ## Verifying it after a deploy
 
@@ -226,8 +242,9 @@ Worth doing once on a disposable workflow after upgrading:
    that your `syn` build matches the API.
 2. Run a workflow that completes one phase and then fails inside the next. Note
    the parent id and the completed phase's artifacts.
-3. Fork it with no flags. Expect **409** mentioning external effects, and confirm
-   the parent has no fork recorded.
+3. Fork it with no flags. Expect **409** mentioning external effects. A refusal
+   writes nothing, so the next step must still succeed - that is how you confirm
+   it, since the parent's fork state is not exposed through `syn` yet (#1464).
 4. Fork it with `--acknowledge-external-effects`. Expect **200**, a new child id,
    the right resume phase and inherited prefix. Fork the parent again and expect
    **409** naming the fork it already has.
