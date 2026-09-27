@@ -15,7 +15,10 @@ rule keyed on one would silently open on exactly the stream that lost it. See
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     PhaseDefinition,
@@ -37,23 +40,63 @@ def evt(event: DomainEvent, field: str, default: Any = None) -> Any:  # noqa: AN
     return data.get(field, default)
 
 
-def parse_phase_definitions(raw_defs: list[dict[str, Any]]) -> list[PhaseDefinition]:
-    """Parse raw phase definition dicts into sorted PhaseDefinition objects.
+logger = logging.getLogger(__name__)
+
+
+class PhaseDefinitionPayload(BaseModel):
+    """One phase as a replayed `WorkflowExecutionStarted` carries it.
+
+    A MODEL rather than `dict[str, Any]` so the four fields this code reads are
+    named once and checked once, instead of being indexed by string at the point
+    of use where a missing key is a KeyError during replay (#1268).
+
+    `extra="allow"` on purpose: old streams carry keys this model does not name,
+    and replay must not fail because a payload knows more than we do. What it
+    must not do is silently accept a payload MISSING what sequencing needs -
+    hence no defaults on the first three.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+    phase_id: str
+    name: str
+    order: int
+    timeout_seconds: int = 300
+
+
+_PHASE_DEFINITIONS = TypeAdapter(list[PhaseDefinitionPayload])
+
+
+def parse_phase_definitions(raw_defs: object) -> list[PhaseDefinition]:
+    """The replayed phase definitions, sorted, or empty when unreadable.
 
     Sorted by `order`, which `WorkflowDefinition.from_yaml` guarantees is unique
     per phase - so this is a total order, and consumers that walk phases in
     sequence (notably `fork_rules.completed_prefix`) may rely on it. Nothing
     re-checks that here; #1455 tracks it.
+
+    Unreadable is EMPTY, not an exception, matching `read_pinned_phases`: a
+    payload this cannot validate would otherwise make the execution unloadable,
+    and an execution that cannot be loaded cannot be inspected, cancelled or
+    forked. Empty means the aggregate does not sequence, which is the documented
+    behaviour when `phase_definitions` is absent anyway.
     """
+    if not raw_defs:
+        return []
+    try:
+        parsed = _PHASE_DEFINITIONS.validate_python(raw_defs)
+    except ValidationError:
+        logger.warning("Unreadable phase_definitions on a replayed start event; treating as absent")
+        return []
     return sorted(
         [
             PhaseDefinition(
-                phase_id=d["phase_id"],
-                name=d["name"],
-                order=d["order"],
-                timeout_seconds=d.get("timeout_seconds", 300),
+                phase_id=d.phase_id,
+                name=d.name,
+                order=d.order,
+                timeout_seconds=d.timeout_seconds,
             )
-            for d in raw_defs
+            for d in parsed
         ],
         key=lambda p: p.order,
     )

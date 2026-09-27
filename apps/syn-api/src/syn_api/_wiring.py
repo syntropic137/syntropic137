@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.orchestration import StartForkHandler
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
@@ -885,6 +886,8 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     ``SkillResolutionService.resolve_for_phase`` so
     ``ExecutablePhase.skills`` is populated the same way.
     """
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
 
     processor = await get_execution_processor()
@@ -899,6 +902,20 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
         # informatively than this, but a path added later that only knows about
         # the handler is still refused rather than silently admitted.
         maintenance=get_maintenance_port(),
+        # #1457: every start records the commit each repository was at, so a
+        # fork of it can name the code its parent ran against.
+        commit_resolver=GitHubSourceCommitResolver(get_github_client),
+    )
+
+
+async def _build_fork_handler() -> StartForkHandler:
+    """The fork start handler, built when a fork is first requested."""
+    from syn_domain.contexts.orchestration import StartForkHandler
+
+    return StartForkHandler(
+        await get_execution_processor(),
+        get_workflow_execution_repository(),
+        maintenance=get_maintenance_port(),
     )
 
 
@@ -912,6 +929,15 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         handler,
         max_concurrent=max_concurrent,
         maintenance=get_admission_gate(),
+        # ADR-014 s7: the child of an admitted fork starts through this same
+        # gate and semaphore, reading everything it runs from its parent.
+        #
+        # Passed as a FACTORY, not a handler. Building it here would need the
+        # execution processor and repository - and so the observability event
+        # store - before any fork exists, which made an unconfigured
+        # SYN_OBSERVABILITY_DB_URL break dispatcher construction for every
+        # deployment, forking or not.
+        fork_handler=_build_fork_handler,
     )
 
 

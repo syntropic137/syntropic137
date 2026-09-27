@@ -728,3 +728,43 @@ class ExecutablePhase:
     # populates it from the workflow- and phase-scope SkillRefs, with phase
     # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
+
+
+# --- what a fork's start event carries ------------------------------------
+#
+# These two live HERE rather than beside the rest of `start_pins` because
+# `WorkflowExecutionStarted` carries them, and a domain EVENT may import value
+# objects from this module but not from an aggregate's internals - vsa enforces
+# that, and `ExecutionForkedEvent` already depends on this module the same way.
+
+
+class SourceCommit(BaseModel):
+    """The commit one repository was at when the execution started (#1457).
+
+    `sha` is None when nothing could resolve it - no GitHub access, a repository
+    that has since gone - and that is recorded as an honest "unknown" rather
+    than left out, so the repository list stays complete.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: `owner/name`, the canonical slug of `RepositoryRef`.
+    repository: str
+    sha: str | None = None
+
+
+class ForkOrigin(BaseModel):
+    """Where a forked execution came from (ADR-014 s7).
+
+    Copied from the parent's `ExecutionForked`, which is the decision; this is
+    the child recording which decision it is carrying out, so the child's own
+    stream answers "what was this a fork of" without reading the parent's.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent_execution_id: str
+    #: The parent's completed prefix, in phase order. The child never runs
+    #: these; their artifacts are the ones it hands forward.
+    inherited_phases: list[InheritedPhase]
+    resume_phase_id: str

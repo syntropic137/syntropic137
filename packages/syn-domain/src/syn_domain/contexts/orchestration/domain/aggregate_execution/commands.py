@@ -14,8 +14,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        ForkOrigin,
+        SourceCommit,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        ExecutablePhase,
         FailureClassification,
         PhaseDefinition,
         ReportedFailureReason,
@@ -34,6 +39,8 @@ class StartExecutionCommand:
         inputs: dict[str, Any],
         expected_completion_at: datetime | None = None,
         phase_definitions: list[PhaseDefinition] | None = None,
+        pinned_phases: list[ExecutablePhase] | None = None,
+        source_commits: list[SourceCommit] | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -42,6 +49,36 @@ class StartExecutionCommand:
         self.inputs = inputs
         self.expected_completion_at = expected_completion_at
         self.phase_definitions = phase_definitions
+        self.pinned_phases = pinned_phases
+        self.source_commits = source_commits
+
+
+class StartForkCommand:
+    """Command to start the execution a parent's fork admitted (ADR-014 s7).
+
+    Addressed to the CHILD: `execution_id` is the fork's own id, the one the
+    parent's `ExecutionForked` named. Built from the parent's stream by
+    `WorkflowExecutionAggregate.fork_start_command`, never from the workflow
+    template, so every field here is what the parent ran with (#1454, #1457).
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        workflow_name: str,
+        inputs: dict[str, str],
+        pinned_phases: list[ExecutablePhase],
+        source_commits: list[SourceCommit],
+        forked_from: ForkOrigin,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.workflow_id = workflow_id
+        self.workflow_name = workflow_name
+        self.inputs = inputs
+        self.pinned_phases = pinned_phases
+        self.source_commits = source_commits
+        self.forked_from = forked_from
 
 
 class CompleteExecutionCommand:

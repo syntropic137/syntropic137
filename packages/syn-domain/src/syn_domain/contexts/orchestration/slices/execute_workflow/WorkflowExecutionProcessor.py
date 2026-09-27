@@ -8,15 +8,18 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+    phase_definitions_of,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionStatus,
-    PhaseDefinition,
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
     StartExecutionCommand,
+    StartForkCommand,
     WorkflowExecutionAggregate,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
@@ -36,6 +39,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.failure_teardown import (
     record_failure_and_release,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
+    inherited_outputs,
+    inherited_phase_ids,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
@@ -60,15 +67,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace i
     PhaseWorkspace,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
-    AgentHandlerProtocol,
-    ArtifactRepository,
-    CommandBuilder,
-    ExecutionRepository,
-    PhaseOutputCache,
-    PromptBuilder,
-    SessionRepository,
-    TodoProjection,
-    WorkflowExecutionResult,  # re-exported for backward compatibility
+    # Imported at RUNTIME on purpose, not annotation-only: this module re-exports
+    # it, and `slices/execute_workflow/__init__.py` plus a dozen tests do
+    # `from ...WorkflowExecutionProcessor import WorkflowExecutionResult`. Moving
+    # it into the type-checking block below would break every one of them at
+    # import time, which is why TC001 is silenced here rather than obeyed.
+    WorkflowExecutionResult,  # noqa: TC001
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
@@ -92,12 +96,26 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports import (
         ArtifactContentStoragePort,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        ForkOrigin,
+        SourceCommit,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         ClaudePluginMaterializerProtocol,
         SkillMaterializerProtocol,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+        AgentHandlerProtocol,
+        ArtifactRepository,
+        CommandBuilder,
+        ExecutionRepository,
+        PhaseOutputCache,
+        PromptBuilder,
+        SessionRepository,
+        TodoProjection,
     )
 
 logger = logging.getLogger(__name__)
@@ -229,6 +247,18 @@ class WorkflowExecutionProcessor:
             inputs=inputs,
         )
 
+    async def resolve_inheritance(self, origin: ForkOrigin | None) -> None:
+        """Raise unless a fork's inherited outputs can be handed over.
+
+        For a caller that must find that out BEFORE dispatching the start rather
+        than inside it: a refusal raised in the background task reaches only a
+        log line. `start_fork` calls this through the processor it already holds,
+        rather than importing `fork_handoff` - a slice may not import another
+        slice's modules, and depending on an injected collaborator is the way
+        across that boundary.
+        """
+        await inherited_outputs(self._artifact_query, origin)
+
     async def run(
         self,
         workflow_id: str,
@@ -239,6 +269,7 @@ class WorkflowExecutionProcessor:
         repos: list[RepositoryRef] | None = None,
         expected_completion_at: datetime | None = None,
         admitted: AdmissionTicket | None = None,
+        source_commits: list[SourceCommit] | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern.
 
@@ -248,7 +279,6 @@ class WorkflowExecutionProcessor:
         admission decision and that write is queueing, and a deploy that
         drained over it would count a quiet system and then kill this run.
         """
-        started_at = datetime.now(UTC)
         # PromptBuilder reads ``inputs["repos"]`` for ``{{repos}}`` template substitution.
         # ADR-063: write the canonical HTTPS form of typed RepositoryRef so the prompt
         # never sees un-normalized slugs. TODO(#712): replace this with typed access
@@ -256,18 +286,6 @@ class WorkflowExecutionProcessor:
         if repos and "repos" not in inputs:
             inputs["repos"] = ",".join(r.https_url for r in repos)
         aggregate = WorkflowExecutionAggregate()
-
-        phase_definitions = [
-            PhaseDefinition(
-                phase_id=p.phase_id,
-                name=p.name,
-                order=p.order,
-                timeout_seconds=p.timeout_seconds or p.agent_config.timeout_seconds,
-            )
-            for p in phases
-        ]
-        phase_map = {p.phase_id: p for p in phases}
-
         start_cmd = StartExecutionCommand(
             execution_id=execution_id,
             workflow_id=workflow_id,
@@ -275,9 +293,55 @@ class WorkflowExecutionProcessor:
             total_phases=len(phases),
             inputs=inputs,
             expected_completion_at=expected_completion_at,
-            phase_definitions=phase_definitions,
+            phase_definitions=phase_definitions_of(phases),
+            pinned_phases=phases,
+            source_commits=source_commits,
         )
         aggregate.start_execution(start_cmd)
+        return await self._run_started(aggregate, workflow_id, phases, inputs, repos, admitted)
+
+    async def run_fork(
+        self,
+        command: StartForkCommand,
+        repos: list[RepositoryRef] | None = None,
+        admitted: AdmissionTicket | None = None,
+    ) -> WorkflowExecutionResult:
+        """Start and run the fork a parent admitted (ADR-014 s7).
+
+        The same drain as `run`, over the parent's PINNED phases (#1454) and
+        from the resume phase on: the aggregate and the to-do list both start
+        the child with its inherited phases complete, and their outputs are
+        handed forward from the parent's artifacts.
+        """
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.start_fork(command)
+        return await self._run_started(
+            aggregate,
+            command.workflow_id,
+            command.pinned_phases,
+            dict(command.inputs),
+            repos,
+            admitted,
+            origin=command.forked_from,
+        )
+
+    async def _run_started(
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        workflow_id: str,
+        phases: list[ExecutablePhase],
+        inputs: dict[str, Any],
+        repos: list[RepositoryRef] | None,
+        admitted: AdmissionTicket | None,
+        origin: ForkOrigin | None = None,
+    ) -> WorkflowExecutionResult:
+        """Record the start, then drain the to-do list until the run ends."""
+        started_at = datetime.now(UTC)
+        execution_id = aggregate.id or ""
+        phase_map = {p.phase_id: p for p in phases}
+        # Before the stream opens: a fork whose inheritance cannot be read
+        # must not leave a child that exists and can never run its first phase.
+        phase_outputs = await inherited_outputs(self._artifact_query, origin)
         await self._journal.open(aggregate)
 
         # #1387: durable, therefore visible. From here the drain counts this
@@ -291,8 +355,7 @@ class WorkflowExecutionProcessor:
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
-        completed_phase_ids: list[str] = []
-        phase_outputs = PhaseOutputCache()
+        completed_phase_ids = inherited_phase_ids(origin)
         dispatch_ctx = _DispatchContext(inputs=inputs)
 
         try:

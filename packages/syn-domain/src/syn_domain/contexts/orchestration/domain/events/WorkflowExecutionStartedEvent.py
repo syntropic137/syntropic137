@@ -7,6 +7,12 @@ from typing import Any
 
 from event_sourcing import DomainEvent, event
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutablePhase,  # noqa: TC001 - needed at runtime for Pydantic
+    ForkOrigin,  # noqa: TC001 - needed at runtime for Pydantic
+    SourceCommit,  # noqa: TC001 - needed at runtime for Pydantic
+)
+
 #: Where the dispatched task lives inside ``inputs``.
 #:
 #: A run is dispatched with a task and a set of inputs, and the task is folded
@@ -42,3 +48,19 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     # Phase definitions for aggregate-level sequencing (ISS-196)
     # Optional for backward compatibility — when absent, aggregate does not sequence.
     phase_definitions: list[dict[str, Any]] | None = None
+
+    #: The full runnable config of every phase, as this execution runs it
+    #: (#1454): provider, model resolved at start, prompt, sandbox, tools,
+    #: plugins, skills. The workflow template is mutable and this is not, so a
+    #: fork runs what its parent WOULD have run rather than what the template
+    #: says today. None on events written before the field existed, and a
+    #: parent with none cannot be forked.
+    pinned_phases: list[ExecutablePhase] | None = None
+
+    #: The commit each repository was at when this execution started (#1457).
+    #: A fork copies its parent's, so the two record the same code.
+    source_commits: list[SourceCommit] | None = None
+
+    #: Set only on a fork: the parent, what it inherited and where it resumes
+    #: (ADR-014 s7). The child's own record of "what was this a fork of".
+    forked_from: ForkOrigin | None = None

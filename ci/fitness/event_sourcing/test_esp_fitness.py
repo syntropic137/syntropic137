@@ -59,11 +59,13 @@ def _find_process_managers() -> list[type]:
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow import (
         WorkflowDispatchProjection,
     )
+    from syn_domain.contexts.orchestration.slices.start_fork import ForkStartProcessManager
 
     # Collect all known ProcessManager subclasses
     managers: list[type] = []
-    if issubclass(WorkflowDispatchProjection, ProcessManager):
-        managers.append(WorkflowDispatchProjection)
+    for manager in (WorkflowDispatchProjection, ForkStartProcessManager):
+        if issubclass(manager, ProcessManager):
+            managers.append(manager)
     return managers
 
 
