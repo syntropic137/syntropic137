@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -140,6 +141,11 @@ def get_admission_gate() -> AdmissionGate:
     return _admission_gate_singleton
 
 
+#: Builds a :class:`StartForkHandler` on demand. See the constructor for why
+#: this is not simply the handler.
+ForkHandlerFactory = Callable[[], Awaitable["StartForkHandler"]]
+
+
 class BackgroundWorkflowDispatcher:
     """Bridges WorkflowDispatchProjection → ExecuteWorkflowHandler.
 
@@ -154,7 +160,7 @@ class BackgroundWorkflowDispatcher:
         handler: ExecuteWorkflowHandler,
         max_concurrent: int = 1,
         maintenance: AdmissionGate | None = None,
-        fork_handler: StartForkHandler | None = None,
+        fork_handler: StartForkHandler | ForkHandlerFactory | None = None,
     ) -> None:
         """`max_concurrent` defaults to 1 for the same reason the setting does.
 
@@ -170,7 +176,35 @@ class BackgroundWorkflowDispatcher:
         self._tasks: set[asyncio.Task[None]] = set()
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._maintenance = maintenance
-        self._fork_handler = fork_handler
+        # Either the handler, or something that will build it on first fork.
+        #
+        # A FACTORY is accepted because building the handler eagerly drags the
+        # execution processor, the execution repository and therefore the
+        # observability event store into DISPATCHER CONSTRUCTION - so an
+        # unconfigured `SYN_OBSERVABILITY_DB_URL` stopped the dispatcher being
+        # built at all, even for a deployment that never forks anything. The
+        # dispatcher's job is dispatching; a fork's dependencies are a fork's
+        # problem, and they are resolved when one is actually requested.
+        self._fork_handler: StartForkHandler | None = (
+            None if callable(fork_handler) else fork_handler
+        )
+        self._fork_handler_factory: ForkHandlerFactory | None = (
+            fork_handler if callable(fork_handler) else None
+        )
+
+    async def _resolved_fork_handler(self) -> StartForkHandler:
+        """The fork handler, built on first use and kept.
+
+        Raises the same RuntimeError as before when this dispatcher was given
+        neither a handler nor a way to make one - a caller asking to fork
+        without that is a wiring bug, not a runtime condition.
+        """
+        if self._fork_handler is None and self._fork_handler_factory is not None:
+            self._fork_handler = await self._fork_handler_factory()
+        if self._fork_handler is None:
+            msg = "This dispatcher was built without a StartForkHandler"
+            raise RuntimeError(msg)
+        return self._fork_handler
 
     async def start_fork(self, parent_execution_id: str) -> AdmissionTicket | None:
         """Start the child a forked parent admitted, behind the same gate.
@@ -181,15 +215,13 @@ class BackgroundWorkflowDispatcher:
         synchronously, where the to-do list can still record them; the start
         itself runs as a task that shares the execution semaphore.
         """
-        if self._fork_handler is None:
-            msg = "This dispatcher was built without a StartForkHandler"
-            raise RuntimeError(msg)
+        fork_handler = await self._resolved_fork_handler()
         if self._maintenance is None:
-            await self._fork_handler.validate(parent_execution_id)
+            await fork_handler.validate(parent_execution_id)
             self._spawn_fork(parent_execution_id, None)
             return None
         await self._maintenance.refuse_early()
-        await self._fork_handler.validate(parent_execution_id)
+        await fork_handler.validate(parent_execution_id)
         async with self._maintenance.admitting() as ticket:
             self._spawn_fork(parent_execution_id, ticket)
             return ticket
@@ -207,11 +239,11 @@ class BackgroundWorkflowDispatcher:
     async def _start_fork_with_semaphore(
         self, parent_execution_id: str, admitted: AdmissionTicket | None
     ) -> None:
-        assert self._fork_handler is not None
+        fork_handler = await self._resolved_fork_handler()
         with carrying(admitted):
             async with self._semaphore:
                 try:
-                    await self._fork_handler.handle(parent_execution_id, admitted=admitted)
+                    await fork_handler.handle(parent_execution_id, admitted=admitted)
                 except Exception:
                     logger.exception(
                         "Background fork start raised exception",

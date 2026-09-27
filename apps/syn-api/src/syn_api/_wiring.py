@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.orchestration import StartForkHandler
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
@@ -907,10 +908,20 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     )
 
 
+async def _build_fork_handler() -> StartForkHandler:
+    """The fork start handler, built when a fork is first requested."""
+    from syn_domain.contexts.orchestration import StartForkHandler
+
+    return StartForkHandler(
+        await get_execution_processor(),
+        get_workflow_execution_repository(),
+        maintenance=get_maintenance_port(),
+    )
+
+
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
     handler = await get_execute_workflow_handler()
-    from syn_domain.contexts.orchestration.slices.start_fork import StartForkHandler
     from syn_shared.settings import get_settings
 
     max_concurrent = get_settings().polling.max_concurrent_dispatches
@@ -920,11 +931,13 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         maintenance=get_admission_gate(),
         # ADR-014 s7: the child of an admitted fork starts through this same
         # gate and semaphore, reading everything it runs from its parent.
-        fork_handler=StartForkHandler(
-            await get_execution_processor(),
-            get_workflow_execution_repository(),
-            maintenance=get_maintenance_port(),
-        ),
+        #
+        # Passed as a FACTORY, not a handler. Building it here would need the
+        # execution processor and repository - and so the observability event
+        # store - before any fork exists, which made an unconfigured
+        # SYN_OBSERVABILITY_DB_URL break dispatcher construction for every
+        # deployment, forking or not.
+        fork_handler=_build_fork_handler,
     )
 
 

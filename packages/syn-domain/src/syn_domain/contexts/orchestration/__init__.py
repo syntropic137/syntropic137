@@ -159,6 +159,12 @@ from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins impor
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
 )
+from syn_domain.contexts.orchestration.slices.start_fork import (
+    ForkStarter,
+    ForkStartProcessManager,
+    ForkStartRecord,
+    StartForkHandler,
+)
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
@@ -205,6 +211,9 @@ __all__ = [
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
+    "ForkStartProcessManager",
+    "ForkStartRecord",
+    "ForkStarter",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     # Aggregates
@@ -229,6 +238,7 @@ __all__ = [
     "SkillInvalidName",
     "SkillNotRegistered",
     "SkillRef",
+    "StartForkHandler",
     "StreamResult",
     "SubagentTracker",
     "TerminateWorkspaceCommand",

@@ -7,7 +7,7 @@ Location: orchestration/domain/aggregate_execution/ (per ADR-020)
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Final
 
 from event_sourcing import (
     AggregateRoot,
@@ -756,8 +756,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._started_at = evt(event, "started_at")
         self._total_phases = evt(event, "total_phases", 0)
         self._expected_completion_at = evt(event, "expected_completion_at")
-        raw_defs: list[dict[str, Any]] = evt(event, "phase_definitions") or []
-        self._phase_definitions = parse_phase_definitions(raw_defs)
+        self._phase_definitions = parse_phase_definitions(evt(event, "phase_definitions"))
         self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
         self._status = ExecutionStatus.RUNNING
         self._pins = read_start_pins(event)

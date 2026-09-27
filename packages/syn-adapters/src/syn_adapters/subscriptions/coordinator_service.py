@@ -470,6 +470,10 @@ def create_coordinator_service(
     from syn_domain.contexts.github.slices.trigger_history.projection import (
         TriggerHistoryProjection,
     )
+    from syn_domain.contexts.orchestration import (
+        ForkStarter,
+        ForkStartProcessManager,
+    )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
     )
@@ -497,10 +501,6 @@ def create_coordinator_service(
     )
     from syn_domain.contexts.orchestration.slices.register_skill.projection import (
         SkillLockProjection,
-    )
-    from syn_domain.contexts.orchestration.slices.start_fork import (
-        ForkStarter,
-        ForkStartProcessManager,
     )
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,

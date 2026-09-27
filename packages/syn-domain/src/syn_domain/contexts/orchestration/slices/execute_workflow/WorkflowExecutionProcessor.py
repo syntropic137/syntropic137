@@ -67,15 +67,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace i
     PhaseWorkspace,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
-    AgentHandlerProtocol,
-    ArtifactRepository,
-    CommandBuilder,
-    ExecutionRepository,
-    PhaseOutputCache,
-    PromptBuilder,
-    SessionRepository,
-    TodoProjection,
-    WorkflowExecutionResult,  # re-exported for backward compatibility
+    # Imported at RUNTIME on purpose, not annotation-only: this module re-exports
+    # it, and `slices/execute_workflow/__init__.py` plus a dozen tests do
+    # `from ...WorkflowExecutionProcessor import WorkflowExecutionResult`. Moving
+    # it into the type-checking block below would break every one of them at
+    # import time, which is why TC001 is silenced here rather than obeyed.
+    WorkflowExecutionResult,  # noqa: TC001
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
@@ -109,6 +106,16 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         ClaudePluginMaterializerProtocol,
         SkillMaterializerProtocol,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+        AgentHandlerProtocol,
+        ArtifactRepository,
+        CommandBuilder,
+        ExecutionRepository,
+        PhaseOutputCache,
+        PromptBuilder,
+        SessionRepository,
+        TodoProjection,
     )
 
 logger = logging.getLogger(__name__)
