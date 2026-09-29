@@ -267,7 +267,6 @@ describe('useExecutionData live polling (#1048)', () => {
   describe.each([
     { status: 'running', visibility: 'visible', shouldPoll: true },
     { status: 'running', visibility: 'hidden', shouldPoll: false },
-    { status: 'paused', visibility: 'visible', shouldPoll: true },
     { status: 'completed', visibility: 'visible', shouldPoll: false },
     { status: 'failed', visibility: 'visible', shouldPoll: false },
     { status: 'cancelled', visibility: 'visible', shouldPoll: false },
@@ -339,8 +338,8 @@ describe('useExecutionData stops polling in every terminal status (#1048)', () =
     vi.useRealTimers()
   })
 
-  // ExecutionStatus has seven members. Three of them can still change
-  // (not_started, running, paused); the other four cannot. The hook's set held
+  // ExecutionStatus has six members. Two of them can still change
+  // (not_started, running); the other four cannot. The hook's set held
   // only three of those four, so `interrupted` — a forceful SIGINT stop, which
   // the execution-detail projection writes and never revisits — kept the page
   // polling the API every 3 seconds for as long as the tab stayed open.

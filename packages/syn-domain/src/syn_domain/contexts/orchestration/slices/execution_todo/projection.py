@@ -49,11 +49,11 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
-        ForkOrigin,
+        ResumeOrigin,
     )
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
-    read_fork_origin,
+    read_resume_origin,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
@@ -210,11 +210,11 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not phase_defs:
             return  # Legacy mode — no to-do list management
 
-        origin = read_fork_origin(
-            event_data.get("forked_from"), event_data.get(INHERITED_PHASE_OWNERS)
+        origin = read_resume_origin(
+            event_data.get("resumed_from"), event_data.get(INHERITED_PHASE_OWNERS)
         )
         if origin is not None:
-            await self._start_fork(execution_id, origin)
+            await self._start_resume(execution_id, origin)
             return
 
         # Sort by order, take first phase
@@ -461,8 +461,8 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 _merge_progress(progress, {phase_id: new_rank}),
             )
 
-    async def _start_fork(self, execution_id: str, origin: ForkOrigin) -> None:
-        """A fork's list starts at its resume phase, its inherited ones done.
+    async def _start_resume(self, execution_id: str, origin: ResumeOrigin) -> None:
+        """A resume's list starts at its resume phase, its inherited ones done.
 
         Marked done rather than merely left out (ADR-014 s7): the phase's
         highwater is what `get_pending` filters by, so an inherited phase is

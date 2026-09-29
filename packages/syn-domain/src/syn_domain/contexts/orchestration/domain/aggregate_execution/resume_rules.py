@@ -1,8 +1,8 @@
-"""The rules that decide whether a terminal execution may be forked.
+"""The rules that decide whether a terminal execution may be resumed.
 
-Resume is a FORK, not a mutation of the run that failed (ADR-014 s7). The
+Resume is a RESUME, not a mutation of the run that failed (ADR-014 s7). The
 parent decides, and these are the rules it decides by. They live here rather
-than inside `WorkflowExecutionAggregate.fork_execution` for two reasons: the
+than inside `WorkflowExecutionAggregate.resume_execution` for two reasons: the
 handler was the most branch-dense one in the aggregate, and every rule below is
 a pure function of the parent's replayed state, so it is testable without
 building an aggregate at all.
@@ -25,26 +25,26 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
-        ForkExecutionCommand,
+        ResumeExecutionCommand,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         PhaseDefinition,
     )
-    from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
-        ExecutionForkedEvent,
+    from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+        ExecutionResumedEvent,
     )
 
-#: Terminal states a fork may be taken from on the request alone (ADR-014 s7).
+#: Terminal states a resume may be taken from on the request alone (ADR-014 s7).
 #:
 #: FAILED and INTERRUPTED ended without anyone deciding the work should stop,
 #: so running the rest of it again is what the operator wanted all along.
 #: CANCELLED is deliberately absent: a cancel IS that decision - it may have
 #: been issued because the run targeted the wrong repository or its task held
-#: a secret - so it is forkable only on `override_cancellation`, never merely
-#: because it is terminal. COMPLETED has nothing left to run; RUNNING and
-#: PAUSED are still live, and forking them would put two runs on one piece of
-#: work; an execution that never started has nothing to inherit.
-FORKABLE_STATUSES: Final[frozenset[ExecutionStatus]] = frozenset(
+#: a secret - so it is resumable only on `override_cancellation`, never merely
+#: because it is terminal. COMPLETED has nothing left to run; RUNNING is
+#: still live, and resuming it would put two runs on one piece of work; an
+#: execution that never started has nothing to inherit.
+RESUMABLE_STATUSES: Final[frozenset[ExecutionStatus]] = frozenset(
     {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}
 )
 
@@ -57,11 +57,11 @@ def completed_prefix(
     execution_id: str,
     phase_owners: Mapping[str, str],
 ) -> tuple[list[InheritedPhase], str | None]:
-    """The phases a fork inherits, and the phase it resumes at.
+    """The phases a resume inherits, and the phase it resumes at.
 
     The CONTIGUOUS prefix, in phase order, stopping at the first phase that did
     not complete. A phase completed AFTER that gap is not inherited: its output
-    was built on a predecessor the fork is about to produce afresh, so handing
+    was built on a predecessor the resume is about to produce afresh, so handing
     it over would hand the child work resting on something that no longer
     holds.
 
@@ -77,8 +77,8 @@ def completed_prefix(
 
     Every inherited phase names the execution that holds its artifacts (#1462):
     ``execution_id`` for a phase this run ran, or its owner from
-    ``phase_owners`` for one this run itself inherited. Without that a fork of a
-    fork asks its parent for artifacts only the grandparent ever stored.
+    ``phase_owners`` for one this run itself inherited. Without that a resume of a
+    resume asks its parent for artifacts only the grandparent ever stored.
     """
     inherited: list[InheritedPhase] = []
     for phase in phase_definitions:
@@ -94,41 +94,41 @@ def completed_prefix(
     return inherited, None
 
 
-def refuse_fork(
+def refuse_resume(
     *,
     execution_id: str | None,
     status: ExecutionStatus,
-    forked: bool,
-    fork_execution_id: str | None,
-    requested_fork_id: str,
+    resumed: bool,
+    resume_execution_id: str | None,
+    requested_resume_id: str,
     override_cancellation: bool,
 ) -> str | None:
-    """Why this execution may not be forked, or None if it may.
+    """Why this execution may not be resumed, or None if it may.
 
     Returns the refusal MESSAGE rather than raising, so the whole admission
     decision is one expression the caller turns into a `ValueError`.
 
-    `forked` carries the at-most-once rule, NOT `fork_execution_id`. Under
+    `resumed` carries the at-most-once rule, NOT `resume_execution_id`. Under
     ADR-023 the store falls back to `GenericDomainEvent` when a stored event
     fails typed validation, and a field read off such an event comes back None -
     so a rule keyed on the child's id would fail OPEN on exactly the parent that
-    has already been forked. The id is only used to name it in the message.
+    has already been resumed. The id is only used to name it in the message.
     """
     if execution_id is None:
-        return "Cannot fork an execution that has not been started"
+        return "Cannot resume an execution that has not been started"
     if status is ExecutionStatus.CANCELLED:
         if not override_cancellation:
             return (
-                f"Cannot fork execution {execution_id}: it was cancelled, and "
-                "forking a cancelled execution needs an explicit override"
+                f"Cannot resume execution {execution_id}: it was cancelled, and "
+                "resuming a cancelled execution needs an explicit override"
             )
-    elif status not in FORKABLE_STATUSES:
-        return f"Cannot fork execution in status {status}"
-    if forked:
-        named = fork_execution_id or "an execution this stream does not name"
-        return f"Execution {execution_id} has already been forked as {named}"
-    if not requested_fork_id or requested_fork_id == execution_id:
-        return f"A fork needs an execution id of its own, got {requested_fork_id!r}"
+    elif status not in RESUMABLE_STATUSES:
+        return f"Cannot resume execution in status {status}"
+    if resumed:
+        named = resume_execution_id or "an execution this stream does not name"
+        return f"Execution {execution_id} has already been resumed as {named}"
+    if not requested_resume_id or requested_resume_id == execution_id:
+        return f"A resume needs an execution id of its own, got {requested_resume_id!r}"
     return None
 
 
@@ -139,80 +139,80 @@ def refuse_resume_point(
     may_repeat_effects: bool,
     acknowledge_external_effects: bool,
 ) -> str | None:
-    """Why the fork's resume point is not acceptable, or None if it is.
+    """Why the resume's resume point is not acceptable, or None if it is.
 
-    Separate from `refuse_fork` because it needs the prefix computed first, and
-    computing the prefix is only worthwhile once the parent is forkable at all.
+    Separate from `refuse_resume` because it needs the prefix computed first, and
+    computing the prefix is only worthwhile once the parent is resumable at all.
     """
     if resume_phase_id is None:
-        return f"Cannot fork execution {execution_id}: it has no unfinished phase to resume at"
+        return f"Cannot resume execution {execution_id}: it has no unfinished phase to resume at"
     if may_repeat_effects and not acknowledge_external_effects:
         return (
-            f"Cannot fork execution {execution_id}: phase {resume_phase_id} started "
+            f"Cannot resume execution {execution_id}: phase {resume_phase_id} started "
             "and may have pushed or published something re-running it would "
-            "repeat; the fork must acknowledge external effects"
+            "repeat; the resume must acknowledge external effects"
         )
     return None
 
 
 @dataclass(frozen=True)
-class ForkRefused:
-    """The parent may not be forked, and why."""
+class ResumeRefused:
+    """The parent may not be resumed, and why."""
 
     reason: str
 
 
 @dataclass(frozen=True)
-class ForkAdmitted:
-    """The parent may be forked, and the event that records it."""
+class ResumeAdmitted:
+    """The parent may be resumed, and the event that records it."""
 
-    event: ExecutionForkedEvent
+    event: ExecutionResumedEvent
 
 
-#: The whole outcome of asking to fork, as one value the caller matches on.
+#: The whole outcome of asking to resume, as one value the caller matches on.
 #:
 #: Two types rather than a message plus an optional event, so "refused" and
 #: "admitted" are not both representable at once and the caller cannot forget to
 #: check. The caller RAISES - the decision is made here, the refusal is signalled
 #: there, and the aggregate's handler keeps the precondition guard that every
 #: command handler is required to have.
-ForkDecision = ForkRefused | ForkAdmitted
+ResumeDecision = ResumeRefused | ResumeAdmitted
 
 
-def decide_fork(
+def decide_resume(
     *,
     execution_id: str | None,
     workflow_id: str,
     status: ExecutionStatus,
-    forked: bool,
-    fork_execution_id: str | None,
+    resumed: bool,
+    resume_execution_id: str | None,
     phase_definitions: Sequence[PhaseDefinition],
     completed_phase_ids: frozenset[str] | set[str],
     phase_artifact_ids: Mapping[str, list[str]],
     phase_owners: Mapping[str, str],
     started_phase_ids: Mapping[str, int] | frozenset[str] | set[str],
-    command: ForkExecutionCommand,
-) -> ForkDecision:
+    command: ResumeExecutionCommand,
+) -> ResumeDecision:
     """Every rule above, applied in order.
 
-    The ORDER matters: the prefix is only computed once the parent is forkable at
+    The ORDER matters: the prefix is only computed once the parent is resumable at
     all, and the resume point is judged only once there is a prefix to judge it
     against.
     """
-    from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
-        ExecutionForkedEvent,
+    from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+        ExecutionResumedEvent,
     )
 
-    refusal = refuse_fork(
+    refusal = refuse_resume(
         execution_id=execution_id,
         status=status,
-        forked=forked,
-        fork_execution_id=fork_execution_id,
-        requested_fork_id=command.fork_execution_id,
+        resumed=resumed,
+        resume_execution_id=resume_execution_id,
+        requested_resume_id=command.resume_execution_id,
         override_cancellation=command.override_cancellation,
     )
     if refusal is not None:
-        return ForkRefused(refusal)
+        return ResumeRefused(refusal)
 
     inherited, resume_phase_id = completed_prefix(
         phase_definitions,
@@ -233,16 +233,16 @@ def decide_fork(
         acknowledge_external_effects=command.acknowledge_external_effects,
     )
     if refusal is not None:
-        return ForkRefused(refusal)
+        return ResumeRefused(refusal)
 
-    return ForkAdmitted(
-        ExecutionForkedEvent(
+    return ResumeAdmitted(
+        ExecutionResumedEvent(
             workflow_id=workflow_id,
             execution_id=command.aggregate_id,
-            fork_execution_id=command.fork_execution_id,
+            resume_execution_id=command.resume_execution_id,
             inherited_phases=inherited,
             resume_phase_id=resume_phase_id or "",
-            forked_at=datetime.now(UTC),
+            resumed_at=datetime.now(UTC),
             cancellation_overridden=status is ExecutionStatus.CANCELLED,
             external_effects_acknowledged=may_repeat_effects,
         )

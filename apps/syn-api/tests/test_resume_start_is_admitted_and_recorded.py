@@ -1,10 +1,10 @@
-"""An admitted fork's child is started through the gate, and says how it went.
+"""An admitted resume's child is started through the gate, and says how it went.
 
 The same seam as #1387's trigger path, and the same hazard (#1039): the
-process manager awaits `start_fork()` and then writes a status, so a refusal
+process manager awaits `start_resume()` and then writes a status, so a refusal
 raised inside the fire-and-forget task would leave a record claiming a child
 that never started. So these run the REAL process manager over the REAL
-dispatcher and gate; only `StartForkHandler` is a double, because what it does
+dispatcher and gate; only `StartResumeHandler` is a double, because what it does
 once admitted is proven in the domain against the real processor.
 """
 
@@ -36,14 +36,14 @@ from syn_domain.contexts._shared.integration_events.AdmissionOpenEvent import (
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     InheritedPhase,
 )
-from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
-    ExecutionForkedEvent,
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
 )
-from syn_domain.contexts.orchestration.slices.start_fork import (
-    ForkStartProcessManager,
-    ForkStartRecord,
+from syn_domain.contexts.orchestration.slices.start_resume import (
+    ResumeStartProcessManager,
+    ResumeStartRecord,
 )
-from syn_domain.contexts.orchestration.slices.start_fork.value_objects import MAX_START_ATTEMPTS
+from syn_domain.contexts.orchestration.slices.start_resume.value_objects import MAX_START_ATTEMPTS
 
 pytestmark = pytest.mark.unit
 
@@ -52,18 +52,18 @@ PARENT = "exec-parent-1454"
 #: The process manager's MODULE. The package re-exports the class under the
 #: same name, so an ordinary import of this path yields the class instead.
 _pm_module = importlib.import_module(
-    "syn_domain.contexts.orchestration.slices.start_fork.ForkStartProcessManager"
+    "syn_domain.contexts.orchestration.slices.start_resume.ResumeStartProcessManager"
 )
-_PROJECTION = ForkStartProcessManager.PROJECTION_NAME
+_PROJECTION = ResumeStartProcessManager.PROJECTION_NAME
 
 
-class _ForkHandler:
-    """Stands in for StartForkHandler: refuses on request, records what it started."""
+class _ResumeHandler:
+    """Stands in for StartResumeHandler: refuses on request, records what it started."""
 
     def __init__(self) -> None:
         self.refusal: str | None = None
         #: Raised from INSIDE the spawned task - after `validate` passed and
-        #: `start_fork` returned - which is where a real start fails when a
+        #: `start_resume` returned - which is where a real start fails when a
         #: store, a repository or a workspace gives out mid-start (#1463).
         self.fails_in_task: Exception | None = None
         self.attempted = 0
@@ -77,9 +77,9 @@ class _ForkHandler:
     async def handle(
         self, parent_execution_id: str, *, admitted: AdmissionTicket | None = None
     ) -> None:
-        # Idempotent per parent, because the real `StartForkHandler.handle` is:
+        # Idempotent per parent, because the real `StartResumeHandler.handle` is:
         # it returns early when the child already exists, and the child's id is
-        # fixed by the parent's `ExecutionForked` rather than minted per attempt.
+        # fixed by the parent's `ExecutionResumed` rather than minted per attempt.
         # That matters now that a `dispatched` record stays OWED and is therefore
         # re-offered on later processor passes - a fake that appended every time
         # would report a double start the real one cannot perform.
@@ -97,14 +97,14 @@ class _Fixture:
     def __init__(self) -> None:
         self.store = InMemoryProjectionStore()
         self.checkpoints = MemoryCheckpointStore()
-        self.forks = _ForkHandler()
+        self.resumes = _ResumeHandler()
         self.maintenance = AdmissionGate(InMemoryMaintenanceAdapter())
         self.dispatcher = BackgroundWorkflowDispatcher(
-            handler=None,  # type: ignore[arg-type]  # the fork path never reaches it
+            handler=None,  # type: ignore[arg-type]  # the resume path never reaches it
             maintenance=self.maintenance,
-            fork_handler=self.forks,  # type: ignore[arg-type]
+            resume_handler=self.resumes,  # type: ignore[arg-type]
         )
-        self.manager = ForkStartProcessManager(fork_starter=self.dispatcher, store=self.store)
+        self.manager = ResumeStartProcessManager(resume_starter=self.dispatcher, store=self.store)
         self._nonce = 0
 
     async def _deliver(self, event: DomainEvent, event_type: str, aggregate_id: str) -> None:
@@ -121,16 +121,16 @@ class _Fixture:
         )
         await self.manager.handle_event(envelope, self.checkpoints)
 
-    async def the_parent_forks(self) -> None:
-        event = ExecutionForkedEvent(
+    async def the_parent_resumes(self) -> None:
+        event = ExecutionResumedEvent(
             workflow_id="wf-1",
             execution_id=PARENT,
-            fork_execution_id="exec-child-1454",
+            resume_execution_id="exec-child-1454",
             inherited_phases=[InheritedPhase(phase_id="research", artifact_ids=["art-1"])],
             resume_phase_id="plan",
-            forked_at=datetime.now(UTC),
+            resumed_at=datetime.now(UTC),
         )
-        await self._deliver(event, "ExecutionForked", PARENT)
+        await self._deliver(event, "ExecutionResumed", PARENT)
 
     async def admission_reopens(self) -> None:
         await self._deliver(
@@ -139,10 +139,10 @@ class _Fixture:
             "maintenance",
         )
 
-    async def record(self) -> ForkStartRecord:
+    async def record(self) -> ResumeStartRecord:
         row = await self.store.get(_PROJECTION, PARENT)
-        assert row is not None, "the fork produced no start record at all"
-        return ForkStartRecord.model_validate(row)
+        assert row is not None, "the resume produced no start record at all"
+        return ResumeStartRecord.model_validate(row)
 
     async def drain(self) -> None:
         while self.dispatcher._tasks:  # pyright: ignore[reportPrivateUsage]
@@ -154,15 +154,15 @@ async def fixture() -> _Fixture:
     return _Fixture()
 
 
-class TestAnAdmittedFork:
+class TestAnAdmittedResume:
     async def test_is_owed_a_start_before_anything_runs(self, fixture: _Fixture) -> None:
-        await fixture.the_parent_forks()
+        await fixture.the_parent_resumes()
 
         assert (await fixture.record()).status == "pending"
-        assert fixture.forks.started == []
+        assert fixture.resumes.started == []
 
     async def test_is_started_once_processed(self, fixture: _Fixture) -> None:
-        await fixture.the_parent_forks()
+        await fixture.the_parent_resumes()
 
         assert await fixture.manager.process_pending() == 1
         await fixture.drain()
@@ -171,36 +171,36 @@ class TestAnAdmittedFork:
         # yet proves a child stream exists. Only the child's own
         # `WorkflowExecutionStarted` settles that (#1459 review).
         assert (await fixture.record()).status == "dispatched"
-        assert fixture.forks.started == [PARENT]
+        assert fixture.resumes.started == [PARENT]
 
-    async def test_a_replayed_fork_does_not_reopen_a_started_record(
+    async def test_a_replayed_resume_does_not_reopen_a_started_record(
         self, fixture: _Fixture
     ) -> None:
-        await fixture.the_parent_forks()
+        await fixture.the_parent_resumes()
         await fixture.manager.process_pending()
         await fixture.drain()
 
-        await fixture.the_parent_forks()
+        await fixture.the_parent_resumes()
         await fixture.manager.process_pending()
         await fixture.drain()
 
         assert (await fixture.record()).status == "dispatched"
-        assert fixture.forks.started == [PARENT], "the fork was started twice"
+        assert fixture.resumes.started == [PARENT], "the resume was started twice"
 
 
-class TestAForkStartedWhileAdmissionIsPaused:
+class TestAResumeStartedWhileAdmissionIsPaused:
     async def test_starts_nothing_and_is_recorded_paused(self, fixture: _Fixture) -> None:
-        await fixture.the_parent_forks()
+        await fixture.the_parent_resumes()
         await fixture.maintenance.set_mode(active=True, reason="pit stop", actor="deploy")
 
         assert await fixture.manager.process_pending() == 0
         await fixture.drain()
 
         assert (await fixture.record()).status == "paused"
-        assert fixture.forks.started == []
+        assert fixture.resumes.started == []
 
     async def test_is_started_once_admission_reopens(self, fixture: _Fixture) -> None:
-        await fixture.the_parent_forks()
+        await fixture.the_parent_resumes()
         await fixture.maintenance.set_mode(active=True, reason="pit stop", actor="deploy")
         await fixture.manager.process_pending()
 
@@ -210,35 +210,35 @@ class TestAForkStartedWhileAdmissionIsPaused:
         await fixture.drain()
 
         assert (await fixture.record()).status == "dispatched"
-        assert fixture.forks.started == [PARENT]
+        assert fixture.resumes.started == [PARENT]
 
 
-class TestAForkTheChildRefuses:
+class TestAResumeTheChildRefuses:
     async def test_is_recorded_failed_with_the_reason_not_started(self, fixture: _Fixture) -> None:
         """#1039: the refusal must reach the record, not die in a background task."""
-        fixture.forks.refusal = "Cannot start fork exec-child-1454: no pinned phase config"
-        await fixture.the_parent_forks()
+        fixture.resumes.refusal = "Cannot start resume exec-child-1454: no pinned phase config"
+        await fixture.the_parent_resumes()
 
         await fixture.manager.process_pending()
         await fixture.drain()
 
         record = await fixture.record()
         assert record.status == "failed"
-        assert record.status_reason == fixture.forks.refusal
-        assert fixture.forks.started == []
+        assert record.status_reason == fixture.resumes.refusal
+        assert fixture.resumes.started == []
 
     async def test_is_not_retried(self, fixture: _Fixture) -> None:
-        fixture.forks.refusal = "refused"
-        await fixture.the_parent_forks()
+        fixture.resumes.refusal = "refused"
+        await fixture.the_parent_resumes()
         await fixture.manager.process_pending()
 
-        fixture.forks.refusal = None
+        fixture.resumes.refusal = None
         assert await fixture.manager.process_pending() == 0
-        assert fixture.forks.started == []
+        assert fixture.resumes.started == []
 
 
-class TestAForkStartThatFailsInsideItsTask:
-    """#1463. `validate` passed, `start_fork` returned, then the task raised.
+class TestAResumeStartThatFailsInsideItsTask:
+    """#1463. `validate` passed, `start_resume` returned, then the task raised.
 
     That failure used to reach only a log line: the record stayed `dispatched`,
     `attempts` never moved, `status_reason` stayed None, and the start was
@@ -263,8 +263,8 @@ class TestAForkStartThatFailsInsideItsTask:
             await fixture.drain()
 
     async def test_is_retryable_with_the_reason_after_one_attempt(self, fixture: _Fixture) -> None:
-        fixture.forks.fails_in_task = RuntimeError("workspace provider unreachable")
-        await fixture.the_parent_forks()
+        fixture.resumes.fails_in_task = RuntimeError("workspace provider unreachable")
+        await fixture.the_parent_resumes()
 
         await self._cycle(fixture, 1)
 
@@ -273,8 +273,8 @@ class TestAForkStartThatFailsInsideItsTask:
         assert record.status_reason == "workspace provider unreachable"
 
     async def test_settles_failed_once_the_attempts_are_spent(self, fixture: _Fixture) -> None:
-        fixture.forks.fails_in_task = RuntimeError("workspace provider unreachable")
-        await fixture.the_parent_forks()
+        fixture.resumes.fails_in_task = RuntimeError("workspace provider unreachable")
+        await fixture.the_parent_resumes()
 
         await self._cycle(fixture, MAX_START_ATTEMPTS + 3)
 
@@ -282,16 +282,16 @@ class TestAForkStartThatFailsInsideItsTask:
         assert record.status == "failed"
         assert record.attempts == MAX_START_ATTEMPTS
         assert record.status_reason == "workspace provider unreachable"
-        assert fixture.forks.attempted == MAX_START_ATTEMPTS, "the bound did not apply"
+        assert fixture.resumes.attempted == MAX_START_ATTEMPTS, "the bound did not apply"
 
     async def test_a_refusal_inside_the_task_is_terminal_at_once(self, fixture: _Fixture) -> None:
         """Classified as the synchronous path classifies it: a `ValueError` is
         the domain's refusal, and asking again gets the same answer."""
-        fixture.forks.fails_in_task = ValueError("Cannot start fork: refused")
-        await fixture.the_parent_forks()
+        fixture.resumes.fails_in_task = ValueError("Cannot start resume: refused")
+        await fixture.the_parent_resumes()
 
         await self._cycle(fixture, 3)
 
         record = await fixture.record()
-        assert (record.status, record.status_reason) == ("failed", "Cannot start fork: refused")
-        assert fixture.forks.attempted == 1
+        assert (record.status, record.status_reason) == ("failed", "Cannot start resume: refused")
+        assert fixture.resumes.attempted == 1

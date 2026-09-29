@@ -348,7 +348,7 @@ class ExecuteWorkflowHandler:
         # optional dependency nobody verifies is how a gate loses an entrance.
         self._maintenance = maintenance
         # WHY optional (#1457): without one every commit is recorded as
-        # unknown, which is honest and forks exactly as before. Production
+        # unknown, which is honest and resumes exactly as before. Production
         # passes the GitHub resolver.
         self._commit_resolver = commit_resolver
 

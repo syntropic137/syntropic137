@@ -3,6 +3,12 @@
 **Last Updated:** 2026-01-26  
 **Reference:** [ADR-019: WebSocket Control Plane Architecture](../adrs/ADR-019-websocket-control-plane.md)
 
+> **Out of date (2026-09-29).** This document describes the WebSocket control
+> plane, which was REMOVED (see [ADR-049](../adrs/ADR-049-sse-over-websocket-for-execution-streams.md)):
+> observation is served by SSE, and control is plain HTTP POST. The pause and
+> resume commands it shows were also deleted, because nothing ever read the
+> pause signal. Read it as history until it is rewritten (#1469).
+
 ---
 
 ## Overview

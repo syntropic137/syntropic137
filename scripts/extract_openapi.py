@@ -58,7 +58,7 @@ def main() -> None:
         "execution": "Execute workflows and monitor active executions",
         "executions": "Query execution records and details",
         "control": "Pause, resume, cancel, and inject context into running executions",
-        "fork": "Fork a failed execution so it restarts at the first phase that did not finish",
+        "resume": "Resume a failed execution so it restarts at the first phase that did not finish",
         "sessions": "List and inspect agent sessions",
         "conversations": "Retrieve conversation logs and metadata",
         "artifacts": "Create, upload, and retrieve artifacts produced by agent sessions",

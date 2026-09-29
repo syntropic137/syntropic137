@@ -141,6 +141,57 @@ Existing endpoints updated:
 /executions/{exec_id}   → Execution detail with per-phase metrics
 ```
 
+### 7. Resume - continuing an Execution that did not finish
+
+**Added 2026-09-29.** Roughly fifteen code sites cite "ADR-014 s7"; until this
+date the section they cited did not exist. It is written here in place rather
+than in a new ADR, because it is part of the execution model this ADR defines.
+
+An Execution is immutable once terminal. Resuming one therefore does NOT
+restart it: it creates a SECOND Execution that inherits the first's completed
+work and begins at the first phase that did not finish. The parent stays
+terminal and its record stays true.
+
+**What is resumable.** `FAILED` and `INTERRUPTED` only. Both ended without
+anyone deciding the work should stop, so running the rest is what the operator
+wanted all along. `CANCELLED` is a decision to stop - it may have been issued
+because the run targeted the wrong repository or its task held a secret - so it
+is resumable only when the request says `override_cancellation`, separately and
+explicitly. `COMPLETED` has nothing left to run; `RUNNING` is still live, and
+resuming it would put two runs on one piece of work; an Execution that never
+started has nothing to inherit.
+
+**What is inherited.** The parent's *contiguous* prefix of completed phases, in
+phase order, with the artifact ids each produced. The prefix stops at the first
+phase that did not complete, so a phase completed after a gap is NOT inherited:
+the resume re-runs the gap, and that later phase's output was built on a
+predecessor the resume will produce afresh.
+
+**One resume per parent.** "Already resumed" is a fact about the parent, so the
+parent stream's optimistic concurrency is what makes two concurrent requests
+resolve to one. The loser gets 409 naming the winner.
+
+**External effects.** When the phase the resume begins at had already started in
+the parent without leaving evidence that it changed nothing outside its
+workspace, re-running it may repeat a push or a publish. The request must say
+`acknowledge_external_effects` before that is admitted, and the acknowledgement
+is recorded so it is never indistinguishable from a phase that was safe.
+
+**The event and the start are separate.** `ExecutionResumed` on the parent's
+stream is the parent's decision and nothing more; the child does not exist yet.
+`ResumeStartProcessManager` reads that event, creates the child's stream and
+starts it through the same admission gate as any other execution. This keeps
+the decision replay-safe and the start idempotent (ADR-025).
+
+**Naming.** Until 2026-09-29 this was called "fork" in the code, and `resume`
+meant un-pausing. Pause was deleted (nothing ever read its signal) and the name
+was reassigned. `fork` is now reserved for a different, unbuilt operation:
+starting a NEW run from an arbitrary point of a COMPLETED execution, the way a
+git branch is taken from a commit. See
+[docs/architecture/orchestration-ubiquitous-language.md](../architecture/orchestration-ubiquitous-language.md).
+
+**API.** `POST /executions/{execution_id}/resume`, CLI `syn execution resume`.
+
 ## Consequences
 
 ### Positive

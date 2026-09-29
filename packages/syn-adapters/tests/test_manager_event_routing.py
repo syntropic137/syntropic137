@@ -90,8 +90,8 @@ def test_org_event_handler_methods_exist():
 
 @pytest.mark.unit
 @pytest.mark.xfail(  # #444
-    reason="TODO(#444): 6 EVENT_HANDLERS entries reference methods that don't exist yet "
-    "(ExecutionPaused, ExecutionResumed, CostRecorded). These events are silently dropped.",
+    reason="TODO(#444): 2 EVENT_HANDLERS entries reference methods that don't exist yet "
+    "(CostRecorded). These events are silently dropped.",
     strict=True,
 )
 def test_all_handler_methods_exist_on_projections():

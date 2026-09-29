@@ -27,8 +27,6 @@ from syn_adapters.control.commands import (
     ControlSignal,
     ControlSignalType,
     InjectContext,
-    PauseExecution,
-    ResumeExecution,
 )
 
 if TYPE_CHECKING:
@@ -56,8 +54,6 @@ class ExecutionController:
 
     #: What each command asks for, and what the operator is told on success.
     _SIGNALS: ClassVar[dict[type[ControlCommand], tuple[ControlSignalType, str]]] = {
-        PauseExecution: (ControlSignalType.PAUSE, "Pause signal queued"),
-        ResumeExecution: (ControlSignalType.RESUME, "Resume signal queued"),
         CancelExecution: (ControlSignalType.CANCEL, "Cancel signal queued"),
         InjectContext: (ControlSignalType.INJECT, "Context injection queued"),
     }
@@ -131,7 +127,7 @@ def _signal_for(cmd: ControlCommand, signal_type: ControlSignalType) -> ControlS
     return ControlSignal(
         signal_type=signal_type,
         execution_id=cmd.execution_id,
-        reason=cmd.reason if isinstance(cmd, PauseExecution | CancelExecution) else None,
+        reason=cmd.reason if isinstance(cmd, CancelExecution) else None,
         inject_message=cmd.message if isinstance(cmd, InjectContext) else None,
     )
 

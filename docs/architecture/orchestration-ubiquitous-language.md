@@ -59,7 +59,13 @@ fresh one.
 
 The new Execution has its own id. The original stays exactly as it was,
 including its terminal status, and records that it was resumed. One Resume per
-Execution.
+Execution: "already resumed" is a fact about the original, so its stream's
+optimistic concurrency is what makes two concurrent requests resolve to one.
+
+`ResumeExecutionCommand` -> `ExecutionResumed` on the ORIGINAL's stream ->
+`ResumeStartProcessManager` creates and starts the child. The event is the
+decision; the start is a separate, idempotent step. Specified in ADR-014
+section 7.
 
 ## Fork
 
@@ -71,11 +77,16 @@ Where Resume derives its starting point, a Fork is given one. Where Resume
 carries the original configuration unchanged, a Fork exists in order to vary
 something - a model, a prompt - against the same baseline.
 
-**Not implemented.** The word is reserved so the capability can be built without
-renaming anything. Until it ships, an operation that continues unfinished work
-is a Resume and is called one.
-`ci/fitness/code_quality/test_reserved_domain_words.py` fails if `fork`
-reappears in this context before the feature claims it.
+**Not implemented.** Tracked as
+[#1468](https://github.com/syntropic137/syntropic137/issues/1468), where it is
+the substrate evals need: a fixed prefix and a varying suffix. The word is
+reserved so the capability can be built without renaming anything. Until it
+ships, an operation that continues unfinished work is a Resume and is called
+one. `ci/fitness/code_quality/test_reserved_domain_words.py` fails if `fork`
+reappears in this context before that issue claims it.
+
+Until 2026-09-29 the code used `fork` for what this file calls Resume. See
+ADR-014 section 7.
 
 ## Inherited Phase
 
@@ -113,13 +124,25 @@ successful API response reports the first.
 
 ## Words we do not use
 
-- **Pause.** Deleted 2026-09-27. It recorded an event that nothing in the
+- **Pause.** Deleted 2026-09-29. It recorded an event that nothing in the
   execution path observed - the processor checks `CANCELLED` and nothing else -
   so a paused Execution kept running, and zero such events existed in
   production across 26,917. Cancel is the mechanism that works. Pausing an
   Execution for real would require the processor to observe the status, which
   was never written. Note this is unlike `github`, where a paused Trigger Rule
   genuinely cannot fire.
+
+  Gone with it: `ExecutionPaused`, `ExecutionResumed`, `ExecutionStatus.PAUSED`,
+  `PauseExecutionCommand`, `ResumeExecutionCommand`, `ControlSignalType.PAUSE`
+  and `.RESUME`, `POST /executions/{id}/pause` and its `resume` twin, and
+  `syn control pause` / `syn control resume`. The control plane now carries
+  `cancel` and `inject` only.
+
+  **Admission pause is NOT this.** `POST /maintenance` pauses ADMISSION: the
+  system stops accepting new Executions while a deploy drains. That is a
+  property of the deployment, not of an Execution, and it stays. Where a
+  to-do record reads `paused` (the resume-start list), it means the record is
+  waiting on admission, not that anything was paused by an operator.
 - **Branch.** Reserved, no meaning assigned. If a chat-style "branch from here"
   operation is ever wanted, this is where it gets defined.
 - **Retry.** A Phase attempt within one Execution (`PhaseRetryScheduled`), never

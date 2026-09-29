@@ -1,4 +1,4 @@
-"""The fork start to-do list's records (ADR-014 s7)."""
+"""The resume start to-do list's records (ADR-014 s7)."""
 
 from __future__ import annotations
 
@@ -10,21 +10,21 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 logger = logging.getLogger(__name__)
 
-ForkStartStatus = Literal["pending", "paused", "retryable", "dispatched", "started", "failed"]
+ResumeStartStatus = Literal["pending", "paused", "retryable", "dispatched", "started", "failed"]
 
 #: Statuses still owed a start.
 #:
 #: `paused` is reversible, never terminal. `retryable` is a start that failed for
 #: a reason that may not recur. `dispatched` is the subtle one: the start was
 #: handed to a background task and NOTHING yet proves a child exists. Marking
-#: that `started` lost admitted forks whose process died between spawning the
-#: task and writing the child's first event - the parent had admitted a fork, no
+#: that `started` lost admitted resumes whose process died between spawning the
+#: task and writing the child's first event - the parent had admitted a resume, no
 #: child stream existed, and the to-do was no longer owed (codex review of
 #: #1459). It stays owed until the child's own `WorkflowExecutionStarted` says
-#: otherwise; re-offering is safe because `StartForkHandler.handle` returns early
+#: otherwise; re-offering is safe because `StartResumeHandler.handle` returns early
 #: when the child already exists, and the child's id is fixed by the parent's
-#: `ExecutionForked` rather than minted per attempt.
-OWED_STATUSES: tuple[ForkStartStatus, ...] = ("pending", "paused", "retryable", "dispatched")
+#: `ExecutionResumed` rather than minted per attempt.
+OWED_STATUSES: tuple[ResumeStartStatus, ...] = ("pending", "paused", "retryable", "dispatched")
 
 #: How long a `dispatched` start is left alone before it is re-offered.
 #:
@@ -38,23 +38,23 @@ DISPATCH_GRACE = timedelta(minutes=5)
 
 #: How many times a start may be attempted before `retryable` becomes `failed`.
 #:
-#: A CEILING, not a tuning knob. Without one, a fork whose start fails the same
+#: A CEILING, not a tuning knob. Without one, a resume whose start fails the same
 #: way for ever is retried for ever, and each attempt can provision a workspace.
 MAX_START_ATTEMPTS = 3
 
 
-class ForkStartRecord(BaseModel):
-    """One admitted fork on the to-do list, keyed by its PARENT.
+class ResumeStartRecord(BaseModel):
+    """One admitted resume on the to-do list, keyed by its PARENT.
 
-    Keyed by the parent because that is the one id every `ExecutionForked`
+    Keyed by the parent because that is the one id every `ExecutionResumed`
     has: under ADR-023 the child's id can replay as None, and the parent
-    admits at most one fork.
+    admits at most one resume.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     parent_execution_id: str
-    status: ForkStartStatus = "pending"
+    status: ResumeStartStatus = "pending"
     status_reason: str | None = None
     recorded_at: datetime
 
@@ -70,10 +70,10 @@ class ForkStartRecord(BaseModel):
     attempts: int = 0
 
 
-def read_record(row: object) -> ForkStartRecord | None:
+def read_record(row: object) -> ResumeStartRecord | None:
     """A stored row as a record, or None - logged - when it cannot be read."""
     try:
-        return ForkStartRecord.model_validate(row)
+        return ResumeStartRecord.model_validate(row)
     except ValidationError:
-        logger.warning("Unreadable fork start record skipped: %r", row)
+        logger.warning("Unreadable resume start record skipped: %r", row)
         return None

@@ -5,8 +5,8 @@ system is built on: a bounded context is DEFINED by the language spoken inside
 it, so that language is an artifact and not folklore.
 
 The absence had already cost a domain word. One operation was called both
-`fork` and `resume` until 2026-09-27, when the meanings were separated and
-`fork` had to be reclaimed for the capability it should have named.
+`resume` and `resume` until 2026-09-27, when the meanings were separated and
+`resume` had to be reclaimed for the capability it should have named.
 
 Naming standard: `<bounded-context>-ubiquitous-language.md`, context name first,
 so a search returns files whose names say which context they speak for instead

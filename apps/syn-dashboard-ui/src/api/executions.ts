@@ -39,24 +39,6 @@ export async function listAllExecutions(
   return fetchJSON(`${API_BASE}/executions?${listQueryParams(query)}`, { signal })
 }
 
-export async function pauseExecution(
-  executionId: string,
-  reason?: string
-): Promise<{ success: boolean; execution_id: string; state: string; message: string | null }> {
-  return fetchJSON(`${API_BASE}/executions/${executionId}/pause`, {
-    method: 'POST',
-    body: JSON.stringify({ reason }),
-  })
-}
-
-export async function resumeExecution(
-  executionId: string
-): Promise<{ success: boolean; execution_id: string; state: string; message: string | null }> {
-  return fetchJSON(`${API_BASE}/executions/${executionId}/resume`, {
-    method: 'POST',
-  })
-}
-
 export async function cancelExecution(
   executionId: string,
   reason?: string

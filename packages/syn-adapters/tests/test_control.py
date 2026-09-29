@@ -16,8 +16,6 @@ from syn_adapters.control import (
     ControlSignalType,
     ExecutionController,
     InjectContext,
-    PauseExecution,
-    ResumeExecution,
 )
 from syn_adapters.control.adapters.memory import InMemorySignalQueueAdapter
 from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
@@ -27,8 +25,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     CompleteExecutionCommand,
     FailExecutionCommand,
     InterruptExecutionCommand,
-    PauseExecutionCommand,
-    ResumeExecutionCommand,
     StartExecutionCommand,
     StartPhaseCommand,
 )
@@ -64,10 +60,6 @@ def _executions(
             "WorkflowExecution",
         )
     )
-
-
-def _pause(agg: WorkflowExecutionAggregate) -> None:
-    agg.pause_execution(PauseExecutionCommand(execution_id=agg.id or "", phase_id="p1"))
 
 
 def _cancel(agg: WorkflowExecutionAggregate) -> None:
@@ -111,7 +103,6 @@ def _interrupt(agg: WorkflowExecutionAggregate) -> None:
 #: How to bring a started execution to each status an execution can be loaded in.
 _TO_STATUS: dict[ExecutionStatus, Callable[[WorkflowExecutionAggregate], None] | None] = {
     ExecutionStatus.RUNNING: None,
-    ExecutionStatus.PAUSED: _pause,
     ExecutionStatus.CANCELLED: _cancel,
     ExecutionStatus.COMPLETED: _complete,
     ExecutionStatus.FAILED: _fail,
@@ -156,8 +147,6 @@ async def _record(
 
 
 _REQUESTS: dict[ControlSignalType, Callable[[str], ControlCommand]] = {
-    ControlSignalType.PAUSE: lambda eid: PauseExecution(execution_id=eid, reason="r"),
-    ControlSignalType.RESUME: lambda eid: ResumeExecution(execution_id=eid),
     ControlSignalType.CANCEL: lambda eid: CancelExecution(execution_id=eid, reason="r"),
     ControlSignalType.INJECT: lambda eid: InjectContext(execution_id=eid, message="m"),
 }
@@ -167,12 +156,6 @@ def _aggregate_command_accepted(agg: WorkflowExecutionAggregate, signal: Control
     """What the aggregate's own command handler does with the same request."""
     eid = agg.id or ""
     commands: dict[ControlSignalType, Callable[[], None]] = {
-        ControlSignalType.PAUSE: lambda: agg.pause_execution(
-            PauseExecutionCommand(execution_id=eid, phase_id="p1")
-        ),
-        ControlSignalType.RESUME: lambda: agg.resume_execution(
-            ResumeExecutionCommand(execution_id=eid, phase_id="p1")
-        ),
         ControlSignalType.CANCEL: lambda: agg.cancel_execution(
             CancelExecutionCommand(execution_id=eid, phase_id="p1")
         ),
@@ -195,9 +178,7 @@ class TestAdmissionIsTheAggregatesDecision:
     """
 
     @pytest.mark.parametrize("status", list(_TO_STATUS))
-    @pytest.mark.parametrize(
-        "signal", [ControlSignalType.PAUSE, ControlSignalType.RESUME, ControlSignalType.CANCEL]
-    )
+    @pytest.mark.parametrize("signal", [ControlSignalType.CANCEL])
     async def test_the_operator_gets_the_answer_the_command_will_get(
         self, status: ExecutionStatus, signal: ControlSignalType
     ) -> None:
@@ -230,21 +211,21 @@ class TestAdmissionIsTheAggregatesDecision:
             assert result.new_state == "cancelled"
         assert await signals.get_signal("exec-c") is None
 
-    async def test_a_paused_execution_resumes(self) -> None:
+    async def test_a_running_execution_is_cancelled(self) -> None:
         """The control: the controller can say yes, so the refusals are about state."""
         executions = _executions()
         signals = InMemorySignalQueueAdapter()
-        await _record(executions, "exec-p", ExecutionStatus.PAUSED)
+        await _record(executions, "exec-r", ExecutionStatus.RUNNING)
 
         result = await ExecutionController(executions, signals).handle_command(
-            ResumeExecution(execution_id="exec-p")
+            CancelExecution(execution_id="exec-r")
         )
 
         assert result.success is True
-        assert result.message == "Resume signal queued"
-        queued = await signals.get_signal("exec-p")
+        assert result.message == "Cancel signal queued"
+        queued = await signals.get_signal("exec-r")
         assert queued is not None
-        assert queued.signal_type == ControlSignalType.RESUME
+        assert queued.signal_type == ControlSignalType.CANCEL
 
     @pytest.mark.parametrize("status", list(_TO_STATUS))
     async def test_inject_is_refused_exactly_when_terminal(self, status: ExecutionStatus) -> None:
@@ -256,7 +237,7 @@ class TestAdmissionIsTheAggregatesDecision:
             InjectContext(execution_id="exec-i", message="m")
         )
 
-        live = status in (ExecutionStatus.RUNNING, ExecutionStatus.PAUSED)
+        live = status is ExecutionStatus.RUNNING
         assert result.success is live
         if not live:
             assert "terminal" in (result.error or "").lower()
@@ -296,22 +277,6 @@ class TestAdmissionIsTheAggregatesDecision:
 @pytest.mark.unit
 class TestExecutionController:
     """What an admitted request queues, and what the executor reads back."""
-
-    async def test_pause_carries_its_reason(self) -> None:
-        executions = _executions()
-        signals = InMemorySignalQueueAdapter()
-        await _record(executions, "exec-1", ExecutionStatus.RUNNING)
-
-        result = await ExecutionController(executions, signals).handle_command(
-            PauseExecution(execution_id="exec-1", reason="User requested")
-        )
-
-        assert result.success
-        assert result.message == "Pause signal queued"
-        signal = await signals.dequeue("exec-1")
-        assert signal is not None
-        assert signal.signal_type == ControlSignalType.PAUSE
-        assert signal.reason == "User requested"
 
     async def test_cancel_carries_its_reason(self) -> None:
         executions = _executions()
@@ -358,11 +323,11 @@ class TestExecutionController:
         controller = ExecutionController(executions, InMemorySignalQueueAdapter())
 
         assert await controller.check_signal("exec-1") is None
-        await controller.handle_command(PauseExecution(execution_id="exec-1"))
+        await controller.handle_command(CancelExecution(execution_id="exec-1"))
 
         signal = await controller.check_signal("exec-1")
         assert signal is not None
-        assert signal.signal_type == ControlSignalType.PAUSE
+        assert signal.signal_type == ControlSignalType.CANCEL
         assert await controller.check_signal("exec-1") is None
 
 
@@ -411,8 +376,8 @@ class TestInMemoryAdapters:
         adapter = InMemorySignalQueueAdapter()
         execution_id = "exec-1"
 
-        signal1 = ControlSignal(ControlSignalType.PAUSE, execution_id)
-        signal2 = ControlSignal(ControlSignalType.RESUME, execution_id)
+        signal1 = ControlSignal(ControlSignalType.CANCEL, execution_id)
+        signal2 = ControlSignal(ControlSignalType.INJECT, execution_id)
 
         await adapter.enqueue(execution_id, signal1)
         await adapter.enqueue(execution_id, signal2)
@@ -422,7 +387,7 @@ class TestInMemoryAdapters:
         result3 = await adapter.dequeue(execution_id)
 
         assert result1 is not None
-        assert result1.signal_type == ControlSignalType.PAUSE
+        assert result1.signal_type == ControlSignalType.CANCEL
         assert result2 is not None
-        assert result2.signal_type == ControlSignalType.RESUME
+        assert result2.signal_type == ControlSignalType.INJECT
         assert result3 is None

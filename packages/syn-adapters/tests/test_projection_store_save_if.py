@@ -1,6 +1,6 @@
 """`save_if`: a projection write that lands only over the row it was decided on.
 
-Verification of #1466 found the fork start's "read, decide, save" atomic only
+Verification of #1466 found the resume start's "read, decide, save" atomic only
 inside one process manager, behind a lock the others do not share, so the
 comparison and the write had to move into the store. These tests pin the two
 properties a caller relies on:
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
-PROJECTION = "fork_start"
+PROJECTION = "resume_start"
 KEY = "exec-parent"
 
 

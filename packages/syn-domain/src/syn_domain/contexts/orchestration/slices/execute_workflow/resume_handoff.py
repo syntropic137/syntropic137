@@ -1,6 +1,6 @@
-"""What a fork hands its resumed phase from the phases it inherited (ADR-014 s7).
+"""What a resume hands its resumed phase from the phases it inherited (ADR-014 s7).
 
-A fork never runs its inherited phases, so nothing in its own run records what
+A resume never runs its inherited phases, so nothing in its own run records what
 they produced - and the phase it resumes at may read exactly that. The parent
 named the artifacts each inherited phase kept; this turns those names into the
 per-run output cache the processor fills for every phase it DOES run, so the
@@ -22,12 +22,12 @@ if TYPE_CHECKING:
         ArtifactQueryServiceProtocol,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
-        ForkOrigin,
+        ResumeOrigin,
     )
 
 
 class InheritanceUnavailableError(RuntimeError):
-    """A fork's inherited outputs could not be handed to its resumed phase.
+    """A resume's inherited outputs could not be handed to its resumed phase.
 
     Raised BEFORE the child's stream opens, which is why it is an error and not
     a degraded cache: the resumed phase reads its predecessors' files, and a
@@ -38,13 +38,13 @@ class InheritanceUnavailableError(RuntimeError):
 
 async def inherited_outputs(
     query: ArtifactQueryServiceProtocol | None,
-    origin: ForkOrigin | None,
+    origin: ResumeOrigin | None,
 ) -> PhaseOutputCache:
-    """The output cache a run starts with: empty, or a fork's inheritance.
+    """The output cache a run starts with: empty, or a resume's inheritance.
 
     Read by artifact id from the execution that RAN each inherited phase,
-    because that is where its artifacts were stored (#1462). For a first fork
-    that is the parent; for a fork of a fork, a phase the parent itself
+    because that is where its artifacts were stored (#1462). For a first resume
+    that is the parent; for a resume of a resume, a phase the parent itself
     inherited is owned further up, and asking the parent finds nothing. The
     head of each phase's files is its alias, as it is for a phase run live.
 
@@ -67,7 +67,7 @@ async def inherited_outputs(
     if query is None:
         if expected:
             msg = (
-                f"Cannot hand fork of {origin.parent_execution_id} its inheritance: "
+                f"Cannot hand resume of {origin.parent_execution_id} its inheritance: "
                 f"phase(s) {expected} recorded artifacts and no artifact "
                 "query service was wired to read them"
             )
@@ -89,7 +89,7 @@ async def inherited_outputs(
 
 
 async def _files_by_owner(
-    query: ArtifactQueryServiceProtocol, origin: ForkOrigin
+    query: ArtifactQueryServiceProtocol, origin: ResumeOrigin
 ) -> dict[str, list[PhaseOutputFile]]:
     """Each inherited phase's files, asked of the execution that ran it (#1462).
 
@@ -108,7 +108,7 @@ async def _files_by_owner(
         unresolved = sorted(p for p, ids in wanted.items() if ids and not found.get(p))
         if unresolved:
             msg = (
-                f"Cannot hand fork of {origin.parent_execution_id} its inheritance: "
+                f"Cannot hand resume of {origin.parent_execution_id} its inheritance: "
                 f"execution {owner}, which ran phase(s) {unresolved}, holds no files "
                 "for the artifact ids they recorded"
             )
@@ -117,6 +117,6 @@ async def _files_by_owner(
     return files
 
 
-def inherited_phase_ids(origin: ForkOrigin | None) -> list[str]:
+def inherited_phase_ids(origin: ResumeOrigin | None) -> list[str]:
     """The phases a run begins with already complete, in phase order."""
     return [] if origin is None else [p.phase_id for p in origin.inherited_phases]

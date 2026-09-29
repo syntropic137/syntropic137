@@ -136,7 +136,7 @@ class ArtifactQueryServiceProtocol(Protocol):
     ) -> dict[str, list[PhaseOutputFile]]:
         """The files of exactly these artifacts of an execution, per phase.
 
-        For a fork handing forward what it inherited (ADR-014 s7): the parent
+        For a resume handing forward what it inherited (ADR-014 s7): the parent
         named the artifact ids each inherited phase kept, and an attempt it
         abandoned produced others under the same phase id. Selecting by phase
         would hand those over too; selecting by id cannot.

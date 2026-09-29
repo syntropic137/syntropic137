@@ -29,12 +29,9 @@ describe('useExecutionControl', () => {
     expect(result.current.canCancel).toBe(false)
   })
 
-  it('canCancel is true only for running/paused and not loading', () => {
+  it('canCancel is true only for running and not loading', () => {
     const { result: running } = renderHook(() => useExecutionControl('e', 'running'))
     expect(running.current.canCancel).toBe(true)
-
-    const { result: paused } = renderHook(() => useExecutionControl('e', 'paused'))
-    expect(paused.current.canCancel).toBe(true)
 
     const { result: completed } = renderHook(() => useExecutionControl('e', 'completed'))
     expect(completed.current.canCancel).toBe(false)

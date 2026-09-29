@@ -142,16 +142,16 @@ const showCommand: CommandDef = {
 };
 
 
-type ForkResponse = components["schemas"]["ForkResponse"];
+type ResumeResponse = components["schemas"]["ResumeResponse"];
 
-const forkCommand: CommandDef = {
-  name: "fork",
-  description: "Fork a failed execution so it restarts at the first phase that did not finish",
-  args: [{ name: "execution-id", description: "Execution to fork", required: true }],
+const resumeCommand: CommandDef = {
+  name: "resume",
+  description: "Resume a failed execution so it restarts at the first phase that did not finish",
+  args: [{ name: "execution-id", description: "Execution to resume", required: true }],
   options: {
     "override-cancellation": {
       type: "boolean",
-      description: "Fork a CANCELLED execution (a cancel is an instruction to stop)",
+      description: "Resume a CANCELLED execution (a cancel is an instruction to stop)",
     },
     "acknowledge-external-effects": {
       type: "boolean",
@@ -169,21 +169,21 @@ const forkCommand: CommandDef = {
       override_cancellation: Boolean(parsed.values["override-cancellation"]),
       acknowledge_external_effects: Boolean(parsed.values["acknowledge-external-effects"]),
     };
-    const data = unwrap<ForkResponse>(
-      await api.POST("/executions/{execution_id}/fork", {
+    const data = unwrap<ResumeResponse>(
+      await api.POST("/executions/{execution_id}/resume", {
         params: { path: { execution_id: id } },
         body,
       }),
-      "Fork execution",
+      "Resume execution",
     );
 
-    print(style(`Forked ${data.parent_execution_id}`, GREEN));
+    print(style(`Resumed ${data.parent_execution_id}`, GREEN));
     print(`  New execution: ${data.execution_id}`);
     print(`  Resumes at:    ${data.resume_phase_id}`);
     if (data.inherited_phase_ids.length > 0) {
       print(`  Not re-run:    ${data.inherited_phase_ids.join(", ")}`);
     } else {
-      printDim("  Nothing inherited - the fork starts from the first phase.");
+      printDim("  Nothing inherited - the resume starts from the first phase.");
     }
     if (data.cancellation_overridden) {
       print(style("  Cancellation overridden", YELLOW));
@@ -196,4 +196,4 @@ const forkCommand: CommandDef = {
 };
 
 export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions");
-executionGroup.command(listCommand).command(showCommand).command(forkCommand);
+executionGroup.command(listCommand).command(showCommand).command(resumeCommand);
