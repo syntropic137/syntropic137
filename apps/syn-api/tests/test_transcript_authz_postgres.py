@@ -202,6 +202,7 @@ async def test_foreign_run_and_foreign_installation_disclose_nothing(stack: Stac
         "size": None,
         "redaction": "source",
         "content_base64": None,
+        "conversation": None,
     }
     for action in ("deletion", "revocation"):
         refused = await stack.client.post(

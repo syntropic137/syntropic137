@@ -794,7 +794,7 @@ async def test_host_seal_reconciles_then_late_child_reopens_new_revision(
             sequence=1,
             child_invocation_id="background-child",
             child_native_id=None,
-            status="launched",
+            status="pending",
             call=ChildCall(
                 invocation_id="root",
                 attempt_id="attempt",
