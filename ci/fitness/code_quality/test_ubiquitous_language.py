@@ -70,3 +70,14 @@ def test_no_vocabulary_is_orphaned() -> None:
         if f.name.removesuffix("-ubiquitous-language.md") not in contexts
     ]
     assert not orphans, f"vocabularies with no bounded context: {orphans}"
+
+
+def test_agents_md_explains_the_convention() -> None:
+    """A convention nobody is told about is not a convention.
+
+    AGENTS.md is the primary context every agent and contributor reads, so the
+    vocabularies are worthless if nothing points at them from there.
+    """
+    agents = Path("AGENTS.md").read_text()
+    assert "Ubiquitous Language" in agents, "AGENTS.md must explain the convention"
+    assert "-ubiquitous-language.md" in agents, "AGENTS.md must state the naming standard"
