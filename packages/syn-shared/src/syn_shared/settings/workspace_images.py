@@ -330,16 +330,50 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 #                  functional regression. It still cannot run a default codex
 #                  phase - codex 0.144.6 predates gpt-6-sol - so codex phases
 #                  belong on omni-agent, exactly as before.
+# AGENTIC-WORKSPACE v0.2.0, 2026-09-29 (#1398). Taken from release-branch run
+# 36640582820 ("Release Workspace Images", push to release, success) of
+# agentic-workspace 008ed117 (release PR #12), the commit lib/agentic-workspace
+# pins. Re-verified here rather than trusted: `docker buildx imagetools
+# inspect` of each v0.2.0 tag returns exactly the digest below (amd64 + arm64),
+# every image carries agentic.image.channel=release and revision 008ed117, and
+# `cosign verify` (v3.1.3) passes for each against
+# AGENTIC_WORKSPACE_IDENTITY_REGEXP with the GitHub Actions OIDC issuer. This
+# release carries AW #2 (Codex seccomp + AppArmor sandbox policy), #6
+# (conversation preview), #7 (native child lifecycle, journal schema v3) and
+# #9 (consumer contracts).
+#
+# omni-agent       omni-agent manifest 1.10.0. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.281 (Claude Code)", "codex-cli 0.156.1",
+#                  "apss-session-exporter 0.6.0", skills CLI 1.7.0,
+#                  agentic-session-store 0.5.0, syn-delegate, and git, gh, jq,
+#                  uv, node and python3 all present. Label
+#                  agentic.codex_cli_version=0.156.1, so the provider applies
+#                  the Codex sandbox policy (AppArmor hosts: load the profile,
+#                  docs/deployment/apparmor-codex-sandbox.md).
+# toolchain        toolchain manifest 1.1.0, built FROM omni 1.10.0 in the same
+#                  run (label agentic.base.omni.version=1.10.0). Verified by
+#                  running OUT OF THIS DIGEST: same claude, codex, exporter
+#                  0.6.0, skills 1.7.0 and session store as omni; labels bun
+#                  1.3.14, rustup 1.29.1.
+# claude-cli       claude-cli manifest 2.1.6. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.126 (Claude Code)", "codex-cli 0.144.6",
+#                  skills 1.7.0, session store 0.5.0, no exporter (unchanged:
+#                  claude-cli never carried one). Codex phases still belong on
+#                  omni-agent: codex 0.144.6 predates gpt-6-sol.
+#
+#                  Previous pins, for the record (publisher cutover above):
+#                  claude-cli decf374c, omni-agent 89189b6c, toolchain 27b70b32,
+#                  all from agentic-workspace c5e34284.
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:decf374c17151165e0eac415f7cd120c928e8059b1591193152b9c77364a7560"
+            "sha256:c0573ea630ffc97a8f46725d5c20d90c38eea692ffa48db3cd885a147a8aea36"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:89189b6c9cf67ac6a9b137fa7427990ca5535077e53e729a0ff4635053e6970d"
+            "sha256:12e7dc55d7aad558798552f2f373ddc0aebd3205e5b30543ff8751a2a12a0189"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8"
+            "sha256:e38b1a45b14e7b58040d7664a83e9f53191f24d9ea92462b4eeee829d3ad65f9"
         ),
     }
 )
@@ -357,12 +391,12 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
 #: one after any reordering.
 PINNED_EXPORTER_VERSIONS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
-        WorkspaceImageProvider.OMNI_AGENT: "0.5.0",
+        WorkspaceImageProvider.OMNI_AGENT: "0.6.0",
         # toolchain is built FROM the omni digest, so it inherits the exporter.
         # Recorded from running the binary in the toolchain image anyway:
         # inheritance is the reason to EXPECT a value, never the evidence for
         # one, and a base-image bump could change it without changing omni.
-        WorkspaceImageProvider.TOOLCHAIN: "0.5.0",
+        WorkspaceImageProvider.TOOLCHAIN: "0.6.0",
     }
 )
 

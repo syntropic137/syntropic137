@@ -49,7 +49,11 @@ from syn_shared.settings.workspace_images import (
 
 # The skills CLI version the injection contract was verified against. A bump
 # here is a deliberate act: re-verify install paths before changing it.
-EXPECTED_SKILLS_CLI_VERSION: Final[str] = "1.5.14"
+# 1.7.0 (#1398): the pinned omni-agent (agentic-workspace v0.2.0, 12e7dc55)
+# reports `skills --version` 1.7.0 run out of the digest (the 1.5.14 -> 1.7.0
+# move landed with the c5e34284 pins); both --agent keys re-verified against
+# that image to install under the same roots as before.
+EXPECTED_SKILLS_CLI_VERSION: Final[str] = "1.7.0"
 
 # Where each --agent key installs a project-scoped skill, relative to /workspace.
 CLAUDE_CODE_SKILL_ROOT: Final[str] = ".claude/skills"
