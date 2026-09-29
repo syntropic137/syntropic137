@@ -13,7 +13,7 @@ dependencies = [
     "agentic-isolation", # Workspace isolation (ADR-021 from agentic-primitives)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "pyyaml>=6.0.3",
-    "pyjwt>=2.12.0",
+    "pyjwt==2.14.0",
     "cryptography>=46.0.5",
     "redis>=5.0.0",
     "httpx==0.28.1",
