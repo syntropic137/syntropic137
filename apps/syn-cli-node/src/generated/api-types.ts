@@ -4383,9 +4383,17 @@ export interface components {
         InventoryGap: {
             /**
              * Reason
-             * @description Why the inventory is incomplete or uncertain here. Resolver reasons: invocation_running, invocation_launch_failed, invocation_transport_failed_before_announce, conflicting_invocation_lifecycle, conflicting_invocation_context, unverified_invocation_context, conflicting_parentage, lineage_cycle, unresolved_parentage, conflicting_source_evidence, conflicting_native_binding, expected_body_unavailable, invocation_unsettled_at_seal, capture_unsettled_at_seal, child_context_unresolved_at_seal, parentage_unresolved_at_seal, no_host_registration; plus invocation_<outcome> for other abnormal process outcomes and producer-specific acquisition reasons.
+             * @description Why the inventory is incomplete or uncertain here. Resolver reasons: invocation_running, invocation_pending, invocation_launch_failed, invocation_launch_failed_process_start_failed, invocation_launch_failed_codex_sandbox_unavailable, invocation_launch_failed_native_tool_failed, invocation_launch_failed_native_tool_interrupted, invocation_launch_failed_capture_hook_failed, invocation_launch_failed_hook_watchdog, invocation_launch_failed_capture_hook_unreachable, invocation_transport_failed_before_announce, conflicting_invocation_lifecycle, conflicting_invocation_context, unverified_invocation_context, conflicting_parentage, lineage_cycle, unresolved_parentage, conflicting_source_evidence, conflicting_native_binding, expected_body_unavailable, invocation_unsettled_at_seal, capture_unsettled_at_seal, child_context_unresolved_at_seal, parentage_unresolved_at_seal, no_host_registration; plus invocation_<outcome> for other abnormal process outcomes and producer-specific acquisition reasons.
              * @example invocation_running
+             * @example invocation_pending
              * @example invocation_launch_failed
+             * @example invocation_launch_failed_process_start_failed
+             * @example invocation_launch_failed_codex_sandbox_unavailable
+             * @example invocation_launch_failed_native_tool_failed
+             * @example invocation_launch_failed_native_tool_interrupted
+             * @example invocation_launch_failed_capture_hook_failed
+             * @example invocation_launch_failed_hook_watchdog
+             * @example invocation_launch_failed_capture_hook_unreachable
              * @example invocation_transport_failed_before_announce
              * @example conflicting_invocation_lifecycle
              * @example conflicting_invocation_context
