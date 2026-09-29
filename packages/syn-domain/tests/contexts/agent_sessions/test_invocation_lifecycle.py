@@ -193,3 +193,95 @@ def test_unknown_exit_code_is_not_fabricated_or_conflicting_with_later_proof() -
     result = resolve_relationships(source(historical, precise))
     assert {gap.reason for gap in result.gaps} == {"expected_body_unavailable"}
     assert result.coverage.state == "open"
+
+
+# --- Schema v3 native child lifecycle (#1398) --------------------------------
+
+
+def _gaps(*items: InvocationLifecycleEvidence) -> set[str]:
+    return {gap.reason for gap in resolve_relationships(source(*items)).gaps}
+
+
+def test_pending_intent_is_its_own_gap_never_running_or_settled() -> None:
+    from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import GapReason
+
+    pending = _gaps(observation(1, "pending"))
+    assert GapReason.INVOCATION_PENDING in pending
+    assert GapReason.INVOCATION_RUNNING not in pending
+    # Launch acknowledged after the intent: running, then settled by the stop.
+    assert GapReason.INVOCATION_PENDING not in _gaps(
+        observation(1, "pending"), observation(2, "launched")
+    )
+    assert (
+        _gaps(observation(1, "pending"), observation(2, "launched"), observation(3, "completed"))
+        & {
+            GapReason.INVOCATION_PENDING,
+            GapReason.INVOCATION_RUNNING,
+        }
+        == set()
+    )
+
+
+def test_native_stop_without_exit_code_settles() -> None:
+    settled = observation(2, "completed")
+    assert settled.exit_code is None
+    assert not any(
+        reason.startswith("invocation_") for reason in _gaps(observation(1, "pending"), settled)
+    )
+
+
+def test_pending_rejects_an_exit_code_and_only_failed_launches_carry_a_reason() -> None:
+    from pydantic import ValidationError
+
+    from syn_domain.contexts.agent_sessions import LaunchFailureReason
+
+    with pytest.raises(ValidationError):
+        observation(1, "pending", 0)
+    completed = observation(1, "completed").model_dump()
+    with pytest.raises(ValidationError):
+        InvocationLifecycleEvidence.model_validate(
+            {**completed, "reason": LaunchFailureReason.HOOK_WATCHDOG}
+        )
+
+
+@pytest.mark.parametrize(
+    "cause",
+    [
+        "process_start_failed",
+        "codex_sandbox_unavailable",
+        "native_tool_failed",
+        "native_tool_interrupted",
+        "capture_hook_failed",
+        "hook_watchdog",
+        "capture_hook_unreachable",
+    ],
+)
+def test_every_named_launch_failure_maps_to_its_own_gap(cause: str) -> None:
+    from syn_domain.contexts.agent_sessions import LaunchFailureReason
+    from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import (
+        LAUNCH_FAILED_REASONS,
+        LAUNCH_FAILURE_GAPS,
+        GapReason,
+    )
+
+    reason = LaunchFailureReason(cause)
+    failed = observation(2, "launch_failed").model_copy(update={"reason": reason})
+    gaps = _gaps(observation(1, "pending"), failed)
+    assert LAUNCH_FAILURE_GAPS[reason] in gaps
+    assert LAUNCH_FAILURE_GAPS[reason] in LAUNCH_FAILED_REASONS
+    assert GapReason.INVOCATION_LAUNCH_FAILED not in gaps
+    assert GapReason.INVOCATION_PENDING not in gaps
+
+
+def test_launch_failure_vocabulary_is_total() -> None:
+    from syn_domain.contexts.agent_sessions import LaunchFailureReason
+    from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import LAUNCH_FAILURE_GAPS
+
+    assert set(LAUNCH_FAILURE_GAPS) == set(LaunchFailureReason)
+    assert len(set(LAUNCH_FAILURE_GAPS.values())) == len(LaunchFailureReason)
+
+
+def test_unnamed_launch_failure_stays_generic() -> None:
+    from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import GapReason
+
+    assert GapReason.INVOCATION_LAUNCH_FAILED in _gaps(observation(1, "launch_failed"))

@@ -7,6 +7,7 @@ lineage and binding facts; it does not infer phase or run membership from them.
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -19,6 +20,7 @@ from syn_domain.contexts.agent_sessions import (
     InventoryNodeRef,
     InvocationContextEvidence,
     InvocationLifecycleEvidence,
+    LaunchFailureReason,
     LineageEvidence,
     NodeEvidence,
     RunIdentity,
@@ -27,6 +29,8 @@ from syn_domain.contexts.agent_sessions import (
 
 if TYPE_CHECKING:
     from agentic_isolation.child_journal import ChildChange, WorkspaceChildJournalReader
+
+logger = logging.getLogger(__name__)
 
 
 class ChildEvidenceWriter(Protocol):
@@ -60,20 +64,37 @@ def child_evidence(change: ChildChange, run: RunIdentity, spool_id: str) -> Evid
         source_instance_id=run.source_instance_id,
         local_id=intent.child_invocation_id,
     )
-    bindings: tuple[IdentityBindingEvidence, ...] = ()
+    child_harness = intent.call.target_harness or intent.call.harness
+
+    def transcript(native_id: str) -> InventoryNodeRef:
+        return InventoryNodeRef(
+            kind="transcript",
+            source_instance_id=run.source_instance_id,
+            harness=child_harness,
+            local_id=native_id,
+        )
+
+    bindings: list[IdentityBindingEvidence] = []
     if intent.child_native_id is not None:
-        bindings = (
+        bindings.append(
             IdentityBindingEvidence(
                 owner=child,
-                transcript=InventoryNodeRef(
-                    kind="transcript",
-                    source_instance_id=run.source_instance_id,
-                    harness=intent.call.target_harness or intent.call.harness,
-                    local_id=intent.child_native_id,
-                ),
+                transcript=transcript(intent.child_native_id),
                 confidence=EvidenceClass.CORROBORATED,
                 evidence=reference,
-            ),
+            )
+        )
+    if change.conflict_native_id is not None:
+        # Schema v3: a different identity was observed for an already-bound
+        # intent. The journal kept its binding; the rejected identity is
+        # conflicting evidence, never a corroborated binding.
+        bindings.append(
+            IdentityBindingEvidence(
+                owner=child,
+                transcript=transcript(change.conflict_native_id),
+                confidence=EvidenceClass.CONFLICTING,
+                evidence=reference,
+            )
         )
     return EvidenceBatch(
         batch_id=str(change.sequence),
@@ -102,15 +123,31 @@ def child_evidence(change: ChildChange, run: RunIdentity, spool_id: str) -> Evid
                     evidence=reference,
                 ),
             ),
-            bindings=bindings,
+            bindings=tuple(bindings),
         ),
     )
+
+
+def launch_failure_reason(value: str | None) -> LaunchFailureReason | None:
+    """Translate the journal's wire reason; an unknown one stays a generic failure."""
+    if value is None:
+        return None
+    try:
+        return LaunchFailureReason(value)
+    except ValueError:
+        logger.warning("Unknown child launch failure reason %r; recording it as generic", value)
+        return None
 
 
 def child_lifecycle_evidence(
     change: ChildChange, run: RunIdentity, spool_id: str
 ) -> EvidenceBatch | None:
-    """Separate producer preserves immutable pre-lifecycle journal batches on replay."""
+    """Separate producer preserves immutable pre-lifecycle journal batches on replay.
+
+    Schema v3 adds ``pending`` (a native intent whose launch was never
+    acknowledged) and a named ``reason`` on ``launch_failed``; both are carried
+    so the resolver can report them as explicit gaps.
+    """
     if change.intent.status is None:
         return None
     original = child_evidence(change, run, spool_id)
@@ -133,6 +170,7 @@ def child_lifecycle_evidence(
                     sequence=change.sequence,
                     status=change.intent.status,
                     exit_code=change.intent.exit_code,
+                    reason=launch_failure_reason(change.intent.reason),
                     evidence=reference,
                 ),
             ),

@@ -193,6 +193,8 @@ def test_cross_harness_binding_preserves_both_namespaces() -> None:
 
 
 def test_legacy_evidence_hash_unchanged_by_optional_delegation_fields() -> None:
+    """Schema v2 and v3 optional fields (reason, conflict_native_id) are defaults
+    on a v1 change, so the replayed source revision must not move."""
     import hashlib
     import json
 
@@ -200,6 +202,8 @@ def test_legacy_evidence_hash_unchanged_by_optional_delegation_fields() -> None:
     legacy = original.model_dump()
     legacy["intent"].pop("status")
     legacy["intent"].pop("exit_code")
+    legacy["intent"].pop("reason")
+    legacy.pop("conflict_native_id")
     legacy["intent"]["call"].pop("target_harness")
     digest = hashlib.sha256(
         json.dumps(legacy, ensure_ascii=False, separators=(",", ":")).encode()

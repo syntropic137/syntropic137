@@ -24,6 +24,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     RunIdentity,
 )
 
+from .launch_failure import LaunchFailureReason  # noqa: TC001 - runtime Pydantic field
 from .native_session_evidence import NativeTranscriptFacts  # noqa: TC001 - runtime Pydantic field
 
 
@@ -57,22 +58,29 @@ class AcquisitionStatusEvidence(InventoryModel):
 class InvocationLifecycleEvidence(InventoryModel):
     """Producer-sequenced invocation outcomes, independent of capture settlement.
 
-    A missing exit code stays unknown (historical host events omit it).
+    A missing exit code stays unknown (historical host events omit it, and a
+    native child reports a stop, never an exit status). ``pending`` is a
+    committed intent whose launch was never acknowledged: it is neither
+    running nor settled. ``reason`` explains a ``launch_failed`` only.
     """
 
     node: InventoryNodeRef
     sequence: int = Field(ge=1)
-    status: Literal["launched", "launch_failed", "completed", "failed", "cancelled"]
+    status: Literal["pending", "launched", "launch_failed", "completed", "failed", "cancelled"]
     exit_code: int | None = Field(default=None, ge=-255, le=255)
+    reason: LaunchFailureReason | None = None
     evidence: EvidenceReference
 
     @model_validator(mode="after")
     def _outcome(self) -> InvocationLifecycleEvidence:
         if self.node.kind != "invocation":
             raise ValueError("lifecycle observation requires an invocation")
+        if self.reason is not None and self.status != "launch_failed":
+            raise ValueError("only a failed launch carries a reason")
         if self.exit_code is None:
             return self
         expected = {
+            "pending": False,
             "launched": self.exit_code is None,
             "launch_failed": self.exit_code is None,
             "completed": self.exit_code == 0,

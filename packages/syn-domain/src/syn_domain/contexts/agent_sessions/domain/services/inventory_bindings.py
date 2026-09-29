@@ -52,10 +52,12 @@ def resolve_bindings(
         if RANK[binding.confidence] >= 2:
             owners[binding.owner.key].append(index)
     gaps: list[InventoryGap] = []
+    conflicted: set[str] = set()
     for owner, indices in owners.items():
         identities = {result[i].transcript.key for i in indices}
         if len(identities) < 2:
             continue
+        conflicted.add(owner)
         strongest = max(RANK[result[i].confidence] for i in indices)
         winners = {
             result[i].transcript.key for i in indices if RANK[result[i].confidence] == strongest
@@ -66,6 +68,18 @@ def resolve_bindings(
                     update={"confidence": EvidenceClass.CONFLICTING}
                 )
         gaps.append(InventoryGap(reason=GapReason.CONFLICTING_BINDING, node_keys=(owner,)))
+    # A producer that saw a different identity for an owner it already bound
+    # reports that observation as conflicting evidence (never as a second
+    # binding). It cannot win, but it must still surface as a conflict.
+    reported = {
+        binding.owner.key
+        for binding in result
+        if binding.confidence is EvidenceClass.CONFLICTING and binding.owner.key not in conflicted
+    }
+    gaps.extend(
+        InventoryGap(reason=GapReason.CONFLICTING_BINDING, node_keys=(owner,))
+        for owner in sorted(reported)
+    )
     return tuple(result), tuple(gaps)
 
 

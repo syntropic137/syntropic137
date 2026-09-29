@@ -12,7 +12,11 @@ from itertools import permutations
 
 import pytest
 
-from syn_domain.contexts.agent_sessions import EvidenceBatch, UnsupportedEvidenceIssue
+from syn_domain.contexts.agent_sessions import (
+    EvidenceBatch,
+    LaunchFailureReason,
+    UnsupportedEvidenceIssue,
+)
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
     AcquisitionGapEvidence,
     CaptureEvidence,
@@ -212,6 +216,21 @@ CHILD_SETTLED = add(
     invocation_lifecycle=(lifecycle(CHILD, 1, "launched"), lifecycle(CHILD, 2, "completed")),
     captures=(capture("child-native"),),
 )
+PENDING_CHILD = add(
+    invocation_contexts=(
+        InvocationContextEvidence(
+            controller=ROOT, child=CHILD, attempt_id="attempt", evidence=proof("ctx", "workspace")
+        ),
+    ),
+    invocation_lifecycle=(lifecycle(CHILD, 1, "pending", "child-lifecycle"),),
+)
+NAMED_LAUNCH_FAILURE = InvocationLifecycleEvidence(
+    node=CHILD,
+    sequence=2,
+    status="launch_failed",
+    reason=LaunchFailureReason.HOOK_WATCHDOG,
+    evidence=proof("child-2-launch_failed", "child-lifecycle"),
+)
 LEGACY_PLATFORM = add(
     memberships=(
         MembershipEvidence(
@@ -271,6 +290,30 @@ STATES: list[tuple[str, tuple[Change, ...], tuple[CoverageState, ...]]] = [
         (OPEN, OPEN, MISSING),
     ),
     ("background child settled", (child(), CHILD_SETTLED), (OPEN, RECONCILED, RECONCILED)),
+    # Schema v3 native lifecycle: a committed intent whose launch was never
+    # acknowledged is neither running nor settled. It blocks the seal until
+    # the deadline, then becomes an explicit unsettled gap.
+    ("native child intent pending", (PENDING_CHILD,), (OPEN, OPEN, MISSING)),
+    (
+        "native child pending then launched and stopped",
+        (
+            PENDING_CHILD,
+            add(
+                bindings=(binding(CHILD, "child-native"),),
+                invocation_lifecycle=(
+                    lifecycle(CHILD, 2, "launched", "child-lifecycle"),
+                    lifecycle(CHILD, 3, "completed", "child-lifecycle"),
+                ),
+                captures=(capture("child-native"),),
+            ),
+        ),
+        (OPEN, RECONCILED, RECONCILED),
+    ),
+    (
+        "native child launch failed with a named cause",
+        (PENDING_CHILD, add(invocation_lifecycle=(NAMED_LAUNCH_FAILURE,))),
+        (OPEN, MISSING, MISSING),
+    ),
     ("unverified child attempt", (child("stale"), CHILD_SETTLED), (OPEN, OPEN, MISSING)),
     (
         "conflicting child attempts",

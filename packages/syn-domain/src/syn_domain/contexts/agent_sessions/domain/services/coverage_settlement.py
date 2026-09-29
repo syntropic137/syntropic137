@@ -16,7 +16,9 @@ Rule (pure; recomputed on every reconstruction, never mutating a revision):
    own (a receipt, lifecycle or owned binding): it then settles on its own
    terms. Everything else must prove itself.
 2. A node is SETTLED when its process is terminal (an invocation's latest
-   lifecycle is completed, failed, cancelled or launch_failed) and its capture
+   lifecycle is completed, failed, cancelled or launch_failed; never
+   ``pending``, a committed intent whose launch was never acknowledged, which
+   blocks the seal exactly like a running invocation) and its capture
    is terminal (the latest local receipt through its binding is not pending;
    a failed launch needs no body). Unresolved child attempt claims, unresolved
    parentage and a live acquisition failure (e.g. an unreadable child journal)
@@ -57,7 +59,12 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     InventoryGap,
 )
 
-from .gap_reasons import CONFLICT_REASONS, GapReason
+from .gap_reasons import (
+    CONFLICT_REASONS,
+    LAUNCH_FAILED_REASONS,
+    UNSETTLED_PROCESS_REASONS,
+    GapReason,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
@@ -199,14 +206,16 @@ class _Unsettled:
 
 def _unsettled(data: SettlementInput, expected: dict[str, InventoryNodeRef]) -> _Unsettled:
     keys = set(expected)
-    running = _gap_keys(data.gaps, GapReason.INVOCATION_RUNNING) & keys
+    # Running and pending (intent committed, launch never acknowledged) both
+    # lack an outcome: neither may ever count as settled.
+    running = _gap_keys(data.gaps, *UNSETTLED_PROCESS_REASONS) & keys
     # A registered invocation with no outcome at all has not settled either.
     # Only the host seal waits on it; an explicit producer seal predates this.
     observed = {item.node.key for item in data.evidence.invocation_lifecycle}
     unobserved = {
         key for key, ref in expected.items() if ref.kind == "invocation" and key not in observed
     }
-    launch_failed = _gap_keys(data.gaps, GapReason.INVOCATION_LAUNCH_FAILED)
+    launch_failed = _gap_keys(data.gaps, *LAUNCH_FAILED_REASONS)
     states = expected_capture_states(data.evidence, data.bindings, keys)
     capture = {
         key

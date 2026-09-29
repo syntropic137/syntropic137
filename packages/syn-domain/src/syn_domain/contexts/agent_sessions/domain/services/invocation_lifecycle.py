@@ -7,7 +7,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence impo
 )
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import InventoryGap
 
-from .gap_reasons import GapReason
+from .gap_reasons import LAUNCH_FAILURE_GAPS, GapReason
 
 
 def lifecycle_gaps(
@@ -39,6 +39,10 @@ def lifecycle_gaps(
     return tuple(gaps)
 
 
+# Neither an intent awaiting its launch nor a running child has an outcome yet.
+_NOT_TERMINAL = frozenset({"pending", "launched"})
+
+
 def _outcome(items: list[InvocationLifecycleEvidence]) -> str | None:
     """The one status every producer's latest record agrees on, else None."""
     latest: dict[str, int] = {}
@@ -46,7 +50,7 @@ def _outcome(items: list[InvocationLifecycleEvidence]) -> str | None:
         producer = item.evidence.producer_id
         latest[producer] = max(latest.get(producer, 0), item.sequence)
     outcomes = {item.status for item in items if item.sequence == latest[item.evidence.producer_id]}
-    terminals = {item.status for item in items if item.status != "launched"}
+    terminals = {item.status for item in items if item.status not in _NOT_TERMINAL}
     codes = {item.exit_code for item in items if item.exit_code is not None}
     if (
         len(outcomes) != 1
@@ -66,6 +70,21 @@ def _reason(items: list[InvocationLifecycleEvidence], *, bound: bool) -> str | N
         return None
     if status == "launched":
         return GapReason.INVOCATION_RUNNING
+    if status == "pending":
+        return GapReason.INVOCATION_PENDING
+    if status == "launch_failed":
+        return _launch_failure(items)
     if status == "failed" and not bound and all(item.status != "launched" for item in items):
         return GapReason.INVOCATION_TRANSPORT_FAILED_BEFORE_ANNOUNCE
     return "invocation_" + status
+
+
+def _launch_failure(items: list[InvocationLifecycleEvidence]) -> GapReason:
+    """A single named cause keeps its own gap; none or disagreeing causes stay generic."""
+    reasons = {item.reason for item in items if item.status == "launch_failed"}
+    reasons.discard(None)
+    if len(reasons) == 1:
+        (reason,) = reasons
+        if reason is not None:
+            return LAUNCH_FAILURE_GAPS[reason]
+    return GapReason.INVOCATION_LAUNCH_FAILED

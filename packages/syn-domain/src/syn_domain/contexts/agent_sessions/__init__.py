@@ -307,6 +307,7 @@ __all__ = [
     "InvocationLifecycleEvidence",
     "InvocationStatus",
     "ItemKind",
+    "LaunchFailureReason",
     "LegacyCaptureObservation",
     "LegacyDelegateAlias",
     "LineageEdge",
@@ -401,6 +402,7 @@ from ._shared.session_invocation import InvocationStatus, SessionInvocationState
 from .domain.aggregate_inventory_clock.InventoryClockAggregate import InventoryClockAggregate
 from .domain.commands.ObserveInventoryClockCommand import ObserveInventoryClockCommand
 from .domain.commands.RecordSessionInvocationCommand import RecordSessionInvocationCommand
+from .domain.read_models.launch_failure import LaunchFailureReason
 from .domain.read_models.session_evidence import (
     AcquisitionGapEvidence,
     AcquisitionStatusEvidence,
