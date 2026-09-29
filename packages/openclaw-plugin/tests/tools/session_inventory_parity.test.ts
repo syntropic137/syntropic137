@@ -116,6 +116,9 @@ it("handwritten types know every field the API emits (#1182)", () => {
     }
     if (!("items" in exchange.body)) continue;
     expect(unknownKeys(exchange.body, inventoryFieldKeys.SessionInventoryPageResponse)).toEqual([]);
+    for (const hashes of (exchange.body["capture_hashes"] ?? []) as object[]) {
+      expect(unknownKeys(hashes, inventoryFieldKeys.CaptureRevisionHashes)).toEqual([]);
+    }
     const kind = exchange.body["kind"] as string;
     for (const item of exchange.body["items"] as object[]) {
       expect(unknownKeys(item, itemKeys[kind]!)).toEqual([]);

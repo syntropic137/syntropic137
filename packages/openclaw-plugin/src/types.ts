@@ -513,6 +513,15 @@ export interface SessionInventoryPageResponse {
   item_keys: InventoryItemKeys[];
   next_cursor?: string | null;
   body_overrides: TranscriptBodyState[];
+  /** On capture pages, `capture_hashes[i]` names the hash representations of `items[i]`. */
+  capture_hashes?: CaptureRevisionHashes[];
+}
+
+/** Which representation a capture receipt's hashes are. Never compare hashes of different kinds. */
+export interface CaptureRevisionHashes {
+  transcript_revision_kind?: "archived_bytes_sha256" | "source_content_hash" | "unqualified" | null;
+  archived_bytes_sha256?: string | null;
+  source_content_hash?: string | null;
 }
 
 export interface SessionInventoryNodeResponse {
@@ -539,7 +548,8 @@ export const inventoryFieldKeys = {
   InventorySnapshot: { snapshot_id: true, run: true, revision: true, resolver_version: true, evidence_watermark: true, coverage: true, counts: true } satisfies Keys<InventorySnapshot>,
   InventoryCounts: { node: true, membership: true, edge: true, capture: true, gap: true, retraction: true, binding: true, namespaces: true } satisfies Keys<InventoryCounts>,
   InventoryCoverage: { state: true, contract_id: true, expected_count: true, missing_keys: true } satisfies Keys<InventoryCoverage>,
-  SessionInventoryPageResponse: { snapshot: true, kind: true, filters: true, items: true, item_keys: true, next_cursor: true, body_overrides: true } satisfies Keys<SessionInventoryPageResponse>,
+  SessionInventoryPageResponse: { snapshot: true, kind: true, filters: true, items: true, item_keys: true, next_cursor: true, body_overrides: true, capture_hashes: true } satisfies Keys<SessionInventoryPageResponse>,
+  CaptureRevisionHashes: { transcript_revision_kind: true, archived_bytes_sha256: true, source_content_hash: true } satisfies Keys<CaptureRevisionHashes>,
   SessionInventoryNodeResponse: { snapshot_id: true, node_key: true, status: true, node: true } satisfies Keys<SessionInventoryNodeResponse>,
   InventoryNode: { ref: true, evidence: true } satisfies Keys<InventoryNode>,
   InventoryNodeRef: { kind: true, source_instance_id: true, local_id: true, harness: true } satisfies Keys<InventoryNodeRef>,
