@@ -92,7 +92,10 @@ import subprocess
 import threading
 from dataclasses import dataclass
 
-from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.errors import (
+    ProvisionFailureReason,
+    WorkspaceProvisionError,
+)
 from syn_shared.diagnostics import name_exit_status
 from syn_shared.env_constants import (
     ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES,
@@ -123,6 +126,8 @@ class ImageVerificationError(WorkspaceProvisionError):
     context, while callers that care specifically about a supply-chain failure
     can still match the narrower type.
     """
+
+    reason = ProvisionFailureReason.IMAGE_VERIFICATION_FAILED
 
 
 #: An immutable local Docker image ID, as reported by ``docker image inspect``.

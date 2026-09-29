@@ -16,6 +16,9 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
 from agentic_isolation import (
+    AppArmorProfileNotLoadedError,
+    CodexSandboxPolicyError,
+    DockerDetectionError,
     SecurityConfig,
     WorkspaceDockerProvider,
 )
@@ -37,6 +40,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.host_security import host_security_failure
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
@@ -301,6 +305,12 @@ class AgenticIsolationAdapter:
         # with execution context all the way to the CLI (was "Unknown error").
         try:
             workspace_obj = await self._provider.create(ws_config)
+        except (
+            AppArmorProfileNotLoadedError,
+            CodexSandboxPolicyError,
+            DockerDetectionError,
+        ) as exc:
+            raise host_security_failure(exc, config.execution_id) from exc
         except Exception as exc:
             logger.exception(
                 "Workspace provisioning failed (execution=%s, workspace=%s)",

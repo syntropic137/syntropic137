@@ -1359,6 +1359,11 @@ validate-pre-merge-quick:
 # --- Selfhost Deployment ---
 
 # Pre-flight check: platform, Docker, env, secrets, workspaces
+# Load the Codex sandbox AppArmor profile on this Docker host and persist it
+# under /etc/apparmor.d (#1398). No-op on hosts without AppArmor.
+apparmor-setup *args:
+    bash infra/scripts/apparmor-setup.sh {{args}}
+
 _selfhost-preflight:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1383,6 +1388,11 @@ _selfhost-preflight:
         if ! docker info &>/dev/null; then
             echo "  ❌ Docker is not running or user not in docker group"
             exit 1
+        fi
+        # Codex workspaces need the agentic-codex-sandbox AppArmor profile on
+        # AppArmor hosts (#1398). Installs + loads it (sudo); skips elsewhere.
+        if ! bash infra/scripts/apparmor-setup.sh; then
+            ERRORS=$((ERRORS + 1))
         fi
     fi
 

@@ -41,6 +41,25 @@ Each agent execution runs in an isolated Docker workspace with a two-phase secur
 
 **Agent Phase**: A claude phase runs with its Anthropic credential, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as its only runtime secret. A codex phase runs with an empty agent environment, its credential having been staged to `~/.codex/auth.json` during provisioning. `CODEX_AUTH_JSON` is a deployment variable, not something the agent sees. Git operations use cached credentials from the setup phase.
 
+### AppArmor hosts (Codex workspaces)
+
+On a Linux host whose Docker daemon enforces AppArmor (Ubuntu 24.04 and most Debian/Ubuntu servers; `docker info` lists `name=apparmor` under Security Options), Codex workspaces run under the AppArmor profile `agentic-codex-sandbox`: Docker's default profile with its blanket `deny mount,` replaced by only the mounts the Codex sandbox (bubblewrap) performs. The workspace refuses to start until that profile is loaded, and the execution fails with the provision reason `apparmor_profile_not_loaded` naming the fix.
+
+Load it once on the Docker host. It is persisted under `/etc/apparmor.d`, so it loads again at every boot:
+
+```bash
+# From a repository checkout (also run automatically by `just selfhost-up`):
+just apparmor-setup
+
+# Without a checkout, copy the profile shipped in the running API image:
+docker exec syn137-api python -c \
+  "from agentic_isolation import codex_sandbox_apparmor_profile_path as p; print(p().read_text(), end='')" \
+  | sudo tee /etc/apparmor.d/agentic-codex-sandbox >/dev/null
+sudo apparmor_parser -r /etc/apparmor.d/agentic-codex-sandbox
+```
+
+Re-run it after an update that changes the profile. Hosts without AppArmor (macOS, Docker Desktop) need nothing; `just apparmor-setup` skips them. The profile adds no capabilities, never uses `apparmor=unconfined`, and leaves host sysctls alone.
+
 ## Environment Variables
 
 | Variable | Default | Description |
