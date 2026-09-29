@@ -67,6 +67,11 @@ def _run(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _loads(tmp_path: Path) -> int:
+    """Real parser invocations (the sudo stand-in logs its own line too)."""
+    return sum(line.startswith("apparmor_parser -r") for line in _calls(tmp_path).splitlines())
+
+
 def _calls(tmp_path: Path) -> str:
     log = tmp_path / "calls.log"
     return log.read_text() if log.exists() else ""
@@ -89,11 +94,42 @@ def test_apparmor_host_installs_persists_and_loads(tmp_path: Path) -> None:
     persisted = tmp_path / "etc" / _NAME
     assert persisted.read_bytes() == _SHIPPED.read_bytes()
     assert f"apparmor_parser -r {persisted}" in _calls(tmp_path)
-    assert _run(env, "--check").returncode == 0
-    # Idempotent: a second run loads nothing.
-    before = _calls(tmp_path).count("apparmor_parser")
+    check = _run(env, "--check")
+    assert check.returncode == 0
+    assert "cannot verify the LOADED rules" in check.stdout
+    # A second run is harmless: nothing to install, but the profile is replaced
+    # again, because loaded rules cannot be compared to the file.
+    before = _loads(tmp_path)
+    installs = _calls(tmp_path).count("sudo install")
     assert _run(env).returncode == 0
-    assert _calls(tmp_path).count("apparmor_parser") == before
+    assert _loads(tmp_path) == before + 1
+    assert _calls(tmp_path).count("sudo install") == installs
+
+
+def test_preloaded_name_with_current_file_is_still_reloaded(tmp_path: Path) -> None:
+    """The name is loaded and the file matches, but the loaded rules may be an
+    older profile (e.g. the file was replaced after the last load): reload."""
+    env = _host(tmp_path, APPARMOR)
+    (tmp_path / "policy" / "p0").mkdir()
+    (tmp_path / "policy" / "p0" / "name").write_text(f"{_NAME}\n")
+    persisted = tmp_path / "etc" / _NAME
+    persisted.write_bytes(_SHIPPED.read_bytes())
+    assert _run(env).returncode == 0
+    assert f"apparmor_parser -r {persisted}" in _calls(tmp_path)
+    assert "sudo install" not in _calls(tmp_path)
+
+
+def test_preloaded_name_with_changed_file_is_reinstalled_and_reloaded(tmp_path: Path) -> None:
+    env = _host(tmp_path, APPARMOR)
+    (tmp_path / "policy" / "p0").mkdir()
+    (tmp_path / "policy" / "p0" / "name").write_text(f"{_NAME}\n")
+    persisted = tmp_path / "etc" / _NAME
+    persisted.write_text("profile agentic-codex-sandbox { # locally edited\n}\n")
+    assert _run(env, "--check").returncode == 1
+    assert _run(env).returncode == 0
+    assert persisted.read_bytes() == _SHIPPED.read_bytes()
+    calls = _calls(tmp_path)
+    assert calls.index("sudo install") < calls.index(f"apparmor_parser -r {persisted}")
 
 
 def test_changed_profile_is_reinstalled(tmp_path: Path) -> None:

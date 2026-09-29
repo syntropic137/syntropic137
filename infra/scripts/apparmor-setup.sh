@@ -18,7 +18,7 @@
 #   infra/scripts/apparmor-setup.sh           # install + load if needed (sudo)
 #   infra/scripts/apparmor-setup.sh --check   # exit 1 if needed but not loaded
 #
-# Idempotent. Overrides (tests only): SYN_APPARMOR_PROFILE_SOURCE,
+# Idempotent: ensure always reloads (replace) the persisted file. Overrides (tests only): SYN_APPARMOR_PROFILE_SOURCE,
 # SYN_APPARMOR_ETC_DIR, SYN_APPARMOR_POLICY_DIR, SYN_APPARMOR_SUDO, SYN_APPARMOR_OS.
 # =============================================================================
 
@@ -77,16 +77,19 @@ if [[ ! -f "$SOURCE" ]]; then
     exit 1
 fi
 
-if profile_loaded && persisted_current; then
-    info "✅ AppArmor: $PROFILE_NAME loaded and persisted in $ETC_DIR"
-    exit 0
-fi
-
 if [[ "$MODE" == "check" ]]; then
-    echo "  ❌ AppArmor: the Docker host enforces AppArmor but $PROFILE_NAME is not" >&2
-    echo "     loaded and persisted. Codex workspaces will be refused. Run:" >&2
-    echo "       just apparmor-setup" >&2
-    exit 1
+    if ! profile_loaded || ! persisted_current; then
+        echo "  ❌ AppArmor: the Docker host enforces AppArmor but $PROFILE_NAME is not" >&2
+        echo "     loaded and persisted. Codex workspaces will be refused. Run:" >&2
+        echo "       just apparmor-setup" >&2
+        exit 1
+    fi
+    # The kernel exposes only a hash of the compiled policy, not of this
+    # source, so a loaded name does not prove the loaded rules match the file
+    # (someone may have edited or replaced it since the last load).
+    info "✅ AppArmor: $PROFILE_NAME loaded and $TARGET matches the shipped profile"
+    info "⚠️  cannot verify the LOADED rules match that file; 'just apparmor-setup' reloads it"
+    exit 0
 fi
 
 if ! command -v apparmor_parser >/dev/null 2>&1; then
@@ -94,9 +97,15 @@ if ! command -v apparmor_parser >/dev/null 2>&1; then
     exit 1
 fi
 
-info "🔐 AppArmor: installing $PROFILE_NAME to $TARGET and loading it (needs sudo)"
-$SUDO mkdir -p "$ETC_DIR"
-$SUDO install -m 0644 "$SOURCE" "$TARGET"
+# Always reload, even when the name is already loaded and the file matches:
+# the loaded rules cannot be compared to the file, and `apparmor_parser -r`
+# (replace) is idempotent. Skipping it would leave a replaced profile stale.
+if ! persisted_current; then
+    info "🔐 AppArmor: installing $PROFILE_NAME to $TARGET (needs sudo)"
+    $SUDO mkdir -p "$ETC_DIR"
+    $SUDO install -m 0644 "$SOURCE" "$TARGET"
+fi
+info "🔐 AppArmor: loading $TARGET with apparmor_parser -r (needs sudo)"
 $SUDO apparmor_parser -r "$TARGET"
 
 if ! profile_loaded; then

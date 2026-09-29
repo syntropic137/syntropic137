@@ -24,16 +24,20 @@ daemon. The containerized API cannot load it.
 ## Setup (once per host)
 
 ```bash
-just apparmor-setup          # install to /etc/apparmor.d + apparmor_parser -r (sudo)
-just apparmor-setup --check  # exit 1 if needed but not loaded and persisted
+just apparmor-setup          # install to /etc/apparmor.d + always apparmor_parser -r (sudo)
+just apparmor-setup --check  # exit 1 if needed but not loaded or the file differs
 ```
 
 `infra/scripts/apparmor-setup.sh` installs the profile shipped by the pinned
 AW submodule to `/etc/apparmor.d/agentic-codex-sandbox`, so it loads at every
 boot, and loads it now with `apparmor_parser -r`. It skips hosts without
 AppArmor and treats a failing `docker info` as an error, never as "no
-AppArmor". `just selfhost-up` runs it from `_selfhost-preflight`, and it
-re-installs when an AW bump changes the profile.
+AppArmor". `just selfhost-up` runs it from `_selfhost-preflight`. It
+re-installs when an AW bump changes the profile and always reloads the
+persisted file: the kernel exposes no hash of the profile source, so a loaded
+name cannot prove the loaded rules match the file, and `-r` is idempotent. For
+the same reason `--check` can confirm the name is loaded and the file is
+current, but not that the loaded rules are; it says so.
 
 Without a repository checkout (npx setup), copy the profile out of the
 running API image:
