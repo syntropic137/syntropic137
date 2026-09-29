@@ -54,6 +54,11 @@ moves one, which is deliberate. Signature verification
 digest at provision time, so a bump to an unsigned or unexpectedly-built image
 fails closed rather than running.
 
+When the omni-agent pin moves, append the outgoing ``DEFAULT_WORKSPACE_IMAGE``
+to ``PREVIOUS_DEFAULT_WORKSPACE_IMAGES`` and regenerate ``.env.example``, so
+``just selfhost-update`` moves operators who copied the old default (#1398).
+A test fails if ``.env.example`` ever shipped a value that is neither.
+
 Overriding without a code change
 --------------------------------
 Operators override the full image reference through the existing workspace
@@ -467,3 +472,33 @@ configuration.
 Operators pin a different image with ``SYN_WORKSPACE_DOCKER_IMAGE``. It must be
 a digest reference; a registry tag is rejected.
 """
+
+#: Every value ``.env.example`` ever shipped for ``SYN_WORKSPACE_DOCKER_IMAGE``
+#: before the current default, oldest first (read from the file's history on
+#: main, with the commit that introduced each; #1398).
+#:
+#: WHY: ``.env.example`` carries the default digest, so an operator who copied
+#: it has that digest in ``.env``, where it OVERRIDES the code default. Every
+#: later pin bump then leaves the deployment on the old image. A value in this
+#: set was never an operator's choice, only a copied default, so
+#: ``migrate_workspace_image`` may move it to the current default; any other
+#: value is a deliberate override and is left alone. Append the outgoing
+#: default here in the same change that bumps ``PINNED_DIGESTS``.
+PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
+    "agentic-workspace-claude-cli:latest",  # de72c95b
+    "ghcr.io/agentparadise/agentic-workspace-claude-cli:latest",  # f6b5bee1
+    "ghcr.io/agentparadise/agentic-workspace-claude-cli@sha256:0d53e7a1a9476c5c45cbb7b1467adc004347bef4cf9168c013a6bc7caa5c3f07",  # 49a11ed1
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:f73353adfe99fbab00e0d754543d686f5e57e6c30fddbaebdeeff97b644d53e6",  # 6131040a
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:fb1a719e71f251fbc6cbee4025e89a4dee1fbb9217503f3bc511817eea6ee92c",  # c0b5eb17
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:c447f0cb9905791499de29fba4f848cbb1e6829cf2400d82437fe8f4fc6c5948",  # 52fd32e9
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:dd27d01d5655638d9bffbad6a8a521c0466a78de2f797641fa429686afe457a8",  # d780433b
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:70de5883ba60441b4bc5c357fdb5ec8106852d526735cea90d98aeea1652a7d3",  # 648fc035
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:7b82a14dd65cdd6bdee141a87677055e3110c0cb86d52b33765e6850a773aaea",  # fc897f9e
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:83834d632c9218c0b1772e11820c23e703a5304d7c5016ae9a683665f7d5db6f",  # 25718d9d
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:3e88b1c7d8f6ff9648b3337c2220e17e9368aff940ab9fbbebd0d3c9b25bfaed",  # 6d79609e
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:898aeef61dd057546ef0db7a84467c7d05cb8bb71452a4a3bfd9789343eb912a",  # 0a39dd60
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:29b76b43753292ab50de77921b4cd2750446ea2896cb25f8ee0bfa162d537ad0",  # 46615708
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:a6ba94d71507384d33df7abe2050f7255bdae8b81dc5a37dbe92b7972f154773",  # bdd0ba5d
+    "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:123ab8497e224871b83fc3148774b7be1b59753638f6516673acf5400f049053",  # 9a720d66
+    "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:89189b6c9cf67ac6a9b137fa7427990ca5535077e53e729a0ff4635053e6970d",  # ab974fd8
+)

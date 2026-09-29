@@ -1667,10 +1667,19 @@ selfhost-update *args:
     echo "3️⃣ Syncing Python dependencies..."
     uv sync
     echo ""
-    echo "4️⃣ Rebuilding and restarting services..."
+    # After the submodule update (the AppArmor profile ships in it) and before
+    # compose restarts anything (#1398): reload the Codex sandbox profile and
+    # move a copied old default workspace image in .env to the new default.
+    echo "4️⃣ Host upgrade steps (AppArmor profile, workspace image pin)..."
+    bash infra/scripts/selfhost-update-host.sh .env
+    # .env may have changed: re-export it, since the shell value sourced above
+    # would otherwise override the file for compose.
+    source infra/scripts/selfhost-env.sh
+    echo ""
+    echo "5️⃣ Rebuilding and restarting services..."
     $COMPOSE up -d --build
     echo ""
-    echo "5️⃣ Waiting for services to be healthy..."
+    echo "6️⃣ Waiting for services to be healthy..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
     echo ""
     just selfhost-status

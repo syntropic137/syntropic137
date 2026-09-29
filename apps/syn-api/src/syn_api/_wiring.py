@@ -245,6 +245,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_shared.settings.workspace import WorkspaceSettings
 
     ws_settings = WorkspaceSettings()
+    _warn_if_stale_default_image(ws_settings.docker_image)
     # The workspace service is the Docker headless path: claude -p and
     # codex exec both run there, keeping the stream-json pipeline, Envoy
     # token accounting, and telemetry.
@@ -1510,3 +1511,28 @@ def reset_skill_singletons() -> None:
     _register_skill_handler_singleton = None
     _skill_resolution_service_singleton = None
     _skill_materializer_singleton = None
+
+
+def _warn_if_stale_default_image(image: str) -> None:
+    """Say so when the configured image is a default an older release shipped (#1398).
+
+    ``SYN_WORKSPACE_DOCKER_IMAGE`` in ``.env`` overrides the code default, and
+    ``.env.example`` carries the default of the day it was copied, so a
+    deployment updated by any path that does not rewrite ``.env`` keeps running
+    the old image. ``just selfhost-update`` migrates it; this names the
+    condition for every other path (npx setup, hand-managed hosts) without
+    overriding an operator's configuration.
+    """
+    from syn_shared.settings.workspace_images import (
+        DEFAULT_WORKSPACE_IMAGE,
+        PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
+    )
+
+    if image in PREVIOUS_DEFAULT_WORKSPACE_IMAGES:
+        logger.warning(
+            "SYN_WORKSPACE_DOCKER_IMAGE is %s, a default shipped by an older release; "
+            "this release defaults to %s. Remove the variable to use the default, "
+            "or run `just selfhost-update`, which migrates it.",
+            image,
+            DEFAULT_WORKSPACE_IMAGE,
+        )

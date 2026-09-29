@@ -29,7 +29,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SOURCE="${SYN_APPARMOR_PROFILE_SOURCE:-${REPO_ROOT}/lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/apparmor/${PROFILE_NAME}}"
 ETC_DIR="${SYN_APPARMOR_ETC_DIR:-/etc/apparmor.d}"
 POLICY_DIR="${SYN_APPARMOR_POLICY_DIR:-/sys/kernel/security/apparmor/policy/profiles}"
-SUDO="${SYN_APPARMOR_SUDO-sudo}"
+if [[ -n "${SYN_APPARMOR_SUDO+set}" ]]; then
+    SUDO="$SYN_APPARMOR_SUDO"
+elif [[ "$(id -u)" == "0" ]]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
 TARGET="${ETC_DIR}/${PROFILE_NAME}"
 
 MODE="ensure"
@@ -100,13 +106,20 @@ fi
 # Always reload, even when the name is already loaded and the file matches:
 # the loaded rules cannot be compared to the file, and `apparmor_parser -r`
 # (replace) is idempotent. Skipping it would leave a replaced profile stale.
+needs_root() {
+    echo "  ❌ AppArmor: '$*' failed. Loading a profile needs root on the Docker host." >&2
+    echo "     Re-run interactively (sudo prompts): just apparmor-setup" >&2
+    echo "     or as root: sudo bash infra/scripts/apparmor-setup.sh" >&2
+    exit 1
+}
+
 if ! persisted_current; then
     info "🔐 AppArmor: installing $PROFILE_NAME to $TARGET (needs sudo)"
-    $SUDO mkdir -p "$ETC_DIR"
-    $SUDO install -m 0644 "$SOURCE" "$TARGET"
+    $SUDO mkdir -p "$ETC_DIR" || needs_root mkdir -p "$ETC_DIR"
+    $SUDO install -m 0644 "$SOURCE" "$TARGET" || needs_root install "$TARGET"
 fi
 info "🔐 AppArmor: loading $TARGET with apparmor_parser -r (needs sudo)"
-$SUDO apparmor_parser -r "$TARGET"
+$SUDO apparmor_parser -r "$TARGET" || needs_root apparmor_parser -r "$TARGET"
 
 if ! profile_loaded; then
     echo "  ❌ AppArmor: apparmor_parser succeeded but $PROFILE_NAME is not listed in $POLICY_DIR" >&2

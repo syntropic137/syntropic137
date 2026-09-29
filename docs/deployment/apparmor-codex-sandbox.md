@@ -39,6 +39,12 @@ name cannot prove the loaded rules match the file, and `-r` is idempotent. For
 the same reason `--check` can confirm the name is loaded and the file is
 current, but not that the loaded rules are; it says so.
 
+`just selfhost-update` runs the same step (via
+`infra/scripts/selfhost-update-host.sh`) after the submodule update and
+before compose restarts anything, so an upgrade reloads a changed profile.
+If the profile cannot be loaded (for example sudo cannot prompt), the update
+stops before restarting services and says how to re-run it.
+
 Without a repository checkout (npx setup), copy the profile out of the
 running API image:
 

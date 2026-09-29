@@ -162,3 +162,81 @@ def test_failing_docker_info_is_an_error_not_no_apparmor(tmp_path: Path) -> None
     assert result.returncode == 1
     assert "docker info failed" in result.stderr
     assert "apparmor_parser" not in _calls(tmp_path)
+
+
+# --- The upgrade path: `just selfhost-update` (#1398) ------------------------
+
+_UPDATE = _REPO / "infra" / "scripts" / "selfhost-update-host.sh"
+
+
+def _update(env: dict[str, str], env_file: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(_UPDATE), str(env_file)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_REPO,
+    )
+
+
+def _preload(tmp_path: Path) -> Path:
+    """A host upgraded from an earlier release: name loaded, file persisted."""
+    (tmp_path / "policy" / "p0").mkdir()
+    (tmp_path / "policy" / "p0" / "name").write_text(f"{_NAME}\n")
+    persisted = tmp_path / "etc" / _NAME
+    persisted.write_bytes(_SHIPPED.read_bytes())
+    return persisted
+
+
+def test_update_reloads_a_preloaded_profile_and_migrates_the_old_default(tmp_path: Path) -> None:
+    from syn_shared.settings.workspace_images import (
+        DEFAULT_WORKSPACE_IMAGE,
+        PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
+    )
+
+    env = _host(tmp_path, APPARMOR)
+    persisted = _preload(tmp_path)
+    old = PREVIOUS_DEFAULT_WORKSPACE_IMAGES[-1]
+    env_file = tmp_path / "selfhost.env"
+    env_file.write_text(f"A=1\nSYN_WORKSPACE_DOCKER_IMAGE='{old}'\n")
+    result = _update(env, env_file)
+    assert result.returncode == 0, result.stderr
+    assert _loads(tmp_path) == 1
+    assert f"apparmor_parser -r {persisted}" in _calls(tmp_path)
+    assert env_file.read_text() == f"A=1\nSYN_WORKSPACE_DOCKER_IMAGE='{DEFAULT_WORKSPACE_IMAGE}'\n"
+    assert old in result.stdout and DEFAULT_WORKSPACE_IMAGE in result.stdout
+
+
+def test_update_leaves_a_custom_image_alone(tmp_path: Path) -> None:
+    env = _host(tmp_path, NO_APPARMOR)
+    custom = "ghcr.io/example/my-omni@sha256:" + "cd" * 32
+    env_file = tmp_path / "selfhost.env"
+    env_file.write_text(f"SYN_WORKSPACE_DOCKER_IMAGE='{custom}'\n")
+    result = _update(env, env_file)
+    assert result.returncode == 0, result.stderr
+    assert env_file.read_text() == f"SYN_WORKSPACE_DOCKER_IMAGE='{custom}'\n"
+    assert "custom image; left unchanged" in result.stdout
+    assert "apparmor_parser" not in _calls(tmp_path)
+
+
+def test_update_stops_before_restart_when_the_profile_cannot_load(tmp_path: Path) -> None:
+    env = _host(tmp_path, APPARMOR)
+    _stub(tmp_path / "bin", "fakesudo", "exit 1")  # sudo refused / no tty
+    env_file = tmp_path / "selfhost.env"
+    env_file.write_text("")
+    result = _update(env, env_file)
+    assert result.returncode == 1
+    assert "needs root" in result.stderr
+    assert "Update stopped before restarting services" in result.stderr
+
+
+def test_selfhost_update_runs_host_steps_between_submodules_and_compose() -> None:
+    justfile = (_REPO / "justfile").read_text()
+    recipe = justfile[justfile.index("\nselfhost-update *args:") :]
+    recipe = recipe[: recipe.index("\n\n# ")]
+    submodules = recipe.index("git submodule update")
+    host = recipe.index("infra/scripts/selfhost-update-host.sh")
+    reexport = recipe.index("source infra/scripts/selfhost-env.sh", host)
+    compose = recipe.index("$COMPOSE up")
+    assert submodules < host < reexport < compose

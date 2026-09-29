@@ -58,7 +58,11 @@ docker exec syn137-api python -c \
 sudo apparmor_parser -r /etc/apparmor.d/agentic-codex-sandbox
 ```
 
-Re-run it after an update that changes the profile. Hosts without AppArmor (macOS, Docker Desktop) need nothing; `just apparmor-setup` skips them. The profile adds no capabilities, never uses `apparmor=unconfined`, and leaves host sysctls alone.
+`just selfhost-update` re-runs this step on every update, before restarting services. On an npx install, re-run the two commands above after each update.
+
+### Workspace image after an update
+
+`.env.example` carries the default workspace image digest, and a `SYN_WORKSPACE_DOCKER_IMAGE` value in `.env` overrides the built-in default. `just selfhost-update` replaces a value that is a default shipped by an older release with the new default and prints the change; any other value is treated as your own override and left alone. The API also logs a warning at startup when the configured image is an older shipped default. On an npx install, remove the variable from `.env` (or set it to the new digest) after updating. Hosts without AppArmor (macOS, Docker Desktop) need nothing; `just apparmor-setup` skips them. The profile adds no capabilities, never uses `apparmor=unconfined`, and leaves host sysctls alone.
 
 ## Environment Variables
 
