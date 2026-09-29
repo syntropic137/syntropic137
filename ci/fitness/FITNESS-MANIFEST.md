@@ -31,6 +31,17 @@ Run both: `just fitness`
 | 13 | Pointer Reachability | test_submodule_pointer_is_reachable_from_its_default_branch | submodules discovered from .gitmodules | Enforced |
 | 14 | Answer Honesty | test_unknown_has_a_representation | fitness_exceptions.toml `[unknown_has_a_representation]` | Enforced |
 | 15 | Harness Format Boundary (#1398) | test_harness_format_boundary | fitness_exceptions.toml `[harness_format_boundary]` | Enforced |
+| 16 | Codex Sandbox Stays On (#1398) | test_no_codex_sandbox_bypass | no exemptions | Enforced |
+
+### 16. Codex Sandbox Stays On (#1398)
+
+Delegated Codex runs through `syn-delegate codex` with its own sandbox on; the
+workspace supplies the seccomp/AppArmor policy bubblewrap needs
+(`docs/deployment/apparmor-codex-sandbox.md`). The sandbox-and-approvals bypass
+flag was once the documented workaround in a shipped workflow prompt, which
+agents copy verbatim. The check scans every file tracked by this repository
+(not submodules) for any spelling of that flag and has no exemptions; a planted
+copy in a scratch repository proves the scan catches it.
 
 ### 15. Harness Format Boundary (#1398)
 
