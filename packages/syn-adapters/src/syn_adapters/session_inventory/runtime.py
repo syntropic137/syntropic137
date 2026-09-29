@@ -52,6 +52,7 @@ from .replication_runtime import (
 from .spool_drain import LocalSpoolDrain
 from .spool_release import CaptureSpoolRetention
 from .transcript_access import InstallationTranscriptAccess
+from .transcript_conversation import AgenticTranscriptConversation
 from .transcript_deletions import PostgresTranscriptDeletions
 
 if TYPE_CHECKING:
@@ -263,7 +264,9 @@ async def create_inventory_runtime(
         jobs=jobs,
         archive=archive,
         body_availability=PostgresBodyAvailability(pool),
-        transcripts=ReadLocalTranscriptHandler(catalog, archive, access),
+        transcripts=ReadLocalTranscriptHandler(
+            catalog, archive, access, conversation=AgenticTranscriptConversation()
+        ),
         catalog=catalog,
         access=access,
         deletions=PostgresTranscriptDeletions(

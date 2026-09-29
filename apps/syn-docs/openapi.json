@@ -12217,6 +12217,16 @@
               }
             ],
             "title": "Content Base64"
+          },
+          "conversation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptConversation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -17130,6 +17140,55 @@
         "title": "TranscriptBodyState",
         "description": "A current restriction overlaid on an immutable inventory page.\n\nEach hash names its representation. ``archive_sha256`` is the SHA-256 of the\nexact archived bytes (a local receipt's ``archived_byte_hash``).\n``source_content_hash`` is the APSS original-content hash a remote receipt\nreports as its ``transcript_revision``; it is absent until known."
       },
+      "TranscriptConversation": {
+        "properties": {
+          "supported": {
+            "type": "boolean",
+            "title": "Supported"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptMessage"
+            },
+            "type": "array",
+            "title": "Messages",
+            "default": []
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "issues": {
+            "items": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "type": "array",
+            "title": "Issues",
+            "default": []
+          },
+          "reader_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reader Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "supported"
+        ],
+        "title": "TranscriptConversation",
+        "description": "``supported`` is False when no reader exists for this harness or format."
+      },
       "TranscriptDeletion": {
         "properties": {
           "archive_sha256": {
@@ -17322,6 +17381,36 @@
         ],
         "title": "TranscriptIdentityRequest",
         "description": "Qualified native identity of one archived revision in the addressed run."
+      },
+      "TranscriptMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 32768,
+            "title": "Text"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Line"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "text",
+          "line"
+        ],
+        "title": "TranscriptMessage"
       },
       "TranscriptRevocationResponse": {
         "properties": {

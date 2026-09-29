@@ -106,6 +106,7 @@ async def get_local_transcript_revision(
                 content_base64=base64.b64encode(result.body).decode("ascii")
                 if result.body is not None
                 else None,
+                conversation=result.conversation,
             )
             # Rendered to bytes before the fence is released: the handoff point.
             return Response(

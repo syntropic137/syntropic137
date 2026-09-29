@@ -369,10 +369,13 @@ __all__ = [
     "TokenMetrics",
     "TokenUsageData",
     "TranscriptBodyState",
+    "TranscriptConversation",
+    "TranscriptConversationPort",
     "TranscriptDeletedError",
     "TranscriptDeletion",
     "TranscriptDeletionReplica",
     "TranscriptIntegrityError",
+    "TranscriptMessage",
     "UnsupportedEvidenceIssue",
     "import_phase_delegates",
     "inventory_counts",
@@ -434,6 +437,11 @@ from .ports.SessionSettlementPort import (
     SessionSettlementPort,
     SettlementDeadline,
     SettlementDeadlinePage,
+)
+from .ports.TranscriptConversationPort import (
+    TranscriptConversation,
+    TranscriptConversationPort,
+    TranscriptMessage,
 )
 from .slices.capture_local_transcript.CaptureLocalTranscriptHandler import (
     CaptureLocalTranscriptHandler,

@@ -4534,6 +4534,7 @@ export interface components {
             redaction: "source";
             /** Content Base64 */
             content_base64?: string | null;
+            conversation?: components["schemas"]["TranscriptConversation"] | null;
         };
         /**
          * MaintenanceModeResponse
@@ -7131,6 +7132,31 @@ export interface components {
             status: "expired" | "deleted" | "withheld";
         };
         /**
+         * TranscriptConversation
+         * @description ``supported`` is False when no reader exists for this harness or format.
+         */
+        TranscriptConversation: {
+            /** Supported */
+            supported: boolean;
+            /**
+             * Messages
+             * @default []
+             */
+            messages: components["schemas"]["TranscriptMessage"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /**
+             * Issues
+             * @default []
+             */
+            issues: string[];
+            /** Reader Version */
+            reader_version?: string | null;
+        };
+        /**
          * TranscriptDeletion
          * @description A durable body tombstone. Catalog and inventory history remain discoverable.
          */
@@ -7227,6 +7253,18 @@ export interface components {
             harness: string;
             /** Native Id */
             native_id: string;
+        };
+        /** TranscriptMessage */
+        TranscriptMessage: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+            /** Text */
+            text: string;
+            /** Line */
+            line: number;
         };
         /**
          * TranscriptRevocationResponse

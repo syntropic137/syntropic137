@@ -14,6 +14,7 @@ from syn_domain.contexts.agent_sessions import (
     OwnerDeletionReason,
     RunIdentity,
     TranscriptBodyState,
+    TranscriptConversation,
     TranscriptDeletion,
 )
 
@@ -219,6 +220,9 @@ class LocalTranscriptResponse(BaseModel):
         description="Only source-applied redaction; the server serves archived bytes unchanged.",
     )
     content_base64: str | None = Field(default=None, repr=False)
+    #: Normalized user/assistant excerpt from the harness adapter. Clients render
+    #: this and never parse ``content_base64``, which exists only for download.
+    conversation: TranscriptConversation | None = None
 
 
 class TranscriptIdentityRequest(BaseModel):
