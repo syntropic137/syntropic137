@@ -1,6 +1,6 @@
 """A codex phase must not receive more authority than it declared (#1157, #1161).
 
-Every codex phase used to be built with ``--sandbox danger-full-access``
+Every codex phase used to be built with the full-access sandbox level
 regardless of what its workflow said. On ``exec-dff4ff410bb1`` a verify phase
 used that grant to merge, commit and push the change it then certified, and
 the resulting verdict was indistinguishable from a real one.

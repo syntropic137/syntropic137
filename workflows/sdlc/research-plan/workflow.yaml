@@ -30,7 +30,7 @@ requires_repos: true
 # AVAILABILITY. #964 closed when that landed.
 #
 # The codex phase below is the exception and cannot declare tools at all:
-# `_build_codex_command` hardcodes `--sandbox danger-full-access` and takes only
+# `_build_codex_command` hardcoded the full-access sandbox level and took only
 # a prompt and a model (#1009). Codex rejects tool-NAME policies by design, so
 # the fix is a sandbox mode, not an allowlist. Until then that phase can write
 # to the workspace its artifacts are collected from.
