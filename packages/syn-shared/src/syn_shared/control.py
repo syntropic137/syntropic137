@@ -31,7 +31,5 @@ from enum import StrEnum
 class ControlSignalType(StrEnum):
     """Types of control signals an operator can send to an execution."""
 
-    PAUSE = "pause"
-    RESUME = "resume"
     CANCEL = "cancel"
     INJECT = "inject"

@@ -7,7 +7,7 @@ import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/com
 import { CLIError } from "../framework/errors.js";
 import { streamSSE, type SSEEvent } from "../client/sse.js";
 import { print, printError, printDim } from "../output/console.js";
-import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
+import { style, BOLD, CYAN, DIM, GREEN, RED } from "../output/ansi.js";
 import { formatCost, formatTimestamp, formatTokens } from "../output/format.js";
 
 const EVENT_STYLES: Record<string, string> = {
@@ -18,7 +18,6 @@ const EVENT_STYLES: Record<string, string> = {
   PhaseCompleted: GREEN,
   PhaseFailed: RED,
   SessionTokensRecorded: DIM,
-  ExecutionPaused: YELLOW,
   ExecutionResumed: GREEN,
   ExecutionCancelled: RED,
 };

@@ -1,6 +1,6 @@
-"""Start the child execution a parent's fork admitted (ADR-014 s7, #1454).
+"""Start the child execution a parent's resume admitted (ADR-014 s7, #1454).
 
-The parent's `ExecutionForked` is the decision; this carries it out. Every
+The parent's `ExecutionResumed` is the decision; this carries it out. Every
 fact the child runs with is read from the PARENT's stream - its pinned phases,
 its inputs, its recorded commits and the inherited prefix the decision fixed -
 and nothing from the workflow template, which may have been edited since the
@@ -17,14 +17,14 @@ from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_start import (
-    refuse_fork_start,
+from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    refuse_resume_start,
 )
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePort
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
-        StartForkCommand,
+        StartResumeCommand,
     )
     from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
         WorkflowExecutionRepositoryPort,
@@ -37,8 +37,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class StartForkHandler:
-    """Loads a forked parent and runs the child it admitted.
+class StartResumeHandler:
+    """Loads a resumed parent and runs the child it admitted.
 
     Idempotent, as an infrastructure handler must be: a child whose stream
     already exists has started, and asking again returns None rather than
@@ -67,8 +67,8 @@ class StartForkHandler:
     ) -> WorkflowExecutionResult | None:
         """Run the child of ``parent_execution_id``; None if it already started.
 
-        Raises when the parent does not exist, has admitted no fork, or has a
-        snapshot the child may not start from (`fork_start.refuse_fork_start`).
+        Raises when the parent does not exist, has admitted no resume, or has a
+        snapshot the child may not start from (`resume_start.refuse_resume_start`).
         """
         # #1387 backstop, as in ExecuteWorkflowHandler: skipped for a ticketed
         # start, whose admission the gate already decided under its lock.
@@ -77,7 +77,9 @@ class StartForkHandler:
 
         command = await self._command_for(parent_execution_id)
         if await self._executions.get_by_id(command.aggregate_id) is not None:
-            logger.info("Fork %s of %s already started", command.aggregate_id, parent_execution_id)
+            logger.info(
+                "Resume %s of %s already started", command.aggregate_id, parent_execution_id
+            )
             return None
 
         # The repositories the PARENT ran against, as it recorded them - not
@@ -85,9 +87,11 @@ class StartForkHandler:
         # the recorded sha; until then the workspace clones the default branch.
         repos = [RepositoryRef.from_slug(c.repository) for c in command.source_commits]
         try:
-            return await self._processor.run_fork(command, repos=repos, admitted=admitted)
+            return await self._processor.run_resume(command, repos=repos, admitted=admitted)
         except StreamAlreadyExistsError:
-            logger.info("Fork %s of %s already started", command.aggregate_id, parent_execution_id)
+            logger.info(
+                "Resume %s of %s already started", command.aggregate_id, parent_execution_id
+            )
             return None
 
     async def validate(self, parent_execution_id: str) -> None:
@@ -98,7 +102,7 @@ class StartForkHandler:
         the to-do list would record as started a child that never was.
         """
         command = await self._command_for(parent_execution_id)
-        refusal = refuse_fork_start(command)
+        refusal = refuse_resume_start(command)
         if refusal is not None:
             raise ValueError(refusal)
         # The inheritance is resolved HERE, synchronously, for the reason in the
@@ -108,11 +112,11 @@ class StartForkHandler:
         # after a task was spent and a start was queued behind the semaphore
         # (codex review of #1459). Resolving it here means a vanished artifact is
         # refused before anything is dispatched.
-        await self._processor.resolve_inheritance(command.forked_from)
+        await self._processor.resolve_inheritance(command.resumed_from)
 
-    async def _command_for(self, parent_execution_id: str) -> StartForkCommand:
+    async def _command_for(self, parent_execution_id: str) -> StartResumeCommand:
         parent = await self._executions.get_by_id(parent_execution_id)
         if parent is None:
-            msg = f"Cannot start the fork of {parent_execution_id}: no such execution"
+            msg = f"Cannot start the resume of {parent_execution_id}: no such execution"
             raise ValueError(msg)
-        return parent.fork_start_command()
+        return parent.resume_start_command()

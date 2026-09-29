@@ -4,7 +4,6 @@ import { cancelExecution } from '../api/client'
 export type ExecutionState =
   | 'pending'
   | 'running'
-  | 'paused'
   | 'cancelled'
   | 'cancelling' // UI-only: cancel sent, waiting for projection to confirm
   | 'completed'
@@ -82,6 +81,6 @@ export function useExecutionControl(
     error,
     loading,
     cancel,
-    canCancel: (state === 'running' || state === 'paused') && !loading,
+    canCancel: state === 'running' && !loading,
   }
 }

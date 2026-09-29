@@ -32,9 +32,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
-    from syn_domain.contexts.orchestration.slices.start_fork import (
+    from syn_domain.contexts.orchestration.slices.start_resume import (
         StartFailureReporter,
-        StartForkHandler,
+        StartResumeHandler,
     )
 
 from syn_adapters.storage import get_event_store_client
@@ -144,9 +144,9 @@ def get_admission_gate() -> AdmissionGate:
     return _admission_gate_singleton
 
 
-#: Builds a :class:`StartForkHandler` on demand. See the constructor for why
+#: Builds a :class:`StartResumeHandler` on demand. See the constructor for why
 #: this is not simply the handler.
-ForkHandlerFactory = Callable[[], Awaitable["StartForkHandler"]]
+ResumeHandlerFactory = Callable[[], Awaitable["StartResumeHandler"]]
 
 
 class BackgroundWorkflowDispatcher:
@@ -163,7 +163,7 @@ class BackgroundWorkflowDispatcher:
         handler: ExecuteWorkflowHandler,
         max_concurrent: int = 1,
         maintenance: AdmissionGate | None = None,
-        fork_handler: StartForkHandler | ForkHandlerFactory | None = None,
+        resume_handler: StartResumeHandler | ResumeHandlerFactory | None = None,
     ) -> None:
         """`max_concurrent` defaults to 1 for the same reason the setting does.
 
@@ -179,98 +179,98 @@ class BackgroundWorkflowDispatcher:
         self._tasks: set[asyncio.Task[None]] = set()
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._maintenance = maintenance
-        # Either the handler, or something that will build it on first fork.
+        # Either the handler, or something that will build it on first resume.
         #
         # A FACTORY is accepted because building the handler eagerly drags the
         # execution processor, the execution repository and therefore the
         # observability event store into DISPATCHER CONSTRUCTION - so an
         # unconfigured `SYN_OBSERVABILITY_DB_URL` stopped the dispatcher being
-        # built at all, even for a deployment that never forks anything. The
-        # dispatcher's job is dispatching; a fork's dependencies are a fork's
+        # built at all, even for a deployment that never resumes anything. The
+        # dispatcher's job is dispatching; a resume's dependencies are a resume's
         # problem, and they are resolved when one is actually requested.
-        self._fork_handler: StartForkHandler | None = (
-            None if callable(fork_handler) else fork_handler
+        self._resume_handler: StartResumeHandler | None = (
+            None if callable(resume_handler) else resume_handler
         )
-        self._fork_handler_factory: ForkHandlerFactory | None = (
-            fork_handler if callable(fork_handler) else None
+        self._resume_handler_factory: ResumeHandlerFactory | None = (
+            resume_handler if callable(resume_handler) else None
         )
 
-    async def _resolved_fork_handler(self) -> StartForkHandler:
-        """The fork handler, built on first use and kept.
+    async def _resolved_resume_handler(self) -> StartResumeHandler:
+        """The resume handler, built on first use and kept.
 
         Raises the same RuntimeError as before when this dispatcher was given
-        neither a handler nor a way to make one - a caller asking to fork
+        neither a handler nor a way to make one - a caller asking to resume
         without that is a wiring bug, not a runtime condition.
         """
-        if self._fork_handler is None and self._fork_handler_factory is not None:
-            self._fork_handler = await self._fork_handler_factory()
-        if self._fork_handler is None:
-            msg = "This dispatcher was built without a StartForkHandler"
+        if self._resume_handler is None and self._resume_handler_factory is not None:
+            self._resume_handler = await self._resume_handler_factory()
+        if self._resume_handler is None:
+            msg = "This dispatcher was built without a StartResumeHandler"
             raise RuntimeError(msg)
-        return self._fork_handler
+        return self._resume_handler
 
-    async def start_fork(
+    async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
     ) -> AdmissionTicket | None:
-        """Start the child a forked parent admitted, behind the same gate.
+        """Start the child a resumed parent admitted, behind the same gate.
 
-        Bridges ForkStartProcessManager -> StartForkHandler (ADR-014 s7) with
+        Bridges ResumeStartProcessManager -> StartResumeHandler (ADR-014 s7) with
         `run_workflow`'s shape and for its reasons: the refusals - a closed
         gate (#1387), a child that may not start (#1454) - are raised HERE,
         synchronously, where the to-do list can still record them; the start
         itself runs as a task that shares the execution semaphore, and what
         fails in there is handed to ``on_failure`` (#1463).
         """
-        fork_handler = await self._resolved_fork_handler()
+        resume_handler = await self._resolved_resume_handler()
         if self._maintenance is None:
-            await fork_handler.validate(parent_execution_id)
-            self._spawn_fork(parent_execution_id, None, on_failure)
+            await resume_handler.validate(parent_execution_id)
+            self._spawn_resume(parent_execution_id, None, on_failure)
             return None
         await self._maintenance.refuse_early()
-        await fork_handler.validate(parent_execution_id)
+        await resume_handler.validate(parent_execution_id)
         async with self._maintenance.admitting() as ticket:
-            self._spawn_fork(parent_execution_id, ticket, on_failure)
+            self._spawn_resume(parent_execution_id, ticket, on_failure)
             return ticket
 
-    def _spawn_fork(
+    def _spawn_resume(
         self,
         parent_execution_id: str,
         ticket: AdmissionTicket | None,
         on_failure: StartFailureReporter,
     ) -> None:
-        """`_spawn`, for a fork start: the lease is ended by the task."""
+        """`_spawn`, for a resume start: the lease is ended by the task."""
         asyncio_task = asyncio.create_task(
-            self._start_fork_with_semaphore(parent_execution_id, ticket, on_failure),
-            name=f"fork-start-{parent_execution_id}",
+            self._start_resume_with_semaphore(parent_execution_id, ticket, on_failure),
+            name=f"resume-start-{parent_execution_id}",
         )
         self._tasks.add(asyncio_task)
         asyncio_task.add_done_callback(self._tasks.discard)
         guarantee_settled(ticket, asyncio_task)
 
-    async def _start_fork_with_semaphore(
+    async def _start_resume_with_semaphore(
         self,
         parent_execution_id: str,
         admitted: AdmissionTicket | None,
         on_failure: StartFailureReporter,
     ) -> None:
-        fork_handler = await self._resolved_fork_handler()
+        resume_handler = await self._resolved_resume_handler()
         with carrying(admitted):
             async with self._semaphore:
                 try:
-                    await fork_handler.handle(parent_execution_id, admitted=admitted)
+                    await resume_handler.handle(parent_execution_id, admitted=admitted)
                 except Exception as exc:
                     logger.exception(
-                        "Background fork start raised exception",
+                        "Background resume start raised exception",
                         extra={"parent_execution_id": parent_execution_id},
                     )
                     # A log alone left the to-do `dispatched` and re-offered for
                     # ever, counting no attempt and recording no reason (#1463).
                     # The record decides what the failure means; this only
                     # delivers it.
-                    await self._report_fork_failure(parent_execution_id, on_failure, exc)
+                    await self._report_resume_failure(parent_execution_id, on_failure, exc)
 
     @staticmethod
-    async def _report_fork_failure(
+    async def _report_resume_failure(
         parent_execution_id: str, on_failure: StartFailureReporter, exc: Exception
     ) -> None:
         """Hand the failure over; a failure to record it is only logged.
@@ -282,7 +282,7 @@ class BackgroundWorkflowDispatcher:
             await on_failure(exc)
         except Exception:
             logger.exception(
-                "Could not record the failed fork start",
+                "Could not record the failed resume start",
                 extra={"parent_execution_id": parent_execution_id},
             )
 

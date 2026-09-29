@@ -30,50 +30,6 @@ describe("control commands", () => {
       .join("");
   }
 
-  it("pause sends signal", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ state: "pausing", message: "ok" }));
-    const handler = controlGroup.getCommand("pause")!.handler;
-    await handler({ positionals: ["exec-1"], values: {} });
-    expect(stdout()).toContain("Pause signal sent");
-  });
-
-  it("resume sends signal", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ state: "running" }));
-    const handler = controlGroup.getCommand("resume")!.handler;
-    await handler({ positionals: ["exec-1"], values: {} });
-    expect(stdout()).toContain("Resume signal sent");
-  });
-
-  it("resume names the deployment it restarted the execution on (issue #1264)", async () => {
-    // Resuming restarts work, so the report has to say WHERE — `exec-1` names a
-    // different run on a different host. Two distinct non-default hosts here:
-    // DISPATCHED_TO is what the client is built from, LATER is where the
-    // environment moved afterwards. Naming LATER would mean the command read
-    // the environment instead of the client it actually sent through.
-    const DISPATCHED_TO = "http://100.112.178.5:8137";
-    const LATER = "http://100.114.86.77:8137";
-
-    vi.stubEnv("SYN_API_URL", DISPATCHED_TO);
-    vi.resetModules();
-    const { controlGroup: freshGroup } = await import("../../src/commands/control.js");
-    vi.stubEnv("SYN_API_URL", LATER);
-
-    mockFetch.mockResolvedValue(jsonResponse({ state: "running" }));
-    await freshGroup.getCommand("resume")!.handler({
-      positionals: ["exec-resumed-1"],
-      values: {},
-    });
-
-    const resumeReq = mockFetch.mock.calls[0]![0] as Request;
-    const dispatchedTo = new URL(resumeReq.url).origin;
-    expect(dispatchedTo).toBe(DISPATCHED_TO);
-
-    const out = stdout();
-    expect(out).toContain(dispatchedTo);
-    expect(out).toContain("exec-resumed-1");
-    expect(out).not.toContain(LATER);
-  });
-
   it("cancel requires --force", async () => {
     const handler = controlGroup.getCommand("cancel")!.handler;
     await expect(handler({ positionals: ["exec-1"], values: {} })).rejects.toThrow(CLIError);

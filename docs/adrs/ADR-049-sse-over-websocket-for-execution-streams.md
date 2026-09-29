@@ -8,7 +8,7 @@
 
 The Syntropic137 dashboard and CLI require real-time streaming of domain events as workflows execute. Previously this was implemented using WebSocket endpoints (`/ws/executions/{id}`, `/ws/activity`, `/ws/health`, `/ws/control/{id}`).
 
-The fundamental insight that drove this change: **execution observation is unidirectional**. Events flow server→client only. All control actions (pause, resume, cancel, inject) are fully covered by synchronous HTTP POST endpoints that the CLI and dashboard already use as the canonical interface. The bidirectional capability of WebSocket was unused for streaming, and the `/ws/control/{id}` endpoint that did accept commands was entirely redundant with existing HTTP endpoints.
+The fundamental insight that drove this change: **execution observation is unidirectional**. Events flow server→client only. All control actions (cancel, inject) are fully covered by synchronous HTTP POST endpoints that the CLI and dashboard already use as the canonical interface. The bidirectional capability of WebSocket was unused for streaming, and the `/ws/control/{id}` endpoint that did accept commands was entirely redundant with existing HTTP endpoints.
 
 ### Problems with the WebSocket approach
 
@@ -97,7 +97,6 @@ _queues: dict[str, set[SSEQueue]]   # channel → subscriber queues
 ### Control actions remain HTTP-only
 
 ```
-POST /executions/{id}/pause
 POST /executions/{id}/resume
 POST /executions/{id}/cancel
 POST /executions/{id}/inject

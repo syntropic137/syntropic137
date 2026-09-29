@@ -239,10 +239,22 @@ class TestResolveDurationSeconds:
             == 300.0
         )
 
-    def test_paused_still_accrues_wall_clock_time(self) -> None:
+    def test_a_status_that_is_not_in_flight_does_not_accrue_wall_clock_time(self) -> None:
+        """`paused` was in flight until 2026-09-29, when pause was deleted.
+
+        It is kept here as the unknown-status case: an in-flight status is
+        named explicitly, so anything else must fall back to what was recorded
+        rather than being clocked live against `now`.
+        """
         now = datetime(2026, 9, 1, 12, 5, 0, tzinfo=UTC)
         assert (
-            resolve_duration_seconds("paused", started_at="2026-09-01T12:00:00Z", now=now) == 300.0
+            resolve_duration_seconds(
+                "paused",
+                started_at="2026-09-01T12:00:00Z",
+                recorded_seconds=42.0,
+                now=now,
+            )
+            == 42.0
         )
 
     def test_pending_is_unknown_not_zero(self) -> None:

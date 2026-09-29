@@ -1,8 +1,8 @@
-"""A forked child runs from its resume phase, from the parent's pins (#1454).
+"""A resumed child runs from its resume phase, from the parent's pins (#1454).
 
 These drive the REAL processor end to end twice over the same repository:
 once as the parent, which completes `research` and fails in `plan`, and once
-as the child its fork admitted. Only the agent, the artifact query and the
+as the child its resume admitted. Only the agent, the artifact query and the
 prompt builder are doubles, and each is there to be asked a question:
 
 * the agent - which phases were run at all;
@@ -27,7 +27,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-    ForkExecutionCommand,
+    ResumeExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
@@ -37,7 +37,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
-from syn_domain.contexts.orchestration.slices.start_fork import StartForkHandler
+from syn_domain.contexts.orchestration.slices.start_resume import StartResumeHandler
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
@@ -46,9 +46,9 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
-PARENT = "exec-fork-parent"
-FORK = "exec-fork-child"
-WORKFLOW = "wf-fork"
+PARENT = "exec-resume-parent"
+RESUME = "exec-resume-child"
+WORKFLOW = "wf-resume"
 PHASE_IDS = ("research", "plan", "implement")
 
 #: What the parent's stored research artifact reads as, through the query.
@@ -115,7 +115,7 @@ class _NoArtifacts:
 
 @dataclass
 class _ArtifactQuery:
-    """Answers only the one question a fork asks, and remembers it was asked."""
+    """Answers only the one question a resume asks, and remembers it was asked."""
 
     asked: list[tuple[str, dict[str, list[str]]]] = field(default_factory=list)
 
@@ -209,21 +209,21 @@ async def _failed_in_plan(executions: _Executions) -> None:
     )
     result = await _processor(executions, agent, _Provisioned()).run(
         workflow_id=WORKFLOW,
-        workflow_name="Fork me",
+        workflow_name="Resume me",
         phases=_pinned(),
-        inputs={"task": "fork me"},
+        inputs={"task": "resume me"},
         execution_id=PARENT,
     )
     assert result.status == "failed", result
     assert _ran(agent) == ["research", "plan"]
 
 
-async def _forked(executions: _Executions) -> WorkflowExecutionAggregate:
+async def _resumed(executions: _Executions) -> WorkflowExecutionAggregate:
     await _failed_in_plan(executions)
     parent = executions.streams[PARENT]
-    parent.fork_execution(
-        ForkExecutionCommand(
-            execution_id=PARENT, fork_execution_id=FORK, acknowledge_external_effects=True
+    parent.resume_execution(
+        ResumeExecutionCommand(
+            execution_id=PARENT, resume_execution_id=RESUME, acknowledge_external_effects=True
         )
     )
     await executions.save(parent)
@@ -236,7 +236,7 @@ async def _start_child(
     agent = FakeAgentExecutionHandler.success()
     provisioned = _Provisioned()
     query = _ArtifactQuery()
-    handler = StartForkHandler(_processor(executions, agent, provisioned, query), executions)
+    handler = StartResumeHandler(_processor(executions, agent, provisioned, query), executions)
     result = await handler.handle(PARENT)
     assert result is not None
     assert result.status == "completed", result
@@ -246,7 +246,7 @@ async def _start_child(
 class TestTheChildDoesNotRerunWhatItInherited:
     async def test_it_runs_from_the_failed_phase_on(self) -> None:
         executions = _Executions()
-        await _forked(executions)
+        await _resumed(executions)
 
         agent, provisioned, _ = await _start_child(executions)
 
@@ -256,15 +256,15 @@ class TestTheChildDoesNotRerunWhatItInherited:
     async def test_the_inherited_phase_is_closed_on_the_child(self) -> None:
         """Not only skipped by this drain: no later command may start it."""
         executions = _Executions()
-        parent = await _forked(executions)
+        parent = await _resumed(executions)
         child = WorkflowExecutionAggregate()
-        child.start_fork(parent.fork_start_command())
+        child.start_resume(parent.resume_start_command())
         assert child.status is ExecutionStatus.RUNNING
 
         with pytest.raises(ValueError, match="research: it has already completed"):
             child.start_phase(
                 StartPhaseCommand(
-                    execution_id=FORK,
+                    execution_id=RESUME,
                     workflow_id=WORKFLOW,
                     phase_id="research",
                     phase_name="Research",
@@ -274,8 +274,8 @@ class TestTheChildDoesNotRerunWhatItInherited:
 
     async def test_the_resumed_phase_reads_the_parents_research(self) -> None:
         executions = _Executions()
-        parent = await _forked(executions)
-        (research,) = parent.fork_start_command().forked_from.inherited_phases
+        parent = await _resumed(executions)
+        (research,) = parent.resume_start_command().resumed_from.inherited_phases
         assert research.artifact_ids, "the parent's research must have kept an artifact"
 
         _, provisioned, query = await _start_child(executions)
@@ -285,12 +285,12 @@ class TestTheChildDoesNotRerunWhatItInherited:
 
     async def test_the_parent_and_child_name_each_other(self) -> None:
         executions = _Executions()
-        await _forked(executions)
+        await _resumed(executions)
         await _start_child(executions)
 
-        parent, child = executions.streams[PARENT], executions.streams[FORK]
-        assert parent.fork_execution_id == FORK
-        origin = child.start_pins.forked_from
+        parent, child = executions.streams[PARENT], executions.streams[RESUME]
+        assert parent.resume_execution_id == RESUME
+        origin = child.start_pins.resumed_from
         assert origin is not None
         assert origin.parent_execution_id == PARENT
         assert [p.phase_id for p in origin.inherited_phases] == ["research"]
@@ -300,11 +300,11 @@ class TestTheChildDoesNotRerunWhatItInherited:
 
     async def test_a_second_start_starts_nothing(self) -> None:
         executions = _Executions()
-        await _forked(executions)
+        await _resumed(executions)
         await _start_child(executions)
 
         again = FakeAgentExecutionHandler.success()
-        handler = StartForkHandler(_processor(executions, again, _Provisioned()), executions)
+        handler = StartResumeHandler(_processor(executions, again, _Provisioned()), executions)
 
         assert await handler.handle(PARENT) is None
         assert again.call_count == 0
@@ -312,9 +312,9 @@ class TestTheChildDoesNotRerunWhatItInherited:
 
 class TestAStaleWorkflowEditCannotChangeWhatTheChildRuns:
     async def test_the_child_runs_the_pinned_prompts_not_the_edited_ones(self) -> None:
-        """The workflow is edited between the parent's start and the fork.
+        """The workflow is edited between the parent's start and the resume.
 
-        The fork path has no way to read the template at all - the handler is
+        The resume path has no way to read the template at all - the handler is
         built from the execution repository alone - so the edit below is held
         by nothing the child can see. What this pins is the positive half: the
         prompts that ran are the ones the PARENT started with, which only its
@@ -322,7 +322,7 @@ class TestAStaleWorkflowEditCannotChangeWhatTheChildRuns:
         orders; a child built from it had no prompt to run but the template's.
         """
         executions = _Executions()
-        await _forked(executions)
+        await _resumed(executions)
         edited = _edited()
 
         _, provisioned, _ = await _start_child(executions)
@@ -343,19 +343,21 @@ class TestAStaleWorkflowEditCannotChangeWhatTheChildRuns:
         )
         await _processor(executions, agent, _Provisioned()).run(
             workflow_id=WORKFLOW,
-            workflow_name="Fork me",
+            workflow_name="Resume me",
             phases=phases,
             inputs={},
             execution_id=PARENT,
         )
         phases[1] = replace(phases[1], prompt_template="plan as edited")
         parent = executions.streams[PARENT]
-        parent.fork_execution(
-            ForkExecutionCommand(
-                execution_id=PARENT, fork_execution_id=FORK, acknowledge_external_effects=True
+        parent.resume_execution(
+            ResumeExecutionCommand(
+                execution_id=PARENT, resume_execution_id=RESUME, acknowledge_external_effects=True
             )
         )
 
-        pinned = {p.phase_id: p.prompt_template for p in parent.fork_start_command().pinned_phases}
+        pinned = {
+            p.phase_id: p.prompt_template for p in parent.resume_start_command().pinned_phases
+        }
 
         assert pinned["plan"] == "plan as pinned"

@@ -1,5 +1,5 @@
 /**
- * Execution control commands — pause, resume, cancel, status, inject, stop.
+ * Execution control commands - cancel, status, inject, stop.
  * Port of apps/syn-cli/src/syn_cli/commands/control.py
  */
 
@@ -8,7 +8,6 @@ import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
-import { printStarted } from "../output/started.js";
 import { style, GREEN, YELLOW } from "../output/ansi.js";
 import { formatStatus } from "../output/format.js";
 
@@ -25,51 +24,9 @@ function reqId(parsed: ParsedArgs): string {
   return id;
 }
 
-const pauseCommand: CommandDef = {
-  name: "pause",
-  description: "Pause a running execution at the next yield point",
-  args: [{ name: "execution-id", description: "Execution ID to pause", required: true }],
-  options: { reason: { type: "string", short: "r", description: "Reason for pausing" } },
-  handler: async (parsed: ParsedArgs) => {
-    const id = reqId(parsed);
-    const reason = parsed.values["reason"] as string | undefined;
-    const data = unwrap<ControlResponse>(
-      await api.POST("/executions/{execution_id}/pause", {
-        params: { path: { execution_id: id } },
-        ...(reason ? { body: { reason } } : {}),
-      }),
-      "Pause execution",
-    );
-    print(style(`Pause signal sent for execution ${id}`, GREEN));
-    print(`  State: ${data.state}`);
-    if (data.message) print(`  Message: ${data.message}`);
-  },
-};
-
-const resumeCommand: CommandDef = {
-  name: "resume",
-  description: "Resume a paused execution",
-  args: [{ name: "execution-id", description: "Execution ID to resume", required: true }],
-  handler: async (parsed: ParsedArgs) => {
-    const id = reqId(parsed);
-    const data = unwrap<ControlResponse>(
-      await api.POST("/executions/{execution_id}/resume", {
-        params: { path: { execution_id: id } },
-      }),
-      "Resume execution",
-    );
-    // Resuming restarts work on a specific deployment, so it reports like the
-    // other start/activate commands — the execution ID alone names a different
-    // run on a different host (issue #1264).
-    printStarted(api, `Resume signal sent for execution ${id}`, [
-      { label: "State", value: data.state },
-    ]);
-  },
-};
-
 const cancelCommand: CommandDef = {
   name: "cancel",
-  description: "Cancel a running or paused execution",
+  description: "Cancel a running execution",
   args: [{ name: "execution-id", description: "Execution ID to cancel", required: true }],
   options: {
     reason: { type: "string", short: "r", description: "Reason for cancelling" },
@@ -163,8 +120,6 @@ const stopCommand: CommandDef = {
 
 export const controlGroup = new CommandGroup("control", "Control running executions");
 controlGroup
-  .command(pauseCommand)
-  .command(resumeCommand)
   .command(cancelCommand)
   .command(statusCommand)
   .command(injectCommand)

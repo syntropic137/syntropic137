@@ -1,6 +1,6 @@
 """Port for reading the commit a repository is at, as an execution starts.
 
-WHY THIS IS A PORT (#1457). A fork runs the rest of its parent's work, and that
+WHY THIS IS A PORT (#1457). A resume runs the rest of its parent's work, and that
 is only the same work if it runs against the same code. So the parent records
 the commit each of its repositories was at when it started - but reading that
 commit means knowing a forge, its API and its credentials, none of which is
@@ -26,6 +26,6 @@ class SourceCommitResolverPort(Protocol):
         that is gone, a rate limit. It is recorded as unknown, never guessed.
 
         Implementations MUST NOT raise. Recording a commit is evidence for a
-        later fork, and must never be the thing that stops this run starting.
+        later resume, and must never be the thing that stops this run starting.
         """
         ...

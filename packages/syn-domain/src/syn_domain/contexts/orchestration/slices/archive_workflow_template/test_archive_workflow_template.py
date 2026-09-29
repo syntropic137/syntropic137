@@ -184,12 +184,12 @@ class TestArchiveWorkflowTemplateHandler:
         assert "active execution" in result.error.lower()
 
     @pytest.mark.asyncio
-    async def test_handler_rejects_with_paused_executions(self) -> None:
-        """Paused executions count as active and should block archiving."""
+    async def test_handler_rejects_with_not_started_executions(self) -> None:
+        """An execution that has not started yet still has work owed."""
         repo = InMemoryWorkflowRepository()
         repo.seed(_create_aggregate())
         projection = InMemoryExecutionProjection()
-        projection.seed("wf-test-123", ["paused"])
+        projection.seed("wf-test-123", ["not_started"])
 
         handler = ArchiveWorkflowTemplateHandler(repository=repo, execution_projection=projection)
         command = ArchiveWorkflowTemplateCommand(workflow_id="wf-test-123")

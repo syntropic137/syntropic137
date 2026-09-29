@@ -1,10 +1,10 @@
-"""The parent's decision to admit a fork (ADR-014 s7).
+"""The parent's decision to admit a resume (ADR-014 s7).
 
 Every refusal here is asserted against a parent READ BACK FROM ITS STREAM,
 not against the object that just handled a command. The rules are only worth
 anything if they hold for the aggregate a later request loads - "already
-forked" in particular is a fact that has to survive the process that recorded
-it, or the one-fork rule is one fork per restart.
+resumed" in particular is a fact that has to survive the process that recorded
+it, or the one-resume rule is one resume per restart.
 """
 
 from __future__ import annotations
@@ -27,16 +27,15 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
-    ForkExecutionCommand,
     InterruptExecutionCommand,
-    PauseExecutionCommand,
+    ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
-    ExecutionForkedEvent,
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
     PhaseStartedEvent,
@@ -46,7 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 PARENT = "exec-parent"
-FORK = "exec-fork"
+RESUME = "exec-resume"
 PHASES = ("research", "plan", "implement")
 
 
@@ -59,9 +58,9 @@ def _started() -> WorkflowExecutionAggregate:
         StartExecutionCommand(
             execution_id=PARENT,
             workflow_id="wf-1",
-            workflow_name="Fork test",
+            workflow_name="Resume test",
             total_phases=len(PHASES),
-            inputs={"task": "fork me"},
+            inputs={"task": "resume me"},
             phase_definitions=[
                 PhaseDefinition(phase_id=p, name=p.title(), order=i + 1)
                 for i, p in enumerate(PHASES)
@@ -151,13 +150,6 @@ def _interrupted_between_phases() -> WorkflowExecutionAggregate:
     return aggregate
 
 
-def _paused() -> WorkflowExecutionAggregate:
-    aggregate = _started()
-    _run_phase(aggregate, "research", "art-research-1")
-    aggregate.pause_execution(PauseExecutionCommand(execution_id=PARENT, phase_id="plan"))
-    return aggregate
-
-
 def _completed() -> WorkflowExecutionAggregate:
     aggregate = _started()
     for phase_id in PHASES:
@@ -210,23 +202,23 @@ class _Store:
         fresh.rehydrate(list(self._events))
         return fresh
 
-    def forked(self) -> list[ExecutionForkedEvent]:
-        return [e.event for e in self._events if isinstance(e.event, ExecutionForkedEvent)]
+    def resumed(self) -> list[ExecutionResumedEvent]:
+        return [e.event for e in self._events if isinstance(e.event, ExecutionResumedEvent)]
 
 
-def _fork(
+def _resume(
     store: _Store,
-    fork_id: str = FORK,
+    resume_id: str = RESUME,
     *,
     override_cancellation: bool = False,
     acknowledge_external_effects: bool = False,
 ) -> None:
-    """Load the parent, ask it for a fork, and save whatever it decided."""
+    """Load the parent, ask it for a resume, and save whatever it decided."""
     parent = store.load()
-    parent.fork_execution(
-        ForkExecutionCommand(
+    parent.resume_execution(
+        ResumeExecutionCommand(
             execution_id=PARENT,
-            fork_execution_id=fork_id,
+            resume_execution_id=resume_id,
             override_cancellation=override_cancellation,
             acknowledge_external_effects=acknowledge_external_effects,
         )
@@ -234,8 +226,8 @@ def _fork(
     store.save(parent)
 
 
-def _without_fork_id(event: ExecutionForkedEvent) -> GenericDomainEvent:
-    """The stored fork event as a stream that lost `fork_execution_id` replays it.
+def _without_resume_id(event: ExecutionResumedEvent) -> GenericDomainEvent:
+    """The stored resume event as a stream that lost `resume_execution_id` replays it.
 
     This is the ADR-023 fallback, built the way the store builds it: typed
     validation fails, so the event comes back as `GenericDomainEvent` carrying
@@ -243,45 +235,45 @@ def _without_fork_id(event: ExecutionForkedEvent) -> GenericDomainEvent:
     hazard real - a stand-in that still carried it would exercise nothing.
     """
     payload = event.model_dump()
-    payload.pop("fork_execution_id", None)
-    return GenericDomainEvent(event_type="ExecutionForked", **payload)
+    payload.pop("resume_execution_id", None)
+    return GenericDomainEvent(event_type="ExecutionResumed", **payload)
 
 
-def _forked_event(store: _Store) -> ExecutionForkedEvent:
-    forked = store.forked()
-    assert len(forked) == 1, forked
-    return forked[0]
+def _resumed_event(store: _Store) -> ExecutionResumedEvent:
+    resumed = store.resumed()
+    assert len(resumed) == 1, resumed
+    return resumed[0]
 
 
 # --- tests ------------------------------------------------------------------
 
 
 @pytest.mark.unit
-class TestForkedAtMostOnce:
-    def test_a_second_fork_is_refused_by_the_reloaded_parent(self) -> None:
-        """A retried request cannot fork the parent twice.
+class TestResumedAtMostOnce:
+    def test_a_second_resume_is_refused_by_the_reloaded_parent(self) -> None:
+        """A retried request cannot resume the parent twice.
 
         Each attempt loads the parent from the store, as a separate request
         would, so the refusal comes from the stream and not from an object that
-        remembers the first fork.
+        remembers the first resume.
 
         What this does NOT prove: safety under two SIMULTANEOUS requests. This
         store appends without optimistic concurrency, so both would read a
-        parent that had not yet been forked and both would pass this guard.
-        Genuinely concurrent forks are refused one layer out, by the
+        parent that had not yet been resumed and both would pass this guard.
+        Genuinely concurrent resumes are refused one layer out, by the
         repository's expected-version check on append, and that belongs to the
         slice that wires one up - not to a fake store that cannot conflict.
         """
         store = _Store(_failed_between_phases())
-        _fork(store, "exec-fork-a")
+        _resume(store, "exec-resume-a")
 
-        with pytest.raises(ValueError, match="already been forked as exec-fork-a"):
-            _fork(store, "exec-fork-b")
-        assert [e.fork_execution_id for e in store.forked()] == ["exec-fork-a"]
+        with pytest.raises(ValueError, match="already been resumed as exec-resume-a"):
+            _resume(store, "exec-resume-b")
+        assert [e.resume_execution_id for e in store.resumed()] == ["exec-resume-a"]
 
     def test_the_parent_stays_the_terminal_run_it_was(self) -> None:
         store = _Store(_failed_between_phases())
-        _fork(store)
+        _resume(store)
 
         assert store.load().status is ExecutionStatus.FAILED
 
@@ -294,105 +286,104 @@ class TestCancelledParent:
 
         with pytest.raises(
             ValueError,
-            match="cancelled, and forking a cancelled execution needs an explicit override",
+            match="cancelled, and resuming a cancelled execution needs an explicit override",
         ):
-            _fork(store)
-        assert store.forked() == []
+            _resume(store)
+        assert store.resumed() == []
 
     def test_refused_when_only_external_effects_are_acknowledged(self) -> None:
         """The two decisions are separate; one does not stand in for the other."""
         store = _Store(_cancelled_between_phases())
 
         with pytest.raises(ValueError, match="explicit override"):
-            _fork(store, acknowledge_external_effects=True)
-        assert store.forked() == []
+            _resume(store, acknowledge_external_effects=True)
+        assert store.resumed() == []
 
     def test_accepted_with_the_override_and_says_so(self) -> None:
         store = _Store(_cancelled_between_phases())
-        _fork(store, override_cancellation=True)
+        _resume(store, override_cancellation=True)
 
-        forked = _forked_event(store)
-        assert forked.fork_execution_id == FORK
-        assert forked.cancellation_overridden is True
+        resumed = _resumed_event(store)
+        assert resumed.resume_execution_id == RESUME
+        assert resumed.cancellation_overridden is True
 
     def test_a_failed_parent_does_not_record_an_override_it_did_not_need(self) -> None:
         store = _Store(_failed_between_phases())
-        _fork(store, override_cancellation=True)
+        _resume(store, override_cancellation=True)
 
-        assert _forked_event(store).cancellation_overridden is False
+        assert _resumed_event(store).cancellation_overridden is False
 
 
 @pytest.mark.unit
-class TestForkableStatuses:
+class TestResumableStatuses:
     @pytest.mark.parametrize(
         "history",
         [_failed_between_phases, _interrupted_between_phases],
         ids=["failed", "interrupted"],
     )
-    def test_forkable_on_the_request_alone(
+    def test_resumable_on_the_request_alone(
         self, history: Callable[[], WorkflowExecutionAggregate]
     ) -> None:
         store = _Store(history())
-        _fork(store)
+        _resume(store)
 
-        forked = _forked_event(store)
-        assert forked.execution_id == PARENT
-        assert forked.fork_execution_id == FORK
+        resumed = _resumed_event(store)
+        assert resumed.execution_id == PARENT
+        assert resumed.resume_execution_id == RESUME
 
     @pytest.mark.parametrize(
         ("history", "status"),
         [
             (_completed, ExecutionStatus.COMPLETED),
             (_running, ExecutionStatus.RUNNING),
-            (_paused, ExecutionStatus.PAUSED),
         ],
-        ids=["completed", "running", "paused"],
+        ids=["completed", "running"],
     )
-    def test_never_forkable_even_with_both_flags(
+    def test_never_resumable_even_with_both_flags(
         self, history: Callable[[], WorkflowExecutionAggregate], status: ExecutionStatus
     ) -> None:
         store = _Store(history())
         assert store.load().status is status
 
-        with pytest.raises(ValueError, match=f"Cannot fork execution in status {status}"):
-            _fork(store, override_cancellation=True, acknowledge_external_effects=True)
-        assert store.forked() == []
+        with pytest.raises(ValueError, match=f"Cannot resume execution in status {status}"):
+            _resume(store, override_cancellation=True, acknowledge_external_effects=True)
+        assert store.resumed() == []
 
-    def test_an_execution_that_never_started_is_not_forkable(self) -> None:
+    def test_an_execution_that_never_started_is_not_resumable(self) -> None:
         with pytest.raises(ValueError, match="has not been started"):
-            WorkflowExecutionAggregate().fork_execution(
-                ForkExecutionCommand(
+            WorkflowExecutionAggregate().resume_execution(
+                ResumeExecutionCommand(
                     execution_id=PARENT,
-                    fork_execution_id=FORK,
+                    resume_execution_id=RESUME,
                     override_cancellation=True,
                     acknowledge_external_effects=True,
                 )
             )
 
-    def test_a_fork_cannot_reuse_its_parents_id(self) -> None:
+    def test_a_resume_cannot_reuse_its_parents_id(self) -> None:
         store = _Store(_failed_between_phases())
 
         with pytest.raises(ValueError, match="execution id of its own"):
-            _fork(store, PARENT)
+            _resume(store, PARENT)
 
 
 @pytest.mark.unit
 class TestInheritedPrefix:
     def test_completed_phases_are_inherited_with_every_collected_artifact(self) -> None:
         store = _Store(_failed_between_phases())
-        _fork(store)
+        _resume(store)
 
-        forked = _forked_event(store)
-        assert forked.inherited_phases == [
+        resumed = _resumed_event(store)
+        assert resumed.inherited_phases == [
             InheritedPhase(phase_id="research", artifact_ids=["art-research-1", "art-research-2"])
         ]
-        assert forked.resume_phase_id == "plan"
+        assert resumed.resume_phase_id == "plan"
 
     def test_a_phase_completed_after_a_gap_is_not_inherited(self) -> None:
         """Only the CONTIGUOUS prefix: `implement` completed, `plan` did not.
 
         A rule that took every completed phase would inherit `implement` and
-        resume at `plan`, handing the fork work built on a predecessor it is
+        resume at `plan`, handing the resume work built on a predecessor it is
         about to redo.
         """
         history = _started()
@@ -400,11 +391,11 @@ class TestInheritedPrefix:
         _complete_phase(history, "implement")
         _fail(history)
         store = _Store(history)
-        _fork(store)
+        _resume(store)
 
-        forked = _forked_event(store)
-        assert [p.phase_id for p in forked.inherited_phases] == ["research"]
-        assert forked.resume_phase_id == "plan"
+        resumed = _resumed_event(store)
+        assert [p.phase_id for p in resumed.inherited_phases] == ["research"]
+        assert resumed.resume_phase_id == "plan"
 
     def test_artifacts_of_an_abandoned_attempt_are_not_inherited(self) -> None:
         history = _started()
@@ -416,9 +407,9 @@ class TestInheritedPrefix:
         _run_phase(history, "research", "art-kept")
         _fail(history)
         store = _Store(history)
-        _fork(store)
+        _resume(store)
 
-        assert _forked_event(store).inherited_phases == [
+        assert _resumed_event(store).inherited_phases == [
             InheritedPhase(phase_id="research", artifact_ids=["art-kept"])
         ]
 
@@ -426,11 +417,11 @@ class TestInheritedPrefix:
         history = _started()
         _fail(history)
         store = _Store(history)
-        _fork(store)
+        _resume(store)
 
-        forked = _forked_event(store)
-        assert forked.inherited_phases == []
-        assert forked.resume_phase_id == "research"
+        resumed = _resumed_event(store)
+        assert resumed.inherited_phases == []
+        assert resumed.resume_phase_id == "research"
 
     def test_a_parent_with_no_unfinished_phase_is_refused(self) -> None:
         history = _started()
@@ -440,7 +431,7 @@ class TestInheritedPrefix:
         store = _Store(history)
 
         with pytest.raises(ValueError, match="no unfinished phase"):
-            _fork(store)
+            _resume(store)
 
 
 @pytest.mark.unit
@@ -457,22 +448,22 @@ class TestExternalEffects:
         store = self._failed_inside_plan()
 
         with pytest.raises(ValueError, match="phase plan started"):
-            _fork(store)
-        assert store.forked() == []
+            _resume(store)
+        assert store.resumed() == []
 
-    def test_acknowledged_the_fork_is_admitted_and_says_so(self) -> None:
+    def test_acknowledged_the_resume_is_admitted_and_says_so(self) -> None:
         store = self._failed_inside_plan()
-        _fork(store, acknowledge_external_effects=True)
+        _resume(store, acknowledge_external_effects=True)
 
-        forked = _forked_event(store)
-        assert forked.resume_phase_id == "plan"
-        assert forked.external_effects_acknowledged is True
+        resumed = _resumed_event(store)
+        assert resumed.resume_phase_id == "plan"
+        assert resumed.external_effects_acknowledged is True
 
     def test_a_phase_that_never_started_needs_no_acknowledgement(self) -> None:
         store = _Store(_failed_between_phases())
-        _fork(store)
+        _resume(store)
 
-        assert _forked_event(store).external_effects_acknowledged is False
+        assert _resumed_event(store).external_effects_acknowledged is False
 
     def test_a_cancel_inside_a_phase_needs_both_decisions(self) -> None:
         history = _started()
@@ -482,12 +473,12 @@ class TestExternalEffects:
         store = _Store(history)
 
         with pytest.raises(ValueError, match="phase plan started"):
-            _fork(store, override_cancellation=True)
-        _fork(store, override_cancellation=True, acknowledge_external_effects=True)
+            _resume(store, override_cancellation=True)
+        _resume(store, override_cancellation=True, acknowledge_external_effects=True)
 
-        forked = _forked_event(store)
-        assert forked.cancellation_overridden is True
-        assert forked.external_effects_acknowledged is True
+        resumed = _resumed_event(store)
+        assert resumed.cancellation_overridden is True
+        assert resumed.external_effects_acknowledged is True
 
 
 @pytest.mark.unit
@@ -505,7 +496,7 @@ class TestACompletedPhaseCannotBeReentered:
 
     Both need the phase to be running again, and `retry_phase` demands exactly
     that while completion clears the running phase - so nothing else could get
-    there. A fork is what made it expensive rather than merely untidy: it
+    there. A resume is what made it expensive rather than merely untidy: it
     inherits the completed prefix, so an artifact-less "completed" phase hands
     the child work built on a predecessor whose output no longer exists
     (ADR-014 s7).
@@ -523,7 +514,7 @@ class TestACompletedPhaseCannotBeReentered:
 
         Complete `research`, start it again, retry it: the retry pops the
         artifacts of the attempt that DID complete, while `research` stays in
-        the completed set. The fork then inherits `research` with nothing in it
+        the completed set. The resume then inherits `research` with nothing in it
         and resumes at `plan`, handing the child work whose input is gone.
         """
         history = _started()
@@ -535,8 +526,8 @@ class TestACompletedPhaseCannotBeReentered:
         # The record is intact BECAUSE the re-entry was refused.
         _fail(history)
         store = _Store(history)
-        _fork(store)
-        assert _forked_event(store).inherited_phases == [
+        _resume(store)
+        assert _resumed_event(store).inherited_phases == [
             InheritedPhase(phase_id="research", artifact_ids=["art-research"])
         ]
 
@@ -563,10 +554,10 @@ class TestACompletedPhaseCannotBeReentered:
             _complete_phase(history, "research")
 
     def test_artifacts_cannot_be_collected_onto_a_completed_phase(self) -> None:
-        """The third door, and the one a fork notices.
+        """The third door, and the one a resume notices.
 
         A late `ArtifactsCollectedCommand` for a finished phase appended to that
-        phase's artifact list, so the fork inherited an artifact the phase never
+        phase's artifact list, so the resume inherited an artifact the phase never
         produced during the attempt that completed it.
         """
         history = _started()
@@ -645,34 +636,34 @@ class TestACompletedPhaseCannotBeReentered:
 
         _fail(history)
         store = _Store(history)
-        _fork(store)
-        assert _forked_event(store).inherited_phases == [
+        _resume(store)
+        assert _resumed_event(store).inherited_phases == [
             InheritedPhase(phase_id="research", artifact_ids=["art-kept"])
         ]
 
 
 @pytest.mark.unit
-class TestTheForkGuardFailsClosed:
+class TestTheResumeGuardFailsClosed:
     """Codex review of #1453, finding 4.
 
     Under ADR-023 the store falls back to `GenericDomainEvent` when a stored
     event fails typed validation. The at-most-once rule therefore cannot be
-    keyed on a FIELD of the fork event: `_evt` returns None for a field it
+    keyed on a FIELD of the resume event: `_evt` returns None for a field it
     cannot find, and the parent would replay with no evidence it had been
-    forked.
+    resumed.
     """
 
-    def test_a_fork_event_that_lost_its_child_id_still_refuses_a_second_fork(self) -> None:
+    def test_a_resume_event_that_lost_its_child_id_still_refuses_a_second_resume(self) -> None:
         store = _Store(_failed_between_phases())
-        _fork(store, "exec-fork-a")
+        _resume(store, "exec-resume-a")
 
-        # The stored fork event as a stream that lost the field would replay it.
+        # The stored resume event as a stream that lost the field would replay it.
         stripped = WorkflowExecutionAggregate()
         stripped.rehydrate(
             [
                 EventEnvelope(
-                    event=_without_fork_id(e.event)
-                    if isinstance(e.event, ExecutionForkedEvent)
+                    event=_without_resume_id(e.event)
+                    if isinstance(e.event, ExecutionResumedEvent)
                     else e.event,
                     metadata=e.metadata,
                 )
@@ -680,22 +671,22 @@ class TestTheForkGuardFailsClosed:
             ]
         )
 
-        assert stripped._forked is True
-        with pytest.raises(ValueError, match="has already been forked"):
-            stripped.fork_execution(
-                ForkExecutionCommand(execution_id=PARENT, fork_execution_id="exec-fork-b")
+        assert stripped._resumed is True
+        with pytest.raises(ValueError, match="has already been resumed"):
+            stripped.resume_execution(
+                ResumeExecutionCommand(execution_id=PARENT, resume_execution_id="exec-resume-b")
             )
 
     def test_the_refusal_names_what_it_can(self) -> None:
         """No child id to name, so the message says so rather than 'None'."""
         store = _Store(_failed_between_phases())
-        _fork(store, "exec-fork-a")
+        _resume(store, "exec-resume-a")
         stripped = WorkflowExecutionAggregate()
         stripped.rehydrate(
             [
                 EventEnvelope(
-                    event=_without_fork_id(e.event)
-                    if isinstance(e.event, ExecutionForkedEvent)
+                    event=_without_resume_id(e.event)
+                    if isinstance(e.event, ExecutionResumedEvent)
                     else e.event,
                     metadata=e.metadata,
                 )
@@ -703,6 +694,6 @@ class TestTheForkGuardFailsClosed:
             ]
         )
         with pytest.raises(ValueError, match="does not name"):
-            stripped.fork_execution(
-                ForkExecutionCommand(execution_id=PARENT, fork_execution_id="exec-fork-b")
+            stripped.resume_execution(
+                ResumeExecutionCommand(execution_id=PARENT, resume_execution_id="exec-resume-b")
             )

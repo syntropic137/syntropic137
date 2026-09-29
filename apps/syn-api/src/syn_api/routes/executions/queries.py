@@ -563,14 +563,14 @@ async def get_detail(
 async def list_active(
     limit: int = 50,
 ) -> Result[list[ExecutionSummary], ExecutionError]:
-    """List currently running or paused executions."""
+    """List currently running or pending executions."""
     await ensure_connected()
     manager = get_projection_mgr()
     all_execs = await manager.workflow_execution_list.get_all(
         limit=limit,
         status_filter=None,
     )
-    active = [s for s in all_execs if s.status in ("running", "paused", "pending")]
+    active = [s for s in all_execs if s.status in ("running", "pending")]
     # Enrich cost from Lane 2 execution_cost projection (#695)
     cost_by_execution = await _load_execution_enrichment(
         manager, [s.workflow_execution_id for s in active]

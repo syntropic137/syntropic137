@@ -7,7 +7,7 @@ Control running executions
 
 ## `syn control cancel`
 
-Cancel a running or paused execution
+Cancel a running execution
 
 ```bash
 syn control cancel <execution-id> [options]
@@ -47,44 +47,6 @@ syn control inject <execution-id> [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--message`, `-m` | `text` | --- | Message to inject |
-
----
-
-## `syn control pause`
-
-Pause a running execution at the next yield point
-
-```bash
-syn control pause <execution-id> [options]
-```
-
-**Arguments:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `execution-id` | `text` | Yes | Execution ID to pause |
-
-**Options:**
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--reason`, `-r` | `text` | --- | Reason for pausing |
-
----
-
-## `syn control resume`
-
-Resume a paused execution
-
-```bash
-syn control resume <execution-id>
-```
-
-**Arguments:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `execution-id` | `text` | Yes | Execution ID to resume |
 
 ---
 

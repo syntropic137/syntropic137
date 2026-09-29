@@ -10,7 +10,7 @@ PAYLOADS, not about any decision the aggregate makes.
 `evt` in particular is why a replayed field is never load-bearing for a rule
 that must fail closed: it returns the default for a field it cannot find, so a
 rule keyed on one would silently open on exactly the stream that lost it. See
-`fork_rules.refuse_fork` for the case that taught us.
+`resume_rules.refuse_resume` for the case that taught us.
 """
 
 from __future__ import annotations
@@ -72,13 +72,13 @@ def parse_phase_definitions(raw_defs: object) -> list[PhaseDefinition]:
 
     Sorted by `order`, which `WorkflowDefinition.from_yaml` guarantees is unique
     per phase - so this is a total order, and consumers that walk phases in
-    sequence (notably `fork_rules.completed_prefix`) may rely on it. Nothing
+    sequence (notably `resume_rules.completed_prefix`) may rely on it. Nothing
     re-checks that here; #1455 tracks it.
 
     Unreadable is EMPTY, not an exception, matching `read_pinned_phases`: a
     payload this cannot validate would otherwise make the execution unloadable,
     and an execution that cannot be loaded cannot be inspected, cancelled or
-    forked. Empty means the aggregate does not sequence, which is the documented
+    resumed. Empty means the aggregate does not sequence, which is the documented
     behaviour when `phase_definitions` is absent anyway.
     """
     if not raw_defs:

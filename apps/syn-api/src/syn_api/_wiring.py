@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.orchestration import StartForkHandler
+    from syn_domain.contexts.orchestration import StartResumeHandler
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
@@ -144,7 +144,7 @@ def get_artifact_query() -> ArtifactQueryService:
     """The artifact read service, on its own.
 
     Narrower than `get_execution_processor()` on purpose: a caller that only
-    needs to READ artifacts - resolving a fork's inheritance before admitting it,
+    needs to READ artifacts - resolving a resume's inheritance before admitting it,
     for instance - should not drag the execution processor and therefore the
     observability event store into a request that writes nothing through them.
     """
@@ -914,16 +914,16 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
         # the handler is still refused rather than silently admitted.
         maintenance=get_maintenance_port(),
         # #1457: every start records the commit each repository was at, so a
-        # fork of it can name the code its parent ran against.
+        # resume of it can name the code its parent ran against.
         commit_resolver=GitHubSourceCommitResolver(get_github_client),
     )
 
 
-async def _build_fork_handler() -> StartForkHandler:
-    """The fork start handler, built when a fork is first requested."""
-    from syn_domain.contexts.orchestration import StartForkHandler
+async def _build_resume_handler() -> StartResumeHandler:
+    """The resume start handler, built when a resume is first requested."""
+    from syn_domain.contexts.orchestration import StartResumeHandler
 
-    return StartForkHandler(
+    return StartResumeHandler(
         await get_execution_processor(),
         get_workflow_execution_repository(),
         maintenance=get_maintenance_port(),
@@ -940,15 +940,15 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         handler,
         max_concurrent=max_concurrent,
         maintenance=get_admission_gate(),
-        # ADR-014 s7: the child of an admitted fork starts through this same
+        # ADR-014 s7: the child of an admitted resume starts through this same
         # gate and semaphore, reading everything it runs from its parent.
         #
         # Passed as a FACTORY, not a handler. Building it here would need the
         # execution processor and repository - and so the observability event
-        # store - before any fork exists, which made an unconfigured
+        # store - before any resume exists, which made an unconfigured
         # SYN_OBSERVABILITY_DB_URL break dispatcher construction for every
-        # deployment, forking or not.
-        fork_handler=_build_fork_handler,
+        # deployment, resuming or not.
+        resume_handler=_build_resume_handler,
     )
 
 

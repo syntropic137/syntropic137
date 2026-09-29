@@ -1,6 +1,6 @@
 """Execution control endpoints and service functions.
 
-Pause, resume, cancel, inject, and state inspection for running executions.
+Cancel, inject, and state inspection for running executions.
 """
 
 from __future__ import annotations
@@ -41,12 +41,6 @@ async def _resolve_execution_id(execution_id: str) -> str:
 # =============================================================================
 
 
-class PauseRequest(BaseModel):
-    """Request to pause an execution."""
-
-    reason: str | None = None
-
-
 class CancelRequest(BaseModel):
     """Request to cancel an execution."""
 
@@ -82,58 +76,11 @@ class StateResponse(BaseModel):
 # =============================================================================
 
 
-async def pause(
-    execution_id: str,
-    reason: str | None = None,
-) -> Result[ControlResult, ExecutionError]:
-    """Pause a running execution at the next yield point."""
-    from syn_adapters.control.commands import PauseExecution
-
-    try:
-        controller = get_controller()
-        domain_result = await controller.handle_command(
-            PauseExecution(execution_id=execution_id, reason=reason)
-        )
-        return Ok(
-            ControlResult(
-                success=domain_result.success,
-                execution_id=domain_result.execution_id,
-                new_state=domain_result.new_state,
-                message=domain_result.message,
-                error=domain_result.error,
-            )
-        )
-    except Exception as e:
-        return Err(ExecutionError.SIGNAL_FAILED, message=str(e))
-
-
-async def resume(
-    execution_id: str,
-) -> Result[ControlResult, ExecutionError]:
-    """Resume a paused execution."""
-    from syn_adapters.control.commands import ResumeExecution
-
-    try:
-        controller = get_controller()
-        domain_result = await controller.handle_command(ResumeExecution(execution_id=execution_id))
-        return Ok(
-            ControlResult(
-                success=domain_result.success,
-                execution_id=domain_result.execution_id,
-                new_state=domain_result.new_state,
-                message=domain_result.message,
-                error=domain_result.error,
-            )
-        )
-    except Exception as e:
-        return Err(ExecutionError.SIGNAL_FAILED, message=str(e))
-
-
 async def cancel(
     execution_id: str,
     reason: str | None = None,
 ) -> Result[ControlResult, ExecutionError]:
-    """Cancel a running or paused execution."""
+    """Cancel a running execution."""
     from syn_adapters.control.commands import CancelExecution
 
     try:
@@ -246,31 +193,12 @@ async def _handle_control_result(
     )
 
 
-@router.post("/executions/{execution_id}/pause", response_model=ControlResponse)
-async def pause_execution_endpoint(
-    execution_id: str,
-    request: PauseRequest | None = None,
-) -> ControlResponse:
-    """Pause a running execution."""
-    execution_id = await _resolve_execution_id(execution_id)
-    result = await pause(execution_id, reason=request.reason if request else None)
-    return await _handle_control_result(result, "pause")
-
-
-@router.post("/executions/{execution_id}/resume", response_model=ControlResponse)
-async def resume_execution_endpoint(execution_id: str) -> ControlResponse:
-    """Resume a paused execution."""
-    execution_id = await _resolve_execution_id(execution_id)
-    result = await resume(execution_id)
-    return await _handle_control_result(result, "resume")
-
-
 @router.post("/executions/{execution_id}/cancel", response_model=ControlResponse)
 async def cancel_execution_endpoint(
     execution_id: str,
     request: CancelRequest | None = None,
 ) -> ControlResponse:
-    """Cancel a running or paused execution."""
+    """Cancel a running execution."""
     execution_id = await _resolve_execution_id(execution_id)
     result = await cancel(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "cancel")

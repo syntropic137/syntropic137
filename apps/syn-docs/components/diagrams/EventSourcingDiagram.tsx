@@ -138,10 +138,6 @@ export function StateMachineDiagram() {
       {/* Terminal states in even grid */}
       <DiagramGrid columns={4}>
         <div className="flex flex-col items-center gap-1.5">
-          <DiagramNode icon="pause" label="PAUSED" color="amber" className="w-full" />
-          <span className="text-[10px] text-fd-muted-foreground">pause / resume</span>
-        </div>
-        <div className="flex flex-col items-center gap-1.5">
           <DiagramNode icon="check" label="COMPLETED" color="emerald" className="w-full" />
           <span className="text-[10px] text-fd-muted-foreground">success</span>
         </div>

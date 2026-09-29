@@ -23,26 +23,7 @@ __all__ = [
     "ControlSignal",
     "ControlSignalType",
     "InjectContext",
-    "PauseExecution",
-    "ResumeExecution",
 ]
-
-
-@dataclass(frozen=True)
-class PauseExecution:
-    """Command to pause an execution at the next yield point."""
-
-    execution_id: str
-    reason: str | None = None
-    requested_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-@dataclass(frozen=True)
-class ResumeExecution:
-    """Command to resume a paused execution."""
-
-    execution_id: str
-    requested_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True)
@@ -65,7 +46,7 @@ class InjectContext:
 
 
 # Union type for all commands
-ControlCommand = PauseExecution | ResumeExecution | CancelExecution | InjectContext
+ControlCommand = CancelExecution | InjectContext
 
 
 @dataclass(frozen=True)

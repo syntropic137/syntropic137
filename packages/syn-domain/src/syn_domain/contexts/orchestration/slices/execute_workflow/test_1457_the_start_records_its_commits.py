@@ -4,8 +4,8 @@ Driven through `ExecuteWorkflowHandler` over a shipped workflow, because the
 handler is the one place that knows both the repositories a run was given and
 the resolver that can name their commits. The processor is the double: what it
 does with `source_commits` - write them on the start event, and hand them to a
-fork - is proven against the real one in `start_fork/test_start_fork.py` and
-`aggregate_execution/test_fork_start.py`.
+resume - is proven against the real one in `start_resume/test_start_resume.py` and
+`aggregate_execution/test_resume_start.py`.
 """
 
 from __future__ import annotations
