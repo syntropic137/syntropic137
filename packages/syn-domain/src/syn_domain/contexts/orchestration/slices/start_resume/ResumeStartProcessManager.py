@@ -36,6 +36,12 @@ from event_sourcing import (
 
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
+from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    ResumedEventShape,
+    classify_resumed_payload,
+    payload_of,
+    shape_of_resumed_payload,
+)
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
     DISPATCH_GRACE,
     MAX_START_ATTEMPTS,
@@ -66,7 +72,38 @@ def _may_replace(current: str, proposed: str) -> bool:
     return True
 
 
-_EXECUTION_RESUMEED = "ExecutionResumed"
+def _is_a_resume(event: DomainEvent, aggregate_id: str | None) -> bool:
+    """Whether a replayed `ExecutionResumed` is one, by payload shape.
+
+    The event type alone used to decide this, which was the same fail-open the
+    aggregate had: under ADR-023 a payload the typed validator refused replays
+    as a generic event with its type intact, so a pre-rename un-pause would put
+    a start on the to-do list for a child that was never admitted.
+
+    Ambiguous raises, and the caller's handler reports it rather than recording
+    a start it cannot justify.
+    """
+    payload = payload_of(event)
+    shape = shape_of_resumed_payload(payload)
+    if shape is ResumedEventShape.PRE_RENAME_UNPAUSE:
+        logger.warning(
+            "Ignoring a pre-rename ExecutionResumed (un-pause) on %s: it owes no start",
+            aggregate_id,
+            extra={"execution_id": aggregate_id},
+        )
+        return False
+    if shape is ResumedEventShape.AMBIGUOUS:
+        classify_resumed_payload(payload)  # raises, with the reason
+    return True
+
+
+_EXECUTION_RESUMED = "ExecutionResumed"
+
+#: The pre-rename name for the SAME event. Subscribed because the rename moved
+#: the `@event` registration, so a stored `ExecutionForked` resolves to no
+#: concrete class and would reach no branch here. A resume that never gets a
+#: to-do record is a child that never starts.
+_EXECUTION_FORKED = "ExecutionForked"
 
 #: How many times one write decides again after losing its compare-and-set.
 #: Each loss means another writer's write landed, and a resume start has only a
@@ -83,7 +120,12 @@ _ADMISSION_OPEN = AdmissionOpenEvent.event_type
 #: exists, and this event is the only thing that says so.
 _EXECUTION_STARTED = "WorkflowExecutionStarted"
 
-_SUBSCRIBED_EVENTS = {_EXECUTION_RESUMEED, _EXECUTION_STARTED, _ADMISSION_OPEN}
+_SUBSCRIBED_EVENTS = {
+    _EXECUTION_RESUMED,
+    _EXECUTION_FORKED,
+    _EXECUTION_STARTED,
+    _ADMISSION_OPEN,
+}
 
 
 #: Told how a start that had already been handed to a task went wrong.
@@ -208,7 +250,10 @@ class ResumeStartProcessManager(ProcessManager):
         """
         event_type = envelope.metadata.event_type or "Unknown"
         try:
-            if event_type == _EXECUTION_RESUMEED:
+            if event_type == _EXECUTION_RESUMED:
+                if _is_a_resume(envelope.event, envelope.metadata.aggregate_id):
+                    await self._record_resume(envelope.metadata.aggregate_id)
+            elif event_type == _EXECUTION_FORKED:
                 await self._record_resume(envelope.metadata.aggregate_id)
             elif event_type == _EXECUTION_STARTED:
                 await self._settle_if_a_resume_started(envelope.event)

@@ -6,6 +6,7 @@ Location: orchestration/domain/aggregate_execution/ (per ADR-020)
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
 
@@ -31,6 +32,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartPhaseCommand,
     StartResumeCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    ResumedEventShape,
+    classify_resumed_payload,
+    payload_of,
+    shape_of_resumed_payload,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
     completed_event,
     failed_event,
@@ -53,6 +60,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins imp
     AdmittedResume,
     ResumeOrigin,
     StartPins,
+    read_admitted_forked_resume,
     read_admitted_resume,
     read_start_pins,
 )
@@ -119,6 +127,9 @@ if TYPE_CHECKING:
 #: diminishing share of the remaining faults at full price each, and an
 #: unbounded one bills until the phase timeout does the refusing instead.
 MAX_PHASE_ATTEMPTS: Final[int] = 2
+
+
+logger = logging.getLogger(__name__)
 
 
 @aggregate("WorkflowExecution")
@@ -864,7 +875,47 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
         Status is deliberately untouched: the parent stays the terminal run it
         was, and only this fact about it is new.
+
+        THE SHAPE IS CHECKED HERE, not only in the event's validator. Under
+        ADR-023 the store catches a validation error and falls back to
+        `GenericDomainEvent` with the event type preserved, so a payload the
+        validator refused arrives here anyway and routes on its name. The
+        validator is the early warning; this is the gate.
         """
+        payload = payload_of(event)
+        shape = shape_of_resumed_payload(payload)
+        if shape is ResumedEventShape.PRE_RENAME_UNPAUSE:
+            # Not a resume at all: this recorded un-pausing a paused execution,
+            # which no longer exists. Applying it would spend the parent's one
+            # resume on a child nobody asked for and cannot be undone, so it is
+            # ignored - loudly, because a stream holding one needs migrating.
+            logger.warning(
+                "Ignoring a pre-rename ExecutionResumed (un-pause) on %s: it is not a resume",
+                self.id,
+                extra={"execution_id": self.id},
+            )
+            return
+        if shape is ResumedEventShape.AMBIGUOUS:
+            classify_resumed_payload(payload)  # raises, with the reason
         self._resumed = True
         self._resume_execution_id = evt(event, "resume_execution_id")
         self._admitted_resume = read_admitted_resume(event)
+
+    @event_sourcing_handler("ExecutionForked")
+    def on_execution_forked(self, event: ExecutionResumedEvent) -> None:
+        """Apply a pre-rename `ExecutionForked` as the resume it always was.
+
+        Registered because the rename moved the `@event` registration to
+        `ExecutionResumed`, so a stored `ExecutionForked` resolves to no
+        concrete class, replays as a generic event and would route NOWHERE.
+        Being dropped is worse than failing: the parent would look unresumed
+        and a second resume would be admitted, which is the one thing the
+        one-resume rule exists to prevent.
+
+        The concept never changed, only its name, so the payload maps field for
+        field (`upcast_forked_payload`).
+        """
+        admitted = read_admitted_forked_resume(event)
+        self._resumed = True
+        self._resume_execution_id = admitted.resume_execution_id
+        self._admitted_resume = admitted

@@ -111,3 +111,39 @@ def test_upcasting_does_not_mutate_what_it_was_given() -> None:
     upcast_forked_payload(forked)
 
     assert forked == {"fork_execution_id": "exec-2", "forked_at": "2026-09-26T00:00:00Z"}
+
+
+class TestWhichFieldsIdentifyAResume:
+    """Why the post-rename marker set has three members and not one.
+
+    Keying on `resume_execution_id` alone looked sufficient and was not: under
+    ADR-023 a stored event that fails typed validation replays as a generic
+    one whose absent fields simply read as missing, so a resume that lost its
+    child id would classify as an un-pause. The parent would then replay as
+    never-resumed and a SECOND resume would be admitted - two runs on one
+    piece of work, which is the failure the at-most-once rule exists to stop.
+
+    The full unit suite caught this through `TestTheResumeGuardFailsClosed`.
+    Pinned here too, beside the constant, so the next person to narrow the set
+    is told why it is wide.
+    """
+
+    def test_a_resume_that_lost_its_child_id_is_still_a_resume(self) -> None:
+        lost_the_id = {
+            "workflow_id": "wf-1",
+            "execution_id": "exec-1",
+            "inherited_phases": [],
+            "resume_phase_id": "implement",
+            "resumed_at": "2026-09-29T00:00:00Z",
+        }
+
+        assert classify_resumed_payload(lost_the_id) is None
+
+    def test_a_resume_that_lost_everything_but_its_phase_is_still_a_resume(self) -> None:
+        """The narrowest survivable case: one marker left."""
+        assert classify_resumed_payload({"resume_phase_id": "implement"}) is None
+
+    def test_an_unpause_carries_none_of_the_three(self) -> None:
+        """The control: widening the set must not swallow the un-pause shape."""
+        with pytest.raises(LegacyEventShapeError, match="un-pausing"):
+            classify_resumed_payload({"phase_id": "plan", "resumed_at": "2026-09-01T00:00:00Z"})

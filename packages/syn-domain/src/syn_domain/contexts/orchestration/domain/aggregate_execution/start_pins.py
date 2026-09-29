@@ -27,6 +27,11 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    LegacyEventShapeError,
+    payload_of,
+    upcast_forked_payload,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
@@ -182,6 +187,36 @@ def read_admitted_resume(event: DomainEvent) -> AdmittedResume:
             evt(event, "inherited_phases"), evt(event, INHERITED_PHASE_OWNERS)
         ),
         resume_phase_id=evt(event, "resume_phase_id"),
+    )
+
+
+def _stored_str(value: object) -> str | None:
+    """A stored value as a string, or None when it is not one.
+
+    Reading a non-string as absent is deliberate: the resume then refuses with
+    "cannot be named" rather than starting a child under whatever the record
+    happened to hold.
+    """
+    return value if isinstance(value, str) else None
+
+
+def read_admitted_forked_resume(event: DomainEvent) -> AdmittedResume:
+    """The resume a pre-rename `ExecutionForked` admitted.
+
+    The upcast happens inside rather than at the call site, so the only thing
+    that ever crosses this boundary is the typed value object. The concept
+    never changed with the rename, so the fields map one to one.
+    """
+    upcast = upcast_forked_payload(payload_of(event))
+    if not isinstance(upcast, Mapping):
+        msg = "An ExecutionForked payload is not readable as a resume"
+        raise LegacyEventShapeError(msg)
+    return AdmittedResume(
+        resume_execution_id=_stored_str(upcast.get("resume_execution_id")),
+        inherited_phases=read_inherited_phases(
+            upcast.get("inherited_phases"), upcast.get(INHERITED_PHASE_OWNERS)
+        ),
+        resume_phase_id=_stored_str(upcast.get("resume_phase_id")),
     )
 
 

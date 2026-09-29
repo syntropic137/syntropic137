@@ -21,8 +21,25 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_CONTEXTS = Path("packages/syn-domain/src/syn_domain/contexts")
-_DOCS = Path("docs/architecture")
+
+def _repo_root() -> Path:
+    """The repository root, found from this file rather than the cwd.
+
+    A relative path resolved at collection time makes the gate depend on where
+    pytest was invoked from: run it from `ci/` and it finds no contexts, which
+    would have been a silent pass before `test_there_are_contexts_to_check`
+    turned it into a loud one. Deriving it removes the question.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "pyproject.toml").is_file() and (parent / "packages").is_dir():
+            return parent
+    msg = f"No repo root above {here}"
+    raise AssertionError(msg)
+
+
+_CONTEXTS = _repo_root() / "packages/syn-domain/src/syn_domain/contexts"
+_DOCS = _repo_root() / "docs/architecture"
 
 #: Not a bounded context: shared value objects with no domain of their own.
 _NOT_A_CONTEXT = {"_shared"}
@@ -78,6 +95,6 @@ def test_agents_md_explains_the_convention() -> None:
     AGENTS.md is the primary context every agent and contributor reads, so the
     vocabularies are worthless if nothing points at them from there.
     """
-    agents = Path("AGENTS.md").read_text()
+    agents = (_repo_root() / "AGENTS.md").read_text()
     assert "Ubiquitous Language" in agents, "AGENTS.md must explain the convention"
     assert "-ubiquitous-language.md" in agents, "AGENTS.md must state the naming standard"
