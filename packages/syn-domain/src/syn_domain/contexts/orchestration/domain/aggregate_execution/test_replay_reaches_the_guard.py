@@ -97,7 +97,7 @@ class TestALegacyUnpauseDoesNotSpendTheResume:
             aggregate.resume_start_command()
 
 
-class TestAPreRenameForkIsStillAResume:
+class TestAPreRenameForkedEventIsStillAResume:
     """Dropping it silently is the opposite failure, and just as bad.
 
     A parent whose resume was recorded as `ExecutionForked` would look
@@ -141,3 +141,57 @@ class TestAnAmbiguousPayloadIsRefusedNotGuessed:
 
         with pytest.raises(Exception, match=r"ambiguous|cannot be determined|both"):
             aggregate.rehydrate([_generic("ExecutionResumed", **both)])
+
+
+class TestAResumedGrandchildStillReadsItsOwners:
+    """#1462 on the pre-rename path, which nothing else covers.
+
+    A phase inherited from further up the chain carries the id of the
+    execution that actually PRODUCED it, beside the phases rather than nested
+    inside them (`inherited_phase_owners`). The typed event restores that in a
+    validator; a generic one does not, so `read_inherited_phases` merges it.
+
+    `upcast_forked_payload` renames two fields and copies the rest, so the
+    sidecar passes through - but "passes through" is a claim about a dict copy,
+    and #1462 is the bug that appears when an owner is lost. A chain of resumes
+    that reaches back past a renamed ancestor is exactly where it would be.
+    """
+
+    def test_the_owner_of_an_inherited_phase_survives_the_upcast(self) -> None:
+        grandparent = "exec-grandparent-1"
+        payload = {
+            "workflow_id": "wf-1",
+            "execution_id": PARENT,
+            "fork_execution_id": "exec-child-1",
+            "inherited_phases": [{"phase_id": "research", "artifact_ids": ["art-1"]}],
+            "inherited_phase_owners": {"research": grandparent},
+            "resume_phase_id": "implement",
+            "forked_at": datetime(2026, 9, 26, tzinfo=UTC).isoformat(),
+        }
+        aggregate = WorkflowExecutionAggregate()
+
+        aggregate.rehydrate([_generic("ExecutionForked", **payload)])
+
+        origin = aggregate.resume_start_command().resumed_from
+        inherited = origin.inherited_phases[0]
+        assert origin.owner_of(inherited) == grandparent, (
+            "the inherited phase lost its owner, so the resumed phase would read "
+            "its predecessor's output from the wrong execution (#1462)"
+        )
+
+    def test_a_phase_this_execution_ran_is_owned_by_this_execution(self) -> None:
+        """The control: no sidecar entry means the parent produced it itself."""
+        payload = {
+            "workflow_id": "wf-1",
+            "execution_id": PARENT,
+            "fork_execution_id": "exec-child-1",
+            "inherited_phases": [{"phase_id": "research", "artifact_ids": ["art-1"]}],
+            "resume_phase_id": "implement",
+            "forked_at": datetime(2026, 9, 26, tzinfo=UTC).isoformat(),
+        }
+        aggregate = WorkflowExecutionAggregate()
+
+        aggregate.rehydrate([_generic("ExecutionForked", **payload)])
+
+        origin = aggregate.resume_start_command().resumed_from
+        assert origin.owner_of(origin.inherited_phases[0]) == PARENT

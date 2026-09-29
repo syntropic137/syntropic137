@@ -119,7 +119,7 @@ class TestWhatOwesAStart:
 
         assert await _owed(store)
 
-    async def test_a_pre_rename_fork_owes_one(self) -> None:
+    async def test_a_pre_rename_forked_event_owes_one(self) -> None:
         """The other half: dropping it leaves a child that never starts."""
         store = InMemoryProjectionStore()
 
@@ -162,3 +162,76 @@ class TestBothReadersAgree:
         assert subscribed is not None
         assert "ExecutionForked" in subscribed
         assert "ExecutionResumed" in subscribed
+
+
+class TestAnUnstartableResumeSettlesRatherThanStranding:
+    """Round 2 of the #1471 review called a recorded-but-unstartable resume a
+    defect. It is the designed path, and this pins that rather than arguing it.
+
+    A stored resume whose child id did not survive replay (ADR-023 can drop a
+    field) DOES get a to-do record. The alternative - recording nothing - would
+    silently lose the fact that a resume was admitted and cannot be started,
+    leaving an operator with a parent that refuses a second resume and no
+    reason anywhere.
+
+    Instead `StartResumeHandler.validate` refuses it BEFORE dispatch with
+    "cannot be named", the refusal is recorded against the record, and the
+    attempt ceiling settles it as `failed` with that reason. Bounded, visible,
+    and identical for a pre-rename `ExecutionForked` and a post-rename
+    `ExecutionResumed`, which is the symmetry the review asked for.
+    """
+
+    @staticmethod
+    async def _settled(event_type: str, **payload: object) -> str:
+        from datetime import datetime as _dt
+
+        from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
+            MAX_START_ATTEMPTS,
+            ResumeStartRecord,
+        )
+
+        store = InMemoryProjectionStore()
+
+        class _CannotName:
+            async def start_resume(self, parent_execution_id: str, *, on_failure: object) -> None:
+                del parent_execution_id, on_failure
+                msg = "Execution exec-parent-1 admitted a resume its stream cannot name"
+                raise ValueError(msg)
+
+        manager = ResumeStartProcessManager(resume_starter=_CannotName(), store=store)
+        await manager.handle_event(_generic(event_type, **payload), _Checkpoints())
+
+        record = ResumeStartRecord(
+            parent_execution_id=PARENT,
+            recorded_at=_dt.now(UTC),
+            attempts=MAX_START_ATTEMPTS - 1,
+        )
+        await manager._save(record)
+        await manager._start(record)
+
+        row = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
+        assert row is not None, "the attempt recorded nothing"
+        return ResumeStartRecord.model_validate(row).status
+
+    async def test_a_nameless_pre_rename_resume_settles_failed(self) -> None:
+        nameless = {
+            "workflow_id": "wf-1",
+            "execution_id": PARENT,
+            "inherited_phases": [],
+            "resume_phase_id": "implement",
+            "forked_at": datetime(2026, 9, 26, tzinfo=UTC).isoformat(),
+        }
+
+        assert await self._settled("ExecutionForked", **nameless) == "failed"
+
+    async def test_a_nameless_post_rename_resume_settles_the_same_way(self) -> None:
+        """The symmetry: the two names must not behave differently."""
+        nameless = {
+            "workflow_id": "wf-1",
+            "execution_id": PARENT,
+            "inherited_phases": [],
+            "resume_phase_id": "implement",
+            "resumed_at": datetime(2026, 9, 29, tzinfo=UTC).isoformat(),
+        }
+
+        assert await self._settled("ExecutionResumed", **nameless) == "failed"

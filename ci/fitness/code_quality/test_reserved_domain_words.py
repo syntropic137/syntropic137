@@ -29,7 +29,10 @@ _GUARDED = (
     "apps/syn-api/src/syn_api/routes/executions",
 )
 
-#: Files inside a guarded tree whose `fork` is demonstrably something else.
+#: Files where the RETIRED NAME may appear, because reading a stored
+#: `ExecutionForked` is their whole job. This is NOT "files nobody checks":
+#: they are scanned like any other, with `_RETIRED_NAME` additionally
+#: stripped, so a NEW forbidden use in one of them still fails the gate.
 _ALLOWED = {
     # The discriminator's whole job is reading pre-rename `ExecutionForked`.
     "packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/legacy_event_shapes.py",
@@ -68,10 +71,33 @@ _ALLOWED_SPANS = _PROCESS_FORK_SPANS + _LEGACY_NAME_SPANS
 _FORK = re.compile(r"fork", re.IGNORECASE)
 
 
-def _without_exempt_spans(line: str) -> str:
-    """`line` with each exempt span removed, so only the rest is searched."""
+#: A word is the retired NAME when every `fork` in it is the past participle -
+#: `ExecutionForked`, `_forked_payload`, `forked_at`. Checked per whole word
+#: rather than by a greedy pattern: `\w*[Ff]orked\w*` would swallow
+#: `upcast_forked_payload_and_fork_it` entire, exempting the bare `fork` that
+#: rides along with it. Tested by
+#: `test_an_exempt_identifier_does_not_shelter_a_forbidden_one`.
+_BARE_FORK = re.compile(r"[Ff]ork(?!ed|ing)", re.IGNORECASE)
+
+
+def _strip_retired_name_words(line: str) -> str:
+    """`line` with every word that is purely the retired name removed."""
+    return re.sub(r"\w+", lambda m: "" if not _BARE_FORK.search(m.group(0)) else m.group(0), line)
+
+
+def _without_exempt_spans(line: str, *, retired_name_allowed: bool = False) -> str:
+    """`line` with each exempt span removed, so only the rest is searched.
+
+    Spans are bounded by lookarounds rather than matched as bare substrings:
+    otherwise `ExecutionForkedAndSomethingElse` would inherit the exemption of
+    `ExecutionForked`. Lookarounds rather than `\b` because a span may end in
+    punctuation - `\bfork()\b` can never match, which would silently un-exempt
+    it and is exactly the kind of quiet hole this gate exists to avoid.
+    """
     for span in _ALLOWED_SPANS:
-        line = line.replace(span, "")
+        line = re.sub(r"(?<!\w)" + re.escape(span) + r"(?!\w)", "", line)
+    if retired_name_allowed:
+        line = _strip_retired_name_words(line)
     return line
 
 
@@ -128,15 +154,34 @@ def test_an_exempt_span_alone_is_exempt() -> None:
     assert _FORK.search(_without_exempt_spans("# GRPC_ENABLE_FORK_SUPPORT=false")) is None
 
 
+def test_an_exempt_identifier_does_not_shelter_a_forbidden_one() -> None:
+    """One word may not carry both the retired name and a live `fork`.
+
+    A greedy `\\w*[Ff]orked\\w*` swallowed the whole token, so appending
+    `_and_fork_it` to an exempt identifier inherited its exemption. Found by
+    the round-2 review, which asked for exactly this probe.
+    """
+    line = "upcast_forked_payload_and_fork_it"
+
+    assert _FORK.search(_without_exempt_spans(line, retired_name_allowed=True)) is not None
+
+
+def test_the_retired_name_alone_is_still_allowed_where_it_is_allowed() -> None:
+    """The control: the exemption must still work for the real identifiers."""
+    line = "upcast_forked_payload(ExecutionForked)"
+
+    assert _FORK.search(_without_exempt_spans(line, retired_name_allowed=True)) is None
+
+
 def test_fork_stays_reserved_in_the_orchestration_domain() -> None:
     root = _repo_root()
     offenders: list[str] = []
     for path in _guarded_files():
         rel = path.relative_to(root).as_posix()
-        if rel in _ALLOWED:
-            continue
+        retired_ok = rel in _ALLOWED
         for number, line in enumerate(path.read_text().splitlines(), start=1):
-            if _FORK.search(_without_exempt_spans(line)):
+            stripped = _without_exempt_spans(line, retired_name_allowed=retired_ok)
+            if _FORK.search(stripped):
                 offenders.append(f"{rel}:{number}: {line.strip()}")
 
     assert not offenders, (
