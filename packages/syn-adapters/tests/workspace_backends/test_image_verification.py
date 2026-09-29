@@ -52,7 +52,7 @@ PINNED_REF = (
     "ghcr.io/agentparadise/agentic-workspace-claude-cli@sha256:"
     "d16a95f5745627b6d154bc7d0c879410b6a2ce61e7cb46118fa3b3bf852f8cb5"
 )
-LOCAL_REF = "agentic-workspace-claude-cli:dev"
+LOCAL_REF = "agentic-workspace-claude:dev"
 LOCAL_IMAGE_ID = "sha256:" + "b" * 64
 
 COSIGN_PATH = "/usr/local/bin/cosign"
@@ -153,7 +153,7 @@ class TestReferenceClassification:
     @pytest.mark.parametrize(
         "ref",
         [
-            "agentic-workspace-claude-cli:dev",
+            "agentic-workspace-claude:dev",
             "agentic-workspace-omni-agent:latest",
             "myorg/myimage:1",
         ],

@@ -467,6 +467,7 @@ class WorkspaceService:
 
         isolation_handle: IsolationHandle | None = None
         sidecar_handle: SidecarHandle | None = None
+        workspace: ManagedWorkspace | None = None
 
         try:
             isolation_handle, sidecar_handle = await provision_workspace(
@@ -499,6 +500,10 @@ class WorkspaceService:
             raise
 
         finally:
+            # After the caller's block, and so after the unpushed-work guard's
+            # quarantine push: nothing left in the container needs a token (#725).
+            if workspace is not None:
+                await workspace.revoke_issued_credentials()
             await cleanup_workspace(
                 self,
                 aggregate,

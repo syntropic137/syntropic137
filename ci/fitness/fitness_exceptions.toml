@@ -425,8 +425,6 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_pull_request.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_push.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_repo_name.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py:_evt.param:default" = { annotation = "Any", verdict = "undeclared", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py:_parse_phase_definitions.param:raw_defs" = { annotation = "list[dict[str, Any]]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py:_apply_phase_update.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/SubagentTracker.py:SubagentTracker.on_task_started.param:input_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.page.base.param:record" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }

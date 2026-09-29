@@ -315,7 +315,7 @@ flowchart TB
     end
     
     subgraph adapters["Storage Adapters (Outbound Ports)"]
-        state_store[ControlStatePort]
+        state_store[WorkflowExecutionAggregate]
         signal_queue[SignalQueuePort]
     end
     

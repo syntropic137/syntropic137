@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from event_sourcing import ProjectionReadStore, ProjectionStore
+from pydantic import BaseModel
 
 __all__ = ["ProjectionReadStore", "ProjectionStore", "ProjectionStoreProtocol"]
 
@@ -36,6 +37,22 @@ class ProjectionStoreProtocol(ProjectionStore, Protocol):
 
         `filters` uses the same equality semantics as `query`, so a count and
         the query it describes cannot disagree about what they are counting.
+        """
+        ...
+
+    async def save_if(
+        self, projection: str, key: str, record: BaseModel, *, expected: BaseModel | None
+    ) -> bool:
+        """Write ``record`` only while the store still holds ``expected``.
+
+        A compare-and-set, atomic in the store: the stored row, read as
+        ``type(expected)``, must equal ``expected`` at the moment of writing
+        (`record_match.holds`); None means "only while there is no row". True
+        if written.
+
+        A writer that reads, decides and then saves cannot make that atomic
+        itself once more than one process writes the same row; a lock held by
+        one of them is invisible to the other (verification of #1466).
         """
         ...
 

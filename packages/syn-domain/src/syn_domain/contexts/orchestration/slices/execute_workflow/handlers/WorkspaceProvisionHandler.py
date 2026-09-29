@@ -26,6 +26,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
+    install_skill,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -36,7 +39,6 @@ from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CLAUDE_SESSION_ID,
     ENV_GH_REPO,
-    ENV_GITHUB_TOKEN,
 )
 from syn_shared.process_exit import describe_process_failure
 
@@ -100,8 +102,6 @@ _SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
     "codex": "codex",
     "gemini": "gemini-cli",
 }
-
-_SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
 # Baked delegation skills live in the agentic-primitives image under this root
 # (claude-cli manifest plugins.include: delegation). A delegation-enabled phase
@@ -177,9 +177,7 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
 
 
-async def _build_agent_env(
-    workspace: ManagedWorkspace, session_id: str, repos: Sequence[str], *, can_open_pr: bool
-) -> dict[str, str]:
+async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
     """Build agent environment for workspace execution.
 
     Injects Claude credentials directly into agent env. ANTHROPIC_BASE_URL
@@ -226,30 +224,14 @@ async def _build_agent_env(
     # function, but that breaks smoke tests that exercise the processor loop
     # without configured credentials.)
 
-    # TODO(#723): direct injection — short-term only.
-    # TODO(#725): replace with sidecar mint-on-demand to (a) restore the
-    # "agent never sees raw secrets" invariant and (b) handle workflows >60min
-    # past GitHub's hard 1-hour installation token expiry.
-    #
-    # Mint a GitHub App installation token and inject as GITHUB_TOKEN so the
-    # workspace agent's `gh` CLI can read issues/PRs/comments.
-    #
-    # ROUTED BY THE REPO UNDER WORK (issue #1129). This used to take
-    # `installations[0]`, with a comment saying that was "sufficient for
-    # single-org dogfood deployments". The deployment stopped being single-org:
-    # with two installations, index 0 was the WRONG one, and because `gh`
-    # prefers $GITHUB_TOKEN over the repo-scoped entry `setup_phase_secrets.py`
-    # writes to hosts.yml, injecting it actively BROKE a credential that
-    # already worked:
-    #
-    #   $ gh api /installation/repositories        # the injected token
-    #   {"total_count": 2,  "repos": ["AgentParadise/..."]}
-    #   $ GH_TOKEN=<hosts.yml> gh api /installation/repositories
-    #   {"total_count": 6,  "repos": ["syntropic137/syntropic137", ...]}
-    gh_token = await _resolve_github_app_token(repos, can_open_pr=can_open_pr)
-    if gh_token:
-        env[ENV_GITHUB_TOKEN] = gh_token
-
+    # NO GITHUB CREDENTIAL HERE (#725). `gh` used to get an installation token
+    # as $GITHUB_TOKEN, which it prefers over hosts.yml - and an environment
+    # variable fixed at launch cannot be renewed, so every `gh` call past
+    # minute sixty failed. The same credential, chosen by the same
+    # repo-under-work routing (#1129), now lives in hosts.yml, written by the
+    # setup phase and rewritten by every renewal: see `setup_phase_secrets`.
+    # TODO(#725): Tier 1 - a per-workspace credential sidecar that mints on
+    # demand, so the agent never holds a raw GitHub token at all.
     return env
 
 
@@ -302,83 +284,6 @@ def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
     """
     primary = _repo_full_names(repos[:1])
     return {ENV_GH_REPO: primary[0]} if primary else {}
-
-
-async def _resolve_github_app_token(repos: Sequence[str], *, can_open_pr: bool) -> str | None:
-    """Mint an installation token for the repo under work.
-
-    SCOPED TO WHAT THE PHASE MAY DO (#1197). `gh` prefers $GITHUB_TOKEN over
-    the hosts.yml credential the setup phase writes, so a full-permission
-    token here would hand publication back to a phase whose hosts.yml entry
-    had just been scoped to prevent it. The two credential paths have to
-    agree, which is the same lesson #1129 drew about which installation they
-    resolve.
-
-    ASKS GITHUB WHICH INSTALLATION OWNS THE REPO, rather than listing every
-    installation and matching account logins. `GET /repos/{owner}/{repo}/
-    installation` is authoritative and is what `setup_phase_secrets.py` already
-    uses, so both credential paths now resolve the same way and cannot disagree.
-
-    The list-and-match version this replaced had the original bug back by
-    another route: `list_installations` issues one unpaginated request, GitHub
-    pages that endpoint at 30, and an owner sitting on page two matched nothing
-    (#1129, found in review).
-
-    NO REPOS IS NOT A ROUTING FAILURE. A `requires_repos: false` workflow has no
-    repo to route on, and nine in-tree workflows are that shape. Returning None
-    for them would remove GitHub access entirely - setup only writes hosts.yml
-    when it has repo tokens - so they keep the previous behaviour of the first
-    installation, with the arbitrariness stated rather than implied.
-
-    Returns None when the App is not configured, or when a repo IS named and no
-    installation owns it: a token from elsewhere cannot reach that repo and
-    would displace the repo-scoped hosts.yml credential `gh` would otherwise
-    use, which is strictly worse than no token at all.
-    """
-    try:
-        from syn_adapters.github import GitHubAppClient
-        from syn_adapters.github.client_endpoints import (
-            get_installation_for_repo,
-            list_installations,
-        )
-        from syn_shared.settings.github import GitHubAppSettings
-
-        github_settings = GitHubAppSettings()
-        if not github_settings.is_configured:
-            return None
-
-        repo_names = _repo_full_names(repos)
-
-        async with GitHubAppClient(github_settings) as client:
-            if not repo_names:
-                installations = await list_installations(client)
-                if not installations:
-                    return None
-                logger.info(
-                    "No repo to route the GitHub token on (repo-less workflow); "
-                    "using the first installation"
-                )
-                return await client.mint_agent_token(
-                    str(installations[0]["id"]), can_open_pr=can_open_pr
-                )
-
-            for name in repo_names:
-                try:
-                    installation_id = await get_installation_for_repo(client, name)
-                except Exception:
-                    logger.debug("No GitHub App installation owns %s", name, exc_info=True)
-                    continue
-                return await client.mint_agent_token(installation_id, can_open_pr=can_open_pr)
-
-            logger.warning(
-                "No GitHub App installation owns any of %s; leaving GITHUB_TOKEN unset "
-                "so the repo-scoped hosts.yml credential is used",
-                repo_names,
-            )
-            return None
-    except Exception as exc:
-        logger.warning("Could not mint GitHub App token for agent env: %s", exc)
-        return None
 
 
 class ProvisionResult:
@@ -550,6 +455,7 @@ class WorkspaceProvisionHandler:
             can_open_pr=can_open_pr,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
+            ledger=workspace.issuance_ledger,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
@@ -651,26 +557,9 @@ class WorkspaceProvisionHandler:
         if skill_files:
             await workspace.inject_files(skill_files)
         for skill in phase.skills:
-            result = await workspace.execute(
-                [
-                    "skills",
-                    "add",
-                    f"/workspace/.syn-skills/{skill.skill_name}",
-                    "--agent",
-                    agent_key,
-                    "-y",
-                ],
-                timeout_seconds=_SKILL_INSTALL_TIMEOUT_SECONDS,
-                working_directory="/workspace",
+            await install_skill(
+                workspace, skill.skill_name, f"/workspace/.syn-skills/{skill.skill_name}", agent_key
             )
-            if result.exit_code != 0:
-                raise SkillInstallFailed.after_exit(
-                    skill.skill_name,
-                    agent_key,
-                    exit_code=result.exit_code,
-                    output=result.stderr or result.stdout or "",
-                    timed_out=result.timed_out,
-                )
         logger.info(
             "Installed %d skill(s) for agent %s in %s",
             len(phase.skills),
@@ -728,13 +617,7 @@ class WorkspaceProvisionHandler:
         _, needs_claude_env = _auth_staging_for(
             phase.agent_config.provider, phase.agent_config.allow_delegation
         )
-        agent_env = (
-            await _build_agent_env(
-                workspace, session_id, effective_repos, can_open_pr=phase.can_open_pr
-            )
-            if needs_claude_env
-            else {}
-        )
+        agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
         # OUTSIDE the branch above, deliberately. A codex phase gets an empty
         # agent env by design - it authenticates from ~/.codex/auth.json and
         # must not see claude credentials - so `_build_agent_env` is the one
@@ -864,26 +747,9 @@ class WorkspaceProvisionHandler:
         if skill_name is None or agent_key is None:
             # allow_delegation is validated headless-only (claude/codex); defensive.
             return
-        result = await workspace.execute(
-            [
-                "skills",
-                "add",
-                f"{_DELEGATION_SKILL_ROOT}/{skill_name}",
-                "--agent",
-                agent_key,
-                "-y",
-            ],
-            timeout_seconds=_SKILL_INSTALL_TIMEOUT_SECONDS,
-            working_directory="/workspace",
+        await install_skill(
+            workspace, skill_name, f"{_DELEGATION_SKILL_ROOT}/{skill_name}", agent_key
         )
-        if result.exit_code != 0:
-            raise SkillInstallFailed.after_exit(
-                skill_name,
-                agent_key,
-                exit_code=result.exit_code,
-                output=result.stderr or result.stdout or "",
-                timed_out=result.timed_out,
-            )
         logger.info(
             "Installed baked delegation skill %s for agent %s in %s",
             skill_name,

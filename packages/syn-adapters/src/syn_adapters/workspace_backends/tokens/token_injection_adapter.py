@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_GITHUB_TOKEN
+from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.tokens.token_vending_adapter import (
@@ -159,7 +159,12 @@ class DirectTokenInjectionAdapter:
 
     Tokens are injected as environment variables:
     - ANTHROPIC_API_KEY
-    - GITHUB_TOKEN
+
+    NEVER GITHUB (#725). A GitHub installation token lives 60 minutes and an
+    environment variable in a running process can never be replaced, so a
+    `GITHUB_TOKEN` here would outrank the renewable hosts.yml entry `gh` reads
+    and die mid-phase. GitHub credentials reach a workspace only through the
+    setup phase's credential files; asking for one here is refused.
     """
 
     def __init__(self, vending_adapter: TokenVendingServiceAdapter) -> None:
@@ -198,6 +203,13 @@ class DirectTokenInjectionAdapter:
             TokenType,
         )
 
+        if TokenType.GITHUB in token_types:
+            msg = (
+                "GitHub tokens are never injected as env vars (#725): an env var cannot "
+                "be renewed. The setup phase installs the GitHub credential."
+            )
+            raise ValueError(msg)
+
         # Vend tokens
         tokens = await self._vending.vend_tokens(
             token_types=token_types,
@@ -208,7 +220,6 @@ class DirectTokenInjectionAdapter:
         # Map to environment variables
         env_mapping = {
             TokenType.ANTHROPIC: ENV_ANTHROPIC_API_KEY,
-            TokenType.GITHUB: ENV_GITHUB_TOKEN,
         }
 
         env_vars = {}

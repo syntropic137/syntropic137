@@ -16,6 +16,8 @@ from syn_domain.contexts.artifacts._shared.value_objects import PhaseOutputFile
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
         ArtifactSummary,
     )
@@ -127,6 +129,28 @@ class ArtifactQueryServiceProtocol(Protocol):
         """
         ...
 
+    async def get_files_for_artifacts(
+        self,
+        execution_id: str,
+        phase_artifact_ids: Mapping[str, Sequence[str]],
+    ) -> dict[str, list[PhaseOutputFile]]:
+        """The files of exactly these artifacts of an execution, per phase.
+
+        For a fork handing forward what it inherited (ADR-014 s7): the parent
+        named the artifact ids each inherited phase kept, and an attempt it
+        abandoned produced others under the same phase id. Selecting by phase
+        would hand those over too; selecting by id cannot.
+
+        Args:
+            execution_id: The execution that produced the artifacts
+            phase_artifact_ids: phase_id -> the artifact ids it kept
+
+        Returns:
+            Dict mapping phase_id -> those artifacts' files, ranked as
+            ``get_files_for_phase_injection`` ranks them.
+        """
+        ...
+
 
 class ArtifactQueryService:
     """Service for querying artifacts from the projection store.
@@ -232,6 +256,38 @@ class ArtifactQueryService:
         # content survives a duplicated `source_path`. Since #1149 it also
         # takes the HEAD of this list as `<phase-id>.md`, so the ranking here
         # is what makes the alias and the tree name the same artifact.
+        return {
+            phase_id: [
+                PhaseOutputFile(source_path=a.source_path, content=a.content)
+                for a in sorted(rows, key=_injection_rank)
+                if a.content is not None
+            ]
+            for phase_id, rows in by_phase.items()
+        }
+
+    async def get_files_for_artifacts(
+        self,
+        execution_id: str,
+        phase_artifact_ids: Mapping[str, Sequence[str]],
+    ) -> dict[str, list[PhaseOutputFile]]:
+        """The files of exactly these artifacts of an execution, per phase.
+
+        Same filter and rank as `get_files_for_phase_injection`, so the head of
+        each list is the artifact a live run would have handed forward as that
+        phase's alias. The phase an artifact counts for is the one it was
+        NAMED under, not the one its row records.
+        """
+        phase_of = {
+            artifact_id: phase_id
+            for phase_id, artifact_ids in phase_artifact_ids.items()
+            for artifact_id in artifact_ids
+        }
+        by_phase: dict[str, list[ArtifactSummary]] = {}
+        for artifact in await self._projection.get_by_execution(execution_id):
+            phase_id = phase_of.get(artifact.id)
+            if phase_id is None or not artifact.content:
+                continue
+            by_phase.setdefault(phase_id, []).append(artifact)
         return {
             phase_id: [
                 PhaseOutputFile(source_path=a.source_path, content=a.content)

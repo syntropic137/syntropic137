@@ -1,7 +1,18 @@
-"""Execution controller - core domain logic.
+"""Execution controller - admits operator control requests and queues signals.
 
-Handles control commands and manages execution state.
 Uses ports for I/O - no direct dependencies on storage or messaging.
+
+WHO DECIDES (ADR-014 section 7). Whether a request is admissible is the
+WorkflowExecution aggregate's decision, asked of the aggregate rehydrated from
+its event stream on every request. It used to be decided here, by a state
+machine fed from the execution detail PROJECTION. A projection lags the stream
+it is derived from, so an execution the aggregate had already cancelled could
+still read `running` or `paused`, and a request the aggregate would refuse was
+admitted, reported as success and queued. The controller now holds no rule of
+its own: it loads, asks, and queues.
+
+It fails closed. An execution with no stream is refused, and an event store
+that cannot be read is refused with the error rather than guessed around.
 """
 
 from __future__ import annotations
@@ -19,13 +30,15 @@ from syn_adapters.control.commands import (
     PauseExecution,
     ResumeExecution,
 )
-from syn_adapters.control.state_machine import (
-    ExecutionState,
-    ExecutionStateMachine,
-)
 
 if TYPE_CHECKING:
-    from syn_adapters.control.ports import ControlStatePort, SignalQueuePort
+    from syn_adapters.control.ports import SignalQueuePort
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        ExecutionStatus,
+    )
+    from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
+        WorkflowExecutionRepositoryPort,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -35,32 +48,24 @@ class ExecutionController:
 
     def __init__(
         self,
-        state_port: ControlStatePort,
+        executions: WorkflowExecutionRepositoryPort,
         signal_port: SignalQueuePort,
     ) -> None:
-        self._state_port = state_port
+        self._executions = executions
         self._signal_port = signal_port
 
-    _COMMAND_DISPATCH: ClassVar[dict[type[ControlCommand], str]] = {
-        PauseExecution: "_handle_pause",
-        ResumeExecution: "_handle_resume",
-        CancelExecution: "_handle_cancel",
-        InjectContext: "_handle_inject",
+    #: What each command asks for, and what the operator is told on success.
+    _SIGNALS: ClassVar[dict[type[ControlCommand], tuple[ControlSignalType, str]]] = {
+        PauseExecution: (ControlSignalType.PAUSE, "Pause signal queued"),
+        ResumeExecution: (ControlSignalType.RESUME, "Resume signal queued"),
+        CancelExecution: (ControlSignalType.CANCEL, "Cancel signal queued"),
+        InjectContext: (ControlSignalType.INJECT, "Context injection queued"),
     }
 
     async def handle_command(self, cmd: ControlCommand) -> ControlResult:
-        """Handle a control command and return result."""
+        """Admit a control command if the aggregate accepts it, then queue its signal."""
         try:
-            handler_name = self._COMMAND_DISPATCH.get(type(cmd))
-            if handler_name is None:
-                return ControlResult(
-                    success=False,
-                    execution_id=getattr(cmd, "execution_id", "unknown"),
-                    new_state="unknown",
-                    error=f"Unknown command type: {type(cmd).__name__}",
-                )
-            handler = getattr(self, handler_name)
-            return await handler(cmd)
+            return await self._admit(cmd)
         except Exception as e:
             logger.exception("Error handling control command")
             return ControlResult(
@@ -70,135 +75,68 @@ class ExecutionController:
                 error=str(e),
             )
 
-    async def _handle_pause(self, cmd: PauseExecution) -> ControlResult:
-        """Handle pause command."""
-        sm = await self._get_state_machine(cmd.execution_id)
+    async def _admit(self, cmd: ControlCommand) -> ControlResult:
+        entry = self._SIGNALS.get(type(cmd))
+        if entry is None:
+            return ControlResult(
+                success=False,
+                execution_id=getattr(cmd, "execution_id", "unknown"),
+                new_state="unknown",
+                error=f"Unknown command type: {type(cmd).__name__}",
+            )
+        signal_type, queued_message = entry
 
-        if not sm.can_pause():
+        execution = await self._executions.get_by_id(cmd.execution_id)
+        if execution is None:
             return ControlResult(
                 success=False,
                 execution_id=cmd.execution_id,
-                new_state=sm.state.value,
-                error=f"Cannot pause execution in state {sm.state.value}",
+                new_state="unknown",
+                error=f"Execution {cmd.execution_id} not found",
             )
 
-        # Queue signal for executor to pick up
-        signal = ControlSignal(
-            signal_type=ControlSignalType.PAUSE,
-            execution_id=cmd.execution_id,
-            reason=cmd.reason,
-        )
-        await self._signal_port.enqueue(cmd.execution_id, signal)
-
-        # Note: State transition happens when executor acknowledges
-        return ControlResult(
-            success=True,
-            execution_id=cmd.execution_id,
-            new_state=sm.state.value,  # Still running until acknowledged
-            message="Pause signal queued",
-        )
-
-    async def _handle_resume(self, cmd: ResumeExecution) -> ControlResult:
-        """Handle resume command."""
-        sm = await self._get_state_machine(cmd.execution_id)
-
-        if not sm.can_resume():
+        state = execution.status.value
+        if not execution.accepts_control(signal_type):
             return ControlResult(
                 success=False,
                 execution_id=cmd.execution_id,
-                new_state=sm.state.value,
-                error=f"Cannot resume execution in state {sm.state.value}",
+                new_state=state,
+                error=_refusal(signal_type, state),
             )
 
-        signal = ControlSignal(
-            signal_type=ControlSignalType.RESUME,
-            execution_id=cmd.execution_id,
-        )
-        await self._signal_port.enqueue(cmd.execution_id, signal)
+        await self._signal_port.enqueue(cmd.execution_id, _signal_for(cmd, signal_type))
 
+        # The state is unchanged until the executor acts on the signal.
         return ControlResult(
             success=True,
             execution_id=cmd.execution_id,
-            new_state=sm.state.value,
-            message="Resume signal queued",
+            new_state=state,
+            message=queued_message,
         )
 
-    async def _handle_cancel(self, cmd: CancelExecution) -> ControlResult:
-        """Handle cancel command."""
-        sm = await self._get_state_machine(cmd.execution_id)
-
-        if not sm.can_cancel():
-            return ControlResult(
-                success=False,
-                execution_id=cmd.execution_id,
-                new_state=sm.state.value,
-                error=f"Cannot cancel execution in state {sm.state.value}",
-            )
-
-        signal = ControlSignal(
-            signal_type=ControlSignalType.CANCEL,
-            execution_id=cmd.execution_id,
-            reason=cmd.reason,
-        )
-        await self._signal_port.enqueue(cmd.execution_id, signal)
-
-        return ControlResult(
-            success=True,
-            execution_id=cmd.execution_id,
-            new_state=sm.state.value,
-            message="Cancel signal queued",
-        )
-
-    async def _handle_inject(self, cmd: InjectContext) -> ControlResult:
-        """Handle inject context command."""
-        sm = await self._get_state_machine(cmd.execution_id)
-
-        if sm.is_terminal:
-            return ControlResult(
-                success=False,
-                execution_id=cmd.execution_id,
-                new_state=sm.state.value,
-                error="Cannot inject into terminal execution",
-            )
-
-        signal = ControlSignal(
-            signal_type=ControlSignalType.INJECT,
-            execution_id=cmd.execution_id,
-            inject_message=cmd.message,
-        )
-        await self._signal_port.enqueue(cmd.execution_id, signal)
-
-        return ControlResult(
-            success=True,
-            execution_id=cmd.execution_id,
-            new_state=sm.state.value,
-            message="Context injection queued",
-        )
-
-    async def _get_state_machine(self, execution_id: str) -> ExecutionStateMachine:
-        """Create a state machine from the current projection state."""
-        state = await self._state_port.get_state(execution_id)
-        if state:
-            return ExecutionStateMachine(state)
-        return ExecutionStateMachine()
-
-    async def get_state(self, execution_id: str) -> ExecutionState | None:
-        """Get current state for an execution from the projection.
+    async def get_state(self, execution_id: str) -> ExecutionStatus | None:
+        """Get the execution's current status from its event stream.
 
         Returns None if the execution is not known.
         """
-        return await self._state_port.get_state(execution_id)
+        execution = await self._executions.get_by_id(execution_id)
+        return execution.status if execution is not None else None
 
     async def check_signal(self, execution_id: str) -> ControlSignal | None:
         """Check for pending control signal (called by executor)."""
         return await self._signal_port.dequeue(execution_id)
 
-    async def acknowledge_state(self, execution_id: str, new_state: ExecutionState) -> None:
-        """Acknowledge state transition (called by executor)."""
-        await self._state_port.save_state(execution_id, new_state)
 
-    async def initialize_execution(
-        self, execution_id: str, initial_state: ExecutionState = ExecutionState.PENDING
-    ) -> None:
-        """Initialize state for a new execution."""
-        await self._state_port.save_state(execution_id, initial_state)
+def _signal_for(cmd: ControlCommand, signal_type: ControlSignalType) -> ControlSignal:
+    return ControlSignal(
+        signal_type=signal_type,
+        execution_id=cmd.execution_id,
+        reason=cmd.reason if isinstance(cmd, PauseExecution | CancelExecution) else None,
+        inject_message=cmd.message if isinstance(cmd, InjectContext) else None,
+    )
+
+
+def _refusal(signal_type: ControlSignalType, state: str) -> str:
+    if signal_type is ControlSignalType.INJECT:
+        return "Cannot inject into terminal execution"
+    return f"Cannot {signal_type.value} execution in state {state}"

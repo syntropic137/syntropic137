@@ -124,6 +124,13 @@ export interface SessionSummary {
 
 export interface SessionResponse {
   id: string
+  /**
+   * Cache-read / cache-write rate relative to fresh input, as the API words it,
+   * verbatim. Null when the scope mixes models with different multipliers
+   * or a model is unpriced; optional for a server that predates the field.
+   */
+  cache_read_rate_display?: string | null
+  cache_write_rate_display?: string | null
   workflow_id: string | null
   workflow_name: string | null
   execution_id: string | null
@@ -219,7 +226,16 @@ export interface PhaseMetrics {
   input_tokens: number
   output_tokens: number
   total_tokens: number
-  cost_usd: number
+  /** Decimal string, as the API serialises Decimal; never parse it into a float to add. */
+  cost_usd: string
+  /**
+   * Observations in this phase that carried no usable rate.
+   *
+   * Non-zero means `cost_usd` is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
+  /** True while a run of this phase is open: `cost_usd` is a lower bound "so far" (#1048). */
+  cost_in_progress: boolean
   /** Nullable: the API returns null when the duration is genuinely unknown. */
   duration_seconds: number | null
   artifact_count: number
@@ -453,6 +469,13 @@ export interface ExecutionDetailResponse {
   reported_failure_reason?: ReportedFailureReason | null
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
+  /**
+   * Cache-read / cache-write rate relative to fresh input, as the API words it,
+   * verbatim. Null when the scope mixes models with different multipliers
+   * or a model is unpriced; optional for a server that predates the field.
+   */
+  cache_read_rate_display?: string | null
+  cache_write_rate_display?: string | null
   // Workspace info (ADR-021)
   workspace: WorkspaceInfo | null
 }

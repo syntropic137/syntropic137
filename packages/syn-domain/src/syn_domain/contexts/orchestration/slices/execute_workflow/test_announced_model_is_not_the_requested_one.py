@@ -24,6 +24,7 @@ of it, and the pair is what a reader needs to see at once.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
@@ -494,6 +495,9 @@ class _CodexWorkspace:
 
     async def interrupt(self) -> bool:
         return True
+
+    def keep_git_credential_fresh(self, **_kwargs: object) -> contextlib.nullcontext[None]:
+        return contextlib.nullcontext()
 
 
 class TestTheHandlerGivesTheProcessorSomethingToAsk:

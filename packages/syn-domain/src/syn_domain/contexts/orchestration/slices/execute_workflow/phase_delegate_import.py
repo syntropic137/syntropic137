@@ -25,7 +25,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture imp
 )
 from syn_shared.events import SESSION_SUMMARY
 from syn_shared.observed_model import REQUESTED_MODEL_KEY
-from syn_shared.pricing import price_tokens
+from syn_shared.pricing import cost_json_number, price_tokens
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -143,7 +143,7 @@ def _delegate_cost(usage: PricedUsage | None, session_id: str) -> float | None:
     )
     if not priced.is_priced or priced.cost is None:
         return None
-    return float(priced.cost)
+    return cost_json_number(priced.cost)
 
 
 def _coverage_gap_session_id(execution_id: str, phase_id: str) -> str:

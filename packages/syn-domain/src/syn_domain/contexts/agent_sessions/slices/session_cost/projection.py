@@ -35,6 +35,7 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query impo
     TimescaleSessionCostQuery,
 )
 from syn_shared.observed_model import RecordedModel, split_observation_model
+from syn_shared.pricing import parse_vendor_cost
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -357,8 +358,8 @@ class SessionCostProjection:
         # would be wrong for any session that spanned two. Leaving it is also
         # what keeps a killed phase agreeing with the last figure the live path
         # reported, instead of dropping to $0.00.
-        if data.get("total_cost_usd") is not None:
-            session_cost.total_cost_usd = Decimal(str(data["total_cost_usd"]))
+        if (reported_cost := parse_vendor_cost(data.get("total_cost_usd"))) is not None:
+            session_cost.total_cost_usd = reported_cost
             session_cost.token_cost_usd = session_cost.total_cost_usd
             # The breakdown follows the summary too, keyed as the SQL path keys
             # a summary row (`recorded.cost_key`). Keeping the per-turn estimate

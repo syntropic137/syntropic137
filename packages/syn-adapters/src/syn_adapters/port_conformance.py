@@ -29,12 +29,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from syn_adapters.control.adapters.memory import (
-        InMemoryControlStateAdapter,
         InMemorySignalQueueAdapter,
     )
-    from syn_adapters.control.adapters.projection import ProjectionControlStateAdapter
     from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
-    from syn_adapters.control.ports import ControlStatePort, SignalQueuePort
+    from syn_adapters.control.ports import SignalQueuePort
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.conversations.protocol import (
         ConversationStoragePort as AdapterConversationStoragePort,
@@ -47,6 +45,7 @@ if TYPE_CHECKING:
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
     from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
+    from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
     from syn_adapters.maintenance import (
         InMemoryMaintenanceAdapter,
         PostgresMaintenanceAdapter,
@@ -230,6 +229,9 @@ if TYPE_CHECKING:
         SkillRegistrationRepositoryPort,
     )
     from syn_domain.contexts.orchestration.ports.SkillStoragePort import SkillStoragePort
+    from syn_domain.contexts.orchestration.ports.SourceCommitResolverPort import (
+        SourceCommitResolverPort,
+    )
     from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
         WorkflowExecutionRepositoryPort,
     )
@@ -340,12 +342,11 @@ if TYPE_CHECKING:
         redis_dedup: RedisDedupAdapter,
         postgres_dedup: PostgresDedupAdapter,
         memory_dedup: InMemoryDedupAdapter,
-        projection_state: ProjectionControlStateAdapter,
-        memory_state: InMemoryControlStateAdapter,
         redis_signals: RedisSignalQueueAdapter,
         memory_signals: InMemorySignalQueueAdapter,
         postgres_pending: PostgresPendingSHAStore,
         memory_pending: InMemoryPendingSHAStore,
+        source_commits: GitHubSourceCommitResolver,
     ) -> None:
         """GitHub ingestion and execution control.
 
@@ -355,11 +356,10 @@ if TYPE_CHECKING:
         """
         _events: GitHubEventsAPIPort = events_client
         _checks: GitHubChecksAPIPort = checks_client
+        _source_commits: SourceCommitResolverPort = source_commits
         _redis_dedup: DedupPort = redis_dedup
         _postgres_dedup: DedupPort = postgres_dedup
         _memory_dedup: DedupPort = memory_dedup
-        _projection_state: ControlStatePort = projection_state
-        _memory_state: ControlStatePort = memory_state
         _redis_signals: SignalQueuePort = redis_signals
         _memory_signals: SignalQueuePort = memory_signals
         _postgres_pending: PendingSHAStore = postgres_pending

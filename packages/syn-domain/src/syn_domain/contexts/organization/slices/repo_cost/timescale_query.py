@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
+from syn_shared.pricing import canonical_cost_usd, parse_vendor_cost
 
 # SAME EXECUTION-KEYED SHAPE AS execution_cost/ (#1338 asked for this to be
 # assessed alongside it). Both queries below are
@@ -126,9 +127,7 @@ class TimescaleRepoCostQuery:
                     total_output=row["total_output"] or 0,
                     total_cache_creation=row["total_cache_creation"] or 0,
                     total_cache_read=row["total_cache_read"] or 0,
-                    total_cost=Decimal(str(row["total_cost"]))
-                    if row["total_cost"]
-                    else Decimal("0"),
+                    total_cost=parse_vendor_cost(row["total_cost"]) or Decimal("0"),
                 )
         return result
 
@@ -177,7 +176,7 @@ class TimescaleRepoCostQuery:
 
         return RepoCost(
             repo_full_name=repo_full_name,
-            total_cost_usd=total_cost,
+            total_cost_usd=canonical_cost_usd(total_cost),
             # All four components (issue #873) - matches the executions read model.
             total_tokens=total_input + total_output + total_cache_creation + total_cache_read,
             total_input_tokens=total_input,

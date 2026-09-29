@@ -1,0 +1,128 @@
+"""The events an execution starts and ends with, built from their commands.
+
+Kept out of the aggregate because they are payload assembly, not decisions:
+the guard that decides whether a run may end this way stays on the handler,
+and what these build is only what that decision records.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        CompleteExecutionCommand,
+        FailExecutionCommand,
+        StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+        WorkflowCompletedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+        WorkflowExecutionStartedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+        WorkflowFailedEvent,
+    )
+
+
+def started_event(command: StartExecutionCommand) -> WorkflowExecutionStartedEvent:
+    """The `WorkflowExecutionStarted` a fresh run records, pins included."""
+    from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+        WorkflowExecutionStartedEvent,
+    )
+
+    return WorkflowExecutionStartedEvent(
+        workflow_id=command.workflow_id,
+        execution_id=command.aggregate_id,
+        workflow_name=command.workflow_name,
+        started_at=datetime.now(UTC),
+        total_phases=command.total_phases,
+        inputs=command.inputs,
+        expected_completion_at=command.expected_completion_at,
+        phase_definitions=(
+            [asdict(pd) for pd in command.phase_definitions] if command.phase_definitions else None
+        ),
+        pinned_phases=command.pinned_phases,
+        source_commits=command.source_commits,
+    )
+
+
+def completed_event(command: CompleteExecutionCommand, workflow_id: str) -> WorkflowCompletedEvent:
+    """The `WorkflowCompleted` a completed run records."""
+    from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+        WorkflowCompletedEvent,
+    )
+
+    return WorkflowCompletedEvent(
+        workflow_id=workflow_id,
+        execution_id=command.aggregate_id,
+        completed_at=datetime.now(UTC),
+        total_phases=command.total_phases,
+        completed_phases=command.completed_phases,
+        total_input_tokens=command.total_input_tokens,
+        total_output_tokens=command.total_output_tokens,
+        total_cache_creation_tokens=command.total_cache_creation_tokens,
+        total_cache_read_tokens=command.total_cache_read_tokens,
+        total_tokens=(
+            command.total_input_tokens
+            + command.total_output_tokens
+            + command.total_cache_creation_tokens
+            + command.total_cache_read_tokens
+        ),
+        total_duration_seconds=command.duration_seconds,
+        artifact_ids=command.artifact_ids,
+    )
+
+
+def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFailedEvent:
+    """The `WorkflowFailed` a failed run records."""
+    from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+        WorkflowFailedEvent,
+    )
+
+    return WorkflowFailedEvent(
+        workflow_id=workflow_id,
+        execution_id=command.aggregate_id,
+        failed_at=datetime.now(UTC),
+        failed_phase_id=command.failed_phase_id,
+        error_message=command.error,
+        error_type=command.error_type,
+        completed_phases=command.completed_phases,
+        total_phases=command.total_phases,
+        failed_phase_duration_seconds=command.failed_phase_duration_seconds,
+        # list() rather than a default, and None rather than []: the event
+        # has to preserve the difference between "read, and no branch had
+        # moved" and "nobody could read it" (#1200).
+        observed_branches=(
+            None if command.observed_branches is None else list(command.observed_branches)
+        ),
+        # Straight through, None included: "nothing observed a status" is
+        # a fact about the failure and coercing it to 0 would report a
+        # clean exit for a phase nobody watched (#1319).
+        exit_code=command.exit_code,
+        failed_phase_artifact_ids=list(command.failed_phase_artifact_ids),
+        # Spread into four named fields HERE, once, rather than carried as
+        # a nested object: every sibling `failed_phase_*` field on this
+        # event is flat, and the projection that reads them reads flat
+        # keys. The total is deliberately not a fifth field - it is derived
+        # from these four wherever it is wanted, so it cannot disagree with
+        # them (#1262).
+        failed_phase_input_tokens=command.failed_phase_usage.input_tokens,
+        failed_phase_output_tokens=command.failed_phase_usage.output_tokens,
+        failed_phase_cache_creation_tokens=command.failed_phase_usage.cache_creation_tokens,
+        failed_phase_cache_read_tokens=command.failed_phase_usage.cache_read_tokens,
+        # Straight from the command, never re-derived here (#1357). The
+        # only frame that could tell a correct refusal from a crash was the
+        # one holding the phase's own verdict, several hops upstream; an
+        # aggregate looking at `error_type` or at the message text would be
+        # guessing, and guessing is what put the distinction in prose.
+        failure_classification=command.classification,
+        # Beside it, never instead of it (#1392). The classification is
+        # what the platform measured; this is what the phase SAID, and the
+        # event is where the two stop being one frame's local variables and
+        # start being the record every read model is built from.
+        reported_failure_reason=command.reported_failure_reason,
+    )

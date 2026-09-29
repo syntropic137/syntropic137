@@ -6,7 +6,7 @@ Accepted (with limitations - see 2026-01-29 update below)
 
 ## Date
 
-2025-12-15 (Updated: 2026-01-29)
+2025-12-15 (Updated: 2026-01-29, 2026-04-09, 2026-05-01, 2026-09-26)
 
 ## Context
 
@@ -530,21 +530,21 @@ Different secret types have very different risk profiles. The platform handles e
 |---|---|---|---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | months/years | account-wide, full spend | direct env injection | **HIGH** — accepted; ToS gray area precludes header proxying | none — direct injection is the long-term posture |
 | `ANTHROPIC_API_KEY` | indefinite | account-wide, full spend | direct env injection (fallback when OAuth absent) | **HIGH** — accepted short-term | TODO #724 — spike sidecar substitution with valid-format placeholder |
-| `GH_TOKEN` (GitHub App installation token) | 1 hour | per-installation, repo-scoped | direct env injection (planned) | **LOW** — already short-lived and scoped | TODO #723 — implement direct injection; #725 — sidecar mint-on-demand for >60min tasks |
+| GitHub App installation token | 1 hour, renewed every 40 min while the agent runs | per-installation, minted for the workspace's repositories only | setup phase writes `~/.git-credentials` and `~/.config/gh/hosts.yml`; renewal rewrites both; **never** an env var (see 2026-09-26 update) | **LOW** — short-lived, repo-scoped, revoked at teardown | TODO #725 (Tier 1) — per-workspace credential sidecar so the agent holds no raw token |
 | `GH_TOKEN` (user PAT, dev fallback) | user-set | user-defined | direct env injection (operator-controlled) | **MEDIUM** — operator owns it | none — user controls scope |
 
 ### Long-running task ceiling
 
-GitHub App installation tokens are hard-capped at **1 hour** by GitHub. As Claude Code agent runs grow longer (model capability + multi-phase orchestration), workflow executions exceeding 60 minutes will hit mid-execution 401s on any `gh` or `git push` call. The direct-injection path (#723) does not solve this; the sidecar mint-on-demand pattern (#725) does, by transparently refreshing the token on every outgoing GitHub call.
+GitHub App installation tokens are hard-capped at **1 hour** by GitHub. Workflow executions exceeding 60 minutes used to hit 401s on any `gh` or `git push` call past that point.
 
-Migration plan: ship #723 first to unblock the common case (sub-60min workflows). Land #725 before it becomes a blocker — track wall-clock distribution of workflow executions to know when that's imminent.
+**Resolved for the common case on 2026-09-26 (Tier 0, #1439 / #725)** — see the 2026-09-26 update at the end of this ADR. The credential lives in files the platform rewrites on a schedule while the agent runs, rather than in an environment variable fixed at launch. The remaining step, a per-workspace sidecar that mints on demand so the agent never holds a raw GitHub token (Tier 1), stays tracked by #725.
 
 ### TODOs in implementation
 
 Code paths that violate ADR-024's original "agent never sees raw secrets" invariant carry inline TODO comments referencing the relevant follow-up issue:
 
 - `_build_agent_env` in `WorkspaceProvisionHandler.py` — TODO #724 (Claude API key sidecar spike)
-- (future) `_build_agent_env` once `GH_TOKEN` injection lands — TODO #725 (GH App sidecar mint-on-demand)
+- `_build_agent_env` in `WorkspaceProvisionHandler.py` — TODO #725 (Tier 1 GitHub credential sidecar). It deliberately injects NO GitHub credential; the note there explains why.
 
 These TODOs are an explicit reminder that direct injection is a deliberate compromise documented in this ADR, not an oversight.
 
@@ -597,3 +597,39 @@ This change does NOT pin the workspace image to a specific digest. The default `
 This intentionally defers the "workspace image versioning + compatibility strategy" question to a follow-up issue. The right policy (recommended pin tag, compatibility matrix, what does it mean for platform vN to support workspace image vM) needs an ADR of its own.
 
 > **Superseded 2026-08-17.** The two paragraphs above describe the state before digest pinning and are kept as the historical record. Workspace images are now pinned by immutable digest and their cosign signatures are verified before a container is created. `DEFAULT_TAG` no longer exists. See `packages/syn-shared/src/syn_shared/settings/workspace_images.py` for the current pins and the bump procedure, and `packages/syn-adapters/src/syn_adapters/workspace_backends/image_verification.py` for the verification policy.
+
+---
+
+## 2026-09-26 Update: GitHub credentials outlive the hour (#1439, #725 Tier 0)
+
+### Context
+
+The setup phase wrote an installation token into `~/.git-credentials` and `~/.config/gh/hosts.yml`, and `_build_agent_env` ALSO handed `gh` a token as `$GITHUB_TOKEN`. That caused three problems:
+
+1. **Nothing renewed the credential while the agent ran.** Renewal happened only at the quarantine rehearsal (phase start) and the quarantine push (teardown, #1393). An agent that pushed at minute 70 pushed with a dead token.
+2. **`gh` prefers `$GITHUB_TOKEN` over hosts.yml, and a process's environment cannot be changed from outside.** So even a renewal that rewrote both files left `gh` holding the dead token.
+3. **Tokens were minted without `repositories`, so they reached every repository the installation covers.** Nothing revoked them, and each lived its full hour.
+
+### Decision
+
+**Repository-scoped minting.** Every agent token request names the workspace's repositories (by name, per installation). The installation-token cache keys on (installation, repository set, permissions), so a token minted for one repository set is never handed out for another. Each workspace still holds one token per installation. A repo-less workflow gets an installation-wide token from the first installation, because it has no repository to be scoped to.
+
+**`gh` reads hosts.yml, never the environment.** `GITHUB_TOKEN` is no longer injected into the agent's environment. The token in hosts.yml is chosen by the same routing the env path used (#1129): the installation of the first configured repository, which is the repository under work. Renewal rewrites hosts.yml through the same script as `~/.git-credentials`, so `gh` sees the new token on its next call. **Cross-installation `gh` is out of scope.** `gh` holds one credential for all of github.com, so a phase driving repositories in two installations through `gh` reaches only the primary repository's installation, as before. `git` is unaffected: it gets a per-repository token through `~/.git-credentials`.
+
+**Issuance ledger.** Each `ManagedWorkspace` records every token it mints as `IssuedToken(token, installation_id, repositories, expires_at)`. There are three mint sites: the setup phase, renewal (the scheduled renewal and both quarantine paths go through `renew_git_credential`), and quarantine. A token is recorded *before* it is installed, so a token whose install fails can still be revoked. `renew_git_credential` returns what it issued. **The ledger is in-process only and best effort across a crash.** If the API process dies mid-phase, the ledger is lost with it, and the tokens it named expire on their own within the hour. It is deliberately not an event: tokens are infrastructure state tied to a live container, not domain truth (see "What Goes in the Event Store" in AGENTS.md).
+
+**Phase-scoped renewal.** `AgentExecutionHandler` keeps the credential fresh for exactly as long as the agent's stream runs (`ManagedWorkspace.keep_git_credential_fresh`, implemented in `credential_keeper.py`). It is an asyncio task owned by the live handler, not a durable ProcessManager: after a crash, the container it would be renewing is gone too.
+
+- The first renewal is at T+40 min, and later renewals follow every 40 min after the last success.
+- A failed renewal is retried every 3 min until one succeeds or the installed token expires.
+- If the token expires unrenewed, a `git_credential_lapsed` observability event is written and a `[PHASE …]` warning is logged. **A lapse is never silent.** The schedule then continues, so a later success still rescues the phase.
+- The task is cancelled when the phase ends, however it ends.
+
+**Revocation at teardown, never at renewal.** A push in flight when a renewal lands authenticated with the old token, and revoking that token would fail the push for no gain. `WorkspaceService.create_workspace` revokes every unexpired ledger token (`DELETE /installation/token`) in its `finally`. That runs after the caller's block, and so after the unpushed-work guard's quarantine push, and before the container is destroyed. A failed revocation is logged and does not stop the others.
+
+### Consequences
+
+- Runs longer than 60 minutes can push and use `gh` throughout.
+- A leaked agent token reaches only the workspace's repositories, and usually dies at teardown rather than at its hour.
+- The agent still holds a raw, renewable GitHub token. Removing that is Tier 1, a per-workspace credential sidecar, and remains tracked by #725.
+

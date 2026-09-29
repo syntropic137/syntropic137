@@ -390,6 +390,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{execution_id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fork Execution Endpoint
+         * @description Fork a failed or interrupted execution so it resumes where it stopped.
+         */
+        post: operations["fork_execution_endpoint_executions__execution_id__fork_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/executions/{execution_id}/session-inventory": {
         parameters: {
             query?: never;
@@ -3231,6 +3251,10 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Cache Read Rate Display */
+            cache_read_rate_display?: string | null;
+            /** Cache Write Rate Display */
+            cache_write_rate_display?: string | null;
             /** Total Duration Seconds */
             total_duration_seconds?: number | null;
             /**
@@ -3940,6 +3964,45 @@ export interface components {
              * @description Updated comment
              */
             comment?: string | null;
+        };
+        /**
+         * ForkRequest
+         * @description What an operator must decide before a fork is admitted.
+         *
+         *     Both flags default to the REFUSAL, because both exist to make an operator
+         *     say something out loud. Neither implies the other.
+         */
+        ForkRequest: {
+            /**
+             * Override Cancellation
+             * @description Fork a CANCELLED parent. A cancel is an instruction to stop, so forking past it needs a fresh decision rather than inheriting the old one.
+             * @default false
+             */
+            override_cancellation: boolean;
+            /**
+             * Acknowledge External Effects
+             * @description Accept that the phase the fork restarts may already have pushed or published something in the parent, which re-running it repeats.
+             * @default false
+             */
+            acknowledge_external_effects: boolean;
+        };
+        /**
+         * ForkResponse
+         * @description The fork that was admitted, and what the child will do.
+         */
+        ForkResponse: {
+            /** Parent Execution Id */
+            parent_execution_id: string;
+            /** Execution Id */
+            execution_id: string;
+            /** Resume Phase Id */
+            resume_phase_id: string;
+            /** Inherited Phase Ids */
+            inherited_phase_ids: string[];
+            /** Cancellation Overridden */
+            cancellation_overridden: boolean;
+            /** External Effects Acknowledged */
+            external_effects_acknowledged: boolean;
         };
         /**
          * GitEventData
@@ -4839,6 +4902,26 @@ export interface components {
              * @default false
              */
             allow_delegation: boolean;
+            /**
+             * Clone Repos
+             * @default true
+             */
+            clone_repos: boolean;
+            /**
+             * Can Open Pr
+             * @default false
+             */
+            can_open_pr: boolean;
+            /**
+             * Delivers Repo Changes
+             * @default true
+             */
+            delivers_repo_changes: boolean;
+            /**
+             * Sandbox
+             * @default full-access
+             */
+            sandbox: string;
             /** Claude Plugins */
             claude_plugins?: components["schemas"]["PhaseRefResponse"][];
             /** Skills */
@@ -4954,6 +5037,16 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /**
+             * Cost In Progress
+             * @default false
+             */
+            cost_in_progress: boolean;
             /** Duration Seconds */
             duration_seconds?: number | null;
             /**
@@ -6183,6 +6276,10 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Cache Read Rate Display */
+            cache_read_rate_display?: string | null;
+            /** Cache Write Rate Display */
+            cache_write_rate_display?: string | null;
             /** Operations */
             operations?: components["schemas"]["OperationInfo"][];
             /** Started At */
@@ -7681,7 +7778,7 @@ export interface components {
              */
             cache_read_tokens: number;
             /** Estimated Cost Usd */
-            estimated_cost_usd?: number | null;
+            estimated_cost_usd?: string | null;
         };
     };
     responses: never;
@@ -8366,6 +8463,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fork_execution_endpoint_executions__execution_id__fork_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ForkRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForkResponse"];
                 };
             };
             /** @description Validation Error */

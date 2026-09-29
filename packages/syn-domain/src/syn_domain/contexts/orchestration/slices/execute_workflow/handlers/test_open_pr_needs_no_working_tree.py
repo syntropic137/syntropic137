@@ -54,6 +54,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
+from syn_adapters.workspace_backends.service.setup_phase_secrets import _GitHubAuth
 from syn_api._wiring import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
@@ -84,6 +85,9 @@ from syn_shared.env_constants import ENV_CLAUDE_CODE_OAUTH_TOKEN, ENV_GH_REPO, E
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        SourceCommit,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
@@ -131,6 +135,7 @@ class _CapturingProcessor:
         execution_id: str,
         repos: list[RepositoryRef],
         admitted: AdmissionTicket | None = None,
+        source_commits: list[SourceCommit] | None = None,
     ) -> WorkflowExecutionResult:
         del workflow_name, inputs, repos, admitted
         self.phases = list(phases)
@@ -260,15 +265,15 @@ async def _provision(phase: ExecutablePhase, *, completed: dict[str, str]) -> _P
         phase_id=phase.phase_id,
     )
 
-    with (
-        patch(
-            "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_github_auth",
-            AsyncMock(return_value=({_REPO_URL: "tok-a"}, "syn-bot", "bot@example.com")),
-        ),
-        patch(
-            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers."
-            "WorkspaceProvisionHandler._resolve_github_app_token",
-            AsyncMock(return_value="tok-a"),
+    with patch(
+        "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_github_auth",
+        AsyncMock(
+            return_value=_GitHubAuth(
+                repo_tokens={_REPO_URL: "tok-a"},
+                gh_token="tok-a",
+                author_name="syn-bot",
+                author_email="bot@example.com",
+            )
         ),
     ):
         result = await handler.handle(
@@ -1054,11 +1059,10 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
     ) -> None:
         """Without this, hosts.yml could be empty and the test above stays green.
 
-        The provisioned environment also carries GITHUB_TOKEN, and `gh`
-        prefers it (#1129). So the file is exercised by taking that token
-        away, leaving hosts.yml as the only credential - and the deletion
-        control below is what stops THIS test passing on an unauthenticated
-        `gh` that never needed a credential at all.
+        hosts.yml is the ONLY credential `gh` is given (#725: the renewable
+        one, where GITHUB_TOKEN used to shadow it). The deletion control
+        below is what stops THIS test passing on an unauthenticated `gh`
+        that never needed a credential at all.
         """
         phases = await _executable_phases()
         provisioned = await _provision(phases["open_pr"], completed={})
@@ -1066,9 +1070,8 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
             provisioned.setup_script, tmp_path
         )
         hosts_yml = home / ".config" / "gh" / "hosts.yml"
-        without_token = {
-            name: value for name, value in provisioned.agent_env.items() if name != ENV_GITHUB_TOKEN
-        }
+        assert ENV_GITHUB_TOKEN not in provisioned.agent_env
+        without_token = dict(provisioned.agent_env)
 
         with _FakeGitHubApi(tmp_path) as github:
             on_hosts_yml_alone = _run_gh(
@@ -1096,7 +1099,7 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
 
         A codex phase gets an EMPTY agent env by design: it authenticates from
         ~/.codex/auth.json and must not be handed claude credentials. So the
-        obvious place to put GH_REPO - beside GITHUB_TOKEN in
+        obvious place to put GH_REPO - beside the credentials in
         `_build_agent_env` - is the one place it must not go, because that
         function does not run for codex at all. Asserted on the real `verify`
         phase, which is the codex phase this workflow ships.

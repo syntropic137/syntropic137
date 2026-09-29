@@ -12,8 +12,14 @@ Usage:
             print(f"Error: {error}")
 """
 
-from syn_api.build_info import get_build_info
-from syn_api.types import Err, Ok, Result
+# First, before anything can log or capture sys.stderr: mask URL passwords
+# (redis://:secret@...) in every line this process writes.
+from syn_shared.logging.redaction import install_credential_redaction
+
+install_credential_redaction()
+
+from syn_api.build_info import get_build_info  # noqa: E402
+from syn_api.types import Err, Ok, Result  # noqa: E402
 
 __all__ = ["Err", "Ok", "Result"]
 

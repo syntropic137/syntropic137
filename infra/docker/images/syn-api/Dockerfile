@@ -28,9 +28,9 @@ COPY lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-captur
 COPY packages/syn-shared/ ./packages/syn-shared/
 
 # 2. Agentic primitives packages
-COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
-COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
-COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
+COPY lib/agentic-workspace/lib/python/agentic_logging/ ./lib/agentic-workspace/lib/python/agentic_logging/
+COPY lib/agentic-workspace/lib/python/agentic_events/ ./lib/agentic-workspace/lib/python/agentic_events/
+COPY lib/agentic-workspace/lib/python/agentic_isolation/ ./lib/agentic-workspace/lib/python/agentic_isolation/
 
 # 3. Event sourcing SDK
 COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/
@@ -56,9 +56,9 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Install in dependency order
 RUN uv pip install ./packages/syn-shared
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_logging
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_events
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_isolation
+RUN uv pip install ./lib/agentic-workspace/lib/python/agentic_logging
+RUN uv pip install ./lib/agentic-workspace/lib/python/agentic_events
+RUN uv pip install ./lib/agentic-workspace/lib/python/agentic_isolation
 RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/syn-domain
 RUN uv pip install ./packages/syn-tokens
@@ -121,6 +121,11 @@ COPY --from=builder /app/apps /app/apps
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+# uvicorn runs on uvloop, which spawns every `docker exec` with a real fork().
+# With grpc fork support on, a fork while grpc threads are busy leaves the child
+# holding half-updated grpc state, and it segfaults in cygrpc before exec: the
+# random exit -11 of #1046/#1295. Nothing here uses grpc in a forked child.
+ENV GRPC_ENABLE_FORK_SUPPORT=false
 
 # Default configuration
 ENV SYN_API_HOST=0.0.0.0

@@ -6,6 +6,8 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
+from syn_shared.pricing import canonical_cost_usd
+
 
 class CostField(StrEnum):
     """A ``SessionCost`` field that a read path either measures or does not.
@@ -83,6 +85,11 @@ def _coerce_cost_fields(raw: object) -> frozenset[CostField]:
     if not isinstance(raw, (list, tuple, set, frozenset)):
         return frozenset(CostField)
     return frozenset(CostField(name) for name in raw if name in set(CostField))
+
+
+def _canonical_map(raw: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Each cost in *raw* in canonical form (see ``canonical_cost_usd``)."""
+    return {k: canonical_cost_usd(v) for k, v in raw.items()}
 
 
 @dataclass
@@ -210,6 +217,20 @@ class SessionCost:
 
     completed_at: datetime | None = None
     """When the session completed."""
+
+    def __post_init__(self) -> None:
+        """Hold every money field in canonical form (``canonical_cost_usd``).
+
+        Every read path builds this record fresh, so canonicalising here is
+        what keeps a harness's double noise (``0.30566780000000005``) and a
+        Decimal sum's trailing zeros out of every API response.
+        """
+        self.total_cost_usd = canonical_cost_usd(self.total_cost_usd)
+        self.token_cost_usd = canonical_cost_usd(self.token_cost_usd)
+        self.compute_cost_usd = canonical_cost_usd(self.compute_cost_usd)
+        self.cost_by_model = _canonical_map(self.cost_by_model)
+        self.cost_by_tool = _canonical_map(self.cost_by_tool)
+        self.cost_by_tool_tokens = _canonical_map(self.cost_by_tool_tokens)
 
     def record_measured(self, cost_field: CostField) -> None:
         """Declare that this record's value for *cost_field* was really computed.

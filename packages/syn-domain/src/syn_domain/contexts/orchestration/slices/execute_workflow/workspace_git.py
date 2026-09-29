@@ -221,11 +221,13 @@ class GitWorkspace(Protocol):
 
     async def execute(self, command: list[str]) -> ExecutionResult: ...
 
-    async def renew_git_credential(self) -> None:
+    async def renew_git_credential(self) -> object:
         """Install a freshly minted credential, or raise `CredentialRenewalFailedError`.
 
         Says nothing about whether the credential it replaced still worked -
-        see that error for why nothing can.
+        see that error for why nothing can. What it returns is the workspace's
+        record of what it issued (#725); this slice does not read it, the
+        workspace's own ledger does, so it is typed no tighter than that.
         """
         ...
 

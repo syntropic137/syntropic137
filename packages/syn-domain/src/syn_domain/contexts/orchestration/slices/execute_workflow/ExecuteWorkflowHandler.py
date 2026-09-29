@@ -31,7 +31,14 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
-from syn_shared.agents import AgentProvider, require_executable_provider
+from syn_domain.contexts.orchestration.slices.execute_workflow.source_commits import (
+    source_commits_for,
+)
+from syn_shared.agents import (
+    AgentProvider,
+    require_executable_provider,
+    require_runnable_sandbox,
+)
 from syn_shared.tools import require_supported_tools
 
 if TYPE_CHECKING:
@@ -53,6 +60,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
         ExecuteWorkflowCommand,
+    )
+    from syn_domain.contexts.orchestration.ports.SourceCommitResolverPort import (
+        SourceCommitResolverPort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
         WorkflowExecutionProcessor,
@@ -194,6 +204,9 @@ def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
             getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
             phase_id=phase_id,
         )
+        # Before provisioning, so a stored template declaring a level the
+        # workspace cannot run is refused with a 422, not mid-run (#1434).
+        require_runnable_sandbox(getattr(phase, "sandbox", None), phase_id=phase_id)
         tools = require_supported_tools(
             tuple(getattr(phase, "allowed_tools", ()) or ()),
             phase_id=phase_id,
@@ -315,6 +328,7 @@ class ExecuteWorkflowHandler:
         phase_plugin_resolver: PhasePluginResolver | None = None,
         phase_skill_resolver: PhaseSkillResolver | None = None,
         maintenance: MaintenancePort | None = None,
+        commit_resolver: SourceCommitResolverPort | None = None,
     ) -> None:
         self._processor = processor
         self._workflow_repo = workflow_repository
@@ -333,6 +347,10 @@ class ExecuteWorkflowHandler:
         # ci/fitness/code_quality/test_execution_admission_names_the_gate.py - an
         # optional dependency nobody verifies is how a gate loses an entrance.
         self._maintenance = maintenance
+        # WHY optional (#1457): without one every commit is recorded as
+        # unknown, which is honest and forks exactly as before. Production
+        # passes the GitHub resolver.
+        self._commit_resolver = commit_resolver
 
     async def handle(
         self,
@@ -404,6 +422,7 @@ class ExecuteWorkflowHandler:
                 execution_id=execution_id,
                 repos=repos,
                 admitted=admitted,
+                source_commits=await source_commits_for(self._commit_resolver, repos),
             )
         except StreamAlreadyExistsError:
             logger.warning(
@@ -499,6 +518,12 @@ class ExecuteWorkflowHandler:
             require_supported_execution_type(
                 getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
                 phase_id=getattr(phase, "phase_id", None),
+            )
+            # Same reasoning, for a direct handler caller that skipped
+            # validate_phase_declarations: never hand codex a level the
+            # workspace cannot run (#1434).
+            require_runnable_sandbox(
+                getattr(phase, "sandbox", None), phase_id=getattr(phase, "phase_id", None)
             )
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(

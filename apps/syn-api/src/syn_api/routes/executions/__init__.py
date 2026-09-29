@@ -11,6 +11,8 @@ from .commands import execute
 from .commands import router as commands_router
 from .control import cancel, get_state, inject, pause, resume
 from .control import router as control_router
+from .fork import ForkRequest, ForkResponse, fork
+from .fork import router as fork_router
 from .inventory import router as inventory_router
 from .queries import get, get_detail, list_, list_active
 from .queries import router as queries_router
@@ -20,14 +22,18 @@ router = APIRouter()
 router.include_router(queries_router)
 router.include_router(commands_router)
 router.include_router(control_router)
+router.include_router(fork_router)
 router.include_router(inventory_router)
 router.include_router(transcripts_router)
 
 # Re-export service functions so callers can do:
 #   from syn_api.routes.executions import list_, execute, pause, ...
 __all__ = [
+    "ForkRequest",
+    "ForkResponse",
     "cancel",
     "execute",
+    "fork",
     "get",
     "get_detail",
     "get_state",

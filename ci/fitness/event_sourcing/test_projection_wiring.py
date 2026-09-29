@@ -99,6 +99,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.orchestration.slices.register_skill.projection import (
         SkillLockProjection,
     )
+    from syn_domain.contexts.orchestration.slices.start_fork import ForkStartProcessManager
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
     )
@@ -139,6 +140,8 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         ArtifactListProjection(dummy),
         # GitHub — dispatch and trigger index
         WorkflowDispatchProjection(execution_service=None, store=dummy),
+        # Orchestration — starts the child of an admitted fork (ADR-014 s7)
+        ForkStartProcessManager(fork_starter=None, store=dummy),
         TriggerQueryProjection(dummy),
         # Organization — adapted namespace projections
         OrganizationListAdapter(OrganizationProjection(dummy)),
@@ -167,7 +170,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 27
+_EXPECTED_COUNT = 28
 
 
 # ---------------------------------------------------------------------------

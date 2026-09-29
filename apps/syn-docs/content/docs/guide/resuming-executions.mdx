@@ -1,0 +1,276 @@
+---
+title: Resuming Failed Executions
+description: Fork a failed execution so it restarts at the first phase that did not finish, instead of paying for the phases that already succeeded
+---
+
+## The problem
+
+A six-phase workflow dies in phase five. Phases one to four succeeded, cost real
+money, and produced artifacts you still want. Re-running the workflow from the
+start throws all of that away and pays for it twice.
+
+**Forking** an execution creates a new run that inherits the phases that
+completed and restarts at the **first phase that did not finish**. A run that dies in phase five of
+six costs you phase five onwards, not all six.
+
+A run usually dies **inside** a phase, and that phase may already have pushed or
+published something. Re-running it can repeat that, so the fork asks you to say
+you accept it:
+
+```bash
+syn execution fork exec-43f430469266 --acknowledge-external-effects
+```
+
+```
+Forked exec-43f430469266
+  New execution: exec-9a1c77e04b12
+  Resumes at:    implement
+  Not re-run:    premise, plan
+  External effects acknowledged
+Follow it with: syn execution show exec-9a1c77e04b12
+```
+
+If the resumed phase was **never attempted** - the run died between phases, and
+that phase had no earlier try - no flag is needed:
+
+```bash
+syn execution fork exec-43f430469266
+```
+
+## A successful response means *admitted*
+
+The call returns once the fork has been **admitted and recorded on the parent**.
+The child execution is created and started by a background processor, so a
+success tells you the decision was accepted, not that the child is already
+running.
+
+Watch the child to see it start:
+
+```bash
+syn execution show <child-id>
+```
+
+If it never appears, the fork was admitted but its start was refused or is being
+retried. The platform records that against the parent's fork rather than losing
+it - a refusal that can only be known at start time (a vanished artifact, for
+instance) settles as failed after a bounded number of attempts.
+
+## Fork, not resume
+
+Syntropic137 has two different things that sound the same, and the distinction
+matters when you are reaching for one of them:
+
+| You want | Command | What happens |
+| --- | --- | --- |
+| Continue a **paused** run | `syn control resume <id>` | The same execution carries on |
+| Pick up a **failed** run | `syn execution fork <id>` | A **new** execution inherits the completed phases |
+
+A fork is a new execution with its own id. The parent stays exactly as it was -
+still failed, still showing what it did. Nothing is rewritten, so the record of
+what went wrong survives.
+
+## What the child inherits
+
+The fork inherits the **contiguous** run of phases that completed, in order,
+stopping at the first one that did not:
+
+- those phases are never re-run
+- their artifacts are handed to the resumed phase, so it reads its
+  predecessors' output
+- the resumed phase restarts **from its beginning** - there is no mid-phase
+  resume
+
+<Callout type="warn">
+  The handoff is checked but not guaranteed complete. If a phase recorded two
+  artifacts and one has since gone, the fork is still admitted and the resumed
+  phase runs with part of what its predecessor produced. Detecting that needs the
+  artifact query to report which ids it resolved, which it does not yet do
+  (#1460). A phase whose artifacts resolve to **nothing** is caught and refuses
+  the fork.
+</Callout>
+
+A phase that completed *after* a gap is deliberately not inherited. Its output
+was built on a predecessor the fork is about to produce again, so carrying it
+forward would hand the child work resting on something that no longer holds.
+
+## What the child runs
+
+The child runs **what the parent ran**, not the workflow as it stands today.
+The full phase configuration - provider, model, prompt, timeouts - is pinned on
+the execution when it starts, so editing the workflow between the original run
+and the fork cannot silently change what the fork does.
+
+<Callout type="info">
+  If an inherited phase is missing from that pinned configuration, the fork is
+  refused rather than started on a guess.
+</Callout>
+
+## Two decisions you have to make out loud
+
+Each defaults to `false`, and each **applicable** condition is refused without
+its flag. A fork that needs neither decision - a failed run whose resumed phase was never
+attempted - proceeds with no flags at all. The test is whether that phase was
+ever *started*, including by an earlier retry, not whether it was the phase the
+failure named. Neither flag implies the other.
+
+### A cancelled execution
+
+A cancel is an instruction to stop - possibly because the run targeted the wrong
+repository, or its task held a secret. Forking past that needs a fresh decision:
+
+```bash
+syn execution fork exec-1234 --override-cancellation
+```
+
+<Callout type="warn">
+  A fork inherits the parent's configuration and inputs, so it cannot correct
+  what the cancel was for. If the run was cancelled because it targeted the wrong
+  repository, or because its task held a secret, forking reproduces that. Start a
+  fresh execution instead.
+</Callout>
+
+### A phase that may already have published something
+
+If the phase being restarted had started in the parent, it may already have
+pushed a branch, opened a pull request or published a package. Re-running it can
+repeat that. Nothing in the record can prove it did not, so you acknowledge it:
+
+```bash
+syn execution fork exec-1234 --acknowledge-external-effects
+```
+
+## What cannot be forked
+
+| Status | Forkable |
+| --- | --- |
+| `failed` | Yes, if a phase is left unfinished |
+| `interrupted` | Yes, if a phase is left unfinished |
+| `cancelled` | Only with `--override-cancellation` |
+| `completed` | No - nothing is left to run |
+| `running`, `paused` | No - forking would put two runs on one piece of work |
+
+Three conditions apply whatever the status. A run with **no unfinished phase** has
+nothing to resume and is refused. A run whose resumed phase had already started
+needs `--acknowledge-external-effects`. And a parent that pinned no phase
+configuration - an execution from before that was recorded - cannot be forked at
+all, because what the child would run could then only be read from the current
+workflow template.
+
+<Callout type="info">
+  **A forked child can itself be forked**, when it is otherwise eligible. Each
+  inherited phase's files are read from the execution that actually produced them,
+  which may be an earlier ancestor rather than the immediate parent, so a chain of
+  forks keeps reaching the right output (#1462).
+</Callout>
+
+A parent can be forked **once**. Asking twice is refused and names the fork it
+already has, so a retried request cannot quietly create a second child.
+
+That is why every refusal the platform can know **at admission** is checked
+before the fork is recorded: a parent whose one fork was spent on a child that
+then failed to start cannot be forked again.
+
+It is not a guarantee that the child will start. Admission is a point-in-time
+check, and a start can still fail afterwards - an artifact that disappears in
+between, a read model lagging the parent's own stream, maintenance closing, or an
+infrastructure fault.
+
+Those failures are recorded against the parent's fork, wherever they are raised.
+A transient one is retried up to the attempt limit and then settles as failed with
+the reason; a refusal the domain makes settles as failed immediately; and the
+child's own start event settles the record as started (#1463). So a child that
+never appears has a recorded reason rather than an indefinite retry.
+
+## Over the API
+
+```bash
+curl -X POST "$SYN_API_URL/api/v1/executions/exec-1234/fork" \
+  -u "${SYN_API_USER:-admin}:$SYN_API_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  -d '{"override_cancellation": false, "acknowledge_external_effects": false}'
+```
+
+```json
+{
+  "parent_execution_id": "exec-1234",
+  "execution_id": "exec-9a1c77e04b12",
+  "resume_phase_id": "implement",
+  "inherited_phase_ids": ["premise", "plan"],
+  "cancellation_overridden": false,
+  "external_effects_acknowledged": false
+}
+```
+
+| Code | Meaning |
+| --- | --- |
+| `200` | The fork was **admitted**. The child starts asynchronously. |
+| `404` | No such execution. |
+| `409` | A refusal: the parent's status, a missing decision, a parent already forked, a snapshot the child cannot start from, or an inheritance that cannot be read. The reason is in `detail`. |
+| `503` | No unused execution id could be minted. Retry. |
+
+A malformed body or field is **422** from request validation, and an
+infrastructure fault is **500**. A refusal is 409 rather than 400 because it is a
+conflict with what the parent recorded, not a malformed request.
+
+## If the child never appears
+
+A successful fork is an admission, and the child is started by a background
+process. If no child execution shows up:
+
+1. Check whether the child exists at all: `syn execution show <child-id>`, using
+   the `execution_id` the fork returned. If it is there, the start worked and the
+   problem is in the run rather than the fork.
+2. Check whether admission is closed. A held start resumes on its own when
+   maintenance reopens.
+3. Check the API logs for `Background fork start raised exception` and for the
+   fork-start records the process manager writes. The record does now carry the
+   outcome - held, retrying, given up, and the reason - but it is **not** readable
+   through `syn` or the API yet (#1464), so reaching it needs log or database
+   access that a self-hosted operator may not have. That gap is why this step
+   reads the way it does.
+4. Causes worth ruling out in order: maintenance mode, artifact-list projection
+   lag, whether the inherited artifacts still exist, and event-store errors.
+
+## Verifying it after a deploy
+
+Worth doing once on a disposable workflow after upgrading:
+
+1. Confirm `/openapi.json` contains `POST /executions/{execution_id}/fork`, and
+   that your `syn` build matches the API.
+2. Run a workflow that completes one phase and then fails inside the next. Note
+   the parent id and the completed phase's artifacts.
+3. Fork it with no flags. Expect **409** mentioning external effects. A refusal
+   writes nothing, so the next step must still succeed - that is how you confirm
+   it, since the parent's fork state is not exposed through `syn` yet (#1464).
+4. Fork it with `--acknowledge-external-effects`. Expect **200**, a new child id,
+   the right resume phase and inherited prefix. Fork the parent again and expect
+   **409** naming the fork it already has.
+5. Follow the child with `syn execution show <child-id>`: the inherited phases
+   should not re-run, the resumed phase should run with its predecessors' files
+   available, and the parent should still read `failed`.
+
+## Forking for comparison
+
+Resuming a failed run is what forking pays for today. The same primitive is what
+comparison would be built on - a fork starts from a recorded baseline rather than
+from whatever the workflow says now - but **there is no way to vary anything yet.**
+
+A fork copies the parent's pinned phases and inputs exactly. The API accepts no
+overrides, so you cannot currently fork a run with a different model or an edited
+phase. That is future capability, not a switch you are missing.
+
+<Callout type="warn">
+  Two further limits matter if you are thinking about controlled comparisons. The
+  commit each repository was at **is** recorded on an execution, but the workspace
+  still clones the default branch rather than checking out that commit, so two
+  runs cannot be asserted to have seen the same code. And a fork inherits its
+  parent's configuration and inputs, so what can differ between a parent and its
+  fork is which phases ran, and - until #1458 - the code on the default branch at
+  the moment each one is provisioned.
+</Callout>
+
+## See also
+
+- [Observability](/docs/guide/observability) - watching the forked run
+- [Core Concepts](/docs/guide/core-concepts) - executions, phases and artifacts
+- [`syn execution`](/docs/cli/execution) - the full command reference
