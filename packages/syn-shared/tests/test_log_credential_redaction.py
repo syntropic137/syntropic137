@@ -21,7 +21,9 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
-SECRET = "752d61ec9cd57ca11e7e6e6abfaeac14"
+# Obviously fake. Never paste a real credential into a fixture, even a
+# fragment of one: this repo is public.
+SECRET = "not-a-real-password-0000000000"
 
 
 @pytest.mark.parametrize(
