@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
 from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
@@ -305,12 +306,19 @@ async def test_large_inventory_pages_without_loss_under_concurrent_revisions(
         ]
 
 
-def _scans(plan: dict[str, object]) -> list[tuple[str, str]]:
-    found = [(str(plan.get("Node Type")), str(plan.get("Relation Name", "")))]
-    children = plan.get("Plans", [])
-    assert isinstance(children, list)
-    for child in children:
-        assert isinstance(child, dict)
+class _PlanNode(BaseModel):
+    """The slice of a Postgres ``EXPLAIN (FORMAT JSON)`` node these tests read."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore", populate_by_name=True)
+
+    node_type: str = Field(alias="Node Type")
+    relation_name: str = Field(default="", alias="Relation Name")
+    plans: tuple[_PlanNode, ...] = Field(default=(), alias="Plans")
+
+
+def _scans(plan: _PlanNode) -> list[tuple[str, str]]:
+    found = [(plan.node_type, plan.relation_name)]
+    for child in plan.plans:
         found.extend(_scans(child))
     return found
 
@@ -371,7 +379,7 @@ async def test_page_queries_are_bounded_and_index_served(
         for sql, args in statements:
             raw = await conn.fetchval(f"EXPLAIN (FORMAT JSON) {sql}", *args)
             assert raw is not None
-            plan = json.loads(raw)[0]["Plan"]
+            plan = _PlanNode.model_validate(json.loads(raw)[0]["Plan"])
             scans = _scans(plan)
             big = [
                 node
@@ -380,7 +388,7 @@ async def test_page_queries_are_bounded_and_index_served(
             ]
             assert big, sql
             assert all(node != "Seq Scan" for node in big), (sql, scans)
-            assert plan["Node Type"] == "Limit", sql
+            assert plan.node_type == "Limit", sql
 
 
 async def test_rows_written_before_query_columns_are_backfilled(
