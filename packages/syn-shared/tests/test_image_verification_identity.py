@@ -100,7 +100,6 @@ def test_rollback_identity_still_admits_the_ap_release_build() -> None:
     assert not _matches(AGENTIC_PRIMITIVES_IDENTITY_REGEXP, AW_RELEASE_SIGNER)
 
 
-@pytest.mark.unit
 def test_default_setting_is_the_new_publisher_only() -> None:
     """The shipped default must be agentic-workspace, and only it."""
     settings = ImageVerificationSettings(
@@ -113,7 +112,6 @@ def test_default_setting_is_the_new_publisher_only() -> None:
     )
 
 
-@pytest.mark.unit
 def test_the_retired_identity_is_still_exported() -> None:
     """Not trusted by default, but still SPELLED here.
 
@@ -129,83 +127,6 @@ def test_the_retired_identity_is_still_exported() -> None:
     )
 
 
-@pytest.mark.unit
-def test_verification_is_on_by_default() -> None:
-    """Verification must fail closed by default."""
-    settings = ImageVerificationSettings(
-        _env_file=None,  # pyright: ignore[reportCallIssue]
-    )
-    assert settings.enabled is True
-    assert settings.allow_local_images is False
-    "/.github/workflows/release-images.yml@refs/heads/release",
-    "https://github.com/attacker/agentic-workspace"
-    "/.github/workflows/release-images.yml@refs/heads/release",
-    # Anchor checks: a good identity embedded in a longer SAN must not match.
-    f"https://evil.example.com/?x={_WORKSPACE_WORKFLOW}@refs/heads/release",
-    f"{_WORKSPACE_WORKFLOW}@refs/heads/release.evil.example.com",
-    # Host confusion: the dots in the pattern are escaped, so this must fail.
-    "https://githubXcom/AgentParadise/agentic-workspace"
-    "/.github/workflows/release-images.yml@refs/heads/release",
-]
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("identity", ADMITTED)
-def test_admitted_publisher_identities_match(identity: str) -> None:
-    assert re.match(WORKSPACE_IMAGE_IDENTITY_REGEXP, identity) is not None
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("identity", REJECTED)
-def test_rejected_identities_do_not_match(identity: str) -> None:
-    assert re.match(WORKSPACE_IMAGE_IDENTITY_REGEXP, identity) is None
-
-
-@pytest.mark.unit
-def test_fullmatch_and_search_agree() -> None:
-    """A substring match must not be possible for any admitted identity.
-
-    ``cosign`` applies the pattern with Go's regexp, which is unanchored by
-    default, so a pattern that only works under ``re.match`` would be a real
-    hole. Every alternative therefore carries its own ``^``/``$``, and
-    ``re.search`` must reject the same things ``re.match`` rejects.
-    """
-    for identity in REJECTED:
-        assert re.search(WORKSPACE_IMAGE_IDENTITY_REGEXP, identity) is None
-    for identity in ADMITTED:
-        assert re.search(WORKSPACE_IMAGE_IDENTITY_REGEXP, identity) is not None
-
-
-@pytest.mark.unit
-def test_default_setting_is_the_new_publisher_only() -> None:
-    """The shipped default must be agentic-workspace, and only it."""
-    settings = ImageVerificationSettings(
-        _env_file=None,  # pyright: ignore[reportCallIssue]
-    )
-    assert settings.certificate_identity_regexp == WORKSPACE_IMAGE_IDENTITY_REGEXP
-    assert WORKSPACE_IMAGE_IDENTITY_REGEXP == AGENTIC_WORKSPACE_IDENTITY_REGEXP
-    assert "agentic-primitives" not in WORKSPACE_IMAGE_IDENTITY_REGEXP, (
-        "the retired publisher is still trusted by default"
-    )
-
-
-@pytest.mark.unit
-def test_the_retired_identity_is_still_exported() -> None:
-    """Not trusted by default, but still SPELLED here.
-
-    An operator overriding SYN_WORKSPACE_DOCKER_IMAGE to an old
-    agentic-primitives digest needs its signer's identity. Deleting the
-    constant would leave them writing one by hand, which is how a wrong
-    identity constraint gets authored.
-    """
-    assert "agentic-primitives" in AGENTIC_PRIMITIVES_IDENTITY_REGEXP
-    assert re.match(
-        AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
-        f"{_AP}/.github/workflows/build-workspace-images.yml@refs/heads/release",
-    )
-
-
-@pytest.mark.unit
 def test_verification_is_on_by_default() -> None:
     """Verification must fail closed by default."""
     settings = ImageVerificationSettings(
