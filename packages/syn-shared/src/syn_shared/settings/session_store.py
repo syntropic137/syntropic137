@@ -2,7 +2,7 @@
 
 Syntropic137 can forward every agent session it runs to a central SeshMagic
 session store. The capture itself is implemented by a capability that ships in
-the agentic-primitives workspace image and activates purely from environment
+the agentic-workspace workspace image and activates purely from environment
 variables; Syn137's only job is to supply the contract at provision time.
 
 **This is opt-in and defaults to completely OFF.** Syntropic137 must stay

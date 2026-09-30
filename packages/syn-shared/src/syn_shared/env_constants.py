@@ -91,10 +91,10 @@ ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES = "SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES"
 ENV_SYN_IMAGE_VERIFY_COSIGN_PATH = "SYN_IMAGE_VERIFY_COSIGN_PATH"
 
 # ---------------------------------------------------------------------------
-# Session store capability env vars (agentic-primitives workspace image)
+# Session store capability env vars (agentic-workspace workspace image)
 #
 # These are read INSIDE the workspace container by the session-store capability
-# that ships in the agentic-primitives workspace image. Syn137 does not read
+# that ships in the agentic-workspace workspace image. Syn137 does not read
 # them; it only writes them into the container environment at provision time.
 #
 # The capability is a complete no-op when AGENTIC_SESSION_STORE_PROVIDER is

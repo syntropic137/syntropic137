@@ -1,11 +1,19 @@
 """Container image signature verification settings (cosign keyless / Sigstore).
 
+<<<<<<< HEAD
+agentic-workspace signs every published workspace image with cosign keyless
+OIDC at build time (``.github/workflows/release-images.yml``, the
+``sign-and-verify-image`` action). Until this module existed nothing on the
+Syntropic137 side checked those signatures, which made them evidence nobody
+read.
+=======
 The publisher signs every workspace image with cosign keyless OIDC at build
 time. That is agentic-workspace as of 2026-09-25
 (``.github/workflows/release-images.yml``), and was agentic-primitives before
 it (``.github/workflows/build-workspace-images.yml``). Until this module
 existed nothing on the Syntropic137 side checked those signatures, which made
 them evidence nobody read.
+>>>>>>> origin/main
 
 Keyless verification is only meaningful with identity constraints. A bare
 ``cosign verify`` with no ``--certificate-identity`` and no
@@ -18,6 +26,25 @@ off the publishing workflow, not guessed:
 - The certificate identity (the SAN on the Fulcio cert) for a GitHub Actions
   keyless signature is the workflow reference:
   ``https://github.com/<owner>/<repo>/<workflow path>@<git ref>``.
+<<<<<<< HEAD
+  For this publisher that is exactly
+  ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/heads/release``
+  (the ``SIGNER_IDENTITY`` env of that workflow).
+
+The trust root is the protected ``release`` branch of agentic-workspace
+(PR-only from main, required checks, no force push). Its release workflow
+publishes and signs ONLY on a push to ``release``: not from main, not from a
+tag, not from a pull request, not from ``workflow_dispatch``. A tag or a
+GitHub release can be created against any ref and would bypass the PR gate on
+``release``, so the default admits no tag identity and no other branch. It is
+a regexp only so it can be anchored; it matches exactly one SAN.
+
+Rollback to agentic-primitives images sets
+``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` to
+``AGENTIC_PRIMITIVES_IDENTITY_REGEXP`` below together with an AP digest in
+``SYN_WORKSPACE_DOCKER_IMAGE``; see
+``syn_shared.settings.workspace_images`` ("Rollback to agentic-primitives").
+=======
   For the current publisher that is
   ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/heads/release``.
 
@@ -33,6 +60,7 @@ The default is a regexp rather than an exact identity for two reasons:
 
 Each identity names one workflow in one repository, anchored end to end, and
 admits no other workflow, repository, or ref.
+>>>>>>> origin/main
 
 Environment Variables:
     SYN_IMAGE_VERIFY_* - signature verification configuration
@@ -46,8 +74,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 #: OIDC issuer for GitHub Actions keyless signing.
 GITHUB_ACTIONS_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 
-#: Certificate identity (SAN) regexp for the agentic-primitives image publisher.
+#: Certificate identity (SAN) regexp for the agentic-workspace image publisher:
+#: its release workflow, on its protected ``release`` branch, and nothing else.
 #: Anchored at both ends so it matches the whole SAN, not a substring.
+AGENTIC_WORKSPACE_IDENTITY_REGEXP = (
+    r"^https://github\.com/AgentParadise/agentic-workspace"
+    r"/\.github/workflows/release-images\.yml"
+    r"@refs/heads/release$"
+)
+
+#: ROLLBACK ONLY. The identity of the former publisher, agentic-primitives.
+#: Not a default anywhere: an operator rolling back to a pinned AP digest sets
+#: ``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` to this value. Remove it
+#: once AP stops publishing workspace images and no rollback window remains.
 AGENTIC_PRIMITIVES_IDENTITY_REGEXP = (
     r"^https://github\.com/AgentParadise/agentic-primitives"
     r"/\.github/workflows/build-workspace-images\.yml"
@@ -123,7 +162,11 @@ class ImageVerificationSettings(BaseSettings):
     )
 
     certificate_identity_regexp: str = Field(
+<<<<<<< HEAD
+        default=AGENTIC_WORKSPACE_IDENTITY_REGEXP,
+=======
         default=WORKSPACE_IMAGE_IDENTITY_REGEXP,
+>>>>>>> origin/main
         description=(
             "Regexp matched against the signing certificate identity (SAN). "
             "For GitHub Actions keyless signing this is the workflow reference "

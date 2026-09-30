@@ -1,5 +1,15 @@
 """Image names must match what agentic-workspace actually publishes.
 
+<<<<<<< HEAD
+A workspace image name is a cross-repo contract: agentic-workspace's release
+workflow (``.github/workflows/release-images.yml``) declares, per publishing
+job, ``PROVIDER: <provider>`` and ``IMAGE: ghcr.io/agentparadise/<name>``, and
+this repo has to reference the same ``<name>``. Deriving it from a pattern is
+the tempting move and it is wrong - claude-cli publishes as
+``agentic-workspace-claude``, because ``agentic-workspace-claude-cli`` is the
+GHCR package agentic-primitives already owns. The manifest ``image.tag`` is only
+the LOCAL build tag and does not decide the published name.
+=======
 A workspace image name is a cross-repo contract, and the authoritative source
 MOVED when publishing moved.
 
@@ -23,32 +33,44 @@ The exception also moved: agentic-primitives made omni-agent the odd one out,
 agentic-workspace makes claude-cli the odd one out. A test that only checked
 "an override exists" would pass before and after while naming the wrong
 image.
+>>>>>>> origin/main
 
-Getting it wrong fails at workspace provision time, in a container pull error
-far from the constant that caused it. These tests read the submodule manifests
-and compare, so a rename upstream fails here instead.
+Getting it wrong fails at workspace provision time, in a pull or signature
+error far from the constant that caused it. These tests read the vendored
+workflow and compare, so a rename upstream fails here instead.
 
-Skipped when the submodule is not checked out, so a shallow clone does not fail
-the suite - the CI job that has submodules is the one that enforces this.
+Skipped when the submodule is not checked out, or when the vendored commit
+predates the release-branch pipeline (no PROVIDER/IMAGE pairs), so a shallow
+clone does not fail the suite.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from syn_shared.settings.workspace_images import (
+    AW_RELEASE_DIGEST_PENDING,
+    DEFAULT_WORKSPACE_IMAGE,
+    GHCR_OWNER,
+    GHCR_REGISTRY,
     PINNED_DIGESTS,
     WorkspaceImageProvider,
     workspace_image_name,
     workspace_image_ref,
 )
 
+<<<<<<< HEAD
+pytestmark = pytest.mark.unit
+
+=======
 #: ``release-images.yml`` in the PUBLISHING repository is what decides the
 #: repository each digest is pushed to. Not the provider manifests: under
 #: agentic-workspace those still carry agentic-primitives names and disagree
 #: with what is published.
+>>>>>>> origin/main
 _RELEASE_WORKFLOW = (
     Path(__file__).resolve().parents[3]
     / "lib"
@@ -56,6 +78,28 @@ _RELEASE_WORKFLOW = (
     / ".github"
     / "workflows"
     / "release-images.yml"
+<<<<<<< HEAD
+)
+
+_PAIR = re.compile(
+    r"^\s+PROVIDER:\s*([\w-]+)\s*\n\s+IMAGE:\s*"
+    + re.escape(f"{GHCR_REGISTRY}/{GHCR_OWNER}/")
+    + r"([\w.-]+)\s*$",
+    re.MULTILINE,
+)
+
+
+def _published_names() -> dict[str, str]:
+    if not _RELEASE_WORKFLOW.is_file():
+        pytest.skip("agentic-workspace submodule not checked out")
+    pairs = dict(_PAIR.findall(_RELEASE_WORKFLOW.read_text()))
+    if not pairs:
+        pytest.skip(
+            "vendored agentic-workspace predates the release-branch pipeline "
+            "(no PROVIDER/IMAGE pairs in release-images.yml)"
+        )
+    return pairs
+=======
 )
 
 
@@ -81,10 +125,19 @@ def _published_repositories() -> dict[str, str] | None:
             found[provider] = ref.rsplit("/", 1)[-1]
             provider = None
     return found or None
+>>>>>>> origin/main
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize("provider", list(WorkspaceImageProvider))
+<<<<<<< HEAD
+def test_image_name_matches_the_release_workflow(provider: WorkspaceImageProvider) -> None:
+    published = _published_names()
+    assert provider.value in published, (
+        f"agentic-workspace's release workflow does not publish {provider.value!r}; "
+        f"it publishes {sorted(published)}. A pinned provider nobody publishes cannot "
+        f"be bumped."
+    )
+=======
 def test_image_name_matches_what_the_publisher_pushes(provider: WorkspaceImageProvider) -> None:
     published = _published_repositories()
     if published is None:
@@ -97,6 +150,7 @@ def test_image_name_matches_what_the_publisher_pushes(provider: WorkspaceImagePr
             f"digest - or the workflow renamed its PROVIDER value."
         )
 
+>>>>>>> origin/main
     assert workspace_image_name(provider) == published[provider.value], (
         f"{provider.value}: this repo references {workspace_image_name(provider)!r} but "
         f"agentic-workspace publishes {published[provider.value]!r}. Add or correct an "
@@ -105,6 +159,20 @@ def test_image_name_matches_what_the_publisher_pushes(provider: WorkspaceImagePr
     )
 
 
+<<<<<<< HEAD
+class TestClaudeIsTheKnownException:
+    """Pin the specific case that motivated the override map."""
+
+    def test_claude_does_not_use_the_derived_name(self) -> None:
+        name = workspace_image_name(WorkspaceImageProvider.CLAUDE_CLI)
+        assert name == "agentic-workspace-claude"
+        # AP's package: pulling it would run an image signed by another identity.
+        assert name != "agentic-workspace-claude-cli"
+
+    def test_claude_ref_is_fully_qualified(self) -> None:
+        ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
+        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-claude"
+=======
 @pytest.mark.unit
 def test_every_published_provider_is_known_here() -> None:
     """A provider the publisher ships but this repo does not model is a gap.
@@ -168,28 +236,35 @@ class TestDerivedProvidersUnchanged:
     def test_omni_agent_now_derives(self) -> None:
         ref = workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
         assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-omni-agent"
+>>>>>>> origin/main
         assert "@sha256:" in ref
 
 
-@pytest.mark.unit
-class TestEveryProviderIsPinned:
-    """A provider without a digest pin is a KeyError at workspace provision time.
+class TestDerivedProviders:
+    """Providers without an override use ``agentic-workspace-<provider>``."""
 
-    ``workspace_image_ref`` subscripts PINNED_DIGESTS directly, so adding an
-    enum member without a matching pin does not fail here - it fails far away,
-    when a workspace is being created. This test moves that failure to the
-    place that can fix it.
+    def test_omni_derives(self) -> None:
+        ref = workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
+        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-omni-agent"
+        # The AP name: a different publisher and signing identity.
+        assert "omni-agent-workspace" not in ref
+
+    def test_buildfloor_derives_and_is_the_default(self) -> None:
+        ref = workspace_image_ref(WorkspaceImageProvider.BUILDFLOOR)
+        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-buildfloor"
+        assert ref == DEFAULT_WORKSPACE_IMAGE
+
+
+def test_every_provider_is_pinned() -> None:
+    assert set(PINNED_DIGESTS) == set(WorkspaceImageProvider)
+
+
+def test_no_pin_is_the_pending_placeholder() -> None:
+    """RED UNTIL #1417: the switchover must not ship without real digests.
+
+    AW_RELEASE_DIGEST_PENDING exists only so this branch can be prepared before
+    agentic-workspace's first release. Fill PINNED_DIGESTS from that release
+    run; never delete or skip this test to make the suite green.
     """
-
-    def test_all_providers_have_a_pinned_digest(self) -> None:
-        missing = [p.value for p in WorkspaceImageProvider if p not in PINNED_DIGESTS]
-        assert not missing, (
-            f"providers with no PINNED_DIGESTS entry: {missing}. "
-            f"Resolve the multi-arch index digest with `docker buildx imagetools "
-            f"inspect` and add it, or workspace provision raises KeyError."
-        )
-
-    def test_every_provider_resolves_to_a_digest_reference(self) -> None:
-        for provider in WorkspaceImageProvider:
-            ref = workspace_image_ref(provider)
-            assert "@sha256:" in ref, f"{provider.value} is not digest-pinned: {ref}"
+    pending = sorted(p.value for p, d in PINNED_DIGESTS.items() if d == AW_RELEASE_DIGEST_PENDING)
+    assert not pending, f"TODO(#1417): digests still pending for {pending}"

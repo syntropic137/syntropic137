@@ -2,7 +2,7 @@
 
 This package contains adapter implementations for the workspace bounded context:
 - service/: WorkspaceService facade (RECOMMENDED entry point)
-- agentic/: Adapters using agentic_isolation from agentic-primitives
+- agentic/: Adapters using agentic_isolation from agentic-workspace
 - memory/: In-memory adapters for testing (TEST ENVIRONMENT ONLY)
 - docker/: Sidecar proxy adapter
 - recording/: Recording playback for integration testing (TEST ENVIRONMENT ONLY)

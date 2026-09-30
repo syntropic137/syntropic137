@@ -1,6 +1,6 @@
 """Build the session-store contract injected into workspace containers.
 
-The session-store capability ships inside the agentic-primitives workspace
+The session-store capability ships inside the agentic-workspace workspace
 image and activates purely from environment variables. Syntropic137's entire
 job is to write those variables into the container environment at provision
 time; there is no capture code on this side.
@@ -97,7 +97,7 @@ TAG_PHASE_ID = "phase_id"
 TAG_DEPLOYMENT = "deployment"
 
 #: Value of the ``source`` tag. Lets the store distinguish Syn137-originated
-#: sessions from sessions captured by any other agentic-primitives consumer.
+#: sessions from sessions captured by any other agentic-workspace consumer.
 SOURCE_SYNTROPIC137 = "syntropic137"
 
 #: Separator in the ``<app>__<tier>`` deployment convention (APS-V1-0004

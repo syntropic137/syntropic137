@@ -60,7 +60,7 @@ All other event type constants already conformed (e.g., `SESSION_STARTED = "sess
 ### Single source of truth
 
 `packages/syn-shared/src/syn_shared/events/__init__.py` is the authoritative constant registry.
-All producers (`agentic-primitives`) and consumers (`WorkflowExecutionEngine`, projections,
+All producers (`agentic-workspace`, moved from agentic-primitives, 2026-09) and consumers (`WorkflowExecutionEngine`, projections,
 `ObservationType`) MUST use these constants. Direct string literals are forbidden.
 
 ### Enforcement

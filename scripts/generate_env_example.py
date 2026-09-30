@@ -424,7 +424,7 @@ def generate_env_example() -> str:
 
     # Workspace image signature verification (SYN_IMAGE_VERIFY_* prefix).
     # ON by default and fails closed: a remote workspace image must carry a
-    # valid cosign keyless signature from the agentic-primitives publishing
+    # valid cosign keyless signature from the agentic-workspace publishing
     # workflow before a container is created.
     lines.extend(
         generate_settings_section(
