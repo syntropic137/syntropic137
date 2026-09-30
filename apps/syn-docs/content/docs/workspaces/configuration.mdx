@@ -5,11 +5,19 @@ description: "How to configure workspace images: custom images, environment vari
 
 ## Choosing a Workspace Image
 
+<<<<<<< HEAD
 The default workspace image is `agentic-workspace-buildfloor`, pinned by digest in `syn-shared`. It is the omni-agent image (both the claude and the codex harness, so switching a phase's `agent.provider` needs no image change) plus a native build floor: a C toolchain, rustup, pnpm and bun.
 
 ```bash
 # Override via environment variable
 SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/agentic-workspace-buildfloor@sha256:<digest>
+=======
+The default workspace image is `agentic-workspace-omni-agent`, pinned by digest in `syn-shared`. It hosts both the claude and the codex harness, so switching a phase's `agent.provider` needs no image change.
+
+```bash
+# Override via environment variable
+SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:<digest>
+>>>>>>> origin/main
 ```
 
 To use a custom or locally-built image:

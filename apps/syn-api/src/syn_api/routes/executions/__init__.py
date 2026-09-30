@@ -9,19 +9,24 @@ from fastapi import APIRouter
 
 from .commands import execute
 from .commands import router as commands_router
-from .control import cancel, get_state, inject, pause, resume
+from .control import cancel, get_state, inject
 from .control import router as control_router
 from .queries import get, get_detail, list_, list_active
 from .queries import router as queries_router
+from .resume import ResumeRequest, ResumeResponse, resume
+from .resume import router as resume_router
 
 router = APIRouter()
 router.include_router(queries_router)
 router.include_router(commands_router)
 router.include_router(control_router)
+router.include_router(resume_router)
 
 # Re-export service functions so callers can do:
-#   from syn_api.routes.executions import list_, execute, pause, ...
+#   from syn_api.routes.executions import list_, execute, cancel, ...
 __all__ = [
+    "ResumeRequest",
+    "ResumeResponse",
     "cancel",
     "execute",
     "get",
@@ -30,7 +35,6 @@ __all__ = [
     "inject",
     "list_",
     "list_active",
-    "pause",
     "resume",
     "router",
 ]

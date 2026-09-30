@@ -119,8 +119,6 @@ syn marketplace refresh
 syn execution list                   # List all executions
 syn execution show <id>              # Show execution detail
 
-syn control pause <id>               # Pause at next yield point
-syn control resume <id>              # Resume paused execution
 syn control cancel <id> --force      # Cancel execution
 syn control status <id>              # Check execution state
 syn control inject <id> -m "msg"     # Inject a message

@@ -188,7 +188,7 @@ def compute_duration_seconds(
     return elapsed
 
 
-_IN_FLIGHT_STATUSES = frozenset({"running", "paused"})
+_IN_FLIGHT_STATUSES = frozenset({"running"})
 """Statuses that mean "still accruing wall-clock time, no completion recorded"."""
 
 

@@ -13,6 +13,7 @@ having it fail during real work.
 | `skills-injection` | a vendored skill AND an external pinned skill both reach the agent's context |
 | `delegation` | a codex leader can hand work to `claude -p`, and BOTH legs get priced |
 | `github-ops` | the GitHub App token can open an issue, comment, and close it |
+| `long-push` | a phase still pushes and uses `gh` after the installation token's 60-minute TTL (#725). Takes ~75 minutes; check `PUSHED_AT - STARTED` exceeds 60 minutes before trusting a pass |
 
 ## Running
 

@@ -26,7 +26,7 @@ hook existed, which is the property actually wanted.
 ## Drift
 
 ``prepare-commit-msg`` here is a byte-for-byte MIRROR of the submodule's copy,
-not a fork. ``test_attribution_hook_matches_submodule`` fails if they diverge,
+not a divergent copy. ``test_attribution_hook_matches_submodule`` fails if
 so there is one source of truth and a gate that says so out loud. When #401
 lands and every supported image carries the hook, this module can be deleted;
 until then it is the only thing that makes the feature real.

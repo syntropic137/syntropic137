@@ -153,8 +153,6 @@ syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
 
 ```bash
 syn control status <execution-id>
-syn control pause <execution-id> --reason "investigating"
-syn control resume <execution-id>
 syn control cancel <execution-id>
 ```
 
@@ -173,7 +171,6 @@ phases:
     agent:
       provider: codex           # a different model reviews the work
       model: gpt-sol            # platform alias for gpt-6-sol, see note below
-      sandbox: read-only        # codex honours this, claude does not yet
 ```
 
 Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, a phase
@@ -265,7 +262,7 @@ syntropic137/
 │   ├── syn-perf/                # Performance benchmarking
 │   └── openclaw-plugin/         # OpenClaw integration
 ├── lib/                         # Git submodules (our own projects)
-│   ├── agentic-workspace/      # Agent building blocks, isolation providers
+│   ├── agentic-workspace/       # Workspace images, isolation providers, event recording
 │   ├── event-sourcing-platform/ # Rust event store, Python SDK, VSA tool
 │   ├── syntropic137-claude-plugin/ # Claude Code plugin
 │   └── agent-paradise-standards-system/ # Architecture fitness functions

@@ -53,7 +53,7 @@ syntropic137/
 │   ├── syn-collector/         # Event ingestion API
 │   └── syn-shared/            # Shared settings, configuration
 ├── lib/                       # Git submodules (we manage both - dogfooding)
-│   ├── agentic-workspace/     # Workspace images, isolation providers, capture runtime
+│   ├── agentic-workspace/     # Workspace images, isolation providers, agent event recording
 │   └── event-sourcing-platform/ # ES infrastructure, VSA tool, projections
 ├── infra/                     # Docker Compose, setup wizard, secrets
 ├── docs/                      # Internal/local development docs (ADRs, architecture notes,
@@ -67,7 +67,7 @@ syntropic137/
 
 Both are our own projects - we dogfood them. If something needs fixing, push the fix directly to the submodule repo. Don't work around it.
 
-- **agentic-workspace** (AgentParadise/agentic-workspace): workspace images (claude, omni-agent, buildfloor), workspace isolation providers, agent event recording/playback, capture capabilities. Replaced agentic-primitives as the workspace dependency; the claude-plugin marketplace (`AgentParadise/agentic-primitives`) is unaffected
+- **agentic-workspace**: Workspace images (claude, omni-agent, toolchain), isolation providers, agent event recording/playback, harness adapters. Publishes and signs every workspace image from its protected `release` branch; Syntropic137 pins those digests. Replaced agentic-primitives on 2026-09-25 - that submodule is gone and nothing here depends on it.
 - **event-sourcing-platform**: Rust event store, Python SDK, VSA validation CLI, projection framework
 
 #### Where does this change belong?
@@ -96,10 +96,10 @@ That keeps the domain testable against a double and stops CLI details leaking
 into the domain model.
 
 **The split has a real delivery cost, so plan for it.** A change in
-agentic-workspace reaches a running workspace only after: merge -> PR to its
-protected `release` branch (the only thing that builds, signs and publishes)
--> a `PINNED_DIGESTS` + submodule bump here. Pushing to `main` publishes
-nothing. So put as little in the submodule as genuinely needs
+agentic-workspace reaches a running workspace only after: merge -> image
+build -> the protected `release` channel -> a `PINNED_DIGESTS` bump here.
+Pushing to `main` publishes `:edge` only, which is explicitly unreviewed and is
+NOT what consumers pull. So put as little in the submodule as genuinely needs
 to be there, and define the contract first so work on both sides can proceed in
 parallel instead of serialising behind the image.
 
@@ -241,11 +241,49 @@ Pydantic models (syn-api/types.py)
 
 | Context | Aggregates | Key Operations | Purpose |
 |---------|------------|----------------|---------|
-| `orchestration` | Workspace, Workflow, WorkflowExecution | Create, archive (soft-delete), execute, pause/resume/cancel | Workflow execution and workspace management |
+| `orchestration` | Workspace, Workflow, WorkflowExecution | Create, archive (soft-delete), execute, resume, cancel | Workflow execution and workspace management |
 | `agent_sessions` | AgentSession | Start, record operations, complete | Agent sessions and observability |
 | `github` | Installation, TriggerRule | Register, configure, fire triggers | GitHub App integration, trigger rules, hybrid event pipeline (webhooks + Events API + Checks API polling with dedup) |
 | `artifacts` | Artifact | Create, upload, retrieve | Artifact storage |
 | `organization` | Organization, System, Repo | CRUD, assign/unassign repos to systems | Organization hierarchy, system/repo management, insights |
+
+### Ubiquitous Language
+
+Every bounded context owns a vocabulary file. This is a DDD requirement, not a
+documentation nicety: a bounded context is defined by the language that holds
+inside it, so a context whose words are not written down has no boundary anyone
+can check.
+
+**Naming standard (enforced):**
+
+```
+docs/architecture/<bounded-context>-ubiquitous-language.md
+```
+
+The `<bounded-context>` segment MUST match the directory name under
+`packages/syn-domain/src/syn_domain/contexts/`. The file name alone tells you
+which context it speaks for, so no two vocabularies can be confused and an
+orphaned file is detectable.
+
+**Rules:**
+
+| Rule | Why |
+|------|-----|
+| One file per bounded context, no exceptions | `ci/fitness/code_quality/test_ubiquitous_language.py` fails the build otherwise |
+| The same word MAY mean different things in different contexts | That is the point of a bounded context. `github`'s `resume` is not `orchestration`'s `resume`, and each file says so |
+| A term in the code MUST appear in its context's file | If you cannot name it, you do not understand it well enough to model it |
+| Words we deliberately do NOT use get their own section | A reserved or rejected word is as load-bearing as an adopted one. `fork` is reserved in `orchestration`; `pause` was deleted from it |
+| Genuine uncertainty is written down as **Unclear:**, with an issue | A vocabulary that hides its gaps lies about what the model knows |
+
+**The ESP relationship:** the event-sourcing-platform submodule provides the
+machinery (aggregates, projections, the VSA validator). It does NOT provide the
+vocabulary. Each consuming bounded context owns its own file. ESP's own glossary
+at `lib/event-sourcing-platform/docs/` covers event-sourcing mechanics
+(aggregate, projection, checkpoint), not domain meaning.
+
+**Start here:** [docs/architecture/README.md](docs/architecture/README.md) links
+every vocabulary. [docs/architecture/es-glossary.md](docs/architecture/es-glossary.md)
+covers the cross-cutting event-sourcing terms.
 
 ### TODO/FIXME Standard
 

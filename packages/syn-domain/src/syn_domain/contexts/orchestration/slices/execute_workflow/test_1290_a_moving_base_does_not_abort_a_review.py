@@ -81,6 +81,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        SourceCommit,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
@@ -136,6 +139,7 @@ async def _prompt_reaching_execution(workflow: str, phase_id: str) -> str:
             execution_id: str,
             repos: list[RepositoryRef],
             admitted: object | None = None,
+            source_commits: list[SourceCommit] | None = None,
         ) -> WorkflowExecutionResult:
             del workflow_name, inputs, repos, admitted
             captured.extend(phases)

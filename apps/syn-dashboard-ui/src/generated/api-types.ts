@@ -290,46 +290,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/executions/{execution_id}/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pause Execution Endpoint
-         * @description Pause a running execution.
-         */
-        post: operations["pause_execution_endpoint_executions__execution_id__pause_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/executions/{execution_id}/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Resume Execution Endpoint
-         * @description Resume a paused execution.
-         */
-        post: operations["resume_execution_endpoint_executions__execution_id__resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/executions/{execution_id}/cancel": {
         parameters: {
             query?: never;
@@ -341,7 +301,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel Execution Endpoint
-         * @description Cancel a running or paused execution.
+         * @description Cancel a running execution.
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -384,6 +344,26 @@ export interface paths {
         get: operations["get_execution_state_endpoint_executions__execution_id__state_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Execution Endpoint
+         * @description Resume a failed or interrupted execution so it resumes where it stopped.
+         */
+        post: operations["resume_execution_endpoint_executions__execution_id__resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2965,6 +2945,10 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Cache Read Rate Display */
+            cache_read_rate_display?: string | null;
+            /** Cache Write Rate Display */
+            cache_write_rate_display?: string | null;
             /** Total Duration Seconds */
             total_duration_seconds?: number | null;
             /**
@@ -4249,14 +4233,6 @@ export interface components {
             repo_count: number;
         };
         /**
-         * PauseRequest
-         * @description Request to pause an execution.
-         */
-        PauseRequest: {
-            /** Reason */
-            reason?: string | null;
-        };
-        /**
          * PhaseActivityInfo
          * @description What a phase was DOING when it ended, and against what budget (#1262).
          *
@@ -4354,6 +4330,26 @@ export interface components {
              * @default false
              */
             allow_delegation: boolean;
+            /**
+             * Clone Repos
+             * @default true
+             */
+            clone_repos: boolean;
+            /**
+             * Can Open Pr
+             * @default false
+             */
+            can_open_pr: boolean;
+            /**
+             * Delivers Repo Changes
+             * @default true
+             */
+            delivers_repo_changes: boolean;
+            /**
+             * Sandbox
+             * @default full-access
+             */
+            sandbox: string;
             /** Claude Plugins */
             claude_plugins?: components["schemas"]["PhaseRefResponse"][];
             /** Skills */
@@ -4469,6 +4465,16 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /**
+             * Cost In Progress
+             * @default false
+             */
+            cost_in_progress: boolean;
             /** Duration Seconds */
             duration_seconds?: number | null;
             /**
@@ -5166,6 +5172,45 @@ export interface components {
          */
         ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
         /**
+         * ResumeRequest
+         * @description What an operator must decide before a resume is admitted.
+         *
+         *     Both flags default to the REFUSAL, because both exist to make an operator
+         *     say something out loud. Neither implies the other.
+         */
+        ResumeRequest: {
+            /**
+             * Override Cancellation
+             * @description Resume a CANCELLED parent. A cancel is an instruction to stop, so resuming past it needs a fresh decision rather than inheriting the old one.
+             * @default false
+             */
+            override_cancellation: boolean;
+            /**
+             * Acknowledge External Effects
+             * @description Accept that the phase the resume restarts may already have pushed or published something in the parent, which re-running it repeats.
+             * @default false
+             */
+            acknowledge_external_effects: boolean;
+        };
+        /**
+         * ResumeResponse
+         * @description The resume that was admitted, and what the child will do.
+         */
+        ResumeResponse: {
+            /** Parent Execution Id */
+            parent_execution_id: string;
+            /** Execution Id */
+            execution_id: string;
+            /** Resume Phase Id */
+            resume_phase_id: string;
+            /** Inherited Phase Ids */
+            inherited_phase_ids: string[];
+            /** Cancellation Overridden */
+            cancellation_overridden: boolean;
+            /** External Effects Acknowledged */
+            external_effects_acknowledged: boolean;
+        };
+        /**
          * RootResponse
          * @description Payload of ``GET /`` — what this API is, and which build is serving it.
          *
@@ -5466,6 +5511,10 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Cache Read Rate Display */
+            cache_read_rate_display?: string | null;
+            /** Cache Write Rate Display */
+            cache_write_rate_display?: string | null;
             /** Operations */
             operations?: components["schemas"]["OperationInfo"][];
             /** Started At */
@@ -6820,7 +6869,7 @@ export interface components {
              */
             cache_read_tokens: number;
             /** Estimated Cost Usd */
-            estimated_cost_usd?: number | null;
+            estimated_cost_usd?: string | null;
         };
     };
     responses: never;
@@ -7351,72 +7400,6 @@ export interface operations {
             };
         };
     };
-    pause_execution_endpoint_executions__execution_id__pause_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                execution_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["PauseRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ControlResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    resume_execution_endpoint_executions__execution_id__resume_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                execution_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ControlResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     cancel_execution_endpoint_executions__execution_id__cancel_post: {
         parameters: {
             query?: never;
@@ -7505,6 +7488,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_execution_endpoint_executions__execution_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ResumeRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeResponse"];
                 };
             };
             /** @description Validation Error */

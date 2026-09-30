@@ -60,6 +60,7 @@ from syn_shared.settings.image_verification import (
     AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
     AGENTIC_WORKSPACE_IDENTITY_REGEXP,
     GITHUB_ACTIONS_OIDC_ISSUER,
+    WORKSPACE_IMAGE_IDENTITY_REGEXP,
     ImageVerificationSettings,
 )
 from syn_shared.settings.infra import InfraSettings
@@ -95,6 +96,7 @@ __all__ = [
     "DEFAULT_WORKSPACE_IMAGE",
     "GITHUB_ACTIONS_OIDC_ISSUER",
     "SESHMAGIC_PROVIDER",
+    "WORKSPACE_IMAGE_IDENTITY_REGEXP",
     "AppEnvironment",
     "CloudProvider",
     "ContainerLoggingSettings",

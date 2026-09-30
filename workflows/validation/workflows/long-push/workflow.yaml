@@ -1,0 +1,25 @@
+id: selfhost-long-push-v1
+name: "Validation: push and gh after the 60-minute token TTL (#725)"
+description: >
+  Proves a phase that runs past a GitHub App installation token's 60-minute
+  lifetime can still push and use gh. Sleeps 72 minutes, then pushes a
+  throwaway branch, calls gh, and deletes the branch. Before #725 the push
+  failed with "Invalid username or token".
+type: custom
+classification: simple
+requires_repos: true
+
+phases:
+  - id: long_push
+    name: Wait past the token TTL, then push and use gh
+    order: 1
+    execution_type: sequential
+    timeout_seconds: 5400
+    delivers_repo_changes: false
+    allowed_tools:
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/long_push.md

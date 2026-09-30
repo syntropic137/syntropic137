@@ -14,8 +14,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        ResumeOrigin,
+        SourceCommit,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        ExecutablePhase,
         FailureClassification,
         PhaseDefinition,
         ReportedFailureReason,
@@ -34,6 +39,8 @@ class StartExecutionCommand:
         inputs: dict[str, Any],
         expected_completion_at: datetime | None = None,
         phase_definitions: list[PhaseDefinition] | None = None,
+        pinned_phases: list[ExecutablePhase] | None = None,
+        source_commits: list[SourceCommit] | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -42,6 +49,36 @@ class StartExecutionCommand:
         self.inputs = inputs
         self.expected_completion_at = expected_completion_at
         self.phase_definitions = phase_definitions
+        self.pinned_phases = pinned_phases
+        self.source_commits = source_commits
+
+
+class StartResumeCommand:
+    """Command to start the execution a parent's resume admitted (ADR-014 s7).
+
+    Addressed to the CHILD: `execution_id` is the resume's own id, the one the
+    parent's `ExecutionResumed` named. Built from the parent's stream by
+    `WorkflowExecutionAggregate.resume_start_command`, never from the workflow
+    template, so every field here is what the parent ran with (#1454, #1457).
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        workflow_name: str,
+        inputs: dict[str, str],
+        pinned_phases: list[ExecutablePhase],
+        source_commits: list[SourceCommit],
+        resumed_from: ResumeOrigin,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.workflow_id = workflow_id
+        self.workflow_name = workflow_name
+        self.inputs = inputs
+        self.pinned_phases = pinned_phases
+        self.source_commits = source_commits
+        self.resumed_from = resumed_from
 
 
 class CompleteExecutionCommand:
@@ -228,32 +265,6 @@ class CompletePhaseCommand:
         self.duration_seconds = duration_seconds
 
 
-class PauseExecutionCommand:
-    """Command to pause a workflow execution."""
-
-    def __init__(
-        self,
-        execution_id: str,
-        phase_id: str,
-        reason: str | None = None,
-    ) -> None:
-        self.aggregate_id = execution_id
-        self.phase_id = phase_id
-        self.reason = reason
-
-
-class ResumeExecutionCommand:
-    """Command to resume a paused workflow execution."""
-
-    def __init__(
-        self,
-        execution_id: str,
-        phase_id: str,
-    ) -> None:
-        self.aggregate_id = execution_id
-        self.phase_id = phase_id
-
-
 class CancelExecutionCommand:
     """Command to cancel a workflow execution."""
 
@@ -360,3 +371,30 @@ class ArtifactsCollectedCommand:
         #: not complete until a later to-do item, so the fact has to be told
         #: to the aggregate here or be lost (#1195, #1300).
         self.deliverable_recovered = deliverable_recovered
+
+
+class ResumeExecutionCommand:
+    """Command to resume a terminal execution into a new one (ADR-014 s7).
+
+    Addressed to the PARENT: `execution_id` is the execution being resumed and
+    `resume_execution_id` the id the new run will have. The parent decides.
+
+    Both flags are separate, explicit operator decisions and default to the
+    refusal. `override_cancellation` is the only way to resume a CANCELLED
+    parent: a cancel is an instruction to stop, and a resume must not defeat it
+    without a fresh decision. `acknowledge_external_effects` accepts that the
+    phase the resume re-runs may have pushed or published something in the
+    parent that re-running repeats. Neither implies the other.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        resume_execution_id: str,
+        override_cancellation: bool = False,
+        acknowledge_external_effects: bool = False,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.resume_execution_id = resume_execution_id
+        self.override_cancellation = override_cancellation
+        self.acknowledge_external_effects = acknowledge_external_effects

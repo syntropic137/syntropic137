@@ -1,10 +1,19 @@
 """Container image signature verification settings (cosign keyless / Sigstore).
 
+<<<<<<< HEAD
 agentic-workspace signs every published workspace image with cosign keyless
 OIDC at build time (``.github/workflows/release-images.yml``, the
 ``sign-and-verify-image`` action). Until this module existed nothing on the
 Syntropic137 side checked those signatures, which made them evidence nobody
 read.
+=======
+The publisher signs every workspace image with cosign keyless OIDC at build
+time. That is agentic-workspace as of 2026-09-25
+(``.github/workflows/release-images.yml``), and was agentic-primitives before
+it (``.github/workflows/build-workspace-images.yml``). Until this module
+existed nothing on the Syntropic137 side checked those signatures, which made
+them evidence nobody read.
+>>>>>>> origin/main
 
 Keyless verification is only meaningful with identity constraints. A bare
 ``cosign verify`` with no ``--certificate-identity`` and no
@@ -17,6 +26,7 @@ off the publishing workflow, not guessed:
 - The certificate identity (the SAN on the Fulcio cert) for a GitHub Actions
   keyless signature is the workflow reference:
   ``https://github.com/<owner>/<repo>/<workflow path>@<git ref>``.
+<<<<<<< HEAD
   For this publisher that is exactly
   ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/heads/release``
   (the ``SIGNER_IDENTITY`` env of that workflow).
@@ -34,6 +44,23 @@ Rollback to agentic-primitives images sets
 ``AGENTIC_PRIMITIVES_IDENTITY_REGEXP`` below together with an AP digest in
 ``SYN_WORKSPACE_DOCKER_IMAGE``; see
 ``syn_shared.settings.workspace_images`` ("Rollback to agentic-primitives").
+=======
+  For the current publisher that is
+  ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/heads/release``.
+
+The default is a regexp rather than an exact identity for two reasons:
+
+1. The agentic-primitives publishing branch moved from ``main`` to a protected
+   ``release`` branch, so that identity admits either ref of that one workflow.
+2. Publishing MOVED repository, from agentic-primitives to agentic-workspace.
+   The default admitted both for the duration of that cutover; it now admits
+   agentic-workspace only, because every pin comes from there. The retired
+   identity is still exported for an operator overriding the image reference
+   to an old digest - see ``WORKSPACE_IMAGE_IDENTITY_REGEXP``.
+
+Each identity names one workflow in one repository, anchored end to end, and
+admits no other workflow, repository, or ref.
+>>>>>>> origin/main
 
 Environment Variables:
     SYN_IMAGE_VERIFY_* - signature verification configuration
@@ -65,6 +92,38 @@ AGENTIC_PRIMITIVES_IDENTITY_REGEXP = (
     r"/\.github/workflows/build-workspace-images\.yml"
     r"@refs/heads/(main|release)$"
 )
+
+#: Certificate identity (SAN) regexp for the agentic-workspace image publisher,
+#: which is taking over publishing from agentic-primitives.
+#:
+#: Narrower than the agentic-primitives identity above in one deliberate way:
+#: it admits ``refs/heads/release`` ONLY. agentic-workspace's
+#: ``release-images.yml`` publishes exclusively on a push to the protected
+#: ``release`` branch - not main, not tags, not workflow_dispatch - so
+#: admitting any other ref would accept a signature that workflow cannot
+#: legitimately produce.
+AGENTIC_WORKSPACE_IDENTITY_REGEXP = (
+    r"^https://github\.com/AgentParadise/agentic-workspace"
+    r"/\.github/workflows/release-images\.yml"
+    r"@refs/heads/release$"
+)
+
+#: The identity constraint actually applied by default: agentic-workspace ONLY.
+#:
+#: This admitted BOTH publishers during the cutover, so that a deployment still
+#: pinned to agentic-primitives digests kept verifying while the pins moved.
+#: That window is closed: every PINNED_DIGESTS entry now names an
+#: agentic-workspace-built image, which is the removal condition the cutover
+#: comment stated. Keeping the retired publisher would go on trusting a signer
+#: nothing needs, which is exactly the drift this constraint exists to prevent.
+#:
+#: AGENTIC_PRIMITIVES_IDENTITY_REGEXP is deliberately still exported. An
+#: operator who overrides ``SYN_WORKSPACE_DOCKER_IMAGE`` with an old
+#: agentic-primitives digest needs a spelling for its signer, and inventing one
+#: by hand is how a wrong constraint gets written. Set
+#: ``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` to it, or to an alternation
+#: of both, for that case only.
+WORKSPACE_IMAGE_IDENTITY_REGEXP = AGENTIC_WORKSPACE_IDENTITY_REGEXP
 
 #: Lowest cosign major version accepted by the verifier probe.
 #: v2 introduced ``--certificate-identity-regexp``; v3 is current and keeps it.
@@ -103,7 +162,11 @@ class ImageVerificationSettings(BaseSettings):
     )
 
     certificate_identity_regexp: str = Field(
+<<<<<<< HEAD
         default=AGENTIC_WORKSPACE_IDENTITY_REGEXP,
+=======
+        default=WORKSPACE_IMAGE_IDENTITY_REGEXP,
+>>>>>>> origin/main
         description=(
             "Regexp matched against the signing certificate identity (SAN). "
             "For GitHub Actions keyless signing this is the workflow reference "
@@ -137,7 +200,7 @@ class ImageVerificationSettings(BaseSettings):
         default=False,
         description=(
             "Allow running an image reference that carries no registry host "
-            "(for example 'agentic-workspace-claude-cli:dev'). OFF by default: "
+            "(for example 'agentic-workspace-claude:dev'). OFF by default: "
             "reference syntax is not proof an image is local, because Docker "
             "pulls 'myorg/image:latest' and 'ubuntu@sha256:...' from Docker Hub "
             "when they are not already present. When ON, such a reference is "

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python (pydantic v2, event sourcing via `event_sourcing` lib), MinIO, Docker, vercel-labs `skills` npm CLI (pinned `1.5.14`).
 
-**Worktree:** All work happens in `/Users/neural/Code/Syntropic137/syntropic137_worktrees/20260703_772-skills-injection` on branch `feat/772-skills-injection`. All paths below are relative to that root.
+**Worktree:** All work happens in `<repo-root>/../syntropic137_worktrees/20260703_772-skills-injection` on branch `feat/772-skills-injection`. All paths below are relative to that root.
 
 ## Global Constraints
 

@@ -4,6 +4,7 @@ This port provides read-only access to artifact projections for multi-phase
 workflows. Artifacts from previous phases are injected into subsequent phase prompts.
 """
 
+from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from syn_domain.contexts.artifacts import ArtifactSummary, PhaseOutputFile
@@ -86,6 +87,26 @@ class ArtifactQueryServicePort(Protocol):
             Dictionary mapping phase_id to that phase's files. A file created
             before ArtifactCreated v5 has ``source_path`` None, meaning its
             original path was never recorded and cannot be recovered.
+        """
+        ...
+
+    async def get_files_for_artifacts(
+        self,
+        execution_id: str,
+        phase_artifact_ids: Mapping[str, Sequence[str]],
+    ) -> dict[str, list[PhaseOutputFile]]:
+        """The files of exactly these artifacts, per phase they were named under.
+
+        What a resume hands forward from its parent (ADR-014 s7): the artifacts
+        the parent KEPT for each inherited phase, not every artifact that
+        phase's attempts ever produced.
+
+        Args:
+            execution_id: The execution that produced the artifacts.
+            phase_artifact_ids: phase_id -> the artifact ids it kept.
+
+        Returns:
+            Dictionary mapping phase_id to those artifacts' files.
         """
         ...
 

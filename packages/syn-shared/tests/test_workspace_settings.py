@@ -219,7 +219,11 @@ class TestWorkspaceImages:
     def test_default_image_is_ghcr(self) -> None:
         """Default image should reference GHCR, not a local-only name."""
         assert DEFAULT_WORKSPACE_IMAGE.startswith("ghcr.io/")
+<<<<<<< HEAD
         assert "agentic-workspace-buildfloor" in DEFAULT_WORKSPACE_IMAGE
+=======
+        assert "agentic-workspace-omni-agent" in DEFAULT_WORKSPACE_IMAGE
+>>>>>>> origin/main
 
     def test_default_image_is_digest_pinned(self) -> None:
         """The default image must be immutable: a digest, never a tag.

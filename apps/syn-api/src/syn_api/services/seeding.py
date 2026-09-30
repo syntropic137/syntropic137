@@ -84,8 +84,28 @@ async def _seed_trigger_presets() -> int:
                 installation_id="",
                 created_by="offline-seed",
             )
-            # Skip if workflow template doesn't exist yet
-            if not await workflow_repo.exists(command.workflow_id):
+            # Skip if workflow template doesn't exist yet.
+            #
+            # `exists` RAISES when the store cannot be read (ESP #310). An
+            # enclosing handler would catch that and skip the preset, which
+            # reads in the log as "workflow not found" - the same confident
+            # wrong answer the raise was introduced to stop. Caught here so the
+            # log says which of the two actually happened, at WARNING rather
+            # than DEBUG, because a store that cannot be read during seeding is
+            # worth seeing.
+            try:
+                workflow_exists = await workflow_repo.exists(command.workflow_id)
+            except Exception:
+                logger.warning(
+                    "Skipped trigger preset '%s' - could not read the event store to "
+                    "determine whether workflow '%s' exists. This is NOT a missing "
+                    "workflow; seeding did not run for this preset.",
+                    preset_name,
+                    command.workflow_id,
+                    exc_info=True,
+                )
+                continue
+            if not workflow_exists:
                 logger.debug("Skipped trigger preset '%s' — workflow not found", preset_name)
                 continue
 

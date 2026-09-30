@@ -13,6 +13,7 @@ import type {
   ExecutionListResponse,
   ExecuteWorkflowResponse,
   MetricsResponse,
+  ResumeResponse,
   SessionDetail,
   TriggerCreateResponse,
   TriggerListResponse,
@@ -135,20 +136,13 @@ export const executionDetail: ExecutionDetail = {
   error_message: null,
 };
 
-export const controlPause: ControlResponse = {
-  success: true,
-  execution_id: "exec-abc-123",
-  state: "paused",
-  message: "Execution paused",
-  error: null,
-};
-
-export const controlResume: ControlResponse = {
-  success: true,
-  execution_id: "exec-abc-123",
-  state: "running",
-  message: "Execution resumed",
-  error: null,
+export const resumeCreated: ResumeResponse = {
+  parent_execution_id: "exec-abc-123",
+  execution_id: "exec-def-456",
+  resume_phase_id: "implement",
+  inherited_phase_ids: ["research", "plan"],
+  cancellation_overridden: false,
+  external_effects_acknowledged: false,
 };
 
 export const controlCancel: ControlResponse = {

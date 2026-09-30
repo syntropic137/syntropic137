@@ -27,7 +27,11 @@ Run fast checks (don't install anything yet):
 2. **uv available** — `uv --version`
 3. **pnpm available** — `pnpm --version`
 4. **`.env` exists** — `test -f .env`
+<<<<<<< HEAD
 5. **Submodules initialized** - `test -d lib/agentic-workspace/.git`
+=======
+5. **Submodules initialized** — `test -d lib/agentic-workspace/.git`
+>>>>>>> origin/main
 6. **Python deps installed** — `test -d .venv`
 
 ### Step 3: Fix or Suggest

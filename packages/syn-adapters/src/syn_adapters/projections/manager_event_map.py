@@ -166,14 +166,6 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "ArtifactsCollectedForPhase": [("execution_todo", "on_artifacts_collected_for_phase")],
     "NextPhaseReady": [("execution_todo", "on_next_phase_ready")],
     "PhaseRetryScheduled": [("execution_todo", "on_phase_retry_scheduled")],
-    "ExecutionPaused": [
-        ("workflow_execution_list", "on_execution_paused"),
-        ("workflow_execution_detail", "on_execution_paused"),
-    ],
-    "ExecutionResumed": [
-        ("workflow_execution_list", "on_execution_resumed"),
-        ("workflow_execution_detail", "on_execution_resumed"),
-    ],
     "ExecutionCancelled": [
         ("workflow_execution_list", "on_execution_cancelled"),
         ("workflow_execution_detail", "on_execution_cancelled"),

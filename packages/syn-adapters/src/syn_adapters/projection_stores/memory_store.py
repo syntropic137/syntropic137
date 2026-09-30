@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import BaseModel
+
 from syn_adapters.in_memory import InMemoryAdapterError, assert_test_only
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.memory_store_helpers import (
@@ -22,6 +24,7 @@ from syn_adapters.projection_stores.memory_store_helpers import (
 from syn_adapters.projection_stores.memory_store_helpers import (
     clear_projection as _clear_projection,
 )
+from syn_adapters.projection_stores.record_match import holds
 
 # Re-export for backwards compatibility
 InMemoryProjectionStoreError = InMemoryAdapterError
@@ -64,6 +67,23 @@ class InMemoryProjectionStore:
         """Save or update a projection record."""
         self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(data.copy())
         self._update_state(projection)
+
+    async def save_if(
+        self, projection: str, key: str, record: BaseModel, *, expected: BaseModel | None
+    ) -> bool:
+        """Save only while the store still holds ``expected``. True if saved.
+
+        Atomic because nothing here awaits between the comparison and the
+        write, which is the property the Postgres store gets from a row lock.
+        """
+        stored = self._data.get(projection, {}).get(pg_safe(key))
+        if expected is None:
+            if stored is not None:
+                return False
+        elif stored is None or not holds(stored, expected):
+            return False
+        await self.save(projection, key, record.model_dump(mode="json"))
+        return True
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
         """Get a single projection record by key."""

@@ -3,14 +3,12 @@ import { SyntropicClient } from "../../src/client.js";
 import {
   synCancelExecution,
   synInjectContext,
-  synPauseExecution,
   synResumeExecution,
 } from "../../src/tools/control.js";
 import {
   controlCancel,
+  resumeCreated,
   controlInject,
-  controlPause,
-  controlResume,
 } from "../fixtures/responses.js";
 
 const mockFetch = vi.fn<typeof globalThis.fetch>();
@@ -33,41 +31,16 @@ function jsonResponse(data: unknown): Response {
   });
 }
 
-describe("synPauseExecution", () => {
-  it("pauses successfully", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse(controlPause));
-
-    const result = await synPauseExecution(client, {
-      execution_id: "exec-abc-123",
-      reason: "Need to review",
-    });
-
-    expect(result.isError).toBeUndefined();
-    expect(result.content).toContain("paused successfully");
-    expect(result.content).toContain("paused");
-  });
-
-  it("sends reason in body", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse(controlPause));
-
-    await synPauseExecution(client, { execution_id: "e1", reason: "test" });
-
-    const [, init] = mockFetch.mock.calls[0]!;
-    const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.reason).toBe("test");
-  });
-});
-
 describe("synResumeExecution", () => {
-  it("names the deployment the execution was restarted on (issue #1264)", async () => {
-    // Resuming restarts work, so the result has to say WHERE: `exec-abc-123`
+  it("names the deployment the resume was created on (issue #1264)", async () => {
+    // A resume CREATES a run, so the result has to say WHERE: `exec-def-456`
     // names a different run on a different deployment. Two distinct non-default
-    // hosts — the client's, and one the environment offers afterwards. Naming
+    // hosts - the client's, and one the environment offers afterwards. Naming
     // the environment's would mean the result was built from something other
     // than the client the request actually went through.
     vi.stubEnv("SYNTROPIC_URL", "http://100.114.86.77:8137");
     const vps = new SyntropicClient({ apiUrl: "http://100.112.178.5:8137" });
-    mockFetch.mockResolvedValueOnce(jsonResponse(controlResume));
+    mockFetch.mockResolvedValueOnce(jsonResponse(resumeCreated));
 
     const result = await synResumeExecution(vps, { execution_id: "exec-abc-123" });
 
@@ -75,19 +48,43 @@ describe("synResumeExecution", () => {
     const resumedOn = new URL(url as string).origin;
     expect(resumedOn).toBe("http://100.112.178.5:8137");
     expect(result.content).toContain(resumedOn);
-    expect(result.content).toContain("exec-abc-123");
     expect(result.content).not.toContain("100.114.86.77");
   });
 
-  it("resumes successfully", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse(controlResume));
+  it("reports the parent, the child and the phase it restarts at", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(resumeCreated));
 
     const result = await synResumeExecution(client, { execution_id: "exec-abc-123" });
 
     expect(result.isError).toBeUndefined();
-    expect(result.content).toContain("Execution Resumed");
     expect(result.content).toContain("exec-abc-123");
-    expect(result.content).toContain("running");
+    expect(result.content).toContain("exec-def-456");
+    expect(result.content).toContain("implement");
+    expect(result.content).toContain("research, plan");
+  });
+
+  it("sends both acknowledgement flags, so the API never infers a default", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(resumeCreated));
+
+    await synResumeExecution(client, {
+      execution_id: "e1",
+      override_cancellation: true,
+    });
+
+    const [, init] = mockFetch.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.override_cancellation).toBe(true);
+    expect(body.acknowledge_external_effects).toBe(false);
+  });
+
+  it("says nothing was inherited rather than printing an empty list", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ...resumeCreated, inherited_phase_ids: [] }),
+    );
+
+    const result = await synResumeExecution(client, { execution_id: "exec-abc-123" });
+
+    expect(result.content).toContain("none");
   });
 });
 

@@ -39,7 +39,7 @@ from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
 )
-from syn_shared.pricing import PricedAmount, PricingStatus
+from syn_shared.pricing import PricedAmount, PricingStatus, parse_vendor_cost
 
 # List all sessions with cost data from session_summary (authoritative).
 _LIST_ALL_FROM_SUMMARY_QUERY = f"""
@@ -238,11 +238,9 @@ class SessionCostQueryService:
         model has no rate reaches the API as "unpriced" instead of as a zero
         that reads identically to free work (issue #890).
         """
-        sdk_cost = row["sdk_cost"]  # type: ignore[index]
+        sdk_cost = parse_vendor_cost(row["sdk_cost"])  # type: ignore[index]
         if sdk_cost is not None:
-            return PricedAmount(
-                cost=Decimal(str(sdk_cost)), status=PricingStatus.PRICED, model=model
-            )
+            return PricedAmount(cost=sdk_cost, status=PricingStatus.PRICED, model=model)
         return self._cost_calculator.calculate_token_cost(
             input_tokens=row["total_input"] or 0,  # type: ignore[index]
             output_tokens=row["total_output"] or 0,  # type: ignore[index]

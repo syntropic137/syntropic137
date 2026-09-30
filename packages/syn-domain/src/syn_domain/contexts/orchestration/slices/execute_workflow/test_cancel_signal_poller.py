@@ -54,9 +54,9 @@ class TestCancelSignalPoller:
         from syn_adapters.control.commands import ControlSignal, ControlSignalType
 
         signal = ControlSignal(
-            signal_type=ControlSignalType.PAUSE,
+            signal_type=ControlSignalType.INJECT,
             execution_id="exec-1",
-            reason="pause",
+            inject_message="keep going",
         )
         controller = MagicMock()
         controller.check_signal = AsyncMock(return_value=signal)

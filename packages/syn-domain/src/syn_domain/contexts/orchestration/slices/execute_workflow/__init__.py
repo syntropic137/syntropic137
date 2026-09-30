@@ -9,8 +9,6 @@ This slice handles the execution of workflows, including:
 from syn_domain.contexts.orchestration.domain.commands import ExecuteWorkflowCommand
 from syn_domain.contexts.orchestration.domain.events import (
     ExecutionCancelledEvent,
-    ExecutionPausedEvent,
-    ExecutionResumedEvent,
     PhaseCompletedEvent,
     PhaseStartedEvent,
     WorkflowCompletedEvent,
@@ -30,8 +28,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 __all__ = [
     "ExecuteWorkflowCommand",
     "ExecutionCancelledEvent",
-    "ExecutionPausedEvent",
-    "ExecutionResumedEvent",
     "PhaseCompletedEvent",
     "PhaseStartedEvent",
     "WorkflowCompletedEvent",

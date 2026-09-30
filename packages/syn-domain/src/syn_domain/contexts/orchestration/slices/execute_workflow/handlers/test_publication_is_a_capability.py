@@ -11,11 +11,12 @@ nothing if an earlier phase can publish before the gate is consulted.
 WHY THE ASSERTIONS ARE WHERE THEY ARE. The implement prompt already said "Do
 not open a PR - that is the last phase's job", in those words, so a test that
 checked the prompt would have passed on the run that broke. What decides the
-outcome is the credential, and the credential reaches the agent by two
-independent routes: the `gh` hosts.yml entry the setup script writes, and the
-`GITHUB_TOKEN` environment variable. `gh` prefers the env var, so BOTH have to
-be scoped or the boundary is decorative - the same two-paths-must-agree lesson
-#1129 drew about which installation they resolve.
+outcome is the credential. It used to reach the agent by two independent
+routes - the `gh` hosts.yml entry the setup script writes, and a
+`GITHUB_TOKEN` environment variable `gh` preferred - and both had to be
+scoped or the boundary was decorative. Since #725 hosts.yml is the only
+route (an env var cannot be renewed), and that is asserted here too: a
+second route coming back would reopen the question.
 
 So these drive the real workflow file through the real chain and assert on the
 bash the workspace executes and the env the agent is handed. `can_open_pr` is
@@ -25,7 +26,8 @@ top of six hops, any of which could drop it while both ends still look right.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -56,8 +58,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_shared.env_constants import ENV_GITHUB_TOKEN
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        SourceCommit,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
@@ -96,9 +103,28 @@ class _FakeGitHubClient:
         del full_name
         return "inst-1"
 
-    async def mint_agent_token(self, installation_id: str, *, can_open_pr: bool) -> str:
+    async def mint_agent_token(
+        self,
+        installation_id: str,
+        *,
+        can_open_pr: bool,
+        repositories: Collection[str] | None = None,
+    ) -> _Minted:
+        del repositories
         type(self).mints.append((installation_id, can_open_pr))
-        return _PUBLISHING_TOKEN if can_open_pr else _SCOPED_TOKEN
+        return _Minted(_PUBLISHING_TOKEN if can_open_pr else _SCOPED_TOKEN)
+
+    async def revoke_installation_token(self, token: str) -> None:
+        del token
+
+    async def close(self) -> None:
+        return None
+
+
+@dataclass(frozen=True)
+class _Minted:
+    token: str
+    expires_at: datetime = field(default_factory=lambda: datetime.now(UTC) + timedelta(hours=1))
 
 
 async def _executable_phases() -> dict[str, ExecutablePhase]:
@@ -131,6 +157,7 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
             execution_id: str,
             repos: list[RepositoryRef],
             admitted: AdmissionTicket | None = None,
+            source_commits: list[SourceCommit] | None = None,
         ) -> WorkflowExecutionResult:
             del workflow_name, inputs, repos, admitted
             captured.extend(phases)
@@ -171,10 +198,9 @@ class _Provisioned:
 async def _provision(phase: ExecutablePhase) -> _Provisioned:
     """Run the REAL provision handler for one phase against a fake workspace.
 
-    Only the GitHub client is faked. `SetupPhaseSecrets.create` and
-    `_resolve_github_app_token` both run for real, because they are the two
-    hops under test - patching either would replace the thing this file exists
-    to check.
+    Only the GitHub client is faked. `SetupPhaseSecrets.create` and the
+    credential routing inside it run for real, because they are the hops under
+    test - patching them would replace the thing this file exists to check.
     """
     _FakeGitHubClient.mints = []
 
@@ -238,10 +264,14 @@ class TestOnlyOpenPrCanPublish:
         assert _PUBLISHING_TOKEN not in provisioned.setup_script
 
     async def test_implements_github_token_env_cannot_either(self) -> None:
-        """`gh` prefers $GITHUB_TOKEN, so scoping only hosts.yml would change nothing."""
+        """`gh` prefers $GITHUB_TOKEN, so a token there would outrank hosts.yml (#725).
+
+        There is none: hosts.yml is the only credential `gh` is given, so its
+        scoping above is the whole of the boundary.
+        """
         provisioned = await _provision((await _executable_phases())["implement"])
 
-        assert provisioned.agent_env[ENV_GITHUB_TOKEN] == _SCOPED_TOKEN
+        assert ENV_GITHUB_TOKEN not in provisioned.agent_env
 
     async def test_open_pr_still_gets_the_token_its_whole_job_needs(self) -> None:
         """The negative control.

@@ -39,6 +39,17 @@ requires_repos: true
 # means verification starts from a finished diff and has its own budget, and a
 # run that fails is attributable to the job that ran out of room.
 
+# Software leverage points, injected into EVERY phase. Workflow scope reaches
+# all phases; the per-phase blocks below are additive, naming the points that
+# phase is actually being judged on.
+#
+# NOT `software-leverage-review`: its own SKILL.md requires `claude -p` because
+# it fans out 17 subagents, and "an orchestrator that is itself a subagent
+# cannot fan out". A workflow phase IS that subagent.
+skills:
+  - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+  - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+
 phases:
   # Phase ids are load-bearing: a later phase reads the previous one's output at
   # artifacts/input/<phase-id>.md, so renaming a phase breaks the one after it.
@@ -64,6 +75,10 @@ phases:
     agent:
       provider: claude
       model: sonnet
+    skills:
+      - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/premise.md
 
   - id: implement
@@ -85,6 +100,11 @@ phases:
     agent:
       provider: claude
       model: opus
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/implement.md
 
   - id: verify
@@ -112,6 +132,11 @@ phases:
       # cost figures in this file were measured under gpt-5.6-sol
       # (pre-2026-09-24); re-measure before tuning them against this model.
       model: gpt-sol
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/software-complexity@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/verify.md
 
   - id: fix
@@ -133,6 +158,11 @@ phases:
     agent:
       provider: claude
       model: opus
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/fix.md
 
   - id: reverify
@@ -162,6 +192,11 @@ phases:
       # cost figures in this file were measured under gpt-5.6-sol
       # (pre-2026-09-24); re-measure before tuning them against this model.
       model: gpt-sol
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/security@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/reverify.md
 
   - id: open_pr
@@ -215,4 +250,7 @@ phases:
     agent:
       provider: claude
       model: sonnet
+    skills:
+      - syntropic137/software-leverage-points/documentation@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/open_pr.md

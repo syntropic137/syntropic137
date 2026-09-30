@@ -83,6 +83,12 @@ class ObservationType(StrEnum):
     # data loss. This is the record.
     SESSION_CAPTURE = "session_capture"
 
+    # The agent's git credential expired and no renewal succeeded first
+    # (#725). Lane 2, like capture: renewal is infrastructure, and a lapse
+    # changes what the agent can do, never what the domain decided. Recorded
+    # because the alternative is a phase whose pushes fail with nobody told.
+    GIT_CREDENTIAL_LAPSED = "git_credential_lapsed"
+
 
 @event("AgentObservation", "v1")
 class AgentObservationEvent(DomainEvent):

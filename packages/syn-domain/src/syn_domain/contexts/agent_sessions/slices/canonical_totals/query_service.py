@@ -26,6 +26,7 @@ from syn_domain.contexts.agent_sessions.canonical_usage import (
     price_canonical_row,
 )
 from syn_domain.storable_text import pg_safe
+from syn_shared.pricing import canonical_cost_usd
 
 # Mirrors the heatmap's scoping so both read the same rows for the same
 # filter. Callers that pass no filter get all-time totals, which is what the
@@ -150,7 +151,8 @@ class CanonicalUsageQueryService:
             output_tokens=output_tokens,
             cache_creation_tokens=cache_creation,
             cache_read_tokens=cache_read,
-            cost_usd=cost,
+            # A Decimal sum keeps its operands' exponent; report the canonical form.
+            cost_usd=canonical_cost_usd(cost),
             unpriced_tokens=unpriced,
             sessions=int(session_row["sessions"]) if session_row else 0,
         )

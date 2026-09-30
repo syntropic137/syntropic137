@@ -731,7 +731,7 @@ curl -s http://localhost:<port>/api/v1/health | jq .
 
 **Polling-available events (17):** `push`, `pull_request`, `pull_request_review`,
 `pull_request_review_comment`, `issue_comment`, `issues`, `create`, `delete`,
-`release`, `fork`, `watch`, `commit_comment`, `discussion`, `gollum`, `member`,
+`release`, `resume`, `watch`, `commit_comment`, `discussion`, `gollum`, `member`,
 `public`, `sponsorship`
 
 **Webhook-only events (CI/CD + security + admin):** `check_run`, `check_suite`,
@@ -1147,8 +1147,6 @@ syn watch activity
 ### Execution control
 
 ```bash
-syn control pause <execution-id>
-syn control resume <execution-id>
 syn control cancel <execution-id> --force     # --force is REQUIRED
 syn control stop <execution-id> --force       # --force is REQUIRED
 ```
@@ -1184,16 +1182,11 @@ remaining phases from starting. Assert that, not "the execution halts".
 > at unit and processor level. Confirming it end to end is a job for this
 > runbook, not a thing to assume.
 
-**PAUSE IS NOT OBSERVABLE.** `syn control pause` returns 200 and prints
-`Pause signal sent`, and then nothing changes: measured, the execution ran to
-completion 45s later. No field in the execution payload reflects a pending
-pause - there is no `paused`, no `pause_requested`, nothing. A following
-`resume` fails with `Cannot resume execution in state running`, which is a
-correct guard that the API surface gives an operator no way to understand.
-
-- [ ] Record what pause actually does; do not mark it passing because the
-      command returned 0. A 200 and a printed acknowledgement are not evidence
-      the signal was honoured
+**PAUSE IS GONE.** It was never observable: `syn control pause` returned 200,
+printed `Pause signal sent`, and nothing changed, because no executor ever read
+the signal. It was deleted rather than finished - `cancel` already covers
+stopping a run, and `resume` now means resuming a FAILED or INTERRUPTED
+execution from its first incomplete phase (`syn execution resume`).
 
 ### Inject context into running execution
 
@@ -3238,7 +3231,7 @@ claude plugin update syntropic137@syntropic137
 
 Invoke these skills and verify they give correct guidance:
 
-- [ ] **`execution-control` skill**: Walk through pause/resume guidance - references valid CLI flags
+- [ ] **`execution-control` skill**: Walk through cancel/resume guidance - `resume` is resume-from-failure, NOT the deleted pause-resume
 - [ ] **`observability` skill**: Query tool timeline for a session from Section 6 - session output uses server-rendered `*_display` fields (`total_cost_display`, `total_tokens_display`, `agent_model_display`, `duration_display`) per ADR-064, not client-formatted numbers
 - [ ] **`marketplace` skill**: Workflow install/list guidance uses `syn workflow packages` (not `syn workflow installed`) with a note that `syn workflow list` shows the live stack
 
@@ -3252,7 +3245,7 @@ whether they still described commands that exist.
 - [ ] **`workflow-management`**: lifecycle guidance; no `syn workflow installed`
 - [ ] **`syn-marketplace`**: matches the `marketplace` skill, no drift between the pair
 - [ ] **`syn-triggers`**: uses `max_attempts` (not `max_fires`) and names the safety guards
-- [ ] **`syn-control`**: pause/resume/cancel flags match `syn control --help`
+- [ ] **`syn-control`**: cancel/inject/stop flags match `syn control --help`; no pause or resume
 - [ ] **`syn-insights`**: references endpoints that exist and cost fields that are current
 - [ ] **`syn-repo`**: repo add/assign guidance matches `syn repo --help`
 - [ ] **`organization`**: org/system/repo hierarchy guidance is current
@@ -3569,7 +3562,7 @@ Full pass/fail/skip for every command and feature tested.
 | **Executions**                     |        |       |
 | syn execution list/show            |        |       |
 | syn execution list --status        |        |       |
-| syn control status/pause/resume    |        |       |
+| syn control status                 |        |       |
 | syn control cancel/stop/inject     |        |       |
 | syn watch execution/activity       |        |       |
 | **Sessions & Observability**       |        |       |

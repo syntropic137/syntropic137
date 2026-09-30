@@ -43,7 +43,11 @@ syntropic137/
 │   └── syn-tokens/                 # Secure token vending
 │
 ├── lib/                            # Git submodules
+<<<<<<< HEAD
 │   ├── agentic-workspace/          # Composable agent blocks
+=======
+│   ├── agentic-workspace/         # Workspace images, isolation, event recording
+>>>>>>> origin/main
 │   │   └── lib/python/             # Python libs (agentic_events, etc.)
 │   ├── event-sourcing-platform/    # Event sourcing infrastructure
 │   └── ui-feedback/                # UI feedback widget

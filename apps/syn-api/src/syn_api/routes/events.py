@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import (
     datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
 )
+from decimal import Decimal  # noqa: TC003 - Pydantic needs Decimal at runtime for model validation
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -25,6 +26,7 @@ from syn_api.types import (
     TimelineEntry,
     ToolUsageSummary,
 )
+from syn_shared.pricing import canonical_cost_usd
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
@@ -76,7 +78,7 @@ class CostSummaryResponse(BaseModel):
     total_tokens: int = 0
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
-    estimated_cost_usd: float | None = None
+    estimated_cost_usd: Decimal | None = None
 
 
 class ToolSummary(BaseModel):
@@ -573,7 +575,11 @@ async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
         total_tokens=data.get("total_tokens", 0),
         cache_creation_tokens=data.get("cache_creation_tokens", 0),
         cache_read_tokens=data.get("cache_read_tokens", 0),
-        estimated_cost_usd=float(data["total_cost_usd"]) if "total_cost_usd" in data else None,
+        # Decimal, never float: a float here reintroduced the binary noise the
+        # read models canonicalise away (0.3056678 -> 0.30566780000000005).
+        estimated_cost_usd=canonical_cost_usd(data["total_cost_usd"])
+        if "total_cost_usd" in data
+        else None,
     )
 
 

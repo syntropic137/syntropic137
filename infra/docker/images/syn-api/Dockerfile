@@ -118,6 +118,11 @@ COPY --from=builder /app/apps /app/apps
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+# uvicorn runs on uvloop, which spawns every `docker exec` with a real fork().
+# With grpc fork support on, a fork while grpc threads are busy leaves the child
+# holding half-updated grpc state, and it segfaults in cygrpc before exec: the
+# random exit -11 of #1046/#1295. Nothing here uses grpc in a forked child.
+ENV GRPC_ENABLE_FORK_SUPPORT=false
 
 # Default configuration
 ENV SYN_API_HOST=0.0.0.0

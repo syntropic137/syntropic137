@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.model_identity import cost_by_observed_model
 from syn_api.types import (
@@ -57,6 +58,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
     )
+
+    from .models import PhaseExecutionInfo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["executions"])
@@ -560,14 +563,14 @@ async def get_detail(
 async def list_active(
     limit: int = 50,
 ) -> Result[list[ExecutionSummary], ExecutionError]:
-    """List currently running or paused executions."""
+    """List currently running or pending executions."""
     await ensure_connected()
     manager = get_projection_mgr()
     all_execs = await manager.workflow_execution_list.get_all(
         limit=limit,
         status_filter=None,
     )
-    active = [s for s in all_execs if s.status in ("running", "paused", "pending")]
+    active = [s for s in all_execs if s.status in ("running", "pending")]
     # Enrich cost from Lane 2 execution_cost projection (#695)
     cost_by_execution = await _load_execution_enrichment(
         manager, [s.workflow_execution_id for s in active]
@@ -659,6 +662,22 @@ async def list_executions_endpoint(
     )
 
 
+def _models_run(phases: list[PhaseExecutionInfo]) -> set[str]:
+    """Every model an execution's phases ran, for its cache rate labels.
+
+    A phase's ``cost_by_model`` keys are what it was priced as, including the
+    unattributed-model bucket (which has no rate, so it correctly blanks the
+    label). A phase with no breakdown yet contributes its reported model.
+    """
+    models: set[str] = set()
+    for phase in phases:
+        if phase.cost_by_model:
+            models.update(phase.cost_by_model)
+        elif phase.model:
+            models.add(phase.model)
+    return models
+
+
 @router.get("/executions/{execution_id}", response_model=ExecutionDetailResponse)
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
@@ -679,6 +698,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     total_cache_creation = sum(p.cache_creation_tokens for p in phases)
     total_cache_read = sum(p.cache_read_tokens for p in phases)
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
+    cache_rates = cache_rate_display(_models_run(phases))
     return ExecutionDetailResponse(
         workflow_execution_id=detail.workflow_execution_id,
         workflow_id=detail.workflow_id,
@@ -699,6 +719,8 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         ),
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
         unpriced_observation_count=detail.unpriced_observation_count,
+        cache_read_rate_display=cache_rates.cache_read_rate_display,
+        cache_write_rate_display=cache_rates.cache_write_rate_display,
         artifact_ids=artifact_ids,
         error_message=detail.error_message,
         failure_classification=detail.failure_classification,
