@@ -648,10 +648,6 @@ workspace-build:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "🔨 Building workspace image from agentic-workspace..."
-<<<<<<< HEAD
-    cd lib/agentic-workspace && uv run scripts/build-provider.py claude-cli
-    echo "✅ Image built: agentic-workspace-claude-cli:latest"
-=======
     # --tag is explicit, and it has to be. Without it build-provider.py takes
     # the name from the vendored provider manifest, which still reads
     # `agentic-workspace-claude-cli` (AgentParadise/agentic-workspace#5), so
@@ -661,7 +657,6 @@ workspace-build:
     cd lib/agentic-workspace && uv run scripts/build-provider.py claude-cli \
         --tag agentic-workspace-claude:latest
     echo "✅ Image built: agentic-workspace-claude:latest"
->>>>>>> origin/main
 
 # List all workspace image versions
 workspace-versions:
