@@ -141,45 +141,107 @@ Existing endpoints updated:
 /executions/{exec_id}   → Execution detail with per-phase metrics
 ```
 
-### 7. Resume - continuing an Execution that did not finish
+### 7. Resuming a terminal execution is a FORK, not a mutation (2026-09-26)
 
-**Added 2026-09-29.** Roughly fifteen code sites cite "ADR-014 s7"; until this
-date the section they cited did not exist. It is written here in place rather
-than in a new ADR, because it is part of the execution model this ADR defines.
+An execution that reached `FAILED`, `CANCELLED` or `INTERRUPTED` is terminal and
+stays terminal. Resuming it creates a **new execution** with a new id that
+records its parent, inherits the parent's contiguous prefix of completed phases
+and their artifacts, and begins at the phase that did not finish. The parent is
+never rewritten.
 
-An Execution is immutable once terminal. Resuming one therefore does NOT
-restart it: it creates a SECOND Execution that inherits the first's completed
-work and begins at the first phase that did not finish. The parent stays
-terminal and its record stays true.
+This extends the separation this ADR already draws. A template is reusable, an
+execution is one run, so a resume is a NEW run that knows where it came from -
+not a second pass over an existing run's history. Sections 1-6 did not address
+terminal states at all, so nothing above is contradicted.
 
-**What is resumable.** `FAILED` and `INTERRUPTED` only. Both ended without
-anyone deciding the work should stop, so running the rest is what the operator
-wanted all along. `CANCELLED` is a decision to stop - it may have been issued
-because the run targeted the wrong repository or its task held a secret - so it
-is resumable only when the request says `override_cancellation`, separately and
-explicitly. `COMPLETED` has nothing left to run; `RUNNING` is still live, and
-resuming it would put two runs on one piece of work; an Execution that never
-started has nothing to inherit.
+**Why a fork rather than reopening the phase in place.** Reopening keeps one
+stream and needs no new identity, which is cheaper on paper. It also rewrites
+the history of a run someone has already read, and makes "what did execution X
+do" unanswerable afterwards. A fork keeps the audit trail intact and makes a bad
+resume visible as its own row rather than entangled with the original.
 
-**What is inherited.** The parent's *contiguous* prefix of completed phases, in
-phase order, with the artifact ids each produced. The prefix stops at the first
-phase that did not complete, so a phase completed after a gap is NOT inherited:
-the resume re-runs the gap, and that later phase's output was built on a
-predecessor the resume will produce afresh.
+**Ownership.** The PARENT aggregate decides whether a fork may exist and records
+`ExecutionForked` on its own stream. "Already forked" is a fact about the parent,
+and the parent stream's optimistic concurrency is the only race-free place to
+enforce it. Admission MUST NOT be decided from a projection - see the fail-opens
+below.
 
-**One resume per parent.** "Already resumed" is a fact about the parent, so the
-parent stream's optimistic concurrency is what makes two concurrent requests
-resolve to one. The loser gets 409 naming the winner.
+**What is inherited.**
 
-**External effects.** When the phase the resume begins at had already started in
-the parent without leaving evidence that it changed nothing outside its
-workspace, re-running it may repeat a push or a publish. The request must say
-`acknowledge_external_effects` before that is admitted, and the acknowledgement
-is recorded so it is never indistinguishable from a phase that was safe.
+| | Inherited | Measured |
+|---|---|---|
+| Completed phases (contiguous prefix) | yes, as `PhaseInherited` | - |
+| Their artifacts, by id | yes, ATTRIBUTED TO THE FORK | EXP2 |
+| The operator's inputs and task text | yes, byte-identical | EXP3 |
+| The rendered phase prompt | **no** | EXP3 |
+| The failed phase's work | no - it restarts from its beginning | - |
+| In-phase reasoning context | no, and this is a stated gap | - |
 
-**The event and the start are separate.** `ExecutionResumed` on the parent's
-stream is the parent's decision and nothing more; the child does not exist yet.
-`ResumeStartProcessManager` reads that event, creates the child's stream and
+**Artifact references are attributed to the fork at creation.** The tempting
+design is "artifacts are addressed by id, so a fork just names the parent's
+ids". Measured against this codebase, that does not work: the prior-phase
+injection path resolves artifacts THROUGH THE CONSUMING EXECUTION, so a fork
+naming a parent's artifact id receives nothing. Relinking the row to the fork
+makes injection succeed, which identifies the read path - not the id - as the
+constraint. The fork's opening append therefore attributes references to the
+inherited ids to itself. Artifacts remain immutable and are not copied; only the
+reference is new.
+
+This also removes a hazard a review raised. If the fork resolved inherited
+artifacts by querying the artifact list projection at start time, a projection
+that is merely LAGGING is indistinguishable from a deleted artifact, and a
+one-fork-per-parent rule would let that lag permanently consume the parent's
+only fork. Writing attribution at creation keeps the decision on the event
+stream, where lag cannot reach it.
+
+**The rendered prompt is not reproducible, and the contract says so.** The
+inputs round-trip byte-identically through the event store. The rendered prompt
+does not: the execution id is interpolated into it, so a fork re-rendering the
+same template differs from its parent by exactly that id. The `prompt_template`
+text is also absent from the start event, so a template edited between runs
+diverges further. The contract is "same inputs, re-rendered per fork", not "same
+prompt".
+
+**Which parents are forkable.**
+
+- `FAILED`, `INTERRUPTED`: yes.
+- `CANCELLED`: only on an explicit, separate operator action. A cancel is an
+  instruction to stop; treating it as another retryable terminal label defeats
+  it. The harm is concrete: an execution cancelled because it targeted the wrong
+  repository, or because its task carried a secret, must not be re-runnable by a
+  second operator or a queued retry without a fresh decision. Re-validate
+  repository authorization and inputs at that point, and never include
+  `CANCELLED` in automatic recovery.
+- `COMPLETED`, `RUNNING`, `PAUSED`, `NOT_STARTED`: not forkable.
+
+**A phase's failure is not a boundary for its external effects.** A phase can
+push a branch or open a pull request and then fail before its completion event
+is recorded, so re-running it from the beginning can repeat a non-repeatable
+effect. The intra-phase retry path already refuses on exactly this basis,
+permitting a retry only when the prior attempt did nothing observable. A fork
+applies the same rule: where the failed attempt left evidence of external
+effects, or left no readable evidence either way, the aggregate refuses unless
+the request acknowledges it.
+
+**Two fail-opens found while validating this, to be closed before a fork
+endpoint ships.** Both are pre-existing and independent of forking:
+
+1. The resume controller decides from the execution detail PROJECTION and never
+   loads the aggregate. Against a rehydrated `CANCELLED` execution the aggregate
+   rejects all twelve of its commands; the controller, reading a projection row
+   that still says `paused`, returns success and queues a resume signal.
+
+   SCOPE THIS PRECISELY. The control state is not an independent mutable store:
+   `ProjectionControlStateAdapter.save_state` is a deliberate no-op and the
+   state lives only in the events. Load and rehydrate the aggregate before
+   every command, never the projection.
+
+2. The fork start event carries no source-commit pin and provisions at HEAD.
+   The execution then fails during the failing phase, which is now stale. A fork
+   that starts against a different commit than it should is indistinguishable
+   from a success until the phase is pushed and CI runs. Record the source
+   commit on execution start (EVENT 1 in the lifecycle) and use it as the fork
+   provision base, rather than HEAD.
 starts it through the same admission gate as any other execution. This keeps
 the decision replay-safe and the start idempotent (ADR-025).
 
@@ -191,6 +253,7 @@ git branch is taken from a commit. See
 [docs/architecture/orchestration-ubiquitous-language.md](../architecture/orchestration-ubiquitous-language.md).
 
 **API.** `POST /executions/{execution_id}/resume`, CLI `syn execution resume`.
+>>>>>>> origin/main
 
 ## Consequences
 
