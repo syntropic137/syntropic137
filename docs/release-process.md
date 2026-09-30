@@ -626,7 +626,7 @@ to the root plus `syn-api`, `syn-adapters`, `syn-collector`, `syn-domain`,
 workspace record in the lockfile against the new version.
 
 **Not included** (independent versioning):
-- `lib/agentic-primitives/` - separate project
+- `lib/agentic-workspace/` - separate project
 - `lib/event-sourcing-platform/` - separate project
 - `packages/openclaw-plugin/` - independent plugin
 

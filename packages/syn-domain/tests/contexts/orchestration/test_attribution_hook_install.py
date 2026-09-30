@@ -164,7 +164,7 @@ async def test_a_failed_install_does_not_kill_the_phase(_configured: None) -> No
 def test_the_hook_is_a_mirror_of_the_submodule_not_a_fork() -> None:
     """One source of truth, with a gate that says so.
 
-    agentic-primitives owns this hook. The copy here exists only because
+    agentic-workspace owns this hook. The copy here exists only because
     omni-agent images do not carry it (AgentParadise/agentic-primitives#401).
     A copy that drifts is worse than no copy: two behaviours, one name.
     """
@@ -183,10 +183,10 @@ def test_the_hook_is_a_mirror_of_the_submodule_not_a_fork() -> None:
         / HOOK_FILENAME
     )
     if not upstream.is_file():
-        pytest.skip("agentic-primitives submodule not checked out")
+        pytest.skip("agentic-workspace submodule not checked out")
 
     assert upstream.read_bytes() == attribution_hook_source(), (
-        f"{HOOK_FILENAME} has drifted from the submodule's copy. agentic-primitives "
+        f"{HOOK_FILENAME} has drifted from the submodule's copy. agentic-workspace "
         f"owns this file; re-mirror it rather than editing the copy here."
     )
 

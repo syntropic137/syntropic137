@@ -127,7 +127,7 @@ class ContainerSubagentStopped:
 
 ### Neutral
 
-- Requires `agentic-primitives` v0.3.0+ for `EventParser` support
+- Requires `agentic-primitives` v0.3.0+ for `EventParser` support (2026-09: `EventParser` now lives in agentic-workspace, see #1417)
 - Recording fixtures include subagent events for testing
 
 ## Implementation
@@ -156,7 +156,7 @@ class ContainerSubagentStopped:
 
 ### Testing
 
-Recording-based tests using `v2.0.76_claude-haiku-4-5_subagent-concurrent.jsonl` fixture from agentic-primitives.
+Recording-based tests using `v2.0.76_claude-haiku-4-5_subagent-concurrent.jsonl` fixture from agentic-workspace (moved from agentic-primitives, 2026-09, see #1417).
 
 ## References
 

@@ -3,7 +3,7 @@
 This module provides Docker-based sidecar proxy management.
 
 For workspace isolation, use WorkspaceService.create() which uses
-agentic_isolation from agentic-primitives.
+agentic_isolation from agentic-workspace.
 
 Available:
 - DockerSidecarAdapter: Per-workspace Envoy sidecar containers (legacy)

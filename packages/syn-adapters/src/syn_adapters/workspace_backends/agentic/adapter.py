@@ -1,7 +1,7 @@
 """Agentic workspace adapters - thin wrappers around agentic_isolation.
 
 These adapters implement Syn137's domain ports by delegating to the
-agentic_isolation library from agentic-primitives. This keeps Syn137
+agentic_isolation library from agentic-workspace. This keeps Syn137
 focused on orchestration and observability, not container management.
 
 See ADR-021: Isolated Workspace Architecture
@@ -123,7 +123,7 @@ class AgenticIsolationAdapter:
     """Implements IsolationBackendPort using agentic_isolation.
 
     This adapter delegates container lifecycle management to the
-    WorkspaceDockerProvider from agentic-primitives.
+    WorkspaceDockerProvider from agentic-workspace.
 
     Usage:
         adapter = AgenticIsolationAdapter()

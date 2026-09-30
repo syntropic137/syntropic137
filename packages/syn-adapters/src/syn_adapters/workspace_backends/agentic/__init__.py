@@ -3,7 +3,7 @@
 This module provides thin wrappers that connect the agentic_isolation
 library to Syn137's domain ports (IsolationBackendPort, EventStreamPort).
 
-The heavy lifting is done by agentic_isolation in agentic-primitives.
+The heavy lifting is done by agentic_isolation in agentic-workspace.
 Syn137 just orchestrates and captures observability.
 """
 

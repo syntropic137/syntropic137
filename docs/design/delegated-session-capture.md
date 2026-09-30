@@ -190,7 +190,7 @@ The parent's platform id is already available in-container as
 delegation-enabled Codex phases though not every Codex container, since
 `_build_agent_env` is conditional.
 
-**Do not rename it.** Claude hooks and git hooks in agentic-primitives consume
+**Do not rename it.** Claude hooks and git hooks in agentic-workspace consume
 that variable (for example `plugins/observability/hooks/handlers/observe.py`),
 so a rename breaks them silently. Propagate both instead: keep
 `CLAUDE_SESSION_ID` for existing correlation, and add `SYN_PARENT_SESSION_ID`

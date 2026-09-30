@@ -3,11 +3,11 @@
 **Status:** Proposed
 **Date:** 2025-12-01
 **Deciders:** @neural
-**Tags:** hooks, performance, scalability, agentic-primitives
+**Tags:** hooks, performance, scalability, agentic-workspace
 
 ## Context
 
-The Syntropic137 needs to capture observability events from AI agent operations (tool calls, token usage, session lifecycle). The existing approach in `agentic-primitives` uses subprocess-based hooks:
+The Syntropic137 needs to capture observability events from AI agent operations (tool calls, token usage, session lifecycle). The existing approach in `agentic-workspace` uses subprocess-based hooks:
 
 ```bash
 # Current approach
@@ -81,7 +81,7 @@ Security validators (bash command checking, file path validation, PII detection)
 - **Scalability**: 1000+ concurrent agents supported
 - **Simplicity**: 3-line integration for any Python agent
 - **Observability**: Full event capture without performance penalty
-- **Contribution**: Improvements flow back to agentic-primitives
+- **Contribution**: Improvements flow back to agentic-workspace
 
 ### Negative
 - **Complexity**: Requires running a backend service
@@ -115,4 +115,4 @@ See project plans:
 
 ## References
 
-- [Hook System Documentation](../../lib/agentic-primitives/docs/architecture/hooks-system-overview.md)
+- [Hook System Documentation](../../lib/agentic-workspace/docs/architecture/hooks-system-overview.md)

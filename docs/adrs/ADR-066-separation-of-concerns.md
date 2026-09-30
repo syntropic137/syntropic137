@@ -26,7 +26,7 @@ The goal is twofold:
 | **Application services** | `apps/syn-api/src/syn_api/services/` | Composition of domain handlers, projection reads, and adapter calls into application-level operations. Used by API routes. | Heavy I/O (defer to Processors), git/subprocess (defer to CLI or Workspace). |
 | **Processors** | `apps/syn-api/.../processors/`, `slices/execute_workflow/` | Long-running, multi-step orchestration via the To-Do List pattern (see ADR-055). React to events, dispatch commands, persist state via projections. Crash-resilient. | Imperative async/await orchestration. Holding ephemeral state in memory. |
 | **CLI** | `apps/syn-cli-node` | User-facing client. Local file/git operations on the user's machine. Interactive prompts. Translates user intent into thin API calls. | Business rules (push them down to domain handlers via API). Persistent state (the API owns persistence). |
-| **Workspace** | `lib/agentic-primitives/providers/workspaces/*` | Isolated agent execution. Has the heavy tooling baked in (claude CLI, git, language servers, hooks). Runs the actual agent. | Talking back to the API mid-task (the orchestrator drives, the workspace executes). |
+| **Workspace** | `lib/agentic-workspace/implementations/docker/images/*` (moved from agentic-primitives, 2026-09) | Isolated agent execution. Has the heavy tooling baked in (claude CLI, git, language servers, hooks). Runs the actual agent. | Talking back to the API mid-task (the orchestrator drives, the workspace executes). |
 | **Collectors** | `packages/syn-collector` | Event ingestion (webhooks, JSONL streams). Transforms external signals into domain events. | Holding state. Cross-cutting orchestration. |
 | **Dashboard UI** | `apps/syn-dashboard-ui` | Read-only display, SSE-driven live updates. | Mutating state directly (always go via API). |
 | **Infrastructure** | `infra/`, `docker/`, ` Dockerfile`s | Container build, compose, secrets, networking, port mapping, runtime dependencies. | Application logic. |
@@ -98,7 +98,7 @@ The #726 redesign (sibling document `docs/experiments/cycle-004/dogfood-platform
 - ADR-020 (bounded contexts and aggregate convention)
 - ADR-024 (workspace setup phase)
 - ADR-027 (provider-based workspace images, where heavy tooling like git lives)
-- ADR-033 (plugin-native workspace images, in agentic-primitives)
+- ADR-033 (plugin-native workspace images, in agentic-workspace; moved from agentic-primitives, 2026-09)
 - ADR-040 (ports per bounded context)
 - ADR-055 (projection coordinator)
 - ADR-057 (declarative lifecycle service registry)

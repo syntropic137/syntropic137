@@ -47,7 +47,7 @@ def _settings(**kw: str) -> OperatorSettings:
 def test_both_values_produce_the_hook_contract_exactly() -> None:
     """The keys are the hook's published names, not this class's prefix.
 
-    agentic-primitives' prepare-commit-msg reads SYN_OPERATOR_NAME and
+    agentic-workspace' prepare-commit-msg reads SYN_OPERATOR_NAME and
     SYN_OPERATOR_EMAIL. Renaming either would disable attribution in silence,
     because the hook's response to an unknown variable is to exit 0.
     """

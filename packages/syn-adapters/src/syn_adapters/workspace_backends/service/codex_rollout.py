@@ -7,7 +7,7 @@ codex artifact says ``provider="codex", model=null`` and proves which HARNESS
 ran, never which MODEL.
 
 WHERE codex keeps its sessions is not restated here. ``CodexTranscriptSource``
-in agentic-primitives already owns the ``$CODEX_HOME`` layout, the override,
+in agentic-workspace already owns the ``$CODEX_HOME`` layout, the override,
 the absent-root case and the id each file is keyed by, and it reads through the
 workspace's exec rather than the local filesystem because the container may not
 be on this machine. Per the boundary rule in AGENTS.md that knowledge tracks
@@ -128,7 +128,7 @@ async def read_codex_rollout(
         # guess about which session it belongs to - there is no other.
         #
         # It is needed because the id is resolved from `session_meta`, and the
-        # field that carries it has already moved once: agentic-primitives
+        # field that carries it has already moved once: agentic-workspace
         # reads `payload.session_id` while the rollout captured in this repo's
         # own fixture writes `payload.id`. On a codex version that writes the
         # latter every exact match fails and falls back to the FILENAME stem,

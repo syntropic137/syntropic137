@@ -4,14 +4,14 @@ These tests are a POKA-YOKE (mistake-proofing) mechanism that catches
 producer/consumer event type drift at CI time rather than in production.
 
 The problem this solves:
-    - agentic_events.types.EventType (in agentic-primitives) defines what
+    - agentic_events.types.EventType (in agentic-workspace) defines what
       the hook producer actually emits.
     - syn_shared.events.VALID_EVENT_TYPES defines what the consumer
       (WorkflowExecutionEngine, SessionToolsProjection) expects.
     - If these diverge, events are silently dropped or stored under wrong names.
 
 If a test here fails, it means:
-    1. A new event type was added to agentic-primitives but not to syn_shared.events
+    1. A new event type was added to agentic-workspace but not to syn_shared.events
     2. An event type was renamed in one place but not the other
     3. The Literal union in syn_shared.events is out of date
 
@@ -31,7 +31,7 @@ class TestEventTypeConsistency:
     def test_every_agentic_events_type_is_in_valid_event_types(self) -> None:
         """Every EventType in agentic_events MUST exist in syn_shared VALID_EVENT_TYPES.
 
-        This is the critical CI gate: if agentic-primitives adds a new event type
+        This is the critical CI gate: if agentic-workspace adds a new event type
         and syn_shared.events is not updated, this test fails before production does.
         """
         from agentic_events.types import EventType

@@ -1,6 +1,6 @@
 """Verify workspace image signatures with cosign before a container is created.
 
-agentic-primitives signs every published workspace image with cosign keyless
+agentic-workspace signs every published workspace image with cosign keyless
 OIDC. This module is the consumer half of that: it runs ``cosign verify``
 against the exact digest that is about to be run, with the publisher's identity
 constraints, and raises if verification does not succeed.
