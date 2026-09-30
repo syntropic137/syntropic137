@@ -219,11 +219,7 @@ class TestWorkspaceImages:
     def test_default_image_is_ghcr(self) -> None:
         """Default image should reference GHCR, not a local-only name."""
         assert DEFAULT_WORKSPACE_IMAGE.startswith("ghcr.io/")
-<<<<<<< HEAD
-        assert "agentic-workspace-buildfloor" in DEFAULT_WORKSPACE_IMAGE
-=======
         assert "agentic-workspace-omni-agent" in DEFAULT_WORKSPACE_IMAGE
->>>>>>> origin/main
 
     def test_default_image_is_digest_pinned(self) -> None:
         """The default image must be immutable: a digest, never a tag.
@@ -241,7 +237,7 @@ class TestWorkspaceImages:
         assert separator == "@", f"{DEFAULT_WORKSPACE_IMAGE} is not digest-pinned"
         assert digest.startswith("sha256:")
         assert ":" not in repository, "digest reference must not also carry a tag"
-        assert digest == PINNED_DIGESTS[WorkspaceImageProvider.BUILDFLOOR]
+        assert digest == PINNED_DIGESTS[WorkspaceImageProvider.OMNI_AGENT]
 
     def test_no_pinned_digest_is_a_tag(self) -> None:
         """Every pinned digest must be a well-formed sha256 hex digest."""
