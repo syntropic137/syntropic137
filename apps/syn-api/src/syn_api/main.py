@@ -224,6 +224,11 @@ def create_app() -> FastAPI:
         # just failed.
         return HealthResponse(status="unhealthy", mode="degraded", build=get_build_info())
 
+    @app.get("/version")
+    async def version() -> dict[str, str]:
+        """Get the current version."""
+        return {"version": version_string()}
+
     return app
 
 
