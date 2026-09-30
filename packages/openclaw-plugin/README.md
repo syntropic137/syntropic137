@@ -71,8 +71,7 @@ The agent uses 15 tools under the hood — you don't need to know their names.
 ### Control
 | Tool | What it does |
 |------|-------------|
-| `syn_pause_execution` | Pause a running execution |
-| `syn_resume_execution` | Resume a paused execution |
+| `syn_resume_execution` | Resume a failed execution into a new one |
 | `syn_cancel_execution` | Cancel an execution |
 | `syn_inject_context` | Send a message to a running agent |
 

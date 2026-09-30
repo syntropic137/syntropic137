@@ -64,6 +64,10 @@ from syn_domain.contexts.orchestration.domain import (
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
+    ResumeExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -101,6 +105,9 @@ from syn_domain.contexts.orchestration.domain.commands import (
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
+)
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
 )
@@ -134,6 +141,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
+    InheritanceUnavailableError,
+    inherited_outputs,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
     salvage_stranded_phase,
 )
@@ -158,6 +169,12 @@ from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins impor
 )
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
+)
+from syn_domain.contexts.orchestration.slices.start_resume import (
+    ResumeStarter,
+    ResumeStartProcessManager,
+    ResumeStartRecord,
+    StartResumeHandler,
 )
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
@@ -202,6 +219,7 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
@@ -211,6 +229,7 @@ __all__ = [
     "HandlerResult",
     # Value objects - workspace
     "ImageManifest",
+    "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
@@ -223,12 +242,17 @@ __all__ = [
     "ReportedFailureReason",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
+    "ResumeExecutionCommand",
+    "ResumeStartProcessManager",
+    "ResumeStartRecord",
+    "ResumeStarter",
     "SecurityPolicy",
     "SidecarConfig",
     "SkillError",
     "SkillInvalidName",
     "SkillNotRegistered",
     "SkillRef",
+    "StartResumeHandler",
     "StreamResult",
     "SubagentTracker",
     "TerminateWorkspaceCommand",
@@ -253,8 +277,10 @@ __all__ = [
     "WorkspaceAggregate",
     "announce_as",
     "build_command_from_definition",
+    "inherited_outputs",
     "is_phase_id",
     "mint_wrapper_name",
+    "refuse_resume_start",
     "render_workspace_prompt",
     "require_supported_execution_type",
     "salvage_stranded_phase",

@@ -13,9 +13,12 @@ the real API key).
 
 Runs as a plain HTTP server on port 9002.
 
-Note: GitHub hosts are passthrough — agents receive installation tokens
-during the setup phase (stored in ~/.git-credentials). The token injector
-does NOT handle GitHub auth.
+Note: GitHub hosts are passthrough. The token injector does NOT handle
+GitHub auth. Agents hold a repo-scoped installation token that the setup
+phase writes to ~/.git-credentials (git) and ~/.config/gh/hosts.yml (gh;
+never $GITHUB_TOKEN). The platform rewrites both every 40 minutes while the
+agent runs and revokes every token it issued at teardown. Moving GitHub
+auth behind a per-workspace credential sidecar is TODO(#725), Tier 1.
 
 Environment:
     ANTHROPIC_API_KEY: Anthropic API key (used when CLAUDE_CODE_OAUTH_TOKEN not set)

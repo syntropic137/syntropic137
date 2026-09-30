@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
@@ -16,11 +17,17 @@ from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
 from syn_domain.contexts.orchestration._shared.resolved_skill import (
     ResolvedSkill,  # noqa: TC001 - needed at runtime for dataclass field default
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    classify_resumed_payload,
+)
 from syn_shared.agents import (
     DEFAULT_PHASE_SANDBOX,
     AgentProvider,
     resolve_phase_model,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +37,6 @@ class ExecutionStatus(StrEnum):
 
     NOT_STARTED = "not_started"
     RUNNING = "running"
-    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -593,6 +599,144 @@ class BranchObservation(BaseModel):
         return self.remote_moved or self.unpushed_commits > 0
 
 
+class InheritedPhase(BaseModel):
+    """One completed phase a resume takes over from its parent (ADR-014 s7).
+
+    The phase is not re-run and its artifacts are not copied: the resume names
+    them. A Pydantic model rather than a dataclass because it travels on
+    ``ExecutionResumedEvent`` and must serialise as event data.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    artifact_ids: list[str]
+    """Every artifact the parent collected for this phase, in collection
+    order. Empty is a real answer - a phase can complete having stored
+    nothing - and not "unknown"."""
+    origin_execution_id: str | None = Field(default=None, exclude=True)
+    """The execution that RAN this phase, and so holds its artifacts (#1462).
+
+    Not always the parent: a resume of a resume inherits phases its parent itself
+    inherited, whose artifacts were only ever stored under the execution that
+    ran them. Carried rather than looked up, so the stream says whose output a
+    run is resting on.
+
+    Never serialised as part of this model. It forbids extra fields, and so
+    did every release before this one: an event nesting the owner here could
+    not be read at all by a reader from before it, which is what a rollback
+    runs. The events carry it BESIDE their phases instead, under
+    `INHERITED_PHASE_OWNERS` (see `owners_to_carry`, `restore_owners`), where
+    such a reader loses only the owner.
+
+    None on every event written before #1462. Read it through
+    `ResumeOrigin.owner_of`, never directly: absent means the parent the event
+    names, which is what it meant when those events were written."""
+
+
+#: The key under which a resume's events carry the execution that ran each
+#: inherited phase (#1462), beside the phases rather than inside them.
+#:
+#: Why beside: every model a phase is nested in forbids extra fields, and so
+#: did the releases before this key existed. A reader from one of those - a
+#: rollback - fails on an unknown field INSIDE a resumed origin, and that
+#: failure is deliberately fatal (`start_pins.read_resume_origin`). An unknown
+#: key at the top of an event only fails its typed validation, and ADR-023 then
+#: replays it as a `GenericDomainEvent`, whose readers ignore what they do not
+#: name. So that reader still replays the stream, and loses only the owner.
+#:
+#: Written only for a phase that the execution the event already names did not
+#: run, which is exactly the case the key exists for. A first resume writes none,
+#: so its events are identical to those written before the key existed.
+INHERITED_PHASE_OWNERS = "inherited_phase_owners"
+
+
+def owners_to_carry(phases: Sequence[InheritedPhase], named: str) -> dict[str, str]:
+    """What an event writes under `INHERITED_PHASE_OWNERS`, by phase id.
+
+    ``named`` is the execution the event already names as the phases' source -
+    the parent - which a phase without an entry is read as owned by anyway.
+    """
+    return {
+        p.phase_id: p.origin_execution_id
+        for p in phases
+        if p.origin_execution_id and p.origin_execution_id != named
+    }
+
+
+def restore_owners(phases: object, owners: object) -> object:
+    """Stored ``phases`` with the owner ``owners`` carried for each put back.
+
+    Operates on the stored shape: a list of plain phase payloads, before they
+    are validated. Anything else - a typed phase, which already has its owner,
+    or a payload with nothing carried - is returned as it came.
+    """
+    if not isinstance(phases, list) or not isinstance(owners, Mapping) or not owners:
+        return phases
+    return [
+        {**phase, "origin_execution_id": owners[phase["phase_id"]]}
+        if isinstance(phase, Mapping) and phase.get("phase_id") in owners
+        else phase
+        for phase in phases
+    ]
+
+
+def payload_with_owners_restored(data: object) -> object:
+    """A stored event payload with each inherited phase's owner put back (#1462).
+
+    The whole restore step, so an EVENT file can declare its payload and hold no
+    logic: vsa forbids an event importing `collections.abc`, and the isinstance
+    guard this needs is exactly the kind of code that belongs beside the value
+    objects rather than in a declaration.
+
+    Anything that is not a payload carrying owners is returned untouched, so a
+    stream written before the owners existed validates exactly as it did.
+    """
+    if not isinstance(data, Mapping) or INHERITED_PHASE_OWNERS not in data:
+        return data
+    payload = dict(data)
+    owners = payload.pop(INHERITED_PHASE_OWNERS)
+    payload["inherited_phases"] = restore_owners(payload.get("inherited_phases"), owners)
+    return payload
+
+
+def resumed_payload_for_replay(data: object) -> object:
+    """A stored `ExecutionResumed` payload, checked and then normalised.
+
+    Two steps the EVENT must not hold itself, for the reason given on
+    `payload_with_owners_restored`: vsa requires an event file to be a
+    declaration, and both steps need isinstance guards.
+
+    First the meaning is settled. `ExecutionResumed` recorded un-pausing before
+    2026-09-29 and records resume-from-unfinished after it, so the payload shape
+    decides which it is and an ambiguous one is refused rather than guessed
+    (`classify_resumed_payload`). Only then are carried owners restored (#1462).
+    """
+    classify_resumed_payload(data)
+    return payload_with_owners_restored(data)
+
+
+def payload_with_origin_owners_restored(data: object) -> object:
+    """As `payload_with_owners_restored`, for a payload whose phases sit inside
+    `resumed_from` rather than at the top level (#1462).
+
+    Same reason for living here: the event file declares a payload and holds no
+    logic, because vsa forbids it importing `collections.abc` for the isinstance
+    guards this needs.
+    """
+    if not isinstance(data, Mapping) or INHERITED_PHASE_OWNERS not in data:
+        return data
+    payload = dict(data)
+    owners = payload.pop(INHERITED_PHASE_OWNERS)
+    origin = payload.get("resumed_from")
+    if isinstance(origin, Mapping):
+        payload["resumed_from"] = {
+            **origin,
+            "inherited_phases": restore_owners(origin.get("inherited_phases"), owners),
+        }
+    return payload
+
+
 @dataclass(frozen=True)
 class ExecutionMetrics:
     """Aggregated metrics for workflow execution.
@@ -711,3 +855,55 @@ class ExecutablePhase:
     # populates it from the workflow- and phase-scope SkillRefs, with phase
     # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
+
+
+# --- what a resume's start event carries ------------------------------------
+#
+# These two live HERE rather than beside the rest of `start_pins` because
+# `WorkflowExecutionStarted` carries them, and a domain EVENT may import value
+# objects from this module but not from an aggregate's internals - vsa enforces
+# that, and `ExecutionResumedEvent` already depends on this module the same way.
+
+
+class SourceCommit(BaseModel):
+    """The commit one repository was at when the execution started (#1457).
+
+    `sha` is None when nothing could resolve it - no GitHub access, a repository
+    that has since gone - and that is recorded as an honest "unknown" rather
+    than left out, so the repository list stays complete.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: `owner/name`, the canonical slug of `RepositoryRef`.
+    repository: str
+    sha: str | None = None
+
+
+class ResumeOrigin(BaseModel):
+    """Where a resumed execution came from (ADR-014 s7).
+
+    Copied from the parent's `ExecutionResumed`, which is the decision; this is
+    the child recording which decision it is carrying out, so the child's own
+    stream answers "what was this a resume of" without reading the parent's.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent_execution_id: str
+    #: The parent's completed prefix, in phase order. The child never runs
+    #: these; their artifacts are the ones it hands forward.
+    inherited_phases: list[InheritedPhase]
+    resume_phase_id: str
+
+    def owner_of(self, phase: InheritedPhase) -> str:
+        """The execution holding ``phase``'s artifacts.
+
+        The one reading of `InheritedPhase.origin_execution_id`, so a stream
+        written before it existed replays as it was meant: owned by the parent.
+        """
+        return phase.origin_execution_id or self.parent_execution_id
+
+    def owners(self) -> dict[str, str]:
+        """Every inherited phase's owner, by phase id."""
+        return {p.phase_id: self.owner_of(p) for p in self.inherited_phases}

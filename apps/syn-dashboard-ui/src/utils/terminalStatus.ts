@@ -25,10 +25,10 @@
 /**
  * `ExecutionStatus`, minus the states an execution can still leave.
  *
- * The full enum is `not_started | running | paused | completed | failed |
- * cancelled | interrupted`. The first three are non-terminal: `paused` and
- * `not_started` both resume, so a view that stopped polling on them would go
- * stale the moment the run picked back up.
+ * The full enum is `not_started | running | completed | failed | cancelled |
+ * interrupted`. The first two are non-terminal: a `not_started` execution has
+ * not begun, so a view that stopped polling on it would go stale the moment
+ * the run picked up.
  *
  * `interrupted` is written by the execution-detail projection on
  * `WorkflowInterrupted` (a forceful SIGINT stop) and never transitions again.

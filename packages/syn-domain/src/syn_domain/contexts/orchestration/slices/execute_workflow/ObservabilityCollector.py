@@ -367,6 +367,25 @@ class ObservabilityCollector:
             tools_used,
         )
 
+    async def record_git_credential_lapsed(
+        self, *, expired_at: str | None, attempts: int, last_error: str
+    ) -> None:
+        """Record that the agent's git credential expired unrenewed (#725).
+
+        ``expired_at`` is ISO-8601, or None when the workspace never reported
+        an expiry for the credential it holds.
+        """
+        if self._writer is None:
+            return
+        await self._writer.record_observation(
+            session_id=self._session_id,
+            observation_type=ObservationType.GIT_CREDENTIAL_LAPSED,
+            data={"expired_at": expired_at, "attempts": attempts, "last_error": last_error},
+            execution_id=self._execution_id,
+            phase_id=self._phase_id,
+            workspace_id=self._workspace_id,
+        )
+
     async def record_session_summary(
         self,
         total_cost_usd: float | None,

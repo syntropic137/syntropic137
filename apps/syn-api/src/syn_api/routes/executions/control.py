@@ -1,6 +1,6 @@
 """Execution control endpoints and service functions.
 
-Pause, resume, cancel, inject, and state inspection for running executions.
+Cancel, inject, and state inspection for running executions.
 """
 
 from __future__ import annotations
@@ -41,12 +41,6 @@ async def _resolve_execution_id(execution_id: str) -> str:
 # =============================================================================
 
 
-class PauseRequest(BaseModel):
-    """Request to pause an execution."""
-
-    reason: str | None = None
-
-
 class CancelRequest(BaseModel):
     """Request to cancel an execution."""
 
@@ -82,58 +76,11 @@ class StateResponse(BaseModel):
 # =============================================================================
 
 
-async def pause(
-    execution_id: str,
-    reason: str | None = None,
-) -> Result[ControlResult, ExecutionError]:
-    """Pause a running execution at the next yield point."""
-    from syn_adapters.control.commands import PauseExecution
-
-    try:
-        controller = get_controller()
-        domain_result = await controller.handle_command(
-            PauseExecution(execution_id=execution_id, reason=reason)
-        )
-        return Ok(
-            ControlResult(
-                success=domain_result.success,
-                execution_id=domain_result.execution_id,
-                new_state=domain_result.new_state,
-                message=domain_result.message,
-                error=domain_result.error,
-            )
-        )
-    except Exception as e:
-        return Err(ExecutionError.SIGNAL_FAILED, message=str(e))
-
-
-async def resume(
-    execution_id: str,
-) -> Result[ControlResult, ExecutionError]:
-    """Resume a paused execution."""
-    from syn_adapters.control.commands import ResumeExecution
-
-    try:
-        controller = get_controller()
-        domain_result = await controller.handle_command(ResumeExecution(execution_id=execution_id))
-        return Ok(
-            ControlResult(
-                success=domain_result.success,
-                execution_id=domain_result.execution_id,
-                new_state=domain_result.new_state,
-                message=domain_result.message,
-                error=domain_result.error,
-            )
-        )
-    except Exception as e:
-        return Err(ExecutionError.SIGNAL_FAILED, message=str(e))
-
-
 async def cancel(
     execution_id: str,
     reason: str | None = None,
 ) -> Result[ControlResult, ExecutionError]:
-    """Cancel a running or paused execution."""
+    """Cancel a running execution."""
     from syn_adapters.control.commands import CancelExecution
 
     try:
@@ -186,7 +133,23 @@ async def get_state(
     """Get the current control state of an execution."""
     try:
         controller = get_controller()
-        state = await controller.get_state(execution_id)
+        try:
+            state = await controller.get_state(execution_id)
+        except Exception as exc:
+            # A failed READ is not an absent execution. The controller loads
+            # the aggregate from the event store now, so an outage raises here
+            # where it previously could not. Mapping it to NOT_FOUND made the
+            # endpoint answer 200 with state="unknown" - a successful-looking
+            # reply to a question nothing could answer.
+            logger.warning("could not read control state for %s", execution_id, exc_info=True)
+            return Err(
+                ExecutionError.STORE_UNAVAILABLE,
+                message=(
+                    f"Could not read the state of execution {execution_id}: the event "
+                    f"store could not be read ({type(exc).__name__}). This is not a "
+                    "statement that the execution is absent."
+                ),
+            )
         if state is None:
             return Err(
                 ExecutionError.NOT_FOUND,
@@ -199,7 +162,11 @@ async def get_state(
             }
         )
     except Exception as e:
-        return Err(ExecutionError.NOT_FOUND, message=str(e))
+        # Anything else reaching here is also a failure to answer, not an
+        # absence. NOT_FOUND was the old catch-all and it is what made an
+        # outage indistinguishable from a missing execution.
+        logger.warning("control state lookup failed for %s", execution_id, exc_info=True)
+        return Err(ExecutionError.STORE_UNAVAILABLE, message=str(e))
 
 
 # =============================================================================
@@ -226,31 +193,12 @@ async def _handle_control_result(
     )
 
 
-@router.post("/executions/{execution_id}/pause", response_model=ControlResponse)
-async def pause_execution_endpoint(
-    execution_id: str,
-    request: PauseRequest | None = None,
-) -> ControlResponse:
-    """Pause a running execution."""
-    execution_id = await _resolve_execution_id(execution_id)
-    result = await pause(execution_id, reason=request.reason if request else None)
-    return await _handle_control_result(result, "pause")
-
-
-@router.post("/executions/{execution_id}/resume", response_model=ControlResponse)
-async def resume_execution_endpoint(execution_id: str) -> ControlResponse:
-    """Resume a paused execution."""
-    execution_id = await _resolve_execution_id(execution_id)
-    result = await resume(execution_id)
-    return await _handle_control_result(result, "resume")
-
-
 @router.post("/executions/{execution_id}/cancel", response_model=ControlResponse)
 async def cancel_execution_endpoint(
     execution_id: str,
     request: CancelRequest | None = None,
 ) -> ControlResponse:
-    """Cancel a running or paused execution."""
+    """Cancel a running execution."""
     execution_id = await _resolve_execution_id(execution_id)
     result = await cancel(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "cancel")
@@ -279,8 +227,15 @@ async def get_execution_state_endpoint(execution_id: str) -> StateResponse:
     )
     result = await get_state(execution_id)
 
-    state_val = "unknown"
-    if not isinstance(result, Err):
-        state_val = result.value.get("state", "unknown")
+    if isinstance(result, Err):
+        # A store failure must NOT render as a 200 carrying state="unknown".
+        # That is a successful-looking answer to a question nothing could
+        # answer, and a caller polling this endpoint would read it as fact.
+        if result.error == ExecutionError.STORE_UNAVAILABLE:
+            raise HTTPException(status_code=503, detail=result.message)
+        # NOT_FOUND keeps its previous shape: the resolver above already
+        # established the execution exists, so this is the narrower case of an
+        # execution with no control state yet.
+        return StateResponse(execution_id=execution_id, state="unknown")
 
-    return StateResponse(execution_id=execution_id, state=state_val)
+    return StateResponse(execution_id=execution_id, state=result.value.get("state", "unknown"))

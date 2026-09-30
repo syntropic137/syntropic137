@@ -32,7 +32,7 @@ Usage:
 
     async with service.create_workspace(config) as workspace:
         # Create secrets using GitHub App (required for production)
-        secrets = await SetupPhaseSecrets.create()
+        secrets = await SetupPhaseSecrets.create(ledger=workspace.issuance_ledger)
         await workspace.run_setup_phase(secrets)
 
         # Agent runs WITHOUT access to raw secrets

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.orchestration import StartResumeHandler
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
@@ -137,6 +138,17 @@ async def disconnect() -> None:
 def get_projection_mgr() -> ProjectionManager:
     """Return the singleton ProjectionManager."""
     return get_projection_manager()
+
+
+def get_artifact_query() -> ArtifactQueryService:
+    """The artifact read service, on its own.
+
+    Narrower than `get_execution_processor()` on purpose: a caller that only
+    needs to READ artifacts - resolving a resume's inheritance before admitting it,
+    for instance - should not drag the execution processor and therefore the
+    observability event store into a request that writes nothing through them.
+    """
+    return ArtifactQueryService(get_projection_manager().artifact_list)
 
 
 def _build_session_store(settings: Settings) -> HttpSessionStore | None:
@@ -822,18 +834,22 @@ def get_controller() -> ExecutionController:
     redis://localhost:6379/0). Falls back to _NullSignalQueueAdapter only
     if Redis is explicitly unavailable (no URL and no connection possible).
 
-    Wraps: ExecutionController(ProjectionControlStateAdapter, signal_adapter)
+    Wraps: ExecutionController(WorkflowExecutionRepositoryPort, signal_adapter)
     """
     global _controller_singleton
     if _controller_singleton is not None:
         return _controller_singleton
 
     from syn_adapters.control import ExecutionController
-    from syn_adapters.control.adapters.projection import ProjectionControlStateAdapter
-    from syn_adapters.projection_stores import get_projection_store
 
-    state_adapter = ProjectionControlStateAdapter(get_projection_store())
+    # The aggregate, not a projection. Admission used to be decided from the
+    # execution detail projection through ProjectionControlStateAdapter, which
+    # lags the stream - so a request the aggregate would refuse could be
+    # admitted and queued (ADR-014 s7). That adapter and its port are gone; the
+    # controller rehydrates the aggregate per request instead.
+    executions = get_workflow_execution_repository()
 
+    from syn_shared.logging.redaction import redact_url_credentials
     from syn_shared.settings import get_settings
 
     redis_url = get_settings().redis_url
@@ -843,17 +859,19 @@ def get_controller() -> ExecutionController:
 
         redis_client = resilient_redis_client(redis_url)
         signal_adapter: SignalQueuePort = RedisSignalQueueAdapter(redis_client)
-        logger.info("ExecutionController using Redis signal queue (%s)", redis_url)
+        logger.info(
+            "ExecutionController using Redis signal queue (%s)", redact_url_credentials(redis_url)
+        )
     except Exception:
         logger.warning(
             "Redis unavailable (%s); control signals (pause/cancel/resume) will not work",
-            redis_url,
+            redact_url_credentials(redis_url),
             exc_info=True,
         )
         signal_adapter = _NullSignalQueueAdapter()
 
     _controller_singleton = ExecutionController(
-        state_port=state_adapter,
+        executions=executions,
         signal_port=signal_adapter,
     )
     return _controller_singleton
@@ -879,6 +897,8 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     ``SkillResolutionService.resolve_for_phase`` so
     ``ExecutablePhase.skills`` is populated the same way.
     """
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
 
     processor = await get_execution_processor()
@@ -893,6 +913,20 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
         # informatively than this, but a path added later that only knows about
         # the handler is still refused rather than silently admitted.
         maintenance=get_maintenance_port(),
+        # #1457: every start records the commit each repository was at, so a
+        # resume of it can name the code its parent ran against.
+        commit_resolver=GitHubSourceCommitResolver(get_github_client),
+    )
+
+
+async def _build_resume_handler() -> StartResumeHandler:
+    """The resume start handler, built when a resume is first requested."""
+    from syn_domain.contexts.orchestration import StartResumeHandler
+
+    return StartResumeHandler(
+        await get_execution_processor(),
+        get_workflow_execution_repository(),
+        maintenance=get_maintenance_port(),
     )
 
 
@@ -906,6 +940,15 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         handler,
         max_concurrent=max_concurrent,
         maintenance=get_admission_gate(),
+        # ADR-014 s7: the child of an admitted resume starts through this same
+        # gate and semaphore, reading everything it runs from its parent.
+        #
+        # Passed as a FACTORY, not a handler. Building it here would need the
+        # execution processor and repository - and so the observability event
+        # store - before any resume exists, which made an unconfigured
+        # SYN_OBSERVABILITY_DB_URL break dispatcher construction for every
+        # deployment, resuming or not.
+        resume_handler=_build_resume_handler,
     )
 
 

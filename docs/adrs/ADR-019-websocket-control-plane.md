@@ -4,7 +4,16 @@
 
 Accepted — **Updated 2026-03-21**
 
-> **ISS-262 note:** The bidirectional WebSocket control endpoint (`/ws/control/{execution_id}`) was removed. It was redundant — all control actions (pause, resume, cancel, inject) are fully covered by the HTTP POST endpoints described in this ADR, which remain the canonical interfaces. Observation streams (execution events) are now served via SSE; see ADR-049.
+> **ISS-262 note:** The bidirectional WebSocket control endpoint (`/ws/control/{execution_id}`) was removed. It was redundant - all control actions are fully covered by the HTTP POST endpoints described in this ADR, which remain the canonical interfaces. Observation streams (execution events) are now served via SSE; see ADR-049.
+
+> **2026-09-29 note:** Pause and resume were DELETED from the orchestration
+> context. Neither was ever wired: no executor read the `pause` signal, so the
+> endpoint returned 200 and the run continued, and zero `ExecutionPaused`
+> events exist in 26,917. `cancel` already expresses "stop this run", and
+> `ExecutionStatus.PAUSED` is gone with them. The control plane now carries
+> `cancel` and `inject` only. The word `resume` was reassigned: it means
+> restarting a FAILED or INTERRUPTED execution from its first incomplete
+> phase, in a new execution (see the orchestration ubiquitous language).
 
 ## Date
 
@@ -14,10 +23,11 @@ Accepted — **Updated 2026-03-21**
 
 The Syntropic137 executes long-running workflows that can take minutes to hours to complete. During execution, users need the ability to:
 
-1. **Pause** execution at a safe point (between tool calls)
-2. **Resume** paused executions
-3. **Cancel** executions with proper cleanup
-4. **Inject context** into running executions (future enhancement)
+1. **Cancel** executions with proper cleanup
+2. **Inject context** into running executions (future enhancement)
+
+Pause and resume were also listed here originally; both were deleted in 2026-09
+as described in the note above.
 
 These control operations need to work from multiple interfaces:
 - Web dashboard (real-time updates via WebSocket)
@@ -56,9 +66,23 @@ Terminal states (CANCELLED, COMPLETED, FAILED) have no outgoing transitions.
 
 ### 2. Adapters
 
-**Storage Adapters** (`ControlStatePort`):
-- `InMemoryControlStateAdapter` - Development/testing
-- Future: Redis adapter for distributed deployments
+**Storage Adapters** (`ControlStatePort`) - **REMOVED 2026-09-26.**
+
+There is no control-state port. Admission is decided by
+`WorkflowExecutionAggregate.accepts_control`, on the aggregate rehydrated per
+request, which is the same method the aggregate's own pause/resume/cancel
+handlers guard with.
+
+The port existed so the controller could answer from stored state, and the
+production adapter read the execution detail projection. A projection lags the
+stream, so an execution the aggregate had already cancelled could still read
+`running` and a request the aggregate would refuse was admitted, reported as
+success, and queued (ADR-014 section 7, fail-open 1).
+
+Two rules over one concept is the defect, not the lag. The controller no
+longer receives a projection at all, so there is nothing left to be stale
+about. `ControlStatePort`, `InMemoryControlStateAdapter`,
+`ProjectionControlStateAdapter` and the duplicate state machine are deleted.
 
 **Signal Queue Adapters** (`SignalQueuePort`):
 - `InMemorySignalQueueAdapter` - Development/testing

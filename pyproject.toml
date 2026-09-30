@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.30.0"
+version = "0.32.0-beta.3"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -51,6 +51,8 @@ build-backend = "uv_build"
 # Supply chain safety: only resolve packages published before this date.
 # Bump intentionally when upgrading dependencies: just bump-exclude-newer
 exclude-newer = "2026-08-20T21:12:36Z"
+# Security patch past the cutoff: GHSA-w6j9-cwv2-h6wq fixed in pyjwt 2.14.0 (published 2026-09-11).
+exclude-newer-package = { pyjwt = "2026-09-12T00:00:00Z" }
 constraint-dependencies = [
     "idna>=3.15",           # PYSEC-2026-215
     "requests>=2.33.0",      # GHSA-gc5v-m9x4-r6x2
@@ -72,9 +74,9 @@ syn-perf = { workspace = true }
 syn-tokens = { workspace = true }
 # Submodule dependencies (editable so source changes apply without reinstall)
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python", editable = true }
-agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging", editable = true }
-agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation", editable = true }
-agentic-events = { path = "lib/agentic-primitives/lib/python/agentic_events", editable = true }
+agentic-logging = { path = "lib/agentic-workspace/lib/python/agentic_logging", editable = true }
+agentic-isolation = { path = "lib/agentic-workspace/lib/python/agentic_isolation", editable = true }
+agentic-events = { path = "lib/agentic-workspace/lib/python/agentic_events", editable = true }
 # Vendored in-tree module (ADR-016), not a submodule. Editable so the syn-api
 # integration and the module move together in one commit.
 ui-feedback-api = { path = "lib/ui-feedback/backend/ui-feedback-api", editable = true }

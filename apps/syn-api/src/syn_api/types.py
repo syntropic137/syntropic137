@@ -37,7 +37,11 @@ from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC0
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
-from syn_shared.agents import AliasResolutionBasis  # noqa: TC001
+
+# One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
+# so `syn_shared.agents` is needed at RUNTIME, which makes a type-checking-only
+# guard on AliasResolutionBasis both unused and misleading.
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.observed_model import format_observed_model
 
@@ -90,6 +94,14 @@ class ExecutionError(StrEnum):
     INVALID_STATE = "invalid_state"
     EXECUTION_FAILED = "execution_failed"
     SIGNAL_FAILED = "signal_failed"
+    STORE_UNAVAILABLE = "store_unavailable"
+    """The event store could not be read, so the state is UNKNOWN.
+
+    Distinct from NOT_FOUND. `get_state` used to map every load exception to
+    NOT_FOUND, and the endpoint then returned 200 with `state="unknown"` - so a
+    store outage rendered as a successful answer. "I looked and there is
+    nothing" and "I could not look" are different facts and must not share a
+    code."""
 
 
 class MetricsError(StrEnum):
@@ -192,6 +204,14 @@ class TriggerError(StrEnum):
     ALREADY_DELETED = "already_deleted"
     PRESET_NOT_FOUND = "preset_not_found"
     WORKFLOW_NOT_FOUND = "workflow_not_found"
+    STORE_UNAVAILABLE = "store_unavailable"
+    """The event store could not be read, so existence is UNKNOWN.
+
+    Distinct from WORKFLOW_NOT_FOUND on purpose. `exists()` used to answer
+    False when the store was unreachable, so an outage rendered as "that
+    workflow does not exist" - a confident wrong answer a caller would act on.
+    The store now raises instead, and this code carries the difference through
+    to the caller rather than collapsing it back into not-found."""
 
 
 class OrganizationError(StrEnum):
@@ -455,6 +475,14 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
+    # #1429. A phase that cannot publish rendered identically to one that can,
+    # so `syn workflow show`, the dashboard and the API all agreed while the
+    # run failed at `gh pr create`. can_open_pr decides the GitHub token's
+    # permission level, so it has to be visible.
+    clone_repos: bool = True
+    can_open_pr: bool = False
+    delivers_repo_changes: bool = True
+    sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)
     execution_type: str = "sequential"

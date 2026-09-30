@@ -7,12 +7,19 @@
 
 ---
 
+> **Superseded (2026-09-29).** The live runbook is
+> [docs/testing/release-validation.md](release-validation.md). This file is kept
+> as history and is NOT maintained. Parts of it describe surfaces that no longer
+> exist, including the WebSocket control plane (removed, ADR-049) and execution
+> pause/resume (deleted: never wired, see ADR-019). Do not run it as written.
+
+
 ## Overview
 
 This document defines acceptance tests for validating the Syntropic137 stack end-to-end. Tests are organized by feature and include specific validation criteria.
 
 **Version 4.0** adds:
-- **WebSocket Control Plane** - Real-time execution control (pause/resume/cancel)
+- **WebSocket Control Plane** - Real-time execution control (removed since; see ADR-049)
 - **Control API Endpoints** - HTTP and WebSocket interfaces
 - **Executor Integration** - Signal checking at yield points
 - **Frontend Control UI** - Interactive control buttons
@@ -1390,11 +1397,11 @@ assert agent is not None
 
 ### Overview
 
-The WebSocket Control Plane enables real-time execution control:
-- **Pause** running executions at yield points
-- **Resume** paused executions
-- **Cancel** running or paused executions
+The control plane enables real-time execution control:
+- **Cancel** running executions
 - **Inject context** into running executions (future)
+
+Pause and resume were listed here; both were deleted in 2026-09 (never wired).
 
 ### F13.1 Control Plane HTTP API
 
@@ -1405,12 +1412,7 @@ The WebSocket Control Plane enables real-time execution control:
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
 | 13.1.1 | `GET /api/executions/{id}/state` returns current state | ⬜ |
-| 13.1.2 | State is one of: pending, running, paused, cancelled, completed, failed | ⬜ |
-| 13.1.3 | `POST /api/executions/{id}/pause` queues pause signal | ⬜ |
-| 13.1.4 | Pause returns success with "Pause signal queued" message | ⬜ |
-| 13.1.5 | Pause on non-running execution returns 400 error | ⬜ |
-| 13.1.6 | `POST /api/executions/{id}/resume` queues resume signal | ⬜ |
-| 13.1.7 | Resume on non-paused execution returns 400 error | ⬜ |
+| 13.1.2 | State is one of: not_started, running, cancelled, completed, failed, interrupted | ⬜ |
 | 13.1.8 | `POST /api/executions/{id}/cancel` queues cancel signal | ⬜ |
 | 13.1.9 | Cancel on terminal execution returns 400 error | ⬜ |
 
@@ -1418,14 +1420,6 @@ The WebSocket Control Plane enables real-time execution control:
 ```bash
 # Get execution state
 curl -s http://localhost:8137/api/executions/<execution_id>/state | jq
-
-# Pause a running execution
-curl -X POST http://localhost:8137/api/executions/<execution_id>/pause \
-  -H "Content-Type: application/json" \
-  -d '{"reason": "Testing pause"}' | jq
-
-# Resume a paused execution
-curl -X POST http://localhost:8137/api/executions/<execution_id>/resume | jq
 
 # Cancel an execution
 curl -X POST http://localhost:8137/api/executions/<execution_id>/cancel \

@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.30.0"
+    "version": "0.32.0b3"
   },
   "paths": {
     "/workflows": {
@@ -949,116 +949,13 @@
         }
       }
     },
-    "/executions/{execution_id}/pause": {
-      "post": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Pause Execution Endpoint",
-        "description": "Pause a running execution.",
-        "operationId": "pause_execution_endpoint_executions__execution_id__pause_post",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/PauseRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Request"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/executions/{execution_id}/resume": {
-      "post": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Resume Execution Endpoint",
-        "description": "Resume a paused execution.",
-        "operationId": "resume_execution_endpoint_executions__execution_id__resume_post",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/executions/{execution_id}/cancel": {
       "post": {
         "tags": [
           "control"
         ],
         "summary": "Cancel Execution Endpoint",
-        "description": "Cancel a running or paused execution.",
+        "description": "Cancel a running execution.",
         "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -1191,6 +1088,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/resume": {
+      "post": {
+        "tags": [
+          "resume"
+        ],
+        "summary": "Resume Execution Endpoint",
+        "description": "Resume a failed or interrupted execution so it resumes where it stopped.",
+        "operationId": "resume_execution_endpoint_executions__execution_id__resume_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ResumeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeResponse"
                 }
               }
             }
@@ -11284,24 +11241,6 @@
         "title": "OrganizationSummaryResponse",
         "description": "Summary of an organization for list views."
       },
-      "PauseRequest": {
-        "properties": {
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "type": "object",
-        "title": "PauseRequest",
-        "description": "Request to pause an execution."
-      },
       "PhaseActivityInfo": {
         "properties": {
           "telemetry_available": {
@@ -11493,6 +11432,26 @@
             "type": "boolean",
             "title": "Allow Delegation",
             "default": false
+          },
+          "clone_repos": {
+            "type": "boolean",
+            "title": "Clone Repos",
+            "default": true
+          },
+          "can_open_pr": {
+            "type": "boolean",
+            "title": "Can Open Pr",
+            "default": false
+          },
+          "delivers_repo_changes": {
+            "type": "boolean",
+            "title": "Delivers Repo Changes",
+            "default": true
+          },
+          "sandbox": {
+            "type": "string",
+            "title": "Sandbox",
+            "default": "full-access"
           },
           "claude_plugins": {
             "items": {
@@ -12863,6 +12822,68 @@
         ],
         "title": "ReportedFailureReason",
         "description": "What a phase says CAUSED the failure it is reporting (#1372).\n\nTHE QUESTION THIS ANSWERS, and why it had to be asked rather than worked\nout. A readable ``success=false`` says THAT a phase failed and nothing\nmore, so every reported failure was recorded as a correct refusal - the\nsystem working - including the one whose agent had just written \"GH_TOKEN\nis not set\", which is the system not working, and the one that said the\ntask was impossible, which is neither. Those three take opposite responses:\nretry, fix the platform, rewrite the brief. An operator re-dispatching off\na record that cannot tell them apart spends a whole run to find out.\n\nTHE SPELLINGS ARE classify.md's, which is the vocabulary analysts already\nsort failures into by hand and the one `FailureClassification` was built\nfrom. Three words, closed, written here and nowhere else - a closed set in\none place is what separates a contract from the habit of adding one more\nstring every time a run is lost, and it is the definition the negative\ntests are written against.\n\nIT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,\nan exception message or an exit status to reach a member of this; the only\nway into one is a phase that wrote it.\n\nAND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A\nMEASUREMENT (#1392). This is the whole of what the type means, and the\nreason it is spelled `reported_failure_reason` everywhere it is carried:\nthe platform's only corroboration of anything written here is that the\nprocess exited cleanly and its stream arrived intact, which is evidence\nabout the HARNESS and not about whether the task was possible. A run that\nnamed itself ``task`` established nothing about the request; it said\nsomething about it. So the word travels the whole way to the operator - who\nwants to know what the agent said - and `FailureClassification`, which is\nwhat failure NUMBERS are computed from, is never decided by it. The one\nthing a phase can do to that record is WITHDRAW a claim; see\n`_corroborated_classification`, which holds the whole rule.\n\nAND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when\nediting anything here. This decides a LABEL on a failure already decided by\n``success``. A word nobody recognises, a sentence, a number, or no key at\nall all read as \"no reason given\" and leave the verdict exactly as it was.\nMaking a misspelling fatal would let a tally field refuse a finished run,\nwhich is #1324's defect bought back in exchange for nothing."
+      },
+      "ResumeRequest": {
+        "properties": {
+          "override_cancellation": {
+            "type": "boolean",
+            "title": "Override Cancellation",
+            "description": "Resume a CANCELLED parent. A cancel is an instruction to stop, so resuming past it needs a fresh decision rather than inheriting the old one.",
+            "default": false
+          },
+          "acknowledge_external_effects": {
+            "type": "boolean",
+            "title": "Acknowledge External Effects",
+            "description": "Accept that the phase the resume restarts may already have pushed or published something in the parent, which re-running it repeats.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ResumeRequest",
+        "description": "What an operator must decide before a resume is admitted.\n\nBoth flags default to the REFUSAL, because both exist to make an operator\nsay something out loud. Neither implies the other."
+      },
+      "ResumeResponse": {
+        "properties": {
+          "parent_execution_id": {
+            "type": "string",
+            "title": "Parent Execution Id"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "resume_phase_id": {
+            "type": "string",
+            "title": "Resume Phase Id"
+          },
+          "inherited_phase_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Inherited Phase Ids"
+          },
+          "cancellation_overridden": {
+            "type": "boolean",
+            "title": "Cancellation Overridden"
+          },
+          "external_effects_acknowledged": {
+            "type": "boolean",
+            "title": "External Effects Acknowledged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parent_execution_id",
+          "execution_id",
+          "resume_phase_id",
+          "inherited_phase_ids",
+          "cancellation_overridden",
+          "external_effects_acknowledged"
+        ],
+        "title": "ResumeResponse",
+        "description": "The resume that was admitted, and what the child will do."
       },
       "RootResponse": {
         "properties": {
@@ -15944,7 +15965,7 @@
     },
     {
       "name": "control",
-      "description": "Pause, resume, cancel, and inject context into running executions"
+      "description": "Cancel and inject context into running executions"
     },
     {
       "name": "conversations",
@@ -16005,6 +16026,10 @@
     {
       "name": "repos",
       "description": ""
+    },
+    {
+      "name": "resume",
+      "description": "Resume a failed execution so it restarts at the first phase that did not finish"
     },
     {
       "name": "sessions",

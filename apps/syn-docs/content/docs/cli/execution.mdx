@@ -23,6 +23,29 @@ syn execution list [options]
 
 ---
 
+## `syn execution resume`
+
+Resume a failed execution so it restarts at the first phase that did not finish
+
+```bash
+syn execution resume <execution-id> [options]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | Execution to resume |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--override-cancellation` | `boolean` | --- | Resume a CANCELLED execution (a cancel is an instruction to stop) |
+| `--acknowledge-external-effects` | `boolean` | --- | Accept that re-running the resumed phase may repeat a push or publish |
+
+---
+
 ## `syn execution show`
 
 Show detailed information about a single execution

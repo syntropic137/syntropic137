@@ -232,31 +232,28 @@ endpoint ships.** Both are pre-existing and independent of forking:
    that still says `paused`, returns success and queues a resume signal.
 
    SCOPE THIS PRECISELY. The control state is not an independent mutable store:
-   `ProjectionControlStateAdapter.save_state` is a deliberate no-op and
-   `get_state` reads the event-derived detail projection. So the divergence is
-   not arbitrary injection - the experiment hand-set the row, which production
-   cannot do. The reachable window is PROJECTION LAG: the aggregate records the
-   cancel, the projection has not caught up, and a resume is admitted against an
-   execution the aggregate would refuse. Narrow, but real, and it is the window
-   a terminal-state guard exists to close. A guard is worth only as much as the
-   staleness of what it reads.
-2. `stream_exists` returns `False` when the event store is UNREACHABLE, which is
-   indistinguishable from "no such stream". A pre-dispatch existence check built
-   on it passes when it cannot see, so it must fail closed.
+   `ProjectionControlStateAdapter.save_state` is a deliberate no-op and the
+   state lives only in the events. Load and rehydrate the aggregate before
+   every command, never the projection.
 
-**Evidence.** Claims marked "measured" come from four experiments run against
-this codebase rather than reasoning about it, kept in
-`docs/experiments/resumability-fork/`: 200-way concurrent appends confirming
-that optimistic concurrency and `NoStream` each admit exactly one writer, and
-failing when `expected_version` is dropped so the guard is shown to be
-load-bearing; a fork holding a parent's artifact id receiving nothing from the
-injection path; the task surviving a round trip while the rendered prompt does
-not; and every aggregate command refused on a rehydrated cancelled execution
-while the HTTP route was not.
+2. The fork start event carries no source-commit pin and provisions at HEAD.
+   The execution then fails during the failing phase, which is now stale. A fork
+   that starts against a different commit than it should is indistinguishable
+   from a success until the phase is pushed and CI runs. Record the source
+   commit on execution start (EVENT 1 in the lifecycle) and use it as the fork
+   provision base, rather than HEAD.
+starts it through the same admission gate as any other execution. This keeps
+the decision replay-safe and the start idempotent (ADR-025).
 
-**Deliberately unsolved.** Continuation WITHIN a phase. A fork restarts the
-unfinished phase from its beginning, so whatever reasoning context it had
-accumulated is lost. Bounding that loss is a separate concern, not decided here.
+**Naming.** Until 2026-09-29 this was called "fork" in the code, and `resume`
+meant un-pausing. Pause was deleted (nothing ever read its signal) and the name
+was reassigned. `fork` is now reserved for a different, unbuilt operation:
+starting a NEW run from an arbitrary point of a COMPLETED execution, the way a
+git branch is taken from a commit. See
+[docs/architecture/orchestration-ubiquitous-language.md](../architecture/orchestration-ubiquitous-language.md).
+
+**API.** `POST /executions/{execution_id}/resume`, CLI `syn execution resume`.
+>>>>>>> origin/main
 
 ## Consequences
 

@@ -7,6 +7,10 @@ systems on the event-sourcing-platform (ESP). This is the shared vocabulary
 for all contributors. If a term is used differently elsewhere in the
 codebase, this document is canonical.
 
+This glossary covers event-sourcing PATTERNS. For the domain vocabulary of a
+bounded context - what an Execution or a Resume is - see that context's file,
+named `<bounded-context>-ubiquitous-language.md` in this directory.
+
 Reference: Martin Dilger, *Understanding Event Sourcing* (primary source
 for pattern definitions).
 

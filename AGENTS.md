@@ -53,7 +53,7 @@ syntropic137/
 │   ├── syn-collector/         # Event ingestion API
 │   └── syn-shared/            # Shared settings, configuration
 ├── lib/                       # Git submodules (we manage both - dogfooding)
-│   ├── agentic-primitives/    # Composable agent building blocks, isolation providers
+│   ├── agentic-workspace/     # Workspace images, isolation providers, agent event recording
 │   └── event-sourcing-platform/ # ES infrastructure, VSA tool, projections
 ├── infra/                     # Docker Compose, setup wizard, secrets
 ├── docs/                      # Internal/local development docs (ADRs, architecture notes,
@@ -67,7 +67,7 @@ syntropic137/
 
 Both are our own projects - we dogfood them. If something needs fixing, push the fix directly to the submodule repo. Don't work around it.
 
-- **agentic-primitives**: Agent event recording/playback, Claude CLI/SDK adapters, workspace isolation providers
+- **agentic-workspace**: Workspace images (claude, omni-agent, toolchain), isolation providers, agent event recording/playback, harness adapters. Publishes and signs every workspace image from its protected `release` branch; Syntropic137 pins those digests. Replaced agentic-primitives on 2026-09-25 - that submodule is gone and nothing here depends on it.
 - **event-sourcing-platform**: Rust event store, Python SDK, VSA validation CLI, projection framework
 
 #### Where does this change belong?
@@ -75,10 +75,10 @@ Both are our own projects - we dogfood them. If something needs fixing, push the
 The boundary is harness knowledge vs domain meaning, and there is a test for it:
 
 > **If it changes when Anthropic or OpenAI ships a new CLI version, it belongs
-> in agentic-primitives. If it changes when we decide what a cost, a session or
+> in agentic-workspace. If it changes when we decide what a cost, a session or
 > an execution IS, it belongs here.**
 
-| agentic-primitives | Syntropic137 |
+| agentic-workspace | Syntropic137 |
 |---|---|
 | Stream and transcript formats, where a harness puts its session id | Domain events, aggregates, what a session means |
 | Anything baked into the workspace image, including binaries agents call | Pricing, execution totals, attribution |
@@ -91,12 +91,12 @@ and never reimplement a harness detail here: it will drift the moment that CLI
 changes, and the drift is silent.
 
 **Depend on a port, not on a format.** When this repo needs something
-harness-specific, define a Protocol here and let agentic-primitives satisfy it.
+harness-specific, define a Protocol here and let agentic-workspace satisfy it.
 That keeps the domain testable against a double and stops CLI details leaking
 into the domain model.
 
 **The split has a real delivery cost, so plan for it.** A change in
-agentic-primitives reaches a running workspace only after: merge -> image
+agentic-workspace reaches a running workspace only after: merge -> image
 build -> the protected `release` channel -> a `PINNED_DIGESTS` bump here.
 Pushing to `main` publishes `:edge` only, which is explicitly unreviewed and is
 NOT what consumers pull. So put as little in the submodule as genuinely needs
@@ -241,11 +241,49 @@ Pydantic models (syn-api/types.py)
 
 | Context | Aggregates | Key Operations | Purpose |
 |---------|------------|----------------|---------|
-| `orchestration` | Workspace, Workflow, WorkflowExecution | Create, archive (soft-delete), execute, pause/resume/cancel | Workflow execution and workspace management |
+| `orchestration` | Workspace, Workflow, WorkflowExecution | Create, archive (soft-delete), execute, resume, cancel | Workflow execution and workspace management |
 | `agent_sessions` | AgentSession | Start, record operations, complete | Agent sessions and observability |
 | `github` | Installation, TriggerRule | Register, configure, fire triggers | GitHub App integration, trigger rules, hybrid event pipeline (webhooks + Events API + Checks API polling with dedup) |
 | `artifacts` | Artifact | Create, upload, retrieve | Artifact storage |
 | `organization` | Organization, System, Repo | CRUD, assign/unassign repos to systems | Organization hierarchy, system/repo management, insights |
+
+### Ubiquitous Language
+
+Every bounded context owns a vocabulary file. This is a DDD requirement, not a
+documentation nicety: a bounded context is defined by the language that holds
+inside it, so a context whose words are not written down has no boundary anyone
+can check.
+
+**Naming standard (enforced):**
+
+```
+docs/architecture/<bounded-context>-ubiquitous-language.md
+```
+
+The `<bounded-context>` segment MUST match the directory name under
+`packages/syn-domain/src/syn_domain/contexts/`. The file name alone tells you
+which context it speaks for, so no two vocabularies can be confused and an
+orphaned file is detectable.
+
+**Rules:**
+
+| Rule | Why |
+|------|-----|
+| One file per bounded context, no exceptions | `ci/fitness/code_quality/test_ubiquitous_language.py` fails the build otherwise |
+| The same word MAY mean different things in different contexts | That is the point of a bounded context. `github`'s `resume` is not `orchestration`'s `resume`, and each file says so |
+| A term in the code MUST appear in its context's file | If you cannot name it, you do not understand it well enough to model it |
+| Words we deliberately do NOT use get their own section | A reserved or rejected word is as load-bearing as an adopted one. `fork` is reserved in `orchestration`; `pause` was deleted from it |
+| Genuine uncertainty is written down as **Unclear:**, with an issue | A vocabulary that hides its gaps lies about what the model knows |
+
+**The ESP relationship:** the event-sourcing-platform submodule provides the
+machinery (aggregates, projections, the VSA validator). It does NOT provide the
+vocabulary. Each consuming bounded context owns its own file. ESP's own glossary
+at `lib/event-sourcing-platform/docs/` covers event-sourcing mechanics
+(aggregate, projection, checkpoint), not domain meaning.
+
+**Start here:** [docs/architecture/README.md](docs/architecture/README.md) links
+every vocabulary. [docs/architecture/es-glossary.md](docs/architecture/es-glossary.md)
+covers the cross-cutting event-sourcing terms.
 
 ### TODO/FIXME Standard
 
@@ -505,7 +543,7 @@ The canonical release process lives in [docs/release-process.md](docs/release-pr
 - **Docs:** `release` → Vercel production, `main` → preview only.
 - **Poka-yoke rules:** Before touching any release workflow or triggering a publish manually, read [docs/release-process.md](docs/release-process.md). The publish workflows have strict firing rules - wrong entry points are blocked by design.
 
-Submodules (agentic-primitives, event-sourcing-platform) have independent versioning - never bumped by the release script.
+Submodules (agentic-workspace, event-sourcing-platform) have independent versioning - never bumped by the release script.
 
 ## Security
 

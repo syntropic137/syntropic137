@@ -172,7 +172,6 @@ phases:
     agent:
       provider: codex
       model: gpt-sol          # platform alias for gpt-6-sol
-      sandbox: read-only      # codex enforces this, claude does not
 ```
 
 Running the same work through two vendors is the main reason to mix them. A codex
@@ -185,7 +184,7 @@ it is handed, so it is a genuinely independent read of the work.
 |-------|--------|---------|-------|
 | `provider` | `claude`, `codex` | `claude` | The harness that drives the phase. The schema rejects any other value. |
 | `model` | provider model id or alias | `opus` (claude), `gpt-sol` (codex) | Defaults come from `SYN_DEFAULT_CLAUDE_MODEL` / `SYN_DEFAULT_CODEX_MODEL` and are recorded at install time. See [Codex model ids and cost](#codex-model-ids-and-cost). |
-| `sandbox` | `read-only`, `workspace-write`, `full-access` | `full-access` | Enforced on codex phases only. See [What `sandbox` actually does](#what-sandbox-actually-does). |
+| `sandbox` | `full-access` | `full-access` | Omit it. Lower levels are refused, see [What `sandbox` actually does](#what-sandbox-actually-does). |
 | `allow_delegation` | `true`, `false` | `false` | Lets the phase's agent hand work to the other harness. Works in both directions. |
 
 A phase-level `model:` key, sitting outside the `agent` block, takes precedence
@@ -193,34 +192,21 @@ over `agent.model`. If you set both, the outer one wins.
 
 ### What `sandbox` actually does
 
-`sandbox` is named provider-neutrally, but today it steers `codex exec --sandbox`
-and nothing else.
+Omit `sandbox`. Only `full-access`, the default, runs in the workspace container.
+`read-only` and `workspace-write` are refused when you validate or install a
+workflow, and a stored workflow that declares one is refused when you execute it,
+before anything is provisioned.
 
 <Callout type="warn">
-**Declaring `sandbox: read-only` on a claude phase does not restrict it.** The field
-is accepted and recorded, and the claude harness ignores it. Do not read a sandbox
-level on a claude phase as a security guarantee. Only codex phases are constrained
-at the kernel level.
+**There is no read-only reviewer phase.** Codex enforces every level below
+`full-access` with bubblewrap, and bubblewrap cannot create a namespace inside the
+workspace container. A `read-only` phase fails on its first command: it cannot read
+the repository, and it cannot write its verdict under `artifacts/output/`, which is
+how every phase publishes. Claude ignores the field entirely.
 </Callout>
 
-The two harnesses restrict along different axes and neither guarantee can be
-expressed in the other's vocabulary:
-
-| Harness | What it could restrict in principle | What it cannot restrict | Enforced today |
-|---------|-------------------------------------|-------------------------|----------------|
-| `claude` | Which tools exist | Where the process may write | No. See the `allowed_tools` section below. |
-| `codex` | Where the process may write, enforced by the kernel | Which tools exist. Codex has no tool vocabulary at all. | Yes, via `sandbox`. |
-
-Read that last column carefully. Codex is the only harness enforcing anything at
-the process level today.
-
-Sandbox levels, least to most authority:
-
-| Level | Grants | Use for |
-|-------|--------|---------|
-| `read-only` | Read and search | Review, verify, and audit phases. A phase that cannot write cannot invent the work it was asked to check. It also cannot write its own deliverable, so pair it with another way to publish. |
-| `workspace-write` | Read, write, and run commands inside the workspace | Work that stays inside the container. This level is **not** network-free: egress is available at every level. It also cannot write under `artifacts/output/`, so a phase that publishes an artifact needs `full-access`. |
-| `full-access` | Unrestricted filesystem access | Phases that publish an artifact, because `workspace-write` cannot write under `artifacts/output/`. Never appropriate for a phase whose job is checking other work. Note this is not the level you need for network access, which every level already has. |
+The workspace container is the isolation boundary. Keeping a review phase from
+changing what it reviews has to come from the platform, not from this field.
 
 ### `allowed_tools` and the two harnesses
 
@@ -239,8 +225,8 @@ because codex exposes no tool flag and translating an allowlist into a sandbox
 mode would be a category error. That guard is currently unreachable for the same
 reason: `allowed_tools` never arrives populated.
 
-If you need to bound what a phase can do, use `sandbox` on a codex phase. That
-is the only enforced control available today.
+Neither harness has an enforced per-phase restriction today. The workspace
+container is the boundary; see [What `sandbox` actually does](#what-sandbox-actually-does).
 
 ### Codex authentication
 
@@ -282,7 +268,7 @@ for both harnesses.
 | Token accounting | Yes | Yes |
 | Vendor cost (`vendor_cost_usd`) | Yes | No, always null |
 | Delegation to the other harness | Yes | Yes |
-| Filesystem sandbox enforcement | No | Yes |
+| Filesystem sandbox enforcement | No | No, the container is the boundary |
 | Hook events (`PreToolUse`, `PostToolUse`) | Yes | No |
 | Subagent tracking | Yes | No |
 | TodoWrite and the todo projection | Yes | No |

@@ -135,7 +135,7 @@ This means projections can safely restart mid-stream without reprocessing the fu
 
 The dashboard and CLI receive live execution updates over **Server-Sent Events (SSE)**. A single long-lived HTTP connection streams progress updates, tool events, token metrics, and state changes as they happen.
 
-Control commands (pause, resume, cancel) are issued via standard REST calls, they do not require a persistent connection and can be sent from anywhere.
+Control commands (cancel, inject) are issued via standard REST calls, they do not require a persistent connection and can be sent from anywhere.
 
 <Callout type="info">
 SSE was chosen over WebSockets because execution updates are unidirectional: the server pushes updates to the client, not the other way around. SSE is simpler, works through HTTP/2 multiplexing, and reconnects automatically on drop.

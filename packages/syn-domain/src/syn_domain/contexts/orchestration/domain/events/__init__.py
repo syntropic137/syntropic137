@@ -24,9 +24,6 @@ from syn_domain.contexts.orchestration.domain.events.CommandFailedEvent import (
 from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
     ExecutionCancelledEvent,
 )
-from syn_domain.contexts.orchestration.domain.events.ExecutionPausedEvent import (
-    ExecutionPausedEvent,
-)
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
 )
@@ -104,7 +101,6 @@ __all__ = [
     "CommandExecutedEvent",
     "CommandFailedEvent",
     "ExecutionCancelledEvent",
-    "ExecutionPausedEvent",
     "ExecutionResumedEvent",
     "GlobalClaudePluginAddedEvent",
     "GlobalClaudePluginRemovedEvent",

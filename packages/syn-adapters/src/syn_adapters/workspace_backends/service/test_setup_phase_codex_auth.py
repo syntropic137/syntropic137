@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.setup_phase import (
     _build_setup_env,
@@ -87,10 +88,10 @@ async def test_codex_auth_scoped_to_codex_phases() -> None:
         return_value='{"a":1}',
     ):
         claude_secrets = await SetupPhaseSecrets.create(
-            require_github=False, include_codex_auth=False
+            ledger=IssuanceLedger(), require_github=False, include_codex_auth=False
         )
         codex_secrets = await SetupPhaseSecrets.create(
-            require_github=False, include_codex_auth=True
+            ledger=IssuanceLedger(), require_github=False, include_codex_auth=True
         )
 
     assert claude_secrets.codex_auth_json is None

@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import
     PhaseRefDetail,
     WorkflowDetail,
 )
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
 
 def _find_phase(phases: list[dict[str, Any]], phase_id: str) -> dict[str, Any] | None:
@@ -87,7 +88,21 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # bump would buy nothing and cost a full replay through the coordinator's
     # non-atomic clear-then-delete-checkpoint sequence, which loses the whole
     # read model if the process dies between the two steps.
-    VERSION = 8  # v8: surface allow_delegation, claude_plugins, skills (#1013)
+    # v9 IS bumped, and the distinction above is why. That paragraph declines a
+    # bump for a field REMOVAL, where a stale row stays readable and the field
+    # simply stops surfacing. This is the other case, and the same one #1013
+    # bumped v8 for: rows written before this change carry none of the four new
+    # keys, so `from_dict` supplies defaults - reporting `can_open_pr=False` for
+    # a phase that may publish, and `sandbox=full-access` for a phase stored as
+    # read-only. A stale row here does not omit the field, it ASSERTS a wrong
+    # value, which is the failure #1429 is about.
+    #
+    # The replay cost named above is real and unchanged: the coordinator's
+    # clear-then-delete-checkpoint sequence is not atomic, so a process death
+    # between the two steps loses this read model and it rebuilds from the
+    # stream. That is the price of the rebuild, not a reason to serve wrong
+    # values.
+    VERSION = 9  # v9: surface can_open_pr, clone_repos, delivers_repo_changes, sandbox (#1429)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -130,6 +145,13 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                # #1429. The sibling site in read_models/workflow_detail.py
+                # reads these too; a reader reaches the API through either,
+                # so patching one is patching half.
+                clone_repos=bool(p.get("clone_repos", True)),
+                can_open_pr=bool(p.get("can_open_pr", False)),
+                delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),
                 skills=_refs(p.get("skills")),
                 execution_type=p.get("execution_type", "sequential"),

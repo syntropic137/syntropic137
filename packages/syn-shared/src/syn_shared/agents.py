@@ -31,39 +31,30 @@ class AgentProvider(StrEnum):
 class PhaseSandbox(StrEnum):
     """How much authority a phase's agent process is granted.
 
-    Named provider-neutrally so the same declaration can mean the same thing
-    on any harness, but TODAY it steers ``codex exec --sandbox`` only. Claude
-    phases scope authority through ``allowed_tools`` and ignore this field -
-    declaring ``read-only`` on a claude phase does not restrict it. Do not
-    read a level here as a guarantee on a claude phase.
+    ONLY ``FULL_ACCESS`` RUNS TODAY (#1434, see ``RUNNABLE_PHASE_SANDBOXES``).
+    The lower levels are kept as names so a stored template still parses and
+    is refused with a reason, not with "unknown value".
 
-    Ordered least to most authority. Prefer the least a phase can finish
-    with: a phase that cannot write cannot invent work it was asked to
-    check (#1157, #1161).
+    Named provider-neutrally, but it steers ``codex exec --sandbox`` only.
+    Claude phases scope authority through ``allowed_tools`` and ignore this
+    field.
     """
 
     READ_ONLY = "read-only"
-    """Read and search only. The correct level for any review, verify or
-    audit phase - it makes "the verifier does not modify what it certifies"
-    an enforced property rather than a sentence in a prompt.
-
-    Must be declared explicitly; it is not the default (see
-    ``DEFAULT_PHASE_SANDBOX`` for why). A phase at this level cannot write
-    its deliverable either, so a verify phase moves here only once it has
-    another way to publish."""
+    """Read and search only. NOT RUNNABLE in the workspace container: codex
+    enforces it with bubblewrap, which cannot create a namespace there, so the
+    phase cannot even read the repository. It could not publish either, since
+    a phase delivers by writing under ``artifacts/output/`` (#1167)."""
 
     WORKSPACE_WRITE = "workspace-write"
-    """Read, write and run commands inside the workspace.
-
-    NOT "no network" - network egress was measured as available at every
-    level (see ``DEFAULT_PHASE_SANDBOX``). Also NOT usable by a phase that
-    publishes a deliverable: this was the v0.28.0-beta.5 default and the
-    write under ``artifacts/output/`` was denied (#1167)."""
+    """Read, write and run commands inside the workspace. NOT RUNNABLE in the
+    workspace container, for the same bubblewrap reason (``exec-8e22dc43f351``,
+    #1434). Network egress was measured as available at every level."""
 
     FULL_ACCESS = "full-access"
-    """Unrestricted filesystem access AND network egress. Required only by a
-    phase that must reach the network (pushing a branch, calling the GitHub
-    API). Never appropriate for a phase whose job is to check other work."""
+    """Unrestricted filesystem access AND network egress, inside the workspace
+    container, which is the actual isolation boundary. The only runnable
+    level, and the default."""
 
 
 #: Provider-neutral level -> the value `codex exec --sandbox` expects.
@@ -86,33 +77,16 @@ codex phase in production: a phase publishes its deliverable by WRITING under
 phase still reported ``completed`` - silently removing the verify gate from
 every run (#1167). Rolled back after ~70 minutes.
 
-``READ_ONLY`` is the level a verify phase should run at and is unusable for the
-same reason: a read-only phase publishes nothing.
+It is also the ONLY level that runs. Measured 2026-09-26 inside a live
+workspace (codex-cli 0.156.1, Linux, ``cap_drop=ALL``, ``no-new-privileges``):
+``codex sandbox`` at ``read-only`` and at ``workspace-write`` both fail with
+"bwrap: No permissions to create a new namespace" before running anything.
+Earlier level measurements were taken on macOS (Seatbelt) and do not transfer.
 
-So the default stays where it is until a phase can publish its deliverable
-WITHOUT a filesystem write (#1167). That change is what makes ``READ_ONLY``
-viable for verify phases, which is the actual goal of #1157 - and it closes
-#1161 at the same time, since a verifier that cannot write cannot push the
-change it certifies.
-
-What this module still buys today: the level is DECLARED PER PHASE and mapped
-at the command builder, instead of a constant hardcoded for every codex phase.
-A phase that wants less can ask for less right now.
-
-Levels measured against codex 0.147.0 on macOS. Note the caveat below - these
-were NOT measured on Linux, and the sandbox is implemented by the host's native
-engine (Seatbelt on macOS, Landlock/seccomp on Linux), so they are indicative
-rather than authoritative for the workspace image:
-
-===================  ==========  ==============  =========
-level                write file  ``git commit``  network
-===================  ==========  ==============  =========
-``workspace-write``  yes         yes             yes
-``read-only``        no          no              **yes**
-===================  ==========  ==============  =========
-
-Network egress survives every level, so the sandbox is a FILESYSTEM control
-only. Restricting egress is the workspace container's job, not a flag's.
+So a lower level is refused at authoring and at execution
+(``require_runnable_sandbox``) instead of killing a paid run mid-phase. The
+guarantee a lower level was meant to give - a verifier does not modify what it
+certifies (#1157, #1161) - has to come from the platform, not from this flag.
 """
 
 
@@ -146,9 +120,61 @@ class UnsupportedPhaseSandboxError(ValueError):
         super().__init__(
             f"{where} declares agent.sandbox={sandbox!r}, which is not a known "
             f"sandbox level. Known levels, least to most authority: {known}. "
-            "A review or verify phase should declare "
-            f"'{PhaseSandbox.READ_ONLY}'."
+            "Only 'full-access' runs in the workspace container today; omit "
+            "agent.sandbox to get it (#1434)."
         )
+
+
+#: The levels a phase can actually run at in the workspace container.
+#:
+#: Measured 2026-09-26 (#1434), codex-cli 0.156.1 in the omni workspace image,
+#: inside a live workspace (``cap_drop=ALL``, ``no-new-privileges``): codex
+#: implements every level below full-access with bubblewrap, and bubblewrap
+#: cannot create a namespace there, so ``read-only`` and ``workspace-write``
+#: both fail on the FIRST command - the phase can neither read the repository
+#: nor write its deliverable under ``artifacts/output/``. Claude ignores the
+#: field entirely, so a lower level on a claude phase is a restriction nobody
+#: enforces. Either way the declaration promises something that does not
+#: happen, so it is refused rather than accepted.
+#:
+#: The workspace container is the isolation boundary. A "reviewer cannot
+#: modify what it certifies" guarantee has to come from the platform (read-only
+#: repository mounts, the unpushed-work gate), not from this flag. Widen this
+#: set only on a measurement taken inside a real workspace.
+RUNNABLE_PHASE_SANDBOXES: frozenset[PhaseSandbox] = frozenset({PhaseSandbox.FULL_ACCESS})
+
+
+class UnrunnablePhaseSandboxError(ValueError):
+    """A phase declares a sandbox level the workspace container cannot run."""
+
+    def __init__(self, sandbox: object, *, phase_id: str | None = None) -> None:
+        self.sandbox = sandbox
+        self.phase_id = phase_id
+        where = f"Phase {phase_id!r}" if phase_id else "This phase"
+        super().__init__(
+            f"{where} declares agent.sandbox={str(sandbox)!r}, which cannot run in the "
+            "workspace container. Codex enforces every level below 'full-access' with "
+            "bubblewrap, which cannot create a namespace there, so every command fails - "
+            "including reading the repository and writing artifacts/output/. On claude "
+            "the field is ignored, so the restriction would not be enforced either. "
+            "Remove agent.sandbox; the workspace container is the isolation boundary (#1434)."
+        )
+
+
+def require_runnable_sandbox(sandbox: object, *, phase_id: str | None = None) -> None:
+    """Raise unless ``sandbox`` is absent or a level the workspace can run.
+
+    Called at authoring (the YAML validator) AND at the execution boundary
+    (``validate_phase_declarations``), because a template stored before this
+    rule is rehydrated from its event and never sees the YAML validator - the
+    same two-caller shape as ``require_supported_execution_type``.
+    """
+    if sandbox is None:
+        return
+    for runnable in RUNNABLE_PHASE_SANDBOXES:
+        if sandbox == runnable:
+            return
+    raise UnrunnablePhaseSandboxError(sandbox, phase_id=phase_id)
 
 
 class UnsupportedAgentProviderError(ValueError):
