@@ -1,31 +1,12 @@
-<<<<<<< HEAD
 """The default cosign identity admits exactly one signer: AW's release branch.
 
 agentic-workspace publishes and signs only from a push to its protected
 ``release`` branch (``release-images.yml``, ``SIGNER_IDENTITY``). A tag or a
 GitHub release can be cut from any ref and would bypass the PR gate on
 ``release``, so a tag identity must NOT verify. These tests enumerate the
-neighbouring SANs a looser pattern would admit, rather than one example.
-=======
-"""The default signing identity must admit exactly ONE publisher.
-
-Workspace image publishing MOVED from agentic-primitives to agentic-workspace.
-The default admitted both for the duration of that cutover; every pin now
-comes from agentic-workspace, so the retired publisher is no longer trusted by
-default. Trusting a signer nothing needs is the drift this constraint exists
-to prevent.
-
-Widening an identity constraint is the dangerous direction. These tests pin the
-WHOLE admitted set: the one real publisher identity matches, and a list of
-near-miss identities does not. The near misses are the ones a hand-written
-identity actually gets wrong - a missing anchor makes a good SAN match as a
-substring of a longer one, and an unescaped dot makes a lookalike host match.
-Asserting only that the good identity passes would leave that class open.
-
-The retired agentic-primitives identities are in the REJECTED list on purpose.
-They were admitted during the cutover, so a regression that re-admits them
-would otherwise look like nothing.
->>>>>>> origin/main
+neighbouring SANs a looser pattern would admit, and also verify that the
+retired agentic-primitives publisher is rejected (even though it was admitted
+during the cutover, regressions that re-admit it would otherwise look normal).
 """
 
 from __future__ import annotations
@@ -37,7 +18,7 @@ import pytest
 from syn_shared.settings.image_verification import (
     AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
     AGENTIC_WORKSPACE_IDENTITY_REGEXP,
-<<<<<<< HEAD
+    WORKSPACE_IMAGE_IDENTITY_REGEXP,
     ImageVerificationSettings,
 )
 
@@ -72,7 +53,8 @@ REJECTED = [
     f"{AW_RELEASE_SIGNER}x",
     f"{AW_RELEASE_SIGNER}\n",
     f"x{AW_RELEASE_SIGNER}",
-    # The former publisher is rollback-only, never the default.
+    # The former publisher is rollback-only, never the default (even though it
+    # was admitted during the cutover from agentic-primitives to agentic-workspace).
     f"{_AP}/.github/workflows/build-workspace-images.yml@refs/heads/release",
     f"{_AP}/.github/workflows/build-workspace-images.yml@refs/heads/main",
 ]
@@ -116,38 +98,45 @@ def test_rollback_identity_still_admits_the_ap_release_build() -> None:
         f"{_AP}/.github/workflows/build-workspace-images.yml@refs/heads/release",
     )
     assert not _matches(AGENTIC_PRIMITIVES_IDENTITY_REGEXP, AW_RELEASE_SIGNER)
-=======
-    WORKSPACE_IMAGE_IDENTITY_REGEXP,
-    ImageVerificationSettings,
-)
 
-_PRIMITIVES_WORKFLOW = (
-    "https://github.com/AgentParadise/agentic-primitives"
-    "/.github/workflows/build-workspace-images.yml"
-)
-_WORKSPACE_WORKFLOW = (
-    "https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml"
-)
 
-ADMITTED = [
-    f"{_WORKSPACE_WORKFLOW}@refs/heads/release",
-]
+@pytest.mark.unit
+def test_default_setting_is_the_new_publisher_only() -> None:
+    """The shipped default must be agentic-workspace, and only it."""
+    settings = ImageVerificationSettings(
+        _env_file=None,  # pyright: ignore[reportCallIssue]
+    )
+    assert settings.certificate_identity_regexp == WORKSPACE_IMAGE_IDENTITY_REGEXP
+    assert WORKSPACE_IMAGE_IDENTITY_REGEXP == AGENTIC_WORKSPACE_IDENTITY_REGEXP
+    assert "agentic-primitives" not in WORKSPACE_IMAGE_IDENTITY_REGEXP, (
+        "the retired publisher is still trusted by default"
+    )
 
-REJECTED = [
-    # The RETIRED publisher. Admitted during the cutover, rejected now. An
-    # operator overriding SYN_WORKSPACE_DOCKER_IMAGE to an old digest must set
-    # the identity explicitly rather than have it trusted by default.
-    f"{_PRIMITIVES_WORKFLOW}@refs/heads/main",
-    f"{_PRIMITIVES_WORKFLOW}@refs/heads/release",
-    # agentic-workspace publishes ONLY from the protected release branch.
-    f"{_WORKSPACE_WORKFLOW}@refs/heads/main",
-    f"{_WORKSPACE_WORKFLOW}@refs/tags/v1.0.0",
-    f"{_WORKSPACE_WORKFLOW}@refs/pull/1/merge",
-    # A different workflow in the right repository.
-    "https://github.com/AgentParadise/agentic-workspace"
-    "/.github/workflows/ci.yml@refs/heads/release",
-    # The right workflow path in the wrong repository.
-    "https://github.com/AgentParadise/agentic-workspace-legacy"
+
+@pytest.mark.unit
+def test_the_retired_identity_is_still_exported() -> None:
+    """Not trusted by default, but still SPELLED here.
+
+    An operator overriding SYN_WORKSPACE_DOCKER_IMAGE to an old
+    agentic-primitives digest needs its signer's identity. Deleting the
+    constant would leave them writing one by hand, which is how a wrong
+    identity constraint gets authored.
+    """
+    assert "agentic-primitives" in AGENTIC_PRIMITIVES_IDENTITY_REGEXP
+    assert re.match(
+        AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+        f"{_AP}/.github/workflows/build-workspace-images.yml@refs/heads/release",
+    )
+
+
+@pytest.mark.unit
+def test_verification_is_on_by_default() -> None:
+    """Verification must fail closed by default."""
+    settings = ImageVerificationSettings(
+        _env_file=None,  # pyright: ignore[reportCallIssue]
+    )
+    assert settings.enabled is True
+    assert settings.allow_local_images is False
     "/.github/workflows/release-images.yml@refs/heads/release",
     "https://github.com/attacker/agentic-workspace"
     "/.github/workflows/release-images.yml@refs/heads/release",
@@ -211,16 +200,16 @@ def test_the_retired_identity_is_still_exported() -> None:
     """
     assert "agentic-primitives" in AGENTIC_PRIMITIVES_IDENTITY_REGEXP
     assert re.match(
-        AGENTIC_PRIMITIVES_IDENTITY_REGEXP, f"{_PRIMITIVES_WORKFLOW}@refs/heads/release"
+        AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+        f"{_AP}/.github/workflows/build-workspace-images.yml@refs/heads/release",
     )
 
 
 @pytest.mark.unit
 def test_verification_is_on_by_default() -> None:
-    """Widening the identity must not have relaxed the fail-closed default."""
+    """Verification must fail closed by default."""
     settings = ImageVerificationSettings(
         _env_file=None,  # pyright: ignore[reportCallIssue]
     )
     assert settings.enabled is True
     assert settings.allow_local_images is False
->>>>>>> origin/main
