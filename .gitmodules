@@ -10,3 +10,7 @@
 	path = lib/syntropic137-claude-plugin
 	url = https://github.com/syntropic137/syntropic137-claude-plugin.git
 	active = true
+[submodule "lib/agentic-workspace"]
+	path = lib/agentic-workspace
+	url = https://github.com/AgentParadise/agentic-workspace.git
+	active = true
