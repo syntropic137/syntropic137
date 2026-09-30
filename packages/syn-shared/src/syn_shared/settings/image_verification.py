@@ -162,11 +162,7 @@ class ImageVerificationSettings(BaseSettings):
     )
 
     certificate_identity_regexp: str = Field(
-<<<<<<< HEAD
         default=AGENTIC_WORKSPACE_IDENTITY_REGEXP,
-=======
-        default=WORKSPACE_IMAGE_IDENTITY_REGEXP,
->>>>>>> origin/main
         description=(
             "Regexp matched against the signing certificate identity (SAN). "
             "For GitHub Actions keyless signing this is the workflow reference "
