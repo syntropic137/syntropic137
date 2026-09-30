@@ -1,19 +1,16 @@
 """Container image signature verification settings (cosign keyless / Sigstore).
 
-<<<<<<< HEAD
 agentic-workspace signs every published workspace image with cosign keyless
 OIDC at build time (``.github/workflows/release-images.yml``, the
 ``sign-and-verify-image`` action). Until this module existed nothing on the
 Syntropic137 side checked those signatures, which made them evidence nobody
 read.
-=======
 The publisher signs every workspace image with cosign keyless OIDC at build
 time. That is agentic-workspace as of 2026-09-25
 (``.github/workflows/release-images.yml``), and was agentic-primitives before
 it (``.github/workflows/build-workspace-images.yml``). Until this module
 existed nothing on the Syntropic137 side checked those signatures, which made
 them evidence nobody read.
->>>>>>> origin/main
 
 Keyless verification is only meaningful with identity constraints. A bare
 ``cosign verify`` with no ``--certificate-identity`` and no
@@ -26,7 +23,6 @@ off the publishing workflow, not guessed:
 - The certificate identity (the SAN on the Fulcio cert) for a GitHub Actions
   keyless signature is the workflow reference:
   ``https://github.com/<owner>/<repo>/<workflow path>@<git ref>``.
-<<<<<<< HEAD
   For this publisher that is exactly
   ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/heads/release``
   (the ``SIGNER_IDENTITY`` env of that workflow).
@@ -44,7 +40,6 @@ Rollback to agentic-primitives images sets
 ``AGENTIC_PRIMITIVES_IDENTITY_REGEXP`` below together with an AP digest in
 ``SYN_WORKSPACE_DOCKER_IMAGE``; see
 ``syn_shared.settings.workspace_images`` ("Rollback to agentic-primitives").
-=======
   For the current publisher that is
   ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/heads/release``.
 
@@ -60,7 +55,6 @@ The default is a regexp rather than an exact identity for two reasons:
 
 Each identity names one workflow in one repository, anchored end to end, and
 admits no other workflow, repository, or ref.
->>>>>>> origin/main
 
 Environment Variables:
     SYN_IMAGE_VERIFY_* - signature verification configuration
