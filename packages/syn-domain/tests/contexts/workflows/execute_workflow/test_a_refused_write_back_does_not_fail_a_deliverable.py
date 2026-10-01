@@ -160,14 +160,19 @@ class TestTheRunCompletesAndSaysWhatWasRefused:
 class TestTheFenceTheAgentCopies:
     @pytest.mark.parametrize("clone_repos", [True, False])
     def test_the_success_fence_copied_verbatim_reads_as_no_writes(self, clone_repos: bool) -> None:
+        """The WHOLE fenced block, as an agent copies it, closing line included."""
         prompt = render_workspace_prompt(clone_repos=clone_repos)
-        fence = next(
-            line
-            for line in prompt.splitlines()
-            if line.startswith("TASK_RESULT: ") and '"success": true' in line
-        )
+        blocks = [
+            body.strip()
+            for i, body in enumerate(prompt.split("```"))
+            if i % 2 == 1 and '"success": true' in body
+        ]
+        assert len(blocks) == 1, f"expected one success fence, got {blocks}"
+        (block,) = blocks
+        assert block.count("TASK_RESULT:") == 1
+        assert block.count("TASK_RESULT_END") == 1
 
-        verdict = AgentVerdict.from_agent_text(f"{fence}\nTASK_RESULT_END")
+        verdict = AgentVerdict.from_agent_text(block)
 
         assert verdict.status is VerdictStatus.SUCCESS
         assert verdict.reported_side_effects is SideEffectStatus.NONE

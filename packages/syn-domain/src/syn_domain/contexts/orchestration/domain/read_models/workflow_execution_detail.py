@@ -319,12 +319,19 @@ class WorkflowExecutionDetail:
 
         Independent of `status`: a run can fail after its deliverable exists,
         and a run can complete while a phase's write-back was refused.
+
+        Scoped to the phases THIS execution ran. A resumed execution's inherited
+        phases are recorded on its parent, as every other per-phase field here is.
         """
         return bool(self.artifact_ids) or any(p.artifact_id for p in self.phases)
 
     @property
     def reported_side_effects(self) -> SideEffectStatus | None:
-        """The most severe side-effect status any phase reported, None if none did."""
+        """The most severe side-effect status any phase reported, None if none did.
+
+        Scoped to the phases THIS execution ran. A resumed execution's inherited
+        phases are recorded on its parent, as every other per-phase field here is.
+        """
         return SideEffectStatus.most_severe(p.reported_side_effects for p in self.phases)
 
     @classmethod

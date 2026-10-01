@@ -247,7 +247,9 @@ class ExecutionDetailResponse(BaseModel):
 
     A run can fail after its deliverable exists, and complete while a phase's
     write-back was refused; this is the one field that answers "is there work
-    to read" without inferring it from `artifact_ids`.
+    to read" without inferring it from `artifact_ids`. Scoped, like every
+    per-phase field here, to the phases this execution ran: a resumed run's
+    inherited phases are on its parent.
     """
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
