@@ -286,9 +286,7 @@ async def _resolve_github_auth(
     # Closed on every path: a renewal builds one of these every 40 minutes for
     # as long as a phase runs, and each owns an httpx connection pool (#725).
     try:
-        return await _resolve_with_client(
-            client, github_settings, repos, require_github, ledger
-        )
+        return await _resolve_with_client(client, github_settings, repos, require_github, ledger)
     finally:
         await client.close()
 
@@ -310,9 +308,7 @@ async def _resolve_with_client(
             author_email=github_settings.bot_email,
         )
     url_to_installation = await _lookup_installations(client, repos, require_github)
-    repo_tokens, issued = await _mint_tokens_per_installation(
-        client, url_to_installation, ledger
-    )
+    repo_tokens, issued = await _mint_tokens_per_installation(client, url_to_installation, ledger)
     return _GitHubAuth(
         repo_tokens=repo_tokens,
         gh_token=_gh_token_for_repo_under_work(repos, repo_tokens),
