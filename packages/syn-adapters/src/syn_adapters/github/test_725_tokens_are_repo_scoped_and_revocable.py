@@ -89,13 +89,13 @@ class TestTheRequestNamesTheRepositories:
     async def test_an_agent_token_is_requested_for_the_named_repositories_only(self) -> None:
         http = _FakeHttp()
 
-        await mint_agent_token(
-            _client(http), "42", can_open_pr=False, repositories=["repo-b", "repo-a"]
-        )
+        await mint_agent_token(_client(http), "42", repositories=["repo-b", "repo-a"])
 
         (request,) = http.token_requests
         assert request is not None
         assert request.repositories == ["repo-a", "repo-b"]
+        # WHERE is scoped; WHAT is the installation's own grant (#1477).
+        assert request.permissions is None
 
     async def test_it_goes_on_the_wire_under_the_name_github_reads(self) -> None:
         """GitHub ignores a key it does not know - and grants every repository."""
@@ -103,21 +103,11 @@ class TestTheRequestNamesTheRepositories:
 
         assert body == {"repositories": ["repo-a"]}
 
-    async def test_a_publishing_token_is_repository_scoped_too(self) -> None:
-        """`can_open_pr` widens WHAT a token may do, never WHERE."""
-        http = _FakeHttp()
-
-        await mint_agent_token(_client(http), "42", can_open_pr=True, repositories=["repo-a"])
-
-        (request,) = http.token_requests
-        assert request is not None
-        assert request.repositories == ["repo-a"]
-
     async def test_no_repositories_still_means_no_repositories_key(self) -> None:
         """Callers that pass none - the repo-less gh credential - keep today's request."""
         http = _FakeHttp()
 
-        await mint_agent_token(_client(http), "42", can_open_pr=True)
+        await mint_agent_token(_client(http), "42")
 
         assert http.token_requests == [None]
 

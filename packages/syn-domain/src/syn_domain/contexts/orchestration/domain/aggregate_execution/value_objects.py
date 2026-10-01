@@ -903,16 +903,13 @@ class ExecutablePhase:
     # contains, not how the agent is invoked.
     clone_repos: bool = True
 
-    # Whether this phase may create a pull request (#1197). Like clone_repos
-    # this decides what the WORKSPACE gets - specifically the permissions of
-    # the GitHub token in it - rather than how the agent is invoked, which is
-    # why it is not on `agent_config`. A prompt saying "do not open a PR" was
-    # already in place when `implement` opened one; this is the same statement
-    # made somewhere the agent cannot decline it.
+    # Whether this phase was meant to create a pull request (#1197). Inert
+    # since #1477: nothing reads it, and every phase token carries the
+    # installation's own permissions. Kept until the field is removed.
     can_open_pr: bool = False
 
     # Whether a change to the repositories is part of what this phase delivers
-    # (#1308). Unlike clone_repos and can_open_pr this decides nothing about
+    # (#1308). Unlike clone_repos this decides nothing about
     # the workspace - it decides how the unpushed-work gate READS the workspace
     # at the end. `git status` cannot tell an agent's edit from a rewrite
     # `cargo check` made while inspecting the toolchain, so the phase says

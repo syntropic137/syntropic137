@@ -246,7 +246,6 @@ class _GitHubClientProtocol(Protocol):
         self,
         installation_id: str,
         *,
-        can_open_pr: bool,
         repositories: Collection[str] | None = None,
     ) -> _MintedToken: ...
     async def close(self) -> None: ...
@@ -266,7 +265,6 @@ class _GitHubAuth:
 async def _resolve_github_auth(
     repos: list[str],
     require_github: bool,
-    can_open_pr: bool,
     ledger: IssuanceLedger,
 ) -> _GitHubAuth:
     """Resolve the workspace's GitHub App credential: git's per-repo tokens and gh's one.
@@ -288,9 +286,7 @@ async def _resolve_github_auth(
     # Closed on every path: a renewal builds one of these every 40 minutes for
     # as long as a phase runs, and each owns an httpx connection pool (#725).
     try:
-        return await _resolve_with_client(
-            client, github_settings, repos, require_github, can_open_pr, ledger
-        )
+        return await _resolve_with_client(client, github_settings, repos, require_github, ledger)
     finally:
         await client.close()
 
@@ -300,12 +296,11 @@ async def _resolve_with_client(
     github_settings: GitHubAppSettings,
     repos: list[str],
     require_github: bool,
-    can_open_pr: bool,
     ledger: IssuanceLedger,
 ) -> _GitHubAuth:
     """`_resolve_github_auth` once the client exists; the caller owns closing it."""
     if not repos:
-        gh_token, issued = await _mint_repo_less_gh_token(client, can_open_pr, ledger)
+        gh_token, issued = await _mint_repo_less_gh_token(client, ledger)
         return _GitHubAuth(
             gh_token=gh_token,
             issued=issued,
@@ -313,9 +308,7 @@ async def _resolve_with_client(
             author_email=github_settings.bot_email,
         )
     url_to_installation = await _lookup_installations(client, repos, require_github)
-    repo_tokens, issued = await _mint_tokens_per_installation(
-        client, url_to_installation, can_open_pr, ledger
-    )
+    repo_tokens, issued = await _mint_tokens_per_installation(client, url_to_installation, ledger)
     return _GitHubAuth(
         repo_tokens=repo_tokens,
         gh_token=_gh_token_for_repo_under_work(repos, repo_tokens),
@@ -352,7 +345,7 @@ def _gh_token_for_repo_under_work(repos: list[str], repo_tokens: dict[str, str])
 
 
 async def _mint_repo_less_gh_token(
-    client: _GitHubClientProtocol, can_open_pr: bool, ledger: IssuanceLedger
+    client: _GitHubClientProtocol, ledger: IssuanceLedger
 ) -> tuple[str | None, tuple[IssuedToken, ...]]:
     """gh's credential for a workflow that names no repository.
 
@@ -376,7 +369,7 @@ async def _mint_repo_less_gh_token(
             "using the first installation, %s",
             installation_id,
         )
-        minted = await client.mint_agent_token(installation_id, can_open_pr=can_open_pr)
+        minted = await client.mint_agent_token(installation_id)
     except Exception as exc:
         logger.warning("Could not mint a gh credential for a repo-less workflow: %s", exc)
         return None, ()
@@ -425,17 +418,15 @@ async def _lookup_installations(
 async def _mint_tokens_per_installation(
     client: _GitHubClientProtocol,
     url_to_installation: dict[str, str],
-    can_open_pr: bool,
     ledger: IssuanceLedger,
 ) -> tuple[dict[str, str], tuple[IssuedToken, ...]]:
     """Mint one token per unique installation, scoped to that installation's repos.
 
-    These tokens are the ones the agent ends up holding — in
-    ~/.git-credentials and in the gh hosts.yml entry — so ``can_open_pr``
-    decides what the phase is CAPABLE of, not merely what it is asked to do
-    (#1197), and the repository list decides WHERE (#725): the token for an
-    installation reaches the repos this workspace was provisioned with, not
-    every repo the installation covers.
+    These tokens are the ones the agent ends up holding, in
+    ~/.git-credentials and in the gh hosts.yml entry. They carry the
+    installation's own permissions (#1477), and the repository list decides
+    WHERE (#725): the token for an installation reaches the repos this
+    workspace was provisioned with, not every repo the installation covers.
 
     Returns:
         url → token, and every token minted, for the workspace's ledger.
@@ -449,7 +440,6 @@ async def _mint_tokens_per_installation(
     for inst_id, urls in installation_to_urls.items():
         minted = await client.mint_agent_token(
             inst_id,
-            can_open_pr=can_open_pr,
             repositories=sorted({_repo_name(url) for url in urls}),
         )
         token = IssuedToken(
@@ -468,10 +458,9 @@ async def _mint_tokens_per_installation(
         tokens_by_installation[inst_id] = minted.token
         issued.append(token)
         logger.info(
-            "Generated token for installation %s (%d repo(s), can_open_pr=%s, expires_at=%s)",
+            "Generated token for installation %s (%d repo(s), expires_at=%s)",
             inst_id,
             len(urls),
-            can_open_pr,
             minted.expires_at.isoformat(),
         )
 
@@ -535,14 +524,6 @@ class SetupPhaseSecrets:
     False therefore still resolves the installation, mints the token, writes
     the per-repo credential entries and configures gh. It skips ``git clone``
     and nothing else."""
-    can_open_pr: bool = False
-    """Whether the phase these credentials are for may create a pull request
-    (#1197).
-
-    The tokens in ``repo_tokens`` are minted to match: False downgrades
-    ``pull_requests`` to read, so the gh hosts.yml entry this writes cannot
-    open a PR. It is the answer to "what can this phase do", which is why it
-    sits beside the credentials rather than in the phase's prompt."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -567,7 +548,6 @@ class SetupPhaseSecrets:
         *,
         repositories: list[str] | None = None,
         clone_repos: bool = True,
-        can_open_pr: bool = False,
         require_github: bool = True,
         include_codex_auth: bool = False,
         ledger: IssuanceLedger,
@@ -585,9 +565,6 @@ class SetupPhaseSecrets:
             clone_repos: If False, the repos are credentialed but not checked
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
-            can_open_pr: Whether the phase may create a pull request (#1197).
-                Defaults to False so a caller that has not thought about it
-                provisions a phase that cannot publish.
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -607,7 +584,7 @@ class SetupPhaseSecrets:
         repos = repositories or []
         # Repo-less workflows resolve too: they get no git credential, but gh
         # still needs one, and hosts.yml is now the only place gh finds it.
-        github = await _resolve_github_auth(repos, require_github, can_open_pr, ledger)
+        github = await _resolve_github_auth(repos, require_github, ledger)
 
         claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
         # Scope the codex credential to codex phases only: a claude phase's agent
@@ -620,7 +597,6 @@ class SetupPhaseSecrets:
             gh_token=github.gh_token,
             issued=github.issued,
             clone_repos=clone_repos,
-            can_open_pr=can_open_pr,
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             codex_auth_json=codex_auth_json,
@@ -641,7 +617,6 @@ class SetupPhaseSecrets:
         repo_tokens: dict[str, str] | None = None,
         gh_token: str | None = None,
         clone_repos: bool = True,
-        can_open_pr: bool = False,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -657,7 +632,6 @@ class SetupPhaseSecrets:
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
             gh_token: gh's credential; defaults to the one `create` would route to
             clone_repos: False to credential the repos without checking them out (#1187)
-            can_open_pr: True to model a phase permitted to publish (#1197)
         """
         import os
 
@@ -673,7 +647,6 @@ class SetupPhaseSecrets:
             repositories=repositories or [],
             gh_token=gh_token,
             clone_repos=clone_repos,
-            can_open_pr=can_open_pr,
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),

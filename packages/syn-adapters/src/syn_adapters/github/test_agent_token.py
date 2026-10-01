@@ -1,15 +1,13 @@
-"""The credential an agent phase holds is what decides whether it can publish (#1197).
+"""Every agent phase holds the installation's own permissions (#1477).
 
-`implement` opened its own pull request four minutes before it finished, and
-`open_pr` - the phase whose entire job is to refuse publication when
-verification finds a defect - never ran. The implement prompt already said
-"Do not open a PR", in those words. The prompt was not the gate; nothing was.
+#1197 minted non-publishing phases a token with `pull_requests: read`, meaning
+to block `gh pr create` and believing `gh pr comment` still worked through
+`issues: write`. It did not: GitHub refused the comment through GraphQL
+`addComment` and through the REST issues endpoint alike (measured 2026-10-01),
+and there is no comment-only permission. Phases are ephemeral and open their
+own PRs, so these tests pin that NO phase token asks for a permission subset.
 
-So the question these tests ask is not "was the agent told not to" but "could
-it have". A phase that may not publish is handed an installation token whose
-`pull_requests` permission is `read`, and `POST /repos/{o}/{r}/pulls` returns
-403 to it - through `gh pr create`, through `curl`, through the API directly,
-and on a codex phase where a tool allowlist would not have applied at all.
+Repository scoping (#725) is unaffected; its tests live beside this file.
 """
 
 from __future__ import annotations
@@ -49,7 +47,7 @@ class _FakeHttp:
 
     def __init__(self, granted: dict[str, str]) -> None:
         self._granted = granted
-        self.token_request_bodies: list[dict[str, dict[str, str]] | None] = []
+        self.token_request_bodies: list[dict[str, dict[str, str] | list[str]] | None] = []
         self.minted = 0
 
     def last_token_request(self) -> TokenRequest | None:
@@ -75,7 +73,7 @@ class _FakeHttp:
         self,
         path: str,
         headers: dict[str, str] | None = None,
-        json: dict[str, dict[str, str]] | None = None,
+        json: dict[str, dict[str, str] | list[str]] | None = None,
     ) -> httpx.Response:
         self.token_request_bodies.append(json)
         self.minted += 1
@@ -83,7 +81,11 @@ class _FakeHttp:
         # request with no body at all gets the installation's full set - which
         # is exactly the behaviour that let `implement` publish.
         requested = self.last_token_request()
-        effective = self._granted if requested is None else requested.permissions
+        effective = (
+            self._granted
+            if requested is None or requested.permissions is None
+            else requested.permissions
+        )
         expires = datetime.now(UTC) + timedelta(hours=1)
         return httpx.Response(
             201,
@@ -120,131 +122,53 @@ def _requested_permissions(fake: _FakeClient) -> dict[str, str] | None:
 
 
 @pytest.mark.unit
-async def test_a_phase_that_may_not_publish_cannot_create_a_pull_request() -> None:
-    """The reproduction, at the only layer that could have stopped it."""
+async def test_a_phase_token_requests_no_permission_downgrade() -> None:
+    """The regression: no body means GitHub grants the installation's full set.
+
+    A `permissions` subset here is how #1197 took `pull_requests: write` away,
+    and with it every PR comment a review phase was told to post.
+    """
     fake = _FakeClient()
 
-    await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
+    await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
 
-    requested = _requested_permissions(fake)
-    assert requested is not None, (
-        "no `permissions` in the token request means GitHub grants the "
-        "installation's full set, including pull_requests: write"
+    requested = fake.http.last_token_request()
+    assert requested is not None
+    assert requested.permissions is None, (
+        "a phase token must not narrow the installation's permissions: "
+        "pull_requests: read refuses `gh pr comment` (#1477)"
     )
-    assert requested["pull_requests"] == "read"
 
 
 @pytest.mark.unit
-async def test_the_scope_goes_on_the_wire_under_the_name_github_reads() -> None:
-    """The one assertion that has to spell the JSON key out.
-
-    Every other test here reads the request back through `TokenRequest`, so a
-    field renamed or aliased on the model would round-trip green on both sides
-    while GitHub received a key it does not recognise - and an unrecognised
-    key means an unscoped token, which is the whole defect. This pins the
-    serialized body `get_installation_token` actually posts, against what the
-    endpoint documents.
-    """
-    fake = _FakeClient({"contents": "write", "pull_requests": "write"})
-
-    await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
-
-    assert fake.http.token_request_bodies == [
-        {"permissions": {"contents": "write", "pull_requests": "read"}}
-    ]
-
-
-@pytest.mark.unit
-async def test_that_phase_can_still_push_read_prs_and_talk_to_issues() -> None:
-    """Scoping publication away must not take the work with it.
-
-    `implement` pushes a branch, `gh pr checkout`s the PR it is reworking and
-    reads the issue it is fixing. A token that blocked those would trade one
-    broken workflow for another.
-    """
+async def test_a_phase_token_is_still_scoped_to_its_repositories() -> None:
+    """Dropping the permission downgrade must not drop WHERE the token reaches (#725)."""
     fake = _FakeClient()
 
-    await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
+    await mint_agent_token(_as_client(fake), "42", repositories=["repo-b", "repo-a"])
 
-    requested = _requested_permissions(fake)
+    requested = fake.http.last_token_request()
     assert requested is not None
-    assert requested["contents"] == "write"  # push the branch
-    assert requested["pull_requests"] == "read"  # gh pr checkout / view / diff
-    assert requested["issues"] == "write"  # gh issue view, and commenting
-    assert requested["checks"] == "read"  # gh pr checks
+    assert requested.repositories == ["repo-a", "repo-b"]
 
 
 @pytest.mark.unit
-async def test_the_publishing_phase_is_the_one_that_gets_write() -> None:
-    """`open_pr` exists to publish; scoping it down would break the gate itself."""
+async def test_the_token_carries_pull_requests_write_when_the_installation_grants_it() -> None:
+    """What the agent can actually do: comment on and open pull requests."""
     fake = _FakeClient()
 
-    await mint_agent_token(_as_client(fake), "42", can_open_pr=True)
+    minted = await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
 
-    assert _requested_permissions(fake) is None
-
-
-@pytest.mark.unit
-async def test_we_never_ask_for_a_permission_the_installation_does_not_hold() -> None:
-    """GitHub 422s a token request that exceeds the installation's own grant.
-
-    An enumerated "what a phase needs" list would break any deployment whose
-    App is configured differently from ours. The scope is derived from what
-    the installation actually holds, so it cannot exceed it.
-    """
-    fake = _FakeClient({"contents": "write", "metadata": "read"})
-
-    await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
-
-    requested = _requested_permissions(fake)
-    assert requested is not None
-    assert set(requested) == {"contents", "metadata"}
-    assert "pull_requests" not in requested
+    assert minted.permissions["pull_requests"] == "write"
 
 
 @pytest.mark.unit
-async def test_a_publishing_phase_does_not_hand_its_token_to_a_scoped_one() -> None:
-    """Tokens are cached per installation, and both phases share an installation.
-
-    `open_pr` and `implement` run under the same installation id in the same
-    process. A cache keyed on that id alone would serve `implement` the
-    unscoped token `open_pr` minted, and the boundary would hold only until
-    the first execution that published anything.
-    """
+async def test_a_phase_token_is_reused_rather_than_reminted() -> None:
+    """The cache still has to work, or every phase pays an API call."""
     fake = _FakeClient()
 
-    publishing = await mint_agent_token(_as_client(fake), "42", can_open_pr=True)
-    scoped = await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
-
-    assert scoped != publishing
-    assert _requested_permissions(fake) is not None
-    assert fake.http.minted == 2
-
-
-@pytest.mark.unit
-async def test_a_scoped_token_is_reused_rather_than_reminted() -> None:
-    """The cache still has to work, or every phase pays two API calls."""
-    fake = _FakeClient()
-
-    first = await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
-    second = await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
+    first = await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
+    second = await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
 
     assert first == second
     assert fake.http.minted == 1
-
-
-@pytest.mark.unit
-async def test_a_scope_we_cannot_establish_yields_no_token_at_all() -> None:
-    """Fail closed. An unscoped token handed out on a lookup error is the bug."""
-
-    class _Broken(_FakeClient):
-        async def _boom(self, *args: object, **kwargs: object) -> httpx.Response:
-            raise httpx.ConnectError("installation lookup failed")
-
-    fake = _Broken()
-    fake.http.get = fake._boom  # type: ignore[method-assign]
-
-    with pytest.raises(httpx.HTTPError):
-        await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
-
-    assert fake.http.minted == 0

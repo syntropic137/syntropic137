@@ -168,12 +168,11 @@ class _AppClient:
         return [{"id": owner} for owner in dict.fromkeys(_OWNERS.values())]
 
     async def mint_agent_token(
-        self, installation_id: str, *, can_open_pr: bool, repositories: list[str] | None = None
+        self, installation_id: str, *, repositories: list[str] | None = None
     ) -> InstallationToken:
         return await mint_agent_token(
             cast("GitHubAppClient", self),
             installation_id,
-            can_open_pr=can_open_pr,
             repositories=repositories,
         )
 
@@ -365,9 +364,10 @@ class TestGhReadsHostsYmlRoutedByTheRepoUnderWork:
 
         ((installation, request),) = github.token_requests
         assert installation == "inst-1"
-        assert request is not None
-        assert request.repositories is None, (
-            "a repo-less credential has no repository to be scoped to"
+        # No body at all: no repository to scope to, and no permission subset
+        # (#1477), so the token carries the installation's grant everywhere.
+        assert request is None, (
+            "a repo-less credential sends no body: no repository scope, no permission subset"
         )
         assert github.reaches(container.gh_token(), "org/repo-a")
         assert container.git_token("org/repo-a") is None
@@ -388,6 +388,22 @@ class TestGhReadsHostsYmlRoutedByTheRepoUnderWork:
         after = container.gh_token()
         assert after != before
         assert github.reaches(after, primary)
+
+    async def test_a_renewal_keeps_the_repository_scope_provisioning_had(
+        self, github: _GitHub, tmp_path: Path
+    ) -> None:
+        """Reaching the repo proves nothing: an unscoped token reaches it too."""
+        workspace, container = await _provisioned(tmp_path, [_A])
+        provisioned = [(i, r.repositories if r else None) for i, r in github.token_requests]
+
+        await workspace.renew_git_credential()
+
+        renewed = [(i, r.repositories if r else None) for i, r in github.token_requests]
+        renewed = renewed[len(provisioned) :]
+        assert renewed, "renewal minted nothing"
+        assert renewed == provisioned
+        assert not github.reaches(container.git_token("org/repo-a"), "org/repo-b")
+        assert not github.reaches(container.gh_token(), "org/repo-b")
 
 
 class TestTheLedgerCoversEveryMintSite:

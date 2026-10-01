@@ -479,10 +479,9 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
-    # #1429. A phase that cannot publish rendered identically to one that can,
-    # so `syn workflow show`, the dashboard and the API all agreed while the
-    # run failed at `gh pr create`. can_open_pr decides the GitHub token's
-    # permission level, so it has to be visible.
+    # #1429 surfaced can_open_pr when it decided the GitHub token's permission
+    # level. Since #1477 it decides nothing: every phase token carries the
+    # installation's own permissions. Kept readable until the field is removed.
     clone_repos: bool = True
     can_open_pr: bool = False
     delivers_repo_changes: bool = True
