@@ -2991,6 +2991,12 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /**
+             * Deliverable Produced
+             * @default false
+             */
+            deliverable_produced: boolean;
+            reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Repos */
             repos?: string[];
             /** Task */
@@ -4439,6 +4445,7 @@ export interface components {
              * @default false
              */
             deliverable_recovered: boolean;
+            reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Model */
             model?: string | null;
             /** Requested Model */
@@ -5737,6 +5744,24 @@ export interface components {
              */
             actor: string;
         };
+        /**
+         * SideEffectStatus
+         * @description What a phase says happened to the external writes it attempted.
+         *
+         *     THE CONFLATION THIS SPLITS. A phase that wrote its deliverable and was then
+         *     refused a PR comment had one word for both facts - `success` - so it wrote
+         *     `false` and the run failed with the finished review still on disk. 17 runs
+         *     of one canary were recorded as failures that way. The deliverable and the
+         *     write-back are separate outcomes and take separate responses: a missing
+         *     deliverable is a failed phase, a refused comment is a permission to grant.
+         *
+         *     A REPORT, NEVER A MEASUREMENT, and spelled `reported_side_effects` wherever
+         *     it is carried for the reason `ReportedFailureReason` is: the agent chose
+         *     the word and nothing corroborates it. It never decides whether a phase
+         *     completes - `success` does that, unchanged.
+         * @enum {string}
+         */
+        SideEffectStatus: "none" | "succeeded" | "denied" | "failed";
         /**
          * SkillDetailResponse
          * @description Every registration sharing one skill name.
