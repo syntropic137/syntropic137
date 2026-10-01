@@ -6230,7 +6230,7 @@
     "/version": {
       "get": {
         "summary": "Version",
-        "description": "Get the current version.",
+        "description": "Which build is serving this API.\n\nReturns the same ``BuildInfo`` block ``/health`` carries, rather than a\nflat mapping holding ``version_string()``. That function yields the\n``\"unknown\"`` sentinel when package metadata cannot be read, and a bare\nstring in a version field is indistinguishable to a client from a release\nactually called that - the defect #1380 exists to remove. ``BuildInfo``\nmakes the absence a declared state (``version: null`` plus\n``version_status``) instead of a word.",
         "operationId": "version_version_get",
         "responses": {
           "200": {
@@ -6238,11 +6238,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Version Version Get"
+                  "$ref": "#/components/schemas/BuildInfo"
                 }
               }
             }

@@ -1973,7 +1973,15 @@ export interface paths {
         };
         /**
          * Version
-         * @description Get the current version.
+         * @description Which build is serving this API.
+         *
+         *     Returns the same ``BuildInfo`` block ``/health`` carries, rather than a
+         *     flat mapping holding ``version_string()``. That function yields the
+         *     ``"unknown"`` sentinel when package metadata cannot be read, and a bare
+         *     string in a version field is indistinguishable to a client from a release
+         *     actually called that - the defect #1380 exists to remove. ``BuildInfo``
+         *     makes the absence a declared state (``version: null`` plus
+         *     ``version_status``) instead of a word.
          */
         get: operations["version_version_get"];
         put?: never;
@@ -10680,9 +10688,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["BuildInfo"];
                 };
             };
         };

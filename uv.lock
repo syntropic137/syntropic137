@@ -1402,7 +1402,7 @@ provides-extras = ["postgres", "minio", "all"]
 
 [[package]]
 name = "syn-api"
-version = "0.32.0b3"
+version = "0.33.0b1"
 source = { editable = "apps/syn-api" }
 dependencies = [
     { name = "agentic-logging" },
@@ -1565,7 +1565,7 @@ requires-dist = [
 
 [[package]]
 name = "syntropic137"
-version = "0.32.0b3"
+version = "0.33.0b1"
 source = { editable = "." }
 dependencies = [
     { name = "event-sourcing-python" },
