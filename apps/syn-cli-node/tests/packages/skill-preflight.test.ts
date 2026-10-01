@@ -20,6 +20,7 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(pkg, { recursive: true, force: true });
   vi.restoreAllMocks();
+  vi.resetAllMocks();
   vi.unstubAllGlobals();
   mockFetch.mockReset();
 });

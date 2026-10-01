@@ -18,6 +18,7 @@ describe("CLI", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
   });
 
   function createCli(): CLI {

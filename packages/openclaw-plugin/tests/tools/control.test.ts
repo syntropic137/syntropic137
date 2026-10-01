@@ -21,6 +21,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.resetAllMocks();
   vi.unstubAllEnvs();
 });
 

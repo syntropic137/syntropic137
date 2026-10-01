@@ -27,6 +27,7 @@ vi.mock("../../../src/packages/git.js", () => ({
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.resetAllMocks();
   gitClone.mockReset();
   gitHeadSha.mockReset();
   gitHeadSha.mockResolvedValue("deadbeef");

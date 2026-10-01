@@ -13,6 +13,7 @@ describe("repo commands", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
   });
 

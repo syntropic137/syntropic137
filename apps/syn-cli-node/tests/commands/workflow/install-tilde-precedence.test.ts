@@ -39,6 +39,7 @@ describe("installCommand handler: tilde precedence (issue #1045)", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     fs.rmSync(fakeHome, { recursive: true, force: true });
   });
 

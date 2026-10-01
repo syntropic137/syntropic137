@@ -20,6 +20,7 @@ describe("workflow search commands", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
   });
 
   function stdout(): string {
