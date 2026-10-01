@@ -108,8 +108,9 @@ class PhaseDetail:
     """
     reported_side_effects: str | None = None
     """What the phase's agent said happened to its external writes (a PR
-    comment, a push): ``succeeded``, ``denied`` or ``failed``, or ``None`` when
-    it said nothing. A report, not a measurement - see `SideEffectStatus`."""
+    comment, a push): ``none``, ``succeeded``, ``denied`` or ``failed``, or
+    ``None`` when it said nothing. A report, not a measurement - see
+    `SideEffectStatus`."""
 
     @classmethod
     def running(
