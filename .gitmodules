@@ -13,4 +13,4 @@
 [submodule "lib/agentic-workspace"]
 	path = lib/agentic-workspace
 	url = https://github.com/AgentParadise/agentic-workspace.git
-	active = true
+	branch = release

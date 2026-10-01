@@ -37,7 +37,14 @@ from syn_api.routes import (
     workflows_router,
 )
 from syn_api.strict_query import reject_unknown_query_params
-from syn_api.types import Err, FeatureDisabledResponse, HealthResponse, Ok, RootResponse
+from syn_api.types import (
+    BuildInfo,
+    Err,
+    FeatureDisabledResponse,
+    HealthResponse,
+    Ok,
+    RootResponse,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -225,9 +232,18 @@ def create_app() -> FastAPI:
         return HealthResponse(status="unhealthy", mode="degraded", build=get_build_info())
 
     @app.get("/version")
-    async def version() -> dict[str, str]:
-        """Get the current version."""
-        return {"version": version_string()}
+    async def version() -> BuildInfo:
+        """Which build is serving this API.
+
+        Returns the same ``BuildInfo`` block ``/health`` carries, rather than a
+        flat mapping holding ``version_string()``. That function yields the
+        ``"unknown"`` sentinel when package metadata cannot be read, and a bare
+        string in a version field is indistinguishable to a client from a release
+        actually called that - the defect #1380 exists to remove. ``BuildInfo``
+        makes the absence a declared state (``version: null`` plus
+        ``version_status``) instead of a word.
+        """
+        return get_build_info()
 
     return app
 

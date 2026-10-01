@@ -214,39 +214,6 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 #: suite red until it is gone. It must never reach a release.
 AW_RELEASE_DIGEST_PENDING: Final[str] = "sha256:" + "0" * 64
 
-# TODO(#1417): fill all three from the first agentic-workspace release run
-# (push to `release`, release-images.yml) and move lib/agentic-workspace to that
-# release commit in the same change. Record commit, run id, and the claude /
-# codex / exporter versions read OUT OF each digest, as the AP history below
-# does. Expected from AW omni-agent manifest 1.7.1 (claude 2.1.281, codex
-# 0.156.1, apss-session-exporter 0.5.0) and buildfloor manifest 1.0.0.
-PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
-    {
-        WorkspaceImageProvider.CLAUDE_CLI: AW_RELEASE_DIGEST_PENDING,
-        WorkspaceImageProvider.OMNI_AGENT: AW_RELEASE_DIGEST_PENDING,
-        WorkspaceImageProvider.TOOLCHAIN: AW_RELEASE_DIGEST_PENDING,
-    }
-)
-
-
-#: The apss-session-exporter baked into each pinned image, for the providers
-#: that carry one at all. Verified by running OUT OF the digest above and
-#: reading what the binary reports, the same way the pin itself is verified.
-#: toolchain inherits omni's exporter unchanged (it is built FROM omni).
-#:
-#: It lives here, beside the digest, because the two move together: an image
-#: bump that leaves this stale makes every report of it name a version nothing
-#: is running. Deliberately NOT recovered by reading the prose above - the
-#: comment block keeps previous pins on purpose, so a text search returns
-#: whichever version happens to appear first and silently reports a historical
-#: one after any reordering.
-PINNED_EXPORTER_VERSIONS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
-    {
-        WorkspaceImageProvider.OMNI_AGENT: "0.5.0",
-        WorkspaceImageProvider.TOOLCHAIN: "0.5.0",
-    }
-)
-
 
 # ---------------------------------------------------------------------------
 # Rollback: the last agentic-primitives pins
