@@ -36,7 +36,11 @@ from pydantic import (
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
-from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_domain.contexts.orchestration import (
+    FailureClassification,
+    ReportedFailureReason,
+    SideEffectStatus,
+)
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
 # so `syn_shared.agents` is needed at RUNTIME, which makes a type-checking-only
@@ -657,6 +661,20 @@ class ExecutionDetail(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    deliverable_produced: bool = False
+    """True when any phase stored an artifact, whatever `status` says.
+
+    A run can fail after its deliverable exists, and complete while a phase's
+    write-back was refused; this is the one field that answers "is there work
+    to read" without inferring it from `artifact_ids`.
+    """
+    reported_side_effects: SideEffectStatus | None = None
+    """The most severe side-effect status any phase reported, ``None`` if none did.
+
+    What the AGENTS SAID about their external writes (a PR comment, a push):
+    ``denied`` beside a completed run means the deliverable is finished and a
+    write-back was refused - grant the permission, do not re-run the work.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
     task: str | None = None
@@ -1155,6 +1173,10 @@ class PhaseExecution(BaseModel):
     serves, and not only on `PhaseCompletedEvent`, because a fact that reaches
     no read model reaches no reader.
     """
+    reported_side_effects: SideEffectStatus | None = None
+    """What this phase's agent said happened to its external writes, ``None``
+    when it said nothing. A report, never a measurement, and it never decides
+    whether the phase completed."""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -1311,6 +1333,20 @@ class ExecutionDetailFull(BaseModel):
     Distinct from `unknown`, which is the word a phase writes to say it could
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
+    """
+    deliverable_produced: bool = False
+    """True when any phase stored an artifact, whatever `status` says.
+
+    A run can fail after its deliverable exists, and complete while a phase's
+    write-back was refused; this is the one field that answers "is there work
+    to read" without inferring it from `artifact_ids`.
+    """
+    reported_side_effects: SideEffectStatus | None = None
+    """The most severe side-effect status any phase reported, ``None`` if none did.
+
+    What the AGENTS SAID about their external writes (a PR comment, a push):
+    ``denied`` beside a completed run means the deliverable is finished and a
+    write-back was refused - grant the permission, do not re-run the work.
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""

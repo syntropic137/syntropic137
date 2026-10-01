@@ -70,6 +70,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FinishedAgentRun,
     PhaseDefinition,
     ReportedFailureReason,
+    SideEffectStatus,
     StrandedDeliverable,
 )
 from syn_shared.control import ControlSignalType
@@ -201,6 +202,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: same restart hazard as the message above, and here for the same
         #: reason rather than because the value is expensive to recompute.
         self._recovered_phases: set[str] = set()
+        #: What each phase's latest agent run said about its external writes.
+        #: Same restart hazard as `_recovered_phases`: reported when the agent
+        #: finishes, needed when the phase completes.
+        self._reported_side_effects: dict[str, SideEffectStatus | None] = {}
         #: Phases that completed, and what each one's collection stored. The
         #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
@@ -529,6 +534,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             # only honest source is the stream. It also keeps
             # CompletePhaseCommand - and every caller of it - unchanged.
             deliverable_recovered=command.phase_id in self._recovered_phases,
+            reported_side_effects=self._reported_side_effects.get(command.phase_id),
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
             cache_creation_tokens=command.cache_creation_tokens,
@@ -580,6 +586,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
             last_agent_message=command.last_agent_message,
+            reported_side_effects=command.reported_side_effects,
         )
         self._apply(event)
 
@@ -824,6 +831,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @event_sourcing_handler("AgentExecutionCompleted")
     def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:
         """Apply AgentExecutionCompletedEvent — keep what the agent left behind."""
+        reported_for: str = evt(event, "phase_id") or ""
+        if reported_for:
+            # Overwritten by every run, so a retry that says nothing does not
+            # inherit the abandoned attempt's report.
+            self._reported_side_effects[reported_for] = SideEffectStatus.from_stored(
+                evt(event, "reported_side_effects")
+            )
         said = evt(event, "last_agent_message")
         if not said:
             return

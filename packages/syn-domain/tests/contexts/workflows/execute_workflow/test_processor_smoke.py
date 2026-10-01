@@ -116,6 +116,7 @@ def _make_processor(
     session_capture: object | None = None,
     artifact_repository: object | None = None,
     retry_policy: UpstreamRetryPolicy | None = None,
+    execution_repository: FakeExecutionRepository | None = None,
 ) -> WorkflowExecutionProcessor:
     """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies.
 
@@ -132,7 +133,7 @@ def _make_processor(
     todo_projection = ExecutionTodoProjection(store=todo_store)
 
     return WorkflowExecutionProcessor(
-        execution_repository=FakeExecutionRepository(),
+        execution_repository=execution_repository or FakeExecutionRepository(),
         session_repository=FakeSessionRepository(),
         workspace_service=WorkspaceService.create(backend=WorkspaceBackend.MEMORY),
         artifact_repository=artifact_repository or FakeArtifactRepository(),

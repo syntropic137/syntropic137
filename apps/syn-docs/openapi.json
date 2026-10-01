@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.32.0b3"
+    "version": "0.33.0b1"
   },
   "paths": {
     "/workflows": {
@@ -6226,6 +6226,29 @@
           }
         }
       }
+    },
+    "/version": {
+      "get": {
+        "summary": "Version",
+        "description": "Get the current version.",
+        "operationId": "version_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Version Version Get"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8400,6 +8423,21 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliverable_produced": {
+            "type": "boolean",
+            "title": "Deliverable Produced",
+            "default": false
+          },
+          "reported_side_effects": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SideEffectStatus"
               },
               {
                 "type": "null"
@@ -11622,6 +11660,16 @@
             "title": "Deliverable Recovered",
             "default": false
           },
+          "reported_side_effects": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SideEffectStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "model": {
             "anyOf": [
               {
@@ -13851,6 +13899,17 @@
         ],
         "title": "SetMaintenanceModeRequest",
         "description": "Set or clear maintenance mode (#1387).\n\nThe response is not sent until the state is durably persisted, so a caller\nthat has seen a 200 knows no further execution can be admitted."
+      },
+      "SideEffectStatus": {
+        "type": "string",
+        "enum": [
+          "none",
+          "succeeded",
+          "denied",
+          "failed"
+        ],
+        "title": "SideEffectStatus",
+        "description": "What a phase says happened to the external writes it attempted.\n\nTHE CONFLATION THIS SPLITS. A phase that wrote its deliverable and was then\nrefused a PR comment had one word for both facts - `success` - so it wrote\n`false` and the run failed with the finished review still on disk. 17 runs\nof one canary were recorded as failures that way. The deliverable and the\nwrite-back are separate outcomes and take separate responses: a missing\ndeliverable is a failed phase, a refused comment is a permission to grant.\n\nA REPORT, NEVER A MEASUREMENT, and spelled `reported_side_effects` wherever\nit is carried for the reason `ReportedFailureReason` is: the agent chose\nthe word and nothing corroborates it. It never decides whether a phase\ncompletes - `success` does that, unchanged."
       },
       "SkillDetailResponse": {
         "properties": {

@@ -12,6 +12,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     BranchObservation,
     FailureClassification,
     ReportedFailureReason,
+    SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     TASK_INPUT_KEY,
@@ -99,6 +100,14 @@ class PhaseExecutionDetail:
     response has to pass it; this is one of them.
     """
 
+    reported_side_effects: SideEffectStatus | None = None
+    """What this phase's agent said happened to its external writes, or None.
+
+    `denied` beside a completed phase is the case this exists for: the
+    deliverable is finished and a PR comment was refused, which is a
+    permission to grant, not a run to repeat.
+    """
+
     observed_branches: tuple[BranchObservation, ...] | None = None
     """How this failed phase's branches stood when it died (#1200).
 
@@ -150,6 +159,9 @@ class PhaseExecutionDetail:
             "timeout_seconds": self.timeout_seconds,
             "error_message": self.error_message,
             "deliverable_recovered": self.deliverable_recovered,
+            "reported_side_effects": (
+                None if self.reported_side_effects is None else self.reported_side_effects.value
+            ),
             "observed_branches": (
                 None
                 if self.observed_branches is None
@@ -185,6 +197,7 @@ class PhaseExecutionDetail:
             timeout_seconds=data.get("timeout_seconds"),
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
+            reported_side_effects=SideEffectStatus.from_stored(data.get("reported_side_effects")),
             observed_branches=_observed_branches(data.get("observed_branches")),
             exit_code=_exit_code(data.get("exit_code")),
         )
@@ -299,6 +312,20 @@ class WorkflowExecutionDetail:
         task, and that is different from a task nobody recorded.
         """
         return self.inputs.get(TASK_INPUT_KEY)
+
+    @property
+    def deliverable_produced(self) -> bool:
+        """True when any phase stored an artifact.
+
+        Independent of `status`: a run can fail after its deliverable exists,
+        and a run can complete while a phase's write-back was refused.
+        """
+        return bool(self.artifact_ids) or any(p.artifact_id for p in self.phases)
+
+    @property
+    def reported_side_effects(self) -> SideEffectStatus | None:
+        """The most severe side-effect status any phase reported, None if none did."""
+        return SideEffectStatus.most_severe(p.reported_side_effects for p in self.phases)
 
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionDetail":

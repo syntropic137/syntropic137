@@ -9,6 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    SideEffectStatus,
+)
+
+
+def _side_effects(stored: object) -> str | None:
+    """A stored or event value as the record keeps it, None for anything unknown."""
+    status = SideEffectStatus.from_stored(stored)
+    return None if status is None else status.value
+
 
 @dataclass
 class PhaseDetail:
@@ -96,6 +106,10 @@ class PhaseDetail:
     and until this field existed a salvaged phase was stored byte-for-byte as a
     clean one.
     """
+    reported_side_effects: str | None = None
+    """What the phase's agent said happened to its external writes (a PR
+    comment, a push): ``succeeded``, ``denied`` or ``failed``, or ``None`` when
+    it said nothing. A report, not a measurement - see `SideEffectStatus`."""
 
     @classmethod
     def running(
@@ -150,6 +164,7 @@ class PhaseDetail:
             duration_seconds=event_data.get("duration_seconds"),
             completed_at=event_data.get("completed_at"),
             deliverable_recovered=bool(event_data.get("deliverable_recovered", False)),
+            reported_side_effects=_side_effects(event_data.get("reported_side_effects")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -173,6 +188,7 @@ class PhaseDetail:
             "observed_branches": self.observed_branches,
             "exit_code": self.exit_code,
             "deliverable_recovered": self.deliverable_recovered,
+            "reported_side_effects": self.reported_side_effects,
         }
 
     @classmethod
@@ -197,4 +213,5 @@ class PhaseDetail:
             observed_branches=data.get("observed_branches"),
             exit_code=data.get("exit_code"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
+            reported_side_effects=_side_effects(data.get("reported_side_effects")),
         )

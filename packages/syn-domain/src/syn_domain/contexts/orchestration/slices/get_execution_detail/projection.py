@@ -22,6 +22,7 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+    SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
@@ -289,6 +290,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # omitting it here is how the flag would have reached the store only
         # for phases whose PhaseStarted was never projected (#1300).
         phase["deliverable_recovered"] = bool(event_data.get("deliverable_recovered", False))
+        # Same hop as the flag above, for the same reason: this is the path
+        # nearly every real completion takes.
+        status = SideEffectStatus.from_stored(event_data.get("reported_side_effects"))
+        phase["reported_side_effects"] = None if status is None else status.value
 
     @staticmethod
     def _track_artifact(existing: dict[str, Any], artifact_id: str | None) -> None:

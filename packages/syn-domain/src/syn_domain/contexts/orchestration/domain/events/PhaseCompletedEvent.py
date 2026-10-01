@@ -7,6 +7,11 @@ from typing import Any
 
 from event_sourcing import DomainEvent, event
 
+# Runtime import needed for the Pydantic field type (noqa: TC001)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    SideEffectStatus,  # noqa: TC001 - needed at runtime for Pydantic
+)
+
 
 @event("PhaseCompleted", "v1")
 class PhaseCompletedEvent(DomainEvent):
@@ -40,6 +45,11 @@ class PhaseCompletedEvent(DomainEvent):
     #: operator reading one execution nor anyone counting across many could
     #: tell how often the salvage was firing or which runs stood on it.
     deliverable_recovered: bool = False
+
+    #: What the phase said happened to its external writes - `denied` for a
+    #: refused PR comment beside a finished deliverable. None when the phase
+    #: said nothing, which includes every event written before this field.
+    reported_side_effects: SideEffectStatus | None = None
 
     # Metrics (tokens only — cost lives in Lane 2)
     input_tokens: int = 0

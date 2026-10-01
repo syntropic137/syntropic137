@@ -75,6 +75,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FailureClassification,
     PhaseUsage,
     ReportedFailureReason,
+    SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -247,6 +248,7 @@ __all__ = [
     "ResumeStartRecord",
     "ResumeStarter",
     "SecurityPolicy",
+    "SideEffectStatus",
     "SidecarConfig",
     "SkillError",
     "SkillInvalidName",
