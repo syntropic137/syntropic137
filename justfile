@@ -696,6 +696,12 @@ check-default-workspace-image:
     IMAGE="$(uv run python -c 'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')"
     echo "🔎 Default workspace image: $IMAGE"
     docker pull --quiet "$IMAGE" >/dev/null
+    # Run it the way a workspace does. Without the /home/agent tmpfs the probe
+    # sees root-owned dirs the image build leaves in that layer, which every
+    # real workspace masks, so the gate failed on an image that works.
+    read -r -a RUN_ARGS <<< "$(uv run python -c 'from agentic_isolation.config import SecurityConfig; print(" ".join(a for a in SecurityConfig.production().to_docker_run_args() if not a.startswith("--runtime")))')"
+    # Stands in for the per-workspace /workspace mount the backend always adds.
+    RUN_ARGS+=("--tmpfs=/workspace:rw,exec,nosuid,uid=1000,gid=1000")
     FAILED=0
     # Probe THROUGH the image's entrypoint, not around it. `--entrypoint <bin>`
     # would prove the binaries exist while bypassing /opt/agentic/entrypoint.sh,
@@ -704,7 +710,7 @@ check-default-workspace-image:
     # motivated digest pinning in the first place. A check that cannot catch the
     # regression it exists for is worse than no check.
     for probe in claude codex skills rustup bun cc; do
-        if OUT=$(docker run --rm "$IMAGE" "$probe" --version 2>&1); then
+        if OUT=$(docker run --rm "${RUN_ARGS[@]}" "$IMAGE" "$probe" --version 2>&1); then
             # The entrypoint logs plugin discovery before handing off, so the
             # version is the LAST line, not the whole output.
             echo "  ✅ $probe: $(echo "$OUT" | tail -1)"
