@@ -50,7 +50,7 @@ dev = [
 
 [[package]]
 name = "agentic-isolation"
-version = "0.10.0"
+version = "0.8.1"
 source = { editable = "lib/agentic-workspace/lib/python/agentic_isolation" }
 dependencies = [
     { name = "pydantic" },
