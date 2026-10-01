@@ -348,19 +348,13 @@ class PhaseYamlDefinition(BaseModel):
     installation, which in a multi-org deployment is the wrong one."""
 
     can_open_pr: bool = False
-    """Whether this phase may create a pull request (#1197).
+    """Whether this phase was meant to create a pull request (#1197).
 
-    DEFAULTS TO FALSE BECAUSE PUBLICATION IS THE EXCEPTION. `implement`
-    published its own work 14 minutes before the verifier started, on a run
-    where the publication phase never executed at all; its prompt had said
-    not to. Opting in is one line in a workflow that means to publish, and
-    the phases that do are few. Defaulting the other way would mean every
-    phase anyone ever writes is a publisher until someone notices.
-
-    This is enforced by the token the phase is handed, not by its prompt or
-    its tool list - see ``agent_token.mint_agent_token``. False keeps
-    `pull_requests: read`, so a phase can still read and check out the PR it
-    is reworking; it just cannot open one."""
+    INERT SINCE #1477. It used to downgrade the phase's token to
+    `pull_requests: read`, which also refused every PR comment (GitHub has no
+    comment-only permission), so every phase now holds the installation's own
+    permissions and may open its own PR. Still accepted so existing workflow
+    YAML loads; removal is a follow-up."""
 
     delivers_repo_changes: bool = True
     """Whether a change to the repositories is part of what this phase delivers (#1308).

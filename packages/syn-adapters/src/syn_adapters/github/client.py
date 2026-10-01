@@ -259,13 +259,10 @@ class GitHubAppClient:
         self,
         installation_id: str,
         *,
-        can_open_pr: bool,
         repositories: Collection[str] | None = None,
     ) -> InstallationToken:
         """Mint the token an agent phase holds. See agent_token.mint_agent_token."""
-        return await _mint_agent_token(
-            self, installation_id, can_open_pr=can_open_pr, repositories=repositories
-        )
+        return await _mint_agent_token(self, installation_id, repositories=repositories)
 
     async def revoke_installation_token(self, token: str) -> None:
         """Revoke an installation token. See client_token.revoke_installation_token."""

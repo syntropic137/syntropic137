@@ -233,7 +233,6 @@ async def test_secret_injection_killed_by_a_signal_says_so() -> None:
             ["syntropic137/syntropic137"],
             phase_name="premise",
             clone_repos=True,
-            can_open_pr=False,
             include_codex_auth=False,
         )
 
@@ -284,7 +283,6 @@ async def test_secret_injection_names_the_status_even_with_no_diagnostic() -> No
             ["syntropic137/syntropic137"],
             phase_name="premise",
             clone_repos=True,
-            can_open_pr=False,
             include_codex_auth=False,
         )
 

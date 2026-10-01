@@ -64,10 +64,10 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # whether the setup script contains `git clone` at all (#1187). Applied,
     # not validated: any boolean is legal, and both values do something.
     "clone_repos": ("ExecutablePhase", "clone_repos"),
-    # Decides which GitHub permissions the phase's token carries, so it is
-    # applied by `WorkspaceProvisionHandler` minting a token whose
-    # `pull_requests` is `read` (#1197). Applied, not validated: both values
-    # are legal and both do something.
+    # KNOWN INERT since #1477: still passed to ExecutablePhase, but nothing
+    # reads it there; every phase token carries the installation's own
+    # permissions. Listed here only so existing YAML loads until the field is
+    # removed. Do not cite this entry as proof the field does anything.
     "can_open_pr": ("ExecutablePhase", "can_open_pr"),
     # Read by the unpushed-work gate at COMPLETE_PHASE to decide whether an
     # uncommitted change is a deliverable or a build tool's side effect

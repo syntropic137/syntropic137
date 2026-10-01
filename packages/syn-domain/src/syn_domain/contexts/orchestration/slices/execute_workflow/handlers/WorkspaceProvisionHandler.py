@@ -398,7 +398,6 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 phase_name=phase.name,
                 clone_repos=phase.clone_repos,
-                can_open_pr=phase.can_open_pr,
                 include_codex_auth=include_codex_auth,
             )
             await self._materialize_claude_plugins(workspace, phase)
@@ -430,7 +429,6 @@ class WorkspaceProvisionHandler:
         *,
         phase_name: str,
         clone_repos: bool,
-        can_open_pr: bool,
         include_codex_auth: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -453,7 +451,6 @@ class WorkspaceProvisionHandler:
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             clone_repos=clone_repos,
-            can_open_pr=can_open_pr,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
             ledger=workspace.issuance_ledger,

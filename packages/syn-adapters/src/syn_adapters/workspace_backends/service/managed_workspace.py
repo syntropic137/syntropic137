@@ -268,9 +268,7 @@ class ManagedWorkspace:
         # caller: this object is what `renew_git_credential` re-mints from, and
         # a copy of the answers taken anywhere else could disagree with the
         # credential actually installed here (#1393).
-        self._credential_source = CredentialSource(
-            repositories=tuple(secrets.repositories), can_open_pr=secrets.can_open_pr
-        )
+        self._credential_source = CredentialSource(repositories=tuple(secrets.repositories))
         # `secrets.issued` is already in the ledger: `SetupPhaseSecrets.create`
         # recorded each token as it was minted (#725).
         result = await _run_setup_phase(self, secrets, setup_script)
