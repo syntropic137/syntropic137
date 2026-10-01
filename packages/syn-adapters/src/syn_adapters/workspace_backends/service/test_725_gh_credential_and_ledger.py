@@ -366,8 +366,8 @@ class TestGhReadsHostsYmlRoutedByTheRepoUnderWork:
         assert installation == "inst-1"
         # No body at all: no repository to scope to, and no permission subset
         # (#1477), so the token carries the installation's grant everywhere.
-        assert request is None or request.repositories is None, (
-            "a repo-less credential has no repository to be scoped to"
+        assert request is None, (
+            "a repo-less credential sends no body: no repository scope, no permission subset"
         )
         assert github.reaches(container.gh_token(), "org/repo-a")
         assert container.git_token("org/repo-a") is None
