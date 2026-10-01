@@ -389,6 +389,22 @@ class TestGhReadsHostsYmlRoutedByTheRepoUnderWork:
         assert after != before
         assert github.reaches(after, primary)
 
+    async def test_a_renewal_keeps_the_repository_scope_provisioning_had(
+        self, github: _GitHub, tmp_path: Path
+    ) -> None:
+        """Reaching the repo proves nothing: an unscoped token reaches it too."""
+        workspace, container = await _provisioned(tmp_path, [_A])
+        provisioned = [(i, r.repositories if r else None) for i, r in github.token_requests]
+
+        await workspace.renew_git_credential()
+
+        renewed = [(i, r.repositories if r else None) for i, r in github.token_requests]
+        renewed = renewed[len(provisioned) :]
+        assert renewed, "renewal minted nothing"
+        assert renewed == provisioned
+        assert not github.reaches(container.git_token("org/repo-a"), "org/repo-b")
+        assert not github.reaches(container.gh_token(), "org/repo-b")
+
 
 class TestTheLedgerCoversEveryMintSite:
     async def test_setup_the_renewal_task_and_both_quarantine_paths(

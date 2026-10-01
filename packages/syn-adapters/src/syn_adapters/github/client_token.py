@@ -147,7 +147,9 @@ def parse_installation_token(
     # opposite. That line was quoted as proof a token could open a PR during
     # #1429, sending the investigation to the GitHub App's permissions,
     # installation repo selection and app identity, all of which were correct.
-    # The cause was a workflow phase that had not declared `can_open_pr`.
+    # The cause then was a phase that had not declared `can_open_pr`; since
+    # #1477 phase tokens are no longer downgraded, but a caller passing a
+    # permission subset still needs the levels logged, not just the keys.
     #
     # Sorted so two log lines can be compared by eye without dict ordering
     # getting in the way.

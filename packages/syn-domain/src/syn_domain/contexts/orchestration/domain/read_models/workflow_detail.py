@@ -146,12 +146,11 @@ class PhaseDefinitionDetail:
     """Whether the workflow's repos are checked out for this phase (#1187)."""
 
     can_open_pr: bool = False
-    """Whether this phase may create a pull request (#1197).
+    """Declared intent only; inert since #1477.
 
-    Enforced by the permissions of the GitHub token the phase's workspace
-    receives: False mints ``pull_requests: read``. A phase that cannot publish
-    rendered IDENTICALLY to one that can until #1429, so a missing declaration
-    looked like a GitHub App misconfiguration."""
+    Every phase token now carries the installation's grant, because GitHub
+    requires ``pull_requests: write`` to comment on a PR and has no
+    comment-only permission. Kept for schema compatibility until removed."""
 
     delivers_repo_changes: bool = True
     """Whether repository changes are part of this phase's deliverable (#1308)."""
