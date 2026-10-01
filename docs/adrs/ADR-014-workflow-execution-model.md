@@ -253,7 +253,6 @@ git branch is taken from a commit. See
 [docs/architecture/orchestration-ubiquitous-language.md](../architecture/orchestration-ubiquitous-language.md).
 
 **API.** `POST /executions/{execution_id}/resume`, CLI `syn execution resume`.
->>>>>>> origin/main
 
 ## Consequences
 
