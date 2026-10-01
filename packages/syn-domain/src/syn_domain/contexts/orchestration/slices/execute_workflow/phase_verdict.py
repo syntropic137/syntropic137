@@ -221,6 +221,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+    SideEffectStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -306,6 +307,11 @@ class AgentVerdict:
     comments: str = ""
     via_status_alias: bool = False
     reported_failure_reason: ReportedFailureReason | None = None
+    #: What the phase said happened to the external writes it attempted (a PR
+    #: comment, a push). Never read by `refuses_completion`: a deliverable
+    #: whose write-back was refused is a finished deliverable, and the refusal
+    #: travels beside it instead of failing it. See `SideEffectStatus`.
+    reported_side_effects: SideEffectStatus | None = None
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -356,6 +362,7 @@ class AgentVerdict:
             VerdictStatus.SUCCESS if reported.success else VerdictStatus.FAILURE,
             reported.said,
             reported_failure_reason=ReportedFailureReason.from_reported(reported.failure_reason),
+            reported_side_effects=SideEffectStatus.from_reported(reported.side_effects),
         )
 
     @classmethod
@@ -400,6 +407,7 @@ class AgentVerdict:
             aliased.said,
             via_status_alias=True,
             reported_failure_reason=ReportedFailureReason.from_reported(aliased.failure_reason),
+            reported_side_effects=SideEffectStatus.from_reported(aliased.side_effects),
         )
 
     @property
@@ -628,6 +636,9 @@ class _ReportedResult(BaseModel):
     #: does the matching afterwards, where failing to match costs the label and
     #: only the label.
     failure_reason: object | None = None
+    #: `object` for the same reason: a misspelled side-effect word must cost
+    #: the word, never the verdict beside it.
+    side_effects: object | None = None
 
     @property
     def said(self) -> str:
@@ -684,6 +695,7 @@ class _StatusAliasResult(BaseModel):
     #: a rule no reader could state. Declared as `object` on the same grounds
     #: as the contract model's.
     failure_reason: object | None = None
+    side_effects: object | None = None
 
     @model_validator(mode="before")
     @classmethod

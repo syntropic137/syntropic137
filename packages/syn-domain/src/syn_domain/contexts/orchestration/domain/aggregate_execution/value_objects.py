@@ -27,7 +27,7 @@ from syn_shared.agents import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +282,80 @@ class ReportedFailureReason(StrEnum):
                 [member.value for member in cls],
             )
         return matched
+
+
+class SideEffectStatus(StrEnum):
+    """What a phase says happened to the external writes it attempted.
+
+    THE CONFLATION THIS SPLITS. A phase that wrote its deliverable and was then
+    refused a PR comment had one word for both facts - `success` - so it wrote
+    `false` and the run failed with the finished review still on disk. 17 runs
+    of one canary were recorded as failures that way. The deliverable and the
+    write-back are separate outcomes and take separate responses: a missing
+    deliverable is a failed phase, a refused comment is a permission to grant.
+
+    A REPORT, NEVER A MEASUREMENT, and spelled `reported_side_effects` wherever
+    it is carried for the reason `ReportedFailureReason` is: the agent chose
+    the word and nothing corroborates it. It never decides whether a phase
+    completes - `success` does that, unchanged.
+    """
+
+    NONE = "none"
+    """The phase attempted no external write."""
+
+    SUCCEEDED = "succeeded"
+    """Every external write the phase attempted went through."""
+
+    DENIED = "denied"
+    """A write was refused: missing permission, protected branch, read-only token."""
+
+    FAILED = "failed"
+    """A write was attempted and broke: network, API error, tool crash."""
+
+    @classmethod
+    def from_stored(cls, value: object) -> SideEffectStatus | None:
+        """What a stored row or payload names, None when it names nothing known.
+
+        Total and never raises, for `ReportedFailureReason.from_stored`'s
+        reason: an unknown string must not take down a projection replay.
+        """
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value)
+        except ValueError:
+            return None
+
+    @classmethod
+    def from_reported(cls, value: object) -> SideEffectStatus | None:
+        """What a TASK_RESULT block named, None when it named nothing known.
+
+        Crosses the agent trust boundary, so it never raises; an unknown word
+        is logged so a key that quietly stops working stays visible.
+        """
+        if value is None:
+            return None
+        matched = cls.from_stored(value)
+        if matched is None:
+            logger.warning(
+                "TASK_RESULT block named side_effects this reader does not know (%r). "
+                "It must be exactly one of %s. Recorded as not reported.",
+                value,
+                [member.value for member in cls],
+            )
+        return matched
+
+    @classmethod
+    def most_severe(cls, reported: Iterable[SideEffectStatus | None]) -> SideEffectStatus | None:
+        """The worst status any phase reported, None when no phase reported one.
+
+        FAILED outranks DENIED outranks SUCCEEDED outranks NONE: an execution whose second
+        phase was refused is not one whose side effects succeeded because the
+        first phase's did.
+        """
+        rank = {cls.NONE: 0, cls.SUCCEEDED: 1, cls.DENIED: 2, cls.FAILED: 3}
+        present = [r for r in reported if r is not None]
+        return max(present, key=rank.__getitem__) if present else None
 
 
 class PhaseStatus(StrEnum):

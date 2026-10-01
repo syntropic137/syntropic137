@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         FailureClassification,
         PhaseDefinition,
         ReportedFailureReason,
+        SideEffectStatus,
     )
 
 
@@ -337,6 +338,7 @@ class AgentExecutionCompletedCommand:
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
         last_agent_message: str | None = None,
+        reported_side_effects: SideEffectStatus | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -347,6 +349,7 @@ class AgentExecutionCompletedCommand:
         self.cache_creation_tokens = cache_creation_tokens
         self.cache_read_tokens = cache_read_tokens
         self.last_agent_message = last_agent_message
+        self.reported_side_effects = reported_side_effects
 
 
 class ArtifactsCollectedCommand:

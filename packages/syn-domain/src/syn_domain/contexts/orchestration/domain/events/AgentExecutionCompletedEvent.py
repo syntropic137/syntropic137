@@ -8,6 +8,11 @@ from typing import Final
 from event_sourcing import DomainEvent, event
 from pydantic import field_validator
 
+# Runtime import needed for the Pydantic field type (noqa: TC001)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    SideEffectStatus,  # noqa: TC001 - needed at runtime for Pydantic
+)
+
 #: How much of the agent's closing message this event will carry.
 #:
 #: The message is here because a salvage has to survive a restart, not because
@@ -50,6 +55,10 @@ class AgentExecutionCompletedEvent(DomainEvent):
     input_tokens: int = 0
     output_tokens: int = 0
     last_agent_message: str | None = None
+    #: What the agent's TASK_RESULT said about its external writes (a PR
+    #: comment, a push), or None when it said nothing. A report, carried here
+    #: so a restart between this event and PhaseCompleted cannot lose it.
+    reported_side_effects: SideEffectStatus | None = None
 
     @field_validator("last_agent_message")
     @classmethod
