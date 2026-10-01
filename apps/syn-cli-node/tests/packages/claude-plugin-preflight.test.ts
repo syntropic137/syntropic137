@@ -40,6 +40,7 @@ describe("runClaudePluginPreflight", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
     fs.rmSync(tmp, { recursive: true, force: true });
   });

@@ -18,6 +18,7 @@ describe("workflow export command", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });

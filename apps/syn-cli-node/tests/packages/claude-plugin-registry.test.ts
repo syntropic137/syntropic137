@@ -22,6 +22,7 @@ describe("claude-plugin-registry", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     const p = registryPath();
     if (fs.existsSync(p)) fs.rmSync(p);
   });

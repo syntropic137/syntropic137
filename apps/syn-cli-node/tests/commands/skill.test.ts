@@ -24,6 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.resetAllMocks();
   vi.unstubAllGlobals();
   mockFetch.mockReset();
 });
