@@ -33,13 +33,30 @@ from syn_api.main import create_app
 INSTALLED = version("syn-api")
 
 
-async def _health_body() -> dict:
-    """The /health payload, parsed from the wire rather than from the model."""
+async def _body(route: str) -> dict:
+    """A payload, parsed from the wire rather than from the model."""
     transport = ASGITransport(app=create_app())
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/health")
+        response = await client.get(route)
     assert response.status_code == 200, response.text
     return json.loads(response.text)
+
+
+async def _health_body() -> dict:
+    return await _body("/health")
+
+
+async def _build_block(route: str) -> dict:
+    """The BuildInfo a route serves: nested under ``build`` on /health, the
+    whole body on /version. The CLI's ``syn version`` and its release-skew
+    check read /version (#1473), so a rename or a dropped field there breaks
+    the CLI at runtime and nowhere else."""
+    body = await _body(route)
+    return body["build"] if route == "/health" else body
+
+
+#: Both routes that report the build, so both are pinned to the same answer.
+BUILD_ROUTES = pytest.mark.parametrize("route", ["/health", "/version"])
 
 
 @pytest.mark.unit
@@ -81,8 +98,9 @@ async def test_health_and_openapi_cannot_disagree() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@BUILD_ROUTES
 async def test_build_stamps_reach_the_payload_when_the_image_supplies_them(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, route: str
 ) -> None:
     """The image tag and commit survive the model and the serializer.
 
@@ -93,7 +111,7 @@ async def test_build_stamps_reach_the_payload_when_the_image_supplies_them(
     monkeypatch.setenv(ENV_IMAGE_TAG, "v0.29.1-beta.3")
     monkeypatch.setenv(ENV_COMMIT, "9f3c1ab")
 
-    build = (await _health_body())["build"]
+    build = await _build_block(route)
 
     assert build["image_tag"] == "v0.29.1-beta.3"
     assert build["commit"] == "9f3c1ab"
@@ -101,8 +119,9 @@ async def test_build_stamps_reach_the_payload_when_the_image_supplies_them(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@BUILD_ROUTES
 async def test_an_unstamped_build_says_so_rather_than_guessing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, route: str
 ) -> None:
     """Absent reports as null, and an empty stamp is absent.
 
@@ -114,7 +133,7 @@ async def test_an_unstamped_build_says_so_rather_than_guessing(
     monkeypatch.setenv(ENV_IMAGE_TAG, "")
     monkeypatch.delenv(ENV_COMMIT, raising=False)
 
-    build = (await _health_body())["build"]
+    build = await _build_block(route)
 
     assert build["image_tag"] is None
     assert build["commit"] is None

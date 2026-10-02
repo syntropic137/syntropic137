@@ -22,6 +22,12 @@ claimed to cover. So every reader here refuses a shape it cannot parse rather
 than skipping it, and the tests at the bottom of this file pin that: a silent
 skip makes the collection under test exactly the collection that passes.
 
+The same paths must also say WHICH build they made. ``GET /version`` reports
+``image_tag`` and ``commit`` from the ``SYN_BUILD_*`` build args, and a path
+that ships an image without them leaves a deployment that cannot be told apart
+from any other of its release (#1473). That is measured below too, over the
+paths that ship.
+
 Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
@@ -46,6 +52,25 @@ BASE_COMPOSE = "docker-compose.yaml"
 COMPOSE_API_OVERLAYS_WITHOUT_BUILD = {
     "docker/docker-compose.syntropic137.yaml (service api)": (
         "published environment-only overlay; inherits the measured base image"
+    ),
+}
+
+#: Script that builds syn-api for the selfhost VPS outside any release.
+PIT_STOP = "scripts/pit_stop.sh"
+#: What ``GET /version`` reports as ``image_tag`` and ``commit`` (#1473).
+STAMPS = ("SYN_BUILD_IMAGE_TAG", "SYN_BUILD_COMMIT")
+# Deliberately NOT measured for STAMPS: the compose files (local development
+# builds) and _check-docker-dry-run.yml (builds, never pushes). Nothing they
+# build is deployed, and for an image nobody ships null is the honest identity.
+# A shipping path known to be missing its stamps, with the reason it cannot be
+# fixed in the same change. A green run with an entry here proves only that the
+# omission is KNOWN; the path is fixed when the entry is gone, and
+# `test_the_stamp_exception_list_is_exactly_what_still_fails` fails the moment
+# it is, so the entry cannot outlive its reason.
+AWAITING_WORKFLOW_PATCH = {
+    "release-containers.yaml (build-scan-push)": (
+        "#1473: agents cannot edit .github/; a human applies the build-stamps "
+        "patch from PR #1487 and deletes this entry in the same change"
     ),
 }
 
@@ -264,6 +289,50 @@ def _release_local_build_path() -> BuildPath:
     )
 
 
+def _buildx_command_for_syn_api(script: str, source: str) -> str:
+    """The one `docker buildx build` command in a shell script that builds syn-api.
+
+    Backslash-continued lines are joined first, so a flag on any continuation
+    line is part of the command it belongs to. None found, or more than one,
+    is a loud failure: either way the measurement would be of the wrong thing.
+    """
+    joined = re.sub(r"\\\n", " ", script)
+    commands = [
+        line
+        for line in joined.splitlines()
+        if "docker buildx build" in line and SYN_API_DOCKERFILE in line
+    ]
+    if len(commands) != 1:
+        pytest.fail(
+            f"{source}: expected exactly one `docker buildx build` naming "
+            f"{SYN_API_DOCKERFILE}, found {len(commands)}. Teach this test the new "
+            f"shape rather than leaving the path unmeasured."
+        )
+    return commands[0]
+
+
+def _pit_stop_command() -> str:
+    return _buildx_command_for_syn_api((_repo_root() / PIT_STOP).read_text(), PIT_STOP)
+
+
+def _pit_stop_build_path() -> BuildPath:
+    match = re.search(rf"""--build-arg\s+{ARG}=([^\s"']+)""", _pit_stop_command())
+    return BuildPath(source=f"{PIT_STOP} (syn-api)", declared=None if match is None else match[1])
+
+
+def _release_workflow_build_args() -> list[tuple[str, object]]:
+    """Each `build-args` block in the release workflow, by job."""
+    release = yaml.safe_load(
+        (_repo_root() / ".github" / "workflows" / "release-containers.yaml").read_text()
+    )
+    return [
+        (f"release-containers.yaml ({job_name})", args)
+        for job_name, job in (release.get("jobs") or {}).items()
+        for step in job.get("steps") or []
+        if (args := (step.get("with") or {}).get("build-args"))
+    ]
+
+
 def _workflow_build_paths() -> list[BuildPath]:
     """syn-api's build args in the two workflows that build container images.
 
@@ -271,16 +340,10 @@ def _workflow_build_paths() -> list[BuildPath]:
     are measured here rather than edited.
     """
     workflows = _repo_root() / ".github" / "workflows"
-    paths: list[BuildPath] = []
-
-    release = yaml.safe_load((workflows / "release-containers.yaml").read_text())
-    for job_name, job in (release.get("jobs") or {}).items():
-        for step in job.get("steps") or []:
-            args = (step.get("with") or {}).get("build-args")
-            if not args:
-                continue
-            source = f"release-containers.yaml ({job_name})"
-            paths.append(BuildPath(source, _declared_in_blob(args, source)))
+    paths = [
+        BuildPath(source, _declared_in_blob(args, source))
+        for source, args in _release_workflow_build_args()
+    ]
 
     dry_run = yaml.safe_load((workflows / "_check-docker-dry-run.yml").read_text())
     for job_name, job in (dry_run.get("jobs") or {}).items():
@@ -319,6 +382,7 @@ def _syn_api_build_paths() -> list[BuildPath]:
     return [
         *_compose_build_paths(),
         _release_local_build_path(),
+        _pit_stop_build_path(),
         *_workflow_build_paths(),
     ]
 
@@ -558,3 +622,119 @@ def test_syn_api_capabilities_cover_the_binaries_that_fail_closed() -> None:
     assert {"docker", "cosign"} <= required, (
         f"syn-api must be verified for docker and cosign; got {sorted(required)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Build identity (#1473). Every path that SHIPS a syn-api image stamps the tag
+# and commit it built, or `GET /version` answers `image_tag: null, commit:
+# null` and a pit stop cannot be told from a release of the same number.
+# ---------------------------------------------------------------------------
+
+
+def _stamps_missing_from(text: str) -> list[str]:
+    """The STAMPS `text` does not set to a non-empty value.
+
+    Comment lines are not code: `# SYN_BUILD_COMMIT=...` in a comment must not
+    count as declaring it. An empty value (`KEY=` or `KEY=""`) is the
+    Dockerfile default restated, which reports null, so it counts as missing.
+    """
+    code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    missing = []
+    for stamp in STAMPS:
+        match = re.search(rf"(?:^|\s){stamp}=(\S*)", code, re.MULTILINE)
+        if match is None or not match[1].strip("\"'"):
+            missing.append(stamp)
+    return missing
+
+
+def _shipping_stamp_declarations() -> dict[str, str]:
+    """Each path that ships syn-api, mapped to the text that declares its build args."""
+    shipping: dict[str, str] = {}
+    for source, args in _release_workflow_build_args():
+        if not isinstance(args, str):
+            pytest.fail(f"{source}: build-args is {type(args).__name__}, not a string")
+        shipping[source] = args
+    shipping["justfile `release-local` (syn-api)"] = _case_arms(
+        _justfile_recipe_body("release-local")
+    )[SYN_API]
+    shipping[f"{PIT_STOP} (syn-api)"] = _pit_stop_command()
+    return shipping
+
+
+def _paths_missing_stamps(declarations: dict[str, str]) -> dict[str, list[str]]:
+    return {
+        source: missing
+        for source, text in declarations.items()
+        if (missing := _stamps_missing_from(text))
+    }
+
+
+@pytest.mark.architecture
+def test_every_shipping_syn_api_build_path_stamps_its_identity() -> None:
+    """A shipped syn-api image must be able to say which build it is.
+
+    Excludes AWAITING_WORKFLOW_PATCH, so a green run proves the release
+    workflow's omission is known, NOT that it is fixed.
+    """
+    broken = {
+        source: missing
+        for source, missing in _paths_missing_stamps(_shipping_stamp_declarations()).items()
+        if source not in AWAITING_WORKFLOW_PATCH
+    }
+    assert not broken, (
+        "These paths ship a syn-api image whose GET /version reports null for "
+        "the build it is (#1473):\n"
+        + "\n".join(f"  - {source}: missing {', '.join(m)}" for source, m in broken.items())
+    )
+
+
+@pytest.mark.architecture
+def test_the_stamp_exception_list_is_exactly_what_still_fails() -> None:
+    """An exception that outlives its reason hides the next regression.
+
+    When the release-workflow patch lands this fails, telling whoever applied
+    it to delete the AWAITING_WORKFLOW_PATCH entry in the same change.
+    """
+    failing = set(_paths_missing_stamps(_shipping_stamp_declarations()))
+    assert failing == set(AWAITING_WORKFLOW_PATCH), (
+        f"Paths missing stamps: {sorted(failing)}; excepted: {sorted(AWAITING_WORKFLOW_PATCH)}. "
+        "Delete an entry whose path now stamps; fix, don't except, a new one."
+    )
+
+
+@pytest.mark.architecture
+@pytest.mark.parametrize(
+    ("shape", "text", "missing"),
+    [
+        ("both stamped", "INCLUDE_DOCKER_CLI=1\nSYN_BUILD_IMAGE_TAG=v1\nSYN_BUILD_COMMIT=abc", []),
+        ("no commit", "SYN_BUILD_IMAGE_TAG=v1", ["SYN_BUILD_COMMIT"]),
+        ("an empty commit", "SYN_BUILD_IMAGE_TAG=v1 SYN_BUILD_COMMIT=", ["SYN_BUILD_COMMIT"]),
+        ("a quoted empty commit", 'SYN_BUILD_IMAGE_TAG=v1 SYN_BUILD_COMMIT=""', ["SYN_BUILD_COMMIT"]),
+        ("a stamp only in a comment", "# SYN_BUILD_IMAGE_TAG=v1\nSYN_BUILD_COMMIT=abc", ["SYN_BUILD_IMAGE_TAG"]),
+        ("a longer name", "XSYN_BUILD_IMAGE_TAG=v1 SYN_BUILD_COMMIT=abc", ["SYN_BUILD_IMAGE_TAG"]),
+        ("build-arg flags", '--build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$SHA"', []),
+    ],
+)
+def test_a_missing_or_empty_stamp_is_reported(shape: str, text: str, missing: list[str]) -> None:
+    assert _stamps_missing_from(text) == missing, shape
+
+
+@pytest.mark.architecture
+def test_a_continued_buildx_command_is_read_whole() -> None:
+    """pit_stop.sh splits the command over lines; a flag on any of them counts."""
+    script = (
+        "run docker buildx build --platform linux/amd64 \\\n"
+        "    --build-arg SYN_BUILD_IMAGE_TAG=\"$TAG\" \\\n"
+        f'    -t img -f "$WT/{SYN_API_DOCKERFILE}" "$WT"\n'
+        'run docker buildx build -t gw -f "$WT/infra/docker/images/gateway/Dockerfile" "$WT"\n'
+    )
+    command = _buildx_command_for_syn_api(script, "fixture.sh")
+    assert SYN_API_DOCKERFILE in command
+    assert _stamps_missing_from(command) == ["SYN_BUILD_COMMIT"]
+
+
+@pytest.mark.architecture
+def test_a_script_with_no_syn_api_build_is_reported_not_skipped() -> None:
+    with pytest.raises(pytest.fail.Exception) as failure:
+        _buildx_command_for_syn_api("docker buildx build -f gateway/Dockerfile .\n", "fixture.sh")
+    assert "fixture.sh" in str(failure.value)

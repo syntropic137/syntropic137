@@ -159,11 +159,13 @@ EXPOSE 8000
 # LAST ON PURPOSE. Every layer after an ARG that changes per commit is rebuilt
 # on every commit, so these sit below everything expensive.
 #
-# Nothing passes them yet: the workflow that builds this image is under
-# .github/, which this change is not permitted to edit. Until the build-args
-# block in release-containers.yaml supplies them, /health reports
-# image_tag: null and commit: null and names the release from package
-# metadata. See the PR body for the one-block change required.
+# scripts/pit_stop.sh and `just release-local` pass both. The release
+# workflow (release-containers.yaml) does NOT yet: it is under .github/, which
+# agents cannot edit, and waits on a human-applied patch (#1473, PR #1487).
+# ci/fitness/infrastructure/test_release_build_args.py fails any shipping path
+# without them and lists that one as a named exception, which fails in turn
+# once the patch lands so the exception cannot outlive it. Compose and dry-run
+# builds pass nothing and report null, because nobody deploys them.
 ARG SYN_BUILD_IMAGE_TAG=""
 ARG SYN_BUILD_COMMIT=""
 ENV SYN_BUILD_IMAGE_TAG=${SYN_BUILD_IMAGE_TAG}

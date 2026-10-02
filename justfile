@@ -2405,6 +2405,14 @@ release-local version:
     echo "🚀 Local release: {{version}}"
     echo ""
 
+    # syn-api is stamped with this commit (GET /version reports it), and a
+    # commit stamp on a dirty tree names source the image was not built from.
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "❌ Working tree is dirty; commit or stash first (the syn-api commit stamp would be false)"
+        exit 1
+    fi
+    BUILT_SHA="$(git rev-parse HEAD)"
+
     # Login to GHCR
     gh auth token | docker login ghcr.io -u syntropic137 --password-stdin
     echo ""
@@ -2432,7 +2440,9 @@ release-local version:
                               # rather than inheriting it silently - inheriting
                               # it silently is the exact shape of the bug this
                               # line closes.
-                              build_args="--build-arg INCLUDE_DOCKER_CLI=1" ;;
+                              # The SYN_BUILD_* stamps are what GET /version
+                              # reports as image_tag and commit (#1473).
+                              build_args="--build-arg INCLUDE_DOCKER_CLI=1 --build-arg SYN_BUILD_IMAGE_TAG={{version}} --build-arg SYN_BUILD_COMMIT=$BUILT_SHA" ;;
             syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;
         esac
         echo "📦 Building $image..."

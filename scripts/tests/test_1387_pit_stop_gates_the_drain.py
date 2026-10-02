@@ -30,6 +30,7 @@ _PAUSE = 'maintenance true "pit stop $VERSION"'
 _DRAIN = "until drained; do"
 _SWAP = "docker compose -f $COMPOSE up -d api gateway"
 _VERIFY = 'die "projections not healthy after the swap"'
+_IDENTITY = 'die "the running API does not report the build just shipped"'
 _RESUME = 'step "gate: resuming execution admission"'
 _STAGE_ONLY_EXIT = 'step "staged $TAG; run with --swap-only once drained"'
 
@@ -59,6 +60,12 @@ class TestTheOrderOfTheStages:
         """A deploy that swapped but failed verify should stay shut: the new
         container is unconfirmed, and refusing is the recoverable answer."""
         assert _line_of(_VERIFY) < _line_of(_RESUME)
+
+    def test_admission_resumes_only_after_the_build_identifies_itself(self) -> None:
+        """#1473: GET /version must name the tag and commit just shipped before
+        admission reopens, or the stamps were lost somewhere between the build
+        args and the running process and nobody would find out."""
+        assert _line_of(_IDENTITY) < _line_of(_RESUME)
 
 
 class TestStagingAloneChangesNothing:

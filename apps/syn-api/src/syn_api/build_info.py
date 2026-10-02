@@ -1,8 +1,9 @@
 """Which build is this? One answer, for everything that has to report it.
 
-Three places name the running build — ``openapi.json``'s ``info.version``, the
-root endpoint, and (since #1380) ``/health`` — and before this module each
-answered separately. Two of the three can now report a null release beside an
+Four places name the running build — ``openapi.json``'s ``info.version``, the
+root endpoint, ``/health`` and ``/version`` (both since #1380, the second the
+one ``syn version`` and the CLI's release-skew check read, #1473) — and before
+this module each answered separately. Two of the three can now report a null release beside an
 explicit ``version_status``; ``info.version`` cannot, and is the one documented
 home of ``UNKNOWN_VERSION``. The two openapi-facing callers shared a literal
 ``__version__ = "0.5.1"`` in ``main.py`` that had not moved in twenty-odd
@@ -46,7 +47,8 @@ records, so they are stamped into the image as environment variables at build
 time (``ARG`` -> ``ENV`` in ``infra/docker/images/syn-api/Dockerfile``) and
 read back here. They are absent by default and reported as ``null`` rather
 than as a placeholder string, so a caller can tell a build that did not stamp
-itself from one that did.
+itself from one that did. Every path that ships the image stamps both, which
+``ci/fitness/infrastructure/test_release_build_args.py`` enforces.
 
 Deliberately NOT ``pydantic-settings`` despite ADR-004. These are not
 configuration: nobody should be choosing them per deployment, and putting them
