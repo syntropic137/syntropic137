@@ -186,6 +186,29 @@ describe("execution commands", () => {
       });
     });
 
+    it("prints a resume start that failed, with its reason and attempts", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        resume_start: {
+          status: "failed", status_reason: "artifact art-1 not found", attempts: 3, max_attempts: 3,
+          recorded_at: "2026-01-01T00:00:00Z", dispatched_at: null,
+        },
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      const out = stdout();
+      expect(out).toContain("Resume start:");
+      expect(out).toContain("failed");
+      expect(out).toContain("3/3");
+      expect(out).toContain("artifact art-1 not found");
+    });
+
+    it("prints no resume start for an execution that was never resumed", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ...detail, resume_start: null }))
+        .mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      expect(stdout()).not.toContain("Resume start:");
+    });
+
     it("throws on missing execution-id", async () => {
       await expect(handler({ positionals: [], values: {} })).rejects.toThrow(CLIError);
     });

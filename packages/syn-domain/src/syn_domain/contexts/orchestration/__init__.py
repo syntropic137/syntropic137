@@ -172,10 +172,13 @@ from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
 )
 from syn_domain.contexts.orchestration.slices.start_resume import (
+    MAX_START_ATTEMPTS,
     ResumeStarter,
     ResumeStartProcessManager,
     ResumeStartRecord,
+    ResumeStartStatus,
     StartResumeHandler,
+    read_record,
 )
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
@@ -184,6 +187,7 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
+    "MAX_START_ATTEMPTS",
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     # Test support types (used by syn_domain.testing)
@@ -246,6 +250,7 @@ __all__ = [
     "ResumeExecutionCommand",
     "ResumeStartProcessManager",
     "ResumeStartRecord",
+    "ResumeStartStatus",
     "ResumeStarter",
     "SecurityPolicy",
     "SideEffectStatus",
@@ -282,6 +287,7 @@ __all__ = [
     "inherited_outputs",
     "is_phase_id",
     "mint_wrapper_name",
+    "read_record",
     "refuse_resume_start",
     "render_workspace_prompt",
     "require_supported_execution_type",

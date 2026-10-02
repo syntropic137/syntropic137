@@ -55,6 +55,36 @@ retried. The platform records that against the parent's resume rather than losin
 it - a refusal that can only be known at start time (a vanished artifact, for
 instance) settles as failed after a bounded number of attempts.
 
+**You can read that record.** `syn execution show` on the PARENT prints it:
+
+```bash
+syn execution show exec-43f430469266
+```
+
+```
+Resume start:  failed
+  Attempts:    3/3
+  Reason:      inherited artifact art-plan-2 resolved to no files
+```
+
+What each status means:
+
+| Status | What it means |
+| --- | --- |
+| `pending` | Admitted, not yet dispatched. The processor picks it up on its next pass |
+| `dispatched` | A start is in flight. Give it a moment, then look for the child |
+| `paused` | Held because admission is closed, usually a deploy draining. It resumes itself |
+| `retryable` | A start failed transiently and will be tried again. `Attempts` shows how many are left |
+| `started` | The child's own stream exists. This is the one you want, and it is settled |
+| `failed` | Settled. `Reason` says why, and no further attempt will be made |
+
+`Attempts` is used over ceiling. A resume that reaches the ceiling settles as
+`failed` carrying its reason rather than retrying forever, so a child that never
+appears always has an explanation rather than silence.
+
+Over the API the same record is on the parent's detail response under
+`resume_start`, with `status`, `status_reason`, `attempts` and `max_attempts`.
+
 ## Resume is not fork
 
 Resume continues work that did **not finish**. It is not a way to re-run a

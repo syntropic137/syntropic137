@@ -3271,6 +3271,7 @@ export interface components {
             inputs?: {
                 [key: string]: string;
             };
+            resume_start?: components["schemas"]["ResumeStartInfo"] | null;
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -5758,6 +5759,38 @@ export interface components {
             cancellation_overridden: boolean;
             /** External Effects Acknowledged */
             external_effects_acknowledged: boolean;
+        };
+        /**
+         * ResumeStartInfo
+         * @description How starting the child of this execution's resume is going (#1480).
+         *
+         *     A resume is admitted with a 200 and its child is started afterwards, in a
+         *     background task. When that start fails, this is the only place an operator
+         *     can see it: the child execution never appears, so there is nothing else to
+         *     look at.
+         */
+        ResumeStartInfo: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "paused" | "retryable" | "dispatched" | "started" | "failed";
+            /** Status Reason */
+            status_reason?: string | null;
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Dispatched At */
+            dispatched_at?: string | null;
         };
         /**
          * RootResponse

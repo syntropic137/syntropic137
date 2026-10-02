@@ -26,6 +26,11 @@ from syn_api.types import (
     Result,
 )
 from syn_domain import tool_call_counts
+from syn_domain.contexts.orchestration import (
+    MAX_START_ATTEMPTS,
+    ResumeStartProcessManager,
+    read_record,
+)
 from syn_domain.pagination import Page
 from syn_shared.display import (
     format_cost,
@@ -39,6 +44,7 @@ from .models import (
     ExecutionDetailResponse,
     ExecutionListResponse,
     ExecutionSummaryResponse,
+    ResumeStartInfo,
 )
 from .phase_mapping import (
     _load_agent_session_ids,
@@ -51,6 +57,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
     from datetime import datetime
 
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
@@ -682,6 +689,28 @@ def _models_run(phases: list[PhaseExecutionInfo]) -> set[str]:
     return models
 
 
+async def _resume_start_of(
+    store: ProjectionStoreProtocol, execution_id: str
+) -> ResumeStartInfo | None:
+    """The start of the child this execution's resume admitted, if it was resumed.
+
+    Read straight from the `resume_start` to-do list, the record the process
+    manager itself decides on, so what an operator sees is what will be retried.
+    """
+    row = await store.get(ResumeStartProcessManager.PROJECTION_NAME, execution_id)
+    record = read_record(row) if row is not None else None
+    if record is None:
+        return None
+    return ResumeStartInfo(
+        status=record.status,
+        status_reason=record.status_reason,
+        attempts=record.attempts,
+        max_attempts=MAX_START_ATTEMPTS,
+        recorded_at=record.recorded_at,
+        dispatched_at=record.dispatched_at,
+    )
+
+
 @router.get("/executions/{execution_id}", response_model=ExecutionDetailResponse)
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
@@ -736,4 +765,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         unknown_duration_phase_count=detail.unknown_duration_phase_count,
         task=detail.task,
         inputs=dict(detail.inputs),
+        resume_start=await _resume_start_of(mgr.store, execution_id),
     )

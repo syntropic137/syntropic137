@@ -17,6 +17,7 @@ import { Table } from "../output/table.js";
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
 type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
 type InventorySummary = components["schemas"]["SessionInventorySummary"];
+type ResumeStart = components["schemas"]["ResumeStartInfo"];
 type SideEffectStatus = components["schemas"]["SideEffectStatus"];
 
 const listCommand: CommandDef = {
@@ -114,6 +115,7 @@ const showCommand: CommandDef = {
     print(`  Deliverable:  ${ex.deliverable_produced ? "yes" : "no"}`);
     print(`  Side effects: ${formatSideEffects(ex.reported_side_effects)}`);
     if (ex.error_message) print(`  ${style("Error:", RED)}        ${ex.error_message}`);
+    if (ex.resume_start) printResumeStart(ex.resume_start);
 
     const repos = ex.repos ?? [];
     if (repos.length > 0) {
@@ -165,6 +167,18 @@ const showCommand: CommandDef = {
  * agent said nothing, and is never shown as "none", which is a claim. */
 function formatSideEffects(status: SideEffectStatus | null | undefined): string {
   return status ?? "not reported";
+}
+
+/**
+ * The start of the child this execution's resume admitted (#1480). A resume
+ * returns 200 before its child starts, so a child that never appears is
+ * explained here and nowhere else.
+ */
+function printResumeStart(resume: ResumeStart): void {
+  print("");
+  print(`${style("Resume start:", BOLD)} ${formatStatus(resume.status)}`);
+  print(`  Attempts:   ${resume.attempts}/${resume.max_attempts}`);
+  if (resume.status_reason) print(`  ${style("Reason:", RED)}    ${resume.status_reason}`);
 }
 
 /**
