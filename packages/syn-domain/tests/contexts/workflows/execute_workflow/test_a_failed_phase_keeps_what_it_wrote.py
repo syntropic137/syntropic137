@@ -36,6 +36,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
+    RECOVERED_TITLE_MARKER,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
+    UnfinishedPhase,
+)
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor
@@ -48,6 +54,17 @@ pytestmark = pytest.mark.unit
 #: What the phase in the issue actually wrote to close itself out: the marker,
 #: and then prose where the JSON belongs. Read by the REAL verdict reader, so
 #: what makes it unreadable here is what made it unreadable there.
+#: exec-82ce478a6c46's shape: the review exists only in what the agent said,
+#: then a readable refusal because the PR comment was denied.
+REFUSED_COMMENT_REPORT = (
+    "Reviewed PR #159 and drafted three findings: VALIDATE.md has no owner, the "
+    "test helper has a missing type annotation, and the workflow step pins no "
+    "action version. Posting them failed: gh pr comment was refused with "
+    "Resource not accessible by integration.\n"
+    'TASK_RESULT: {"success": false, "comments": "could not post the review"}\n'
+    "TASK_RESULT_END"
+)
+
 PROSE_WHERE_THE_JSON_GOES = (
     "I have completed the research and written it to artifacts/output/research.md.\n"
     "TASK_RESULT: the research is complete and the recommendation is option B\n"
@@ -243,10 +260,13 @@ class TestTheDeliverableSurvivesTheRefusal:
 class TestNothingElseChanged:
     """Guards on the shapes that were already right."""
 
-    async def test_a_failing_phase_that_wrote_nothing_keeps_nothing(self) -> None:
-        """No file, no artifact, and no invented one. The keep reads the disk
-        and never the transcript: substituting a deliverable here would make
-        every failed phase look like it produced something."""
+    async def test_a_failing_phase_that_wrote_nothing_keeps_what_it_said(self) -> None:
+        """#1476: a phase that wrote no file but SAID its conclusion keeps that,
+        marked as recovered and as kept from a failed phase, and still fails.
+
+        exec-82ce478a6c46 reported success=false over a refused PR comment
+        having drafted three findings, and kept none of them.
+        """
         repo = RecordingArtifactRepository()
         processor = _make_processor(
             FakeAgentExecutionHandler.success(says=PROSE_WHERE_THE_JSON_GOES),
@@ -259,6 +279,52 @@ class TestNothingElseChanged:
             phases=_phase_that_declares_an_output(),
             inputs={},
             execution_id="exec-1321-empty",
+        )
+
+        assert result.status == "failed"
+        (kept,) = _kept(repo)
+        assert RECOVERED_TITLE_MARKER in (kept.title or "")
+        assert UnfinishedPhase.FAILED.value in (kept.title or "")
+        assert "option B" in (kept.content or "")
+        assert result.artifact_ids == [kept.id]
+
+    async def test_a_reported_failure_over_a_refused_comment_keeps_the_findings(self) -> None:
+        """exec-82ce478a6c46, exactly: a readable success=false whose only copy
+        of the review is the agent's message. The phase stays failed (#1256);
+        the findings survive it (#1476)."""
+        repo = RecordingArtifactRepository()
+        processor = _make_processor(
+            FakeAgentExecutionHandler.success(says=REFUSED_COMMENT_REPORT),
+            artifact_repository=repo,
+        )
+
+        result = await processor.run(
+            workflow_id="wf-1476",
+            workflow_name="Review a PR",
+            phases=_phase_that_declares_an_output(),
+            inputs={},
+            execution_id="exec-1476-refused-comment",
+        )
+
+        assert result.status == "failed"
+        (kept,) = _kept(repo)
+        assert "missing type annotation" in (kept.content or "")
+        assert RECOVERED_TITLE_MARKER in (kept.title or "")
+        assert result.artifact_ids == [kept.id]
+
+    async def test_a_failing_phase_that_said_nothing_keeps_nothing(self) -> None:
+        """No file and no usable message: nothing to keep, and none invented."""
+        repo = RecordingArtifactRepository()
+        processor = _make_processor(
+            FakeAgentExecutionHandler.failed(exit_code=1), artifact_repository=repo
+        )
+
+        result = await processor.run(
+            workflow_id="wf-1321",
+            workflow_name="Keep what it wrote",
+            phases=_phase_that_declares_an_output(),
+            inputs={},
+            execution_id="exec-1321-silent",
         )
 
         assert result.status == "failed"

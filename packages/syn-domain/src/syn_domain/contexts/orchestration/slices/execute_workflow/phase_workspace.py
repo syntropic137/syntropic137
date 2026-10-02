@@ -247,14 +247,19 @@ class PhaseWorkspace:
         *,
         workspace: ManagedWorkspace,
         workflow_id: str,
+        last_agent_message: str | None,
     ) -> list[str]:
         """Store what a phase wrote before the run that produced it is torn down.
 
         Runs while the workspace is still alive, which is the only window there
-        is: `_fail_execution` abandons it a few frames up. Never raises and
-        never salvages from the transcript - the phase's outcome is already
-        decided and is reported where failures are reported; the question here
-        is only what survives it.
+        is: `_fail_execution` abandons it a few frames up. Never raises. The
+        phase's outcome is already decided and is reported where failures are
+        reported; the question here is only what survives it, and when it wrote
+        nothing that is its last message (#1476).
+
+        `last_agent_message` comes from the run's own stream result, not the
+        aggregate: a failed run is never told `agent_execution_completed`, so
+        the aggregate holds no message for it.
         """
         assert todo.phase_id is not None
         kept = await self._collector().collect_from_unfinished_phase(
@@ -267,6 +272,7 @@ class PhaseWorkspace:
             output_artifact_types=phase.output_artifact_types,
             agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
             outcome=UnfinishedPhase.FAILED,
+            last_agent_message=last_agent_message,
         )
         if kept:
             logger.warning(

@@ -754,7 +754,11 @@ class WorkflowExecutionProcessor:
             dispatch_ctx.kept_artifact_ids = await self._workspaces_for(
                 todo.execution_id, dispatch_ctx.inputs
             ).keep_unfinished_output(
-                todo, phase, workspace=launch.workspace, workflow_id=workflow_id
+                todo,
+                phase,
+                workspace=launch.workspace,
+                workflow_id=workflow_id,
+                last_agent_message=result.stream_result.last_agent_message,
             )
             raise
 
