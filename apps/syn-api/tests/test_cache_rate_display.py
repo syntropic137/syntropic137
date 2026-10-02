@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_api.cache_rate_display import cache_rate_display, format_rate_multiplier
 from syn_api.types import ExecutionDetailFull, Ok, PhaseExecution, SessionDetail
 from syn_shared.agents import ModelId
@@ -102,7 +103,8 @@ async def _execution_response(monkeypatch: pytest.MonkeyPatch, phases: list[Phas
         )
 
     class _Mgr:
-        store = None
+        # Empty, not None: the endpoint also reads this execution's resume start.
+        store = InMemoryProjectionStore()
 
     monkeypatch.setattr(prefix_resolver, "resolve_or_raise", _resolve)
     monkeypatch.setattr(_wiring, "get_projection_mgr", _Mgr)
