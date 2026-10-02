@@ -22,7 +22,12 @@ from syn_shared.settings.workspace_image_migration import (
     migrate_text,
     stale_default_message,
 )
-from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
+from syn_shared.settings.workspace_images import (
+    AP_ROLLBACK_IMAGES,
+    DEFAULT_WORKSPACE_IMAGE,
+    WorkspaceImageProvider,
+    workspace_image_ref,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -87,6 +92,35 @@ def test_main_migrates_identity_and_image_together_and_prints_both(
         f"SYN_WORKSPACE_DOCKER_IMAGE='{DEFAULT_WORKSPACE_IMAGE}'\n"
         f"{VAR}='{WORKSPACE_IMAGE_IDENTITY_REGEXP}'\n"
     )
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        AP_ROLLBACK_IMAGES[WorkspaceImageProvider.CLAUDE_CLI],
+        "ghcr.io/example/my-omni@sha256:" + "ab" * 32,
+    ],
+)
+def test_identity_beside_a_custom_image_is_left_alone(
+    image: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A rollback digest needs its own publisher's identity; migrating it would break and re-trust."""
+    env = tmp_path / ".env"
+    text = f"SYN_WORKSPACE_DOCKER_IMAGE='{image}'\n{VAR}='{AGENTIC_PRIMITIVES_IDENTITY_REGEXP}'\n"
+    env.write_text(text)
+    assert main([str(env)]) == 0
+    assert env.read_text() == text
+    assert f"{VAR} in {env} left unchanged" in capsys.readouterr().out
+
+
+def test_identity_beside_a_currently_pinned_image_migrates(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    pinned = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
+    env.write_text(
+        f"SYN_WORKSPACE_DOCKER_IMAGE='{pinned}'\n{VAR}='{AGENTIC_PRIMITIVES_IDENTITY_REGEXP}'\n"
+    )
+    main([str(env)])
+    assert f"{VAR}='{WORKSPACE_IMAGE_IDENTITY_REGEXP}'" in env.read_text()
 
 
 def test_crlf_file_keeps_its_line_endings(tmp_path: Path) -> None:

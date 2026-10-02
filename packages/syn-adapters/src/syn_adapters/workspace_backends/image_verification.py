@@ -109,6 +109,7 @@ from syn_shared.settings.image_verification import (
 from syn_shared.settings.workspace_image_migration import (
     IMAGE_IDENTITY_RULE,
     WORKSPACE_IMAGE_RULE,
+    image_is_custom,
     stale_default_message,
 )
 
@@ -520,10 +521,15 @@ def _stale_default_notes(image_ref: str, settings: ImageVerificationSettings) ->
     usual cause of a failed verification is an old identity, an old image, or
     both. Naming the exact variable turns a cosign error into one edit.
     """
-    notes = (
-        stale_default_message(settings.certificate_identity_regexp, IMAGE_IDENTITY_RULE),
-        stale_default_message(image_ref, WORKSPACE_IMAGE_RULE),
+    # A custom image may legitimately need a previously shipped identity (an
+    # agentic-primitives rollback digest), so the identity is only called
+    # stale when the image is one of ours.
+    identity_note = (
+        None
+        if image_is_custom(image_ref)
+        else stale_default_message(settings.certificate_identity_regexp, IMAGE_IDENTITY_RULE)
     )
+    notes = (identity_note, stale_default_message(image_ref, WORKSPACE_IMAGE_RULE))
     return [note for note in notes if note is not None]
 
 

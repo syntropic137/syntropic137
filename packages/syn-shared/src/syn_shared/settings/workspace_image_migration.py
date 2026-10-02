@@ -36,7 +36,9 @@ from syn_shared.settings.image_verification import (
 )
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
+    PINNED_DIGESTS,
     PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
+    workspace_image_ref,
 )
 
 #: Kept for callers that name the image variable through this module.
@@ -74,9 +76,6 @@ IMAGE_IDENTITY_RULE: Final = MigrationRule(
     custom_label="a custom signer identity",
 )
 
-#: Applied in this order by ``main``.
-RULES: Final[tuple[MigrationRule, ...]] = (WORKSPACE_IMAGE_RULE, IMAGE_IDENTITY_RULE)
-
 
 class MigrationOutcome(StrEnum):
     MIGRATED = "migrated"  # a previously shipped default, moved to the current one
@@ -90,6 +89,8 @@ class Migration:
     outcome: MigrationOutcome
     text: str
     previous: str | None = None
+    #: The value now in effect, when the variable is set.
+    value: str | None = None
 
 
 def migrate_text(text: str, rule: MigrationRule = WORKSPACE_IMAGE_RULE) -> Migration:
@@ -99,6 +100,7 @@ def migrate_text(text: str, rule: MigrationRule = WORKSPACE_IMAGE_RULE) -> Migra
     lines = text.splitlines(keepends=True)
     outcome = MigrationOutcome.ABSENT
     replaced: str | None = None
+    effective: str | None = None
     for index, line in enumerate(lines):
         body = line.rstrip("\r\n")
         match = pattern.match(body)
@@ -111,10 +113,13 @@ def migrate_text(text: str, rule: MigrationRule = WORKSPACE_IMAGE_RULE) -> Migra
                 f"{match['head']}{match['quote']}{rule.current}"
                 f"{match['quote']}{match['tail']}{ending}"
             )
-            outcome, replaced = MigrationOutcome.MIGRATED, value
-        elif outcome is not MigrationOutcome.MIGRATED:
+            outcome, replaced, effective = MigrationOutcome.MIGRATED, value, rule.current
+            continue
+        # The last assignment wins, as it does for the dotenv reader.
+        effective = value
+        if outcome is not MigrationOutcome.MIGRATED:
             outcome = MigrationOutcome.CURRENT if value == rule.current else MigrationOutcome.CUSTOM
-    return Migration(outcome=outcome, text="".join(lines), previous=replaced)
+    return Migration(outcome=outcome, text="".join(lines), previous=replaced, value=effective)
 
 
 def migrate_file(path: Path, rule: MigrationRule = WORKSPACE_IMAGE_RULE) -> Migration:
@@ -165,11 +170,38 @@ def stale_default_message(value: str, rule: MigrationRule) -> str | None:
     )
 
 
+def image_is_custom(image: str) -> bool:
+    """True for an image this release neither pins nor ever shipped as the default.
+
+    Such an image may come from another publisher (an agentic-primitives
+    rollback digest), so its signer identity is the operator's call: a
+    previously shipped identity next to it is not evidence of staleness.
+    """
+    pinned = {workspace_image_ref(provider) for provider in PINNED_DIGESTS}
+    return (
+        image != WORKSPACE_IMAGE_RULE.current
+        and image not in pinned
+        and image not in WORKSPACE_IMAGE_RULE.previous
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     path = Path(args[0] if args else ".env")
-    for rule in RULES:
-        print(describe(migrate_file(path, rule), path, rule))
+    image = migrate_file(path, WORKSPACE_IMAGE_RULE)
+    print(describe(image, path, WORKSPACE_IMAGE_RULE))
+    # The identity names the publisher of the image. With a custom image (for
+    # example a pinned agentic-primitives digest for rollback) a shipped
+    # identity may be the one that image needs, so moving it would both break
+    # verification and silently change which publisher is trusted.
+    if image.value is not None and image_is_custom(image.value):
+        print(
+            f"  • {IMAGE_IDENTITY_RULE.env_var} in {path} left unchanged: "
+            f"{WORKSPACE_IMAGE_RULE.env_var} is a custom image, and the identity "
+            "must match its publisher"
+        )
+        return 0
+    print(describe(migrate_file(path, IMAGE_IDENTITY_RULE), path, IMAGE_IDENTITY_RULE))
     return 0
 
 

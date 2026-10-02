@@ -14,7 +14,8 @@
 #      in .env to the new defaults. A value in .env overrides the code default,
 #      so without this the upgrade keeps running the old image, or verifies the
 #      new image against the old publisher's identity and refuses it. Custom
-#      values are never changed; every outcome is printed.
+#      values are never changed, and the identity is never moved beside a
+#      custom image (it must match that image's publisher). Every outcome is printed.
 #
 # Usage: infra/scripts/selfhost-update-host.sh [ENV_FILE]   (default: .env)
 # =============================================================================

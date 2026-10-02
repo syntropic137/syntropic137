@@ -247,7 +247,9 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
 
     ws_settings = WorkspaceSettings()
     _warn_if_stale_default_image(ws_settings.docker_image)
-    _warn_if_stale_default_identity(ImageVerificationSettings().certificate_identity_regexp)
+    _warn_if_stale_default_identity(
+        ImageVerificationSettings().certificate_identity_regexp, ws_settings.docker_image
+    )
     # The workspace service is the Docker headless path: claude -p and
     # codex exec both run there, keeping the stream-json pipeline, Envoy
     # token accounting, and telemetry.
@@ -1535,19 +1537,23 @@ def _warn_if_stale_default_image(image: str) -> None:
         logger.warning("%s", message)
 
 
-def _warn_if_stale_default_identity(identity: str) -> None:
+def _warn_if_stale_default_identity(identity: str, image: str) -> None:
     """Same as the image check, for the cosign signer identity (#1398).
 
     A copied ``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` names the
     publisher of the day it was copied. Once the pins name images from a new
     publisher every provision fails verification, so name it before the first
-    one does.
+    one does. Quiet when ``image`` is custom: the identity must match that
+    image's publisher, which may well be the one a previous default named.
     """
     from syn_shared.settings.workspace_image_migration import (
         IMAGE_IDENTITY_RULE,
+        image_is_custom,
         stale_default_message,
     )
 
+    if image_is_custom(image):
+        return
     message = stale_default_message(identity, IMAGE_IDENTITY_RULE)
     if message is not None:
         logger.warning("%s", message)

@@ -33,12 +33,18 @@ from syn_adapters.workspace_backends.image_verification import (
     verify_image,
 )
 from syn_shared.settings.image_verification import (
+    AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
     AGENTIC_WORKSPACE_IDENTITY_REGEXP,
     GITHUB_ACTIONS_OIDC_ISSUER,
     PREVIOUS_DEFAULT_IMAGE_IDENTITY_REGEXPS,
     ImageVerificationSettings,
 )
-from syn_shared.settings.workspace_images import PREVIOUS_DEFAULT_WORKSPACE_IMAGES
+from syn_shared.settings.workspace_images import (
+    AP_ROLLBACK_IMAGES,
+    DEFAULT_WORKSPACE_IMAGE,
+    PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
+    WorkspaceImageProvider,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -349,12 +355,26 @@ class TestVerificationFailsClosed:
             fake_cosign(FakeCompleted(1, stderr="none of the expected identities matched")),
             pytest.raises(ImageVerificationError) as exc_info,
         ):
-            verify_image(PINNED_REF, settings(certificate_identity_regexp=identity))
+            verify_image(DEFAULT_WORKSPACE_IMAGE, settings(certificate_identity_regexp=identity))
 
         message = str(exc_info.value)
         assert "Likely cause: SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP is" in message
         assert AGENTIC_WORKSPACE_IDENTITY_REGEXP in message.split("Likely cause:", 1)[1]
         assert "SYN_WORKSPACE_DOCKER_IMAGE" not in message
+
+    def test_custom_image_with_shipped_identity_adds_no_identity_hint(self) -> None:
+        """An AP rollback digest needs the AP identity; that pairing is not stale."""
+        rollback = AP_ROLLBACK_IMAGES[WorkspaceImageProvider.CLAUDE_CLI]
+        with (
+            fake_cosign(FakeCompleted(1, stderr="no matching signatures")),
+            pytest.raises(ImageVerificationError) as exc_info,
+        ):
+            verify_image(
+                rollback,
+                settings(certificate_identity_regexp=AGENTIC_PRIMITIVES_IDENTITY_REGEXP),
+            )
+
+        assert "Likely cause" not in str(exc_info.value)
 
     def test_stale_shipped_image_names_the_env_var(self) -> None:
         stale = next(i for i in PREVIOUS_DEFAULT_WORKSPACE_IMAGES if "@sha256:" in i)
