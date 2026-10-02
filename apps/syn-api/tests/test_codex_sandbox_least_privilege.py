@@ -183,7 +183,7 @@ class TestTheWholePathFromYaml:
     """
 
     def test_yaml_declared_level_reaches_the_codex_argv(self) -> None:
-        # full-access: the only level YAML accepts since #1434.
+        # A non-default level, so only the declared value reaching argv passes.
         from syn_domain.contexts.orchestration._shared.workflow_definition import (
             WorkflowDefinition,
         )
@@ -201,15 +201,15 @@ phases:
     agent:
       provider: codex
       model: gpt-5.6-sol
-      sandbox: full-access
+      sandbox: workspace-write
 """
         )
         phase = definition.phases[0].to_domain()
-        assert phase.sandbox == "full-access", "dropped between YAML and PhaseDefinition"
+        assert phase.sandbox == "workspace-write", "dropped between YAML and PhaseDefinition"
 
         argv = _build_codex_command(
             "check the work",
             phase.model,
             _resolve_sandbox(phase.sandbox, phase_id=phase.phase_id),
         )
-        assert _sandbox_arg(argv) == "danger-full-access"
+        assert _sandbox_arg(argv) == "workspace-write"

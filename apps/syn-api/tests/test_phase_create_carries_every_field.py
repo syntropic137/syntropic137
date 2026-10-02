@@ -82,11 +82,9 @@ _EVERY_FIELD: Mapping[str, object] = {
     "model": "gpt-5.6-sol",
     "provider": "codex",
     "allow_delegation": True,
-    # The only level the create path accepts since #1434, and also the default,
-    # so this value alone cannot prove the mapping exists. That proof is
-    # test_create_refuses_unrunnable_sandbox.py: a dropped mapping would let
-    # "read-only" through instead of refusing it.
-    "sandbox": "full-access",
+    # NOT the default ("full-access"), so only the caller's value arriving
+    # satisfies the assertion; a dropped mapping falls back and fails it.
+    "sandbox": "workspace-write",
     "claude_plugins": ["owner/repo@abc123"],
     # Skill refs name a SKILL inside a repo; plugin refs name the repo.
     # The model rejects the plugin spelling here, which is how I learned it.
@@ -153,8 +151,7 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.model == "gpt-5.6-sol"
     assert phase.provider == "codex"
     assert phase.allow_delegation is True
-    # Mapping presence is proven by the refusal test (see the fixture comment).
-    assert phase.sandbox == "full-access"
+    assert phase.sandbox == "workspace-write"
     # IDENTITY, not cardinality. The previous version asserted `len(...) == 1`
     # while its comment claimed identity was checked -- so an implementation
     # substituting a wholly different plugin passed. Verified: a mutant
