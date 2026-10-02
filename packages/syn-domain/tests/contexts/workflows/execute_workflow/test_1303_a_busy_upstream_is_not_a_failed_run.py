@@ -42,7 +42,7 @@ import pytest
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     UpstreamRetryPolicy,
 )
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor, _one_phase_workflow
 
@@ -79,7 +79,7 @@ class TestABusyUpstreamIsRetried:
         """
         fake = FakeAgentExecutionHandler.scripted(
             FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
-            FakeAgentExecutionHandler.success(says=SUCCEEDED),
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE, says=SUCCEEDED),
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
 
@@ -108,7 +108,7 @@ class TestABusyUpstreamIsRetried:
         """
         fake = FakeAgentExecutionHandler.scripted(
             FakeAgentExecutionHandler.failed(stream_error=OVERLOADED),
-            FakeAgentExecutionHandler.success(says=SUCCEEDED),
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE, says=SUCCEEDED),
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
 
@@ -207,7 +207,7 @@ class TestAPermanentFailureStaysPermanent:
         """
         fake = FakeAgentExecutionHandler.scripted(
             FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY, uses_tools=["Bash"]),
-            FakeAgentExecutionHandler.success(says=SUCCEEDED),
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE, says=SUCCEEDED),
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
 

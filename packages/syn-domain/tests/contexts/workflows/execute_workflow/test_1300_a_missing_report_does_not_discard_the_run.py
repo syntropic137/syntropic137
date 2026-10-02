@@ -199,9 +199,15 @@ class _Run:
         """(title, content) of every artifact that actually reached the store.
 
         Read off the aggregate rather than the arguments it was built from, so
-        a value dropped at the command would be visible here.
+        a value dropped at the command would be visible here. Only the first
+        phase's: the downstream phase stores its own last message too since
+        #1476, and these tests are about the phase that wrote no report.
         """
-        return [(a.title or "", a.content or "") for a in self.artifacts.saved]
+        return [
+            (a.title or "", a.content or "")
+            for a in self.artifacts.saved
+            if a.phase_id == "phase-001"
+        ]
 
 
 async def _run_writing_nothing(clone: _Clone, *, says: str | None):

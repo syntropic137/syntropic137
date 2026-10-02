@@ -105,9 +105,9 @@ _WROTE_AN_EMPTY_FILE: Final[str] = (
     "last message its agent produced, not the deliverable it intended to write."
 )
 _WROTE_NOTHING: Final[str] = (
-    "This phase declared an output artifact and wrote no collectable file "
-    "under `artifacts/output/`, so what follows is the last message its agent "
-    "produced, not the deliverable it owed. Its other work - commits, pushed "
+    "This phase wrote no collectable file under `artifacts/output/`, so what "
+    "follows is the last message its agent produced, not the deliverable it "
+    "owed. Its other work - commits, pushed "
     "branches - is unaffected by this and is described below if the agent "
     "described it."
 )

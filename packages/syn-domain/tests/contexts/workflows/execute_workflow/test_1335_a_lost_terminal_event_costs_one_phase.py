@@ -42,7 +42,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     MISSING_TERMINAL_TURN_REASON,
 )
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor
 
@@ -84,7 +84,7 @@ class AttemptSequence:
     def __init__(self, phase_id: str, *attempts: FakeAgentExecutionHandler) -> None:
         self._phase_id = phase_id
         self._attempts = attempts
-        self._every_other_phase = FakeAgentExecutionHandler.success()
+        self._every_other_phase = FakeAgentExecutionHandler.success(produces=A_DELIVERABLE)
         self.calls: list[TodoItem] = []
 
     async def handle(
@@ -186,7 +186,7 @@ class TestALostTerminalEventIsRetriedInPlace:
         agent = AttemptSequence(
             "verify",
             _lost_its_terminal_event(),
-            FakeAgentExecutionHandler.success(),
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE),
         )
         processor = _make_processor(agent)  # type: ignore[arg-type]
 
@@ -233,7 +233,8 @@ class TestALostTerminalEventIsRetriedInPlace:
             "verify",
             _lost_its_terminal_event(spent=PhaseUsage(input_tokens=700, output_tokens=90)),
             FakeAgentExecutionHandler.success(
-                spent=PhaseUsage(input_tokens=1300, output_tokens=210)
+                produces=A_DELIVERABLE,
+                spent=PhaseUsage(input_tokens=1300, output_tokens=210),
             ),
         )
         processor = _make_processor(agent)  # type: ignore[arg-type]
@@ -295,7 +296,7 @@ class TestALostTerminalEventIsRetriedInPlace:
             FakeAgentExecutionHandler.failed(
                 exit_code=1, stream_error="codex login failed: refresh_token_reused"
             ),
-            FakeAgentExecutionHandler.success(),
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE),
         )
         processor = _make_processor(agent)  # type: ignore[arg-type]
 

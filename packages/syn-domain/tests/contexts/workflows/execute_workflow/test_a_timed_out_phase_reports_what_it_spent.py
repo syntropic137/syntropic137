@@ -58,7 +58,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor
 
@@ -380,6 +380,7 @@ class TestWhatDidNotChange:
         spent, and the run still completes."""
         result, _ = await _run(
             FakeAgentExecutionHandler.success(
+                produces=A_DELIVERABLE,
                 says='TASK_RESULT: {"success": true, "comments": "done"}\nTASK_RESULT_END',
                 spent=STALLED,
             ),

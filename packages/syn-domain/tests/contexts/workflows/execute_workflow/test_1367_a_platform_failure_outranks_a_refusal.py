@@ -28,7 +28,7 @@ from __future__ import annotations
 import pytest
 
 from syn_domain.contexts.orchestration import FailureClassification
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor, _one_phase_workflow
 
@@ -177,7 +177,9 @@ class TestWhatMustStillBeACorrectRefusal:
         an exit-0 run with no refusal completes, exactly as before.
         """
         fake = FakeAgentExecutionHandler.success(
-            says="Opened PR #1367", stream_error="Stream ended without turn.completed"
+            produces=A_DELIVERABLE,
+            says="Opened PR #1367",
+            stream_error="Stream ended without turn.completed",
         )
         processor = _make_processor(fake)
 
