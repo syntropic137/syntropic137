@@ -102,10 +102,15 @@ describe("probeServerBuild", () => {
     ["an unreachable server", () => Promise.reject(new TypeError("fetch failed"))],
     ["a 401", () => Promise.resolve(json({ detail: "Unauthorized" }, 401))],
     ["an HTML 200 from a proxy", () => Promise.resolve(new Response("<html>", { status: 200, headers: { "Content-Type": "application/json" } }))],
+    ["a JSON null 200", () => Promise.resolve(json(null))],
+    ["a JSON string 200", () => Promise.resolve(json("0.33.0"))],
+    ["a JSON array 200", () => Promise.resolve(json([]))],
   ])("turns %s into unanswered rather than throwing", async (_label, respond) => {
     mockFetch.mockImplementation(respond);
     const result = await probeServerBuild();
     expect(result.kind).toBe("unanswered");
+    // What callers do next must not throw either.
+    expect(compareReleases("0.29.0", result)).toEqual({ kind: "undetermined" });
   });
 
   it("gives up after VERSION_PROBE_TIMEOUT_MS instead of holding the command", async () => {

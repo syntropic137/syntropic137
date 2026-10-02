@@ -81,4 +81,13 @@ describe("version command", () => {
     expect(lines[1]).toContain("has no GET /version");
     expect(stderr).not.toContain("Warning");
   });
+
+  it("prints a server line, not a crash, when /version answers a JSON null", async () => {
+    mockFetch.mockResolvedValue(json(null));
+    const { lines, stderr } = await run();
+    expect(lines[0]).toContain("Syntropic137 v0.29.0");
+    expect(lines[1]).toContain("syn-api not reached at http");
+    expect(lines[1]).toContain("not a build object");
+    expect(stderr).not.toContain("Warning");
+  });
 });

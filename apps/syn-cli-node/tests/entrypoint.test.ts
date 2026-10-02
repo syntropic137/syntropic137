@@ -82,6 +82,7 @@ describe("the shipped syn entrypoint", () => {
   it.each<[string, () => Promise<Response>]>([
     ["unreachable", () => Promise.reject(new TypeError("fetch failed"))],
     ["404 (no /version route)", async () => json({ detail: "Not Found" }, 404)],
+    ["a 200 whose JSON body is null", async () => json(null)],
   ])("says nothing, and lets the command speak, when /version is %s", async (_label, version) => {
     serve(version);
     const at = await synWorkflowRunNope();

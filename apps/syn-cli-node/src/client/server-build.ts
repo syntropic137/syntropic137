@@ -49,6 +49,13 @@ export async function probeServerBuild(): Promise<ServerBuild> {
     if (!response.ok || data === undefined) {
       return { kind: "unanswered", reason: `HTTP ${response.status}` };
     }
+    // openapi-fetch does no runtime validation, so a 200 whose JSON root is
+    // `null`, a string or an array arrives typed as BuildInfo. Only an object
+    // can be one; anything else would crash the first `build.version` read,
+    // outside this `try`, and take the command down with it.
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+      return { kind: "unanswered", reason: "response body is not a build object" };
+    }
     return { kind: "reported", build: data };
   } catch (err) {
     const reason = controller.signal.aborted
