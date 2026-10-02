@@ -22,6 +22,7 @@ from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
 from scripts.check_workflow_definitions import (
     _workflow_files,
     grant_violations,
+    main,
     stale_phase_references,
     validate_file,
 )
@@ -118,6 +119,41 @@ class TestTheGateAgreesWithTheApi:
             },
         )
         assert not _gate_accepts(path), f"`{typo}:` was silently discarded"
+
+
+class TestARetiredKeyFailsTheRepoGate:
+    """The platform accepts `can_open_pr` with a warning; this gate does not.
+
+    The repository's workflows are the examples authors copy, so a retired key
+    here would teach the next workflow to carry a line that does nothing.
+    """
+
+    @staticmethod
+    def _gate_over(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, retired_key: bool) -> int:
+        import scripts.check_workflow_definitions as gate
+
+        phase_line = "    can_open_pr: true\n" if retired_key else ""
+        (tmp_path / "workflows").mkdir()
+        (tmp_path / "workflows" / "wf.yaml").write_text(
+            "id: retired\n"
+            "name: Retired\n"
+            "requires_repos: false\n"
+            "phases:\n"
+            "  - id: one\n"
+            "    name: One\n"
+            "    order: 1\n"
+            "    prompt_template: do it\n" + phase_line
+        )
+        monkeypatch.setattr(gate, "_ROOT", tmp_path)
+        return main()
+
+    def test_a_retired_key_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._gate_over(tmp_path, monkeypatch, retired_key=True) == 1
+
+    def test_the_same_workflow_without_it_passes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._gate_over(tmp_path, monkeypatch, retired_key=False) == 0
 
 
 class TestTheRepositoryOwnWorkflowsStayValid:

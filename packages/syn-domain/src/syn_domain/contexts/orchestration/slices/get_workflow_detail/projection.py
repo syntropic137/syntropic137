@@ -102,6 +102,10 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # between the two steps loses this read model and it rebuilds from the
     # stream. That is the price of the rebuild, not a reason to serve wrong
     # values.
+    #
+    # NOT bumped again when `can_open_pr` was retired (#1477): that is the first
+    # case, a removal. A v9 row that still carries the key stays readable,
+    # because `from_dict` no longer looks for it, and the key stops surfacing.
     VERSION = 9  # v9: surface can_open_pr, clone_repos, delivers_repo_changes, sandbox (#1429)
 
     def __init__(self, store: ProjectionStore):
@@ -149,7 +153,6 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.
                 clone_repos=bool(p.get("clone_repos", True)),
-                can_open_pr=bool(p.get("can_open_pr", False)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),

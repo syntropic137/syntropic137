@@ -2955,6 +2955,8 @@ export interface components {
             requires_repos: boolean;
             /** Status */
             status: string;
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * DegradedReason
@@ -4856,11 +4858,6 @@ export interface components {
              * @default true
              */
             clone_repos: boolean;
-            /**
-             * Can Open Pr
-             * @default false
-             */
-            can_open_pr: boolean;
             /**
              * Delivers Repo Changes
              * @default true
@@ -7696,6 +7693,8 @@ export interface components {
             phase_count: number;
             /** Errors */
             errors?: string[];
+            /** Warnings */
+            warnings?: string[];
         };
         /** ValidationError */
         ValidationError: {

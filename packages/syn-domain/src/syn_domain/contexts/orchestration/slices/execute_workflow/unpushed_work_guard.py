@@ -41,7 +41,7 @@ dependency-bump phase, and a tool can dirty anything.
 
 ASKING THE PHASE DOES NOT FIX IT EITHER, which is the correction #1317 needed.
 ``delivers_repo_changes`` is declared in the workflow definition, beside
-``clone_repos`` and ``can_open_pr``, where the agent cannot decline it - but
+``clone_repos``, where the agent cannot decline it - but
 it states what a phase INTENDS, and the gate needs to know what it CAN do.
 Every phase that declares False still holds ``Bash`` or ``Write``, so a gate
 that believed the declaration threw away an agent's genuine edit in precisely

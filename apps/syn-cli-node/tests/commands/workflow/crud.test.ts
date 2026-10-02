@@ -7,6 +7,7 @@ import {
   listCommand,
   showCommand,
   deleteCommand,
+  validateCommand,
 } from "../../../src/commands/workflow/crud.js";
 import { CLIError } from "../../../src/framework/errors.js";
 
@@ -34,6 +35,12 @@ describe("workflow crud commands", () => {
 
   function stdout(): string {
     return (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+  }
+
+  function stderr(): string {
+    return (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("");
   }
@@ -213,6 +220,69 @@ describe("workflow crud commands", () => {
         values: { from: yamlPath },
       });
       expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("validate", () => {
+    // A retired key is accepted by the server with a notice (#1477 follow-up).
+    // The CLI must carry the file to the server untouched and print what comes
+    // back; it holds no list of retired keys of its own.
+    const NOTICE = "phase 'p1': 'can_open_pr' is retired (#1477) and ignored";
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "syn-crud-validate-"));
+      fs.writeFileSync(
+        path.join(tmpDir, "workflow.yaml"),
+        "id: pkg-wf\nname: Pkg WF\ntype: custom\nphases:\n" +
+          "  - id: p1\n    name: Phase\n    order: 1\n    prompt_template: hi\n    can_open_pr: true\n",
+        "utf-8",
+      );
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("a package directory sends each resolved workflow and prints its warnings", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: true, name: "Pkg WF", phase_count: 1, errors: [], warnings: [NOTICE] }),
+      );
+
+      await validateCommand.handler({ positionals: [tmpDir], values: {} });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const request = mockFetch.mock.calls[0]![0] as Request;
+      expect(request.url).toContain("/workflows/validate");
+      const body = JSON.parse(await request.text()) as { content: string };
+      expect(body.content).toContain("can_open_pr");
+      expect(stdout()).toContain("Valid");
+      expect(stderr()).toContain(NOTICE);
+    });
+
+    it("a package directory with an invalid workflow exits 1", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: false, errors: ["phases.0.prompt: Extra inputs are not permitted"] }),
+      );
+
+      await expect(
+        validateCommand.handler({ positionals: [tmpDir], values: {} }),
+      ).rejects.toThrow(CLIError);
+      expect(stdout()).toContain("Extra inputs are not permitted");
+    });
+
+    it("a single file prints warnings and stays exit 0", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: true, name: "Pkg WF", phase_count: 1, errors: [], warnings: [NOTICE] }),
+      );
+
+      await validateCommand.handler({
+        positionals: [path.join(tmpDir, "workflow.yaml")],
+        values: {},
+      });
+
+      expect(stdout()).toContain("Valid workflow definition");
+      expect(stderr()).toContain(NOTICE);
     });
   });
 

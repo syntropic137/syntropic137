@@ -201,7 +201,6 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         provider=p.provider,
         allow_delegation=p.allow_delegation,
         clone_repos=p.clone_repos,
-        can_open_pr=p.can_open_pr,
         delivers_repo_changes=p.delivers_repo_changes,
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
@@ -566,28 +565,23 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # in the authoring schema at all, so there is no spelling that round-trips.
     # It can only arrive via the untyped JSON create path (#1015 follow-up).
     #
-    # That claim was FALSE for can_open_pr, clone_repos,
-    # delivers_repo_changes and agent.sandbox until #1429: all four are in
-    # the authoring schema and all four were dropped. They are emitted
-    # below. A comment asserting an invariant is worth less than the
+    # That claim was FALSE for clone_repos, delivers_repo_changes and
+    # agent.sandbox until #1429: all are in the authoring schema and all were
+    # dropped. They are emitted below. A comment asserting an invariant is worth less than the
     # invariant, so there is now a test that walks the schema.
     if phase.argument_hint:
         lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
     if phase.allowed_tools:
         lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
-    # #1429. These were dropped, so export -> reinstall SILENTLY converted a
-    # publishing phase into a non-publishing one: the reinstalled phase minted
-    # `pull_requests: read` and failed at `gh pr create`, with nothing in the
-    # YAML, the API or `syn workflow show` to say why.
+    # #1429. These were dropped, so export -> reinstall silently changed what
+    # the reinstalled phase does, with nothing in the YAML, the API or
+    # `syn workflow show` to say why.
     #
     # Emitted whenever they differ from the loader's default rather than only
-    # when truthy. `can_open_pr` defaults False so the truthy test happens to
-    # work, but `clone_repos` and `delivers_repo_changes` default TRUE: a
+    # when truthy. `clone_repos` and `delivers_repo_changes` default TRUE: a
     # truthy-only test would drop an explicit `false` and reinstall it as
-    # `true`, which is the same laundering in the opposite direction. That is
-    # exactly the bug being fixed, so the guard compares against the default.
-    if phase.can_open_pr:
-        lines.append("    can_open_pr: true")
+    # `true`, which is the same laundering in the opposite direction. So the
+    # guard compares against the default.
     if not phase.clone_repos:
         lines.append("    clone_repos: false")
     if not phase.delivers_repo_changes:

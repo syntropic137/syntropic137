@@ -62,6 +62,8 @@ class _HistoricalPhase(TypedDict):
     provider: str
     agent_id: str
     """The tmux pane selector. Gone from ``PhaseDefinition``; still in history."""
+    can_open_pr: bool
+    """Retired after #1477. Gone from ``PhaseDefinition``; still in history."""
 
 
 class _HistoricalTemplate(TypedDict):
@@ -111,6 +113,7 @@ def _historical_created_event(provider: str = REMOVED_INTERACTIVE_PROVIDER) -> _
                     prompt_template="do the thing",
                     provider=provider,
                     agent_id="codex",
+                    can_open_pr=True,
                 )
             ],
         )
@@ -196,6 +199,7 @@ def test_rehydration_of_a_stored_interactive_template_still_succeeds() -> None:
     # The stale value survives rehydration verbatim - that is the point. It is
     # execution, not replay, that refuses it.
     assert aggregate.phases[0].provider == REMOVED_INTERACTIVE_PROVIDER
+    assert "can_open_pr" not in aggregate.phases[0].model_dump()
 
 
 @pytest.mark.unit

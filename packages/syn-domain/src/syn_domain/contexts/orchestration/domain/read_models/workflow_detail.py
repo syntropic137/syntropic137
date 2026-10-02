@@ -145,13 +145,6 @@ class PhaseDefinitionDetail:
     clone_repos: bool = True
     """Whether the workflow's repos are checked out for this phase (#1187)."""
 
-    can_open_pr: bool = False
-    """Declared intent only; inert since #1477.
-
-    Every phase token now carries the installation's grant, because GitHub
-    requires ``pull_requests: write`` to comment on a PR and has no
-    comment-only permission. Kept for schema compatibility until removed."""
-
     delivers_repo_changes: bool = True
     """Whether repository changes are part of this phase's deliverable (#1308)."""
 
@@ -272,7 +265,6 @@ class WorkflowDetail:
                 # comment above this one records that fixing only one left
                 # half the path broken while the tests passed.
                 clone_repos=bool(p.get("clone_repos", True)),
-                can_open_pr=bool(p.get("can_open_pr", False)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_stored_refs(p.get("claude_plugins")),
@@ -349,11 +341,9 @@ class WorkflowDetail:
                 # sites and stopped there, so the projection built a phase
                 # carrying them, stored `to_dict()` without them, and
                 # `get_by_id` reloaded the defaults. The API then reported a
-                # publishing phase as `can_open_pr: false` and a read-only
-                # phase as `full-access` - a security field reading LESS
-                # restricted than the phase actually runs.
+                # read-only phase as `full-access` - a security field reading
+                # LESS restricted than the phase actually runs.
                 "clone_repos": p.clone_repos,
-                "can_open_pr": p.can_open_pr,
                 "delivers_repo_changes": p.delivers_repo_changes,
                 "sandbox": p.sandbox,
                 "claude_plugins": [r.to_dict() for r in p.claude_plugins],

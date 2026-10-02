@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -811,6 +811,42 @@ def payload_with_origin_owners_restored(data: object) -> object:
     return payload
 
 
+#: Keys that stored `WorkflowExecutionStarted` events carry inside
+#: `pinned_phases` and `ExecutablePhase` no longer declares. The event forbids
+#: extra keys, so without this one of them would fail typed validation and the
+#: whole start event would replay as a generic one (ADR-023), losing its pins.
+#:
+#: Entries are NEVER removed: stored history replays forever. Independent of
+#: `RETIRED_PHASE_FIELDS`, which is what authors may still write and changes on
+#: its own schedule.
+REMOVED_EXECUTABLE_PHASE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        # Retired by #1477; every start event written since #1454 carries it.
+        "can_open_pr",
+    }
+)
+
+
+def started_payload_for_replay(data: object) -> object:
+    """A stored `WorkflowExecutionStarted` payload, normalised for validation.
+
+    Lives here, not on the event, for the reason given on
+    `payload_with_owners_restored`. Removed keys are dropped from each pinned
+    phase, then carried owners are restored (#1462).
+    """
+    if isinstance(data, Mapping) and isinstance(data.get("pinned_phases"), list):
+        data = {
+            **data,
+            "pinned_phases": [
+                {k: v for k, v in phase.items() if k not in REMOVED_EXECUTABLE_PHASE_KEYS}
+                if isinstance(phase, Mapping)
+                else phase
+                for phase in data["pinned_phases"]
+            ],
+        }
+    return payload_with_origin_owners_restored(data)
+
+
 @dataclass(frozen=True)
 class ExecutionMetrics:
     """Aggregated metrics for workflow execution.
@@ -902,11 +938,6 @@ class ExecutablePhase:
     # here rather than on `agent_config` because it decides what the WORKSPACE
     # contains, not how the agent is invoked.
     clone_repos: bool = True
-
-    # Whether this phase was meant to create a pull request (#1197). Inert
-    # since #1477: nothing reads it, and every phase token carries the
-    # installation's own permissions. Kept until the field is removed.
-    can_open_pr: bool = False
 
     # Whether a change to the repositories is part of what this phase delivers
     # (#1308). Unlike clone_repos this decides nothing about

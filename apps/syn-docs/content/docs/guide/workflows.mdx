@@ -362,6 +362,24 @@ syn workflow validate ./workflow.yaml
 Validation checks the YAML schema, verifies that all referenced `.md` files exist,
 and resolves `shared://` references.
 
+### Retired phase fields
+
+A phase field that no longer does anything is retired rather than refused, so
+workflows written before the change keep loading. `validate` and `install`
+print a warning naming the phase and the field; the workflow is still valid and
+the value is ignored. Any other unknown field is still an error.
+
+| Field | Retired | Why | What to do |
+|---|---|---|---|
+| `can_open_pr` | after #1477 | Every phase's token carries the installation's own permissions, so every phase may open and comment on a PR. The field decided nothing. | Delete the line. There is no replacement. |
+
+```
+Warning: phase 'open_pr': 'can_open_pr' is retired (#1477) and ignored - ...
+```
+
+A future release will refuse retired fields at validate and install time, so
+remove them now.
+
 ## Example Packages
 
 The repository includes reference implementations:

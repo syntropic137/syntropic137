@@ -243,4 +243,30 @@ describe("unchanged reinstall (issue #822)", () => {
     // caller rerunning the command needs to know.
     expect(refs).toEqual([{ id: "demo", name: "Demo" }]);
   });
+
+  it("prints the server's warnings even when already installed", async () => {
+    const notice = "phase 'p1': 'can_open_pr' is retired (#1477) and ignored";
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "demo",
+          name: "Demo",
+          workflow_type: "research",
+          classification: "simple",
+          repository_url: "",
+          requires_repos: false,
+          status: "unchanged",
+          warnings: [notice],
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })]);
+
+    const written = (stream: NodeJS.WriteStream): string =>
+      (stream.write as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => String(c[0])).join("");
+    expect(written(process.stdout)).toContain("already installed");
+    expect(written(process.stderr)).toContain(notice);
+  });
 });

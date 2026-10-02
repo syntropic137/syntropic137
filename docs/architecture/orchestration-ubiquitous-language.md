@@ -143,6 +143,15 @@ successful API response reports the first.
   property of the deployment, not of an Execution, and it stays. Where a
   to-do record reads `paused` (the resume-start list), it means the record is
   waiting on admission, not that anything was paused by an operator.
+- **`can_open_pr`.** Retired after #1477. It was a Phase field that, from
+  #1197, decided whether a Phase's token could open a pull request. #1477
+  removed the token downgrade it controlled, so it decided nothing, and it was
+  then dropped from the Phase and from Pins. Workflow YAML that still carries
+  it loads, and validate and install report a warning naming the Phase; any
+  other unknown key is still refused. Stored events that carry it replay
+  unchanged, permanently. The retired keys are listed in
+  `_shared/retired_phase_fields.py`; rejecting them at authoring time is
+  #1502. There is no replacement: every Phase may open and comment on a PR.
 - **Branch.** Reserved, no meaning assigned. If a chat-style "branch from here"
   operation is ever wanted, this is where it gets defined.
 - **Retry.** A Phase attempt within one Execution (`PhaseRetryScheduled`), never
