@@ -709,10 +709,22 @@ def test_the_stamp_exception_list_is_exactly_what_still_fails() -> None:
         ("both stamped", "INCLUDE_DOCKER_CLI=1\nSYN_BUILD_IMAGE_TAG=v1\nSYN_BUILD_COMMIT=abc", []),
         ("no commit", "SYN_BUILD_IMAGE_TAG=v1", ["SYN_BUILD_COMMIT"]),
         ("an empty commit", "SYN_BUILD_IMAGE_TAG=v1 SYN_BUILD_COMMIT=", ["SYN_BUILD_COMMIT"]),
-        ("a quoted empty commit", 'SYN_BUILD_IMAGE_TAG=v1 SYN_BUILD_COMMIT=""', ["SYN_BUILD_COMMIT"]),
-        ("a stamp only in a comment", "# SYN_BUILD_IMAGE_TAG=v1\nSYN_BUILD_COMMIT=abc", ["SYN_BUILD_IMAGE_TAG"]),
+        (
+            "a quoted empty commit",
+            'SYN_BUILD_IMAGE_TAG=v1 SYN_BUILD_COMMIT=""',
+            ["SYN_BUILD_COMMIT"],
+        ),
+        (
+            "a stamp only in a comment",
+            "# SYN_BUILD_IMAGE_TAG=v1\nSYN_BUILD_COMMIT=abc",
+            ["SYN_BUILD_IMAGE_TAG"],
+        ),
         ("a longer name", "XSYN_BUILD_IMAGE_TAG=v1 SYN_BUILD_COMMIT=abc", ["SYN_BUILD_IMAGE_TAG"]),
-        ("build-arg flags", '--build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$SHA"', []),
+        (
+            "build-arg flags",
+            '--build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$SHA"',
+            [],
+        ),
     ],
 )
 def test_a_missing_or_empty_stamp_is_reported(shape: str, text: str, missing: list[str]) -> None:
@@ -724,7 +736,7 @@ def test_a_continued_buildx_command_is_read_whole() -> None:
     """pit_stop.sh splits the command over lines; a flag on any of them counts."""
     script = (
         "run docker buildx build --platform linux/amd64 \\\n"
-        "    --build-arg SYN_BUILD_IMAGE_TAG=\"$TAG\" \\\n"
+        '    --build-arg SYN_BUILD_IMAGE_TAG="$TAG" \\\n'
         f'    -t img -f "$WT/{SYN_API_DOCKERFILE}" "$WT"\n'
         'run docker buildx build -t gw -f "$WT/infra/docker/images/gateway/Dockerfile" "$WT"\n'
     )
