@@ -17,6 +17,7 @@ import { Table } from "../output/table.js";
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
 type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
 type InventorySummary = components["schemas"]["SessionInventorySummary"];
+type SideEffectStatus = components["schemas"]["SideEffectStatus"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -101,13 +102,18 @@ const showCommand: CommandDef = {
     }), "Failed to get execution");
 
     print(`${style("Execution:", BOLD)} ${ex.workflow_execution_id}`);
-    print(`  Workflow:   ${ex.workflow_name}`);
-    print(`  Status:     ${formatStatus(ex.status)}`);
-    print(`  Started:    ${formatTimestamp(ex.started_at)}`);
-    if (ex.completed_at) print(`  Completed:  ${formatTimestamp(ex.completed_at)}`);
-    print(`  Tokens:     ${formatTokens(ex.total_tokens)}`);
-    print(`  Cost:       ${formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count)}`);
-    if (ex.error_message) print(`  ${style("Error:", RED)}     ${ex.error_message}`);
+    print(`  Workflow:     ${ex.workflow_name}`);
+    print(`  Status:       ${formatStatus(ex.status)}`);
+    print(`  Started:      ${formatTimestamp(ex.started_at)}`);
+    if (ex.completed_at) print(`  Completed:    ${formatTimestamp(ex.completed_at)}`);
+    print(`  Tokens:       ${formatTokens(ex.total_tokens)}`);
+    print(`  Cost:         ${formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count)}`);
+    // The outcome, beside the status rather than implied by it: a run can fail
+    // after its deliverable exists, or complete while its write-back was
+    // refused (#1501).
+    print(`  Deliverable:  ${ex.deliverable_produced ? "yes" : "no"}`);
+    print(`  Side effects: ${formatSideEffects(ex.reported_side_effects)}`);
+    if (ex.error_message) print(`  ${style("Error:", RED)}        ${ex.error_message}`);
 
     const repos = ex.repos ?? [];
     if (repos.length > 0) {
@@ -129,18 +135,24 @@ const showCommand: CommandDef = {
       table.addColumn("Started");
       table.addColumn("Tokens", { align: "right" });
       table.addColumn("Cost", { align: "right" });
+      table.addColumn("Side effects");
 
       for (let i = 0; i < phases.length; i++) {
         const ph = phases[i]!;
         table.addRow(
           String(i + 1),
           ph.name,
-          formatStatus(ph.status),
+          // A salvaged phase completes, so its status alone would hide that
+          // the deliverable came from the transcript, not the file (#1479).
+          ph.deliverable_recovered
+            ? `${formatStatus(ph.status)} ${style("(recovered)", YELLOW)}`
+            : formatStatus(ph.status),
           // What RAN, or "unknown (requested: X)" - never the alias (ADR-067 D9).
           ph.model_display,
           formatTimestamp(ph.started_at),
           formatTokens(ph.total_tokens),
           formatCostWithCoverage(ph.cost_usd, ph.unpriced_observation_count),
+          formatSideEffects(ph.reported_side_effects),
         );
       }
       table.print();
@@ -148,6 +160,12 @@ const showCommand: CommandDef = {
     await printInventorySummary(ex.workflow_execution_id);
   },
 };
+
+/** What an agent SAID about its external writes. Null is its own answer, the
+ * agent said nothing, and is never shown as "none", which is a claim. */
+function formatSideEffects(status: SideEffectStatus | null | undefined): string {
+  return status ?? "not reported";
+}
 
 /**
  * Inventory is additive context: an execution whose inventory cannot be read
