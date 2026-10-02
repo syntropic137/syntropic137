@@ -1,8 +1,9 @@
 """Which build is this? One answer, for everything that has to report it.
 
-Three places name the running build — ``openapi.json``'s ``info.version``, the
-root endpoint, and (since #1380) ``/health`` — and before this module each
-answered separately. Two of the three can now report a null release beside an
+Four places name the running build — ``openapi.json``'s ``info.version``, the
+root endpoint, ``/health`` (since #1380) and ``/version``, which the CLI asks
+before every API command (#1473) — and before this module each answered
+separately. All but ``info.version`` can report a null release beside an
 explicit ``version_status``; ``info.version`` cannot, and is the one documented
 home of ``UNKNOWN_VERSION``. The two openapi-facing callers shared a literal
 ``__version__ = "0.5.1"`` in ``main.py`` that had not moved in twenty-odd
