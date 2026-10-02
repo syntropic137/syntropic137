@@ -177,11 +177,13 @@ class AgentLaunchEvidence:
     __slots__ = (
         "_announced",
         "_announcement",
+        "_launch_failed",
         "_observer",
         "_ran_to_the_end",
         "_recorded",
         "_spoke_over",
         "_wrapper",
+        "_wrapper_spoke",
     )
 
     def __init__(self, observer: AgentLaunchObserver | None) -> None:
@@ -197,6 +199,13 @@ class AgentLaunchEvidence:
         self._spoke_over = False
         self._ran_to_the_end = False
         self._recorded = False
+        self._launch_failed = False
+        self._wrapper_spoke = False
+
+    @property
+    def launch_failed(self) -> bool:
+        """True only after a drained, signed wrapper failure proves exec failed."""
+        return self._launch_failed
 
     @property
     def wrapper_name(self) -> str:
@@ -228,7 +237,9 @@ class AgentLaunchEvidence:
             if line == self._announcement:
                 self._announced = True
                 continue
-            if not self._signed_by_the_wrapper(line):
+            if self._signed_by_the_wrapper(line):
+                self._wrapper_spoke = True
+            else:
                 self._spoke_over = True
             yield line
         self._ran_to_the_end = True
@@ -271,9 +282,15 @@ class AgentLaunchEvidence:
         Idempotent, so a caller may settle from a ``finally`` without counting
         the launch twice.
         """
-        if self._recorded or not self._announced:
+        if self._recorded or self._launch_failed or not self._announced:
             return
-        if self._ran_to_the_end and exit_code in _COULD_NOT_EXEC and not self._spoke_over:
+        if (
+            self._ran_to_the_end
+            and exit_code in _COULD_NOT_EXEC
+            and self._wrapper_spoke
+            and not self._spoke_over
+        ):
+            self._launch_failed = True
             return
         self._recorded = True
         if self._observer is not None:

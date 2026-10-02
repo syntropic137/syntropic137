@@ -384,6 +384,7 @@ class WorkspaceProvisionHandler:
             phase_id=todo.phase_id,
             with_sidecar=True,
             inject_tokens=True,
+            capture_session_id=session_id,
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
@@ -613,8 +614,7 @@ class WorkspaceProvisionHandler:
         # ANTHROPIC_API_KEY (cross-provider secret exposure), so it gets an empty
         # agent env.
         _, needs_claude_env = _auth_staging_for(
-            phase.agent_config.provider,
-            phase.agent_config.allow_delegation,
+            phase.agent_config.provider, phase.agent_config.allow_delegation
         )
         agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
         # OUTSIDE the branch above, deliberately. A codex phase gets an empty

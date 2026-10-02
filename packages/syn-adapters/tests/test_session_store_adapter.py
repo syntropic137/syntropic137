@@ -185,3 +185,38 @@ class TestMetadataModelIsNotThePricingAuthority:
         )
         assert s is not None
         assert s.model == "openai", "reported as-is; the transcript is what prices"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 404, 401, 409, 503])
+async def test_qualified_read_preserves_native_identity_and_failure_semantics(status: int) -> None:
+    from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+        QualifiedSessionIdentity,
+    )
+
+    identity = QualifiedSessionIdentity(
+        kind="transcript",
+        source_instance_id="installation",
+        harness="codex",
+        local_id="Native/雪 %2F",
+    )
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/transcripts"
+        assert request.url.params["source_instance_id"] == identity.source_instance_id
+        assert request.url.params["harness"] == identity.harness
+        assert request.url.params["native_session_id"] == identity.local_id
+        # Preserve a mismatched response ID so the pricing guard can reject it.
+        return httpx.Response(status, json=_RECORD)
+
+    store = _store(respond)
+    if status not in (200, 404):
+        with pytest.raises(httpx.HTTPStatusError):
+            await store.fetch_qualified_session(identity)
+    else:
+        result = await store.fetch_qualified_session(identity)
+        if status == 404:
+            assert result is None
+        else:
+            assert result is not None and result.session_id == _RECORD["session_id"]
+            assert result.session_id != identity.local_id

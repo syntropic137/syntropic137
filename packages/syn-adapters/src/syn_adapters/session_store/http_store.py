@@ -37,6 +37,9 @@ from syn_domain.contexts.agent_sessions import StoredSession
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions import StoredTranscript
+    from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+        QualifiedSessionIdentity,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,23 @@ class HttpSessionStore:
         Raises on anything else. See the module docstring for why.
         """
         url = f"{self._base_url}/v1/sessions/{session_id}"
+        return await self._fetch(session_id, url)
+
+    async def fetch_qualified_session(
+        self, identity: QualifiedSessionIdentity
+    ) -> StoredSession | None:
+        """Read an exact namespace while retaining the store's native session ID."""
+        url = httpx.URL(
+            f"{self._base_url}/v1/transcripts",
+            params={
+                "source_instance_id": identity.source_instance_id,
+                "harness": identity.harness,
+                "native_session_id": identity.local_id,
+            },
+        )
+        return await self._fetch(identity.local_id, str(url))
+
+    async def _fetch(self, session_id: str, url: str) -> StoredSession | None:
         if self._client is not None:
             response = await self._client.get(url, headers=self._headers(), timeout=self._timeout)
         else:

@@ -45,8 +45,12 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         SystemListAdapter,
         TriggerHistoryAdapter,
     )
+    from syn_domain.contexts.agent_sessions import InventoryReconciliationProcessManager
     from syn_domain.contexts.agent_sessions.slices.list_sessions import (
         SessionListProjection,
+    )
+    from syn_domain.contexts.agent_sessions.slices.replicate_session_inventory.projection import (
+        InventoryReplicationProcessManager,
     )
     from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
         SessionCostProjection,
@@ -128,6 +132,10 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         ExecutionTodoProjection(store=dummy),
         # Agent sessions
         SessionListProjection(dummy),
+        InventoryReconciliationProcessManager(
+            dummy, dummy, lease_seconds=60, retry_seconds=10, max_jobs_per_tick=1
+        ),
+        InventoryReplicationProcessManager(dummy),
         # Artifacts
         ArtifactListProjection(dummy),
         # GitHub — dispatch and trigger index
@@ -162,7 +170,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 26
+_EXPECTED_COUNT = 28
 
 
 # ---------------------------------------------------------------------------

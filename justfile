@@ -1368,6 +1368,11 @@ validate-pre-merge-quick:
 # --- Selfhost Deployment ---
 
 # Pre-flight check: platform, Docker, env, secrets, workspaces
+# Load the Codex sandbox AppArmor profile on this Docker host and persist it
+# under /etc/apparmor.d (#1398). No-op on hosts without AppArmor.
+apparmor-setup *args:
+    bash infra/scripts/apparmor-setup.sh {{args}}
+
 _selfhost-preflight:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1392,6 +1397,11 @@ _selfhost-preflight:
         if ! docker info &>/dev/null; then
             echo "  ❌ Docker is not running or user not in docker group"
             exit 1
+        fi
+        # Codex workspaces need the agentic-codex-sandbox AppArmor profile on
+        # AppArmor hosts (#1398). Installs + loads it (sudo); skips elsewhere.
+        if ! bash infra/scripts/apparmor-setup.sh; then
+            ERRORS=$((ERRORS + 1))
         fi
     fi
 
@@ -1666,10 +1676,19 @@ selfhost-update *args:
     echo "3️⃣ Syncing Python dependencies..."
     uv sync
     echo ""
-    echo "4️⃣ Rebuilding and restarting services..."
+    # After the submodule update (the AppArmor profile ships in it) and before
+    # compose restarts anything (#1398): reload the Codex sandbox profile and
+    # move a copied old default workspace image in .env to the new default.
+    echo "4️⃣ Host upgrade steps (AppArmor profile, workspace image pin)..."
+    bash infra/scripts/selfhost-update-host.sh .env
+    # .env may have changed: re-export it, since the shell value sourced above
+    # would otherwise override the file for compose.
+    source infra/scripts/selfhost-env.sh
+    echo ""
+    echo "5️⃣ Rebuilding and restarting services..."
     $COMPOSE up -d --build
     echo ""
-    echo "5️⃣ Waiting for services to be healthy..."
+    echo "6️⃣ Waiting for services to be healthy..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
     echo ""
     just selfhost-status

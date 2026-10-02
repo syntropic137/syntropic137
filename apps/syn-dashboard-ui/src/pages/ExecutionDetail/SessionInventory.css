@@ -1,0 +1,128 @@
+/* Session inventory view (#1398). Vanilla CSS on the theme's custom properties. */
+.si-panel {
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.si-header,
+.si-group-header,
+.si-actions,
+.si-filters,
+.si-id-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.si-header { justify-content: space-between; }
+.si-header h2 { font-weight: 600; }
+.si-group-header { justify-content: space-between; }
+.si-group-header h3 { font-weight: 600; font-size: 0.95rem; }
+
+.si-muted { color: var(--color-text-muted); }
+.si-wrap { overflow-wrap: anywhere; }
+
+.si-button {
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  padding: 0.15rem 0.6rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.si-button:hover { border-color: var(--color-accent); }
+.si-button:disabled { opacity: 0.5; cursor: default; }
+
+.si-filters input {
+  margin-left: 0.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  padding: 0.15rem 0.4rem;
+}
+
+.si-counts,
+.si-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 0.75rem;
+  row-gap: 0.1rem;
+  font-size: 0.85rem;
+}
+.si-counts dt,
+.si-details dt { color: var(--color-text-secondary); }
+.si-details dd { overflow-wrap: anywhere; }
+
+.si-notice {
+  border-left: 3px solid var(--color-accent);
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+.si-notice-warn { border-left-color: var(--color-warning); }
+.si-notice-ok { border-left-color: var(--color-success); }
+
+.si-groups,
+.si-group,
+.si-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.si-row {
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.si-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.si-id {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+a.si-id { color: var(--color-accent); }
+
+.si-badge {
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  font-size: 0.7rem;
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+}
+.si-badge-platform { color: var(--color-accent); }
+
+.si-lineage {
+  list-style: disc;
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
+}
+
+/* Phase timeline deep link into the phase's inventory filter. */
+.phase-with-inventory {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 200px;
+  flex: 1;
+}
+.phase-inventory-link {
+  font-size: 0.75rem;
+  color: var(--color-accent);
+  align-self: flex-start;
+}

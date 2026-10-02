@@ -28,6 +28,10 @@ Model aliases are NOT here - they are not env var names. They live in
 
 ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
 
+# Per-dispatch identity, supplied only after durable invocation registration.
+ENV_AGENTIC_INVOCATION_ID = "AGENTIC_INVOCATION_ID"
+ENV_AGENTIC_ATTEMPT_ID = "AGENTIC_ATTEMPT_ID"
+
 # ---------------------------------------------------------------------------
 # Agent credential env vars
 # Read from Settings (pydantic-settings); these are the raw env var name strings.
@@ -140,6 +144,8 @@ SESSION_STORE_CONTRACT_ENV_VARS: frozenset[str] = frozenset(
 )
 
 __all__ = [
+    "ENV_AGENTIC_ATTEMPT_ID",
+    "ENV_AGENTIC_INVOCATION_ID",
     "ENV_AGENTIC_SESSION_STORE_AUTH",
     "ENV_AGENTIC_SESSION_STORE_DEPLOYMENT",
     "ENV_AGENTIC_SESSION_STORE_PARTITION",

@@ -94,6 +94,11 @@ workflows that compile native code regress to their pre-switchover behaviour
 under rollback. Everything else - entrypoint contract, capability runtime,
 session-store, exporter 0.5.0 - is the same contract.
 
+When the default provider's pin moves, append the outgoing ``DEFAULT_WORKSPACE_IMAGE``
+to ``PREVIOUS_DEFAULT_WORKSPACE_IMAGES`` and regenerate ``.env.example``, so
+``just selfhost-update`` moves operators who copied the old default (#1398).
+A test fails if ``.env.example`` ever shipped a value that is neither.
+
 Overriding without a code change
 --------------------------------
 Operators override the full image reference through the existing workspace
@@ -402,16 +407,50 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  functional regression. It still cannot run a default codex
 #                  phase - codex 0.144.6 predates gpt-6-sol - so codex phases
 #                  belong on omni-agent, exactly as before.
+# AGENTIC-WORKSPACE v0.2.0, 2026-09-29 (#1398). Taken from release-branch run
+# 36640582820 ("Release Workspace Images", push to release, success) of
+# agentic-workspace 008ed117 (release PR #12), the commit lib/agentic-workspace
+# pins. Re-verified here rather than trusted: `docker buildx imagetools
+# inspect` of each v0.2.0 tag returns exactly the digest below (amd64 + arm64),
+# every image carries agentic.image.channel=release and revision 008ed117, and
+# `cosign verify` (v3.1.3) passes for each against
+# AGENTIC_WORKSPACE_IDENTITY_REGEXP with the GitHub Actions OIDC issuer. This
+# release carries AW #2 (Codex seccomp + AppArmor sandbox policy), #6
+# (conversation preview), #7 (native child lifecycle, journal schema v3) and
+# #9 (consumer contracts).
+#
+# omni-agent       omni-agent manifest 1.10.0. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.281 (Claude Code)", "codex-cli 0.156.1",
+#                  "apss-session-exporter 0.6.0", skills CLI 1.7.0,
+#                  agentic-session-store 0.5.0, syn-delegate, and git, gh, jq,
+#                  uv, node and python3 all present. Label
+#                  agentic.codex_cli_version=0.156.1, so the provider applies
+#                  the Codex sandbox policy (AppArmor hosts: load the profile,
+#                  docs/deployment/apparmor-codex-sandbox.md).
+# toolchain        toolchain manifest 1.1.0, built FROM omni 1.10.0 in the same
+#                  run (label agentic.base.omni.version=1.10.0). Verified by
+#                  running OUT OF THIS DIGEST: same claude, codex, exporter
+#                  0.6.0, skills 1.7.0 and session store as omni; labels bun
+#                  1.3.14, rustup 1.29.1.
+# claude-cli       claude-cli manifest 2.1.6. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.126 (Claude Code)", "codex-cli 0.144.6",
+#                  skills 1.7.0, session store 0.5.0, no exporter (unchanged:
+#                  claude-cli never carried one). Codex phases still belong on
+#                  omni-agent: codex 0.144.6 predates gpt-6-sol.
+#
+#                  Previous pins, for the record (publisher cutover above):
+#                  claude-cli decf374c, omni-agent 89189b6c, toolchain 27b70b32,
+#                  all from agentic-workspace c5e34284.
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:decf374c17151165e0eac415f7cd120c928e8059b1591193152b9c77364a7560"
+            "sha256:c0573ea630ffc97a8f46725d5c20d90c38eea692ffa48db3cd885a147a8aea36"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:89189b6c9cf67ac6a9b137fa7427990ca5535077e53e729a0ff4635053e6970d"
+            "sha256:12e7dc55d7aad558798552f2f373ddc0aebd3205e5b30543ff8751a2a12a0189"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8"
+            "sha256:e38b1a45b14e7b58040d7664a83e9f53191f24d9ea92462b4eeee829d3ad65f9"
         ),
     }
 )
@@ -429,12 +468,12 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
 #: one after any reordering.
 PINNED_EXPORTER_VERSIONS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
-        WorkspaceImageProvider.OMNI_AGENT: "0.5.0",
+        WorkspaceImageProvider.OMNI_AGENT: "0.6.0",
         # toolchain is built FROM the omni digest, so it inherits the exporter.
         # Recorded from running the binary in the toolchain image anyway:
         # inheritance is the reason to EXPECT a value, never the evidence for
         # one, and a base-image bump could change it without changing omni.
-        WorkspaceImageProvider.TOOLCHAIN: "0.5.0",
+        WorkspaceImageProvider.TOOLCHAIN: "0.6.0",
     }
 )
 
@@ -496,9 +535,9 @@ DEFAULT_WORKSPACE_PROVIDER: Final[WorkspaceImageProvider] = WorkspaceImageProvid
 """The provider behind DEFAULT_WORKSPACE_IMAGE, for code that reports on it."""
 
 DEFAULT_WORKSPACE_IMAGE: str = workspace_image_ref(DEFAULT_WORKSPACE_PROVIDER)
-"""Default workspace image - buildfloor, digest-pinned, from GHCR.
+"""Default workspace image - toolchain, digest-pinned, from GHCR.
 
-buildfloor is omni-agent (claude AND codex on the shared ADR-040 capability
+toolchain is omni-agent (claude AND codex on the shared ADR-040 capability
 runtime) plus a native build floor, built FROM the exact omni digest of the
 same release run. As a strict superset it runs every phase omni runs, and
 additionally repositories whose own gates compile native code (cargo, pnpm,
@@ -508,3 +547,36 @@ keeps what a workflow ran reproducible from the pin alone.
 Operators pin a different image with ``SYN_WORKSPACE_DOCKER_IMAGE``. It must be
 a digest reference; a registry tag is rejected.
 """
+
+#: Every value ``.env.example`` ever shipped for ``SYN_WORKSPACE_DOCKER_IMAGE``
+#: before the current default, oldest first (read from the file's history on
+#: main, with the commit that introduced each; #1398).
+#:
+#: WHY: ``.env.example`` carries the default digest, so an operator who copied
+#: it has that digest in ``.env``, where it OVERRIDES the code default. Every
+#: later pin bump then leaves the deployment on the old image. A value in this
+#: set was never an operator's choice, only a copied default, so
+#: ``migrate_workspace_image`` may move it to the current default; any other
+#: value is a deliberate override and is left alone. Append the outgoing
+#: default here in the same change that bumps ``PINNED_DIGESTS``.
+PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
+    "agentic-workspace-claude-cli:latest",  # de72c95b
+    "ghcr.io/agentparadise/agentic-workspace-claude-cli:latest",  # f6b5bee1
+    "ghcr.io/agentparadise/agentic-workspace-claude-cli@sha256:0d53e7a1a9476c5c45cbb7b1467adc004347bef4cf9168c013a6bc7caa5c3f07",  # 49a11ed1
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:f73353adfe99fbab00e0d754543d686f5e57e6c30fddbaebdeeff97b644d53e6",  # 6131040a
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:fb1a719e71f251fbc6cbee4025e89a4dee1fbb9217503f3bc511817eea6ee92c",  # c0b5eb17
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:c447f0cb9905791499de29fba4f848cbb1e6829cf2400d82437fe8f4fc6c5948",  # 52fd32e9
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:dd27d01d5655638d9bffbad6a8a521c0466a78de2f797641fa429686afe457a8",  # d780433b
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:70de5883ba60441b4bc5c357fdb5ec8106852d526735cea90d98aeea1652a7d3",  # 648fc035
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:7b82a14dd65cdd6bdee141a87677055e3110c0cb86d52b33765e6850a773aaea",  # fc897f9e
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:83834d632c9218c0b1772e11820c23e703a5304d7c5016ae9a683665f7d5db6f",  # 25718d9d
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:3e88b1c7d8f6ff9648b3337c2220e17e9368aff940ab9fbbebd0d3c9b25bfaed",  # 6d79609e
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:898aeef61dd057546ef0db7a84467c7d05cb8bb71452a4a3bfd9789343eb912a",  # 0a39dd60
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:29b76b43753292ab50de77921b4cd2750446ea2896cb25f8ee0bfa162d537ad0",  # 46615708
+    "ghcr.io/agentparadise/omni-agent-workspace@sha256:a6ba94d71507384d33df7abe2050f7255bdae8b81dc5a37dbe92b7972f154773",  # bdd0ba5d
+    "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:123ab8497e224871b83fc3148774b7be1b59753638f6516673acf5400f049053",  # 9a720d66
+    "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:89189b6c9cf67ac6a9b137fa7427990ca5535077e53e729a0ff4635053e6970d",  # ab974fd8
+    # #1398 branch history only (AW v0.2.0 omni, before #1418 made toolchain the default).
+    "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:12e7dc55d7aad558798552f2f373ddc0aebd3205e5b30543ff8751a2a12a0189",  # #1398
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8",  # f1647f93
+)

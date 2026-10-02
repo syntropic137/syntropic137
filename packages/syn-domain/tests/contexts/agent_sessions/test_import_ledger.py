@@ -376,6 +376,7 @@ class TestTheLedgerIsGuardedAsInMemoryState:
 
 @dataclass
 class _Capture:
+    qualified_session_identities = None
     """Minimal stand-in for AuthoritativeCapture: only the ids are read."""
 
     agent_session_ids: tuple[str, ...] = (LEADER, DELEGATE)
@@ -497,6 +498,7 @@ class TestAFailedImportKeepsTheLeaderIdentity:
             workspace_id = "ws-1"
 
         class _Capture:
+            qualified_session_identities = None
             agent_session_ids = (LEADER, DELEGATE)
 
         async def _capture_phase(*_a: object, **_k: object) -> object:

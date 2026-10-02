@@ -33,6 +33,7 @@ class WorkspaceServicePort(Protocol):
         *,
         with_sidecar: bool = True,
         inject_tokens: bool = False,
+        capture_session_id: str | None = None,
     ) -> AbstractAsyncContextManager["ManagedWorkspace"]:
         """Create an isolated workspace for agent execution.
 

@@ -22,9 +22,10 @@ the real clock costs 3600 seconds to assert.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -43,10 +44,18 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.invocation_attempt import (
+    UnregisteredLaunchError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseLaunch
+from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+    SessionLifecycleManager,
+)
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_domain.testing.fake_clock import FakeClock
+from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_shared.agents import AgentProvider, AgentRunner
+from syn_shared.env_constants import ENV_AGENTIC_ATTEMPT_ID, ENV_AGENTIC_INVOCATION_ID
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -97,6 +106,7 @@ class _RecordedAttempt:
     runner: Runner
     collector: ObservabilityCollector | None
     workspace: ManagedWorkspace
+    agent_env: dict[str, str]
 
 
 @dataclass
@@ -138,6 +148,7 @@ class _RecordingHandler:
                 runner=runner,
                 collector=collector,
                 workspace=workspace,
+                agent_env=agent_env.copy(),
             )
         )
         if self.clock is not None and self.takes_seconds:
@@ -185,6 +196,36 @@ def _launch() -> PhaseLaunch:
     )
 
 
+# Controlled launches refuse to run without durable intent (#1398). Shared by
+# the other dispatch tests in this slice.
+async def started_session_manager(
+    *,
+    session_id: str = "sess-1",
+    execution_id: str = "exec-1",
+    phase_id: str = "verify",
+    provider: str = "claude",
+    repository: FakeSessionRepository | None = None,
+) -> SessionLifecycleManager:
+    manager = SessionLifecycleManager(
+        repository=repository or FakeSessionRepository(),
+        session_id=session_id,
+        workflow_id="definition",
+        execution_id=execution_id,
+        phase_id=phase_id,
+        agent_provider=provider,
+        agent_model=None,
+    )
+    await manager.start()
+    return manager
+
+
+async def _registered(launch: PhaseLaunch) -> PhaseLaunch:
+    """Controlled launches need durable intent (#1398); supply it when a test has none."""
+    if launch.session_manager is not None:
+        return launch
+    return replace(launch, session_manager=await started_session_manager())
+
+
 async def _run(
     handler: _RecordingHandler,
     *,
@@ -201,7 +242,7 @@ async def _run(
             session_id="sess-1",
         ),
         phase=phase or _phase(),
-        launch=launch or _launch(),
+        launch=await _registered(launch or _launch()),
         session_id="sess-1",
         observability=None,
         retry_policy=retry_policy,
@@ -828,3 +869,98 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
             f"{granted}: a phase configured for 10s was not run on 10s - either it "
             "was refused outright or its budget was rewritten"
         )
+
+
+@pytest.mark.parametrize("provider", [AgentProvider.CLAUDE, AgentProvider.CODEX])
+async def test_retry_dispatch_uses_each_durable_invocation_identity(provider: str) -> None:
+    repository = AsyncMock()
+    manager = SessionLifecycleManager(
+        repository=repository,
+        session_id="sess-1",
+        workflow_id="definition",
+        execution_id="exec-1",
+        phase_id="verify",
+        agent_provider=provider,
+        agent_model=None,
+    )
+    await manager.start()
+    original_env = {
+        "SYN_PHASE": "verify",
+        ENV_AGENTIC_INVOCATION_ID: "stale-invocation",
+        ENV_AGENTIC_ATTEMPT_ID: "stale-attempt",
+    }
+    launch = replace(_launch(), session_manager=manager, agent_env=original_env)
+    handler = _RecordingHandler(
+        scripted=FakeAgentExecutionHandler(
+            attempts=[
+                FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                FakeAgentExecutionHandler.success(says="done"),
+            ]
+        )
+    )
+    await _run(handler, phase=_phase(provider), launch=launch)
+    assert manager.session is not None
+    registrations = manager.session.invocations
+    assert len(registrations) == len(handler.attempts) == 2
+    assert registrations[0].invocation_id != registrations[1].invocation_id
+    assert registrations[0].attempt_id != registrations[1].attempt_id
+    for dispatch, registration in zip(handler.attempts, registrations, strict=True):
+        assert dispatch.agent_env == {
+            "SYN_PHASE": "verify",
+            ENV_AGENTIC_INVOCATION_ID: registration.invocation_id,
+            ENV_AGENTIC_ATTEMPT_ID: registration.attempt_id,
+        }
+    assert original_env[ENV_AGENTIC_INVOCATION_ID] == "stale-invocation"
+    assert original_env[ENV_AGENTIC_ATTEMPT_ID] == "stale-attempt"
+
+
+async def test_unregistered_dispatch_is_refused_and_cannot_inherit_invocation_identity() -> None:
+    """No durable intent, no launch (#1398): stale inherited IDs never reach a process."""
+    handler = _RecordingHandler(scripted=FakeAgentExecutionHandler.success())
+    launch = replace(
+        _launch(),
+        agent_env={
+            "SYN_PHASE": "verify",
+            ENV_AGENTIC_INVOCATION_ID: "stale-invocation",
+            ENV_AGENTIC_ATTEMPT_ID: "stale-attempt",
+        },
+    )
+    with pytest.raises(UnregisteredLaunchError):
+        await run_phase_agent(
+            handler=handler,
+            todo=TodoItem(
+                action=TodoAction.RUN_AGENT,
+                execution_id="exec-1",
+                phase_id="verify",
+                session_id="sess-1",
+            ),
+            phase=_phase(),
+            launch=launch,
+            session_id="sess-1",
+            observability=None,
+            retry_policy=NO_WAITING,
+        )
+    assert handler.attempts == []
+    await _run(handler, launch=launch)
+    env = handler.attempts[0].agent_env
+    assert env[ENV_AGENTIC_INVOCATION_ID] != "stale-invocation"
+    assert env[ENV_AGENTIC_ATTEMPT_ID] != "stale-attempt"
+
+
+async def test_failed_registration_prevents_handler_dispatch() -> None:
+    repository = AsyncMock()
+    manager = SessionLifecycleManager(
+        repository=repository,
+        session_id="sess-1",
+        workflow_id="definition",
+        execution_id="exec-1",
+        phase_id="verify",
+        agent_provider="claude",
+        agent_model=None,
+    )
+    await manager.start()
+    repository.save.side_effect = ConnectionError("unavailable")
+    handler = _RecordingHandler(scripted=FakeAgentExecutionHandler.success())
+    with pytest.raises(ConnectionError, match="unavailable"):
+        await _run(handler, launch=replace(_launch(), session_manager=manager))
+    assert handler.attempts == []
