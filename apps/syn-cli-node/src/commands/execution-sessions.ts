@@ -243,8 +243,16 @@ export const executionSessionsCommand: CommandDef = {
     limit: { type: "string", default: "100", description: "Items per page (1 to 500)" },
     "max-pages": { type: "string", default: String(MAX_PAGES), description: "Stop after this many pages and report the rest as pending (1 to 10000)" },
     cursor: { type: "string", description: "Continue a previously returned inventory cursor" },
-    "require-complete": { type: "boolean", description: "Exit nonzero unless coverage is reconciled and the revision is current" },
+    "require-complete": { type: "boolean", description: "Exit nonzero unless coverage is reconciled, the revision is current and this call read every section unfiltered (use with --all)" },
   },
+  examples: [
+    "syn execution sessions <execution-id>                  # coverage, counts and the first page of sessions",
+    "syn execution sessions <execution-id> --all            # every section: lineage, captures and gaps",
+    "syn execution sessions <execution-id> --kind gap --all # only the gaps",
+    "syn execution sessions <execution-id> --all --json --require-complete  # automation: nonzero exit unless complete",
+    "syn execution sessions <execution-id> --refresh        # schedule a reconstruction and report its job",
+    "syn execution transcript <execution-id> <harness> <native-id> <archived-bytes-sha256>  # read one captured transcript",
+  ],
   handler: async ({ positionals, values }) => {
     const execution = positionals[0];
     if (!execution) throw new CLIError("execution-id is required");

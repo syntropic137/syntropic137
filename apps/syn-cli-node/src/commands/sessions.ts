@@ -29,6 +29,10 @@ const listCommand: CommandDef = {
     status: { type: "string", short: "s", description: "Filter by status" },
     limit: { type: "string", short: "n", description: "Max results", default: "50" },
   },
+  examples: [
+    "syn sessions list --execution <execution-id>   # platform sessions only",
+    "syn execution sessions <execution-id> --all    # every session: delegates, native transcripts, lineage, gaps",
+  ],
   handler: async (parsed: ParsedArgs) => {
     const workflow = parsed.values["workflow"] as string | undefined;
     const status = parsed.values["status"] as string | undefined;

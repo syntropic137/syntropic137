@@ -50,6 +50,7 @@ interface CmdInfo {
   name: string;
   help: string;
   params: ParamInfo[];
+  examples: readonly string[];
 }
 
 interface GrpInfo {
@@ -113,6 +114,7 @@ function extractCommand(def: CommandDef): CmdInfo {
     name: def.name,
     help: def.description,
     params,
+    examples: def.examples ?? [],
   };
 }
 
@@ -211,6 +213,14 @@ function renderCommandMdx(groupName: string, cmd: CmdInfo): string[] {
   lines.push("");
   if (cmd.params.length > 0) {
     lines.push(renderParamTable(cmd.params));
+  }
+  if (cmd.examples.length > 0) {
+    lines.push("**Examples:**");
+    lines.push("");
+    lines.push("```bash");
+    lines.push(...cmd.examples);
+    lines.push("```");
+    lines.push("");
   }
   lines.push("---");
   lines.push("");
