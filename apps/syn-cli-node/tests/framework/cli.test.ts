@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLI } from "../../src/framework/cli.js";
 import { CommandGroup } from "../../src/framework/command.js";
 import { CLIError } from "../../src/framework/errors.js";
+import { printError, printWarning } from "../../src/output/console.js";
 
 describe("CLI", () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
@@ -137,5 +138,92 @@ describe("CLI", () => {
     });
     await cli.run(["greet", "world"]);
     expect(handler.mock.calls[0]![0]!.positionals).toEqual(["world"]);
+  });
+
+  describe("preflight (#1473)", () => {
+    function cliWith(preflight: () => Promise<void>): CLI {
+      return new CLI({ name: "syn", description: "Test CLI", version: "1.0.0", preflight });
+    }
+
+    // The trap: handlers print their own error and THEN throw, so a warning
+    // emitted from run()'s catch, or after the handler, lands below it.
+    it("runs before the handler prints its own error", async () => {
+      const events: string[] = [];
+      stdoutSpy.mockImplementation((chunk) => (events.push(String(chunk)), true));
+      stderrSpy.mockImplementation((chunk) => (events.push(String(chunk)), true));
+      const cli = cliWith(async () => printWarning("X"));
+      cli.addCommand({
+        name: "run",
+        description: "Shaped like workflow/resolver.ts",
+        handler: () => {
+          printError("No workflow found matching: x");
+          throw new CLIError("Workflow not found", 1);
+        },
+      });
+
+      await cli.run(["run"]);
+
+      const at = (text: string) => events.findIndex((e) => e.includes(text));
+      expect(at("Warning: X")).toBeGreaterThanOrEqual(0);
+      expect(at("Warning: X")).toBeLessThan(at("No workflow found"));
+      expect(at("No workflow found")).toBeLessThan(at("Workflow not found"));
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it("runs exactly once per command", async () => {
+      const preflight = vi.fn(async () => {});
+      const cli = cliWith(preflight);
+      const group = new CommandGroup("workflow", "Manage workflows");
+      group.command({ name: "list", description: "List", handler: vi.fn() });
+      cli.addGroup(group);
+
+      await cli.run(["workflow", "list"]);
+
+      expect(preflight).toHaveBeenCalledOnce();
+    });
+
+    it("is skipped for a command that sets skipPreflight", async () => {
+      const preflight = vi.fn(async () => {});
+      const handler = vi.fn();
+      const cli = cliWith(preflight);
+      cli.addCommand({ name: "local", description: "Local", skipPreflight: true, handler });
+
+      await cli.run(["local"]);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(preflight).not.toHaveBeenCalled();
+    });
+
+    it.each([["--help"], ["--version"], ["workflow"], ["workflow", "list", "--help"]])(
+      "never runs for %j",
+      async (...argv: string[]) => {
+        const preflight = vi.fn(async () => {});
+        const cli = cliWith(preflight);
+        const group = new CommandGroup("workflow", "Manage workflows");
+        group.command({ name: "list", description: "List", handler: vi.fn() });
+        cli.addGroup(group);
+        // A real exit stops here; the no-op mock would fall through into the
+        // handler path and test the mock rather than the CLI.
+        exitSpy.mockImplementation(((code?: number) => {
+          throw new Error(`exit ${code}`);
+        }) as unknown as (code?: number) => never);
+
+        await cli.run(argv).catch(() => {});
+
+        expect(exitSpy).toHaveBeenCalledWith(0);
+        expect(preflight).not.toHaveBeenCalled();
+      },
+    );
+
+    it("does not run when the arguments do not parse", async () => {
+      const preflight = vi.fn(async () => {});
+      const cli = cliWith(preflight);
+      cli.addCommand({ name: "test", description: "Test", handler: vi.fn() });
+
+      await cli.run(["test", "--nope"]);
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(preflight).not.toHaveBeenCalled();
+    });
   });
 });
