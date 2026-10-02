@@ -84,6 +84,10 @@ const showCommand: CommandDef = {
   name: "show",
   description: "Show detailed information about a single execution",
   args: [{ name: "execution-id", description: "Execution ID", required: true }],
+  examples: [
+    "syn execution show <execution-id>       # phases, cost and a session inventory summary",
+    "syn execution sessions <execution-id>   # every session of the run (the summary's Details line)",
+  ],
   handler: async (parsed: ParsedArgs) => {
     const id = parsed.positionals[0];
     if (!id) {
@@ -227,7 +231,7 @@ const resumeCommand: CommandDef = {
   },
 };
 
-export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions");
+export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions, their sessions and transcripts");
 executionGroup
   .command(listCommand)
   .command(showCommand)

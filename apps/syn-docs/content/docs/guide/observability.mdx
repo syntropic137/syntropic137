@@ -11,6 +11,10 @@ Syntropic137 captures agent activity in real time. Events flow from workspace co
 What a codex phase still gives you: a session, a conversation, a tool-call timeline parsed from the codex event stream (`command_execution` becomes `Bash`, `file_change` becomes `Edit`), and token counts. What it does not give you is vendor cost, which is always null for codex. See [Choosing an Agent Harness](/docs/guide/workflows#what-each-harness-gives-you).
 </Callout>
 
+<Callout type="info">
+**Reviewing a whole run?** This page covers the event pipeline. To list every session a workflow run produced (delegates and native transcripts included), check whether that list is complete, and pull transcripts for review, see [Finding every session in a workflow run](/docs/guide/session-discovery).
+</Callout>
+
 ## Two-Channel Pipeline
 
 Workspace containers running the claude harness emit observability data through two complementary channels:

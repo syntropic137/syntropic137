@@ -22,6 +22,8 @@ export interface CommandDef {
   description: string;
   args?: readonly ArgDef[];
   options?: Record<string, OptionDef>;
+  /** Example invocations shown under `--help` and in the generated CLI docs. */
+  examples?: readonly string[];
   handler: (parsed: ParsedArgs) => void | Promise<void>;
 }
 

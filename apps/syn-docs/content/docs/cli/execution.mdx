@@ -1,9 +1,9 @@
 ---
 title: syn execution
-description: "List and inspect workflow executions"
+description: "List and inspect workflow executions, their sessions and transcripts"
 ---
 
-List and inspect workflow executions
+List and inspect workflow executions, their sessions and transcripts
 
 ## `syn execution list`
 
@@ -74,7 +74,18 @@ syn execution sessions <execution-id> [options]
 | `--limit` | `text` | `100` | Items per page (1 to 500) |
 | `--max-pages` | `text` | `10000` | Stop after this many pages and report the rest as pending (1 to 10000) |
 | `--cursor` | `text` | --- | Continue a previously returned inventory cursor |
-| `--require-complete` | `boolean` | --- | Exit nonzero unless coverage is reconciled and the revision is current |
+| `--require-complete` | `boolean` | --- | Exit nonzero unless coverage is reconciled, the revision is current and this call read every section unfiltered (use with --all) |
+
+**Examples:**
+
+```bash
+syn execution sessions <execution-id>                  # coverage, counts and the first page of sessions
+syn execution sessions <execution-id> --all            # every section: lineage, captures and gaps
+syn execution sessions <execution-id> --kind gap --all # only the gaps
+syn execution sessions <execution-id> --all --json --require-complete  # automation: nonzero exit unless complete
+syn execution sessions <execution-id> --refresh        # schedule a reconstruction and report its job
+syn execution transcript <execution-id> <harness> <native-id> <archived-bytes-sha256>  # read one captured transcript
+```
 
 ---
 
@@ -92,11 +103,18 @@ syn execution show <execution-id>
 |------|------|----------|-------------|
 | `execution-id` | `text` | Yes | Execution ID |
 
+**Examples:**
+
+```bash
+syn execution show <execution-id>       # phases, cost and a session inventory summary
+syn execution sessions <execution-id>   # every session of the run (the summary's Details line)
+```
+
 ---
 
 ## `syn execution transcript`
 
-Read an exact local transcript archive revision
+Read an exact local transcript archive revision. Harness, native ID and archived-bytes SHA-256 come from `syn execution sessions <execution-id> --kind capture --all`
 
 ```bash
 syn execution transcript <execution-id> <harness> <native-id> <revision> [options]
@@ -116,6 +134,14 @@ syn execution transcript <execution-id> <harness> <native-id> <revision> [option
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--raw` | `boolean` | --- | Write verified archive bytes to stdout |
-| `--json` | `boolean` | --- | Print metadata and base64 archive bytes as JSON |
+| `--json` | `boolean` | --- | Print metadata, normalized conversation and base64 archive bytes as JSON |
+
+**Examples:**
+
+```bash
+syn execution sessions <execution-id> --kind capture --all   # find harness, native ID and 'Archived bytes SHA-256'
+syn execution transcript <execution-id> claude <native-id> <sha256>          # format, size and revision
+syn execution transcript <execution-id> claude <native-id> <sha256> --raw > transcript.raw  # exact archived bytes
+```
 
 ---
