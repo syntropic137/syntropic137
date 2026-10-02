@@ -39,7 +39,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -52,6 +52,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_wor
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     quarantine_unpushed_work,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
