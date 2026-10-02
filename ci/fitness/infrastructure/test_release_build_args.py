@@ -752,7 +752,9 @@ def test_a_fully_stamped_path_passes() -> None:
 _RECORDING_STUB = '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$STUB_LOG"\n'
 
 
-def _run_release_local(repo: Path, stubs: Path) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+def _run_release_local(
+    repo: Path, stubs: Path
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run `release-local 9.9.9` in ``repo`` and return it and every stubbed call."""
     for name in ("docker", "gh", "just"):
         stub = stubs / name
@@ -764,7 +766,7 @@ def _run_release_local(repo: Path, stubs: Path) -> tuple[subprocess.CompletedPro
     script = script.replace("{{version}}", "9.9.9").replace("{{registry}}", "ghcr.io/test")
     bash = shutil.which("bash")
     assert bash is not None
-    result = subprocess.run(  # noqa: S603 - fixed interpreter, script is this repo's recipe
+    result = subprocess.run(
         [bash, "-c", script],
         cwd=repo,
         env={"PATH": f"{stubs}:/usr/bin:/bin", "STUB_LOG": str(log), "HOME": str(repo)},
@@ -780,15 +782,17 @@ def clean_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(repo)]
-    subprocess.run([*git, "init", "-q"], check=True)  # noqa: S603, S607
+    subprocess.run([*git, "init", "-q"], check=True)
     (repo / "f").write_text("x")
-    subprocess.run([*git, "add", "f"], check=True)  # noqa: S603, S607
-    subprocess.run([*git, "commit", "-q", "-m", "c"], check=True)  # noqa: S603, S607
+    subprocess.run([*git, "add", "f"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "c"], check=True)
     return repo
 
 
 @pytest.mark.architecture
-def test_release_local_refuses_a_dirty_tree_before_pushing(clean_repo: Path, tmp_path: Path) -> None:
+def test_release_local_refuses_a_dirty_tree_before_pushing(
+    clean_repo: Path, tmp_path: Path
+) -> None:
     """A dirty tree has no commit to name, so it must not ship `commit: null`."""
     (clean_repo / "uncommitted").write_text("y")
     stubs = tmp_path / "bin"
@@ -800,10 +804,12 @@ def test_release_local_refuses_a_dirty_tree_before_pushing(clean_repo: Path, tmp
 
 
 @pytest.mark.architecture
-def test_release_local_stamps_syn_api_with_the_head_it_built(clean_repo: Path, tmp_path: Path) -> None:
+def test_release_local_stamps_syn_api_with_the_head_it_built(
+    clean_repo: Path, tmp_path: Path
+) -> None:
     stubs = tmp_path / "bin"
     stubs.mkdir()
-    head = subprocess.run(  # noqa: S603, S607
+    head = subprocess.run(
         ["git", "-C", str(clean_repo), "rev-parse", "HEAD"],
         check=True,
         capture_output=True,
