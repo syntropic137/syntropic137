@@ -186,7 +186,7 @@ services:
       [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$template")" = 1 ]
       awk '
       /^[[:space:]]*http-request deny$$/ {
-          print "    http-request allow if { method GET } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
+          print "    http-request allow if { method GET DELETE } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
       }
       { print }
       ' "$$template" > /tmp/capture-haproxy.template
