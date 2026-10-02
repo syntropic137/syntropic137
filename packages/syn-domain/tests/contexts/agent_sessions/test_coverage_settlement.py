@@ -131,6 +131,24 @@ def own_receipt(
     )
 
 
+def revision_issue(native: str, sequence: int) -> AcquisitionGapEvidence:
+    """An issue the extractor reported for one archived revision of a transcript."""
+    return AcquisitionGapEvidence(
+        gap=InventoryGap(
+            reason="unresolved_spawn:toolu_1", evidence_ids=(f"capture-{native}-{sequence}",)
+        ),
+        evidence=proof(f"capture-{native}-{sequence}", "capture"),
+    )
+
+
+SPAWN_ISSUE_1, SPAWN_ISSUE_2 = revision_issue("root-native", 1), revision_issue("root-native", 2)
+OTHER_PRODUCER_LATER = CaptureEvidence(
+    node=transcript("root-native"),
+    availability=BodyAvailability.PRESENT,
+    receipt_sequence=9,
+    evidence=proof("recovered-root-native-9", "recovery"),
+    archived_byte_hash=HASH,
+)
 SESSION = platform("session")
 PENDING_SESSION = own_receipt(SESSION, BodyAvailability.PENDING)
 
@@ -460,6 +478,24 @@ STATES: list[tuple[str, tuple[Change, ...], tuple[CoverageState, ...]]] = [
         (OPEN, RECONCILED, RECONCILED),
     ),
     (
+        # Live 2026-10-02: a revision captured between an Agent call and its
+        # result reported unresolved_spawn; later revisions resolved the call
+        # but the stale gap kept a fully accounted run at missing.
+        "transcript issue superseded by a later revision",
+        (add(captures=(capture("root-native", sequence=2),), acquisition_gaps=(SPAWN_ISSUE_1,)),),
+        (OPEN, RECONCILED, RECONCILED),
+    ),
+    (
+        "transcript issue on the latest revision",
+        (add(captures=(capture("root-native", sequence=2),), acquisition_gaps=(SPAWN_ISSUE_2,)),),
+        (OPEN, OPEN, MISSING),
+    ),
+    (
+        "transcript issue not superseded by another producer's later receipt",
+        (add(captures=(OTHER_PRODUCER_LATER,), acquisition_gaps=(SPAWN_ISSUE_1,)),),
+        (OPEN, OPEN, MISSING),
+    ),
+    (
         "unsupported capture mechanism",
         (
             add(
@@ -683,3 +719,24 @@ def test_settlement_facts_count_toward_the_batch_quota() -> None:
             batch_id="b",
             evidence=SessionEvidence(run=RUN, run_settlement=TERMINAL * 501),
         )
+
+
+def test_superseded_revision_issue_leaves_no_gap() -> None:
+    """The stale issue is gone from the gap list too, not only from coverage."""
+    changes = (
+        add(captures=(capture("root-native", sequence=2),), acquisition_gaps=(SPAWN_ISSUE_1,)),
+    )
+    result = resolve_relationships(build(changes, DEADLINE))
+    assert not [gap for gap in result.gaps if gap.reason.startswith("unresolved_spawn")]
+    latest = resolve_relationships(
+        build(
+            (
+                add(
+                    captures=(capture("root-native", sequence=2),),
+                    acquisition_gaps=(SPAWN_ISSUE_2,),
+                ),
+            ),
+            DEADLINE,
+        )
+    )
+    assert [gap.reason for gap in latest.gaps] == ["unresolved_spawn:toolu_1"]
