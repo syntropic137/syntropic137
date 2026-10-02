@@ -14,10 +14,17 @@ reads every porcelain line as work - correctly, because it cannot tell a moved
 gitlink from an authored one - and refused to report the phase complete. The
 review was never stored.
 
-THE FIX IS IN THE PROMPTS, NOT THE GUARD. The `verify` and `reverify` phases of
-`sdlc/implement` now check out with ``--recurse-submodules``, which removes the
-cause of the dirt. The guard is untouched and still fails a phase that leaves
+THE FIX IS IN THE PROMPTS, NOT THE GUARD. Every review phase that checks out a
+commit it did not write now does so with ``--recurse-submodules``, which removes
+the cause of the dirt. The guard is untouched and still fails a phase that leaves
 real work behind.
+
+THE FIX COVERS THE CLASS, NOT THE ONE SIGHTING. Only `sdlc/implement` was
+observed failing, but `sdlc/pr-review`, `sdlc/pr-review-slp` and the three
+`custom/bake-*` workflows all carried the same plain checkout, so each was one
+submodule bump away from the same refusal. `_REVIEW_PHASES` below is the whole
+class; a new review phase added without the flag fails here rather than in
+production after the review is paid for.
 
 WHY THESE TESTS RUN THE GUARD AND NOT A GREP. A test that the prompt contains
 ``--recurse-submodules`` would pass for a flag in the wrong block, on the wrong
@@ -53,12 +60,19 @@ if TYPE_CHECKING:
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
-#: The implement workflow's review phases, which check out a commit they did not
-#: write. Each declares `delivers_repo_changes: false`; neither may leave the
-#: tree dirty.
+#: Every review phase that checks out a commit it did not write. Each declares
+#: `delivers_repo_changes: false`, so none may leave the tree dirty. The list is
+#: the whole class, not the two phases that happened to fail in production: the
+#: same plain checkout is in all of them, so the same guard refusal is one
+#: submodule bump away in each.
 _REVIEW_PHASES = [
     ("sdlc/implement", "verify"),
     ("sdlc/implement", "reverify"),
+    ("sdlc/pr-review", "verify"),
+    ("sdlc/pr-review-slp", "verify"),
+    ("custom/bake-opus", "verify"),
+    ("custom/bake-haiku", "verify"),
+    ("custom/bake-sonnet", "verify"),
 ]
 
 _FENCED_BLOCK = re.compile(r"^```[a-z]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
@@ -170,6 +184,11 @@ def _run(script: str, workspace: Path, head: str) -> None:
         "the-exact-commit-SHA-from-the-artifact": head,
         "branch": _BRANCH,
         "candidate-sha": head,
+        "pr-branch": _BRANCH,
+        "recorded-head": head,
+        # The pr-review prompts diff against the base they recorded. The
+        # fixture's base is the default branch the workspace was cloned on.
+        "recorded-base": _git(workspace, "rev-parse", "origin/main"),
     }
     for name, value in values.items():
         script = script.replace(f"<{name}>", value)
