@@ -740,3 +740,39 @@ def test_superseded_revision_issue_leaves_no_gap() -> None:
         )
     )
     assert [gap.reason for gap in latest.gaps] == ["unresolved_spawn:toolu_1"]
+
+
+@pytest.mark.parametrize(
+    "availability",
+    [BodyAvailability.PENDING, BodyAvailability.MISSING, BodyAvailability.EXPIRED],
+)
+def test_later_receipt_without_content_supersedes_nothing(availability: BodyAvailability) -> None:
+    later = capture("root-native", availability, sequence=2)
+    result = resolve_relationships(
+        build((add(captures=(later,), acquisition_gaps=(SPAWN_ISSUE_1,)),), DEADLINE)
+    )
+    assert "unresolved_spawn:toolu_1" in {gap.reason for gap in result.gaps}
+
+
+def test_gap_from_another_reference_is_not_a_revision_issue() -> None:
+    """Only the revision's own reference links a gap to it.
+
+    Evidence identity is unique per producer (reuse is rejected), so a gap with
+    the capture's exact reference was extracted from that revision.
+    """
+    unrelated = AcquisitionGapEvidence(
+        gap=InventoryGap(reason="child_journal_unreadable"),
+        evidence=proof("journal-read", "capture"),
+    )
+    result = resolve_relationships(
+        build(
+            (
+                add(
+                    captures=(capture("root-native", sequence=2),),
+                    acquisition_gaps=(SPAWN_ISSUE_1, unrelated),
+                ),
+            ),
+            DEADLINE,
+        )
+    )
+    assert [gap.reason for gap in result.gaps] == ["child_journal_unreadable"]
