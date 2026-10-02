@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import http.server
 import os
+import pathlib
 import socket
 import subprocess
 import threading
@@ -47,9 +48,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow import (
     workspace_git,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    RESCUE_BUNDLE_NAME,
+    RESCUE_PATCH_NAME,
     CredentialRenewalFailedError,
+    DroppedWorkflows,
     QuarantinedWork,
     QuarantinePathUnusableError,
+    SavedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
@@ -60,6 +65,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
     _SCRATCH_INDEX,
     _read_only_mount,
     quarantine_unpushed_work,
+    quarantined_records,
     refuse_to_complete_unsaved_phase,
     rehearse_quarantine_credential,
 )
@@ -85,6 +91,26 @@ _PHASE_ID = "implement"
 _QUARANTINE_REF = f"refs/syn/lost/{_EXECUTION_ID}/{_PHASE_ID}"
 _REPO = "syntropic137"
 _BRANCH = "fix/1184-quarantine-unpushed-work"
+
+#: GitHub's refusal of a workflow change from an App without the permission,
+#: as a `pre-receive` hook (#1437). Every new commit in every update is
+#: inspected, a merge against each parent and a root commit against nothing,
+#: because that is what GitHub does: it is why a rescue cannot keep the
+#: phase's own commits as parents. See `_Clone.refuse_workflow_changes`.
+_REFUSES_WORKFLOWS = r"""#!/bin/sh
+zero=0000000000000000000000000000000000000000
+while read old new ref; do
+  [ "$new" = "$zero" ] && continue
+  if [ "$old" = "$zero" ]; then range="$new --not --all"; else range="$old..$new"; fi
+  for c in $(git rev-list $range); do
+    touched=$(git diff-tree -r -m --root --no-commit-id --name-only "$c" -- .github/workflows/ | head -n 1)
+    if [ -n "$touched" ]; then
+      echo "error: GH013: refusing to allow a GitHub App to create or update workflow \`$touched\` without \`workflows\` permission" >&2
+      exit 1
+    fi
+  done
+done
+"""
 
 
 def _git(*args: str, cwd: Path, home: Path) -> subprocess.CompletedProcess[str]:
@@ -284,6 +310,53 @@ class _Clone:
             ["git", f"--git-dir={self.origin}", "config", "receive.hideRefs", "refs/syn/lost"],
             check=True,
         )
+
+    def refuse_workflow_changes(self) -> str:
+        """Make the ORIGIN refuse what GitHub refuses this App (#1024, #1437).
+
+        A `pre-receive` hook, so the refusal is the server's and the whole push
+        is rejected, which is the property the bug is about: GitHub does not
+        drop the one file, it refuses everything that came with it. The
+        message is GitHub's own wording, because that wording is the only
+        thing the guard can tell this refusal apart from any other by.
+
+        Seeds `.github/workflows/existing.yml` on the branch FIRST, so a phase
+        can edit, delete or add beside a workflow its base already has, and
+        then PROVES the hook is live by being refused: a hook that silently did
+        not run (a ``noexec`` tmpdir, a client-side ``core.hooksPath``) would
+        turn every test that uses this into a test of nothing.
+
+        Returns the seeded commit, which is the rescue's expected base.
+        """
+        workflows = self.path / ".github" / "workflows"
+        workflows.mkdir(parents=True, exist_ok=True)
+        base = self.commit(".github/workflows/existing.yml", "on: push\n")
+        self.git("push", "origin", _BRANCH)
+        hook = self.origin / "hooks" / "pre-receive"
+        hook.write_text(_REFUSES_WORKFLOWS)
+        hook.chmod(0o755)
+
+        (workflows / "existing.yml").write_text("on: probe\n")
+        self.git("add", "--all")
+        tree = self.git("write-tree")
+        self.git("reset", "-q", "--hard", "HEAD")
+        probe = self.git("commit-tree", tree, "-p", base, "-m", "probe")
+        refused = subprocess.run(
+            ["git", "push", "origin", f"{probe}:refs/syn/probe"],
+            cwd=self.path,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_SYSTEM": "/dev/null",
+                "HOME": str(self.root / "home"),
+            },
+        )
+        assert refused.returncode != 0, "the refusing origin did not refuse"
+        assert "without `workflows` permission" in refused.stderr, refused.stderr
+        return base
 
     def break_the_remote(self) -> None:
         """Point origin somewhere that does not exist, so asking it fails.
@@ -2972,3 +3045,475 @@ async def test_a_cancelled_rescue_push_that_never_answers_is_abandoned_and_repor
     assert "NOT RECOVERABLE" in said
     assert "abandoned" in said
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+# --------------------------------------------------------------------------
+# A refusal that names a path is not a refusal of the work (#1437).
+#
+# The App cannot push `.github/workflows/` (#1024) and GitHub refuses the
+# WHOLE push that carries one. Every test below runs against an origin whose
+# pre-receive hook refuses exactly that, in GitHub's words, and reads what
+# survived back out of the origin - or, for the processor hops, out of the
+# artifacts it actually saved.
+# --------------------------------------------------------------------------
+
+_DOCS = (
+    pathlib.Path(__file__).resolve().parents[8]
+    / "apps/syn-docs/content/docs/workspaces/hydration.mdx"
+)
+
+
+def _a_phase_that_edited_a_workflow(clone: _Clone) -> str:
+    """The incident's shape: real work, one workflow edit, one new one, uncommitted notes.
+
+    Returns the commit origin last had, which the rescue must be built on.
+    """
+    base = clone.refuse_workflow_changes()
+    (clone.path / ".github/workflows/existing.yml").write_text("on: edited\n")
+    (clone.path / ".github/workflows/new.yml").write_text("on: added\n")
+    (clone.path / "feature.py").write_text("feature\n")
+    clone.git("add", "--all")
+    clone.git("commit", "-m", "the phase's work, workflow edit included")
+    (clone.path / "notes.md").write_text("never committed\n")
+    return base
+
+
+def _worktree(clone: _Clone, *names: str) -> dict[str, str]:
+    return {name: (clone.path / name).read_text() for name in names}
+
+
+_THE_PHASES_FILES = (
+    "feature.py",
+    "notes.md",
+    ".github/workflows/existing.yml",
+    ".github/workflows/new.yml",
+)
+
+
+def _recovery_line(message: str) -> str:
+    [line] = [line for line in message.splitlines() if "recover with: " in line]
+    return line.split("recover with: ", 1)[1]
+
+
+def _clean_env(clone: _Clone) -> dict[str, str]:
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(clone.root / "home"),
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+    }
+
+
+class _SavesArtifacts:
+    """The artifact repository, keeping what it was handed to be read back."""
+
+    def __init__(self) -> None:
+        self.saved: list[object] = []
+
+    async def save(self, aggregate: object) -> None:
+        self.saved.append(aggregate)
+
+
+class _PushesSlowly:
+    """The real workspace, cancelled at the renewal, whose Nth push is slow or fails."""
+
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        *,
+        slow_push: int,
+        seconds: float,
+        answer: ExecutionResult | None = None,
+    ) -> None:
+        self._inner = inner
+        self._slow_push = slow_push
+        self._seconds = seconds
+        self._answer = answer
+        self.pushes = 0
+
+    async def renew_git_credential(self) -> None:
+        raise asyncio.CancelledError
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+            if self.pushes == self._slow_push:
+                await asyncio.sleep(self._seconds)
+                if self._answer is not None:
+                    return self._answer
+        return await self._inner.execute(command)
+
+
+_STALE = ExecutionResult(
+    exit_code=1,
+    success=False,
+    duration_ms=0.0,
+    stdout="",
+    stderr=" ! [remote rejected] HEAD -> refs/syn/lost/x (cannot lock ref)\n",
+)
+
+
+class _RefusesTheSecondPush(_RenewsCredential):
+    """The real workspace, except the workflow-safe push is refused as well."""
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.pushes = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+            if self.pushes == 2:
+                return _STALE
+        return await self._inner.execute(command)
+
+
+async def test_a_workflow_edit_no_longer_takes_the_rest_of_the_work_with_it(
+    clone: _Clone,
+) -> None:
+    """THE INCIDENT. One YAML edit, and every other file was reported NOT RECOVERABLE.
+
+    The rest of the work must reach the origin, at the ref the report names,
+    with `.github/workflows/` exactly as the base has it - and the phase must
+    still fail, because a rescued phase is not a completed one.
+    """
+    base = _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    run.aggregate.complete_phase.assert_not_called()
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:feature.py") == "feature"
+    assert clone.origin_git("show", f"{pushed}:notes.md") == "never committed"
+    assert clone.origin_git("show", f"{pushed}:.github/workflows/existing.yml") == "on: push"
+    assert not clone.origin_git("ls-tree", pushed, "--", ".github/workflows/new.yml")
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" not in message
+    assert f"quarantined at {_QUARANTINE_REF} WITHOUT 2 workflow file(s)" in message
+    assert "dropped: .github/workflows/existing.yml" in message
+    assert "dropped: .github/workflows/new.yml" in message
+    assert "without `workflows` permission" in message
+
+
+async def test_the_recovery_the_report_prints_gives_back_exactly_what_the_phase_left(
+    clone: _Clone,
+) -> None:
+    """The commands in the report, RUN, in a clone that has never seen the workspace.
+
+    Workflow changes included: the patch puts them back byte for byte. And the
+    original commits come back out of the bundle, because flattening them onto
+    the base was the price of the push and should not be the price of the work.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+    left = _worktree(clone, *_THE_PHASES_FILES)
+    original_head = clone.git("rev-parse", "HEAD")
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    fresh = clone.root / "recovered"
+    _git("clone", "-q", str(clone.origin), str(fresh), cwd=clone.root, home=clone.root / "home")
+    env = _clean_env(clone)
+    subprocess.run(["sh", "-c", _recovery_line(str(raised.value))], cwd=fresh, env=env, check=True)
+    assert {name: (fresh / name).read_text() for name in _THE_PHASES_FILES} == left
+
+    unbundled = subprocess.run(
+        ["git", "bundle", "unbundle", f".syn-quarantine/{RESCUE_BUNDLE_NAME}"],
+        cwd=fresh,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert original_head in unbundled
+    subprocess.run(["git", "cat-file", "-e", original_head], cwd=fresh, env=env, check=True)
+
+
+async def test_the_docs_print_the_recovery_the_report_prints(clone: _Clone) -> None:
+    """The user-facing docs and the report cannot drift: each command is in both."""
+    _a_phase_that_edited_a_workflow(clone)
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    documented = _DOCS.read_text()
+    printed = _recovery_line(str(raised.value)).replace(
+        _QUARANTINE_REF, "refs/syn/lost/<execution-id>/<phase-id>"
+    )
+    for command in printed.split(" && "):
+        assert command in documented, command
+
+
+async def test_a_refusal_for_any_other_reason_is_reported_as_it_always_was(
+    clone: _Clone,
+) -> None:
+    """THE RESCUE IS FOR ONE REFUSAL ONLY, and costs nothing for any other.
+
+    A ruleset or a hidden ref refuses this ref whatever it holds, so a second
+    push would be refused the same way and only delay the report.
+    """
+    (clone.path / ".github/workflows").mkdir(parents=True)
+    clone.commit(".github/workflows/ci.yml", "on: push\n")
+    clone.decline_pushes_server_side()
+    workspace = _CountsPushes(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.pushes == 1
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "WITHOUT" not in message
+    assert "dropped:" not in message
+
+
+async def test_a_deleted_workflow_is_restored_in_the_rescue_and_kept_as_a_deletion(
+    clone: _Clone,
+) -> None:
+    """GitHub refuses a deletion as readily as an edit, so leaving it out is not enough."""
+    base = clone.refuse_workflow_changes()
+    clone.git("rm", "-q", ".github/workflows/existing.yml")
+    clone.commit("feature.py", "feature\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:.github/workflows/existing.yml") == "on: push"
+    assert clone.origin_git("show", f"{pushed}:feature.py") == "feature"
+    patch = clone.origin_git("show", f"{pushed}:.syn-quarantine/{RESCUE_PATCH_NAME}")
+    assert "deleted file mode" in patch
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+
+
+async def test_work_never_committed_needs_no_bundle_and_is_not_told_of_one(
+    clone: _Clone,
+) -> None:
+    """No local commits means nothing was flattened, and the report must not say so."""
+    clone.refuse_workflow_changes()
+    (clone.path / ".github/workflows/existing.yml").write_text("on: edited\n")
+    (clone.path / "feature.py").write_text("feature\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:feature.py") == "feature"
+    assert not clone.origin_git("ls-tree", pushed, "--", f".syn-quarantine/{RESCUE_BUNDLE_NAME}")
+    assert RESCUE_BUNDLE_NAME not in str(raised.value)
+
+
+async def test_the_rescue_never_overwrites_a_directory_the_phase_wrote(clone: _Clone) -> None:
+    """Checked against the tree, not assumed free: the phase's file is work too."""
+    _a_phase_that_edited_a_workflow(clone)
+    (clone.path / ".syn-quarantine").mkdir()
+    (clone.path / ".syn-quarantine" / RESCUE_PATCH_NAME).write_text("the phase's own\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    own = clone.origin_git("show", f"{pushed}:.syn-quarantine/{RESCUE_PATCH_NAME}")
+    assert own == "the phase's own"
+    assert "+on: edited" in clone.origin_git(
+        "show", f"{pushed}:.syn-quarantine-2/{RESCUE_PATCH_NAME}"
+    )
+    assert f".syn-quarantine-2/{RESCUE_PATCH_NAME}" in str(raised.value)
+
+
+async def test_when_the_rescue_is_refused_too_both_refusals_are_named_and_the_patch_kept(
+    clone: _Clone,
+) -> None:
+    """Honest reporting, kept: NOT RECOVERABLE, with both reasons - and the patch still rides out."""
+    _a_phase_that_edited_a_workflow(clone)
+    workspace = _RefusesTheSecondPush(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.pushes == 2
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "without `workflows` permission" in message
+    assert "cannot lock ref" in message
+    assert "dropped: .github/workflows/existing.yml" in message
+    [work] = raised.value.quarantined
+    assert work.dropped is not None
+    assert "+on: edited" in work.dropped.patch
+    assert "+on: added" in work.dropped.patch
+
+
+async def test_a_rescue_that_cannot_be_built_is_reported_rather_than_raised(
+    clone: _Clone,
+) -> None:
+    """A failure building the second commit must not cost the record of the first refusal.
+
+    Raised, it would reach the walk's handler as an inspection failure and
+    take this repository's record - and the patch - with it.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=_BreaksOn(clone.workspace, "bundle"))
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "without `workflows` permission" in message
+    assert "could not be built" in message
+    [work] = raised.value.quarantined
+    assert work.dropped is not None
+    assert "+on: edited" in work.dropped.patch
+
+
+async def test_a_phase_cancelled_during_the_renewal_still_gets_the_workflow_safe_rescue(
+    clone: _Clone,
+) -> None:
+    """The cancellation is re-applied AFTER the second push, never instead of it."""
+    base = _a_phase_that_edited_a_workflow(clone)
+
+    with pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_CancelledWhileRenewing(clone.workspace))
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:feature.py") == "feature"
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+
+
+async def test_the_rescue_has_a_deadline_of_its_own_and_not_a_share_of_the_first(
+    clone: _Clone,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow but healthy second push lands, on a cancelled phase, after the first deadline.
+
+    One deadline over both pushes would cut this rescue off at the first
+    push's bound with nothing wrong at all.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_PUSH_SECONDS", 1.0)
+    workspace = _PushesSlowly(clone.workspace, slow_push=2, seconds=1.5)
+
+    with pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.pushes == 2
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_a_rescue_that_never_answers_is_abandoned_at_its_deadline_and_reported(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "Cancelled" may not become "waits forever" on the second push either."""
+    _a_phase_that_edited_a_workflow(clone)
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_RESCUE_SECONDS", 1.0)
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_PushesSlowly(clone.workspace, slow_push=2, seconds=3600))
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "NOT RECOVERABLE" in said
+    assert "workflow-safe" in said
+    assert "abandoned" in said
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+def _the_patch_artifact(repository: _SavesArtifacts) -> object:
+    [artifact] = [
+        a
+        for a in repository.saved
+        if (getattr(a, "source_path", None) or "").endswith(f"/{RESCUE_PATCH_NAME}")
+    ]
+    return artifact
+
+
+async def test_a_phase_the_gate_refused_keeps_its_workflow_changes_as_an_artifact(
+    clone: _Clone,
+) -> None:
+    """THE CONSUMER: the processor's failure path stores the patch and points at it.
+
+    When both pushes fail, this artifact is the only copy of those changes
+    left once the workspace is gone - so it is read back from what the
+    artifact repository was actually handed, and from the execution result.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(_RefusesTheSecondPush(clone.workspace))
+    artifacts = _SavesArtifacts()
+    run.processor._artifact_repo = artifacts  # type: ignore[assignment]
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+    result = await run.fail_the_way_the_engine_does(raised.value)
+
+    artifact = _the_patch_artifact(artifacts)
+    assert "+on: edited" in artifact.content  # type: ignore[attr-defined]
+    assert artifact.source_path == f"syn-quarantine/{_REPO}/{RESCUE_PATCH_NAME}"  # type: ignore[attr-defined]
+    assert artifact.is_primary_deliverable is False  # type: ignore[attr-defined]
+    assert artifact.id in result.artifact_ids  # type: ignore[attr-defined]
+
+
+async def test_a_phase_that_failed_for_its_own_reason_keeps_its_workflow_changes_too(
+    clone: _Clone,
+) -> None:
+    """The other half of `quarantined_records`: the records came from the save, not the gate."""
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+    artifacts = _SavesArtifacts()
+    run.processor._artifact_repo = artifacts  # type: ignore[assignment]
+
+    result = await run.fail_the_way_the_engine_does(RuntimeError("the agent timed out"))
+
+    artifact = _the_patch_artifact(artifacts)
+    assert "+on: added" in artifact.content  # type: ignore[attr-defined]
+    assert artifact.id in result.artifact_ids  # type: ignore[attr-defined]
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
+    clone: _Clone,
+) -> None:
+    """The cancel path, which saves the work too and must keep the patch with it."""
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+    artifacts = _SavesArtifacts()
+    run.processor._artifact_repo = artifacts  # type: ignore[assignment]
+    all_artifact_ids: list[str] = []
+
+    await run.processor._cancel_execution(
+        _EXECUTION_ID,
+        "wf-1",
+        run.phase_results,
+        all_artifact_ids,
+        datetime.now(UTC),
+        cancel_reason="stopped by the user",
+        phase_id=_PHASE_ID,
+    )
+
+    artifact = _the_patch_artifact(artifacts)
+    assert artifact.id in all_artifact_ids  # type: ignore[attr-defined]
+
+
+def test_records_come_from_the_gate_error_or_the_save_and_never_both() -> None:
+    gate = QuarantinedWork(repo="a", branch="b", commit_count=1, files=("x",), pushed_ref="r")
+    saved = QuarantinedWork(repo="c", branch="d", commit_count=1, files=("x",), pushed_ref="s")
+    refused = UnpushedWorkQuarantinedError(phase_id=_PHASE_ID, quarantined=(gate,))
+
+    assert quarantined_records(refused, SavedWork(quarantined=(saved,))) == (gate,)
+    assert quarantined_records(RuntimeError("x"), SavedWork(quarantined=(saved,))) == (saved,)
+
+
+def test_a_record_cannot_claim_a_rescue_ref_without_naming_where_its_files_are() -> None:
+    dropped = DroppedWorkflows(
+        paths=(".github/workflows/ci.yml",),
+        refusal="refused",
+        base=None,
+        patch="diff",
+        artifact_title="t",
+    )
+    with pytest.raises(ValueError, match="directory its patch"):
+        QuarantinedWork(
+            repo="a", branch="b", commit_count=1, files=("x",), pushed_ref="r", dropped=dropped
+        )

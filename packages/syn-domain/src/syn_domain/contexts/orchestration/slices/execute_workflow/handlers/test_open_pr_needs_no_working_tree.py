@@ -712,6 +712,13 @@ def _run_gh(
 #:   it never decides completion. Still one fence per outcome and nothing left
 #:   to substitute except a closed word the prose names, so #1324's
 #:   copyability holds.
+#: * #1437 added one line to "Important": never change `.github/workflows/`.
+#:   This App cannot push workflow files (#1024), and GitHub refuses the WHOLE
+#:   push that carries one, so a phase that edited a YAML file lost everything
+#:   it wrote. The quarantine now rescues the rest, but a phase that is told
+#:   beforehand never needs rescuing. Shared, seen by every phase: the
+#:   credential is the same in all of them. Prose only, outside the fences, so
+#:   #1324's copyability holds.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -798,6 +805,10 @@ the previous phase failed - report this in your output.
 - **Ephemeral workspace** - all files destroyed when session ends
 - **Only `artifacts/output/` collected** - everything else is lost
 - **Push code before session ends** - unpushed commits are lost
+- **Never change `.github/workflows/`** - this workspace's GitHub credential cannot
+  push workflow files, so a commit touching them is refused, and so is every
+  other change pushed with it. If the task needs a workflow change, write it as
+  a patch to `artifacts/output/` and say so in your summary.
 - **Use feature branches** - never push directly to main/master
 - **Write REAL content** - never copy example templates literally
 

@@ -173,6 +173,10 @@ from __future__ import annotations
 
 from typing import Final
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+    UNPUSHABLE_WORKFLOW_DIR,
+)
+
 #: Placeholders, not f-string fields or ``str.format`` slots: the prompt is full
 #: of literal braces (``{repo-name}``, the TASK_RESULT JSON) that either of those
 #: would require escaping throughout, and the escaping - not the prose - is where
@@ -299,6 +303,10 @@ the previous phase failed - report this in your output.
 - **Ephemeral workspace** - all files destroyed when session ends
 - **Only `artifacts/output/` collected** - everything else is lost
 - **Push code before session ends** - unpushed commits are lost
+- **Never change `{UNPUSHABLE_WORKFLOW_DIR}/`** - this workspace's GitHub credential cannot
+  push workflow files, so a commit touching them is refused, and so is every
+  other change pushed with it. If the task needs a workflow change, write it as
+  a patch to `artifacts/output/` and say so in your summary.
 - **Use feature branches** - never push directly to main/master
 - **Write REAL content** - never copy example templates literally
 
