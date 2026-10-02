@@ -89,6 +89,16 @@ def test_main_migrates_identity_and_image_together_and_prints_both(
     )
 
 
+def test_crlf_file_keeps_its_line_endings(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    before = f"A=1\r\n{VAR}='{AGENTIC_PRIMITIVES_IDENTITY_REGEXP}'\r\nB=2\r\n".encode()
+    env.write_bytes(before)
+    assert migrate_file(env, IMAGE_IDENTITY_RULE).outcome is MigrationOutcome.MIGRATED
+    assert env.read_bytes() == before.replace(
+        AGENTIC_PRIMITIVES_IDENTITY_REGEXP.encode(), WORKSPACE_IMAGE_IDENTITY_REGEXP.encode()
+    )
+
+
 def test_custom_identity_file_is_not_rewritten(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

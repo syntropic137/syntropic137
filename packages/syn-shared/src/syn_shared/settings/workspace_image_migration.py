@@ -120,10 +120,14 @@ def migrate_text(text: str, rule: MigrationRule = WORKSPACE_IMAGE_RULE) -> Migra
 def migrate_file(path: Path, rule: MigrationRule = WORKSPACE_IMAGE_RULE) -> Migration:
     if not path.is_file():
         return Migration(outcome=MigrationOutcome.ABSENT, text="")
-    original = path.read_text()
+    # newline="" on both sides: a CRLF .env keeps its line endings, so the
+    # rewrite changes exactly the migrated value and nothing else.
+    with path.open(encoding="utf-8", newline="") as handle:
+        original = handle.read()
     result = migrate_text(original, rule)
     if result.text != original:
-        path.write_text(result.text)
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(result.text)
     return result
 
 
