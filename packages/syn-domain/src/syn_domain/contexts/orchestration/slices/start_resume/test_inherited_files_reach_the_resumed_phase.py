@@ -82,7 +82,7 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
 from syn_domain.contexts.orchestration.slices.start_resume import StartResumeHandler
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_shared.agents import AgentRunner
 
@@ -379,7 +379,7 @@ class TestTheResumedPhaseReceivesTheInheritedFiles:
         await _parent_failed_in_plan(executions, artifacts)
         await _resume(executions, PARENT, CHILD)
 
-        child = _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        child = _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE))
         assert await _start(executions, artifacts, PARENT, child) == "completed"
 
         assert list(child.inputs) == ["plan", "implement"]
@@ -409,7 +409,7 @@ class TestAResumeOfAResumeReceivesTheOriginalParentsFiles:
         executions, artifacts = _Executions(), _ProjectedArtifacts()
         await self._child_failed_in_plan_too(executions, artifacts)
 
-        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE))
 
         assert await _start(executions, artifacts, CHILD, grandchild) == "completed"
 
@@ -417,7 +417,7 @@ class TestAResumeOfAResumeReceivesTheOriginalParentsFiles:
         executions, artifacts = _Executions(), _ProjectedArtifacts()
         await self._child_failed_in_plan_too(executions, artifacts)
 
-        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE))
         await _start(executions, artifacts, CHILD, grandchild)
 
         assert grandchild.inputs["plan"] == EXPECTED_INPUT_TREE
@@ -427,7 +427,10 @@ class TestAResumeOfAResumeReceivesTheOriginalParentsFiles:
         executions, artifacts = _Executions(), _ProjectedArtifacts()
         await self._child_failed_in_plan_too(executions, artifacts)
         await _start(
-            executions, artifacts, CHILD, _ReadsItsInputs(FakeAgentExecutionHandler.success())
+            executions,
+            artifacts,
+            CHILD,
+            _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE)),
         )
 
         origin = executions.streams[GRANDCHILD].start_pins.resumed_from
@@ -465,7 +468,7 @@ class TestAResumeOfAChildThatRanAPhaseItself:
     async def _grandchild(self) -> tuple[_Executions, _ReadsItsInputs, str]:
         executions, artifacts = _Executions(wire=True), _ProjectedArtifacts()
         await self._child_ran_plan_and_failed_in_implement(executions, artifacts)
-        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE))
         status = await _start(executions, artifacts, CHILD, grandchild)
         return executions, grandchild, status
 
@@ -508,7 +511,10 @@ class TestThisReleaseReadsTheCarriedOwnersBack:
             executions, artifacts
         )
         await _start(
-            executions, artifacts, CHILD, _ReadsItsInputs(FakeAgentExecutionHandler.success())
+            executions,
+            artifacts,
+            CHILD,
+            _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE)),
         )
         return executions
 
@@ -636,7 +642,10 @@ class TestAReleaseBeforeTheOwnerReadsWhatThisOneWrites:
         await _parent_failed_in_plan(executions, artifacts)
         await _resume(executions, PARENT, CHILD)
         await _start(
-            executions, artifacts, PARENT, _ReadsItsInputs(FakeAgentExecutionHandler.success())
+            executions,
+            artifacts,
+            PARENT,
+            _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE)),
         )
 
         resumed = executions.payload(PARENT, "ExecutionResumed")
@@ -654,7 +663,10 @@ class TestAReleaseBeforeTheOwnerReadsWhatThisOneWrites:
             executions, artifacts
         )
         await _start(
-            executions, artifacts, CHILD, _ReadsItsInputs(FakeAgentExecutionHandler.success())
+            executions,
+            artifacts,
+            CHILD,
+            _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE)),
         )
 
         admitted = _v031_read_admitted(executions.payload(CHILD, "ExecutionResumed"))
@@ -698,7 +710,7 @@ class TestStreamsWrittenBeforeTheOwnerWasRecorded:
             }
         )
 
-        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success())
+        grandchild = _ReadsItsInputs(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE))
 
         assert await _start(executions, artifacts, CHILD, grandchild) == "completed"
         assert grandchild.inputs["plan"] == EXPECTED_INPUT_TREE

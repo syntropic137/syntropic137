@@ -273,7 +273,13 @@ class _Crashed:
 
     @property
     def stored(self) -> list[tuple[str, str]]:
-        return [(a.title or "", a.content or "") for a in self.artifacts.saved]
+        """The phase under test's artifacts. The downstream phase stores its own
+        last message too since #1476, which is not what these tests are about."""
+        return [
+            (a.title or "", a.content or "")
+            for a in self.artifacts.saved
+            if a.phase_id == FIRST_PHASE
+        ]
 
 
 async def _crash_between_the_agent_and_collection(*, says: str | None) -> _Crashed:

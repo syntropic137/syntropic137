@@ -38,7 +38,7 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
 from syn_domain.contexts.orchestration.slices.start_resume import StartResumeHandler
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
 if TYPE_CHECKING:
@@ -233,7 +233,7 @@ async def _resumed(executions: _Executions) -> WorkflowExecutionAggregate:
 async def _start_child(
     executions: _Executions,
 ) -> tuple[FakeAgentExecutionHandler, _Provisioned, _ArtifactQuery]:
-    agent = FakeAgentExecutionHandler.success()
+    agent = FakeAgentExecutionHandler.success(produces=A_DELIVERABLE)
     provisioned = _Provisioned()
     query = _ArtifactQuery()
     handler = StartResumeHandler(_processor(executions, agent, provisioned, query), executions)
@@ -303,7 +303,7 @@ class TestTheChildDoesNotRerunWhatItInherited:
         await _resumed(executions)
         await _start_child(executions)
 
-        again = FakeAgentExecutionHandler.success()
+        again = FakeAgentExecutionHandler.success(produces=A_DELIVERABLE)
         handler = StartResumeHandler(_processor(executions, again, _Provisioned()), executions)
 
         assert await handler.handle(PARENT) is None
@@ -338,7 +338,7 @@ class TestAStaleWorkflowEditCannotChangeWhatTheChildRuns:
         executions = _Executions()
         phases = _pinned()
         agent = FakeAgentExecutionHandler.scripted(
-            FakeAgentExecutionHandler.success(),
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE),
             FakeAgentExecutionHandler.failed(exit_code=1),
         )
         await _processor(executions, agent, _Provisioned()).run(

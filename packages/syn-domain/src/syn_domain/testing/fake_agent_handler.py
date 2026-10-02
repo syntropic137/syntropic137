@@ -47,6 +47,15 @@ if TYPE_CHECKING:
         Runner,
     )
 
+#: What a phase that did its job leaves behind: every phase prompt tells the
+#: agent to write ``artifacts/output/deliverable.md``, and since #1476 a phase
+#: with no artifact on disk or in its last message fails. Tests about something
+#: other than output pass this so their phases complete for the reason they
+#: are testing; the default (nothing) still models #1167 and #1300.
+A_DELIVERABLE: tuple[tuple[str, bytes], ...] = (
+    ("artifacts/output/deliverable.md", b"# Deliverable\n\nThe phase's findings."),
+)
+
 
 class FakeAgentExecutionHandler:
     """Configurable, sync-safe test double for ``AgentExecutionHandler``.

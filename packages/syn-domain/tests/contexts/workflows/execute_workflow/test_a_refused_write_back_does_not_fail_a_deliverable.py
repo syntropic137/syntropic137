@@ -51,7 +51,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt 
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
 from .test_processor_smoke import (
@@ -103,7 +103,8 @@ def _payloads_of(repo: _RecordingRepository, kind: type) -> list[object]:
 async def _run(says: str, execution_id: str) -> tuple[str, list[PhaseCompletedEvent]]:
     repo = _RecordingRepository()
     result = await _make_processor(
-        FakeAgentExecutionHandler.success(says=says), execution_repository=repo
+        FakeAgentExecutionHandler.success(produces=A_DELIVERABLE, says=says),
+        execution_repository=repo,
     ).run(
         workflow_id="wf-side-effects",
         workflow_name="A review whose comment was refused",

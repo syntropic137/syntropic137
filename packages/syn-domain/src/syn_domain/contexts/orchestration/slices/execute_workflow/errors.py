@@ -216,7 +216,7 @@ class UnsupportedToolPolicyForProviderError(ValueError):
 
 
 class PhaseProducedNoDeclaredOutputError(Exception):
-    """A phase declared output artifact types and produced none of them (#1167).
+    """A phase produced no artifact, on disk or in its last message (#1167, #1476).
 
     THE FAILURE THIS EXISTS TO STOP. A phase could finish with
     status=completed, error_message=None and artifact_id=None - none of the
@@ -225,11 +225,12 @@ class PhaseProducedNoDeclaredOutputError(Exception):
     vanished was `verify`, so the review gate was silently removed from the run
     while every surface still reported completed.
 
-    WHY THE DECLARATION IS THE TEST, not "did it write anything". A phase that
-    declares no output types is legitimately allowed to produce nothing - the
-    self-host validation workflows have four such phases, which answer a
-    question and stop. Only a declared-but-unproduced output is a failure, so
-    an empty declaration is silence, not a violation.
+    EVERY PHASE PRODUCES AN ARTIFACT (#1476). This used to apply only to a
+    phase that declared output types; one that declared none could complete
+    with nothing stored, which left a reviewed PR's findings only in the
+    transcript (exec-2d90c10fbdb3). A phase that "answers a question and stops"
+    still answers it in its last message, and that is salvaged below, so the
+    only phase this fails is one that said nothing usable at all.
 
     WHAT IT NO LONGER MEANS (#1300). It stopped meaning "no file was written".
     Three `implement` phases, $38.62, were discarded under this error having
@@ -259,9 +260,13 @@ class PhaseProducedNoDeclaredOutputError(Exception):
         phase_name: str,
         declared: tuple[str, ...],
     ) -> None:
+        promised = (
+            f"declares output_artifacts ({', '.join(declared)}) but produced none"
+            if declared
+            else "wrote no artifact"
+        )
         super().__init__(
-            f"Phase '{phase_id}' ({phase_name}) declares output_artifacts "
-            f"({', '.join(declared)}) but produced none: nothing collectable "
+            f"Phase '{phase_id}' ({phase_name}) {promised}: nothing collectable "
             f"was written under artifacts/output/, and its agent's last "
             f"message reported nothing a later phase could act on, so there "
             f"was nothing to recover from the transcript either (#1300). It "
