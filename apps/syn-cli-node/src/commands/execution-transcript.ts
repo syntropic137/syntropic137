@@ -7,7 +7,7 @@ import { print } from "../output/console.js";
 
 export const executionTranscriptCommand: CommandDef = {
   name: "transcript",
-  description: "Read an exact local transcript archive revision",
+  description: "Read an exact local transcript archive revision. Harness, native ID and archived-bytes SHA-256 come from `syn execution sessions <execution-id> --kind capture --all`",
   args: [
     { name: "execution-id", description: "Execution ID or unique prefix", required: true },
     { name: "harness", description: "Native harness namespace", required: true },
@@ -16,8 +16,13 @@ export const executionTranscriptCommand: CommandDef = {
   ],
   options: {
     raw: { type: "boolean", description: "Write verified archive bytes to stdout" },
-    json: { type: "boolean", description: "Print metadata and base64 archive bytes as JSON" },
+    json: { type: "boolean", description: "Print metadata, normalized conversation and base64 archive bytes as JSON" },
   },
+  examples: [
+    "syn execution sessions <execution-id> --kind capture --all   # find harness, native ID and 'Archived bytes SHA-256'",
+    "syn execution transcript <execution-id> claude <native-id> <sha256>          # format, size and revision",
+    "syn execution transcript <execution-id> claude <native-id> <sha256> --raw > transcript.raw  # exact archived bytes",
+  ],
   handler: async ({ positionals, values }) => {
     const [execution, harness, nativeId, revision] = positionals;
     if (!execution || !harness?.trim() || !nativeId?.trim() || !revision || !/^[a-f0-9]{64}$/.test(revision)) {

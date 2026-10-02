@@ -1,0 +1,382 @@
+---
+title: Finding Every Session in a Workflow Run
+description: List every agent session a workflow run produced, including delegates and native transcripts, read its coverage and gaps correctly, and pull transcripts for review
+---
+
+A workflow run is rarely one agent. A phase's agent can delegate to `claude -p`
+or `codex exec` inside its workspace, a delegate can spawn its own children, and
+a resumed run continues earlier work. `syn sessions list` shows only the
+sessions the platform itself started. The **session inventory** shows all of
+them, how they relate, which transcripts were captured, and whether the list is
+known to be complete.
+
+This is the starting point for a learning loop: review what every agent in a
+run was asked, what it did, and where it failed, then feed that back into your
+workflow and prompts.
+
+```bash
+syn execution show <execution-id>          # summary line: counts, coverage, follow-up command
+syn execution sessions <execution-id> --all
+```
+
+## Concepts
+
+### Three kinds of session
+
+Every session in the inventory lives in a **namespace**. An ID is only
+meaningful inside its namespace.
+
+| Namespace | What it is | Where else it appears |
+| --- | --- | --- |
+| `platform` | An agent session the platform created and bills, one per phase run | `syn sessions list`, `syn sessions show`, costs |
+| `invocation` | A registered agent process launch inside a workspace, such as a delegate started with `claude` or `codex` | Inventory only |
+| `transcript:<harness>` | A native session the harness itself recorded, keyed by the harness's own session ID (for example `transcript:claude`, `transcript:codex`) | Inventory and its transcript archive |
+
+A native transcript ID is **never** a platform session ID. Do not pass one to
+`syn sessions show`.
+
+A **binding** records that a platform session or invocation *represents* a
+native transcript, so one piece of work is not counted as two unrelated
+sessions. Each membership, edge and binding carries a confidence:
+`registered`, `corroborated`, `candidate` or `conflicting`.
+
+### Membership
+
+A **membership** places a session in the run, optionally in a phase
+(`phase_id`) and attempt (`attempt_id`). The CLI and dashboard group sessions
+by phase and attempt; sessions with no membership are listed as unlinked.
+
+### Lineage
+
+An **edge** links a parent session to a child with a relation:
+
+| Relation | Meaning |
+| --- | --- |
+| `spawn` | The parent started the child (a delegate or sub-agent) |
+| `resume` | The child continues the parent's conversation |
+| `fork` | The child branched from the parent's conversation |
+
+Follow edges to reconstruct the delegation tree of a run.
+
+### Captures
+
+A **capture** receipt records whether a session's transcript body was archived.
+`availability` is what was recorded at the time: `present`, `pending`,
+`missing`, `expired` or `unknown`. `destination` is `local` (this
+installation's archive) or `remote` (a replica). A present local capture
+carries `archived_byte_hash`, the SHA-256 of the exact archived bytes, which is
+the key you use to read the transcript.
+
+Receipts are history and never change. The current state of a body is reported
+separately as a **body override**: `expired` (retention removed it), `deleted`
+(an owner deleted or retracted it) or `withheld` (access revoked, bytes
+retained). The CLI prints both, for example `recorded=present; current=deleted`.
+
+### Revisions
+
+The inventory is reconstructed from evidence in the background and published
+as immutable **revisions** (snapshots). Late evidence publishes a new
+revision; a published one never changes. Paging always reads one pinned
+revision, so a list cannot mix two states of the run.
+
+`reconstruction_status` says how the published revision relates to the
+evidence: `not_started`, `pending` (newer evidence is waiting), `running`,
+`current` or `failed`.
+
+## Coverage: is the list complete?
+
+Coverage answers "could there be sessions this list does not show?". Read it
+before you draw any conclusion from a count.
+
+| State | Meaning | Complete? |
+| --- | --- | --- |
+| `reconciled` | Every session the run's evidence names is accounted for, settled and consistent | Yes, when the revision is current |
+| `open` | The run is still running, or ended less than the settlement grace ago; more sessions may still appear | No |
+| `missing` | The settlement deadline passed with sessions or captures still unaccounted for; each is a gap | No |
+| `conflicting` | Evidence disagrees about the run (lifecycle, parentage, binding or source) | No |
+| `unsupported` | No supported mechanism can prove completeness, for example a run started before capture was installed, or an unsupported harness | No |
+| `unknown` | No completeness contract yet, or no revision is published | No |
+
+**`open` is not complete.** A finished execution stays `open` until every known
+session has settled or the settlement deadline passes
+(`SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS`, default 1800 seconds after
+the execution ends). Only then does coverage become `reconciled`, `missing` or
+`conflicting`.
+
+The API computes one verdict, `summary.complete`: coverage is `reconciled`, the
+revision is `current`, and no newer evidence is pending. The CLI and dashboard
+print the server's `coverage_display` and `counts_display` text verbatim, so
+every client agrees.
+
+## Gaps
+
+A **gap** names a specific reason the inventory is incomplete or uncertain,
+and the sessions it affects (`node_keys`). Gaps are how you find failed or
+missing delegates.
+
+| Reason | Meaning |
+| --- | --- |
+| `invocation_running` | A launched process has no outcome yet |
+| `invocation_pending` | A committed launch was never acknowledged (killed or denied before it started) |
+| `invocation_launch_failed` | The process never started, cause not recorded |
+| `invocation_launch_failed_<cause>` | The process never started, with a named cause: `process_start_failed`, `codex_sandbox_unavailable`, `native_tool_failed`, `native_tool_interrupted`, `capture_hook_failed`, `hook_watchdog`, `capture_hook_unreachable` |
+| `invocation_transport_failed_before_announce` | Failed before the wrapper announced it; the agent is not known to have run |
+| `invocation_<outcome>` | Any other abnormal outcome, for example `invocation_failed` or `invocation_cancelled` |
+| `conflicting_invocation_lifecycle` | Producers disagree about a process outcome |
+| `conflicting_invocation_context` | Evidence attributes a child to more than one registering session or attempt |
+| `unverified_invocation_context` | A child's claimed attempt does not map to exactly one registered phase and attempt |
+| `conflicting_parentage` | Equally strong evidence names more than one parent for a session |
+| `lineage_cycle` | Parent edges form a cycle |
+| `unresolved_parentage` | A parent link is only a candidate, not registered or corroborated |
+| `conflicting_source_evidence` | A producer reported an edge, membership or binding as conflicting |
+| `conflicting_native_binding` | A platform session or invocation is bound to more than one native transcript |
+| `expected_body_unavailable` | An expected session has no present transcript body (yet, while coverage is `open`) |
+| `invocation_unsettled_at_seal` | Still unsettled when the settlement deadline passed |
+| `capture_unsettled_at_seal` | A capture was still pending at the deadline |
+| `child_context_unresolved_at_seal` | A child's phase/attempt was unresolved at the deadline |
+| `parentage_unresolved_at_seal` | A parent was unresolved at the deadline (coverage `conflicting`) |
+| `no_host_registration` | The run has no host registration, so completeness cannot be proven (coverage `unsupported`) |
+
+The vocabulary is open: capture producers can add their own reasons, so treat an
+unknown reason as a gap, not an error. A gap with no `node_keys` applies to the
+whole run. Gaps on an `open` revision are provisional: a still-running delegate
+or a pending capture can settle before the deadline.
+
+## CLI
+
+### Summary
+
+`syn execution show` ends with a one-line inventory summary and the command for
+the full list:
+
+```
+Session inventory: 2 platform sessions, 3 native transcripts (claude 2, codex 1), 1 invocation, 1 gap
+  Coverage:   missing: expected sessions were not found (incomplete)
+  Details:    syn execution sessions exec-43f430469266 --all
+```
+
+### List every session
+
+```bash
+syn execution sessions <execution-id> --all
+```
+
+`--all` reads every page of every section (nodes, memberships, edges, captures,
+gaps, bindings, retractions) from one pinned revision and prints sessions
+grouped by phase and attempt, with each session's parent, the platform session
+it represents, local capture state and replication state, then unlinked
+sessions, then gaps.
+
+Without `--all` the command prints the header and the first page of sessions
+only, and says the listing is partial. Useful options:
+
+| Option | Use |
+| --- | --- |
+| `--kind <section>` | Read one section: `node`, `membership`, `edge`, `capture`, `gap`, `binding`, `retraction` |
+| `--phase <id>`, `--attempt <id>` | Only sessions with a membership in that phase or attempt (a filtered read is never complete) |
+| `--limit <n>` | Items per page, 1 to 500 (default 100) |
+| `--cursor <c>` | Continue from the `More results: --cursor ...` line of a previous call |
+| `--max-pages <n>` | Stop after `n` pages and report the rest as pending |
+| `--json` | One JSON object: `summary`, every page, `gaps`, `next_cursor`, `coverage_complete`, `traversal_complete`, `pending_sections`, `complete` |
+| `--refresh` | Schedule a local reconstruction and print its job before reading |
+
+```bash
+syn execution sessions <execution-id> --kind gap --all        # just the gaps
+syn execution sessions <execution-id> --kind edge --all       # lineage edges
+syn execution sessions <execution-id> --kind capture --all    # transcript receipts and hashes
+syn execution sessions <execution-id> --phase implement --all # one phase
+```
+
+### Automation: `--require-complete`
+
+```bash
+syn execution sessions <execution-id> --all --json --require-complete > inventory.json
+```
+
+The command still prints everything it read, then exits nonzero unless the
+coverage is `reconciled`, the revision is current, **and** this call read every
+section from start to end with no filter or cursor. Use it as the gate before
+any job that must not act on a partial list. In JSON, `coverage_complete` and
+`traversal_complete` say which half failed.
+
+### Read a transcript
+
+```bash
+syn execution transcript <execution-id> <harness> <native-id> <archived-bytes-sha256>
+```
+
+Take the harness and native ID from the session (`transcript:claude/<native-id>`)
+and the hash from the capture section (`Archived bytes SHA-256: ...`). The
+default output is the format, size and revision. `--raw` writes the exact
+archived bytes to stdout; `--json` prints the metadata, a normalized
+user/assistant `conversation`, and the base64 bytes. The CLI verifies the
+SHA-256 of what it received. A body that is not present (`not_captured`,
+`missing`, `expired`, `deleted`, `too_large`) exits nonzero with that status;
+a revoked body is refused.
+
+## Dashboard
+
+The execution detail page has a **Sessions** panel showing the same inventory:
+the summary and coverage text, sessions grouped by phase and attempt with phase
+and attempt filters, unlinked sessions, and gaps. Locally captured transcripts
+open in place.
+
+## API
+
+All routes are under `$SYN_API_URL/api/v1` and use the same credential as the
+rest of the API. Reads never trigger capture, reconstruction or remote calls.
+
+| Route | Use |
+| --- | --- |
+| `GET /executions/{id}/session-inventory` | Summary, published revision (`snapshot`), reconstruction status |
+| `GET /executions/{id}/session-inventory/{snapshot_id}/{kind}` | One page of a section of that revision (`limit`, `cursor`, `phase_id`, `attempt_id`) |
+| `GET /executions/{id}/session-inventory/{snapshot_id}/nodes/{node_key}` | Resolve a node key from another page (an edge endpoint or gap) |
+| `POST /executions/{id}/session-inventory/reconcile` | Schedule reconstruction; `include_history: true` backfills existing local evidence first |
+| `POST /session-inventory/backfill` | Queue a historical backfill for every execution |
+| `GET /session-inventory-jobs/{job_id}` | Progress of a reconstruction job |
+| `GET /executions/{id}/session-transcripts/{archive_sha256}?harness=&native_id=` | Read one archived transcript revision |
+| `POST /executions/{id}/session-transcripts/{archive_sha256}/revocation` | Withhold reads; bytes are kept |
+| `POST /executions/{id}/session-transcripts/{archive_sha256}/deletion` | Delete the body (`reason`: `deletion` or `retraction`) |
+| `GET /executions/{id}/session-transcripts/{archive_sha256}/deletion` | Local erasure and replica propagation state |
+
+```bash
+AUTH="${SYN_API_USER:-admin}:$SYN_API_PASSWORD"
+API="$SYN_API_URL/api/v1"
+EXEC=exec-43f430469266
+
+# 1. Summary and the revision to pin
+curl -s -u "$AUTH" "$API/executions/$EXEC/session-inventory" > head.json
+jq '.summary | {complete, coverage_state, counts_display}' head.json
+SNAP=$(jq -r '.snapshot.snapshot_id' head.json)
+
+# 2. Page through one section of that revision
+curl -s -u "$AUTH" "$API/executions/$EXEC/session-inventory/$SNAP/gap?limit=500"
+# repeat with &cursor=<next_cursor> until next_cursor is null
+```
+
+Pass `next_cursor` back unchanged with the same revision, section and filters.
+A cursor for another section or filter is rejected with `400 cursor_mismatch`;
+a cursor whose revision is no longer retained gets `410 cursor_expired` with
+`restart: true`, so start again from step 1.
+
+`item_keys[i]` on every page names the node keys `items[i]` refers to, so an
+edge endpoint or gap on one page resolves through the node lookup route.
+
+On capture pages, `capture_hashes[i]` says which hash `items[i]` carries. A
+local receipt's `archived_byte_hash` is the SHA-256 of the archived bytes; a
+remote receipt's `transcript_revision` is a replica content hash
+(`sha256:...`). The two are never comparable.
+
+```bash
+curl -s -u "$AUTH" -G "$API/executions/$EXEC/session-transcripts/$SHA" \
+  --data-urlencode harness=claude --data-urlencode native_id="$NATIVE_ID" \
+  | jq '{status, content_format, size, conversation}'
+```
+
+The OpenClaw plugin exposes the same reads as the `syn_get_session_inventory`
+tool.
+
+## Transcripts, retention and deletion
+
+Transcripts are archived locally by default, under the persistent session
+inventory volume, and served exactly as archived: only redaction applied by the
+capturing source, never server-side rewriting.
+
+- **Retention** is off by default. `SYN_SESSION_INVENTORY_LOCAL_BODY_RETENTION_SECONDS`
+  expires bodies by age and `SYN_SESSION_INVENTORY_LOCAL_BODY_MAX_BYTES` by total
+  size. Expired bodies read as `expired`.
+- **Revocation** withholds reads of the exact bytes and keeps them.
+- **Deletion** tombstones the exact bytes, then erases them. It is idempotent,
+  applies to every run that shares those bytes, and propagates to a configured
+  replica. Retries, replays and re-uploads cannot restore deleted bytes.
+
+In every case the session stays in the inventory, with its body state, so the
+history of what ran is never lost. Pull the transcripts you want to keep for a
+learning loop before any retention window you configure.
+
+## Central replica (SeshMagic)
+
+When a deployment enables inventory replication
+(`SYN_SESSION_INVENTORY_REPLICATION_ENABLED`, see the session inventory section
+of `.env.example`), the inventory is also published to a central SeshMagic
+store, and `summary.remote_replication` is `enabled`. Capture replication
+(`SYN_SESSION_INVENTORY_CAPTURE_REPLICATION_ENABLED`) also delivers transcript
+envelopes. The CLI then shows each session's replication state next to its
+local capture.
+
+The replica is queried on its own, with its own read token, not through the
+Syntropic137 API. Address a run by the `source_instance_id` and `execution_id`
+from the inventory response (the CLI header prints `(source ...)`):
+
+```bash
+curl -s -H "Authorization: Bearer $SESHMAGIC_READ_TOKEN" \
+  "$SESHMAGIC_URL/v1/workflow-runs/$SOURCE_ID/$EXEC/sessions?limit=500"
+# next page: add &revision_id=<revision.revision_id>&after=<next_after>
+```
+
+The same query is available to agents as the SeshMagic MCP tool
+`workflow_run_sessions`. Replication is asynchronous, so the replica can trail
+the local inventory; local reads never wait for it.
+
+## Learning-loop recipe
+
+Review every agent in a finished run: what it was asked, what it did, and what
+went wrong.
+
+### 1. Wait for a complete inventory, then save it
+
+```bash
+EXEC=exec-43f430469266
+syn execution sessions "$EXEC" --all --json --require-complete > inventory.json \
+  || echo "inventory not complete yet: $(jq -r '.summary.coverage_display' inventory.json)"
+```
+
+If coverage is `open`, the run is still settling: try again later. If it is
+`missing`, `conflicting` or `unsupported`, continue, but treat the review as
+partial and report the gaps alongside it.
+
+### 2. Find failed and missing delegates
+
+```bash
+# Gap reasons, with the session each one affects
+jq -r '
+  ([.pages[] | select(.kind == "node") | . as $p
+    | range(0; $p.items | length)
+    | {key: $p.item_keys[.].node_key, value: $p.items[.].ref}] | from_entries) as $nodes
+  | .gaps[]? | .reason as $r
+  | if (.node_keys | length) == 0 then "\($r)\t(run-level)"
+    else .node_keys[] | "\($r)\t\($nodes[.].kind // "?"):\($nodes[.].harness // "-")\t\($nodes[.].local_id // .)"
+    end' inventory.json
+
+# Delegation tree
+jq -r '.pages[] | select(.kind == "edge") | .items[]
+  | "\(.parent.kind):\(.parent.local_id) -[\(.relation)]-> \(.child.kind):\(.child.local_id) (\(.confidence))"' inventory.json
+```
+
+### 3. Pull every captured transcript
+
+```bash
+mkdir -p transcripts
+jq -c '.pages[] | select(.kind == "capture") | .items[]
+  | select((.destination // "local") == "local" and .availability == "present")
+  | {harness: .node.harness, native: .node.local_id, sha: .archived_byte_hash}' inventory.json | sort -u |
+while IFS= read -r rec; do
+  harness=$(jq -r .harness <<<"$rec"); native=$(jq -r .native <<<"$rec"); sha=$(jq -r .sha <<<"$rec")
+  syn execution transcript "$EXEC" "$harness" "$native" "$sha" --json > "transcripts/$sha.json" \
+    || echo "unavailable: $rec"
+done
+```
+
+Files are named by archived-bytes SHA-256 (native IDs are opaque and may not be path safe). Each holds the normalized `conversation` for review and the exact bytes in
+`content_base64`. A capture that was present when recorded but has since been
+deleted, expired or revoked is reported as unavailable rather than skipped
+silently.
+
+### 4. Review
+
+Hand the inventory and transcripts to a reviewing agent (the Syntropic137
+Claude Code plugin's `session-discovery` skill, from plugin 0.12.0, teaches this procedure), or read
+them yourself. Useful questions: which delegates failed and why, which phase
+spent its effort where, which prompts produced work that a later phase redid.
+Turn findings into changes to your workflow YAML and phase prompts, then
+compare the next run's inventory against this one.
