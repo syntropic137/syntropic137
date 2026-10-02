@@ -631,7 +631,9 @@ npm install -g @syntropic137/cli@latest
 syn version
 ```
 
-- [ ] Version matches the release being validated (e.g., `<VERSION>`)
+- [ ] Line 1 (the CLI) matches the release being validated (e.g., `<VERSION>`)
+- [ ] Line 2 names the `syn-api` build that answered, with its image tag and commit
+- [ ] No `Warning:` line on stderr (one appears when the CLI and the server are on different major.minor releases)
 
 ```bash
 syn health
@@ -647,7 +649,8 @@ The CLI and API must be on the same release version. A mismatch can cause
 subtle issues (missing fields, changed endpoints, broken type contracts).
 
 ```bash
-CLI_VERSION=$(syn version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+# Line 1 only: line 2 is the server's build and carries its own version.
+CLI_VERSION=$(syn version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 API_VERSION=$(docker inspect syn137-api --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null | sed 's/^v//')
 echo "CLI: $CLI_VERSION  API: $API_VERSION"
 [ "$CLI_VERSION" = "$API_VERSION" ] && echo "✅ Versions match" || echo "❌ VERSION MISMATCH"
