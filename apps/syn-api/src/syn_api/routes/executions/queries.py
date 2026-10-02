@@ -26,9 +26,9 @@ from syn_api.types import (
     Result,
 )
 from syn_domain import tool_call_counts
-from syn_domain.contexts.orchestration.slices.start_resume import ResumeStartProcessManager
-from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
+from syn_domain.contexts.orchestration import (
     MAX_START_ATTEMPTS,
+    ResumeStartProcessManager,
     read_record,
 )
 from syn_domain.pagination import Page

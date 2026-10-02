@@ -14,10 +14,8 @@ from syn_api.types import BranchObservationInfo, PhaseActivityInfo
 from syn_domain.contexts.orchestration import (
     FailureClassification,
     ReportedFailureReason,
+    ResumeStartStatus,  # Pydantic resolves it at runtime
     SideEffectStatus,
-)
-from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
-    ResumeStartStatus,  # noqa: TC001  # Pydantic resolves it at runtime
 )
 from syn_shared.display import EM_DASH
 from syn_shared.observed_model import format_observed_model
