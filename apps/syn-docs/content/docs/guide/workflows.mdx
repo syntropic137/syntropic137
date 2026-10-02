@@ -620,6 +620,16 @@ SHAs. If the remote HEAD hasn't changed, no update is needed.
 - No rollback to a previous plugin version (uninstall and re-install at a pinned `--ref`)
 - Search is substring-based, not fuzzy or ranked
 
+## Phase Outcomes and Artifacts
+
+Every phase ends with a `TASK_RESULT` block reporting `success`, and, where
+they apply, `failure_reason` and `side_effects`. The platform weighs that
+report against the run's exit status to decide whether the phase completed.
+Every phase must also leave an artifact: whatever it writes under
+`artifacts/output/` is collected, and a phase that wrote nothing has its last
+message recovered as a marked artifact, or fails if that message says nothing
+usable. See [How a Phase Reports Its Outcome](/docs/guide/phase-outcomes).
+
 ## Learn More
 
 - [CLI Reference](/docs/cli): all `syn workflow` and `syn marketplace` commands
