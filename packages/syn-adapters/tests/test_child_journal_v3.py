@@ -137,6 +137,9 @@ async def test_every_v3_field_reaches_evidence() -> None:
         ("native-hook-watchdog", LaunchFailureReason.HOOK_WATCHDOG),
         ("delegate-sandbox", LaunchFailureReason.CODEX_SANDBOX_UNAVAILABLE),
         ("delegate-unreachable", LaunchFailureReason.CAPTURE_HOOK_UNREACHABLE),
+        ("delegate-nested-auth", LaunchFailureReason.CLAUDE_NESTED_AUTH_UNAVAILABLE),
+        ("delegate-parent-permissions", LaunchFailureReason.PARENT_PERMISSIONS_UNAVAILABLE),
+        ("delegate-nested-journal", LaunchFailureReason.NESTED_JOURNAL_UNAVAILABLE),
     ):
         assert lifecycle[keys[call]][-1] == ("launch_failed", None, reason), call
     # conflict_native_id: conflicting evidence, never a corroborated binding.
@@ -173,6 +176,9 @@ async def test_v3_resolves_to_explicit_gaps() -> None:
         ("native-hook-watchdog", GapReason.LAUNCH_FAILED_HOOK_WATCHDOG),
         ("delegate-sandbox", GapReason.LAUNCH_FAILED_CODEX_SANDBOX_UNAVAILABLE),
         ("delegate-unreachable", GapReason.LAUNCH_FAILED_CAPTURE_HOOK_UNREACHABLE),
+        ("delegate-nested-auth", GapReason.LAUNCH_FAILED_CLAUDE_NESTED_AUTH_UNAVAILABLE),
+        ("delegate-parent-permissions", GapReason.LAUNCH_FAILED_PARENT_PERMISSIONS_UNAVAILABLE),
+        ("delegate-nested-journal", GapReason.LAUNCH_FAILED_NESTED_JOURNAL_UNAVAILABLE),
     ):
         assert gaps[keys[call]] == {reason}, call
     assert GapReason.CONFLICTING_BINDING in gaps[keys["native-conflict"]]
@@ -202,4 +208,8 @@ async def test_v2_page_is_still_accepted() -> None:
 def test_unknown_wire_reason_is_a_generic_launch_failure() -> None:
     assert launch_failure_reason(None) is None
     assert launch_failure_reason("hook_watchdog") is LaunchFailureReason.HOOK_WATCHDOG
+    assert (
+        launch_failure_reason("claude_nested_auth_unavailable")
+        is LaunchFailureReason.CLAUDE_NESTED_AUTH_UNAVAILABLE
+    )
     assert launch_failure_reason("a_future_reason") is None

@@ -216,7 +216,7 @@ class UnsupportedToolPolicyForProviderError(ValueError):
 
 
 class PhaseProducedNoDeclaredOutputError(Exception):
-    """A phase declared output artifact types and produced none of them (#1167).
+    """A phase produced no artifact, on disk or in its last message (#1167, #1476).
 
     THE FAILURE THIS EXISTS TO STOP. A phase could finish with
     status=completed, error_message=None and artifact_id=None - none of the
@@ -225,11 +225,12 @@ class PhaseProducedNoDeclaredOutputError(Exception):
     vanished was `verify`, so the review gate was silently removed from the run
     while every surface still reported completed.
 
-    WHY THE DECLARATION IS THE TEST, not "did it write anything". A phase that
-    declares no output types is legitimately allowed to produce nothing - the
-    self-host validation workflows have four such phases, which answer a
-    question and stop. Only a declared-but-unproduced output is a failure, so
-    an empty declaration is silence, not a violation.
+    EVERY PHASE PRODUCES AN ARTIFACT (#1476). This used to apply only to a
+    phase that declared output types; one that declared none could complete
+    with nothing stored, which left a reviewed PR's findings only in the
+    transcript (exec-2d90c10fbdb3). A phase that "answers a question and stops"
+    still answers it in its last message, and that is salvaged below, so the
+    only phase this fails is one that said nothing usable at all.
 
     WHAT IT NO LONGER MEANS (#1300). It stopped meaning "no file was written".
     Three `implement` phases, $38.62, were discarded under this error having
@@ -259,9 +260,13 @@ class PhaseProducedNoDeclaredOutputError(Exception):
         phase_name: str,
         declared: tuple[str, ...],
     ) -> None:
+        promised = (
+            f"declares output_artifacts ({', '.join(declared)}) but produced none"
+            if declared
+            else "wrote no artifact"
+        )
         super().__init__(
-            f"Phase '{phase_id}' ({phase_name}) declares output_artifacts "
-            f"({', '.join(declared)}) but produced none: nothing collectable "
+            f"Phase '{phase_id}' ({phase_name}) {promised}: nothing collectable "
             f"was written under artifacts/output/, and its agent's last "
             f"message reported nothing a later phase could act on, so there "
             f"was nothing to recover from the transcript either (#1300). It "
@@ -453,6 +458,54 @@ class FailedWorkspaceCommand:
     signal_death: SignalDeath | None = None
 
 
+#: The files a workflow-safe rescue writes beside the phase's own (#1437):
+#: the changes it had to leave out, as a patch that applies to the commit it
+#: sits in, and the original commits that flattening it cost. Inside a
+#: directory the guard picks per rescue, so neither name can land on a file of
+#: the phase's own.
+RESCUE_PATCH_NAME: Final[str] = "workflows.patch"
+RESCUE_BUNDLE_NAME: Final[str] = "unpushed.bundle"
+
+
+@dataclass(frozen=True)
+class DroppedWorkflows:
+    """The workflow changes a rescue push had to leave out, and where they are kept (#1437).
+
+    WHY ANYTHING IS LEFT OUT. This platform's GitHub App has no `workflows`
+    permission (#1024), and GitHub refuses a push whose new commits touch
+    ``.github/workflows/`` - the WHOLE push, so one YAML file used to cost a
+    phase every other file it had written. The guard now answers that refusal
+    with a second push whose tree holds that directory exactly as ``base``
+    has it, and whose only parent is ``base``. This record is what that
+    second commit is missing and where each missing part went.
+
+    ``patch`` is carried for ONE reader, the processor, which stores it as a
+    phase artifact - the only copy that survives when no push lands at all.
+    It is never rendered: a report that inlined a diff would bury the refs it
+    exists to name.
+    """
+
+    #: Every path under the directory whose content differs from ``base``.
+    #: EMPTY when the refusal was for history alone: an unpushed commit edited
+    #: a workflow and a later one restored it, so the tree drops nothing and
+    #: only the flattening was needed. ``patch`` is then empty too.
+    paths: tuple[str, ...]
+    #: Why the first push was refused, as `describe_process_failure` says it.
+    refusal: str
+    #: The rescue commit's only parent, a commit origin was last known to have.
+    #: None means the rescue has no parent: nothing on HEAD was known to origin.
+    base: str | None
+    #: ``git diff --binary`` from ``base`` to the phase's tree, over those paths.
+    patch: str
+    #: What the stored phase artifact is called, so the report can name it.
+    artifact_title: str
+    #: The directory in the rescue commit holding the patch and the bundle.
+    #: None when the rescue stopped before one was chosen.
+    rescue_dir: str | None = None
+    #: Whether ``<rescue_dir>/unpushed.bundle`` holds the original commits.
+    has_bundle: bool = False
+
+
 @dataclass(frozen=True)
 class QuarantinedWork:
     """What one repository was holding when its phase ended, and where it went.
@@ -476,6 +529,11 @@ class QuarantinedWork:
     files: tuple[str, ...]
     pushed_ref: str | None
     push_error: str | None = None
+    #: Set when the first push was refused for touching workflows and a
+    #: second, workflow-safe one was attempted (#1437) - on a recoverable
+    #: record AND an unrecoverable one, because the patch it carries is the
+    #: only copy of those changes when the second push fails too.
+    dropped: DroppedWorkflows | None = None
 
     def __post_init__(self) -> None:
         if (self.pushed_ref is None) == (self.push_error is None):
@@ -485,6 +543,28 @@ class QuarantinedWork:
                 f"pushed_ref={self.pushed_ref!r}, push_error={self.push_error!r}. "
                 f"A record saying neither where the work went nor why it went "
                 f"nowhere makes every sentence printed about it a guess."
+            )
+        dropped = self.dropped
+        if dropped is None:
+            return
+        if bool(dropped.paths) != bool(dropped.patch):
+            raise ValueError(
+                f"QuarantinedWork for {self.repo!r} names dropped workflow paths "
+                f"without a patch, or a patch without the paths it changes. A "
+                f"drop with nothing kept is a loss reported as a save."
+            )
+        if self.pushed_ref is not None and not dropped.paths and not dropped.has_bundle:
+            raise ValueError(
+                f"QuarantinedWork for {self.repo!r} landed a workflow-safe rescue "
+                f"at {self.pushed_ref!r} that dropped nothing and kept no bundle. "
+                f"Flattening history is the only reason such a rescue exists, so "
+                f"the original commits have to be in it."
+            )
+        if self.pushed_ref is not None and dropped.rescue_dir is None:
+            raise ValueError(
+                f"QuarantinedWork for {self.repo!r} landed a workflow-safe rescue "
+                f"at {self.pushed_ref!r} without naming the directory its patch "
+                f"is in, so the recovery instructions would point at nothing."
             )
 
     @property
@@ -546,11 +626,63 @@ def _render_quarantined_work(work: QuarantinedWork) -> list[str]:
         lines.extend(f"    uncommitted: {entry}" for entry in shown)
         if len(work.files) > len(shown):
             lines.append(f"    ... and {len(work.files) - len(shown)} more uncommitted")
-    if work.is_recoverable:
+    if work.dropped is not None:
+        lines.extend(_render_dropped_workflows(work, work.dropped))
+    elif work.is_recoverable:
         lines.append(f"    quarantined at {work.pushed_ref}")
         lines.append(f"    recover with: git fetch origin {work.pushed_ref}")
     else:
         lines.append(f"    NOT RECOVERABLE: {work.push_error}")
+    return lines
+
+
+def _render_dropped_workflows(work: QuarantinedWork, dropped: DroppedWorkflows) -> list[str]:
+    """The same entry when the rescue had to leave ``.github/workflows/`` out (#1437).
+
+    Every dropped path is named, uncapped: these are the changes a reader has
+    to put back by hand, and a list cut short would lose one silently. The
+    patch body never appears - it is stored as a phase artifact instead.
+    """
+    paths = [f"      dropped: {path}" for path in dropped.paths]
+    if not work.is_recoverable:
+        if not dropped.paths:
+            return [f"    NOT RECOVERABLE: {work.push_error}"]
+        return [
+            f"    NOT RECOVERABLE: {work.push_error}",
+            *paths,
+            f'    the workflow changes alone are kept as the phase artifact "{dropped.artifact_title}"',
+        ]
+    where = dropped.base if dropped.base is not None else "no commit (the rescue has no parent)"
+    if not dropped.paths:
+        # The refusal was for history alone (see `DroppedWorkflows.paths`).
+        return [
+            f"    quarantined at {work.pushed_ref} with its history flattened: the first "
+            f"push was refused ({dropped.refusal}).",
+            f"    An unpushed commit changed .github/workflows/, which this App cannot push "
+            f"(#1024); the tree as left has it exactly as {where} does, so nothing was dropped.",
+            f"    the {work.commit_count} unpushed commit(s) were flattened onto {where}; "
+            f"the originals are in {dropped.rescue_dir}/{RESCUE_BUNDLE_NAME}",
+            f"    recover with: git fetch origin {work.pushed_ref} && "
+            f"git switch -c recovered FETCH_HEAD",
+        ]
+    patch = f"{dropped.rescue_dir}/{RESCUE_PATCH_NAME}"
+    lines = [
+        f"    quarantined at {work.pushed_ref} WITHOUT {len(dropped.paths)} workflow "
+        f"file(s): the first push was refused ({dropped.refusal}).",
+        f"    This App cannot push .github/workflows/ (#1024), so in that commit they "
+        f"are exactly as {where} has them:",
+        *paths,
+        f'    their changes: {patch} in that commit, and the phase artifact "{dropped.artifact_title}"',
+    ]
+    if dropped.has_bundle:
+        lines.append(
+            f"    the {work.commit_count} unpushed commit(s) were flattened onto {where}; "
+            f"the originals are in {dropped.rescue_dir}/{RESCUE_BUNDLE_NAME}"
+        )
+    lines.append(
+        f"    recover with: git fetch origin {work.pushed_ref} && "
+        f"git switch -c recovered FETCH_HEAD && git apply {patch}"
+    )
     return lines
 
 

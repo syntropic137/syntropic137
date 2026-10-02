@@ -661,7 +661,11 @@ class ArtifactCollector:
         # Judged on COLLECTABLE files, not on what the glob returned: a phase
         # whose entire output tree was build junk produced no deliverable, and
         # that is the same incident as writing nothing at all.
-        if output_artifact_types and not artifacts:
+        #
+        # EVERY phase, declared or not (#1476): a phase that declared no output
+        # types used to store nothing here and complete, so its conclusion
+        # lived only in the transcript (exec-2d90c10fbdb3).
+        if not artifacts:
             recovered = recover_deliverable(
                 last_agent_message=last_agent_message,
                 wrote=None,
@@ -680,7 +684,7 @@ class ArtifactCollector:
                 "the execution (#1300)",
                 phase_id,
                 phase_name,
-                ", ".join(output_artifact_types),
+                ", ".join(output_artifact_types) or "no output types",
             )
             return [_Deliverable.of(recovered)]
 
@@ -731,18 +735,23 @@ class ArtifactCollector:
         output_artifact_types: tuple[str, ...],
         agent: AgentIdentity,
         outcome: UnfinishedPhase,
+        last_agent_message: str | None = None,
     ) -> list[str]:
         """Keep whatever a phase that will not complete managed to write. Never raises.
 
         Deliberately does NOT enforce the output contract that
-        `collect_from_workspace` enforces, and deliberately does not salvage
-        from the transcript either. A phase reaching here already has its
+        `collect_from_workspace` enforces. A phase reaching here already has its
         outcome decided - by an interrupt, or by a run that failed - and the
         only question left is how much of its work survives. Raising a contract
         violation over an empty salvage would replace a truthful reason with a
-        misleading one and lose the real one (#1167); substituting the
-        transcript would invent a deliverable for a phase whose conclusion is
-        already recorded as the failure.
+        misleading one and lose the real one (#1167).
+
+        When nothing storable was written, `last_agent_message` is salvaged
+        the way #1300 salvages a completed phase, marked recovered and under
+        the outcome's title, and the phase stays failed (#1476). A phase that
+        reported `success=false` over a refused PR comment had drafted three
+        findings and kept none of them (exec-82ce478a6c46): a wrong verdict
+        must not be able to destroy the work it was a verdict on.
 
         `outcome` says WHY the phase will not complete, and is the only thing
         that differs between the two callers. It decides the artifact's title
@@ -801,6 +810,28 @@ class ArtifactCollector:
                     agent=agent,
                 )
                 artifact_ids.append(artifact_id)
+            if not artifact_ids:
+                recovered = recover_deliverable(
+                    last_agent_message=last_agent_message,
+                    wrote=None,
+                    title=outcome.title(phase_name=phase_name, source_path=RECOVERED_SOURCE_PATH),
+                )
+                if recovered is not None:
+                    artifact_id = str(uuid4())
+                    await self.create_artifact(
+                        artifact_id=artifact_id,
+                        workflow_id=workflow_id,
+                        phase_id=phase_id,
+                        execution_id=execution_id,
+                        session_id=session_id,
+                        artifact_type=artifact_type,
+                        content=recovered.content,
+                        title=recovered.title,
+                        source_path=recovered.source_path,
+                        is_primary_deliverable=True,
+                        agent=agent,
+                    )
+                    artifact_ids.append(artifact_id)
             return artifact_ids
         except Exception as err:
             logger.warning(

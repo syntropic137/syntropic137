@@ -205,7 +205,7 @@ def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
             phase_id=phase_id,
         )
         # Before provisioning, so a stored template declaring a level the
-        # workspace cannot run is refused with a 422, not mid-run (#1434).
+        # phase cannot finish under is refused with a 422, not mid-run (#1434).
         require_runnable_sandbox(getattr(phase, "sandbox", None), phase_id=phase_id)
         tools = require_supported_tools(
             tuple(getattr(phase, "allowed_tools", ()) or ()),
@@ -521,7 +521,7 @@ class ExecuteWorkflowHandler:
             )
             # Same reasoning, for a direct handler caller that skipped
             # validate_phase_declarations: never hand codex a level the
-            # workspace cannot run (#1434).
+            # phase cannot finish under (#1434).
             require_runnable_sandbox(
                 getattr(phase, "sandbox", None), phase_id=getattr(phase, "phase_id", None)
             )

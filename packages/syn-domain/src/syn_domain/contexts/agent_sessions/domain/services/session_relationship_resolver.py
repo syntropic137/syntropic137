@@ -55,8 +55,13 @@ from .inventory_corrections import active_evidence
 from .invocation_contexts import context_coverage, context_memberships
 from .invocation_lifecycle import lifecycle_gaps
 from .native_relationships import native_relationships
+from .superseded_revisions import without_superseded_revision_issues
 
-RESOLVER_VERSION = "syn-session-relationships/8"
+# /10: three named launch-failure gaps (claude_nested_auth_unavailable,
+# parent_permissions_unavailable, nested_journal_unavailable; agentic-workspace
+# v0.3.0). Evidence acquired before it stored those wire reasons as None (an
+# unknown reason), so it still resolves to the generic invocation_launch_failed.
+RESOLVER_VERSION = "syn-session-relationships/10"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
@@ -132,7 +137,7 @@ def _coverage(
 
 def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
     """Resolve a complete acquired evidence set; caller owns paging and commits."""
-    evidence = active_evidence(evidence)
+    evidence = without_superseded_revision_issues(active_evidence(evidence))
     evidence = evidence.model_copy(
         update={
             "acquisition_gaps": (

@@ -254,6 +254,9 @@ def test_pending_rejects_an_exit_code_and_only_failed_launches_carry_a_reason() 
         "capture_hook_failed",
         "hook_watchdog",
         "capture_hook_unreachable",
+        "claude_nested_auth_unavailable",
+        "parent_permissions_unavailable",
+        "nested_journal_unavailable",
     ],
 )
 def test_every_named_launch_failure_maps_to_its_own_gap(cause: str) -> None:

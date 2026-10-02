@@ -291,10 +291,12 @@ class TestTheThreeOutcomesAreTellableApart:
         assert not isinstance(produced_nothing.value, EmptyPhaseArtifactError)
 
     @pytest.mark.asyncio
-    async def test_a_phase_that_declared_nothing_is_still_allowed_to_be_silent(self) -> None:
-        """The #1167 rule that recovery must not accidentally tighten: a phase
-        declaring no output types may legitimately produce none."""
-        collector = ArtifactCollector(_Repo(), None, None)
+    async def test_a_phase_that_declared_nothing_still_keeps_what_it_said(self) -> None:
+        """#1476: every phase produces an artifact. One that declared no output
+        types and wrote no file used to complete with nothing stored, leaving a
+        PR review's findings only in the transcript (exec-2d90c10fbdb3)."""
+        repo = _Repo()
+        collector = ArtifactCollector(repo, None, None)
 
         result = await collector.collect_from_workspace(
             workspace=_Workspace(),  # type: ignore[arg-type]
@@ -305,9 +307,35 @@ class TestTheThreeOutcomesAreTellableApart:
             phase_name="Answer",
             output_artifact_types=(),
             agent=UNREPORTED_AGENT,
+            last_agent_message=SAID,
         )
 
-        assert result.artifact_ids == []
+        assert len(result.artifact_ids) == 1
+        assert result.deliverable_recovered
+        ((title, content),) = _stored(repo)
+        assert RECOVERED_TITLE_MARKER in title
+        assert SAID in content
+
+    @pytest.mark.asyncio
+    async def test_a_phase_that_declared_nothing_and_said_nothing_fails(self) -> None:
+        """Silence is no longer a legitimate outcome for an undeclared phase, and
+        the error must not claim it declared something it did not."""
+        collector = ArtifactCollector(_Repo(), None, None)
+
+        with pytest.raises(PhaseProducedNoDeclaredOutputError) as raised:
+            await collector.collect_from_workspace(
+                workspace=_Workspace(),  # type: ignore[arg-type]
+                workflow_id="w1",
+                phase_id="answer",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Answer",
+                output_artifact_types=(),
+                agent=UNREPORTED_AGENT,
+            )
+
+        assert "wrote no artifact" in str(raised.value)
+        assert "declares output_artifacts" not in str(raised.value)
 
 
 class TestAHealthyRunNeverEntersTheFallback:

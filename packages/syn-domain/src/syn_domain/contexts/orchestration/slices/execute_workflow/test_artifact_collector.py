@@ -135,29 +135,26 @@ class TestArtifactCollector:
         ]
 
     @pytest.mark.asyncio
-    async def test_collect_empty_workspace_when_nothing_was_declared(self) -> None:
-        """An UNDECLARED phase may produce nothing - the #1167 true negative.
+    async def test_an_undeclared_phase_that_produced_nothing_fails(self) -> None:
+        """Every phase produces an artifact (#1476), declared or not.
 
-        The declaration is empty, so there is no contract to violate and the
-        empty collection is returned rather than raised on. The paired failure
-        case lives in TestADeclaredOutputMustBeProduced below; without both,
-        the rule either does not bite or bites everything.
+        Before, an empty declaration meant "no contract to violate" and an empty
+        workspace was returned as success. Now nothing on disk and nothing said
+        is a phase that produced nothing, whatever it declared.
         """
         collector = ArtifactCollector(MockArtifactRepo(), None, None)
         workspace = MockWorkspace()
-        result = await collector.collect_from_workspace(
-            workspace=workspace,
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Test Phase",
-            output_artifact_types=(),
-            agent=UNREPORTED_AGENT,
-        )
-        assert result.artifact_ids == []
-        assert result.first_content is None
-        assert result.files == []
+        with pytest.raises(PhaseProducedNoDeclaredOutputError):
+            await collector.collect_from_workspace(
+                workspace=workspace,
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Test Phase",
+                output_artifact_types=(),
+                agent=UNREPORTED_AGENT,
+            )
 
     @pytest.mark.asyncio
     async def test_inject_from_query_service(self) -> None:

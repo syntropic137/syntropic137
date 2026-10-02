@@ -22,6 +22,7 @@ and no ``AgentExecutionCompleted`` claiming 0.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -68,6 +69,11 @@ SEGFAULTED = -11
 #: ask - the fixture value the old code could not tell from a clean exit.
 NOTHING_OBSERVED = None
 
+_ANSWER = (
+    "The phase checked the exit status path end to end, recorded the observed "
+    "code exactly, and left the workspace unchanged for the next phase."
+)
+
 
 class _StreamEndingWith(MemoryEventStreamAdapter):
     """A stream that ends reporting `status`, or reporting nothing at all.
@@ -95,6 +101,10 @@ class _StreamEndingWith(MemoryEventStreamAdapter):
     ) -> AsyncIterator[str]:
         for line in self._streams.get(handle.isolation_id, []):
             yield line
+        # The agent's closing answer, so the phase has the artifact every phase
+        # must produce (#1476) and its outcome is decided by the exit status
+        # under test rather than by having said nothing.
+        yield json.dumps({"type": "result", "result": _ANSWER, "usage": {}})
         self._last_exit_code = self._status
 
 

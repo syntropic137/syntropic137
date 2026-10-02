@@ -184,7 +184,7 @@ it is handed, so it is a genuinely independent read of the work.
 |-------|--------|---------|-------|
 | `provider` | `claude`, `codex` | `claude` | The harness that drives the phase. The schema rejects any other value. |
 | `model` | provider model id or alias | `opus` (claude), `gpt-sol` (codex) | Defaults come from `SYN_DEFAULT_CLAUDE_MODEL` / `SYN_DEFAULT_CODEX_MODEL` and are recorded at install time. See [Codex model ids and cost](#codex-model-ids-and-cost). |
-| `sandbox` | `full-access` | `full-access` | Omit it. Lower levels are refused, see [What `sandbox` actually does](#what-sandbox-actually-does). |
+| `sandbox` | `workspace-write`, `full-access` | `full-access` | Codex phases only. `workspace-write` is enforced least privilege. See [What `sandbox` actually does](#what-sandbox-actually-does). |
 | `allow_delegation` | `true`, `false` | `false` | Lets the phase's agent hand work to the other harness. Works in both directions. |
 
 A phase-level `model:` key, sitting outside the `agent` block, takes precedence
@@ -192,21 +192,24 @@ over `agent.model`. If you set both, the outer one wins.
 
 ### What `sandbox` actually does
 
-Omit `sandbox`. Only `full-access`, the default, runs in the workspace container.
-`read-only` and `workspace-write` are refused when you validate or install a
-workflow, and a stored workflow that declares one is refused when you execute it,
-before anything is provisioned.
+`sandbox` steers `codex exec --sandbox`. Claude phases ignore it.
 
-<Callout type="warn">
-**There is no read-only reviewer phase.** Codex enforces every level below
-`full-access` with bubblewrap, and bubblewrap cannot create a namespace inside the
-workspace container. A `read-only` phase fails on its first command: it cannot read
-the repository, and it cannot write its verdict under `artifacts/output/`, which is
-how every phase publishes. Claude ignores the field entirely.
+| Level | Codex may | Use for |
+|-------|-----------|---------|
+| `workspace-write` | Read, write and run commands inside `/workspace`, including `artifacts/output/` and git commits. Writes outside `/workspace` are denied. | Any phase that does not need to reach outside the workspace, including review and verify phases. |
+| `full-access` (default) | Anything the workspace container allows. | Phases that genuinely need more. |
+
+`read-only` is refused when you validate, install or execute a workflow. It is
+enforced, but it denies the write under `artifacts/output/` that every phase
+reports through, so the phase could not publish its result.
+
+<Callout type="info">
+Codex enforces these levels with bubblewrap, which runs inside a workspace only
+because codex-capable workspace images start with a sandbox policy: a narrow
+seccomp profile, plus the `agentic-codex-sandbox` AppArmor profile on AppArmor
+hosts (`just apparmor-setup`). Without it, every level below `full-access`
+fails on its first command.
 </Callout>
-
-The workspace container is the isolation boundary. Keeping a review phase from
-changing what it reviews has to come from the platform, not from this field.
 
 ### `allowed_tools` and the two harnesses
 
@@ -225,8 +228,8 @@ because codex exposes no tool flag and translating an allowlist into a sandbox
 mode would be a category error. That guard is currently unreachable for the same
 reason: `allowed_tools` never arrives populated.
 
-Neither harness has an enforced per-phase restriction today. The workspace
-container is the boundary; see [What `sandbox` actually does](#what-sandbox-actually-does).
+To bound what a codex phase can write, declare `sandbox: workspace-write`; see
+[What `sandbox` actually does](#what-sandbox-actually-does).
 
 ### Codex authentication
 
@@ -268,7 +271,7 @@ for both harnesses.
 | Token accounting | Yes | Yes |
 | Vendor cost (`vendor_cost_usd`) | Yes | No, always null |
 | Delegation to the other harness | Yes | Yes |
-| Filesystem sandbox enforcement | No | No, the container is the boundary |
+| Filesystem sandbox enforcement | No | Yes, `workspace-write` |
 | Hook events (`PreToolUse`, `PostToolUse`) | Yes | No |
 | Subagent tracking | Yes | No |
 | TodoWrite and the todo projection | Yes | No |
@@ -616,6 +619,16 @@ SHAs. If the remote HEAD hasn't changed, no update is needed.
 - No version conflict detection across multiple marketplaces
 - No rollback to a previous plugin version (uninstall and re-install at a pinned `--ref`)
 - Search is substring-based, not fuzzy or ranked
+
+## Phase Outcomes and Artifacts
+
+Every phase ends with a `TASK_RESULT` block reporting `success`, and, where
+they apply, `failure_reason` and `side_effects`. The platform weighs that
+report against the run's exit status to decide whether the phase completed.
+Every phase must also leave an artifact: whatever it writes under
+`artifacts/output/` is collected, and a phase that wrote nothing has its last
+message recovered as a marked artifact, or fails if that message says nothing
+usable. See [How a Phase Reports Its Outcome](/docs/guide/phase-outcomes).
 
 ## Learn More
 

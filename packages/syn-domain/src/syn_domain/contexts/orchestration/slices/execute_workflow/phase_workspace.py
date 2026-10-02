@@ -45,6 +45,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
     ArtifactCollector,
     UnfinishedPhase,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import RESCUE_PATCH_NAME
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
 )
@@ -71,6 +72,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import QuarantinedWork
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -247,14 +249,20 @@ class PhaseWorkspace:
         *,
         workspace: ManagedWorkspace,
         workflow_id: str,
+        last_agent_message: str | None,
+        outcome: UnfinishedPhase,
     ) -> list[str]:
         """Store what a phase wrote before the run that produced it is torn down.
 
         Runs while the workspace is still alive, which is the only window there
-        is: `_fail_execution` abandons it a few frames up. Never raises and
-        never salvages from the transcript - the phase's outcome is already
-        decided and is reported where failures are reported; the question here
-        is only what survives it.
+        is: `_fail_execution` abandons it a few frames up. Never raises. The
+        phase's outcome is already decided and is reported where failures are
+        reported; the question here is only what survives it, and when it wrote
+        nothing that is its last message (#1476).
+
+        `last_agent_message` comes from the run's own stream result, not the
+        aggregate: a failed run is never told `agent_execution_completed`, so
+        the aggregate holds no message for it.
         """
         assert todo.phase_id is not None
         kept = await self._collector().collect_from_unfinished_phase(
@@ -266,17 +274,75 @@ class PhaseWorkspace:
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
             agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
-            outcome=UnfinishedPhase.FAILED,
+            outcome=outcome,
+            last_agent_message=last_agent_message,
         )
         if kept:
             logger.warning(
-                "Phase %s (%s) failed; kept %d artifact(s) it had already written "
-                "under artifacts/output/ rather than discarding them with the "
-                "workspace (#1321)",
+                "Phase %s (%s) did not complete (%s); kept %d artifact(s) rather "
+                "than discarding them with the workspace (#1321, #1476)",
                 todo.phase_id,
                 phase.name,
+                outcome.name.lower(),
                 len(kept),
             )
+        return kept
+
+    async def keep_dropped_workflows(
+        self,
+        quarantined: tuple[QuarantinedWork, ...],
+        *,
+        workflow_id: str,
+        phase_id: str | None,
+        execution_id: str,
+        session_id: str,
+    ) -> list[str]:
+        """Store each workflow change the quarantine could not push (#1437).
+
+        A rescue that GitHub refused for touching ``.github/workflows/`` left
+        those changes out of what it pushed, and when the second push failed
+        too, this artifact is the ONLY copy left once the workspace goes - so
+        it is stored on every outcome, not just the one that lost the rest.
+        Never raises: the phase's outcome is already decided, and the push
+        report names the patch whether or not it could be kept here.
+        """
+        kept: list[str] = []
+        for work in quarantined:
+            dropped = work.dropped
+            if dropped is None or not dropped.patch:
+                # No patch: the refusal was for history alone, and the tree
+                # left nothing out to keep.
+                continue
+            artifact_id = str(uuid4())
+            try:
+                await self._collector().create_artifact(
+                    artifact_id=artifact_id,
+                    workflow_id=workflow_id,
+                    phase_id=phase_id or "",
+                    execution_id=execution_id,
+                    session_id=session_id,
+                    artifact_type="other",
+                    content=dropped.patch,
+                    title=dropped.artifact_title,
+                    agent=self._runtime.agent_for(phase_id or "", provider=None),
+                    source_path=f"syn-quarantine/{work.repo}/{RESCUE_PATCH_NAME}",
+                    is_primary_deliverable=False,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not store the workflow changes %s could not push for "
+                    "execution %s (#1437): %s",
+                    work.repo,
+                    execution_id,
+                    ", ".join(dropped.paths),
+                )
+                continue
+            logger.warning(
+                "Kept the workflow changes %s could not push as artifact %s (#1437)",
+                work.repo,
+                artifact_id,
+            )
+            kept.append(artifact_id)
         return kept
 
     async def collect(

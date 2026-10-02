@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import pytest
 
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor, _one_phase_workflow, _two_phase_workflow
 
@@ -272,9 +272,11 @@ class TestWhatMustStillComplete:
         of every agent, not a fix to a report being discarded, and it would
         land first on the phases that never had a report to lose. Such a
         phase is still governed by its exit status, its declared outputs
-        (#1167) and its artifact content (#1195).
+        (#1167), its artifact content (#1195) and having produced an artifact at all (#1476).
         """
-        fake = FakeAgentExecutionHandler.success(says="I finished the work.")
+        fake = FakeAgentExecutionHandler.success(
+            produces=A_DELIVERABLE, says="I finished the work."
+        )
         processor = _make_processor(fake)
 
         result = await processor.run(

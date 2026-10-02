@@ -21,3 +21,13 @@ class LaunchFailureReason(StrEnum):
     HOOK_WATCHDOG = "hook_watchdog"
     # The delegate probe could not reach the capture hook guard.
     CAPTURE_HOOK_UNREACHABLE = "capture_hook_unreachable"
+    # A delegated Claude would start without credentials: Claude Code removes
+    # its OAuth token from Bash subprocesses, so a Claude below a Claude Bash
+    # call has none unless the workspace supplies one Claude reads itself.
+    CLAUDE_NESTED_AUTH_UNAVAILABLE = "claude_nested_auth_unavailable"
+    # A Claude parent's permission grant could not be read exactly, so the
+    # delegated Claude could not be bounded by it.
+    PARENT_PERMISSIONS_UNAVAILABLE = "parent_permissions_unavailable"
+    # A nested delegate could not write the child journal (for example inside
+    # a read-only Codex sandbox); recorded by the enclosing delegate.
+    NESTED_JOURNAL_UNAVAILABLE = "nested_journal_unavailable"

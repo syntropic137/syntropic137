@@ -88,4 +88,23 @@ describe("renderCommandHelp", () => {
     expect(output).toContain("--dry-run");
     expect(output).toContain("(default: main)");
   });
+
+  it("renders examples after options, and omits the heading when there are none", () => {
+    const base: CommandDef = { name: "sessions", description: "List sessions", handler: noop };
+    const withExamples: CommandDef = { ...base, examples: ["syn execution sessions exec-1 --all"] };
+    const output = stripAnsi(renderCommandHelp(withExamples, "syn", "execution"));
+    expect(output).toContain("Examples:\n  syn execution sessions exec-1 --all");
+    expect(stripAnsi(renderCommandHelp(base, "syn", "execution"))).not.toContain("Examples:");
+  });
+
+  it("points the session commands at each other so a run's sessions are discoverable", async () => {
+    const { executionGroup } = await import("../../src/commands/execution.js");
+    const { sessionsGroup } = await import("../../src/commands/sessions.js");
+    const list = stripAnsi(renderCommandHelp(sessionsGroup.getCommand("list")!, "syn", "sessions"));
+    expect(list).toContain("syn execution sessions <execution-id>");
+    const show = stripAnsi(renderCommandHelp(executionGroup.getCommand("show")!, "syn", "execution"));
+    expect(show).toContain("syn execution sessions <execution-id>");
+    const transcript = stripAnsi(renderCommandHelp(executionGroup.getCommand("transcript")!, "syn", "execution"));
+    expect(transcript).toContain("--kind capture --all");
+  });
 });

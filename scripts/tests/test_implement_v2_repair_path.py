@@ -206,7 +206,7 @@ class TestTheRepairedHeadIdentityContract:
         self, prompts: dict[str, str]
     ) -> None:
         prompt = prompts["reverify"]
-        assert "git checkout <candidate-sha>" in prompt
+        assert "git checkout --recurse-submodules <candidate-sha>" in prompt
         assert "git rev-parse origin/<branch>" in prompt
         assert "git rev-parse HEAD" in prompt
 

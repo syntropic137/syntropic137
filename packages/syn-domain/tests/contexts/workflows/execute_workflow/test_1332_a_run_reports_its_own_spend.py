@@ -71,7 +71,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor
 
@@ -425,7 +425,9 @@ class TestACompletingRunLeavesAConcurrentRunItsCounts:
     """
 
     async def test_a_run_that_completes_does_not_take_the_other_run_s_counts(self) -> None:
-        processor = _make_processor(FakeAgentExecutionHandler.success(spent=STALLED))
+        processor = _make_processor(
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE, spent=STALLED)
+        )
         stream = _EventStore()
         processor._journal = ExecutionJournal(  # pyright: ignore[reportPrivateUsage]
             stream,

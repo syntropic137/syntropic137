@@ -1,0 +1,289 @@
+---
+title: How a Phase Reports Its Outcome
+description: The TASK_RESULT block every phase ends with, what success, failure_reason and side_effects mean, how they become phase and execution status, and the one-artifact-per-phase rule
+---
+
+Every phase of a workflow ends by saying two things about itself: **what it
+delivered** and **whether it succeeded**. The platform reads both, decides
+whether the phase completed, and records what the agent said beside what the
+platform observed. This page describes that contract from both sides: what an
+agent must write, and what you read back from the API.
+
+## The TASK_RESULT block
+
+The prompt every phase is sent ends with a mandatory instruction: the last
+thing the agent writes must be a `TASK_RESULT` block. A block has three parts,
+the marker, one JSON object, and the terminator on the line after it:
+
+```text
+TASK_RESULT: {"success": true, "side_effects": "none", "comments": "Opened PR #42 with the fix and a regression test"}
+TASK_RESULT_END
+```
+
+```text
+TASK_RESULT: {"success": false, "failure_reason": "platform", "comments": "GH_TOKEN is not set, so the repository could not be cloned"}
+TASK_RESULT_END
+```
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `success` | JSON boolean | Whether the phase produced what it was asked for. This is the only key that decides the outcome. |
+| `failure_reason` | one word | When `success` is `false`, what kind of failure it was. |
+| `side_effects` | one word | What happened to the external writes the phase attempted, such as a push or a PR comment. |
+| `comments` | string | A specific, human-readable explanation. Shown to operators. |
+
+### `success` is the outcome, and it must be a boolean
+
+`success` must be the JSON boolean `true` or `false`. The block is parsed
+strictly: the string `"true"`, a number, or a word such as `"completed"` under
+`success` is not a boolean, so the block is **unreadable** (see below), and an
+unreadable block fails the phase.
+
+Two lenient readings exist, both logged as a warning so the drift stays
+visible:
+
+- A block whose JSON is wrapped in a markdown code fence (` ```json ... ``` `)
+  between the marker and the terminator is read as if the fence were not there.
+- A block with **no** `success` key whose `status` is exactly the string
+  `"completed"` or `"failed"` is read as success or failure. Any other `status`
+  value, or a `status` key written twice, is unreadable. When `success` is a
+  boolean, `status` is ignored; a `status` beside an unreadable `success` does
+  not rescue it.
+
+### `failure_reason`: what kind of failure
+
+When `success` is `false`, `failure_reason` is exactly one of four words. It is
+a label, never a sentence: the sentence goes in `comments`.
+
+| `failure_reason` | What the agent is saying | What someone does about it |
+| --- | --- | --- |
+| `task` | The request was wrong, impossible, or too big for one phase | Rewrite the brief |
+| `platform` | The machinery broke: a missing credential, a tool that crashed, a workspace that was not what it claimed | Fix the platform |
+| `refused` | Neither: the agent could have done the work and judged it should not | Read what it found |
+| `unknown` | The agent cannot honestly tell which of the three it was | Somebody reads the run |
+
+`failure_reason` never changes **whether** a phase completes; `success` alone
+decides that. A word the platform does not recognise, a sentence, or a missing
+key is recorded as "no reason given", logged, and leaves the outcome unchanged.
+
+### `side_effects`: what happened to external writes
+
+`side_effects` is exactly one of four words:
+
+| `side_effects` | When |
+| --- | --- |
+| `none` | The phase attempted no external write |
+| `succeeded` | It made external writes and every one went through |
+| `denied` | A write was refused: permissions, a protected branch, a read-only token |
+| `failed` | A write was attempted and broke: network, API error, a tool that crashed |
+
+**`success` is about the deliverable, not every action around it.** A phase
+that produced its deliverable and was then refused a PR comment reports
+`success: true` and `side_effects: denied`. The phase completes, the
+deliverable is kept, and the refusal is recorded beside it for an operator to
+act on. Like `failure_reason`, `side_effects` never decides whether a phase
+completes, and an unrecognised word is recorded as "not reported".
+
+### What counts as a report
+
+A report is delimited, not searched for. Only text that starts with
+`TASK_RESULT:`, holds one JSON value, and is closed by `TASK_RESULT_END` is a
+report. The agent's verdict is read as each message arrives, so a later
+sign-off message cannot overwrite an earlier report.
+
+The platform reads each phase into one of four states:
+
+| State | What happened | Does it fail the phase? |
+| --- | --- | --- |
+| Success | A readable block with `success: true` | No |
+| Failure | A readable block with `success: false` | Yes |
+| Unreadable | The marker was written but no closed, readable block followed it (not JSON, wrong type, or no `TASK_RESULT_END`) | Yes |
+| Not reported | No `TASK_RESULT:` marker at all | No, on its own |
+
+If an agent writes more than one report, the strongest claim stands,
+regardless of order: failure beats success, success beats unreadable,
+unreadable beats not reported. A failure that the agent reported cannot be
+taken back by a later success.
+
+<Callout type="info">
+**Not reported is not a failure by itself.** A phase that never writes the
+marker is governed by the other checks that apply to every phase: its exit
+status and the artifact rule below. The prompt still requires the block, and a
+phase that omits it gives operators nothing to read about its outcome.
+</Callout>
+
+## From the report to phase and execution status
+
+The phase's report is weighed together with what the platform observed about
+the run itself: the process exit code, whether the output stream was intact,
+and whether the run was cancelled.
+
+| The run | The report | Phase | Execution `failure_classification` |
+| --- | --- | --- | --- |
+| Exit 0, stream intact, not cancelled | Success or not reported | `completed` (if the artifact rule below is met) | none |
+| Exit 0, stream intact, not cancelled | Failure | `failed` | `correct_refusal`, or `unclassified` if `failure_reason` was `unknown` |
+| Exit 0, stream intact, not cancelled | Unreadable | `failed` | `platform` |
+| Exit 0, stream broken | Success or not reported | `completed` | none |
+| Non-zero exit, timeout, crash, or broken stream with a failure report | Any | `failed` | `platform` |
+| Cancelled by an operator | Any | not completed; its output is kept as partial, and the execution is `cancelled` | none |
+
+When a phase fails, the execution fails with it, and `status` on the execution
+is `failed`.
+
+Two fields on the execution keep the platform's measurement and the agent's
+words apart:
+
+- **`failure_classification`** is what the **platform** concluded, and failure
+  rates are computed from it. Only a cleanly finished run with a readable
+  `success: false` is a `correct_refusal`: the system working as designed.
+  Everything else that fails is `platform`. The agent's `failure_reason` can
+  never move a failure into `task` or out of the platform's count. The one
+  thing it can do is withdraw the claim: `unknown` records the failure as
+  `unclassified`.
+- **`reported_failure_reason`** is what the **agent said**, recorded verbatim
+  (`task`, `platform`, `refused`, `unknown`, or `null` when it named nothing
+  recognised). Read it as a quotation.
+
+## Reading the outcome from the API
+
+`GET /api/v1/executions/{execution_id}` returns, among its other fields:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `running`, `completed`, `failed`, `cancelled`, `interrupted` |
+| `failure_classification` | What the platform concluded about a failure: `platform`, `correct_refusal`, `unclassified` |
+| `reported_failure_reason` | What the failing phase's agent wrote as `failure_reason`, or `null` |
+| `deliverable_produced` | `true` when an artifact is linked to the execution or to one of its phases, **whatever `status` says** (see the limitation below) |
+| `reported_side_effects` | The most severe `side_effects` any phase reported, or `null` if none did |
+| `phases[].deliverable_recovered` | `true` when this phase's deliverable was recovered from its last message (see below) |
+| `phases[].reported_side_effects` | What this phase's agent reported, or `null` |
+
+`deliverable_produced` and `status` are independent on purpose. A run can fail
+after its deliverable exists, and a run can complete while a write-back was
+refused. To decide what to do next:
+
+| `status` | `deliverable_produced` | `reported_side_effects` | Read it as |
+| --- | --- | --- | --- |
+| `completed` | `true` | `none` or `succeeded` | Done |
+| `completed` | `true` | `denied` | The work is finished; a write was refused. Grant the permission, do not re-run the work |
+| `completed` | `true` | `failed` | The work is finished; a write broke. Retry the write |
+| `failed` | `true` | any | The run failed, but there is work to read. Open the artifacts before re-running |
+| `failed` | `false` | any | Nothing was kept |
+
+`reported_side_effects` ranks `failed` over `denied` over `succeeded` over
+`none`, so one refused write in any phase is not hidden by another phase's
+success. It is collected from phases that **completed**: a failed phase's
+`side_effects` word is not recorded. It is a report, never a measurement:
+nothing verifies what the agent says happened.
+
+Both execution-level fields cover only the phases this execution ran. A
+[resumed execution](/docs/guide/resuming-executions)'s inherited phases are
+recorded on its parent.
+
+<Callout type="warn">
+`deliverable_produced` reads only the artifacts the execution detail links:
+those from completed phases and those kept by a phase that **failed**. The
+partial artifact kept by a phase that was **cancelled** or **interrupted** is
+stored, but nothing links it to the execution detail yet, so it does not count.
+A cancelled or interrupted run whose only artifact is that partial one reads
+`deliverable_produced: false` even though the artifact exists. Look for it in
+the execution's artifacts before concluding nothing was kept.
+</Callout>
+
+```bash
+curl -s -u "$SYN_API_USER:$SYN_API_PASSWORD" \
+  "$SYN_API_URL/api/v1/executions/$EXEC" |
+  jq '{status, failure_classification, reported_failure_reason,
+       deliverable_produced, reported_side_effects,
+       phases: [.phases[] | {name, status, deliverable_recovered, reported_side_effects}]}'
+```
+
+## Every phase produces an artifact
+
+Inside a workspace, `/workspace/artifacts/output/` is the **only** directory
+collected when a phase ends. Every file under it becomes an artifact of the
+phase (files inside `__pycache__` and `.pytest_cache` directories are
+skipped as build junk), and the next phase receives them in `artifacts/input/`.
+
+The rule is that every phase produces at least one artifact, whatever its
+outcome. The platform enforces it in three steps.
+
+### 1. Files the phase wrote
+
+Each collectable file under `artifacts/output/` is judged on its own. A
+non-empty file is stored as-is.
+
+### 2. The last message, recovered
+
+A phase that wrote **no collectable file** has its agent's **last message**
+salvaged instead. So does every file it wrote that was **empty**, even when
+another file beside it has content: the non-empty files are stored as-is and
+each empty one is replaced by the recovered last message, filed under that
+file's own path. The recovered artifact is
+clearly marked so nobody mistakes it for a document the phase wrote:
+
+- its title ends in `[recovered from transcript]`;
+- its content starts with a banner saying it was recovered from the session
+  transcript and is the agent's last message, not its intended deliverable;
+- when the phase left work on a branch, a "Where this phase's work stands"
+  section names it;
+- with no file at all, it is filed as `artifacts/output/recovered-from-transcript.md`.
+
+The phase **completes**, and `phases[].deliverable_recovered` is `true`, which
+is the only field that tells a recovered deliverable apart from a written one.
+
+### 3. Nothing usable: the phase fails
+
+Recovery only accepts a last message that reports something a downstream phase
+could act on. A message needs at least **eight words of substance** after
+removing segments that only announce completion ("Done.", "All set",
+"Task complete", "Thanks") and segments that state a refusal without giving a
+reason ("I cannot do that."). A refusal **with** its reason ("I could not push
+the branch because the credential rejects workflow changes") counts.
+
+So a phase that writes no file and ends on a bare "Done." **fails**: there is
+nothing on disk and nothing said that the next phase could build on. The same
+is true of a phase that wrote one file with content and one empty file and then
+ended on "Done.": the empty file cannot be recovered, and the phase fails
+rather than skipping it, even though the other file had content. The error
+names the phase, and the output types it declared if it declared any.
+
+<Callout type="warn">
+Recovery is a safety net, not a substitute. Have every phase prompt write its
+deliverable to `artifacts/output/`. A recovered artifact is the agent's
+closing message, which may be a full conclusion or only a sign-off.
+</Callout>
+
+### Failed and interrupted phases keep their work
+
+A phase that will not complete still keeps what it produced, before its
+workspace is torn down:
+
+| How the phase ended | What is kept | Artifact title marker |
+| --- | --- | --- |
+| It reported `success: false`, wrote an unreadable report, or exited non-zero | Every non-empty file under `artifacts/output/`; if there were none, its last message (same eight-word rule) | `(kept from a failed phase)` |
+| It was cancelled or interrupted | Every non-empty file under `artifacts/output/`; if there were none, its last message (same rule) | `(partial)` |
+
+Keeping the work does not change the phase's outcome: it stays `failed`,
+`cancelled` or `interrupted` respectively. One exception: when the platform retries an
+attempt whose terminal event was lost, that attempt keeps nothing, because the
+phase is not over and the attempt that finishes it produces its artifact. Artifacts kept by a
+**failed** phase count towards `deliverable_produced`, so a failed run whose
+work survived reads `failed` with `deliverable_produced: true`. Artifacts kept
+by a cancelled or interrupted phase do not count yet; see the limitation under
+[Reading the outcome from the API](#reading-the-outcome-from-the-api).
+
+### Workflow changes the platform could not push
+
+When a failed phase left unpushed commits that change `.github/workflows/`,
+the platform quarantines them in a way GitHub will accept and stores the
+dropped workflow changes as a patch **artifact** of that phase. How the patch
+is produced and how to apply it is described in
+[Work That Changed a GitHub Actions Workflow](/docs/workspaces/hydration#work-that-changed-a-github-actions-workflow).
+
+## Learn More
+
+- [Workflows](/docs/guide/workflows): defining phases and their prompts
+- [Resuming Failed Executions](/docs/guide/resuming-executions): continue a failed run from the phase that did not finish
+- [Observability](/docs/guide/observability): watching a run as it happens
+- [Repository Hydration](/docs/workspaces/hydration): how unpushed work is saved when a phase fails

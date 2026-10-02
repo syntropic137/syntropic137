@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { api, unwrap } from "../client/typed.js";
+import { api, errorDetail, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
@@ -18,6 +18,7 @@ type ExecutionList = components["schemas"]["ExecutionListResponse"];
 type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
 type InventorySummary = components["schemas"]["SessionInventorySummary"];
 type ResumeStart = components["schemas"]["ResumeStartInfo"];
+type SideEffectStatus = components["schemas"]["SideEffectStatus"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -85,6 +86,10 @@ const showCommand: CommandDef = {
   name: "show",
   description: "Show detailed information about a single execution",
   args: [{ name: "execution-id", description: "Execution ID", required: true }],
+  examples: [
+    "syn execution show <execution-id>       # phases, cost and a session inventory summary",
+    "syn execution sessions <execution-id> --all   # every session of the run (the summary's Details line)",
+  ],
   handler: async (parsed: ParsedArgs) => {
     const id = parsed.positionals[0];
     if (!id) {
@@ -98,13 +103,18 @@ const showCommand: CommandDef = {
     }), "Failed to get execution");
 
     print(`${style("Execution:", BOLD)} ${ex.workflow_execution_id}`);
-    print(`  Workflow:   ${ex.workflow_name}`);
-    print(`  Status:     ${formatStatus(ex.status)}`);
-    print(`  Started:    ${formatTimestamp(ex.started_at)}`);
-    if (ex.completed_at) print(`  Completed:  ${formatTimestamp(ex.completed_at)}`);
-    print(`  Tokens:     ${formatTokens(ex.total_tokens)}`);
-    print(`  Cost:       ${formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count)}`);
-    if (ex.error_message) print(`  ${style("Error:", RED)}     ${ex.error_message}`);
+    print(`  Workflow:     ${ex.workflow_name}`);
+    print(`  Status:       ${formatStatus(ex.status)}`);
+    print(`  Started:      ${formatTimestamp(ex.started_at)}`);
+    if (ex.completed_at) print(`  Completed:    ${formatTimestamp(ex.completed_at)}`);
+    print(`  Tokens:       ${formatTokens(ex.total_tokens)}`);
+    print(`  Cost:         ${formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count)}`);
+    // The outcome, beside the status rather than implied by it: a run can fail
+    // after its deliverable exists, or complete while its write-back was
+    // refused (#1501).
+    print(`  Deliverable:  ${ex.deliverable_produced ? "yes" : "no"}`);
+    print(`  Side effects: ${formatSideEffects(ex.reported_side_effects)}`);
+    if (ex.error_message) print(`  ${style("Error:", RED)}        ${ex.error_message}`);
     if (ex.resume_start) printResumeStart(ex.resume_start);
 
     const repos = ex.repos ?? [];
@@ -127,18 +137,24 @@ const showCommand: CommandDef = {
       table.addColumn("Started");
       table.addColumn("Tokens", { align: "right" });
       table.addColumn("Cost", { align: "right" });
+      table.addColumn("Side effects");
 
       for (let i = 0; i < phases.length; i++) {
         const ph = phases[i]!;
         table.addRow(
           String(i + 1),
           ph.name,
-          formatStatus(ph.status),
+          // A salvaged phase completes, so its status alone would hide that
+          // the deliverable came from the transcript, not the file (#1479).
+          ph.deliverable_recovered
+            ? `${formatStatus(ph.status)} ${style("(recovered)", YELLOW)}`
+            : formatStatus(ph.status),
           // What RAN, or "unknown (requested: X)" - never the alias (ADR-067 D9).
           ph.model_display,
           formatTimestamp(ph.started_at),
           formatTokens(ph.total_tokens),
           formatCostWithCoverage(ph.cost_usd, ph.unpriced_observation_count),
+          formatSideEffects(ph.reported_side_effects),
         );
       }
       table.print();
@@ -146,6 +162,12 @@ const showCommand: CommandDef = {
     await printInventorySummary(ex.workflow_execution_id);
   },
 };
+
+/** What an agent SAID about its external writes. Null is its own answer, the
+ * agent said nothing, and is never shown as "none", which is a claim. */
+function formatSideEffects(status: SideEffectStatus | null | undefined): string {
+  return status ?? "not reported";
+}
 
 /**
  * The start of the child this execution's resume admitted (#1480). A resume
@@ -169,7 +191,8 @@ async function readInventorySummary(executionId: string): Promise<InventorySumma
       params: { path: { execution_id: executionId } },
     });
     if (result.data?.summary && result.error === undefined && result.response.ok) return result.data.summary;
-    return `unavailable (${result.response.status})`;
+    const status = `unavailable (${result.response.status})`;
+    return result.error === undefined ? status : `${status}: ${errorDetail(result.error)}`;
   } catch {
     return "unavailable";
   }
@@ -241,7 +264,7 @@ const resumeCommand: CommandDef = {
   },
 };
 
-export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions");
+export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions, their sessions and transcripts");
 executionGroup
   .command(listCommand)
   .command(showCommand)
