@@ -15,7 +15,7 @@ from syn_shared.agents import UnrunnablePhaseSandboxError
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("sandbox", ["read-only", "workspace-write"])
+@pytest.mark.parametrize("sandbox", ["read-only"])
 @pytest.mark.parametrize("spelling", ["flat", "agent"])
 def test_create_refuses_an_unrunnable_level(sandbox: str, spelling: str) -> None:
     base = {"phase_id": "review", "name": "Review", "order": 1}
@@ -28,15 +28,18 @@ def test_create_refuses_an_unrunnable_level(sandbox: str, spelling: str) -> None
         _build_phase_defs([phase])  # type: ignore[list-item]
 
 
-@pytest.mark.parametrize("declared", [None, "full-access"])
-def test_create_accepts_the_runnable_level(declared: str | None) -> None:
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [(None, "full-access"), ("full-access", "full-access"), ("workspace-write", "workspace-write")],
+)
+def test_create_accepts_the_runnable_level(declared: str | None, expected: str) -> None:
     base = {"phase_id": "p", "name": "P", "order": 1}
     phase = {**base, "sandbox": declared} if declared else base
     (built,) = _build_phase_defs([phase])  # type: ignore[list-item]
-    assert built.sandbox == "full-access"
+    assert built.sandbox == expected
 
 
-@pytest.mark.parametrize("sandbox", ["read-only", "workspace-write"])
+@pytest.mark.parametrize("sandbox", ["read-only"])
 async def test_create_workflow_returns_invalid_input_and_persists_nothing(
     sandbox: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

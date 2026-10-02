@@ -139,10 +139,10 @@ def _agent_field(phase: Mapping[str, Any], name: str, default: Any = None) -> An
 
 
 def _runnable_sandbox(declared: object, phase_id: object) -> str:
-    """The phase's sandbox, refused here if the workspace cannot run it (#1434).
+    """The phase's sandbox, refused here if a phase cannot finish under it (#1434).
 
     Checked before the template is persisted, not only at execution: a level
-    the container cannot run should never be stored with a 201.
+    a phase cannot finish under should never be stored with a 201.
     """
     require_runnable_sandbox(declared, phase_id=None if phase_id is None else str(phase_id))
     return str(declared) if declared else DEFAULT_PHASE_SANDBOX

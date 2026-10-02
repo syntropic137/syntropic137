@@ -24,7 +24,7 @@ from syn_shared.agents import UnrunnablePhaseSandboxError
 
 pytestmark = pytest.mark.unit
 
-UNRUNNABLE = ("read-only", "workspace-write")
+UNRUNNABLE = ("read-only",)
 
 
 @dataclass(frozen=True)
@@ -62,15 +62,20 @@ phases:
 @pytest.mark.parametrize("provider", ["codex", "claude"])
 @pytest.mark.parametrize("sandbox", UNRUNNABLE)
 def test_authoring_refuses_an_unrunnable_level(provider: str, sandbox: str) -> None:
-    with pytest.raises(ValidationError, match=r"cannot run in the workspace container.*#1434"):
+    with pytest.raises(ValidationError, match=r"artifacts/output.*#1434"):
         WorkflowDefinition.from_yaml(_yaml(provider, sandbox))
 
 
 @pytest.mark.parametrize("provider", ["codex", "claude"])
-@pytest.mark.parametrize("sandbox", [None, "full-access"])
-def test_authoring_accepts_the_runnable_level(provider: str, sandbox: str | None) -> None:
+@pytest.mark.parametrize(
+    ("sandbox", "expected"),
+    [(None, "full-access"), ("full-access", "full-access"), ("workspace-write", "workspace-write")],
+)
+def test_authoring_accepts_the_runnable_level(
+    provider: str, sandbox: str | None, expected: str
+) -> None:
     definition = WorkflowDefinition.from_yaml(_yaml(provider, sandbox))
-    assert definition.phases[0].to_domain().sandbox == "full-access"
+    assert definition.phases[0].to_domain().sandbox == expected
 
 
 @pytest.mark.parametrize("sandbox", UNRUNNABLE)
