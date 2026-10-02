@@ -17,6 +17,7 @@ import { Table } from "../output/table.js";
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
 type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
 type InventorySummary = components["schemas"]["SessionInventorySummary"];
+type ResumeStart = components["schemas"]["ResumeStartInfo"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -104,6 +105,7 @@ const showCommand: CommandDef = {
     print(`  Tokens:     ${formatTokens(ex.total_tokens)}`);
     print(`  Cost:       ${formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count)}`);
     if (ex.error_message) print(`  ${style("Error:", RED)}     ${ex.error_message}`);
+    if (ex.resume_start) printResumeStart(ex.resume_start);
 
     const repos = ex.repos ?? [];
     if (repos.length > 0) {
@@ -144,6 +146,18 @@ const showCommand: CommandDef = {
     await printInventorySummary(ex.workflow_execution_id);
   },
 };
+
+/**
+ * The start of the child this execution's resume admitted (#1480). A resume
+ * returns 200 before its child starts, so a child that never appears is
+ * explained here and nowhere else.
+ */
+function printResumeStart(resume: ResumeStart): void {
+  print("");
+  print(`${style("Resume start:", BOLD)} ${formatStatus(resume.status)}`);
+  print(`  Attempts:   ${resume.attempts}/${resume.max_attempts}`);
+  if (resume.status_reason) print(`  ${style("Reason:", RED)}    ${resume.status_reason}`);
+}
 
 /**
  * Inventory is additive context: an execution whose inventory cannot be read

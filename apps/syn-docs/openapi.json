@@ -9342,6 +9342,16 @@
             },
             "type": "object",
             "title": "Inputs"
+          },
+          "resume_start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumeStartInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -14439,6 +14449,67 @@
         ],
         "title": "ResumeResponse",
         "description": "The resume that was admitted, and what the child will do."
+      },
+      "ResumeStartInfo": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paused",
+              "retryable",
+              "dispatched",
+              "started",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts",
+            "default": 0
+          },
+          "max_attempts": {
+            "type": "integer",
+            "title": "Max Attempts"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At"
+          },
+          "dispatched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatched At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "max_attempts",
+          "recorded_at"
+        ],
+        "title": "ResumeStartInfo",
+        "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
       },
       "RootResponse": {
         "properties": {
