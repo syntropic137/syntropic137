@@ -30,6 +30,10 @@ from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
 from syn_domain.contexts.orchestration._shared.resolved_skill import (
     ResolvedSkill,
 )
+from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
+    RETIRED_PHASE_FIELDS,
+    retired_field_notices,
+)
 from syn_domain.contexts.orchestration._shared.skill_errors import (
     SkillError,
     SkillInvalidName,
@@ -240,6 +244,7 @@ __all__ = [
     "PhaseExecutionType",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "RETIRED_PHASE_FIELDS",
     "ReportedFailureReason",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
@@ -285,6 +290,7 @@ __all__ = [
     "refuse_resume_start",
     "render_workspace_prompt",
     "require_supported_execution_type",
+    "retired_field_notices",
     "salvage_stranded_phase",
     "validate_phase_declarations",
     "validate_workflow_yaml",

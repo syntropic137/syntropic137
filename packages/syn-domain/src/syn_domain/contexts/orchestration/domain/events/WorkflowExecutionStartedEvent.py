@@ -14,7 +14,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ResumeOrigin,
     SourceCommit,
     owners_to_carry,
-    payload_with_origin_owners_restored,
+    started_payload_for_replay,
 )
 
 #: Where the dispatched task lives inside ``inputs``.
@@ -71,9 +71,9 @@ class WorkflowExecutionStartedEvent(DomainEvent):
 
     @model_validator(mode="before")
     @classmethod
-    def _restore_inherited_owners(cls, data: object) -> object:
-        """Put each inherited phase's carried owner back into `resumed_from` (#1462)."""
-        return payload_with_origin_owners_restored(data)
+    def _normalise_stored_payload(cls, data: object) -> object:
+        """Drop removed pinned-phase keys and restore carried owners (#1462)."""
+        return started_payload_for_replay(data)
 
     @model_serializer(mode="wrap")
     def _carry_inherited_owners(self, handler: SerializerFunctionWrapHandler) -> object:

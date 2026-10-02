@@ -154,12 +154,6 @@ class PhaseDefinition(BaseModel):
     needs no working tree. See ``PhaseYamlDefinition.clone_repos`` for why the
     repo list is deliberately still passed when this is False."""
 
-    can_open_pr: bool = False
-    """Whether this phase was meant to create a pull request (#1197).
-
-    Sourced from the workflow YAML ``can_open_pr`` field. Inert since #1477;
-    see ``PhaseYamlDefinition.can_open_pr``."""
-
     delivers_repo_changes: bool = True
     """Whether repository changes are part of this phase's deliverable (#1308).
 

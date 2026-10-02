@@ -169,13 +169,6 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # installed through the API that declared it did not need one
                 # (#1187) - the bootstrap cost the declaration exists to avoid.
                 clone_repos=_as_bool(p.get("clone_repos", True), "clone_repos"),
-                # Dropping this silently GRANTS publication to a phase that
-                # never asked for it, because the default it would fall back
-                # to is the field's own - and the whole point of #1197 is that
-                # a phase which may not publish must not hold a token that
-                # can. Defaulting to False here means the failure mode of
-                # forgetting is a phase that cannot publish, not one that can.
-                can_open_pr=_as_bool(p.get("can_open_pr", False), "can_open_pr"),
                 # Dropping this silently re-arms the unpushed-work gate against
                 # a phase that declared it delivers no repository changes, so a
                 # build tool touching a tracked lockfile fails a phase that did
@@ -352,6 +345,7 @@ async def validate_yaml(
     from syn_domain.contexts.orchestration import WorkflowDefinition, validate_workflow_yaml
 
     is_valid, error_msg = validate_workflow_yaml(yaml_content)
+    warnings = _retired_field_notices(yaml_content)
 
     if is_valid:
         definition = WorkflowDefinition.from_yaml(yaml_content)
@@ -361,6 +355,7 @@ async def validate_yaml(
                 name=definition.name,
                 workflow_type=definition.type,
                 phase_count=len(definition.phases),
+                warnings=warnings,
             )
         )
 
@@ -368,8 +363,26 @@ async def validate_yaml(
         WorkflowValidation(
             valid=False,
             errors=[error_msg] if error_msg else ["Unknown validation error"],
+            warnings=warnings,
         )
     )
+
+
+def _retired_field_notices(yaml_content: str) -> list[str]:
+    """What the author should be told about retired keys in ``yaml_content``.
+
+    The one place notices are derived from text, and it never raises: YAML that
+    does not parse is reported by validation, not here, so a syntax error stays
+    an invalid result rather than becoming a 500.
+    """
+    import yaml
+
+    from syn_domain.contexts.orchestration import retired_field_notices
+
+    try:
+        return retired_field_notices(yaml.safe_load(yaml_content))
+    except yaml.YAMLError:
+        return []
 
 
 def _classify_workflow_error(error_msg: str) -> WorkflowError:
@@ -532,6 +545,7 @@ class CreateWorkflowResponse(BaseModel):
     repository_url: str
     requires_repos: bool
     status: str
+    warnings: list[str] = Field(default_factory=list)
 
 
 class UpdatePhaseResponse(BaseModel):
@@ -546,6 +560,7 @@ class ValidateYamlResponse(BaseModel):
     workflow_type: str = ""
     phase_count: int = 0
     errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -620,6 +635,7 @@ async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlRespo
         workflow_type=v.workflow_type or "",
         phase_count=v.phase_count or 0,
         errors=v.errors or [],
+        warnings=v.warnings or [],
     )
 
 
@@ -781,6 +797,8 @@ class _YamlCreateOutcome(BaseModel):
     requires_repos: bool
     changed: bool = True
     """False when the package was already installed byte-identical (#822)."""
+    warnings: tuple[str, ...] = ()
+    """Notices for the author, reported whether or not anything changed."""
 
 
 async def create_workflow_from_yaml(
@@ -821,6 +839,7 @@ async def create_workflow_from_yaml(
         definition = WorkflowDefinition.from_yaml(yaml_content)
     except yaml.YAMLError as e:
         raise ValueError(f"Malformed YAML: {e}") from e
+    warnings = tuple(_retired_field_notices(yaml_content))
 
     # Implicit fetch: any claude_plugins ref the YAML declares must be
     # present in the lock projection before we register the workflow.
@@ -877,6 +896,7 @@ async def create_workflow_from_yaml(
             classification=command.classification.value,
             repository_url=command.repository_url,
             requires_repos=command.requires_repos,
+            warnings=warnings,
         )
     )
 
@@ -966,4 +986,5 @@ async def create_workflow_from_yaml_endpoint(
         repository_url=outcome.repository_url,
         requires_repos=outcome.requires_repos,
         status="created" if outcome.changed else "unchanged",
+        warnings=list(outcome.warnings),
     )

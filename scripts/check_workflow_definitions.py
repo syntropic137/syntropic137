@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import yaml
 from pydantic import ValidationError
 
+from syn_domain.contexts.orchestration._shared.retired_phase_fields import retired_field_notices
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PhaseYamlDefinition,
     WorkflowDefinition,
@@ -470,6 +471,10 @@ def main() -> int:
         if not isinstance(raw, dict) or "phases" not in raw:
             # Not a workflow definition (marketplace manifests, fragments).
             continue
+        # Before the package skip: this reads only the raw file, so it needs no
+        # package context. The platform accepts a retired key with a warning,
+        # but these files are the examples authors copy, so here it fails.
+        failures.extend((path, notice) for notice in retired_field_notices(raw))
         if _is_package_member(path):
             # Package-relative skill refs ('./skills/x') resolve against the
             # plugin root, which only exists when the package is validated as a

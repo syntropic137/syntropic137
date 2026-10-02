@@ -30,6 +30,9 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
 )
+from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
+    without_retired_fields,
+)
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
     expand_skill_entry,
@@ -343,15 +346,6 @@ class PhaseYamlDefinition(BaseModel):
     #1129 token routing: dropping it would fall back to the first
     installation, which in a multi-org deployment is the wrong one."""
 
-    can_open_pr: bool = False
-    """Whether this phase was meant to create a pull request (#1197).
-
-    INERT SINCE #1477. It used to downgrade the phase's token to
-    `pull_requests: read`, which also refused every PR comment (GitHub has no
-    comment-only permission), so every phase now holds the installation's own
-    permissions and may open its own PR. Still accepted so existing workflow
-    YAML loads; removal is a follow-up."""
-
     delivers_repo_changes: bool = True
     """Whether a change to the repositories is part of what this phase delivers (#1308).
 
@@ -466,6 +460,22 @@ class PhaseYamlDefinition(BaseModel):
         require_supported_execution_type(str(getattr(value, "value", value)))
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_fields(cls, data: object) -> object:
+        """Ignore a key that is retired, by name, before `extra="forbid"` runs.
+
+        By name and not `extra="ignore"`: ignoring every unknown key is exactly
+        what let a misspelt `prompt:` install and run with no instructions
+        (#961). Only the keys in `RETIRED_PHASE_FIELDS` are dropped, and the
+        author is told about each one (`retired_field_notices`).
+
+        Ignoring is safe here when it was not for the removed provider
+        (`_reject_removed_provider`): a retired key already does nothing, so
+        dropping it changes nothing the phase does.
+        """
+        return without_retired_fields(data)
+
     @field_validator("skills", mode="before")
     @classmethod
     def _expand_skills(cls, value: object) -> object:
@@ -568,7 +578,6 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
-            can_open_pr=self.can_open_pr,
             delivers_repo_changes=self.delivers_repo_changes,
             argument_hint=self.argument_hint,
             model=model,
