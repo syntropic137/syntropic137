@@ -13,6 +13,7 @@ import { style, BOLD, GREEN, RED, DIM } from "../output/ansi.js";
 const showCommand: CommandDef = {
   name: "show",
   description: "Display current CLI configuration",
+  skipPreflight: true,
   handler: async () => {
     const apiUrl = getApiUrl();
     const headers = getAuthHeaders();
@@ -39,6 +40,7 @@ const showCommand: CommandDef = {
 const validateCommand: CommandDef = {
   name: "validate",
   description: "Validate CLI configuration",
+  skipPreflight: true,
   handler: async () => {
     const issues: string[] = [];
     const apiUrl = getApiUrl();
@@ -72,6 +74,7 @@ const validateCommand: CommandDef = {
 const envCommand: CommandDef = {
   name: "env",
   description: "Show environment variable template",
+  skipPreflight: true,
   handler: async () => {
     print("# Syntropic137 CLI configuration");
     print("# Copy and adjust these variables in your shell profile");
