@@ -473,16 +473,49 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  Previous pins, for the record: claude-cli c0573ea6,
 #                  omni-agent 12e7dc55, toolchain e38b1a45, all from
 #                  agentic-workspace 008ed117 (v0.2.0).
+# AGENTIC-WORKSPACE DEGRADABLE SESSION STORE, 2026-10-02 (#1276). Taken from
+# release-branch run 37077378282 ("Release Workspace Images", push to release,
+# success) of agentic-workspace 5ddd1074 (release PR #29), the commit
+# lib/agentic-workspace pins. Re-verified here rather than trusted: `docker
+# buildx imagetools inspect` of each manifest-version tag and full commit tag
+# returns exactly the digest below (amd64 + arm64), every image carries
+# agentic.image.channel=release and revision 5ddd1074, and `cosign verify`
+# (v3.1.3) passes for each against the release-images.yml@refs/heads/release
+# identity with the GitHub Actions OIDC issuer. The repo label stays
+# agentic.repo.version=0.3.0. This release carries AW #27 (PRs #28, #31): an
+# unreachable session store DEGRADES capture instead of failing the workspace
+# (session-store capability.conf failure_policy=degrade,
+# AGENTIC_SESSION_STORE_READY=0, a capability_status audit row read through
+# agentic_isolation.capability_status, degrade.sh removes the capture hooks;
+# AGENTIC_<CAP>_REQUIRED=1 restores the hard fail) and bounds each capability
+# doctor run by AGENTIC_CAPABILITY_DOCTOR_TIMEOUT_S (default 120s).
+#
+# omni-agent       omni-agent manifest 1.13.0. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.281 (Claude Code)", "codex-cli 0.156.1",
+#                  "apss-session-exporter 0.6.0", skills CLI 1.7.0,
+#                  agentic-session-store 0.7.0, session-store capability
+#                  failure_policy=degrade.
+# toolchain        toolchain manifest 1.4.0, built FROM omni e151bb91 in the
+#                  same run (label org.opencontainers.image.base.digest).
+#                  Verified by running OUT OF THIS DIGEST: same claude, codex,
+#                  exporter 0.6.0, skills 1.7.0 and session store as omni.
+# claude-cli       claude-cli manifest 2.1.9. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.126 (Claude Code)", "codex-cli 0.144.6",
+#                  skills 1.7.0, session store 0.7.0, no exporter (unchanged).
+#
+#                  Previous pins, for the record: claude-cli 12a38b8a,
+#                  omni-agent d9395a2e, toolchain 16132cce, all from
+#                  agentic-workspace 7afde6b6 (v0.3.0).
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:12a38b8aa4eaa81bda48790410550d2741870d54b3c39925d8fdf9f934b221ff"
+            "sha256:974979c99a8f98fcff491b466356ed31031ab31dd5f885aa8938eec831c673f5"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:d9395a2ec9b065cd3865e95476c286566231d943b5ab1d2cce3ba3366066556d"
+            "sha256:e151bb91e93a6972879729d80261999c575d4b135ba44f3012c09566479f8670"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:16132cce4470d9375dc2421780915e2d68ccaffb118a4479689e34f8cd20cd44"
+            "sha256:2f41b47c35db1707458637e6bc19325e12a3b8daf0c8cda386c25cc772a8c15c"
         ),
     }
 )
@@ -612,4 +645,5 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:12e7dc55d7aad558798552f2f373ddc0aebd3205e5b30543ff8751a2a12a0189",  # #1398
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8",  # f1647f93
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:e38b1a45b14e7b58040d7664a83e9f53191f24d9ea92462b4eeee829d3ad65f9",  # 70ca5fae
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:16132cce4470d9375dc2421780915e2d68ccaffb118a4479689e34f8cd20cd44",  # 546433c6
 )
