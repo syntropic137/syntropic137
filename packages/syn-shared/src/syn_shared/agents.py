@@ -31,9 +31,11 @@ class AgentProvider(StrEnum):
 class PhaseSandbox(StrEnum):
     """How much authority a phase's agent process is granted.
 
-    ONLY ``FULL_ACCESS`` RUNS TODAY (#1434, see ``RUNNABLE_PHASE_SANDBOXES``).
-    The lower levels are kept as names so a stored template still parses and
-    is refused with a reason, not with "unknown value".
+    Codex enforces these with bubblewrap, which runs inside a workspace only
+    because agentic-workspace starts codex-capable images with its Codex
+    sandbox policy (a seccomp profile plus the ``agentic-codex-sandbox``
+    AppArmor profile). Without that policy every level below ``FULL_ACCESS``
+    fails on its first command. See ``RUNNABLE_PHASE_SANDBOXES``.
 
     Named provider-neutrally, but it steers ``codex exec --sandbox`` only.
     Claude phases scope authority through ``allowed_tools`` and ignore this
@@ -41,20 +43,21 @@ class PhaseSandbox(StrEnum):
     """
 
     READ_ONLY = "read-only"
-    """Read and search only. NOT RUNNABLE in the workspace container: codex
-    enforces it with bubblewrap, which cannot create a namespace there, so the
-    phase cannot even read the repository. It could not publish either, since
-    a phase delivers by writing under ``artifacts/output/`` (#1167)."""
+    """Read and search only, enforced. REFUSED for a phase all the same: a
+    phase delivers by writing under ``artifacts/output/``, and this level
+    denies that write, so the phase cannot report (#1167). Becomes usable
+    once a phase can publish without a filesystem write."""
 
     WORKSPACE_WRITE = "workspace-write"
-    """Read, write and run commands inside the workspace. NOT RUNNABLE in the
-    workspace container, for the same bubblewrap reason (``exec-8e22dc43f351``,
-    #1434). Network egress was measured as available at every level."""
+    """Read, write and run commands inside ``/workspace``, including
+    ``artifacts/output/`` and git commits; writes outside it are denied. The
+    least authority a phase can finish with, so prefer it for any phase that
+    does not need to reach outside the workspace. Network egress is available
+    at every level."""
 
     FULL_ACCESS = "full-access"
-    """Unrestricted filesystem access AND network egress, inside the workspace
-    container, which is the actual isolation boundary. The only runnable
-    level, and the default."""
+    """No codex sandbox: unrestricted filesystem access inside the workspace
+    container. The default."""
 
 
 #: Provider-neutral level -> the value `codex exec --sandbox` expects.
@@ -72,21 +75,13 @@ This is deliberately the MOST permissive level, and that is a stopgap rather
 than a judgement that it is correct.
 
 ``WORKSPACE_WRITE`` was tried as the default in v0.28.0-beta.5 and broke every
-codex phase in production: a phase publishes its deliverable by WRITING under
-``artifacts/output/``, the write was denied, no artifact was produced, and the
-phase still reported ``completed`` - silently removing the verify gate from
-every run (#1167). Rolled back after ~70 minutes.
-
-It is also the ONLY level that runs. Measured 2026-09-26 inside a live
-workspace (codex-cli 0.156.1, Linux, ``cap_drop=ALL``, ``no-new-privileges``):
-``codex sandbox`` at ``read-only`` and at ``workspace-write`` both fail with
-"bwrap: No permissions to create a new namespace" before running anything.
-Earlier level measurements were taken on macOS (Seatbelt) and do not transfer.
-
-So a lower level is refused at authoring and at execution
-(``require_runnable_sandbox``) instead of killing a paid run mid-phase. The
-guarantee a lower level was meant to give - a verifier does not modify what it
-certifies (#1157, #1161) - has to come from the platform, not from this flag.
+codex phase in production: the write under ``artifacts/output/`` was denied
+and the phase still reported ``completed`` (#1167). That was a workspace
+without the Codex sandbox policy, where no lower level runs at all. With the
+policy (measured 2026-10-02, codex-cli 0.156.1, production-shaped container)
+``workspace-write`` writes ``artifacts/output/`` and commits, and denies
+writes outside ``/workspace``. Making it the default is a separate decision,
+to take once every deployment carries the policy.
 """
 
 
@@ -120,49 +115,48 @@ class UnsupportedPhaseSandboxError(ValueError):
         super().__init__(
             f"{where} declares agent.sandbox={sandbox!r}, which is not a known "
             f"sandbox level. Known levels, least to most authority: {known}. "
-            "Only 'full-access' runs in the workspace container today; omit "
-            "agent.sandbox to get it (#1434)."
+            "Use 'workspace-write' for least privilege, or omit agent.sandbox for "
+            "'full-access'."
         )
 
 
-#: The levels a phase can actually run at in the workspace container.
+#: The levels a phase may declare.
 #:
-#: Measured 2026-09-26 (#1434), codex-cli 0.156.1 in the omni workspace image,
-#: inside a live workspace (``cap_drop=ALL``, ``no-new-privileges``): codex
-#: implements every level below full-access with bubblewrap, and bubblewrap
-#: cannot create a namespace there, so ``read-only`` and ``workspace-write``
-#: both fail on the FIRST command - the phase can neither read the repository
-#: nor write its deliverable under ``artifacts/output/``. Claude ignores the
-#: field entirely, so a lower level on a claude phase is a restriction nobody
-#: enforces. Either way the declaration promises something that does not
-#: happen, so it is refused rather than accepted.
+#: Measured 2026-10-02, codex-cli 0.156.1, in a container shaped like a
+#: production workspace (read-only root, ``cap_drop=ALL``, ``no-new-privileges``,
+#: ``/workspace`` bind mount) WITH agentic-workspace's Codex sandbox policy:
+#: ``workspace-write`` writes ``/workspace`` and ``artifacts/output/``, commits,
+#: and is denied outside ``/workspace``; ``read-only`` reads and is denied every
+#: write. Without the policy both fail on bubblewrap (#1434); Syntropic137 pins
+#: the agentic-workspace version that applies it.
 #:
-#: The workspace container is the isolation boundary. A "reviewer cannot
-#: modify what it certifies" guarantee has to come from the platform (read-only
-#: repository mounts, the unpushed-work gate), not from this flag. Widen this
-#: set only on a measurement taken inside a real workspace.
-RUNNABLE_PHASE_SANDBOXES: frozenset[PhaseSandbox] = frozenset({PhaseSandbox.FULL_ACCESS})
+#: ``read-only`` is still refused because it is self-defeating, not because it
+#: cannot run: it denies the ``artifacts/output/`` write that is how a phase
+#: reports. Claude ignores the field, so on a claude phase a level is a
+#: declaration, not a restriction.
+RUNNABLE_PHASE_SANDBOXES: frozenset[PhaseSandbox] = frozenset(
+    {PhaseSandbox.WORKSPACE_WRITE, PhaseSandbox.FULL_ACCESS}
+)
 
 
 class UnrunnablePhaseSandboxError(ValueError):
-    """A phase declares a sandbox level the workspace container cannot run."""
+    """A phase declares a sandbox level it cannot finish under."""
 
     def __init__(self, sandbox: object, *, phase_id: str | None = None) -> None:
         self.sandbox = sandbox
         self.phase_id = phase_id
         where = f"Phase {phase_id!r}" if phase_id else "This phase"
         super().__init__(
-            f"{where} declares agent.sandbox={str(sandbox)!r}, which cannot run in the "
-            "workspace container. Codex enforces every level below 'full-access' with "
-            "bubblewrap, which cannot create a namespace there, so every command fails - "
-            "including reading the repository and writing artifacts/output/. On claude "
-            "the field is ignored, so the restriction would not be enforced either. "
-            "Remove agent.sandbox; the workspace container is the isolation boundary (#1434)."
+            f"{where} declares agent.sandbox={str(sandbox)!r}, which denies the write "
+            "under artifacts/output/ that a phase reports through, so the phase could "
+            "not publish its result. Use 'workspace-write': it is enforced, permits "
+            "writes inside /workspace only, and keeps a review phase from touching "
+            "anything outside it (#1434)."
         )
 
 
 def require_runnable_sandbox(sandbox: object, *, phase_id: str | None = None) -> None:
-    """Raise unless ``sandbox`` is absent or a level the workspace can run.
+    """Raise unless ``sandbox`` is absent or a level a phase can finish under.
 
     Called at authoring (the YAML validator) AND at the execution boundary
     (``validate_phase_declarations``), because a template stored before this
