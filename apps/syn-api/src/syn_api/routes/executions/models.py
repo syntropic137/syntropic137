@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003  # Pydantic resolves it at runtime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, computed_field
@@ -14,6 +15,9 @@ from syn_domain.contexts.orchestration import (
     FailureClassification,
     ReportedFailureReason,
     SideEffectStatus,
+)
+from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
+    ResumeStartStatus,  # noqa: TC001  # Pydantic resolves it at runtime
 )
 from syn_shared.display import EM_DASH
 from syn_shared.observed_model import format_observed_model
@@ -167,6 +171,33 @@ class PhaseExecutionInfo(BaseModel):
         return format_observed_model(self.model, self.requested_model)
 
 
+class ResumeStartInfo(BaseModel):
+    """How starting the child of this execution's resume is going (#1480).
+
+    A resume is admitted with a 200 and its child is started afterwards, in a
+    background task. When that start fails, this is the only place an operator
+    can see it: the child execution never appears, so there is nothing else to
+    look at.
+    """
+
+    status: ResumeStartStatus
+    """``pending``, ``paused``, ``retryable`` and ``dispatched`` are still owed a
+    start and will be offered again; ``started`` and ``failed`` are settled."""
+    status_reason: str | None = None
+    """Why the last attempt did not start the child, if one failed."""
+    attempts: int = 0
+    """Failed attempts counted so far. A hold for maintenance is not one."""
+    max_attempts: int
+    """The ceiling: ``attempts`` reaching it settles the start as ``failed``."""
+    recorded_at: datetime
+    """When the resume was put on the to-do list."""
+    dispatched_at: datetime | None = None
+    """When the start in flight was handed to a background task.
+
+    Set only while ``status`` is ``dispatched``; a failed attempt writes its
+    outcome over the record it was dispatched from, which had none."""
+
+
 class ExecutionDetailResponse(BaseModel):
     workflow_execution_id: str
     workflow_id: str
@@ -269,6 +300,13 @@ class ExecutionDetailResponse(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    resume_start: ResumeStartInfo | None = None
+    """The start of the child this execution admitted when it was resumed.
+
+    ``None`` when this execution has not been resumed. Read from the PARENT,
+    because the record is keyed by the parent and a child that failed to start
+    has no execution of its own to show it on (#1480).
+    """
 
 
 class ExecutionSummaryResponse(BaseModel):
