@@ -15,7 +15,9 @@ which is exactly what the event store holds for those executions.
 from __future__ import annotations
 
 import dataclasses
+import json
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
@@ -37,6 +39,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEve
     WorkflowExecutionStartedEvent,
 )
 
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+
 pytestmark = pytest.mark.unit
 
 EXECUTION = "exec-pre-retirement"
@@ -57,8 +62,11 @@ def _pinned() -> list[ExecutablePhase]:
     ]
 
 
-def _stored_before_retirement() -> dict[str, object]:
-    """A start event's payload as written while `ExecutablePhase` had the field."""
+def _stored_before_retirement(**stored_keys: JsonValue) -> str:
+    """A start event's JSON as written while `ExecutablePhase` had the field.
+
+    ``stored_keys`` are top-level keys the stored document also carried.
+    """
     phases = _pinned()
     event = WorkflowExecutionStartedEvent(
         workflow_id="wf-1",
@@ -74,19 +82,19 @@ def _stored_before_retirement() -> dict[str, object]:
         {**phase, "can_open_pr": phase["phase_id"] == "open_pr"}
         for phase in payload["pinned_phases"]
     ]
-    return payload
+    return json.dumps({**payload, **stored_keys})
 
 
 class TestAStartEventWrittenBeforeRetirement:
     def test_it_validates_as_the_typed_event(self) -> None:
         """The trap: anything but a typed event here is the silent generic downgrade."""
-        event = WorkflowExecutionStartedEvent.model_validate(_stored_before_retirement())
+        event = WorkflowExecutionStartedEvent.model_validate_json(_stored_before_retirement())
 
         assert event.pinned_phases == _pinned()
 
     def test_its_execution_reads_the_pins_typed_and_can_be_resumed_from_them(self) -> None:
         """The consumer of the pins: what a resume would run comes back intact."""
-        event = WorkflowExecutionStartedEvent.model_validate(_stored_before_retirement())
+        event = WorkflowExecutionStartedEvent.model_validate_json(_stored_before_retirement())
         aggregate = WorkflowExecutionAggregate()
 
         aggregate.rehydrate(
@@ -107,15 +115,16 @@ class TestAStartEventWrittenBeforeRetirement:
     def test_owners_are_still_restored(self) -> None:
         """Composing the drop with #1462's owner restore must keep both."""
         grandparent = "exec-grandparent"
-        payload = _stored_before_retirement()
-        payload["resumed_from"] = {
-            "parent_execution_id": "exec-parent",
-            "inherited_phases": [{"phase_id": "research", "artifact_ids": ["art-1"]}],
-            "resume_phase_id": "open_pr",
-        }
-        payload[INHERITED_PHASE_OWNERS] = {"research": grandparent}
+        stored = _stored_before_retirement(
+            resumed_from={
+                "parent_execution_id": "exec-parent",
+                "inherited_phases": [{"phase_id": "research", "artifact_ids": ["art-1"]}],
+                "resume_phase_id": "open_pr",
+            },
+            **{INHERITED_PHASE_OWNERS: {"research": grandparent}},
+        )
 
-        event = WorkflowExecutionStartedEvent.model_validate(payload)
+        event = WorkflowExecutionStartedEvent.model_validate_json(stored)
 
         assert event.pinned_phases == _pinned()
         assert event.resumed_from is not None
@@ -124,7 +133,7 @@ class TestAStartEventWrittenBeforeRetirement:
 
     def test_generic_replay_still_reads_the_pins(self) -> None:
         """ADR-023's other path: `read_pinned_phases` on the raw stored list."""
-        stored = _stored_before_retirement()["pinned_phases"]
+        stored = json.loads(_stored_before_retirement())["pinned_phases"]
 
         assert read_pinned_phases(stored) == _pinned()
 
@@ -140,14 +149,14 @@ class TestAStartEventWrittenBeforeRetirement:
         monkeypatch.setattr(retired_phase_fields, "RETIRED_PHASE_FIELDS", ())
         monkeypatch.setattr(retired_phase_fields, "_RETIRED_NAMES", frozenset())
 
-        event = WorkflowExecutionStartedEvent.model_validate(_stored_before_retirement())
+        event = WorkflowExecutionStartedEvent.model_validate_json(_stored_before_retirement())
 
         assert event.pinned_phases == _pinned()
 
 
 class TestANewStartEvent:
     def test_it_does_not_write_the_key(self) -> None:
-        payload = WorkflowExecutionStartedEvent.model_validate(
+        payload = WorkflowExecutionStartedEvent.model_validate_json(
             _stored_before_retirement()
         ).model_dump(mode="json")
 
