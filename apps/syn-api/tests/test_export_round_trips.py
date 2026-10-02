@@ -654,9 +654,7 @@ class TestARetiredFieldIsNotExported:
             classification="simple",
             description="pre-retirement row",
         ).to_dict()
-        stored["phases"] = [
-            {"id": "open_pr", "name": "Open PR", "order": 1, "can_open_pr": True}
-        ]
+        stored["phases"] = [{"id": "open_pr", "name": "Open PR", "order": 1, "can_open_pr": True}]
         phase = WorkflowDetail.from_dict(stored).phases[0]
         exported = _parsed_phase(_map_phase(phase))
 

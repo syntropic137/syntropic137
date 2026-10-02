@@ -491,7 +491,5 @@ async def test_install_reports_retired_key_notice() -> None:
 
 
 async def test_install_without_the_key_reports_nothing() -> None:
-    response = await create_workflow_from_yaml_endpoint(
-        _make_request(body=WITH_REPO_YAML.encode())
-    )
+    response = await create_workflow_from_yaml_endpoint(_make_request(body=WITH_REPO_YAML.encode()))
     assert response.warnings == []

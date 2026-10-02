@@ -1284,9 +1284,7 @@ class TestTheRepoOwnWorkflowsCarryNoRetiredKey:
     """
 
     @staticmethod
-    def _run_main(
-        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, files: list[Path]
-    ) -> int:
+    def _run_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, files: list[Path]) -> int:
         import scripts.check_workflow_definitions as gate
 
         monkeypatch.setattr(gate, "_ROOT", tmp_path)
