@@ -5,10 +5,15 @@ export const CLI_DESCRIPTION =
   "Syntropic137 - Event-sourced workflow engine for AI agents";
 
 declare const __CLI_VERSION__: string;
+/** What an unbuilt CLI (vitest, tsx) reports. It names no release, so nothing
+ * is compared against it. */
+export const DEV_CLI_VERSION = "0.0.0-dev";
 export const CLI_VERSION =
-  typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : "0.0.0-dev";
+  typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : DEV_CLI_VERSION;
 
 export const DEFAULT_TIMEOUT_MS = 30_000;
+/** Bound on the `GET /version` probe that runs before every API command. */
+export const VERSION_PROBE_TIMEOUT_MS = 2_000;
 export const SSE_CONNECT_TIMEOUT_MS = 5_000;
 
 export function getApiUrl(): string {

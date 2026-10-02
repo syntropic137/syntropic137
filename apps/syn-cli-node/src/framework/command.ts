@@ -24,6 +24,13 @@ export interface CommandDef {
   options?: Record<string, OptionDef>;
   /** Example invocations shown under `--help` and in the generated CLI docs. */
   examples?: readonly string[];
+  /**
+   * Skip the CLI's preflight (the server-version check, #1473). Set it only on
+   * commands that never contact the API. Leaving it unset is the safe mistake:
+   * a local command pays one silent request, whereas an API command wrongly
+   * marked loses the warning that explains its errors.
+   */
+  skipPreflight?: boolean;
   handler: (parsed: ParsedArgs) => void | Promise<void>;
 }
 

@@ -2405,6 +2405,15 @@ release-local version:
     echo "🚀 Local release: {{version}}"
     echo ""
 
+    # syn-api reports this as its commit on /version (#1473). A dirty tree is
+    # not the commit HEAD names, and stamping nothing would ship `commit: null`,
+    # so refuse before anything is logged in to or pushed.
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "❌ Working tree is dirty: commit or stash first, so syn-api's /version names the tree that shipped" >&2
+        exit 1
+    fi
+    build_commit="$(git rev-parse HEAD)"
+
     # Login to GHCR
     gh auth token | docker login ghcr.io -u syntropic137 --password-stdin
     echo ""
@@ -2432,7 +2441,9 @@ release-local version:
                               # rather than inheriting it silently - inheriting
                               # it silently is the exact shape of the bug this
                               # line closes.
-                              build_args="--build-arg INCLUDE_DOCKER_CLI=1" ;;
+                              # SYN_BUILD_* are the image's identity on
+                              # /version, measured by the same fitness test.
+                              build_args="--build-arg INCLUDE_DOCKER_CLI=1 --build-arg SYN_BUILD_IMAGE_TAG={{version}} --build-arg SYN_BUILD_COMMIT=$build_commit" ;;
             syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;
         esac
         echo "📦 Building $image..."

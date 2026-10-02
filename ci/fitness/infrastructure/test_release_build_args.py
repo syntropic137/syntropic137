@@ -22,12 +22,21 @@ claimed to cover. So every reader here refuses a shape it cannot parse rather
 than skipping it, and the tests at the bottom of this file pin that: a silent
 skip makes the collection under test exactly the collection that passes.
 
+The same paths that ship an image must also stamp its identity. syn-api reports
+``SYN_BUILD_IMAGE_TAG`` and ``SYN_BUILD_COMMIT`` as ``image_tag`` and ``commit``
+on ``/version`` and ``/health``, and an unstamped image reports null, so a
+shipping path that stops passing them is invisible until someone asks the
+server which build it is (#1473). The second half of this file measures that.
+
 Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,6 +57,23 @@ COMPOSE_API_OVERLAYS_WITHOUT_BUILD = {
         "published environment-only overlay; inherits the measured base image"
     ),
 }
+
+#: The pit-stop deploy. It builds syn-api for the VPS outside every other path.
+PIT_STOP = "scripts/pit_stop.sh"
+
+#: The build args syn-api reports back as `image_tag` and `commit` (#1473).
+IDENTITY_STAMPS = ("SYN_BUILD_IMAGE_TAG", "SYN_BUILD_COMMIT")
+#: Build paths that are not measured for identity, and why. Each one builds an
+#: image that is never shipped, so null is the honest answer there.
+IDENTITY_NOT_MEASURED = {
+    "docker/docker-compose*.yaml": "local dev and selfhost builds from a working tree",
+    "_check-docker-dry-run.yml": "a CI dry run whose image is never pushed",
+}
+#: Shipping paths known to be unstamped because the fix lives under .github/,
+#: which agents cannot push. An entry must name a path that is STILL failing:
+#: `test_the_awaiting_exception_is_still_needed` fails once the patch is
+#: applied, so whoever applies it deletes the entry in the same change.
+AWAITING_WORKFLOW_PATCH: dict[str, str] = {}
 
 # ``${{ matrix.image == 'syn-api' && '1' || '0' }}`` - the only GitHub
 # expression any build arg in this repo uses. An unrecognised form is a hard
@@ -315,11 +341,52 @@ def _declared_in_blob(blob: object, source: str) -> str | None:
     return None if match is None else _resolve_for_syn_api(match[1], source)
 
 
+def _pit_stop_syn_api_build() -> str:
+    """The one `docker buildx build` command in pit_stop.sh that builds syn-api.
+
+    Continuation lines are joined first, since the command spans several. The
+    script builds two images, so the match is on the Dockerfile it names; zero
+    or several matches is a shape this reader does not know, and fails.
+    """
+    script = (_repo_root() / PIT_STOP).read_text()
+    joined = re.sub(r"\\\n\s*", " ", script)
+    commands = [
+        line
+        for line in joined.splitlines()
+        if "docker buildx build" in line and SYN_API_DOCKERFILE in line
+    ]
+    if len(commands) != 1:
+        pytest.fail(
+            f"{PIT_STOP}: expected exactly one `docker buildx build` naming "
+            f"{SYN_API_DOCKERFILE}, found {len(commands)}. Teach this test the new shape."
+        )
+    return commands[0]
+
+
+def _shell_build_args(command: str) -> dict[str, str]:
+    """`--build-arg KEY=VALUE` pairs in one shell command, quotes stripped."""
+    return {
+        key: value.strip("\"'")
+        for key, value in re.findall(
+            r"--build-arg\s+([A-Z_]+)=(\"[^\"]*\"|'[^']*'|[^\s]*)", command
+        )
+    }
+
+
+def _pit_stop_build_path() -> BuildPath:
+    declared = _shell_build_args(_pit_stop_syn_api_build()).get(ARG)
+    return BuildPath(
+        source=PIT_STOP,
+        declared=None if declared is None else _resolve_for_syn_api(declared, PIT_STOP),
+    )
+
+
 def _syn_api_build_paths() -> list[BuildPath]:
     return [
         *_compose_build_paths(),
         _release_local_build_path(),
         *_workflow_build_paths(),
+        _pit_stop_build_path(),
     ]
 
 
@@ -558,3 +625,213 @@ def test_syn_api_capabilities_cover_the_binaries_that_fail_closed() -> None:
     assert {"docker", "cosign"} <= required, (
         f"syn-api must be verified for docker and cosign; got {sorted(required)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Build identity (#1473). Every path that SHIPS a syn-api image must stamp
+# `SYN_BUILD_IMAGE_TAG` and `SYN_BUILD_COMMIT`. Without them /version and
+# /health report image_tag and commit as null, and a pit stop cannot be told
+# from a release of the same number. Only shipping paths are measured; see
+# IDENTITY_NOT_MEASURED for the rest.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IdentityPath:
+    """One shipping path and the build args it declares."""
+
+    source: str
+    declared: dict[str, str]
+
+
+def _kv_blob(blob: object, source: str) -> dict[str, str]:
+    """A workflow `build-args` blob as a mapping. Refuses what it cannot read."""
+    if not isinstance(blob, str):
+        pytest.fail(f"{source}: build-args is {type(blob).__name__}, not a `KEY=VALUE` string")
+    pairs = (line.strip().partition("=") for line in blob.splitlines() if line.strip())
+    return {key: value for key, _, value in pairs}
+
+
+def _identity_paths() -> list[IdentityPath]:
+    paths: list[IdentityPath] = []
+
+    release = yaml.safe_load(
+        (_repo_root() / ".github" / "workflows" / "release-containers.yaml").read_text()
+    )
+    for job_name, job in (release.get("jobs") or {}).items():
+        for step in job.get("steps") or []:
+            blob = (step.get("with") or {}).get("build-args")
+            if blob:
+                source = f"release-containers.yaml ({job_name})"
+                paths.append(IdentityPath(source, _kv_blob(blob, source)))
+
+    arms = _case_arms(_justfile_recipe_body("release-local"))
+    assert SYN_API in arms, "release-local no longer has a syn-api case arm"
+    paths.append(
+        IdentityPath("justfile `release-local` (syn-api)", _shell_build_args(arms[SYN_API]))
+    )
+
+    paths.append(IdentityPath(PIT_STOP, _shell_build_args(_pit_stop_syn_api_build())))
+
+    assert any(p.source.startswith("release-containers.yaml") for p in paths), (
+        "found no release workflow build step - the reader has gone stale"
+    )
+    return paths
+
+
+def _paths_missing_identity(paths: list[IdentityPath]) -> dict[str, list[str]]:
+    """Source -> the stamps it does not declare with a non-empty value."""
+    missing: dict[str, list[str]] = {}
+    for path in paths:
+        absent = [stamp for stamp in IDENTITY_STAMPS if not path.declared.get(stamp, "").strip()]
+        if absent:
+            missing[path.source] = absent
+    return missing
+
+
+@pytest.mark.architecture
+def test_every_shipping_syn_api_build_path_stamps_its_identity() -> None:
+    """A shipped image that cannot say which build it is reports null.
+
+    Exempt only what AWAITING_WORKFLOW_PATCH names, and only while it is true.
+    """
+    missing = _paths_missing_identity(_identity_paths())
+    unexplained = {s: m for s, m in missing.items() if s not in AWAITING_WORKFLOW_PATCH}
+    assert not unexplained, (
+        "These paths ship a syn-api image that reports image_tag/commit as null on "
+        "/version (#1473):\n" + "\n".join(f"  - {s}: missing {m}" for s, m in unexplained.items())
+    )
+
+
+@pytest.mark.architecture
+def test_the_awaiting_exception_is_still_needed() -> None:
+    """An exception that outlives its reason is a hole in the check.
+
+    When the workflow patch lands this fails, naming the entry to delete.
+    """
+    missing = _paths_missing_identity(_identity_paths())
+    stale = sorted(set(AWAITING_WORKFLOW_PATCH) - set(missing))
+    assert not stale, f"{stale} now stamp their identity. Delete them from AWAITING_WORKFLOW_PATCH."
+
+
+@pytest.mark.architecture
+def test_identity_exclusions_carry_reasons() -> None:
+    for name, reason in {**IDENTITY_NOT_MEASURED, **AWAITING_WORKFLOW_PATCH}.items():
+        assert reason.strip(), f"{name} is excluded without a reason"
+
+
+@pytest.mark.architecture
+@pytest.mark.parametrize(
+    ("label", "blob", "absent"),
+    [
+        ("no commit", "INCLUDE_DOCKER_CLI=1\nSYN_BUILD_IMAGE_TAG=v1\n", ["SYN_BUILD_COMMIT"]),
+        ("an empty commit", "SYN_BUILD_IMAGE_TAG=v1\nSYN_BUILD_COMMIT=\n", ["SYN_BUILD_COMMIT"]),
+        ("neither", "INCLUDE_DOCKER_CLI=1\n", list(IDENTITY_STAMPS)),
+    ],
+)
+def test_a_path_missing_a_stamp_is_reported(label: str, blob: str, absent: list[str]) -> None:
+    path = IdentityPath(label, _kv_blob(blob, label))
+    assert _paths_missing_identity([path]) == {label: absent}
+
+
+@pytest.mark.architecture
+def test_a_fully_stamped_path_passes() -> None:
+    blob = "SYN_BUILD_IMAGE_TAG=${{ steps.version.outputs.version }}\nSYN_BUILD_COMMIT=${{ steps.version.outputs.commit }}\n"
+    assert _paths_missing_identity([IdentityPath("ok", _kv_blob(blob, "ok"))]) == {}
+
+
+# The static reader above sees `SYN_BUILD_COMMIT=$build_commit` as declared
+# whatever `$build_commit` holds at runtime. These run the recipe itself, with
+# stub `docker`, `gh` and `just` on PATH, so the value actually passed to the
+# build is what gets asserted.
+
+_RECORDING_STUB = '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$STUB_LOG"\n'
+
+
+def _run_release_local(
+    repo: Path, stubs: Path
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run `release-local 9.9.9` in ``repo`` and return it and every stubbed call."""
+    for name in ("docker", "gh", "just"):
+        stub = stubs / name
+        stub.write_text(_RECORDING_STUB)
+        stub.chmod(0o755)
+    log = stubs / "calls.log"
+    log.touch()
+    script = textwrap.dedent(_justfile_recipe_body("release-local"))
+    script = script.replace("{{version}}", "9.9.9").replace("{{registry}}", "ghcr.io/test")
+    bash = shutil.which("bash")
+    assert bash is not None
+    result = subprocess.run(
+        [bash, "-c", script],
+        cwd=repo,
+        env={"PATH": f"{stubs}:/usr/bin:/bin", "STUB_LOG": str(log), "HOME": str(repo)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result, log.read_text().splitlines()
+
+
+@pytest.fixture
+def clean_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(repo)]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (repo / "f").write_text("x")
+    subprocess.run([*git, "add", "f"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "c"], check=True)
+    return repo
+
+
+@pytest.mark.architecture
+def test_release_local_refuses_a_dirty_tree_before_pushing(
+    clean_repo: Path, tmp_path: Path
+) -> None:
+    """A dirty tree has no commit to name, so it must not ship `commit: null`."""
+    (clean_repo / "uncommitted").write_text("y")
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    result, calls = _run_release_local(clean_repo, stubs)
+    assert result.returncode != 0, f"release-local ran on a dirty tree:\n{result.stdout}"
+    builds = [c for c in calls if c.startswith("buildx build")]
+    assert not builds, f"release-local built from a dirty tree: {builds}"
+
+
+@pytest.mark.architecture
+def test_release_local_stamps_syn_api_with_the_head_it_built(
+    clean_repo: Path, tmp_path: Path
+) -> None:
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    head = subprocess.run(
+        ["git", "-C", str(clean_repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result, calls = _run_release_local(clean_repo, stubs)
+    assert result.returncode == 0, result.stdout + result.stderr
+    syn_api = [c for c in calls if c.startswith("buildx build") and "syn-api/Dockerfile" in c]
+    assert len(syn_api) == 1, f"expected one syn-api build, got {calls}"
+    declared = _shell_build_args(syn_api[0])
+    assert declared.get("SYN_BUILD_COMMIT") == head, syn_api[0]
+    assert declared.get("SYN_BUILD_IMAGE_TAG") == "9.9.9", syn_api[0]
+
+
+@pytest.mark.architecture
+def test_a_multi_line_shell_build_is_read_whole() -> None:
+    """pit_stop's build spans continuation lines; the stamps are on the second."""
+    command = re.sub(
+        r"\\\n\s*",
+        " ",
+        "run docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 \\\n"
+        '    --build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$BUILT_SHA" \\\n'
+        '    -t x --load -f "$WT/infra/docker/images/syn-api/Dockerfile" "$WT"',
+    )
+    assert _shell_build_args(command) == {
+        "INCLUDE_DOCKER_CLI": "1",
+        "SYN_BUILD_IMAGE_TAG": "$TAG",
+        "SYN_BUILD_COMMIT": "$BUILT_SHA",
+    }

@@ -33,13 +33,31 @@ from syn_api.main import create_app
 INSTALLED = version("syn-api")
 
 
-async def _health_body() -> dict:
-    """The /health payload, parsed from the wire rather than from the model."""
+async def _body(route: str) -> dict:
+    """A route's payload, parsed from the wire rather than from the model."""
     transport = ASGITransport(app=create_app())
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/health")
+        response = await client.get(route)
     assert response.status_code == 200, response.text
     return json.loads(response.text)
+
+
+async def _health_body() -> dict:
+    return await _body("/health")
+
+
+#: Every route that answers "which build is this?", and where in its payload
+#: the answer sits. /version is the one the CLI asks before every API command
+#: (#1473), so a rename or a dropped stamp there breaks `syn` at runtime only.
+BUILD_ROUTES = [
+    pytest.param("/health", "build", id="health"),
+    pytest.param("/version", None, id="version"),
+]
+
+
+async def _build_via(route: str, key: str | None) -> dict:
+    body = await _body(route)
+    return body[key] if key else body
 
 
 @pytest.mark.unit
@@ -81,8 +99,19 @@ async def test_health_and_openapi_cannot_disagree() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_version_and_health_report_the_same_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two routes, one answer: the CLI reads /version, operators read /health."""
+    monkeypatch.setenv(ENV_IMAGE_TAG, "v0.29.1-beta.3")
+    monkeypatch.setenv(ENV_COMMIT, "9f3c1ab")
+
+    assert await _body("/version") == (await _health_body())["build"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("route", "key"), BUILD_ROUTES)
 async def test_build_stamps_reach_the_payload_when_the_image_supplies_them(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, route: str, key: str | None
 ) -> None:
     """The image tag and commit survive the model and the serializer.
 
@@ -93,7 +122,7 @@ async def test_build_stamps_reach_the_payload_when_the_image_supplies_them(
     monkeypatch.setenv(ENV_IMAGE_TAG, "v0.29.1-beta.3")
     monkeypatch.setenv(ENV_COMMIT, "9f3c1ab")
 
-    build = (await _health_body())["build"]
+    build = await _build_via(route, key)
 
     assert build["image_tag"] == "v0.29.1-beta.3"
     assert build["commit"] == "9f3c1ab"
@@ -101,8 +130,9 @@ async def test_build_stamps_reach_the_payload_when_the_image_supplies_them(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("route", "key"), BUILD_ROUTES)
 async def test_an_unstamped_build_says_so_rather_than_guessing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, route: str, key: str | None
 ) -> None:
     """Absent reports as null, and an empty stamp is absent.
 
@@ -114,7 +144,7 @@ async def test_an_unstamped_build_says_so_rather_than_guessing(
     monkeypatch.setenv(ENV_IMAGE_TAG, "")
     monkeypatch.delenv(ENV_COMMIT, raising=False)
 
-    build = (await _health_body())["build"]
+    build = await _build_via(route, key)
 
     assert build["image_tag"] is None
     assert build["commit"] is None

@@ -149,9 +149,23 @@ if [ "$MODE" != "swap" ]; then
         git -C "$WT" status --porcelain | awk '$1=="M"{print $2}' | (cd "$WT" && xargs git add --)
         git -C "$WT" commit --no-verify -q -m "chore: bump to $VERSION" && echo "   committed $(git -C "$WT" rev-parse --short HEAD)"
     fi
+    # The commit the image is built from is the BUMP commit, never $REF:
+    # bump-version rewrites the package metadata syn-api reads its release from,
+    # so $REF's tree is not the tree that ships (#1473). chore/bump-$VERSION is
+    # never pushed, so this SHA resolves in this repository, not on GitHub. That
+    # is also what tells a pit stop apart from a release of the same tag.
+    if [ "$DRY" = 0 ]; then
+        BUILT_SHA="$(git -C "$WT" rev-parse --verify HEAD)"
+    else
+        BUILT_SHA="<the bump commit on $REF>"
+    fi
 
-    step "build: syn-api + syn-gateway $TAG for linux/amd64"
+    step "build: syn-api + syn-gateway $TAG for linux/amd64 (commit $BUILT_SHA)"
+    # SYN_BUILD_* are what /version reports as image_tag and commit, and verify
+    # reads them back below. The fitness test in
+    # ci/fitness/infrastructure/test_release_build_args.py fails if they go.
     run docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 \
+        --build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$BUILT_SHA" \
         -t "ghcr.io/syntropic137/syn-api:$TAG" --load -f "$WT/infra/docker/images/syn-api/Dockerfile" "$WT"
     run docker buildx build --platform linux/amd64 \
         -t "ghcr.io/syntropic137/syn-gateway:$TAG" --load -f "$WT/infra/docker/images/gateway/Dockerfile" "$WT"
@@ -220,7 +234,7 @@ step "swap: recreate api + gateway (no pull: the images are only in the host's d
 # Re-checked immediately above; the swap runs in the same breath.
 run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway" | tail -4
 
-step "verify: images, docker CLI, projections"
+step "verify: images, docker CLI, projections, build identity"
 if [ "$DRY" = 0 ]; then
     # BY IMAGE ID, NOT BY TAG. `{{.Config.Image}}` reports the string the
     # container was created from, and a tag is mutable: a container built from
@@ -244,6 +258,17 @@ if [ "$DRY" = 0 ]; then
         sleep 10
     done
     [ "$healthy" = 1 ] || die "projections not healthy after the swap"
+    # The image id above proves the right bytes are running; this proves they
+    # say so. Under --swap-only this run built nothing, so the commit is only
+    # required to be present, not to equal one.
+    api "/version" "$TMP/version.json" || die "GET /version failed after the swap"
+    python3 - "$TMP/version.json" "$TAG" "${BUILT_SHA:-}" <<'PY' || die "the running API does not report the build just shipped (want image_tag=$TAG commit=${BUILT_SHA:-any})"
+import json, sys
+build, tag, sha = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
+print(f"   /version: image_tag={build.get('image_tag')} commit={build.get('commit')}")
+commit_ok = build.get("commit") == sha if sha else bool(build.get("commit"))
+sys.exit(0 if build.get("image_tag") == tag and commit_ok else 1)
+PY
 fi
 # AFTER verify, deliberately. Every stage above can `die`, and a deploy that
 # failed should leave the new container refusing rather than admitting work to

@@ -22,6 +22,7 @@ function truncate(text: string, maxLen: number): string {
 export const searchCommand: CommandDef = {
   name: "search",
   description: "Search for workflows across registered marketplaces",
+  skipPreflight: true,
   args: [{ name: "query", description: "Search term (matches name, description, tags)" }],
   options: {
     category: { type: "string", short: "c", description: "Filter by category" },
@@ -78,6 +79,7 @@ export const searchCommand: CommandDef = {
 export const infoCommand: CommandDef = {
   name: "info",
   description: "Show details of a marketplace workflow plugin",
+  skipPreflight: true,
   args: [{ name: "name", description: "Plugin name from marketplace", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
