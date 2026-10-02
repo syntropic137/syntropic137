@@ -2,7 +2,7 @@
 
 ## How to use
 
-- Next available number: **ADR-065**
+- Next available number: **ADR-072**
 - Template: Status, Date, Context, Decision, Consequences (Nygard format)
 - ADR-025 was never created (numbering gap)
 - ADR-027 has two files: `ADR-027-sdk-wrapper-architecture.md` (superseded) and `ADR-027-unified-workflow-executor.md` (accepted)
@@ -31,7 +31,7 @@
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-009](ADR-009-agentic-execution-architecture.md) | Agentic Execution Architecture | Accepted |
-| [ADR-014](ADR-014-workflow-execution-model.md) | Workflow Execution Model | Accepted |
+| [ADR-014](ADR-014-workflow-execution-model.md) | Workflow Execution Model (incl. resume as fork, deliverable vs side effects) | Accepted |
 | [ADR-019](ADR-019-websocket-control-plane.md) | WebSocket Control Plane Architecture | Accepted |
 | [ADR-023](ADR-023-workspace-first-execution-model.md) | Workspace-First Execution Model | Accepted |
 | [ADR-027](ADR-027-unified-workflow-executor.md) | Unified Workflow Executor Architecture | Accepted |
@@ -116,6 +116,7 @@
 | [ADR-058](ADR-058-workspace-hydration.md) | Workspace Hydration | Accepted |
 | [ADR-065](ADR-065-claude-plugin-injection.md) | Skills as the Workflow Capability Unit | Accepted |
 | [ADR-068](ADR-068-remove-interactive-tmux-path.md) | Remove the Interactive tmux Agent Path | Accepted |
+| [ADR-071](ADR-071-session-inventory-and-discovery.md) | Session Inventory and Discovery | Accepted |
 
 ### Organization & Repos
 
