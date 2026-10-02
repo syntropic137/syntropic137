@@ -5,8 +5,9 @@ description: "Show CLI and server version, and what happens when they differ"
 
 The `syn` CLI ships to npm and the server is deployed separately, so the two can
 drift apart. `syn version` reports both sides, and every command that talks to the
-API checks the same thing before it runs. Commands that work only locally, such
-as `syn config` and the marketplace commands, skip the check.
+API checks the same thing before it runs. Commands that never call the Syntropic
+API skip the check: `syn config`, and the marketplace commands, which may still
+fetch marketplace registries over the network.
 
 ## Output
 
