@@ -69,13 +69,13 @@ class SessionInventorySettings(BaseSettings):
     local_body_retention_seconds: int | None = Field(
         default=None,
         ge=1,
-        description="Optional local body lifetime since first catalog acquisition. Disabled by default. Expiry permanently deletes exact shared bytes but retains discovery history. When capture replication is enabled, deletion propagates asynchronously to that destination.",
+        description="Optional local body lifetime since the newest catalog acquisition referencing those exact bytes: shared bytes expire only after every referencing capture is past this age. Disabled by default. Expiry permanently deletes the shared bytes but retains discovery history. When capture replication is enabled, deletion propagates asynchronously to that destination.",
     )
 
     local_body_max_bytes: int | None = Field(
         default=None,
         ge=1,
-        description="Optional byte quota for distinct local transcript bodies. Disabled by default. When exceeded, the oldest bodies are tombstoned and erased like age expiry; discovery history is retained.",
+        description="Optional byte quota for distinct local transcript bodies. Disabled by default. When exceeded, bodies whose newest referencing capture is oldest are tombstoned and erased like age expiry; discovery history is retained.",
     )
     spool_retention_seconds: int | None = Field(
         default=None,

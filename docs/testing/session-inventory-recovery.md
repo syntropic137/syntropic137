@@ -166,9 +166,11 @@ remain required before enabling qualified writes in a released deployment.
 ## Optional local body expiry
 
 `SYN_SESSION_INVENTORY_LOCAL_BODY_RETENTION_SECONDS` enables permanent local
-body expiry; unset means no automatic expiry. Age starts at first durable catalog
-acquisition, not the last read or duplicate capture. The policy applies to exact
-shared bytes across all local memberships. Catalog and historical inventory rows
+body expiry; unset means no automatic expiry. Bodies are content-addressed, so
+one object can back captures acquired at different times: age is measured from
+the newest durable catalog acquisition referencing those exact bytes (not the
+last read), and the object expires only once every referencing capture is past
+the age. Owner deletion and retraction still remove the whole object at once. Catalog and historical inventory rows
 remain discoverable. Remote replicas currently have separate retention; this
 setting does not delete their bodies or already queued exporter copies.
 
@@ -326,8 +328,8 @@ content hash.
 Quotas (all disabled by default, ADR-004 settings forwarded through compose):
 
 - `SYN_SESSION_INVENTORY_LOCAL_BODY_MAX_BYTES`: distinct archived objects are
-  counted once; the oldest are tombstoned as `retention_quota` until the newest
-  fit. Owner deletions run whether or not any quota is set.
+  counted once; objects whose newest referencing capture is oldest are
+  tombstoned as `retention_quota` until the rest fit. Owner deletions run whether or not any quota is set.
 - `SYN_SESSION_INVENTORY_SPOOL_RETENTION_SECONDS`: a settled spool (completed
   session or terminal execution) past this age expires.
 - `SYN_SESSION_INVENTORY_SPOOL_MAX_BYTES`: settled spools are evicted oldest

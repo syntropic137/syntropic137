@@ -56,30 +56,44 @@ class LocalBodyRetention:
             await self._discover_quota(limit)
 
     async def _discover_age(self, limit: int) -> None:
+        """Tombstone objects whose every referencing capture is past the age.
+
+        Bodies are content-addressed, so one object can back captures acquired
+        at very different times. Judging it by its oldest capture would erase
+        bytes a recent capture still references; an object expires only when
+        its newest referencing capture has aged out.
+        """
         async with self._pool.acquire() as conn, conn.transaction():
             await lock_tombstones_xact(conn, self._source)
             await conn.execute(
-                """INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive,reason)
-                SELECT c.source_instance_id,c.payload->'archive'->>'sha256',c.payload->'archive',
-                'retention_age'
-                FROM session_capture_catalog c
-                WHERE c.source_instance_id=$1
-                AND c.created_at<=now()-$2::double precision*interval '1 second'
-                AND NOT EXISTS(SELECT 1 FROM session_body_deletions d
-                    WHERE d.source_instance_id=c.source_instance_id
-                    AND d.archive_sha256=c.payload->'archive'->>'sha256')
-                ORDER BY c.created_at,c.producer_id,c.capture_id
-                LIMIT $3 ON CONFLICT DO NOTHING""",
+                """WITH objects AS (
+                    SELECT c.payload->'archive'->>'sha256' AS sha,
+                    min((c.payload->'archive')::text) AS archive,
+                    max(c.created_at) AS last_seen
+                    FROM session_capture_catalog c
+                    WHERE c.source_instance_id=$1
+                    AND NOT EXISTS(SELECT 1 FROM session_body_deletions d
+                        WHERE d.source_instance_id=c.source_instance_id
+                        AND d.archive_sha256=c.payload->'archive'->>'sha256')
+                    GROUP BY 1
+                    HAVING max(c.created_at)<=now()-$2::double precision*interval '1 second'
+                )
+                INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive,reason)
+                SELECT $1,sha,archive::jsonb,'retention_age' FROM objects
+                ORDER BY last_seen,sha LIMIT $3
+                ON CONFLICT DO NOTHING""",
                 self._source,
                 self._age,
                 limit,
             )
 
     async def _discover_quota(self, limit: int) -> None:
-        """Keep the newest retained objects within the byte quota; evict the oldest.
+        """Keep the most recently referenced objects within the byte quota.
 
-        Size counts each exact object once however many captures share it.
-        Objects already tombstoned no longer count against the quota.
+        Size counts each exact object once however many captures share it, and
+        an object is as recent as its newest referencing capture: the objects
+        whose newest reference is oldest are evicted first. Objects already
+        tombstoned no longer count against the quota.
         """
         async with self._pool.acquire() as conn, conn.transaction():
             await lock_tombstones_xact(conn, self._source)
@@ -88,7 +102,7 @@ class LocalBodyRetention:
                     SELECT c.payload->'archive'->>'sha256' AS sha,
                     min((c.payload->'archive')::text) AS archive,
                     max((c.payload->'archive'->>'size')::bigint) AS size,
-                    min(c.created_at) AS first_seen
+                    max(c.created_at) AS last_seen
                     FROM session_capture_catalog c
                     WHERE c.source_instance_id=$1
                     AND NOT EXISTS(SELECT 1 FROM session_body_deletions d
@@ -96,13 +110,13 @@ class LocalBodyRetention:
                         AND d.archive_sha256=c.payload->'archive'->>'sha256')
                     GROUP BY 1
                 ), ranked AS (
-                    SELECT sha,archive,first_seen,
-                    sum(size) OVER (ORDER BY first_seen DESC,sha DESC) AS newer_total
+                    SELECT sha,archive,last_seen,
+                    sum(size) OVER (ORDER BY last_seen DESC,sha DESC) AS newer_total
                     FROM objects
                 )
                 INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive,reason)
                 SELECT $1,sha,archive::jsonb,'retention_quota' FROM ranked
-                WHERE newer_total>$2 ORDER BY first_seen,sha LIMIT $3
+                WHERE newer_total>$2 ORDER BY last_seen,sha LIMIT $3
                 ON CONFLICT DO NOTHING""",
                 self._source,
                 self._max_bytes,
