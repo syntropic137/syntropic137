@@ -360,7 +360,18 @@ syn workflow validate ./workflow.yaml
 ```
 
 Validation checks the YAML schema, verifies that all referenced `.md` files exist,
-and resolves `shared://` references.
+and resolves `shared://` references. For a package directory, each resolved
+workflow is then validated by the server, the same parser `install` uses.
+
+### Retired phase fields
+
+A field that no longer does anything is still accepted, so older workflows keep
+installing, but `validate`, `create --from` and `install` print a warning naming
+the phase and the field. Delete the line. A misspelt field is still an error.
+
+| Field | Retired | Why |
+|-------|---------|-----|
+| `can_open_pr` | #1477 | Every phase token carries the GitHub App installation's own permissions, so every phase may open and comment on a PR. |
 
 ## Example Packages
 

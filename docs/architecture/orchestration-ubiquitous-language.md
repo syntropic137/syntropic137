@@ -41,6 +41,13 @@ A Phase is completed only when the Execution recorded it so. A Phase that
 started and did not complete has no partial credit: there is no mid-phase
 resume.
 
+A **retired phase field** is a key an author may still write that no longer
+does anything (`RETIRED_PHASE_FIELDS`). It is dropped by name before the Phase
+is validated and reported back as a notice; any other unknown key is still
+refused. Retiring a field is an authoring policy only. Stored events that carry
+the key are tolerated separately and permanently
+(`REMOVED_EXECUTABLE_PHASE_KEYS`), because history replays forever.
+
 ## Workflow
 
 The definition a run is made from - its Phases and their configuration.
@@ -143,6 +150,12 @@ successful API response reports the first.
   property of the deployment, not of an Execution, and it stays. Where a
   to-do record reads `paused` (the resume-start list), it means the record is
   waiting on admission, not that anything was paused by an operator.
+- **`can_open_pr`.** Retired after #1477, when every phase's token began to
+  carry the installation's own permissions. GitHub has no permission that
+  allows commenting on a PR without also allowing opening one, so a Phase
+  cannot be denied publication by its token. Which Phase publishes is decided
+  by its prompt. The key is a retired phase field: still accepted, ignored, and
+  reported. Rejecting it is #1496.
 - **Branch.** Reserved, no meaning assigned. If a chat-style "branch from here"
   operation is ever wanted, this is where it gets defined.
 - **Retry.** A Phase attempt within one Execution (`PhaseRetryScheduled`), never

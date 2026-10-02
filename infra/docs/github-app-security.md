@@ -164,8 +164,9 @@ early phase opening a PR. GitHub has no permission that allows commenting on a
 pull request without also allowing opening one: a `pull_requests: read` token
 is refused `gh pr comment` through GraphQL `addComment` and the REST issues
 endpoint alike (measured 2026-10-01). Phases are ephemeral and open their own
-PRs, so the downgrade was removed. `can_open_pr` is still accepted in workflow
-YAML but no longer changes the token. (`gh` reads only
+PRs, so the downgrade was removed. `can_open_pr` is retired: workflow YAML
+that still carries it installs, the key is ignored, and validate/install warn
+that the line can go (rejection is tracked in #1496). (`gh` reads only
 `~/.config/gh/hosts.yml`; `$GITHUB_TOKEN` is not set in agent containers, #725.)
 
 ```python
