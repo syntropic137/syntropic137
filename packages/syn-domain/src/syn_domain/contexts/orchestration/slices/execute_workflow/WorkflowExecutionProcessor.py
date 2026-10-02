@@ -79,6 +79,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
+    quarantined_records,
     refuse_to_complete_unsaved_phase,
 )
 
@@ -391,6 +392,7 @@ class WorkflowExecutionProcessor:
                     started_at,
                     cancel_reason=aggregate.cancel_reason,
                     phase_id=dispatch_ctx.current_phase_id,
+                    inputs=dispatch_ctx.inputs,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -420,6 +422,7 @@ class WorkflowExecutionProcessor:
                 started_at,
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
+                inputs=dispatch_ctx.inputs,
             )
         finally:
             # A shutdown may cancel the minutes-long agent await before either
@@ -515,6 +518,7 @@ class WorkflowExecutionProcessor:
         started_at: datetime,
         cancel_reason: str | None = None,
         phase_id: str | None = None,
+        inputs: dict[str, Any] | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions as cancelled and return cancelled result.
 
@@ -527,12 +531,23 @@ class WorkflowExecutionProcessor:
         name another execution's phase.
         """
         runtime = self._runtimes.of(execution_id)
+        session_ids = runtime.timings().session_ids
         # BEFORE the teardown below. `abandon_all` destroys the cancelled
         # phase's container and commits that exist only in it go with it. The
         # user asked for the run to stop, not for the work to be deleted
         # (#1231).
         try:
             saved = await runtime.save_unpushed_work(phase_id, execution_id=execution_id)
+            # The workflow changes the rescue could not push, stored while
+            # this is still the run that knows them (#1437).
+            dropped = await self._workspaces_for(execution_id, inputs or {}).keep_dropped_workflows(
+                saved.quarantined,
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+                execution_id=execution_id,
+                session_id=session_ids.get(phase_id or "", ""),
+            )
+            all_artifact_ids.extend(i for i in dropped if i not in all_artifact_ids)
             cancellation = cancelled_execution(
                 cancel_reason, phase_results, all_artifact_ids, saved=saved
             )
@@ -575,6 +590,7 @@ class WorkflowExecutionProcessor:
         started_at: datetime,
         failed_phase_id: str | None = None,
         kept_artifact_ids: list[str] | None = None,
+        inputs: dict[str, Any] | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions, save failure event, and return failed result.
 
@@ -629,6 +645,21 @@ class WorkflowExecutionProcessor:
             if already_saved_by_the_completion_gate(error)
             else await runtime.save_unpushed_work(failed_phase_id, execution_id=execution_id)
         )
+        # Whichever of the two saved it, the workflow changes a rescue had to
+        # leave out are stored now, while the run still knows them, and
+        # pointed at from the failed phase like everything else it kept (#1437).
+        for artifact_id in await self._workspaces_for(
+            execution_id, inputs or {}
+        ).keep_dropped_workflows(
+            quarantined_records(error, saved),
+            workflow_id=workflow_id,
+            phase_id=failed_phase_id,
+            execution_id=execution_id,
+            session_id=timings.session_ids.get(failed_phase_id or "", ""),
+        ):
+            kept.append(artifact_id)
+            if artifact_id not in all_artifact_ids:
+                all_artifact_ids.append(artifact_id)
         observed = await runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
             error,

@@ -102,6 +102,15 @@ REMOTE_TIMEOUT_SECONDS: Final[int] = 20
 LOCAL_TIMEOUT_SECONDS: Final[int] = 30
 KILL_AFTER_SECONDS: Final[int] = 5
 
+#: The one directory this platform's credential cannot push, by decision
+#: (#1024): the GitHub App holds no `workflows` permission, so GitHub refuses
+#: any push whose new commits create, change or delete a file under it - and
+#: refuses the WHOLE push, not just that file. Named once because two things
+#: must agree on it: the unpushed-work guard, which drops exactly this
+#: directory from a rescue the first time GitHub refuses one for it (#1437),
+#: and the phase contract, which tells every agent not to touch it.
+UNPUSHABLE_WORKFLOW_DIR: Final[str] = ".github/workflows"
+
 #: Hooks off, in front of every git command this slice runs (#1231). A hook
 #: is a program the REPOSITORY supplies and git executes - `pre-push` on the
 #: quarantine push is the live one here, and it hangs that push exactly as a

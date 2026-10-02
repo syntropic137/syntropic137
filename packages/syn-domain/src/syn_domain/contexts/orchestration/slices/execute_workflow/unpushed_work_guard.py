@@ -76,6 +76,35 @@ path and does not make the files invisible: when a phase holds commits too, the
 quarantine still captures the whole working tree, because by then the phase has
 demonstrably authored something and every byte beside it is worth keeping.
 
+A REFUSAL THAT NAMES A PATH IS NOT A REFUSAL OF THE WORK (#1437). This
+platform's GitHub App holds no `workflows` permission (#1024), and GitHub
+refuses any push whose new commits touch ``.github/workflows/`` - the whole
+push, so the rescue of a phase that edited one YAML file carried that file's
+refusal down onto every other file it had written, and reported all of them
+NOT RECOVERABLE. Now the first push is made exactly as before, and only when
+GitHub refuses it FOR THAT REASON is a second one built: the phase's tree with
+that directory exactly as origin last had it, on that one commit as its only
+parent, plus the dropped changes as a patch and the original commits as a
+bundle. Three choices in that sentence are load-bearing:
+
+- "as ORIGIN last had it", not as any remote had it. The push goes to
+  ``origin``, so a base known only through another remote could itself carry
+  the change GitHub refuses. It is still only what this clone LAST HEARD from
+  origin; if origin was force-moved since, the second push is refused too and
+  the report names both refusals.
+- the second attempt costs a cancelled phase more time: up to
+  `_CANCELLED_RESCUE_SECONDS` on top of `_CANCELLED_PUSH_SECONDS`, and only
+  after a `workflows` refusal. Each has its own deadline, because one deadline
+  over both pushes would cut off a slow but healthy rescue with nothing
+  cancelled at all.
+- building the second commit can fail, and that failure is REPORTED, not
+  raised. Raising would throw away this repository's record - the first
+  refusal and the patch with it - in the walk's handler.
+
+The patch rides out in the record as well as in the commit, and the processor
+stores it as a phase artifact: when the second push fails too, that artifact
+is the only copy of those changes left.
+
 SCOPE is `workspace_git.repositories`': what it finds is what this gate judges,
 and a submodule's own objects are outside it.
 """
@@ -84,6 +113,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, replace
+from functools import partial
 from time import monotonic
 from typing import TYPE_CHECKING, Final
 
@@ -91,7 +122,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     ExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    RESCUE_BUNDLE_NAME,
+    RESCUE_PATCH_NAME,
     CredentialRenewalFailedError,
+    DroppedWorkflows,
     QuarantinedWork,
     SavedWork,
     UnpushedWorkQuarantinedError,
@@ -102,6 +136,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_rehear
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
     BOUND_FIRED_EXIT_CODE,
+    UNPUSHABLE_WORKFLOW_DIR,
     GitWorkspace,
     checked,
     git,
@@ -112,7 +147,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git imp
 from syn_shared.process_exit import describe_process_failure
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Awaitable, Callable, Mapping
 
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
 
@@ -145,6 +180,34 @@ _QUARANTINE_NAMESPACE: Final[str] = "refs/syn/lost"
 #: acceptable on a path that only runs when a phase is already failing.
 _SCRATCH_INDEX: Final[str] = "/tmp/syn-quarantine.index"
 
+#: Where a workflow-safe rescue (#1437) writes its patch and bundle before
+#: hashing them into the commit. Suffixes of the scratch index, so one `rm`
+#: clears all three and anything that relocates the index relocates these.
+_SCRATCH_PATCH: Final[str] = f"{_SCRATCH_INDEX}.patch"
+_SCRATCH_BUNDLE: Final[str] = f"{_SCRATCH_INDEX}.bundle"
+
+#: The directory a workflow-safe rescue puts its own files in, and how many
+#: numbered variants it tries when the phase's tree already holds that name.
+#: Checked against the tree rather than assumed free, so a phase's own files
+#: can never be overwritten by the rescue of them.
+_RESCUE_DIR: Final[str] = ".syn-quarantine"
+_RESCUE_DIR_CANDIDATES: Final[int] = 100
+
+#: How GitHub says a push was refused for touching workflows, and nothing
+#: else in a refusal does. Read from stderr because nothing else differs: git
+#: exits the same code for every refusal (see `workspace_git.answered`).
+#:
+#: - a GitHub App, the credential every workspace holds (#1024, #1437):
+#:   ``refusing to allow a GitHub App to create or update workflow
+#:   `.github/workflows/test.yml` without `workflows` permission``
+#: - a classic OAuth or personal token without the scope:
+#:   ``refusing to allow an OAuth App to create or update workflow
+#:   `.github/workflows/test.yml` without `workflow` scope``
+_WORKFLOW_REFUSALS: Final[tuple[str, ...]] = (
+    "without `workflows` permission",
+    "`workflow` scope",
+)
+
 #: How long the rescue push may go on being waited for AFTER the phase has
 #: been cancelled (#1396). A cancellation is a request to stop, so the salvage
 #: cannot simply ignore it: what it buys is the few seconds the push needs to
@@ -156,6 +219,14 @@ _SCRATCH_INDEX: Final[str] = "/tmp/syn-quarantine.index"
 #: A module global read at call time, like the bounds in `workspace_git`, so a
 #: test can lower it and make the backstop fire in a second.
 _CANCELLED_PUSH_SECONDS: Final[float] = 30.0
+
+#: The same allowance for the workflow-safe rescue (#1437), which runs only
+#: after the first push was refused for touching workflows: a second push
+#: (`REMOTE_TIMEOUT_SECONDS`) plus the local commands that build its commit.
+#: Its own deadline rather than a share of the first one, because that one
+#: applies whether or not anything was cancelled, and two pushes do not fit in
+#: it. A module global read at call time, for the reason above.
+_CANCELLED_RESCUE_SECONDS: Final[float] = 60.0
 
 #: How many times the phase-start rehearsal tries something that talks to
 #: GitHub before it reads a failure as this phase's verdict (#1396). Minting a
@@ -438,6 +509,22 @@ def already_saved_by_the_completion_gate(error: BaseException) -> bool:
     return isinstance(error, UnpushedWorkQuarantinedError | WorkspaceInspectionFailedError)
 
 
+def quarantined_records(
+    error: BaseException | None, saved: SavedWork
+) -> tuple[QuarantinedWork, ...]:
+    """Every record of this phase's rescued work, wherever the terminal path got it.
+
+    The same question `already_saved_by_the_completion_gate` answers, asked
+    the other way round: when the gate refused the phase, ITS error holds the
+    records and ``saved`` is empty by design; on every other path ``saved``
+    holds them. One answer here, so the processor asks for the records rather
+    than deciding which half of that to read (#1437).
+    """
+    if isinstance(error, UnpushedWorkQuarantinedError | WorkspaceInspectionFailedError):
+        return error.quarantined
+    return saved.quarantined
+
+
 class _UnsavedWork:
     """A repository's unsaved state: what is missing, and from which tips."""
 
@@ -610,7 +697,11 @@ async def _quarantine(
     that did not run would report work as quarantined that was never written.
     That is the same false reassurance as a false ``completed``, in a smaller
     costume, so the only failure this reports as data is the one that happens
-    after the objects exist.
+    after the objects exist. The workflow-safe rescue that follows a
+    `workflows` refusal (#1437) is the one addition, and it does not bend the
+    rule: a failure building it is reported as work that is NOT recoverable,
+    which claims the opposite of quarantined - and raising instead would cost
+    the record of the first refusal, and the patch, in the walk's handler.
 
     THE CREDENTIAL IS RENEWED IMMEDIATELY BEFORE THE PUSH, and that is the
     whole of #1393's fix. This runs at teardown, which on a phase that
@@ -631,11 +722,13 @@ async def _quarantine(
     the only way the record BELOW can be written down before the cancellation
     is re-applied. Swallowing it instead would be worse than the bug: a task
     that reports normal completion after being cancelled is a task nobody can
-    stop.
+    stop. A cancellation during the first push does not skip the
+    workflow-safe one either: that second push is then the only thing that
+    can save the work.
     """
     await checked(
         workspace,
-        ["rm", "-f", _SCRATCH_INDEX],
+        ["rm", "-f", _SCRATCH_INDEX, _SCRATCH_PATCH, _SCRATCH_BUNDLE],
         doing=f"clearing the scratch index before quarantining {repo}",
     )
     await git(workspace, repo, "add", "--all", index=_SCRATCH_INDEX)
@@ -652,37 +745,282 @@ async def _quarantine(
         identity=True,
     )
     cancelled = await _renew_credential(workspace, doing=f"quarantining {repo}")
-    pushed, cancelled_pushing = await _push_despite_cancellation(
-        workspace, repo, commit=commit.strip(), ref=ref
+    pushed, cancelled_pushing = await _despite_cancellation(
+        push(workspace, repo, commit=commit.strip(), ref=ref),
+        seconds=_CANCELLED_PUSH_SECONDS,
+        cut_off=partial(_cut_off, f"The rescue push of {repo} to {ref}", _CANCELLED_PUSH_SECONDS),
     )
     cancellation = cancelled or cancelled_pushing
 
-    name = repo.rsplit("/", 1)[-1]
-    if pushed.exit_code != 0:
-        logger.error("Quarantine push failed for %s -> %s: %s", repo, ref, pushed.stderr)
-        record = QuarantinedWork(
-            repo=name,
-            branch=work.branch,
-            commit_count=work.commit_count,
-            files=work.files,
-            pushed_ref=None,
-            push_error=describe_process_failure(
-                "The quarantine push",
-                exit_code=pushed.exit_code,
-                output=pushed.stderr or pushed.stdout,
-                timed_out=pushed.timed_out,
+    rescue: _RescueAttempt | None = None
+    if _refused_for_workflows(pushed):
+        logger.warning(
+            "The quarantine push for %s -> %s was refused for touching %s; retrying "
+            "once without it: %s",
+            repo,
+            ref,
+            UNPUSHABLE_WORKFLOW_DIR,
+            pushed.stderr,
+        )
+        rescue = _RescueAttempt(refusal=_push_failure("The quarantine push", pushed))
+        rescue.second, cancelled_rescuing = await _despite_cancellation(
+            _rescue(workspace, repo, tree=tree, ref=ref, attempt=rescue),
+            seconds=_CANCELLED_RESCUE_SECONDS,
+            cut_off=partial(
+                _cut_off, f"The workflow-safe rescue of {repo} to {ref}", _CANCELLED_RESCUE_SECONDS
             ),
         )
-    else:
-        logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
-        record = QuarantinedWork(
-            repo=name,
-            branch=work.branch,
-            commit_count=work.commit_count,
-            files=work.files,
-            pushed_ref=ref,
+        cancellation = cancellation or cancelled_rescuing
+    return _record(repo, work, ref=ref, pushed=pushed, rescue=rescue), cancellation
+
+
+@dataclass(slots=True)
+class _RescueAttempt:
+    """How far a workflow-safe rescue got (#1437), written as it goes.
+
+    MUTABLE ON PURPOSE: the rescue runs under a deadline that may abandon it
+    part-way, and whatever it had produced by then - above all the patch - must
+    still reach the record. A return value would be lost with the task.
+    """
+
+    #: Why the first push was refused, already described for a reader.
+    refusal: str
+    #: Set as soon as the patch exists, before anything that can still fail.
+    dropped: DroppedWorkflows | None = None
+    #: Why the rescue commit could not be built, if it could not.
+    failure: str | None = None
+    #: The second push's result; None when it was never made.
+    second: ExecutionResult | None = None
+
+
+def _refused_for_workflows(result: ExecutionResult) -> bool:
+    """Whether this push was refused for touching ``.github/workflows/`` (#1437).
+
+    THE ONLY PLACE GitHub's wording is known. A miss here costs nothing new: the
+    refusal is then reported exactly as it was before this existed.
+    """
+    return result.exit_code != 0 and any(said in result.stderr for said in _WORKFLOW_REFUSALS)
+
+
+async def _rescue(
+    workspace: GitWorkspace, repo: str, *, tree: str, ref: str, attempt: _RescueAttempt
+) -> ExecutionResult | None:
+    """Build the workflow-safe commit and push it; None when no push was made."""
+    try:
+        commit = await _prepare_rescue(workspace, repo, tree=tree, ref=ref, attempt=attempt)
+    except WorkspaceInspectionFailedError as unbuildable:
+        attempt.failure = unbuildable.summary
+        return None
+    if commit is None:
+        return None
+    # The SAME ref, still without force: the refused push never created it.
+    return await push(workspace, repo, commit=commit, ref=ref)
+
+
+async def _prepare_rescue(
+    workspace: GitWorkspace, repo: str, *, tree: str, ref: str, attempt: _RescueAttempt
+) -> str | None:
+    """The commit GitHub will take from this App, or None if there is nothing to drop.
+
+    ITS TREE is ``tree`` - the phase's whole worktree - with
+    ``.github/workflows/`` exactly as ``base`` has it, and ITS ONLY PARENT is
+    ``base``: the newest commit on HEAD's first-parent line that origin was
+    last known to have. Both halves are needed. GitHub refuses a deletion as
+    readily as an edit, so the directory cannot simply be left out; and it
+    inspects every new commit, so the phase's own commits, which carry the
+    edit, cannot be parents. What that costs is kept in the same commit, in a
+    directory checked to be free: the dropped changes as a patch, and the
+    original commits as a bundle.
+
+    The worktree is never touched - every index change goes to the scratch
+    index the first push already filled. The patch is written before any of
+    that, into `attempt`, so a failure later on still leaves it to be stored.
+    """
+    head = (await git(workspace, repo, "rev-parse", "--revs-only", "HEAD")).strip()
+    tips = ["HEAD"] if head else []
+    unpushed = await git(
+        workspace, repo, "rev-list", *tips, "--branches", "--not", "--remotes=origin"
+    )
+    local = set(unpushed.split())
+    base: str | None = None
+    if head:
+        line = await git(
+            workspace, repo, "rev-list", "--first-parent", f"--max-count={len(local) + 1}", "HEAD"
         )
-    return record, cancellation
+        base = next((sha for sha in line.split() if sha not in local), None)
+    since = base or (await git(workspace, repo, "hash-object", "-t", "tree", "/dev/null")).strip()
+    scope = ("--", f"{UNPUSHABLE_WORKFLOW_DIR}/")
+
+    changed = await git(
+        workspace, repo, "diff-tree", "-r", "--name-only", "--no-renames", since, tree, *scope
+    )
+    paths = tuple(line for line in changed.splitlines() if line)
+    if not paths:
+        return None
+    await git(
+        workspace,
+        repo,
+        "diff-tree",
+        "-p",
+        "--binary",
+        "--no-renames",
+        f"--output={_SCRATCH_PATCH}",
+        since,
+        tree,
+        *scope,
+    )
+    patch_blob = (await git(workspace, repo, "hash-object", "-w", _SCRATCH_PATCH)).strip()
+    attempt.dropped = DroppedWorkflows(
+        paths=paths,
+        refusal=attempt.refusal,
+        base=base,
+        patch=await git(workspace, repo, "cat-file", "blob", patch_blob),
+        artifact_title=(
+            f"{repo.rsplit('/', 1)[-1]}: {UNPUSHABLE_WORKFLOW_DIR} changes this App "
+            f"could not push (#1437)"
+        ),
+    )
+
+    rescue_dir = await _free_directory(workspace, repo, tree)
+    if rescue_dir is None:
+        attempt.failure = (
+            f"no free directory for the rescue's own files: {_RESCUE_DIR} and its "
+            f"{_RESCUE_DIR_CANDIDATES - 1} numbered variants are all in the phase's tree"
+        )
+        return None
+    attempt.dropped = replace(attempt.dropped, rescue_dir=rescue_dir)
+
+    if base is not None:
+        await git(
+            workspace,
+            repo,
+            "reset",
+            "-q",
+            base,
+            "--",
+            UNPUSHABLE_WORKFLOW_DIR,
+            index=_SCRATCH_INDEX,
+        )
+    else:
+        await git(
+            workspace,
+            repo,
+            "rm",
+            "--cached",
+            "-r",
+            "-q",
+            "--ignore-unmatch",
+            "--",
+            UNPUSHABLE_WORKFLOW_DIR,
+            index=_SCRATCH_INDEX,
+        )
+    await _add_blob(workspace, repo, patch_blob, f"{rescue_dir}/{RESCUE_PATCH_NAME}")
+    if local:
+        await git(
+            workspace,
+            repo,
+            "bundle",
+            "create",
+            "-q",
+            _SCRATCH_BUNDLE,
+            *tips,
+            "--branches",
+            "--not",
+            "--remotes=origin",
+        )
+        bundle_blob = (await git(workspace, repo, "hash-object", "-w", _SCRATCH_BUNDLE)).strip()
+        await _add_blob(workspace, repo, bundle_blob, f"{rescue_dir}/{RESCUE_BUNDLE_NAME}")
+        attempt.dropped = replace(attempt.dropped, has_bundle=True)
+
+    safe_tree = (await git(workspace, repo, "write-tree", index=_SCRATCH_INDEX)).strip()
+    commit = await git(
+        workspace,
+        repo,
+        "commit-tree",
+        safe_tree,
+        *(("-p", base) if base is not None else ()),
+        "-m",
+        _commit_message(ref, dropped=attempt.dropped),
+        identity=True,
+    )
+    return commit.strip()
+
+
+async def _free_directory(workspace: GitWorkspace, repo: str, tree: str) -> str | None:
+    """The first rescue directory name ``tree`` does not already hold, or None."""
+    for n in range(1, _RESCUE_DIR_CANDIDATES + 1):
+        name = _RESCUE_DIR if n == 1 else f"{_RESCUE_DIR}-{n}"
+        if not (await git(workspace, repo, "ls-tree", tree, "--", name)).strip():
+            return name
+    return None
+
+
+async def _add_blob(workspace: GitWorkspace, repo: str, blob: str, path: str) -> None:
+    await git(
+        workspace,
+        repo,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"100644,{blob},{path}",
+        index=_SCRATCH_INDEX,
+    )
+
+
+def _record(
+    repo: str,
+    work: _UnsavedWork,
+    *,
+    ref: str,
+    pushed: ExecutionResult,
+    rescue: _RescueAttempt | None,
+) -> QuarantinedWork:
+    """What became of this repository's work, from the one or two pushes made for it."""
+    name = repo.rsplit("/", 1)[-1]
+    landed = QuarantinedWork(
+        repo=name,
+        branch=work.branch,
+        commit_count=work.commit_count,
+        files=work.files,
+        pushed_ref=ref,
+    )
+    if pushed.exit_code == 0:
+        logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
+        return landed
+    if rescue is None or (rescue.second is None and rescue.failure is None):
+        # Not refused for workflows, or refused for them with no workflow path
+        # actually changed: the first refusal is the whole story, as before.
+        logger.error("Quarantine push failed for %s -> %s: %s", repo, ref, pushed.stderr)
+        return replace(
+            landed, pushed_ref=None, push_error=_push_failure("The quarantine push", pushed)
+        )
+    if rescue.second is not None and rescue.second.exit_code == 0:
+        logger.warning(
+            "Quarantined unpushed work from %s at %s without %s, whose changes it kept as a patch",
+            repo,
+            ref,
+            UNPUSHABLE_WORKFLOW_DIR,
+        )
+        return replace(landed, dropped=rescue.dropped)
+    if rescue.second is not None:
+        then = _push_failure("the workflow-safe retry", rescue.second)
+    else:
+        then = f"the workflow-safe rescue could not be built ({rescue.failure})"
+    logger.error(
+        "Both quarantine pushes failed for %s -> %s: %s; then %s", repo, ref, rescue.refusal, then
+    )
+    return replace(
+        landed, pushed_ref=None, push_error=f"{rescue.refusal}; then {then}", dropped=rescue.dropped
+    )
+
+
+def _push_failure(what: str, result: ExecutionResult) -> str:
+    return describe_process_failure(
+        what,
+        exit_code=result.exit_code,
+        output=result.stderr or result.stdout,
+        timed_out=result.timed_out,
+    )
 
 
 def _quarantine_ref(execution_id: str, phase_id: str) -> str:
@@ -767,56 +1105,59 @@ async def _renew_credential(
     return None
 
 
-async def _push_despite_cancellation(
-    workspace: GitWorkspace, repo: str, *, commit: str, ref: str
-) -> tuple[ExecutionResult, asyncio.CancelledError | None]:
-    """The rescue push, given the seconds it needs even while being cancelled.
+async def _despite_cancellation[T](
+    step: Awaitable[T], *, seconds: float, cut_off: Callable[[], T]
+) -> tuple[T, asyncio.CancelledError | None]:
+    """A rescue step, given the seconds it needs even while being cancelled.
 
     THE PUSH IS THE POINT OF THIS WHOLE PATH, and it is one await long. A
     cancellation delivered anywhere in that await - and teardown is exactly
     when cancellations arrive - would otherwise abandon a commit that exists,
     in a container that is about to be destroyed, with the objects nowhere
-    else. So the push runs as its own task behind `asyncio.shield`: cancelling
+    else. So the step runs as its own task behind `asyncio.shield`: cancelling
     this coroutine no longer cancels it, and the answer is still collected.
+    Two steps use it - the push, and the workflow-safe rescue that follows a
+    `workflows` refusal (#1437) - each under its own ``seconds``.
 
     BOUNDED, because "ignore the cancellation until the push returns" is not a
-    promise this may make. `_CANCELLED_PUSH_SECONDS` is the whole of the extra
-    time a cancelled phase can cost, after which the push is abandoned and
-    reported with `BOUND_FIRED_EXIT_CODE` - the same code the bound inside the
-    push's own argv would produce, because a reader needs "the answer never
-    came", not which bound produced it. Repeated cancellations are absorbed
-    for as long as the deadline allows and no longer, so a caller that cancels
-    in a loop cannot be held.
+    promise this may make. ``seconds`` is the whole of the extra time a
+    cancelled phase can cost for this step, after which it is abandoned and
+    ``cut_off()`` is returned in its place - for a push, a result carrying
+    `BOUND_FIRED_EXIT_CODE`, the same code the bound inside the push's own
+    argv would produce, because a reader needs "the answer never came", not
+    which bound produced it. Repeated cancellations are absorbed for as long
+    as the deadline allows and no longer, so a caller that cancels in a loop
+    cannot be held.
 
     Returns:
-        The push's result, and the first cancellation that arrived while it
+        The step's result, and the first cancellation that arrived while it
         was in flight for the caller to re-apply, or None.
     """
-    pushing = asyncio.ensure_future(push(workspace, repo, commit=commit, ref=ref))
-    deadline = monotonic() + _CANCELLED_PUSH_SECONDS
+    running = asyncio.ensure_future(step)
+    deadline = monotonic() + seconds
     cancelled: asyncio.CancelledError | None = None
     while True:
         try:
             return await asyncio.wait_for(
-                asyncio.shield(pushing), timeout=max(0.0, deadline - monotonic())
+                asyncio.shield(running), timeout=max(0.0, deadline - monotonic())
             ), cancelled
         except asyncio.CancelledError as arrived:
             # The SHIELD is what makes this recoverable: `wait_for` cancelled
-            # its own await, never `pushing`, which is still running. Kept to
+            # its own await, never `running`, which is still going. Kept to
             # be re-applied, and only the first one - they are the same
             # request, and the caller needs a cancellation, not a count.
             cancelled = cancelled or arrived
-            if pushing.done():
-                return pushing.result(), cancelled
+            if running.done():
+                return running.result(), cancelled
             if monotonic() >= deadline:
-                pushing.cancel()
-                return _cut_off(repo, ref), cancelled
+                running.cancel()
+                return cut_off(), cancelled
         except TimeoutError:
-            pushing.cancel()
-            return _cut_off(repo, ref), cancelled
+            running.cancel()
+            return cut_off(), cancelled
 
 
-def _cut_off(repo: str, ref: str) -> ExecutionResult:
+def _cut_off(what: str, seconds: float) -> ExecutionResult:
     """What a push that never answered inside its bound is reported as.
 
     A FAILED PUSH, never an absent one: the objects may or may not have
@@ -830,22 +1171,44 @@ def _cut_off(repo: str, ref: str) -> ExecutionResult:
         success=False,
         duration_ms=0.0,
         stderr=(
-            f"The rescue push of {repo} to {ref} was still running "
-            f"{_CANCELLED_PUSH_SECONDS:.0f}s after this phase was cancelled and was "
-            f"abandoned. Whether the ref exists is unknown."
+            f"{what} was still running {seconds:.0f}s after this phase was "
+            f"cancelled and was abandoned. Whether the ref exists is unknown."
         ),
         timed_out=True,
     )
 
 
-def _commit_message(ref: str) -> str:
-    return (
+def _commit_message(ref: str, *, dropped: DroppedWorkflows | None = None) -> str:
+    """The quarantine commit's message; with ``dropped``, the workflow-safe one's (#1437)."""
+    message = (
         f"syn: quarantined work that would have been lost ({ref})\n\n"
         "The phase that produced this ended without pushing it, and its "
-        "workspace was about to be destroyed. This commit's tree is the "
-        "working tree as it stood; its parents are the local tips carrying "
-        "commits the remote did not have.\n"
+        "workspace was about to be destroyed. "
     )
+    if dropped is None:
+        return message + (
+            "This commit's tree is the working tree as it stood; its parents are "
+            "the local tips carrying commits the remote did not have.\n"
+        )
+    onto = dropped.base if dropped.base is not None else "no parent"
+    lines = [
+        message + f"This commit's tree is the working tree as it stood, EXCEPT "
+        f"{UNPUSHABLE_WORKFLOW_DIR}/, which is exactly as {onto} has it: "
+        "this App may not push workflow changes (#1024), and the first push "
+        "of this work was refused for them.",
+        "",
+        "Left out, and kept as a patch in "
+        f"{dropped.rescue_dir}/{RESCUE_PATCH_NAME} (git apply it):",
+        *(f"  {path}" for path in dropped.paths),
+        "",
+        f"History was flattened onto {onto}"
+        + (
+            f"; the original commits are in {dropped.rescue_dir}/{RESCUE_BUNDLE_NAME}."
+            if dropped.has_bundle
+            else "."
+        ),
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _branch_name(head_sha: str, named: list[tuple[str, str]]) -> str:
