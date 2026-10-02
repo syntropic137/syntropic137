@@ -1,0 +1,89 @@
+---
+title: syn version
+description: "Show CLI and server version, and what happens when they differ"
+---
+
+The `syn` CLI ships to npm and the server is deployed separately, so the two can
+drift apart. `syn version` reports both sides, and every command that talks to the
+API checks the same thing before it runs. Commands that never call the Syntropic
+API skip the check: `syn config`, and the marketplace commands, which may still
+fetch marketplace registries over the network.
+
+## Output
+
+```bash
+syn version
+```
+
+Line 1 is always the CLI. Line 2 is the server build that answered at the
+configured API URL (`SYN_API_URL`). Against a server on the same release line:
+
+```text
+Syntropic137 v0.33.0-beta.1
+syn-api 0.33.0b5
+```
+
+When the server image was stamped with an image tag or a commit, they follow the
+release in parentheses, for example `syn-api 0.33.0 (v0.33.0, abc1234)`.
+
+Line 2 is different when the server could not say which build it is:
+
+| Line 2 | Meaning |
+|--------|---------|
+| `syn-api 0.33.0b5` | The server reported its release. |
+| `syn-api at <url> has no GET /version: a release older than that route, or not a syn-api URL` | `GET /api/v1/version` answered 404. Either the server is too old to report its version, or the URL points at something other than syn-api. |
+| `syn-api not reached at <url>: fetch failed` | No answer. The reason after the colon is the network error, or `no answer within <n>ms` on a timeout. |
+
+For example, with nothing listening at the URL:
+
+```text
+Syntropic137 v0.33.0-beta.1
+syn-api not reached at http://127.0.0.1:1: fetch failed
+```
+
+`syn version` exits 0 in every case: it reports what it found. Use
+`syn health` to check that the server is reachable and healthy.
+
+## Release skew warning
+
+The CLI and the server match when they share a release line, the major and minor
+version. Patch and pre-release differences are ignored, so CLI `0.33.0-beta.1`
+and server `0.33.0b5` match.
+
+When the release lines differ, `syn version` prints a warning on stderr after
+line 2:
+
+```text
+Syntropic137 v0.32.0
+syn-api 0.33.0b5
+Warning: syn CLI 0.32.0 is talking to syn-api 0.33.0b5. Releases differ (0.32 vs 0.33); commands may fail in ways that look unrelated. Install a matching CLI.
+```
+
+Every command that talks to the API makes the same check first, so the warning
+appears before anything the command prints, including its own error:
+
+```text
+$ syn execution show exec-2d90c10fbdb3
+Warning: syn CLI 0.32.0 is talking to syn-api 0.33.0b5. Releases differ (0.32 vs 0.33); commands may fail in ways that look unrelated. Install a matching CLI.
+Execution: exec-2d90c10fbdb3
+  Workflow:     Test: PR Review with Comment
+```
+
+The warning only appears when both versions were read and their release lines
+differ. A server with no `GET /version`, a server that cannot be reached, or a
+development build of the CLI never produces it.
+
+## When the server predates a command
+
+Two builds on the same release line can still differ by a feature. When a
+command calls an API route the server does not have, the error names the server
+build and says the server predates the feature, instead of a bare `Not Found`:
+
+```text
+$ syn execution sessions exec-b6f4c2b271d0
+Error: Failed to read session inventory: syn-api 0.33.0b5 at https://syn.example.com has no GET /executions/{execution_id}/session-inventory; this server predates the feature. Upgrade the server to use this command.
+```
+
+If the server cannot report its version either, the error says that instead of
+naming a release. A 404 for a missing item, such as an unknown execution ID, is
+unaffected and still reports the server's own message.

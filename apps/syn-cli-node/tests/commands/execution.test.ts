@@ -125,7 +125,65 @@ describe("execution commands", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(detail)).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
       await handler({ positionals: ["exec-001"], values: {} });
       expect(stdout()).toContain("test-wf");
-      expect(stdout()).toContain("Session inventory: unavailable (403)");
+      expect(stdout()).toContain("Session inventory: unavailable (403): denied");
+    });
+
+    describe("outcome (#1501 A)", () => {
+      /** What `show` printed for one detail, inventory unavailable. */
+      async function show(over: Record<string, unknown>): Promise<string> {
+        mockFetch
+          .mockResolvedValueOnce(jsonResponse({ ...detail, ...over }))
+          .mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+        await handler({ positionals: ["exec-001"], values: {} });
+        return stdout().replace(/\x1b\[[0-9;]*m/g, "");
+      }
+
+      function phase(over: Record<string, unknown>): Record<string, unknown> {
+        return {
+          phase_id: "p", name: "review", status: "completed", started_at: "2026-01-01T00:00:00Z",
+          total_tokens: 1, cost_usd: "0.01", model: null, requested_model: null, model_display: "m",
+          ...over,
+        };
+      }
+
+      it.each([
+        // The VPS runs #1501 names: completed without a deliverable, and with one.
+        [{ deliverable_produced: false, reported_side_effects: "succeeded" }, "no", "succeeded"],
+        [{ deliverable_produced: true, reported_side_effects: "denied" }, "yes", "denied"],
+        [{ deliverable_produced: true, reported_side_effects: "none" }, "yes", "none"],
+        [{ deliverable_produced: false, reported_side_effects: "failed" }, "no", "failed"],
+        // Said nothing is not "none": "none" is a claim the agent did not make.
+        [{ deliverable_produced: false, reported_side_effects: null }, "no", "not reported"],
+        [{ deliverable_produced: true }, "yes", "not reported"],
+      ])("renders %o as Deliverable %s, Side effects %s", async (over, deliverable, sideEffects) => {
+        const out = await show(over);
+        expect(out).toContain(`  Deliverable:  ${deliverable}\n`);
+        expect(out).toContain(`  Side effects: ${sideEffects}\n`);
+      });
+
+      it("renders each phase's reported side effects", async () => {
+        const out = await show({
+          phases: [
+            phase({ name: "implement", reported_side_effects: "denied" }),
+            phase({ name: "review", reported_side_effects: null }),
+          ],
+        });
+        const rows = out.split("\n");
+        expect(rows.find((r) => r.includes("implement"))).toMatch(/denied\s*$/);
+        expect(rows.find((r) => r.includes("review"))).toMatch(/not reported\s*$/);
+      });
+
+      it("marks a phase whose deliverable was recovered, and only that phase", async () => {
+        const out = await show({
+          phases: [
+            phase({ name: "implement", deliverable_recovered: true }),
+            phase({ name: "review", deliverable_recovered: false }),
+          ],
+        });
+        const rows = out.split("\n");
+        expect(rows.find((r) => r.includes("implement"))).toContain("completed (recovered)");
+        expect(rows.find((r) => r.includes("review"))).not.toContain("recovered");
+      });
     });
 
     it("throws on missing execution-id", async () => {

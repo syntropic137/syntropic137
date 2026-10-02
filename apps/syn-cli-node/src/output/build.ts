@@ -48,6 +48,23 @@ export function describeServerBuild(server: ServerBuild, deployment: string): st
   }
 }
 
+/** Why a route this CLI knows answered with the router's 404: the server is
+ * older than the feature. Names the build when the server reported one; when
+ * it did not, says what is known and stops there. A /version that is missing
+ * or unanswered is undetermined, so this never claims a release it did not
+ * read, and never calls it a mismatch (#1494). */
+export function describeMissingRoute(server: ServerBuild, deployment: string, route: string): string {
+  const missing = `has no ${route}; this server predates the feature`;
+  switch (server.kind) {
+    case "reported":
+      return `${describeBuild(server.build)} at ${deployment} ${missing}. Upgrade the server to use this command.`;
+    case "no-version-route":
+      return `syn-api at ${deployment} ${missing}, and is too old to report its version (no GET /version), or is not a syn-api URL.`;
+    case "unanswered":
+      return `syn-api at ${deployment} ${missing}. Its version could not be read: ${server.reason}.`;
+  }
+}
+
 /** One stderr line when, and only when, the release lines provably differ.
  * Undetermined is silent: if the server cannot be reached the command is about
  * to say so itself, and two messages for one cause is noise. */
