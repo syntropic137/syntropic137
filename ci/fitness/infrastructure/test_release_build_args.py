@@ -368,13 +368,18 @@ def _shell_build_args(command: str) -> dict[str, str]:
     """`--build-arg KEY=VALUE` pairs in one shell command, quotes stripped."""
     return {
         key: value.strip("\"'")
-        for key, value in re.findall(r"--build-arg\s+([A-Z_]+)=(\"[^\"]*\"|'[^']*'|[^\s]*)", command)
+        for key, value in re.findall(
+            r"--build-arg\s+([A-Z_]+)=(\"[^\"]*\"|'[^']*'|[^\s]*)", command
+        )
     }
 
 
 def _pit_stop_build_path() -> BuildPath:
     declared = _shell_build_args(_pit_stop_syn_api_build()).get(ARG)
-    return BuildPath(source=PIT_STOP, declared=None if declared is None else _resolve_for_syn_api(declared, PIT_STOP))
+    return BuildPath(
+        source=PIT_STOP,
+        declared=None if declared is None else _resolve_for_syn_api(declared, PIT_STOP),
+    )
 
 
 def _syn_api_build_paths() -> list[BuildPath]:
@@ -663,7 +668,9 @@ def _identity_paths() -> list[IdentityPath]:
 
     arms = _case_arms(_justfile_recipe_body("release-local"))
     assert SYN_API in arms, "release-local no longer has a syn-api case arm"
-    paths.append(IdentityPath("justfile `release-local` (syn-api)", _shell_build_args(arms[SYN_API])))
+    paths.append(
+        IdentityPath("justfile `release-local` (syn-api)", _shell_build_args(arms[SYN_API]))
+    )
 
     paths.append(IdentityPath(PIT_STOP, _shell_build_args(_pit_stop_syn_api_build())))
 
@@ -705,9 +712,7 @@ def test_the_awaiting_exception_is_still_needed() -> None:
     """
     missing = _paths_missing_identity(_identity_paths())
     stale = sorted(set(AWAITING_WORKFLOW_PATCH) - set(missing))
-    assert not stale, (
-        f"{stale} now stamp their identity. Delete them from AWAITING_WORKFLOW_PATCH."
-    )
+    assert not stale, f"{stale} now stamp their identity. Delete them from AWAITING_WORKFLOW_PATCH."
 
 
 @pytest.mark.architecture
@@ -742,7 +747,7 @@ def test_a_multi_line_shell_build_is_read_whole() -> None:
     command = re.sub(
         r"\\\n\s*",
         " ",
-        'run docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 \\\n'
+        "run docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 \\\n"
         '    --build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$BUILT_SHA" \\\n'
         '    -t x --load -f "$WT/infra/docker/images/syn-api/Dockerfile" "$WT"',
     )
