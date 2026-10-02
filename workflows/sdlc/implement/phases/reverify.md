@@ -49,9 +49,16 @@ Then run:
 ```
 git fetch origin <branch>
 git rev-parse origin/<branch>
-git checkout <candidate-sha>
+git checkout --recurse-submodules <candidate-sha>
 git rev-parse HEAD
 ```
+
+**`--recurse-submodules` is required, not optional.** A plain `git checkout`
+moves the superproject but leaves every submodule where the default branch put
+it, so when the commit under review pins a different gitlink, `git status`
+reports ` M lib/<submodule>`. The unpushed-work guard reads that line as unsaved
+work and fails the phase after the review is complete but before it is stored,
+so the whole review is paid for and lost.
 
 The remote head and `HEAD` must both equal the candidate SHA. **If either SHA
 is absent from the reports or differs from the candidate, output BLOCKED** and
