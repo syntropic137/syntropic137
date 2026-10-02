@@ -606,9 +606,8 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
     )
 
 
-@router.post("/validate", response_model=ValidateYamlResponse)
-async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlResponse:
-    """Validate a workflow YAML definition."""
+def _validate_request_content(body: ValidateYamlRequest) -> str:
+    """The YAML to validate, or the 400 that says why there is none."""
     if body.content is None and body.file is not None:
         raise HTTPException(
             status_code=400,
@@ -622,8 +621,13 @@ async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlRespo
             status_code=400,
             detail="The 'content' field is required.",
         )
-    assert body.content is not None  # guaranteed by guards above
-    result = await validate_yaml(yaml_content=body.content)
+    return body.content
+
+
+@router.post("/validate", response_model=ValidateYamlResponse)
+async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlResponse:
+    """Validate a workflow YAML definition."""
+    result = await validate_yaml(yaml_content=_validate_request_content(body))
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)

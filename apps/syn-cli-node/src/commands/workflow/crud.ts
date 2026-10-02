@@ -363,23 +363,32 @@ function printWarnings(warnings: string[] | undefined): void {
   }
 }
 
-async function validatePackageDir(pkgPath: string): Promise<void> {
-  let fmt: string;
-  let workflows: ReturnType<typeof resolvePackage>["workflows"];
+type PackageWorkflows = ReturnType<typeof resolvePackage>["workflows"];
+type WorkflowValidation = {
+  name: string;
+  phases: number;
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+};
+
+function resolvePackageForValidation(pkgPath: string): { fmt: string; workflows: PackageWorkflows } {
   try {
-    fmt = detectFormat(pkgPath);
-    ({ workflows } = resolvePackage(pkgPath));
+    const fmt = detectFormat(pkgPath);
+    const { workflows } = resolvePackage(pkgPath);
+    return { fmt, workflows };
   } catch (err) {
     printError(err instanceof Error ? err.message : String(err));
     throw new CLIError("Validation failed", 1);
   }
+}
 
-  // WHY the server and not a local check: resolving a package only proves it
-  // is laid out correctly. The schema, and which keys are retired, live on the
-  // server, which is the only authority `install` answers to; a copy here
-  // would drift from it silently. Sent exactly as `install` uploads it.
-  let invalid = 0;
-  const results: { name: string; phases: number; errors: string[]; warnings: string[] }[] = [];
+// WHY the server and not a local check: resolving a package only proves it
+// is laid out correctly. The schema, and which keys are retired, live on the
+// server, which is the only authority `install` answers to; a copy here
+// would drift from it silently. Sent exactly as `install` uploads it.
+async function validateOnServer(workflows: PackageWorkflows): Promise<WorkflowValidation[]> {
+  const results: WorkflowValidation[] = [];
   for (const wf of workflows) {
     const data = unwrap(
       await api.POST("/workflows/validate", {
@@ -387,14 +396,21 @@ async function validatePackageDir(pkgPath: string): Promise<void> {
       }),
       "Failed to validate workflow",
     );
-    if (!data.valid) invalid++;
     results.push({
       name: wf.name,
       phases: wf.phases.length,
+      valid: data.valid,
       errors: data.valid ? [] : (data.errors ?? []),
       warnings: data.warnings ?? [],
     });
   }
+  return results;
+}
+
+async function validatePackageDir(pkgPath: string): Promise<void> {
+  const { fmt, workflows } = resolvePackageForValidation(pkgPath);
+  const results = await validateOnServer(workflows);
+  const invalid = results.filter((r) => !r.valid).length;
 
   if (invalid === 0) {
     printSuccess(`Valid ${fmt} package\n`);
