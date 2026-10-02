@@ -58,11 +58,30 @@ def v3(path: Path) -> None:
         journal.register(failed, pending=True)
         journal.observe_launch_failure(failed, reason)
     # Delegates that never started, with their runner-reported cause.
-    for tool_call_id, reason in (
-        ("delegate-sandbox", LaunchFailureReason.CODEX_SANDBOX_UNAVAILABLE),
-        ("delegate-unreachable", LaunchFailureReason.CAPTURE_HOOK_UNREACHABLE),
+    for tool_call_id, harness, target, reason in (
+        ("delegate-sandbox", "claude", "codex", LaunchFailureReason.CODEX_SANDBOX_UNAVAILABLE),
+        ("delegate-unreachable", "claude", "codex", LaunchFailureReason.CAPTURE_HOOK_UNREACHABLE),
+        # Depth-three delegation causes (agentic-workspace#19, #20, #21).
+        (
+            "delegate-nested-auth",
+            "claude",
+            "claude",
+            LaunchFailureReason.CLAUDE_NESTED_AUTH_UNAVAILABLE,
+        ),
+        (
+            "delegate-parent-permissions",
+            "claude",
+            "claude",
+            LaunchFailureReason.PARENT_PERMISSIONS_UNAVAILABLE,
+        ),
+        (
+            "delegate-nested-journal",
+            "codex",
+            "claude",
+            LaunchFailureReason.NESTED_JOURNAL_UNAVAILABLE,
+        ),
     ):
-        delegate = call(tool_call_id, "claude", "codex")
+        delegate = call(tool_call_id, harness, target)
         journal.register(delegate)
         journal.launch_failed(delegate, reason)
     # A second, different identity observed for an already-bound native child.

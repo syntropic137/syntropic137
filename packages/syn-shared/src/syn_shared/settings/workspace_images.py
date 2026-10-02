@@ -441,16 +441,48 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  Previous pins, for the record (publisher cutover above):
 #                  claude-cli decf374c, omni-agent 89189b6c, toolchain 27b70b32,
 #                  all from agentic-workspace c5e34284.
+# AGENTIC-WORKSPACE v0.3.0, 2026-10-02 (#1398). Taken from release-branch run
+# 37054033737 ("Release Workspace Images", push to release, success) of
+# agentic-workspace 7afde6b6 (release PR #26), the commit lib/agentic-workspace
+# pins. Re-verified here rather than trusted: `docker buildx imagetools
+# inspect` of each v0.3.0 tag, manifest-version tag and commit tag returns
+# exactly the digest below (amd64 + arm64), every image carries
+# agentic.image.channel=release and revision 7afde6b6, and `cosign verify`
+# (v3.1.3) passes for each against the release-images.yml@refs/heads/release
+# identity with the GitHub Actions OIDC issuer. This release carries AW #18
+# ($HOME ownership), #22 (depth-three delegation: Codex delegate journal grant
+# + network, delegated Claude inherits the parent grant, launch-failure
+# reasons claude_nested_auth_unavailable / parent_permissions_unavailable /
+# nested_journal_unavailable) and #24 (Claude grandchild transcript root
+# grant; AppArmor admits nested <execution>/<workspace> partitions - load the
+# updated profile on AppArmor hosts).
+#
+# omni-agent       omni-agent manifest 1.11.0. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.281 (Claude Code)", "codex-cli 0.156.1",
+#                  "apss-session-exporter 0.6.0", skills CLI 1.7.0,
+#                  agentic-session-store 0.6.0 with the transcript-root grant,
+#                  syn-delegate. Label agentic.codex_cli_version=0.156.1.
+# toolchain        toolchain manifest 1.2.0, built FROM omni d9395a2e in the
+#                  same run (label org.opencontainers.image.base.digest).
+#                  Verified by running OUT OF THIS DIGEST: same claude, codex,
+#                  exporter 0.6.0, skills 1.7.0 and session store as omni.
+# claude-cli       claude-cli manifest 2.1.7. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.126 (Claude Code)", "codex-cli 0.144.6",
+#                  skills 1.7.0, session store 0.6.0, no exporter (unchanged).
+#
+#                  Previous pins, for the record: claude-cli c0573ea6,
+#                  omni-agent 12e7dc55, toolchain e38b1a45, all from
+#                  agentic-workspace 008ed117 (v0.2.0).
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:c0573ea630ffc97a8f46725d5c20d90c38eea692ffa48db3cd885a147a8aea36"
+            "sha256:12a38b8aa4eaa81bda48790410550d2741870d54b3c39925d8fdf9f934b221ff"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:12e7dc55d7aad558798552f2f373ddc0aebd3205e5b30543ff8751a2a12a0189"
+            "sha256:d9395a2ec9b065cd3865e95476c286566231d943b5ab1d2cce3ba3366066556d"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:e38b1a45b14e7b58040d7664a83e9f53191f24d9ea92462b4eeee829d3ad65f9"
+            "sha256:16132cce4470d9375dc2421780915e2d68ccaffb118a4479689e34f8cd20cd44"
         ),
     }
 )
@@ -579,4 +611,5 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     # #1398 branch history only (AW v0.2.0 omni, before #1418 made toolchain the default).
     "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:12e7dc55d7aad558798552f2f373ddc0aebd3205e5b30543ff8751a2a12a0189",  # #1398
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8",  # f1647f93
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:e38b1a45b14e7b58040d7664a83e9f53191f24d9ea92462b4eeee829d3ad65f9",  # 70ca5fae
 )
