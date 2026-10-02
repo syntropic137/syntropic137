@@ -279,11 +279,6 @@
           "title": "Clone Repos",
           "type": "boolean"
         },
-        "can_open_pr": {
-          "default": false,
-          "title": "Can Open Pr",
-          "type": "boolean"
-        },
         "delivers_repo_changes": {
           "default": true,
           "title": "Delivers Repo Changes",

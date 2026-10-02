@@ -8,7 +8,7 @@ import { CLIError } from "../../framework/errors.js";
 import { api, unwrap } from "../../client/typed.js";
 import type { components } from "../../generated/api-types.js";
 import { postYaml } from "../../client/yaml-upload.js";
-import { printError, printSuccess, print, printDim } from "../../output/console.js";
+import { printError, printSuccess, print, printDim, printWarning } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
@@ -171,6 +171,7 @@ async function createFromYaml(
   print(`  Type: ${style(response.workflow_type, DIM)}`);
   print(`  Classification: ${style(response.classification, DIM)}`);
   print(`  Repos required: ${style(response.requires_repos ? "yes" : "no", DIM)}`);
+  printWarnings(response.warnings);
 }
 
 // ---------------------------------------------------------------------------
@@ -236,8 +237,8 @@ function renderInputDeclarations(declarations: WorkflowResponse["input_declarati
 
 /** The phase's non-default capabilities, as short display notes.
  *
- * `can_open_pr` is not shown: since #1477 every phase may open a PR, so a
- * note on some phases would imply the others cannot.
+ * `can_open_pr` is retired (#1477) and no longer returned; see
+ * retired_phase_fields. Every phase may open a PR.
  *
  * Only non-defaults are returned. Printing every default would bury the one
  * line that matters, and `sandbox` at the default says nothing a reader needs.
@@ -324,7 +325,7 @@ export const validateCommand: CommandDef = {
     const stat = fs.statSync(file);
 
     if (stat.isDirectory()) {
-      validatePackageDir(file);
+      await validatePackageDir(file);
       return;
     }
 
@@ -341,6 +342,7 @@ export const validateCommand: CommandDef = {
       print(`  ${style("Name:", DIM)} ${data.name}`);
       print(`  ${style("Type:", DIM)} ${data.workflow_type}`);
       print(`  ${style("Phases:", DIM)} ${String(data.phase_count)}`);
+      printWarnings(data.warnings);
     } else {
       printError("Invalid workflow definition");
       if (data.errors) {
@@ -348,26 +350,69 @@ export const validateCommand: CommandDef = {
           print(`  ${error}`);
         }
       }
+      printWarnings(data.warnings);
       throw new CLIError("Validation failed", 1);
     }
   },
 };
 
-function validatePackageDir(pkgPath: string): void {
-  try {
-    const fmt = detectFormat(pkgPath);
-    const { workflows } = resolvePackage(pkgPath);
+/** Print the server's notices. They never change the exit code. */
+function printWarnings(warnings: string[] | undefined): void {
+  for (const warning of warnings ?? []) {
+    printWarning(warning);
+  }
+}
 
-    printSuccess(`Valid ${fmt} package\n`);
-    print(`  ${style("Directory:", DIM)} ${pkgPath}`);
-    print(`  ${style("Workflows:", DIM)} ${workflows.length}`);
-    const totalPhases = workflows.reduce((sum, wf) => sum + wf.phases.length, 0);
-    print(`  ${style("Total phases:", DIM)} ${totalPhases}`);
-    for (const wf of workflows) {
-      printDim(`    \u2022 ${wf.name} (${wf.phases.length} phases)`);
-    }
+async function validatePackageDir(pkgPath: string): Promise<void> {
+  let fmt: string;
+  let workflows: ReturnType<typeof resolvePackage>["workflows"];
+  try {
+    fmt = detectFormat(pkgPath);
+    ({ workflows } = resolvePackage(pkgPath));
   } catch (err) {
     printError(err instanceof Error ? err.message : String(err));
+    throw new CLIError("Validation failed", 1);
+  }
+
+  // WHY the server and not a local check: resolving a package only proves it
+  // is laid out correctly. The schema, and which keys are retired, live on the
+  // server, which is the only authority `install` answers to; a copy here
+  // would drift from it silently. Sent exactly as `install` uploads it.
+  let invalid = 0;
+  const results: { name: string; phases: number; errors: string[]; warnings: string[] }[] = [];
+  for (const wf of workflows) {
+    const data = unwrap(
+      await api.POST("/workflows/validate", {
+        body: { content: JSON.stringify(wf.definition), filename: `${wf.name}.json` },
+      }),
+      "Failed to validate workflow",
+    );
+    if (!data.valid) invalid++;
+    results.push({
+      name: wf.name,
+      phases: wf.phases.length,
+      errors: data.valid ? [] : (data.errors ?? []),
+      warnings: data.warnings ?? [],
+    });
+  }
+
+  if (invalid === 0) {
+    printSuccess(`Valid ${fmt} package\n`);
+  } else {
+    printError(`Invalid ${fmt} package: ${invalid} of ${workflows.length} workflow(s) failed`);
+  }
+  print(`  ${style("Directory:", DIM)} ${pkgPath}`);
+  print(`  ${style("Workflows:", DIM)} ${workflows.length}`);
+  const totalPhases = workflows.reduce((sum, wf) => sum + wf.phases.length, 0);
+  print(`  ${style("Total phases:", DIM)} ${totalPhases}`);
+  for (const r of results) {
+    printDim(`    \u2022 ${r.name} (${r.phases} phases)`);
+    for (const error of r.errors) {
+      print(`      ${error}`);
+    }
+    printWarnings(r.warnings);
+  }
+  if (invalid > 0) {
     throw new CLIError("Validation failed", 1);
   }
 }
