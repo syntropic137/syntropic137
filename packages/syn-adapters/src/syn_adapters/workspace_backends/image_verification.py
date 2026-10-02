@@ -106,6 +106,7 @@ from syn_shared.settings.image_verification import (
     MINIMUM_COSIGN_MAJOR,
     ImageVerificationSettings,
 )
+from syn_shared.settings.workspace_image_migration import stale_default_notes
 
 logger = logging.getLogger(__name__)
 
@@ -502,6 +503,11 @@ def _run_cosign_verify(
             f"{settings.certificate_oidc_issuer}. The image is not run. "
             f"cosign said: {detail}"
         )
+        # After an upgrade the usual cause is a copied .env still holding an old
+        # shipped identity or image (#1398); name the exact variable to fix.
+        stale = stale_default_notes(image_ref, settings.certificate_identity_regexp)
+        if stale:
+            msg += " Likely cause: " + " ".join(stale)
         raise ImageVerificationError(msg)
 
 
