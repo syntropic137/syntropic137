@@ -87,7 +87,10 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # carries "agent_id" stays readable and the field simply stops surfacing. A
     # bump would buy nothing and cost a full replay through the coordinator's
     # non-atomic clear-then-delete-checkpoint sequence, which loses the whole
-    # read model if the process dies between the two steps.
+    # read model if the process dies between the two steps. The same holds,
+    # and the same no-bump decision applies, to the `can_open_pr` removal
+    # (#1477 follow-up): a v9 row that still carries it stays readable, because
+    # `from_dict` no longer looks for it, and the key simply stops surfacing.
     # v9 IS bumped, and the distinction above is why. That paragraph declines a
     # bump for a field REMOVAL, where a stale row stays readable and the field
     # simply stops surfacing. This is the other case, and the same one #1013
@@ -149,7 +152,6 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.
                 clone_repos=bool(p.get("clone_repos", True)),
-                can_open_pr=bool(p.get("can_open_pr", False)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),

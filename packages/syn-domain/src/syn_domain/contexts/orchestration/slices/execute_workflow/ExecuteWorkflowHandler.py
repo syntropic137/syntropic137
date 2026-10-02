@@ -549,7 +549,6 @@ class ExecuteWorkflowHandler:
                     output_artifact_types=tuple(phase.output_artifact_types),
                     timeout_seconds=phase.timeout_seconds,
                     clone_repos=phase.clone_repos,
-                    can_open_pr=phase.can_open_pr,
                     # Dropping this would put the unpushed-work gate back to
                     # guessing what an uncommitted change means, which is
                     # #1308 (a read-only phase failed for a Cargo.lock its own

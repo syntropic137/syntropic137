@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -811,6 +811,42 @@ def payload_with_origin_owners_restored(data: object) -> object:
     return payload
 
 
+#: Keys a stored `WorkflowExecutionStarted` may carry inside `pinned_phases`
+#: that `ExecutablePhase` no longer declares. The event forbids extra fields,
+#: and that strictness reaches the dataclass nested in it, so without this a
+#: start event written before the removal fails typed validation and ADR-023
+#: silently replays it as a `GenericDomainEvent`.
+#:
+#: Permanent: entries are never removed, because the events that carry them
+#: are never rewritten. Deliberately independent of `RETIRED_PHASE_FIELDS`,
+#: which is what AUTHORS may still write and will change; stored history
+#: replays forever whatever that policy becomes.
+#:
+#: - ``can_open_pr``: inert since #1477, removed from the phase after it.
+REMOVED_EXECUTABLE_PHASE_KEYS: Final[frozenset[str]] = frozenset({"can_open_pr"})
+
+
+def started_payload_for_replay(data: object) -> object:
+    """A stored `WorkflowExecutionStarted` payload, normalised for validation.
+
+    Removed keys are dropped from each pinned phase, then carried owners are
+    restored (#1462). Lives here rather than on the event for the reason given
+    on `payload_with_owners_restored`.
+    """
+    pinned = data.get("pinned_phases") if isinstance(data, Mapping) else None
+    if isinstance(data, Mapping) and isinstance(pinned, list):
+        data = {
+            **data,
+            "pinned_phases": [
+                {k: v for k, v in phase.items() if k not in REMOVED_EXECUTABLE_PHASE_KEYS}
+                if isinstance(phase, Mapping)
+                else phase
+                for phase in pinned
+            ],
+        }
+    return payload_with_origin_owners_restored(data)
+
+
 @dataclass(frozen=True)
 class ExecutionMetrics:
     """Aggregated metrics for workflow execution.
@@ -902,11 +938,6 @@ class ExecutablePhase:
     # here rather than on `agent_config` because it decides what the WORKSPACE
     # contains, not how the agent is invoked.
     clone_repos: bool = True
-
-    # Whether this phase was meant to create a pull request (#1197). Inert
-    # since #1477: nothing reads it, and every phase token carries the
-    # installation's own permissions. Kept until the field is removed.
-    can_open_pr: bool = False
 
     # Whether a change to the repositories is part of what this phase delivers
     # (#1308). Unlike clone_repos this decides nothing about

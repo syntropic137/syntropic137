@@ -524,11 +524,7 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
-    # #1429 surfaced can_open_pr when it decided the GitHub token's permission
-    # level. Since #1477 it decides nothing: every phase token carries the
-    # installation's own permissions. Kept readable until the field is removed.
     clone_repos: bool = True
-    can_open_pr: bool = False
     delivers_repo_changes: bool = True
     sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)

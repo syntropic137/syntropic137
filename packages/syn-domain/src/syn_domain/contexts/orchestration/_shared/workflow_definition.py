@@ -30,6 +30,9 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
 )
+from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
+    without_retired_fields,
+)
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
     expand_skill_entry,
@@ -343,15 +346,6 @@ class PhaseYamlDefinition(BaseModel):
     #1129 token routing: dropping it would fall back to the first
     installation, which in a multi-org deployment is the wrong one."""
 
-    can_open_pr: bool = False
-    """Whether this phase was meant to create a pull request (#1197).
-
-    INERT SINCE #1477. It used to downgrade the phase's token to
-    `pull_requests: read`, which also refused every PR comment (GitHub has no
-    comment-only permission), so every phase now holds the installation's own
-    permissions and may open its own PR. Still accepted so existing workflow
-    YAML loads; removal is a follow-up."""
-
     delivers_repo_changes: bool = True
     """Whether a change to the repositories is part of what this phase delivers (#1308).
 
@@ -390,6 +384,23 @@ class PhaseYamlDefinition(BaseModel):
     # Workflow-scope refs live on WorkflowDefinition; phase scope wins on
     # identity collision when the two lists are merged at resolution time.
     skills: list[SkillRef] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_fields(cls, data: object) -> object:
+        """Accept and ignore a phase key that no longer does anything.
+
+        Dropped BY NAME, from `RETIRED_PHASE_FIELDS`, not by loosening to
+        `extra="ignore"`: that would accept every misspelling again, which is
+        #961. `mode="before"` so the key is gone before `extra="forbid"` sees
+        it.
+
+        Ignoring is safe here when ignoring a removed provider was not (see
+        `_reject_removed_provider`): the value already did nothing, so dropping
+        it changes no behaviour. The author is told on every path that reads
+        authored YAML, by `retired_field_notices`.
+        """
+        return without_retired_fields(data)
 
     @field_validator("allowed_tools", mode="before")
     @classmethod
@@ -568,7 +579,6 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
-            can_open_pr=self.can_open_pr,
             delivers_repo_changes=self.delivers_repo_changes,
             argument_hint=self.argument_hint,
             model=model,
