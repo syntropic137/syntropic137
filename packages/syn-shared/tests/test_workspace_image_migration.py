@@ -18,7 +18,6 @@ from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_PROVIDER,
     PINNED_DIGESTS,
     PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
-    WorkspaceImageProvider,
 )
 
 pytestmark = pytest.mark.unit
