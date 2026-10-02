@@ -248,18 +248,14 @@ class AgentYamlDefinition(BaseModel):
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
 
     sandbox: Literal["read-only", "workspace-write", "full-access"] | None = None
-    """How much authority this phase's agent gets. Omit it.
+    """How much authority this phase's agent gets.
 
-    Only ``full-access`` (the default when omitted) runs in the workspace
-    container; ``read-only`` and ``workspace-write`` are REFUSED here and at
-    execution (``require_runnable_sandbox``, #1434). Codex enforces them with
-    bubblewrap, which cannot create a namespace in the container, so the
-    phase could not read the repository or write ``artifacts/output/``. Claude
-    ignores the field. The lower levels stay in the type only so a stored
-    template is refused with a reason rather than "unknown value".
-
-    Do NOT use ``read-only`` for a review phase: it cannot run, and a phase
-    publishes its verdict by writing under ``artifacts/output/``."""
+    ``workspace-write`` is the least privilege a phase can finish with: codex
+    may write inside ``/workspace`` (including ``artifacts/output/``) and
+    nothing outside it. Prefer it for review and verify phases. Omitted means
+    ``full-access``. ``read-only`` is REFUSED here and at execution
+    (``require_runnable_sandbox``): it denies the ``artifacts/output/`` write a
+    phase reports through. Claude ignores the field."""
 
     allow_delegation: bool = False
     """When true, stage BOTH agent auths in this phase's workspace so the
@@ -482,7 +478,7 @@ class PhaseYamlDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_sandbox_is_runnable(self) -> PhaseYamlDefinition:
-        """Refuse a sandbox level the workspace cannot run, at authoring (#1434).
+        """Refuse a sandbox level a phase cannot finish under, at authoring (#1434).
 
         The level is well-formed and the host cannot honour it, so without
         this it installed cleanly and killed the phase mid-run, after earlier
