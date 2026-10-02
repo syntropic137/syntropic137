@@ -7,6 +7,7 @@ import {
   listCommand,
   showCommand,
   deleteCommand,
+  validateCommand,
 } from "../../../src/commands/workflow/crud.js";
 import { CLIError } from "../../../src/framework/errors.js";
 
@@ -369,6 +370,118 @@ describe("workflow crud commands", () => {
       await expect(
         deleteCommand.handler({ positionals: [], values: {} }),
       ).rejects.toThrow(CLIError);
+    });
+  });
+
+  // A retired phase key (can_open_pr, #1477) is accepted and ignored by the
+  // server, which says so in `warnings`. Each command that reads authored YAML
+  // must show that, or the author never learns the line can go.
+  describe("retired-key warnings", () => {
+    const NOTICE = "phase 'open_pr': 'can_open_pr' is retired (#1477) and ignored";
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "syn-crud-warn-"));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    function requestOf(call: unknown[]): { url: string; body: Promise<string> } {
+      const first = call[0] as Request | string;
+      if (typeof first === "string") {
+        return { url: first, body: Promise.resolve(String((call[1] as RequestInit).body)) };
+      }
+      return { url: first.url, body: first.clone().text() };
+    }
+
+    function writePackage(): string {
+      const pkg = path.join(tmpDir, "pkg");
+      fs.mkdirSync(pkg);
+      fs.writeFileSync(
+        path.join(pkg, "workflow.yaml"),
+        "id: retired-pkg\nname: Retired Pkg\ntype: custom\nphases:\n" +
+          "  - id: open_pr\n    name: Open PR\n    order: 1\n" +
+          "    prompt_template: Open it.\n    can_open_pr: true\n",
+        "utf-8",
+      );
+      return pkg;
+    }
+
+    it("validate <file> prints the server's warnings on a valid file", async () => {
+      const file = path.join(tmpDir, "wf.yaml");
+      fs.writeFileSync(file, "id: x\n", "utf-8");
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: true, name: "X", workflow_type: "custom", phase_count: 1, warnings: [NOTICE] }),
+      );
+
+      await validateCommand.handler({ positionals: [file], values: {} });
+
+      expect(stdout()).toContain("warning:");
+      expect(stdout()).toContain(NOTICE);
+    });
+
+    it("validate <file> still prints warnings when the file is invalid", async () => {
+      const file = path.join(tmpDir, "wf.yaml");
+      fs.writeFileSync(file, "id: x\n", "utf-8");
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: false, phase_count: 0, errors: ["bad"], warnings: [NOTICE] }),
+      );
+
+      await expect(validateCommand.handler({ positionals: [file], values: {} })).rejects.toThrow(
+        CLIError,
+      );
+      expect(stdout()).toContain(NOTICE);
+    });
+
+    it("validate <dir> sends each resolved definition to the server", async () => {
+      const pkg = writePackage();
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: true, name: "Retired Pkg", workflow_type: "custom", phase_count: 1, warnings: [NOTICE] }),
+      );
+
+      await validateCommand.handler({ positionals: [pkg], values: {} });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const { url, body } = requestOf(mockFetch.mock.calls[0]!);
+      expect(url).toContain("/workflows/validate");
+      const sent = JSON.parse(await body) as { content: string; filename: string };
+      expect(JSON.parse(sent.content)).toMatchObject({ id: "retired-pkg" });
+      expect(sent.filename).toBe("Retired Pkg.json");
+      expect(stdout()).toContain(NOTICE);
+      expect(stdout()).toContain("Valid single package");
+    });
+
+    it("validate <dir> fails when the server refuses a workflow", async () => {
+      const pkg = writePackage();
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: false, phase_count: 0, errors: ["Extra inputs are not permitted"] }),
+      );
+
+      await expect(validateCommand.handler({ positionals: [pkg], values: {} })).rejects.toThrow(
+        CLIError,
+      );
+      expect(stdout()).toContain("Extra inputs are not permitted");
+      expect(stdout()).not.toContain("Valid single package");
+    });
+
+    it("create --from prints the server's warnings", async () => {
+      const file = path.join(tmpDir, "workflow.yaml");
+      fs.writeFileSync(file, "id: x\n", "utf-8");
+      const originalArgv = process.argv;
+      process.argv = ["node", "syn", "workflow", "create", "X", "--from", file];
+      mockFetch.mockResolvedValue(
+        jsonResponse({ id: "x", name: "X", workflow_type: "custom", status: "created", warnings: [NOTICE] }, 201),
+      );
+
+      try {
+        await createCommand.handler({ positionals: ["X"], values: { from: file } });
+      } finally {
+        process.argv = originalArgv;
+      }
+
+      expect(stdout()).toContain(NOTICE);
     });
   });
 });

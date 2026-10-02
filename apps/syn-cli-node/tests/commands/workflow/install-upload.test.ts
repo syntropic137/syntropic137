@@ -244,3 +244,38 @@ describe("unchanged reinstall (issue #822)", () => {
     expect(refs).toEqual([{ id: "demo", name: "Demo" }]);
   });
 });
+
+describe("installWorkflowsViaApi retired-key warnings", () => {
+  const NOTICE = "phase 'open_pr': 'can_open_pr' is retired (#1477) and ignored";
+
+  function withWarnings(status: string): Response {
+    return new Response(
+      JSON.stringify({
+        id: "demo",
+        name: "Demo",
+        workflow_type: "research",
+        classification: "simple",
+        repository_url: "",
+        requires_repos: false,
+        status,
+        warnings: [NOTICE],
+      }),
+      { status: 201, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  function stdout(): string {
+    return (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+  }
+
+  it.each(["created", "unchanged"])("prints them when the install is %s", async (status) => {
+    mockFetch.mockResolvedValue(withWarnings(status));
+
+    await installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })]);
+
+    expect(stdout()).toContain("warning:");
+    expect(stdout()).toContain(NOTICE);
+  });
+});
