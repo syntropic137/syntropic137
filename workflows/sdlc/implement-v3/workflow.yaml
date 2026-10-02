@@ -237,12 +237,17 @@ phases:
     # `gh` still works: the repo is still resolved to its installation, still
     # gets a token, and still gets a hosts.yml entry. Only the clone is gone.
     clone_repos: false
-    # THE ONLY PHASE HERE ALLOWED TO PUBLISH (#1197). Every other phase in
-    # this workflow gets a token whose `pull_requests` permission is read, so
-    # the gate cannot be routed around by an earlier phase calling
-    # `gh pr create` before the verifier has rendered a verdict - which is
-    # exactly what happened on exec-0bac0e1ed2b2.
-    can_open_pr: true
+    # `can_open_pr: true` used to sit here, with a comment claiming this was
+    # THE ONLY PHASE ALLOWED TO PUBLISH (#1197) and that an earlier phase could
+    # not route around the verifier by calling `gh pr create` first - the thing
+    # that happened on exec-0bac0e1ed2b2.
+    #
+    # That claim was never true. #1477 established the field is inert: every
+    # phase token carries the installation's own permissions, so every phase
+    # could always open and comment on a PR. The field is now retired (#1502)
+    # and fails the repo gate, so it is removed rather than left asserting an
+    # enforcement that does not exist. The ordering this workflow wants still
+    # needs a real mechanism; it does not have one.
     allowed_tools:
       - Read
       - Bash
