@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { api, unwrap } from "../client/typed.js";
+import { api, errorDetail, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
@@ -177,7 +177,8 @@ async function readInventorySummary(executionId: string): Promise<InventorySumma
       params: { path: { execution_id: executionId } },
     });
     if (result.data?.summary && result.error === undefined && result.response.ok) return result.data.summary;
-    return `unavailable (${result.response.status})`;
+    const status = `unavailable (${result.response.status})`;
+    return result.error === undefined ? status : `${status}: ${errorDetail(result.error)}`;
   } catch {
     return "unavailable";
   }

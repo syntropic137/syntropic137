@@ -125,6 +125,8 @@ describe("the shipped syn entrypoint", () => {
     expect(plain()).toContain("  Deliverable:  yes\n");
     expect(plain()).toContain("  Side effects: denied\n");
     expect(plain().split("\n").find((l) => l.includes("Review the PR"))).toMatch(/denied\s*$/);
+    // The inventory it cannot read says why, not just "404".
+    expect(plain()).toContain("Session inventory: unavailable (404): syn-api 0.33.0b5");
   });
 
   it("names the server build when a known route is missing, after the skew warning (#1501 B)", async () => {

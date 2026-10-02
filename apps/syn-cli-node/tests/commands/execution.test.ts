@@ -125,7 +125,7 @@ describe("execution commands", () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(detail)).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
       await handler({ positionals: ["exec-001"], values: {} });
       expect(stdout()).toContain("test-wf");
-      expect(stdout()).toContain("Session inventory: unavailable (403)");
+      expect(stdout()).toContain("Session inventory: unavailable (403): denied");
     });
 
     describe("outcome (#1501 A)", () => {

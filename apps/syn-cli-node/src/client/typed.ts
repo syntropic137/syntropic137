@@ -68,10 +68,15 @@ export function unwrap<T>(
     );
   }
   if (result.error) {
-    const detail = typeof result.error === "object" && result.error !== null && "detail" in result.error
-      ? String((result.error as { detail: unknown }).detail)
-      : String(result.error);
-    throw new CLIError(`${context}: ${detail}`);
+    throw new CLIError(`${context}: ${errorDetail(result.error)}`);
   }
   return result.data as T;
+}
+
+/** The server's own words for an error body: FastAPI's `detail` when there is
+ * one, else the body as a string. */
+export function errorDetail(error: unknown): string {
+  return typeof error === "object" && error !== null && "detail" in error
+    ? String((error as { detail: unknown }).detail)
+    : String(error);
 }
