@@ -476,13 +476,13 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:12a38b8aa4eaa81bda48790410550d2741870d54b3c39925d8fdf9f934b221ff"
+            "sha256:974979c99a8f98fcff491b466356ed31031ab31dd5f885aa8938eec831c673f5"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:d9395a2ec9b065cd3865e95476c286566231d943b5ab1d2cce3ba3366066556d"
+            "sha256:e151bb91e93a6972879729d80261999c575d4b135ba44f3012c09566479f8670"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:16132cce4470d9375dc2421780915e2d68ccaffb118a4479689e34f8cd20cd44"
+            "sha256:2f41b47c35db1707458637e6bc19325e12a3b8daf0c8cda386c25cc772a8c15c"
         ),
     }
 )
