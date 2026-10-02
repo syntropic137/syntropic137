@@ -307,22 +307,89 @@ async def test_retention_expiry_is_expired_not_deleted_and_quota_counts_objects_
                 age,
             )
     # 120 bytes of distinct objects; the shared object counts once, not twice.
+    # It was first captured 3h ago but referenced again 1h ago, so it is more
+    # recent than "middle" (2h): eviction ranks objects by their newest reference.
     retention = LocalBodyRetention(db_pool, archive, source, max_bytes=80)
     assert await retention.drain() == 1
-    assert await archive.get(oldest.archive) is None
-    assert await archive.get(middle.archive) == b"m" * 40
+    assert await archive.get(middle.archive) is None
+    assert await archive.get(oldest.archive) == b"o" * 40
     assert await archive.get(newest.archive) == b"n" * 40
     assert not await retention.step()  # within quota now
     access = InstallationTranscriptAccess(db_pool, source)
-    assert await access.tombstone(oldest) == "expired"
-    state = await _deletions(db_pool, source, archive, None).state(oldest)
+    assert await access.tombstone(middle) == "expired"
+    assert await access.tombstone(oldest) is None
+    state = await _deletions(db_pool, source, archive, None).state(middle)
     assert state is not None and state.reason == "retention_quota"
     assert state.replication == "disabled" and state.replicas == ()
     reader = ReadLocalTranscriptHandler(PostgresCaptureCatalog(db_pool), archive, access)
-    read = await reader.handle(oldest.run, _identity(oldest), oldest.archive.sha256)
-    assert read.status == "expired" and read.capture == oldest
+    read = await reader.handle(middle.run, _identity(middle), middle.archive.sha256)
+    assert read.status == "expired" and read.capture == middle
     # An owner request for an already-expired body keeps the original reason.
-    again, created = await _deletions(db_pool, source, archive, None).request(oldest, "deletion")
+    again, created = await _deletions(db_pool, source, archive, None).request(middle, "deletion")
     assert not created and again.reason == "retention_quota"
     with pytest.raises(ValueError):
         LocalBodyRetention(db_pool, archive, source, max_bytes=0)
+
+
+async def test_shared_body_expires_only_after_every_referencing_capture_ages_out(
+    db_pool: asyncpg.Pool, tmp_path: Path
+) -> None:
+    await PostgresSessionEvidence(db_pool).ensure_ready()
+    source = str(uuid4())
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    body = b"shared transcript bytes"
+    # One content-addressed object, two captures acquired days apart.
+    old = await _record(db_pool, archive, source, "run-old", body, capture_id="old")
+    recent = await _record(db_pool, archive, source, "run-recent", body, capture_id="recent")
+    solo = await _record(db_pool, archive, source, "run-old", b"solo", capture_id="solo")
+    assert old.archive == recent.archive
+
+    async def age(capture_id: str, hours: int) -> None:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE session_capture_catalog
+                SET created_at=now()-$3::double precision*interval '1 hour'
+                WHERE source_instance_id=$1 AND capture_id=$2""",
+                source,
+                capture_id,
+                hours,
+            )
+
+    await age("old", 72)
+    await age("solo", 72)
+    await age("recent", 1)
+    retention = LocalBodyRetention(db_pool, archive, source, age_seconds=86400)
+    access = InstallationTranscriptAccess(db_pool, source)
+    reader = ReadLocalTranscriptHandler(PostgresCaptureCatalog(db_pool), archive, access)
+    # Only the unshared old object expires: the recent capture still holds the
+    # shared bytes although the capture that first acquired them is old.
+    assert await retention.drain() == 1
+    assert await archive.get(solo.archive) is None
+    assert await archive.get(old.archive) == body
+    for capture in (old, recent):
+        assert await access.tombstone(capture) is None
+        read = await reader.handle(capture.run, _identity(capture), capture.archive.sha256)
+        assert read.status == "present" and read.body == body
+    assert await _deletions(db_pool, source, archive, None).state(old) is None
+
+    # Once the recent capture ages out too, the shared object expires for both.
+    await age("recent", 48)
+    assert await retention.drain() == 1
+    assert not await retention.step()
+    assert not (tmp_path / old.archive.sha256).exists()
+    state = await _deletions(db_pool, source, archive, None).state(recent)
+    assert state is not None and state.reason == "retention_age"
+    assert state.local_status == "deleted"
+    with pytest.raises(TranscriptDeletedError):
+        await archive.put(body)
+    catalog = PostgresCaptureCatalog(db_pool)
+    availability = PostgresBodyAvailability(db_pool)
+    for capture in (old, recent):
+        # Both nodes stay discoverable, with the body reported expired.
+        assert await catalog.get(capture.run, "test", capture.capture_id) == capture
+        assert await catalog.get_revision(capture.run, _identity(capture), capture.archive.sha256)
+        assert await access.tombstone(capture) == "expired"
+        read = await reader.handle(capture.run, _identity(capture), capture.archive.sha256)
+        assert read.status == "expired" and read.body is None and read.capture == capture
+        page = _page(capture.run, _receipt(capture.run, local=capture.archive.sha256, remote=None))
+        assert [o.status for o in await availability.overrides(page)] == ["expired"]

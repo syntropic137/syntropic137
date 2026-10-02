@@ -114,11 +114,12 @@ replica retry fencing and cleanup quotas.
 
 Optional `SYN_SESSION_INVENTORY_LOCAL_BODY_RETENTION_SECONDS` now schedules
 local body expiry through durable deletion requests. It is disabled by default;
-age is measured from first catalog acquisition. Each recovery tick discovers at
-most 100 eligible rows and removes one body, with SQL acknowledgement after the
-filesystem tombstone and unlink. Failed expiry does not block other inventory
-work. Two real PostgreSQL tests verify bounds, source isolation, retained catalog,
-and crash after unlink; 14 scheduling/configuration tests pass. Log:
+age is measured from the newest catalog acquisition referencing the exact bytes
+(originally the first; corrected so a shared body outlives its recent captures).
+Each recovery tick discovers at most 100 eligible objects and removes one body,
+with SQL acknowledgement after the filesystem tombstone and unlink. Failed
+expiry does not block other inventory work. Two real PostgreSQL tests verify
+bounds, source isolation, retained catalog, and crash after unlink; 14 scheduling/configuration tests pass. Log:
 `/private/tmp/1398-body-retention.log`.
 
 This closes local expiry scheduling only. Replica deletion, queued exporter
