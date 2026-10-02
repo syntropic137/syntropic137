@@ -28,6 +28,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts im
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
     phase_failure,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
+    UnfinishedPhase,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     UpstreamRetryPolicy,
 )
@@ -106,6 +109,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         ClaudePluginMaterializerProtocol,
         SkillMaterializerProtocol,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import (
+        PhaseLaunch,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         AgentHandlerProtocol,
@@ -372,6 +378,11 @@ class WorkflowExecutionProcessor:
                 dispatch_ctx=dispatch_ctx,
             )
             if aggregate.status == ExecutionStatus.CANCELLED:
+                # What the interrupted phase wrote or said, kept before the
+                # cancel tears its workspace down (#1476).
+                all_artifact_ids.extend(
+                    i for i in dispatch_ctx.kept_artifact_ids if i not in all_artifact_ids
+                )
                 return await self._cancel_execution(
                     execution_id,
                     workflow_id,
@@ -669,74 +680,80 @@ class WorkflowExecutionProcessor:
         launch = runtime.launch(todo.phase_id, session_id=session_id)
         workflow_id = aggregate.workflow_id or ""
 
-        # A BUSY UPSTREAM IS NOT A FAILED PHASE (#1303). Everything below this
-        # line treats the result as final, and for every cause but one it is;
-        # `run_phase_agent` is what makes that true, by not returning until
-        # there is no further attempt to come. How many attempts that took, and
-        # which failures earn one, are settled in `agent_attempts` and are not
-        # facts this function has any use for.
-        result = await run_phase_agent(
-            handler=self._get_agent_handler(),
-            todo=todo,
-            phase=phase,
-            launch=launch,
-            session_id=session_id,
-            observability=self._observability_writer,
-            retry_policy=self._retry_policy,
-        )
-
-        runtime.remember_leader(
-            todo.phase_id, execution_id=todo.execution_id, stream_result=result.stream_result
-        )
-
-        await record_phase_conversation(
-            self._conversation_storage,
-            result,
-            session_id=session_id,
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            workflow_id=workflow_id,
-            requested_model=phase.agent_config.model,
-            started_at=launch.started_at,
-        )
-        runtime.record_agent_run(todo.phase_id, execution_id=todo.execution_id, result=result)
-
-        if result.stream_result.interrupt_requested:
-            await self._handle_cancel_signal(todo, result, aggregate)
-            return
-
         # EVERY WAY OUT OF HERE THAT ENDS THE RUN GOES PAST THE SAME DOOR
-        # (#1321). Below this point the only exits are raises, and each of them
-        # unwinds to `_fail_execution`, which abandons the workspace - so
-        # whatever the phase wrote under artifacts/output/ is destroyed with
-        # it, unclaimed, because COLLECT_ARTIFACTS is a LATER to-do item that
+        # (#1321, #1476). Each exit below either completes the phase, retries
+        # it, or unwinds to `_cancel_execution` / `_fail_execution`, which
+        # abandon the workspace - so whatever the phase wrote under
+        # artifacts/output/, or only said, is destroyed with it unless it is
+        # kept here first, because COLLECT_ARTIFACTS is a LATER to-do item that
         # is now never dispatched. That cost exec-76a6d3b22b23 a finished
-        # 1322-line deliverable over an unreadable report, and it cost the
-        # non-zero-exit path beside it the same thing for longer.
+        # 1322-line deliverable and exec-82ce478a6c46 a drafted review.
         #
         # "This phase did not complete" and "throw away what it produced" are
         # different decisions and this is where they come apart. The keep is
         # attached to the exception rather than repeated at each raise so that
         # a raise added later cannot forget it, and it never raises itself, so
-        # the reason the phase failed always reaches the caller intact.
+        # the reason the phase failed always reaches the caller intact. The
+        # `try` starts before the agent runs so a raise from the run itself or
+        # from recording it is covered too.
+        said: str | None = None
+        kept = False
         try:
+            # A BUSY UPSTREAM IS NOT A FAILED PHASE (#1303). Everything below
+            # treats the result as final, and for every cause but one it is;
+            # `run_phase_agent` is what makes that true, by not returning until
+            # there is no further attempt to come.
+            result = await run_phase_agent(
+                handler=self._get_agent_handler(),
+                todo=todo,
+                phase=phase,
+                launch=launch,
+                session_id=session_id,
+                observability=self._observability_writer,
+                retry_policy=self._retry_policy,
+            )
+            said = result.stream_result.last_agent_message
+
+            runtime.remember_leader(
+                todo.phase_id, execution_id=todo.execution_id, stream_result=result.stream_result
+            )
+            await record_phase_conversation(
+                self._conversation_storage,
+                result,
+                session_id=session_id,
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                workflow_id=workflow_id,
+                requested_model=phase.agent_config.model,
+                started_at=launch.started_at,
+            )
+            runtime.record_agent_run(todo.phase_id, execution_id=todo.execution_id, result=result)
+
+            if result.stream_result.interrupt_requested:
+                kept = True
+                await self._keep(
+                    todo,
+                    phase,
+                    launch,
+                    workflow_id,
+                    dispatch_ctx,
+                    said,
+                    UnfinishedPhase.INTERRUPTED,
+                )
+                await self._handle_cancel_signal(todo, result, aggregate)
+                return
+
             command = result.command
             assert command is not None, "a non-cancelled run must carry its completion command"
             # THE PHASE'S OWN REPORT, on the same footing as its exit status
             # and checked before the aggregate is told the run completed
-            # (#1256). A phase that wrote `TASK_RESULT: {"success": false, ...}`
-            # said it did not do what it was asked; completing it anyway
-            # converts a DETECTED failure into a pass, which is the one
-            # direction that lets defects through every gate downstream.
-            #
-            # WHICH of those two channels ended the run, and what the failure
-            # is counted as, are `agent_run_outcome`'s to decide - they were
-            # the ORDER of two `if`s here, and the order was wrong: a refusal
-            # written by a run that a timeout then killed was recorded as the
-            # gate working (#1367).
+            # (#1256). WHICH channel ended the run, and what the failure is
+            # counted as, are `agent_run_outcome`'s to decide (#1367).
             failure = phase_failure(result, phase_id=todo.phase_id)
             if failure is not None:
                 logger.error(str(failure))
+                # A retried attempt keeps nothing: the phase is not over, and
+                # the attempt that completes it produces the phase's artifact.
                 if await retry_lost_terminal_attempt(
                     todo,
                     aggregate,
@@ -751,16 +768,33 @@ class WorkflowExecutionProcessor:
             aggregate.agent_execution_completed(command)
             await self._journal.append(aggregate)
         except Exception:
-            dispatch_ctx.kept_artifact_ids = await self._workspaces_for(
-                todo.execution_id, dispatch_ctx.inputs
-            ).keep_unfinished_output(
-                todo,
-                phase,
-                workspace=launch.workspace,
-                workflow_id=workflow_id,
-                last_agent_message=result.stream_result.last_agent_message,
-            )
+            if not kept:
+                await self._keep(
+                    todo, phase, launch, workflow_id, dispatch_ctx, said, UnfinishedPhase.FAILED
+                )
             raise
+
+    async def _keep(
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        launch: PhaseLaunch,
+        workflow_id: str,
+        dispatch_ctx: _DispatchContext,
+        said: str | None,
+        outcome: UnfinishedPhase,
+    ) -> None:
+        """Keep what an unfinished phase wrote or said, before its workspace goes."""
+        dispatch_ctx.kept_artifact_ids = await self._workspaces_for(
+            todo.execution_id, dispatch_ctx.inputs
+        ).keep_unfinished_output(
+            todo,
+            phase,
+            workspace=launch.workspace,
+            workflow_id=workflow_id,
+            last_agent_message=said,
+            outcome=outcome,
+        )
 
     async def _handle_cancel_signal(
         self,

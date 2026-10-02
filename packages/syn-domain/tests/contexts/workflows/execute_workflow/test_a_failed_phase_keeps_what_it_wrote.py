@@ -354,3 +354,75 @@ class TestNothingElseChanged:
         assert result.status == "completed"
         assert len(_kept(repo)) == 1
         assert "(kept from a failed phase)" not in (_kept(repo)[0].title or "")
+
+
+class _RaisesAfterWriting(FakeAgentExecutionHandler):
+    """An agent run that writes its file and then raises out of the run itself,
+    before any verdict exists: the route outside the old `try` (#1476)."""
+
+    async def handle(self, *args: object, **kwargs: object) -> object:
+        await super().handle(*args, **kwargs)  # type: ignore[arg-type]
+        raise RuntimeError("the harness died after the agent wrote its file")
+
+
+class TestEveryWayOutKeepsTheWork:
+    """#1476: the interrupt and the agent run itself are exits too."""
+
+    async def test_an_interrupted_phase_keeps_what_it_wrote_as_partial(self) -> None:
+        repo = RecordingArtifactRepository()
+        processor = _make_processor(
+            FakeAgentExecutionHandler(interrupt=True, produces=[RESEARCH]),
+            artifact_repository=repo,
+        )
+
+        result = await processor.run(
+            workflow_id="wf-1476",
+            workflow_name="Interrupted",
+            phases=_phase_that_declares_an_output(),
+            inputs={},
+            execution_id="exec-1476-interrupted",
+        )
+
+        assert result.status == "cancelled"
+        (kept,) = _kept(repo)
+        assert UnfinishedPhase.INTERRUPTED.value in (kept.title or "")
+        assert result.artifact_ids == [kept.id]
+
+    async def test_an_interrupted_phase_that_only_spoke_keeps_what_it_said(self) -> None:
+        repo = RecordingArtifactRepository()
+        processor = _make_processor(
+            FakeAgentExecutionHandler(interrupt=True, says=REFUSED_COMMENT_REPORT),
+            artifact_repository=repo,
+        )
+
+        result = await processor.run(
+            workflow_id="wf-1476",
+            workflow_name="Interrupted",
+            phases=_phase_that_declares_an_output(),
+            inputs={},
+            execution_id="exec-1476-interrupted-said",
+        )
+
+        assert result.status == "cancelled"
+        (kept,) = _kept(repo)
+        assert UnfinishedPhase.INTERRUPTED.value in (kept.title or "")
+        assert RECOVERED_TITLE_MARKER in (kept.title or "")
+
+    async def test_a_raise_from_the_agent_run_still_keeps_the_file(self) -> None:
+        repo = RecordingArtifactRepository()
+        processor = _make_processor(
+            _RaisesAfterWriting(produces=[RESEARCH]), artifact_repository=repo
+        )
+
+        result = await processor.run(
+            workflow_id="wf-1476",
+            workflow_name="Harness died",
+            phases=_phase_that_declares_an_output(),
+            inputs={},
+            execution_id="exec-1476-raised",
+        )
+
+        assert result.status == "failed"
+        assert "harness died" in (result.error_message or "")
+        (kept,) = _kept(repo)
+        assert UnfinishedPhase.FAILED.value in (kept.title or "")

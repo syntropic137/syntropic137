@@ -248,6 +248,7 @@ class PhaseWorkspace:
         workspace: ManagedWorkspace,
         workflow_id: str,
         last_agent_message: str | None,
+        outcome: UnfinishedPhase,
     ) -> list[str]:
         """Store what a phase wrote before the run that produced it is torn down.
 
@@ -271,16 +272,16 @@ class PhaseWorkspace:
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
             agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
-            outcome=UnfinishedPhase.FAILED,
+            outcome=outcome,
             last_agent_message=last_agent_message,
         )
         if kept:
             logger.warning(
-                "Phase %s (%s) failed; kept %d artifact(s) it had already written "
-                "under artifacts/output/ rather than discarding them with the "
-                "workspace (#1321)",
+                "Phase %s (%s) did not complete (%s); kept %d artifact(s) rather "
+                "than discarding them with the workspace (#1321, #1476)",
                 todo.phase_id,
                 phase.name,
+                outcome.name.lower(),
                 len(kept),
             )
         return kept
