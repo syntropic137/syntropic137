@@ -43,7 +43,12 @@ function server(serverVersion: string | null) {
   };
 }
 
-describe("syn entrypoint (src/index.ts)", () => {
+// The first test transforms the whole CLI module graph (every command) on a
+// cold import: ~4s alone and more under the parallel suite, which raced
+// vitest's 5s default. The time is the import, not the behaviour under test.
+const COLD_IMPORT_MS = 30_000;
+
+describe("syn entrypoint (src/index.ts)", { timeout: COLD_IMPORT_MS }, () => {
   const events: string[] = [];
   let exitSpy: ReturnType<typeof vi.spyOn>;
   const argv = process.argv;
@@ -70,7 +75,7 @@ describe("syn entrypoint (src/index.ts)", () => {
     vi.stubGlobal("fetch", vi.fn(fetchImpl));
     await import("../src/index.js");
     // index.ts does not await cli.run(); the exit call is where it finishes.
-    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalled());
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalled(), { timeout: COLD_IMPORT_MS });
   }
 
   const at = (text: string) => events.findIndex((e) => e.includes(text));
