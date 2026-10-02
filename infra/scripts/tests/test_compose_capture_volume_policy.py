@@ -29,7 +29,9 @@ _COMPOSE = [
     _ROOT / "docker" / "docker-compose.syntropic137.yaml",
 ]
 _VOLUME = "syn-capture-" + "ab" * 32
-_TEMPLATE = "frontend dockerfrontend\n    http-request deny unless METH_GET\n    http-request deny\n"
+_TEMPLATE = (
+    "frontend dockerfrontend\n    http-request deny unless METH_GET\n    http-request deny\n"
+)
 _RULE = re.compile(r"http-request allow if \{ method ([A-Z ]+) \} \{ path -m reg (\S+) \}")
 
 
@@ -40,7 +42,9 @@ def _inserted_rules(compose: Path, tmp_path: Path) -> list[tuple[set[str], re.Pa
     template.write_text(_TEMPLATE)
     # Compose unescapes $$ to $; point the script at our template and stop
     # before it execs the real proxy.
-    script = script.replace("$$", "$").replace("/usr/local/etc/haproxy/haproxy.cfg.template", str(template))
+    script = script.replace("$$", "$").replace(
+        "/usr/local/etc/haproxy/haproxy.cfg.template", str(template)
+    )
     script = script.replace("/tmp/capture-haproxy.template", str(tmp_path / "out.template"))
     script = script.replace('exec /docker-entrypoint.sh "$@"', "true")
     subprocess.run([shell, flags, script], check=True)
