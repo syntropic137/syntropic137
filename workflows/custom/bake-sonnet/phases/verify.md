@@ -24,9 +24,16 @@ implementation is not here yet. Before anything else:
 
 ```
 git fetch origin <branch-from-the-artifact>
-git checkout <the-exact-commit-SHA-from-the-artifact>
+git checkout --recurse-submodules <the-exact-commit-SHA-from-the-artifact>
 git rev-parse HEAD          # must equal that SHA
 ```
+
+**`--recurse-submodules` is required, not optional.** A plain `git checkout`
+moves the superproject but leaves every submodule where the default branch put
+it, so when the commit under review pins a different gitlink, `git status`
+reports ` M lib/<submodule>`. The unpushed-work guard reads that line as unsaved
+work and fails the phase after the review is complete but before it is stored,
+so the whole review is paid for and lost.
 
 Paste that `rev-parse` output. If it does not match, stop and report it: every
 result after this point would describe the wrong code, and a green run against
