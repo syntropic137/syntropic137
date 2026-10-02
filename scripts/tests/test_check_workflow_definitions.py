@@ -21,8 +21,8 @@ from pydantic import ValidationError
 from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
 from scripts.check_workflow_definitions import (
     _workflow_files,
-    main,
     grant_violations,
+    main,
     stale_phase_references,
     validate_file,
 )

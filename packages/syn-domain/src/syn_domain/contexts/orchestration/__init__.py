@@ -190,6 +190,7 @@ __all__ = [
     "AGENT_LAUNCH_MARKER",
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
+    "RETIRED_PHASE_FIELDS",
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
@@ -244,7 +245,6 @@ __all__ = [
     "PhaseExecutionType",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
-    "RETIRED_PHASE_FIELDS",
     "ReportedFailureReason",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
