@@ -2413,6 +2413,12 @@ release-local version:
     docker buildx inspect multiarch >/dev/null 2>&1 || docker buildx create --name multiarch
     docker buildx use multiarch
 
+    # What /version reports as syn-api's commit (#1473). Only a clean tree is
+    # the commit it names, so a dirty one stamps nothing and reports null
+    # rather than a SHA whose tree is not what shipped.
+    build_commit=""
+    if [ -z "$(git status --porcelain)" ]; then build_commit="$(git rev-parse HEAD)"; else echo "⚠️  Working tree is dirty: syn-api will report commit: null"; fi
+
     # Images to build (order: fast first)
     FAILED=()
     for image in token-injector sidecar-proxy syn-collector syn-dashboard-ui syn-api syn-gateway; do
@@ -2432,7 +2438,9 @@ release-local version:
                               # rather than inheriting it silently - inheriting
                               # it silently is the exact shape of the bug this
                               # line closes.
-                              build_args="--build-arg INCLUDE_DOCKER_CLI=1" ;;
+                              # SYN_BUILD_* are the image's identity on
+                              # /version, measured by the same fitness test.
+                              build_args="--build-arg INCLUDE_DOCKER_CLI=1 --build-arg SYN_BUILD_IMAGE_TAG={{version}} --build-arg SYN_BUILD_COMMIT=$build_commit" ;;
             syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;
         esac
         echo "📦 Building $image..."
