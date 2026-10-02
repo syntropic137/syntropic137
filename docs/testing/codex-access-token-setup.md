@@ -107,7 +107,7 @@ Confirms nothing depended on in-container state that teardown discards, which wa
 
 ## What this does not solve
 
-Nothing about delegation. A delegated `codex exec` inside a workspace still needs
-`--dangerously-bypass-approvals-and-sandbox`, and delegated child sessions are
-still uncaptured ([#895](https://github.com/syntropic137/syntropic137/issues/895)).
-This fixes who the container is, not what happens once it runs.
+Nothing about delegation. A delegated Codex inside a workspace runs through
+`syn-delegate codex` with its own sandbox on, which depends on the workspace's
+seccomp/AppArmor policy (see `docs/deployment/apparmor-codex-sandbox.md`), not on
+the credential. This fixes who the container is, not what happens once it runs.

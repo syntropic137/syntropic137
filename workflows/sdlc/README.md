@@ -205,7 +205,7 @@ auto-approves tools the agent already had, and the command also carries
 `--dangerously-skip-permissions`, so the declaration restricted nothing.
 
 The codex review phase is a real exception, and it cannot be fixed in this
-file. `_build_codex_command` hardcodes `--sandbox danger-full-access` and takes
+file. `_build_codex_command` hardcoded the full-access sandbox level and took
 only a prompt and a model (#1009), and codex rejects tool-NAME policies by
 design, so the fix is a provider-neutral sandbox mode rather than an allowlist.
 The container is still the isolation boundary, so this is not a host-security

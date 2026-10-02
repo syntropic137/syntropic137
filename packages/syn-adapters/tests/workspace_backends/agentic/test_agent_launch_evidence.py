@@ -231,8 +231,10 @@ async def test_a_process_in_the_container_is_evidence_and_its_output_is_untouche
     assert AGENT_LAUNCH_MARKER not in lines
 
 
+@pytest.mark.parametrize("exit_code", [3, 126, 127])
 async def test_an_agent_that_dies_before_printing_anything_still_counts(
     fake_docker: Callable[[str], _FakeDocker],
+    exit_code: int,
 ) -> None:
     """The mirror-image error, which counting agent output would commit.
 
@@ -244,12 +246,12 @@ async def test_an_agent_that_dies_before_printing_anything_still_counts(
     docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
 
     launches, lines = await _launches_and_lines(
-        docker.adapter, ["python3", "-c", "raise SystemExit(3)"]
+        docker.adapter, ["python3", "-c", f"raise SystemExit({exit_code})"]
     )
 
     assert launches == 1
     assert lines == []
-    assert docker.adapter.last_exit_code == 3, (
+    assert docker.adapter.last_exit_code == exit_code, (
         "an agent choosing its own non-zero status is not a shell reporting a failed exec"
     )
 

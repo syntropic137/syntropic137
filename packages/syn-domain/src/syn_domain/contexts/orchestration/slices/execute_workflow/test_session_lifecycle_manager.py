@@ -13,6 +13,7 @@ from syn_domain.contexts.agent_sessions.domain.events.OperationRecordedEvent imp
 from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
     SessionCompletedEvent,
 )
+from syn_domain.contexts.agent_sessions.domain.events.SessionStartedEvent import SessionStartedEvent
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
@@ -45,6 +46,13 @@ class TestStart:
 
         assert mgr.session is not None
         repo.save.assert_awaited_once()
+        started = [
+            event.event
+            for event in mgr.session.get_uncommitted_events()
+            if isinstance(event.event, SessionStartedEvent)
+        ]
+        assert len(started) == 1
+        assert started[0].capture_profile == "local-spool/1"
 
     @pytest.mark.asyncio
     async def test_noop_when_repo_is_none(self) -> None:

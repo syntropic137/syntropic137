@@ -1533,28 +1533,37 @@ Installed baked delegation skill delegating-to-claude-p for agent codex
 Installed baked delegation skill delegating-to-codex   for agent claude-code
 ```
 
-#### Codex must bypass its own sandbox when it is the DELEGATE
+#### Codex keeps its own sandbox when it is the DELEGATE
 
-A delegated `codex exec` inside a workspace container must use
-`--dangerously-bypass-approvals-and-sandbox`, never `-s workspace-write`. Codex
-sandboxes itself with bubblewrap, and bubblewrap cannot create an unprivileged
-user namespace inside Docker, so every write in the delegated run fails.
+A delegated Codex inside a workspace runs through `syn-delegate codex`, which
+passes Codex an explicit `--sandbox workspace-write` (or `read-only`) and probes
+that sandbox live before launching. Codex's sandbox is never turned off: the
+repository fitness check `test_no_codex_sandbox_bypass` fails on the bypass flag.
 
-The error is three layers deep and the top two both look like the answer:
+Before agentic-workspace #2 this failed inside Docker: bubblewrap could not
+create a user namespace (seccomp), and on AppArmor hosts could not remount `/`
+(`docker-default` has `deny mount,`). The error is layered and the top line
+misleads:
 
 ```
 warning: Codex could not find bubblewrap on PATH ... will use the bundled
          bubblewrap in the meantime            <- WARNING. codex continues.
-bwrap: No permissions to create a new namespace, likely because the kernel
-       does not allow non-privileged user namespaces.     <- the actual fault
-Failed to write file /workspace/palindrome.py             <- the symptom
+bwrap: No permissions to create a new namespace ...  <- seccomp (fixed by AW #2)
+bwrap: Failed to make / slave: Permission denied     <- AppArmor host, profile not loaded
+Failed to write file /workspace/palindrome.py         <- the symptom
 ```
 
-Installing bubblewrap does not help: a bundled copy is already in use and the
-namespace is what is denied. The flag sounds reckless and is not: the workspace
-container IS the sandbox.
+Images labelled `agentic.codex_cli_version` now run with the Codex seccomp
+profile and, on AppArmor hosts, the `agentic-codex-sandbox` profile, which the
+host must load once (`just apparmor-setup`, see
+`docs/deployment/apparmor-codex-sandbox.md`). A missing profile fails the
+execution with provision reason `apparmor_profile_not_loaded`; an unusable
+sandbox makes `syn-delegate` exit 69 with `launch_failed` /
+`codex_sandbox_unavailable`, which the session inventory reports as the gap
+`invocation_launch_failed_codex_sandbox_unavailable`.
 
-- [ ] Delegated `codex exec` uses the bypass flag, and `< /dev/null`
+- [ ] Delegation uses `syn-delegate codex`, run from under `/workspace`
+- [ ] No `codex_sandbox_unavailable` launch failure in the session inventory
 - [ ] Delegated run's output appears in the parent transcript, not just a claim
       that it ran
 

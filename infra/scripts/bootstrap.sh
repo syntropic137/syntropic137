@@ -281,6 +281,16 @@ if [[ "$OS" == "Darwin" ]]; then
     fi
 fi
 
+if [[ "$OS" == "Linux" ]]; then
+    # Codex workspaces need the agentic-codex-sandbox AppArmor profile on hosts
+    # whose Docker daemon enforces AppArmor (#1398). The profile ships with the
+    # repository, so it is loaded after the clone: `just selfhost-up` runs this
+    # step automatically, or run it on its own with `just apparmor-setup`.
+    if docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q 'name=apparmor'; then
+        info "AppArmor host detected - after cloning, 'just apparmor-setup' loads the Codex sandbox profile."
+    fi
+fi
+
 if [[ "$ARCH" == "arm64" ]]; then
     info "Apple Silicon detected — first event-store build may take 5-10 minutes."
 fi

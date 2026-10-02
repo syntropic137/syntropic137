@@ -70,7 +70,7 @@ Put the OLD credential back in place and see whether it still authenticates.
 cp ~/.codex/auth.json ~/.codex/auth.json.device-minted   # keep the new one
 cp ~/.codex/auth.json.pre-device-test ~/.codex/auth.json # restore the old one
 
-codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
+codex exec -s read-only --skip-git-repo-check \
   -C /tmp "reply with the single word OK and nothing else" < /dev/null
 ```
 

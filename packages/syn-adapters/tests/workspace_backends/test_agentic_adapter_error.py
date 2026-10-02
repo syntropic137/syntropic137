@@ -11,6 +11,8 @@ from syn_adapters.workspace_backends.agentic.adapter import (
     WorkspaceProvisionError,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _stub_image_verification() -> object:
@@ -100,3 +102,88 @@ async def test_provision_success_does_not_raise() -> None:
 
     assert handle.isolation_id == "ws-123"
     assert handle.isolation_type == "docker"
+
+
+# --- Host-security refusals from agentic_isolation (#1398) -------------------
+
+
+def _refusals() -> list[tuple[Exception, type[WorkspaceProvisionError], str]]:
+    from agentic_isolation import (
+        AppArmorProfileNotLoadedError,
+        CodexSandboxPolicyError,
+        DockerDetectionError,
+    )
+
+    from syn_adapters.workspace_backends.errors import (
+        AppArmorProfileMissingError,
+        CodexSandboxPolicyConflictError,
+        DockerHostDetectionError,
+        ProvisionFailureReason,
+    )
+
+    return [
+        (
+            AppArmorProfileNotLoadedError("agentic-codex-sandbox"),
+            AppArmorProfileMissingError,
+            ProvisionFailureReason.APPARMOR_PROFILE_NOT_LOADED,
+        ),
+        (
+            CodexSandboxPolicyError("image does not declare codex"),
+            CodexSandboxPolicyConflictError,
+            ProvisionFailureReason.CODEX_SANDBOX_POLICY_CONFLICT,
+        ),
+        (
+            DockerDetectionError("docker info exited 1: permission denied"),
+            DockerHostDetectionError,
+            ProvisionFailureReason.DOCKER_DETECTION_FAILED,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("index", range(3))
+async def test_host_security_refusal_is_a_typed_provision_failure(index: int) -> None:
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+    )
+
+    error, expected, reason = _refusals()[index]
+    adapter = AgenticIsolationAdapter()
+    mock_provider = MagicMock()
+    mock_provider.create = AsyncMock(side_effect=error)
+    config = IsolationConfig(
+        execution_id="exec-abc", workspace_id="ws-xyz", image="test:latest", environment={}
+    )
+    with (
+        patch.object(adapter, "_provider", mock_provider),
+        pytest.raises(WorkspaceProvisionError) as exc_info,
+    ):
+        await adapter.create(config)
+    assert type(exc_info.value) is expected
+    assert exc_info.value.reason == reason
+    assert exc_info.value.__cause__ is error
+    assert "exec-abc" in str(exc_info.value)
+
+
+def test_apparmor_failure_names_the_host_fix() -> None:
+    from agentic_isolation import AppArmorProfileNotLoadedError, codex_sandbox_apparmor_profile_path
+
+    from syn_adapters.workspace_backends.errors import AppArmorProfileMissingError
+    from syn_adapters.workspace_backends.host_security import host_security_failure
+
+    failure = host_security_failure(AppArmorProfileNotLoadedError("agentic-codex-sandbox"), "run")
+    assert isinstance(failure, AppArmorProfileMissingError)
+    assert failure.profile == "agentic-codex-sandbox"
+    assert "just apparmor-setup" in failure.remedy
+    assert f"apparmor_parser -r {codex_sandbox_apparmor_profile_path()}" in failure.remedy
+    assert failure.remedy in str(failure)
+    # The profile the remedy points at is really shipped with the pinned AW.
+    assert codex_sandbox_apparmor_profile_path().is_file()
+
+
+def test_generic_and_image_failures_keep_their_reasons() -> None:
+    from syn_adapters.workspace_backends.errors import ProvisionFailureReason
+    from syn_adapters.workspace_backends.image_verification import ImageVerificationError
+
+    assert WorkspaceProvisionError("x").reason is ProvisionFailureReason.PROVIDER_FAILED
+    assert ImageVerificationError("x").reason is ProvisionFailureReason.IMAGE_VERIFICATION_FAILED

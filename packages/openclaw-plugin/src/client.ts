@@ -68,8 +68,11 @@ export class SyntropicClient {
     const fallback = `${status} ${statusText}`;
     if (!body) return fallback;
     try {
-      const json = JSON.parse(body) as { detail?: string };
-      return json.detail || fallback;
+      const json = JSON.parse(body) as { detail?: unknown };
+      // Structured details (e.g. inventory cursor errors with `code`/`restart`)
+      // stay machine-readable instead of collapsing to "[object Object]".
+      if (typeof json.detail === "string") return json.detail || fallback;
+      return json.detail ? JSON.stringify(json.detail) : fallback;
     } catch {
       return body;
     }

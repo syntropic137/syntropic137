@@ -17,6 +17,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+    QualifiedSessionIdentity,
+    QualifiedSessionStorePort,
+)
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     RetryDisposition,
     StoredTranscript,
@@ -54,7 +58,9 @@ class SessionStorePort(Protocol):
         ...
 
 
-async def resolve_delegate_usage(store: SessionStorePort, session_id: str) -> UsageResult:
+async def resolve_delegate_usage(
+    store: SessionStorePort, session_id: str, *, identity: QualifiedSessionIdentity | None = None
+) -> UsageResult:
     """Fetch a delegated session and recover what it used.
 
     Degrades rather than raises, in every branch. An import runs over many
@@ -62,7 +68,19 @@ async def resolve_delegate_usage(store: SessionStorePort, session_id: str) -> Us
     that session its price rather than costing the whole import its run.
     """
     try:
-        session = await store.fetch_session(session_id)
+        if identity is not None:
+            if identity.local_id != session_id:
+                return UnpricedUsage(
+                    "qualified identity differs from billing session",
+                    retry=RetryDisposition.PERMANENT,
+                )
+            if not isinstance(store, QualifiedSessionStorePort):
+                return UnpricedUsage(
+                    "store lacks qualified session reads", retry=RetryDisposition.TRANSIENT
+                )
+            session = await store.fetch_qualified_session(identity)
+        else:
+            session = await store.fetch_session(session_id)
     except Exception as exc:
         # Deliberately broad. Anything the transport can raise, from a reset
         # connection to a malformed response, leaves this session's cost

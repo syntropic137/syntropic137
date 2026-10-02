@@ -8,11 +8,24 @@ from uuid import uuid4
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
+from syn_domain.contexts.agent_sessions._shared.session_invocation import (
+    InvocationStatus,
+    SessionInvocationState,
+    conflicting_native_id,
+    keep_binding,
+    validate_invocation_transition,
+)
 from syn_domain.contexts.agent_sessions._shared.value_objects import (
     AgentLaunch,
     OperationRecord,
     SessionStatus,
     TokenMetrics,
+)
+from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationBindingConflictedEvent import (
+    SessionInvocationBindingConflictedEvent,
+)
+from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationRecordedEvent import (
+    SessionInvocationRecordedEvent,
 )
 
 if TYPE_CHECKING:
@@ -24,6 +37,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
         RecordOperationCommand,
+    )
+    from syn_domain.contexts.agent_sessions.domain.commands.RecordSessionInvocationCommand import (
+        RecordSessionInvocationCommand,
     )
     from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
         StartSessionCommand,
@@ -72,6 +88,9 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._completed_at: datetime | None = None
         self._metadata: dict[str, str | int | float | bool | None] = {}
         self._agent_launched: bool = False
+        self._invocations: dict[str, SessionInvocationState] = {}
+        #: Contradicting native claims already recorded, per invocation.
+        self._binding_conflicts: dict[str, set[str]] = {}
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -185,6 +204,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             session_id=session_id,
             workflow_id=command.workflow_id,
             execution_id=command.execution_id,
+            capture_profile=command.capture_profile,
             phase_id=command.phase_id,
             milestone_id=command.milestone_id,
             parent_session_id=command.parent_session_id,
@@ -197,6 +217,74 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         )
 
         self._apply(event)
+
+    @property
+    def invocations(self) -> tuple[SessionInvocationState, ...]:
+        return tuple(self._invocations.values())
+
+    @command_handler("RecordSessionInvocationCommand")
+    def record_invocation(self, command: RecordSessionInvocationCommand) -> None:
+        if command.aggregate_id != str(self.id) or not self._execution_id or not self._phase_id:
+            raise ValueError("invocation requires an existing run-scoped session")
+        previous = self._invocations.get(command.invocation.invocation_id)
+        conflict = conflicting_native_id(previous, command.invocation)
+        successor = keep_binding(previous, command.invocation)
+        validate_invocation_transition(previous, successor)
+        if conflict is not None:
+            self._record_binding_conflict(successor, conflict)
+        if previous == successor:
+            return
+        if previous is None and self._status != SessionStatus.RUNNING:
+            raise ValueError("cannot register a new invocation on a terminal session")
+        self._apply(
+            SessionInvocationRecordedEvent(
+                session_id=str(self.id),
+                execution_id=self._execution_id,
+                phase_id=self._phase_id,
+                invocation_id=successor.invocation_id,
+                attempt_id=successor.attempt_id,
+                harness=successor.harness,
+                status=successor.status.value,
+                native_session_id=successor.native_session_id,
+            )
+        )
+
+    def _record_binding_conflict(self, bound: SessionInvocationState, claimed: str) -> None:
+        """Make a contradicting bind visible without rebinding. Idempotent per claim."""
+        assert self._execution_id is not None and self._phase_id is not None
+        assert bound.native_session_id is not None
+        if claimed in self._binding_conflicts.get(bound.invocation_id, set()):
+            return
+        self._apply(
+            SessionInvocationBindingConflictedEvent(
+                session_id=str(self.id),
+                execution_id=self._execution_id,
+                phase_id=self._phase_id,
+                invocation_id=bound.invocation_id,
+                attempt_id=bound.attempt_id,
+                harness=bound.harness,
+                bound_native_session_id=bound.native_session_id,
+                conflicting_native_session_id=claimed,
+            )
+        )
+
+    @event_sourcing_handler("SessionInvocationBindingConflicted")
+    def on_invocation_binding_conflicted(
+        self, event: SessionInvocationBindingConflictedEvent
+    ) -> None:
+        self._binding_conflicts.setdefault(event.invocation_id, set()).add(
+            event.conflicting_native_session_id
+        )
+
+    @event_sourcing_handler("SessionInvocationRecorded")
+    def on_invocation_recorded(self, event: SessionInvocationRecordedEvent) -> None:
+        self._invocations[event.invocation_id] = SessionInvocationState(
+            invocation_id=event.invocation_id,
+            attempt_id=event.attempt_id,
+            harness=event.harness,
+            status=InvocationStatus(event.status),
+            native_session_id=event.native_session_id,
+        )
 
     @command_handler("RecordOperationCommand")
     def record_operation(self, command: RecordOperationCommand) -> None:

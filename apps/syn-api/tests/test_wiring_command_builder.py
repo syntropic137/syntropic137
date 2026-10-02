@@ -1,6 +1,7 @@
 """Regression tests for provider-specific agent command construction.
 
-These pin the DEFAULT sandbox level, which is currently ``danger-full-access``.
+These pin the DEFAULT sandbox level, which is currently full access
+(``PhaseSandbox.FULL_ACCESS``).
 
 That value is unchanged from before #1157, but it is no longer hardcoded: it is
 now a per-phase declaration that merely defaults here. A phase wanting LESS
@@ -25,11 +26,16 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
+from syn_shared.agents import CODEX_SANDBOX_FLAGS, PhaseSandbox
 
 # Without this the whole module collects ZERO under CI's `pytest -m unit`, and
 # the gate goes green having run none of it - including the argv pin that
 # guards the #964 --tools change.
 pytestmark = pytest.mark.unit
+
+# Built from the typed mapping, never hand-written: the repository forbids a
+# literal sandbox-disabling invocation (test_no_codex_sandbox_bypass, #1398).
+FULL_ACCESS_FLAG = CODEX_SANDBOX_FLAGS[PhaseSandbox.FULL_ACCESS]
 
 
 def _phase(
@@ -53,7 +59,7 @@ def test_codex_command_passes_actual_model_and_prompt_as_individual_args() -> No
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
         "--model",
         "gpt-5.6",
@@ -67,7 +73,7 @@ def test_codex_command_omits_model_option_when_model_is_not_provided() -> None:
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
         "do the thing",
     ]
@@ -115,7 +121,7 @@ def test_codex_command_via_domain_default_model_forces_gpt_6_sol() -> None:
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
         "--model",
         ModelId.GPT_6_SOL,

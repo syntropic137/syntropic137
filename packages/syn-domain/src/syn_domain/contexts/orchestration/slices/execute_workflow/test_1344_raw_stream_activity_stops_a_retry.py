@@ -58,6 +58,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     EventStreamProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseLaunch
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_agent_attempts import (
+    started_session_manager,
+)
 from syn_shared.agents import AgentProvider, AgentRunner
 
 if TYPE_CHECKING:
@@ -285,7 +288,7 @@ async def _run(provider: str, attempts: tuple[_Stream, ...]) -> _RawStreamHandle
             agent_env={},
             claude_cmd=["claude", "-p"],
             started_at=datetime.now(UTC),
-            session_manager=None,
+            session_manager=await started_session_manager(),
         ),
         session_id="sess-1",
         observability=None,

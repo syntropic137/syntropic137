@@ -245,6 +245,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_shared.settings.workspace import WorkspaceSettings
 
     ws_settings = WorkspaceSettings()
+    _warn_if_stale_default_image(ws_settings.docker_image)
     # The workspace service is the Docker headless path: claude -p and
     # codex exec both run there, keeping the stream-json pipeline, Envoy
     # token accounting, and telemetry.
@@ -274,6 +275,11 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_shared.settings import get_settings
 
     _settings = get_settings()
+    from syn_api._wiring_inventory import get_inventory_runtime
+
+    capture_source_id = (
+        None if _settings.uses_in_memory_stores else get_inventory_runtime().source_instance_id
+    )
     session_capture = SessionCaptureService(
         _settings.session_store,
         _settings.app_environment,
@@ -286,6 +292,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         workspace_service=WorkspaceService.create(
             config=ws_config,
             environment=_build_workspace_env(),
+            capture_source_instance_id=capture_source_id,
         ),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,
@@ -1080,6 +1087,7 @@ def get_subscription_coordinator(
     """
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.subscriptions import create_coordinator_service
+    from syn_api._wiring_inventory import get_inventory_runtime
     from syn_shared.settings import get_settings
 
     # Pass TimescaleDB pool to cost projections (#505, #507)
@@ -1097,6 +1105,12 @@ def get_subscription_coordinator(
         pool=timescale_pool,
         budget_checker=_get_budget_checker(),
         max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
+        inventory_replication_manager=(
+            None if settings.uses_in_memory_stores else get_inventory_runtime().replication
+        ),
+        inventory_process_manager=(
+            None if settings.uses_in_memory_stores else get_inventory_runtime().processor
+        ),
     )
 
 
@@ -1497,3 +1511,28 @@ def reset_skill_singletons() -> None:
     _register_skill_handler_singleton = None
     _skill_resolution_service_singleton = None
     _skill_materializer_singleton = None
+
+
+def _warn_if_stale_default_image(image: str) -> None:
+    """Say so when the configured image is a default an older release shipped (#1398).
+
+    ``SYN_WORKSPACE_DOCKER_IMAGE`` in ``.env`` overrides the code default, and
+    ``.env.example`` carries the default of the day it was copied, so a
+    deployment updated by any path that does not rewrite ``.env`` keeps running
+    the old image. ``just selfhost-update`` migrates it; this names the
+    condition for every other path (npx setup, hand-managed hosts) without
+    overriding an operator's configuration.
+    """
+    from syn_shared.settings.workspace_images import (
+        DEFAULT_WORKSPACE_IMAGE,
+        PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
+    )
+
+    if image in PREVIOUS_DEFAULT_WORKSPACE_IMAGES:
+        logger.warning(
+            "SYN_WORKSPACE_DOCKER_IMAGE is %s, a default shipped by an older release; "
+            "this release defaults to %s. Remove the variable to use the default, "
+            "or run `just selfhost-update`, which migrates it.",
+            image,
+            DEFAULT_WORKSPACE_IMAGE,
+        )
