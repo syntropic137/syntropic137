@@ -298,13 +298,26 @@ derived from another.
    FAILED > DENIED > SUCCEEDED > NONE, or null when no phase reported one
    (`value_objects.py:348-358`, `workflow_execution_detail.py:328-335`). A
    refused write in one phase is not hidden by another phase's success.
-4. **`deliverable_produced` is independent of `status`.** It is true when any
-   phase this execution ran stored an artifact
-   (`workflow_execution_detail.py:316-326`). Phases that fail or are interrupted
-   keep their output before teardown (`WorkflowExecutionProcessor.py:758-769`,
-   `:797-800`; `ArtifactCollector.collect_from_unfinished_phase`), so `failed`
-   with `deliverable_produced: true` is a real and common state: the run failed
-   and there is work to read.
+4. **`deliverable_produced` is independent of `status`.** It is true when the
+   execution detail links an artifact, either in `artifact_ids` or as a phase's
+   `artifact_id` (`workflow_execution_detail.py:316-326`). Phases that fail or
+   are cancelled or interrupted keep their output before teardown
+   (`WorkflowExecutionProcessor.py:758-769`, `:797-800`;
+   `ArtifactCollector.collect_from_unfinished_phase`). A failed phase's kept
+   artifacts reach the read model on `WorkflowFailed`
+   (`get_execution_detail/projection.py:494-495`), so `failed` with
+   `deliverable_produced: true` is a real and common state: the run failed and
+   there is work to read.
+
+   **Known limitation:** a cancelled or interrupted phase's kept artifact is
+   stored but not linked. `ExecutionCancelledEvent` carries no artifact IDs,
+   and the projection's `WorkflowInterrupted` handler does not read the
+   event's `partial_artifact_ids`
+   (`get_execution_detail/projection.py:545-591`). A cancelled or interrupted
+   execution whose only artifact is that partial one therefore reads
+   `deliverable_produced: false` although the artifact exists. Linking those
+   IDs in the projection would close it; this revision records the gap rather
+   than changing code.
 5. **Every phase produces an artifact (#1195, #1300, #1479).** A phase that
    wrote no collectable file, or an empty one, has its last message recovered
    as a marked artifact if it says something a later phase could act on, and

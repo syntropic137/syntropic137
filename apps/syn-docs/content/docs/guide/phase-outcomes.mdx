@@ -153,7 +153,7 @@ words apart:
 | `status` | `running`, `completed`, `failed`, `cancelled`, `interrupted` |
 | `failure_classification` | What the platform concluded about a failure: `platform`, `correct_refusal`, `unclassified` |
 | `reported_failure_reason` | What the failing phase's agent wrote as `failure_reason`, or `null` |
-| `deliverable_produced` | `true` when any phase this execution ran stored an artifact, **whatever `status` says** |
+| `deliverable_produced` | `true` when an artifact is linked to the execution or to one of its phases, **whatever `status` says** (see the limitation below) |
 | `reported_side_effects` | The most severe `side_effects` any phase reported, or `null` if none did |
 | `phases[].deliverable_recovered` | `true` when this phase's deliverable was recovered from its last message (see below) |
 | `phases[].reported_side_effects` | What this phase's agent reported, or `null` |
@@ -180,6 +180,16 @@ Both execution-level fields cover only the phases this execution ran. A
 [resumed execution](/docs/guide/resuming-executions)'s inherited phases are
 recorded on its parent.
 
+<Callout type="warn">
+`deliverable_produced` reads only the artifacts the execution detail links:
+those from completed phases and those kept by a phase that **failed**. The
+partial artifact kept by a phase that was **cancelled** or **interrupted** is
+stored, but nothing links it to the execution detail yet, so it does not count.
+A cancelled or interrupted run whose only artifact is that partial one reads
+`deliverable_produced: false` even though the artifact exists. Look for it in
+the execution's artifacts before concluding nothing was kept.
+</Callout>
+
 ```bash
 curl -s -u "$SYN_API_USER:$SYN_API_PASSWORD" \
   "$SYN_API_URL/api/v1/executions/$EXEC" |
@@ -200,13 +210,16 @@ outcome. The platform enforces it in three steps.
 
 ### 1. Files the phase wrote
 
-A phase that wrote at least one non-empty file under `artifacts/output/` has
-its files stored as-is.
+Each collectable file under `artifacts/output/` is judged on its own. A
+non-empty file is stored as-is.
 
 ### 2. The last message, recovered
 
-A phase that wrote **no collectable file**, or wrote a file that was empty, has
-its agent's **last message** salvaged instead. The recovered artifact is
+A phase that wrote **no collectable file** has its agent's **last message**
+salvaged instead. So does every file it wrote that was **empty**, even when
+another file beside it has content: the non-empty files are stored as-is and
+each empty one is replaced by the recovered last message, filed under that
+file's own path. The recovered artifact is
 clearly marked so nobody mistakes it for a document the phase wrote:
 
 - its title ends in `[recovered from transcript]`;
@@ -229,7 +242,10 @@ reason ("I cannot do that."). A refusal **with** its reason ("I could not push
 the branch because the credential rejects workflow changes") counts.
 
 So a phase that writes no file and ends on a bare "Done." **fails**: there is
-nothing on disk and nothing said that the next phase could build on. The error
+nothing on disk and nothing said that the next phase could build on. The same
+is true of a phase that wrote one file with content and one empty file and then
+ended on "Done.": the empty file cannot be recovered, and the phase fails
+rather than skipping it, even though the other file had content. The error
 names the phase, and the output types it declared if it declared any.
 
 <Callout type="warn">
@@ -248,11 +264,14 @@ workspace is torn down:
 | It reported `success: false`, wrote an unreadable report, or exited non-zero | Every non-empty file under `artifacts/output/`; if there were none, its last message (same eight-word rule) | `(kept from a failed phase)` |
 | It was cancelled or interrupted | Every non-empty file under `artifacts/output/`; if there were none, its last message (same rule) | `(partial)` |
 
-The phase stays failed either way. One exception: when the platform retries an
+Keeping the work does not change the phase's outcome: it stays `failed`,
+`cancelled` or `interrupted` respectively. One exception: when the platform retries an
 attempt whose terminal event was lost, that attempt keeps nothing, because the
-phase is not over and the attempt that finishes it produces its artifact. Kept artifacts count towards
-`deliverable_produced`, so a failed run whose work survived reads `failed`
-with `deliverable_produced: true`.
+phase is not over and the attempt that finishes it produces its artifact. Artifacts kept by a
+**failed** phase count towards `deliverable_produced`, so a failed run whose
+work survived reads `failed` with `deliverable_produced: true`. Artifacts kept
+by a cancelled or interrupted phase do not count yet; see the limitation under
+[Reading the outcome from the API](#reading-the-outcome-from-the-api).
 
 ### Workflow changes the platform could not push
 

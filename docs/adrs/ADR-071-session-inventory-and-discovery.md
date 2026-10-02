@@ -119,8 +119,20 @@ Coverage is one of `unknown`, `open`, `reconciled`, `missing`, `unsupported`,
 reconstruction:
 
 - `reconciled` only when every node the evidence names is accounted for,
-  settled and non-conflicting, and the execution is terminal. A parent
-  finishing is never enough on its own.
+  settled and non-conflicting, and the inventory is sealed. It is sealed by
+  either of two paths (`coverage_settlement.py:256-264`):
+  - **the execution is terminal** and its work has settled, or its settlement
+    deadline has passed; or
+  - **the producer sealed its own coverage contract** (`CoverageContract.sealed`,
+    a host-recorded expected set, `read_models/session_evidence.py:168-174`)
+    and nothing is still running or unsettled. This path needs no terminal
+    event: a sealed contract whose expected bodies are all present is
+    `reconciled`, and the same contract with a body absent is `missing`
+    (`tests/contexts/agent_sessions/test_session_relationship_resolver.py:129-149`).
+    Once the deadline has passed, a sealed contract seals even over unsettled
+    work, which then becomes explicit gaps.
+
+  A parent finishing is never enough on its own.
 - Settlement is bounded. A terminal execution fixes one deadline
   `settlement_grace` after the terminal event's own timestamp (setting
   `settlement_grace_seconds`, default 1800,
