@@ -32,6 +32,14 @@ import { commandGroups, rootCommands as registryRootCommands } from "../src/regi
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = path.resolve(__dirname, "../../syn-docs/content/docs/cli");
 
+/**
+ * Root commands whose page is written by hand, as `<name>.mdx` beside the
+ * generated ones. Kept, listed after the index, and linked from the Global
+ * Commands table. What these need documenting is their output, which no
+ * command metadata describes (#1501 E).
+ */
+const HAND_WRITTEN_COMMAND_PAGES: ReadonlySet<string> = new Set(["version"]);
+
 // ---------------------------------------------------------------------------
 // Data models (plain objects — no handler references)
 // ---------------------------------------------------------------------------
@@ -270,7 +278,9 @@ function renderIndexMdx(groups: GrpInfo[], topLevel: CmdInfo[]): string {
     lines.push("| Command | Description |");
     lines.push("|---------|-------------|");
     for (const cmd of topLevel) {
-      lines.push(`| \`syn ${cmd.name}\` | ${cmd.help} |`);
+      const name = `\`syn ${cmd.name}\``;
+      const link = HAND_WRITTEN_COMMAND_PAGES.has(cmd.name) ? `[${name}](/docs/cli/${cmd.name})` : name;
+      lines.push(`| ${link} | ${cmd.help} |`);
     }
     lines.push("");
   }
@@ -295,7 +305,7 @@ function renderIndexMdx(groups: GrpInfo[], topLevel: CmdInfo[]): string {
 }
 
 function renderMetaJson(groups: GrpInfo[]): string {
-  const pages = ["index", ...groups.map((g) => g.name)];
+  const pages = ["index", ...HAND_WRITTEN_COMMAND_PAGES, ...groups.map((g) => g.name)];
   const meta = {
     title: "CLI Reference",
     root: true,
@@ -323,8 +333,13 @@ function main(): void {
       `(${totalCommands} total)`,
   );
 
-  // Track generated files to clean up stale ones
-  const generatedFiles = new Set<string>(["index.mdx", "meta.json"]);
+  // Files to keep: every generated one plus the hand-written pages. Any other
+  // .mdx is stale output from a previous generation.
+  const keptFiles = new Set<string>([
+    "index.mdx",
+    "meta.json",
+    ...[...HAND_WRITTEN_COMMAND_PAGES].map((name) => `${name}.mdx`),
+  ]);
 
   // Write index
   const indexPath = path.join(OUTPUT_DIR, "index.mdx");
@@ -339,7 +354,7 @@ function main(): void {
   // Write per-group pages
   for (const group of groups) {
     const filename = `${group.name}.mdx`;
-    generatedFiles.add(filename);
+    keptFiles.add(filename);
     const pagePath = path.join(OUTPUT_DIR, filename);
     fs.writeFileSync(pagePath, renderGroupMdx(group));
     console.log(`  wrote content/docs/cli/${filename}`);
@@ -347,7 +362,7 @@ function main(): void {
 
   // Remove stale .mdx files from previous generations
   for (const file of fs.readdirSync(OUTPUT_DIR)) {
-    if (file.endsWith(".mdx") && !generatedFiles.has(file)) {
+    if (file.endsWith(".mdx") && !keptFiles.has(file)) {
       fs.unlinkSync(path.join(OUTPUT_DIR, file));
       console.log(`  removed stale content/docs/cli/${file}`);
     }
