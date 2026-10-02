@@ -1274,3 +1274,74 @@ class TestARenameMustNotLeaveANameBehind:
         assert stale_phase_references(path, phase_library_dir=lib) == [], (
             "the phase library became unusable"
         )
+
+
+class TestTheRepoOwnWorkflowsCarryNoRetiredKey:
+    """The API accepts `can_open_pr` with a warning; this gate refuses it.
+
+    The repo's workflows are what authors copy. A line that does nothing
+    there teaches every copy to carry it, so here the warning is a failure.
+    """
+
+    @staticmethod
+    def _run_main(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, files: list[Path]
+    ) -> int:
+        import scripts.check_workflow_definitions as gate
+
+        monkeypatch.setattr(gate, "_ROOT", tmp_path)
+        monkeypatch.setattr(gate, "_workflow_files", lambda: files)
+        return gate.main()
+
+    @staticmethod
+    def _workflow(phase_extra: dict[str, object]) -> dict[str, object]:
+        return {
+            "id": "retired",
+            "name": "Retired",
+            "requires_repos": False,
+            "phases": [
+                {
+                    "id": "open_pr",
+                    "name": "Open PR",
+                    "order": 1,
+                    "prompt_template": "Open the PR.",
+                    **phase_extra,
+                }
+            ],
+        }
+
+    def test_a_retired_key_fails_the_gate(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        path = _write(tmp_path, self._workflow({"can_open_pr": True}))
+
+        assert _gate_accepts(path), "the platform itself must still accept it"
+        assert self._run_main(monkeypatch, tmp_path, [path]) == 1
+        out = capsys.readouterr().out
+        assert "'can_open_pr' is retired (#1477)" in out
+        assert "wf.yaml" in out
+
+    def test_the_same_workflow_without_it_passes(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        path = _write(tmp_path, self._workflow({}))
+
+        assert self._run_main(monkeypatch, tmp_path, [path]) == 0
+
+    def test_a_package_member_is_checked_too(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Packages skip the per-file load, but not this: it needs no context."""
+        import scripts.check_workflow_definitions as gate
+
+        member = tmp_path / "pkg" / "workflows" / "retired"
+        member.mkdir(parents=True)
+        (tmp_path / "pkg" / "syntropic137-plugin.json").write_text("{}")
+        path = _write(member, self._workflow({"can_open_pr": True}), name="workflow.yaml")
+        monkeypatch.setattr(gate, "_ROOT", tmp_path)
+        assert gate._is_package_member(path)
+
+        assert self._run_main(monkeypatch, tmp_path, [path]) == 1
