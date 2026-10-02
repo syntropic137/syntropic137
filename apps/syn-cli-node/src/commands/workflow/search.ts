@@ -21,6 +21,7 @@ function truncate(text: string, maxLen: number): string {
 
 export const searchCommand: CommandDef = {
   name: "search",
+  skipPreflight: true, // never calls syn-api
   description: "Search for workflows across registered marketplaces",
   args: [{ name: "query", description: "Search term (matches name, description, tags)" }],
   options: {
@@ -77,6 +78,7 @@ export const searchCommand: CommandDef = {
 
 export const infoCommand: CommandDef = {
   name: "info",
+  skipPreflight: true, // never calls syn-api
   description: "Show details of a marketplace workflow plugin",
   args: [{ name: "name", description: "Plugin name from marketplace", required: true }],
   handler: async (parsed: ParsedArgs) => {

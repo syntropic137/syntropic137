@@ -24,6 +24,11 @@ export interface CommandDef {
   options?: Record<string, OptionDef>;
   /** Example invocations shown under `--help` and in the generated CLI docs. */
   examples?: readonly string[];
+  /** Skip the CLI's preflight (the release-skew check, #1473). Set it on a
+   * command that never calls syn-api, or that runs the check itself. Absent
+   * means the preflight runs, so a new API command that forgets this still
+   * warns; a local one that forgets it costs one silent request. */
+  skipPreflight?: boolean;
   handler: (parsed: ParsedArgs) => void | Promise<void>;
 }
 

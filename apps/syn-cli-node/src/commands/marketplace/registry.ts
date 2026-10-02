@@ -28,6 +28,7 @@ import type { RegistryEntry } from "../../marketplace/models.js";
 
 export const addCommand: CommandDef = {
   name: "add",
+  skipPreflight: true, // never calls syn-api
   description: "Register a GitHub repo as a workflow marketplace",
   args: [{ name: "repo", description: "GitHub repo (org/repo shorthand)", required: true }],
   options: {
@@ -99,6 +100,7 @@ export const addCommand: CommandDef = {
 
 export const listMarketplaceCommand: CommandDef = {
   name: "list",
+  skipPreflight: true, // never calls syn-api
   description: "List registered marketplace registries",
   handler: async () => {
     const config = loadRegistries();
@@ -133,6 +135,7 @@ export const listMarketplaceCommand: CommandDef = {
 
 export const removeCommand: CommandDef = {
   name: "remove",
+  skipPreflight: true, // never calls syn-api
   description: "Remove a registered marketplace",
   args: [{ name: "name", description: "Registry name to remove", required: true }],
   handler: async (parsed: ParsedArgs) => {
@@ -173,6 +176,7 @@ export const removeCommand: CommandDef = {
 
 export const refreshCommand: CommandDef = {
   name: "refresh",
+  skipPreflight: true, // never calls syn-api
   description: "Force-refresh cached marketplace indexes",
   args: [{ name: "name", description: "Registry name (refreshes all if omitted)" }],
   handler: async (parsed: ParsedArgs) => {

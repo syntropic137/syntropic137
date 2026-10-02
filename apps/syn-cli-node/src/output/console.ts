@@ -1,7 +1,11 @@
-import { BOLD, DIM, GREEN, RED, style } from "./ansi.js";
+import { BOLD, DIM, GREEN, RED, YELLOW, style } from "./ansi.js";
 
 export function printError(message: string): void {
   process.stderr.write(style("Error:", BOLD, RED) + " " + message + "\n");
+}
+
+export function printWarning(message: string): void {
+  process.stderr.write(style("Warning:", BOLD, YELLOW) + " " + message + "\n");
 }
 
 export function printSuccess(message: string): void {

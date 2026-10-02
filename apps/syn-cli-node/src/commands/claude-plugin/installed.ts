@@ -15,6 +15,7 @@ import { formatTimestamp } from "../../output/format.js";
 
 export const installedCommand: CommandDef = {
   name: "installed",
+  skipPreflight: true, // never calls syn-api
   description: "List Claude plugins installed locally via 'syn claude-plugin install'",
   handler: async (_parsed: ParsedArgs) => {
     const entries = listInstalled();

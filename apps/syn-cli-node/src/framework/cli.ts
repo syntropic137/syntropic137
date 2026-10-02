@@ -8,13 +8,22 @@ export class CLI {
   private readonly name: string;
   private readonly description: string;
   private readonly version: string;
+  private readonly preflight: (() => Promise<void>) | undefined;
   private readonly groups = new Map<string, CommandGroup>();
   private readonly rootCommands = new Map<string, CommandDef>();
 
-  constructor(options: { name: string; description: string; version: string }) {
+  constructor(options: {
+    name: string;
+    description: string;
+    version: string;
+    /** Runs once before the handler of every command that does not set
+     * `skipPreflight`. Never before help, `--version`, or a parse error. */
+    preflight?: () => Promise<void>;
+  }) {
     this.name = options.name;
     this.description = options.description;
     this.version = options.version;
+    this.preflight = options.preflight;
   }
 
   addGroup(group: CommandGroup): this {
@@ -102,6 +111,10 @@ export class CLI {
       print(renderCommandHelp(cmd, this.name, groupName));
       process.exit(0);
     }
+    // BEFORE the handler, not in run()'s catch: handlers print their own
+    // error before throwing (workflow/resolver.ts), and a warning that lands
+    // after "No workflow found" is read as a footnote, not the cause.
+    if (this.preflight && !cmd.skipPreflight) await this.preflight();
     await cmd.handler(parsed);
   }
 

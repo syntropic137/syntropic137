@@ -400,6 +400,7 @@ function printWorkflowSummary(workflows: ResolvedWorkflow[]): void {
 
 export const packagesCommand: CommandDef = {
   name: "packages",
+  skipPreflight: true, // never calls syn-api
   description: "List workflow packages pulled from the marketplace (local CLI history; use 'syn workflow list' to see what is currently on the running stack)",
   handler: async () => {
     const registry = loadInstalled();
@@ -470,6 +471,7 @@ export const packagesCommand: CommandDef = {
 
 export const initCommand: CommandDef = {
   name: "init",
+  skipPreflight: true, // never calls syn-api
   description: "Scaffold a new workflow package from a template",
   args: [{ name: "directory", description: "Directory to scaffold (defaults to current dir)" }],
   options: {
