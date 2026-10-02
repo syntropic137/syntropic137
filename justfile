@@ -2405,6 +2405,15 @@ release-local version:
     echo "🚀 Local release: {{version}}"
     echo ""
 
+    # syn-api reports this as its commit on /version (#1473). A dirty tree is
+    # not the commit HEAD names, and stamping nothing would ship `commit: null`,
+    # so refuse before anything is logged in to or pushed.
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "❌ Working tree is dirty: commit or stash first, so syn-api's /version names the tree that shipped" >&2
+        exit 1
+    fi
+    build_commit="$(git rev-parse HEAD)"
+
     # Login to GHCR
     gh auth token | docker login ghcr.io -u syntropic137 --password-stdin
     echo ""
@@ -2412,12 +2421,6 @@ release-local version:
     # Ensure buildx builder exists
     docker buildx inspect multiarch >/dev/null 2>&1 || docker buildx create --name multiarch
     docker buildx use multiarch
-
-    # What /version reports as syn-api's commit (#1473). Only a clean tree is
-    # the commit it names, so a dirty one stamps nothing and reports null
-    # rather than a SHA whose tree is not what shipped.
-    build_commit=""
-    if [ -z "$(git status --porcelain)" ]; then build_commit="$(git rev-parse HEAD)"; else echo "⚠️  Working tree is dirty: syn-api will report commit: null"; fi
 
     # Images to build (order: fast first)
     FAILED=()

@@ -34,6 +34,9 @@ Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -739,6 +742,80 @@ def test_a_path_missing_a_stamp_is_reported(label: str, blob: str, absent: list[
 def test_a_fully_stamped_path_passes() -> None:
     blob = "SYN_BUILD_IMAGE_TAG=${{ steps.version.outputs.version }}\nSYN_BUILD_COMMIT=${{ steps.version.outputs.commit }}\n"
     assert _paths_missing_identity([IdentityPath("ok", _kv_blob(blob, "ok"))]) == {}
+
+
+# The static reader above sees `SYN_BUILD_COMMIT=$build_commit` as declared
+# whatever `$build_commit` holds at runtime. These run the recipe itself, with
+# stub `docker`, `gh` and `just` on PATH, so the value actually passed to the
+# build is what gets asserted.
+
+_RECORDING_STUB = '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$STUB_LOG"\n'
+
+
+def _run_release_local(repo: Path, stubs: Path) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run `release-local 9.9.9` in ``repo`` and return it and every stubbed call."""
+    for name in ("docker", "gh", "just"):
+        stub = stubs / name
+        stub.write_text(_RECORDING_STUB)
+        stub.chmod(0o755)
+    log = stubs / "calls.log"
+    log.touch()
+    script = textwrap.dedent(_justfile_recipe_body("release-local"))
+    script = script.replace("{{version}}", "9.9.9").replace("{{registry}}", "ghcr.io/test")
+    bash = shutil.which("bash")
+    assert bash is not None
+    result = subprocess.run(  # noqa: S603 - fixed interpreter, script is this repo's recipe
+        [bash, "-c", script],
+        cwd=repo,
+        env={"PATH": f"{stubs}:/usr/bin:/bin", "STUB_LOG": str(log), "HOME": str(repo)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result, log.read_text().splitlines()
+
+
+@pytest.fixture
+def clean_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(repo)]
+    subprocess.run([*git, "init", "-q"], check=True)  # noqa: S603, S607
+    (repo / "f").write_text("x")
+    subprocess.run([*git, "add", "f"], check=True)  # noqa: S603, S607
+    subprocess.run([*git, "commit", "-q", "-m", "c"], check=True)  # noqa: S603, S607
+    return repo
+
+
+@pytest.mark.architecture
+def test_release_local_refuses_a_dirty_tree_before_pushing(clean_repo: Path, tmp_path: Path) -> None:
+    """A dirty tree has no commit to name, so it must not ship `commit: null`."""
+    (clean_repo / "uncommitted").write_text("y")
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    result, calls = _run_release_local(clean_repo, stubs)
+    assert result.returncode != 0, f"release-local ran on a dirty tree:\n{result.stdout}"
+    builds = [c for c in calls if c.startswith("buildx build")]
+    assert not builds, f"release-local built from a dirty tree: {builds}"
+
+
+@pytest.mark.architecture
+def test_release_local_stamps_syn_api_with_the_head_it_built(clean_repo: Path, tmp_path: Path) -> None:
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    head = subprocess.run(  # noqa: S603, S607
+        ["git", "-C", str(clean_repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result, calls = _run_release_local(clean_repo, stubs)
+    assert result.returncode == 0, result.stdout + result.stderr
+    syn_api = [c for c in calls if c.startswith("buildx build") and "syn-api/Dockerfile" in c]
+    assert len(syn_api) == 1, f"expected one syn-api build, got {calls}"
+    declared = _shell_build_args(syn_api[0])
+    assert declared.get("SYN_BUILD_COMMIT") == head, syn_api[0]
+    assert declared.get("SYN_BUILD_IMAGE_TAG") == "9.9.9", syn_api[0]
 
 
 @pytest.mark.architecture
