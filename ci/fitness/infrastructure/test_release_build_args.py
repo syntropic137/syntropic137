@@ -73,11 +73,7 @@ IDENTITY_NOT_MEASURED = {
 #: which agents cannot push. An entry must name a path that is STILL failing:
 #: `test_the_awaiting_exception_is_still_needed` fails once the patch is
 #: applied, so whoever applies it deletes the entry in the same change.
-AWAITING_WORKFLOW_PATCH = {
-    "release-containers.yaml (build-scan-push)": (
-        "#1473: apply release-containers-build-stamps.patch from the PR; agents cannot edit .github/"
-    ),
-}
+AWAITING_WORKFLOW_PATCH: dict[str, str] = {}
 
 # ``${{ matrix.image == 'syn-api' && '1' || '0' }}`` - the only GitHub
 # expression any build arg in this repo uses. An unrecognised form is a hard

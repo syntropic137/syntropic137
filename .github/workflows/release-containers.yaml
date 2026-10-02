@@ -162,6 +162,9 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "semver=$SEMVER" >> "$GITHUB_OUTPUT"
           echo "major_minor=$MAJOR_MINOR" >> "$GITHUB_OUTPUT"
+          # The tree actually checked out and built, not a github.* context:
+          # under workflow_call those name the CALLER's ref and sha (#1473).
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
           # Don't tag 'latest' for pre-releases or dev builds
           if [[ "$VERSION" == "dev" ]] || [[ "$VERSION" == *"-"* ]]; then
@@ -233,6 +236,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             INCLUDE_DOCKER_CLI=${{ matrix.image == 'syn-api' && '1' || '0' }}
+            SYN_BUILD_IMAGE_TAG=${{ steps.version.outputs.version }}
+            SYN_BUILD_COMMIT=${{ steps.version.outputs.commit }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true  # SLSA provenance attestation
