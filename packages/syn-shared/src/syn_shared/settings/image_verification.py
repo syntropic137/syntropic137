@@ -1,10 +1,5 @@
 """Container image signature verification settings (cosign keyless / Sigstore).
 
-agentic-workspace signs every published workspace image with cosign keyless
-OIDC at build time (``.github/workflows/release-images.yml``, the
-``sign-and-verify-image`` action). Until this module existed nothing on the
-Syntropic137 side checked those signatures, which made them evidence nobody
-read.
 The publisher signs every workspace image with cosign keyless OIDC at build
 time. That is agentic-workspace as of 2026-09-25
 (``.github/workflows/release-images.yml``), and was agentic-primitives before
@@ -40,8 +35,6 @@ Rollback to agentic-primitives images sets
 ``AGENTIC_PRIMITIVES_IDENTITY_REGEXP`` below together with an AP digest in
 ``SYN_WORKSPACE_DOCKER_IMAGE``; see
 ``syn_shared.settings.workspace_images`` ("Rollback to agentic-primitives").
-  For the current publisher that is
-  ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/heads/release``.
 
 The default is a regexp rather than an exact identity for two reasons:
 
@@ -61,6 +54,8 @@ Environment Variables:
 """
 
 from __future__ import annotations
+
+from typing import Final
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -87,21 +82,6 @@ AGENTIC_PRIMITIVES_IDENTITY_REGEXP = (
     r"@refs/heads/(main|release)$"
 )
 
-#: Certificate identity (SAN) regexp for the agentic-workspace image publisher,
-#: which is taking over publishing from agentic-primitives.
-#:
-#: Narrower than the agentic-primitives identity above in one deliberate way:
-#: it admits ``refs/heads/release`` ONLY. agentic-workspace's
-#: ``release-images.yml`` publishes exclusively on a push to the protected
-#: ``release`` branch - not main, not tags, not workflow_dispatch - so
-#: admitting any other ref would accept a signature that workflow cannot
-#: legitimately produce.
-AGENTIC_WORKSPACE_IDENTITY_REGEXP = (
-    r"^https://github\.com/AgentParadise/agentic-workspace"
-    r"/\.github/workflows/release-images\.yml"
-    r"@refs/heads/release$"
-)
-
 #: The identity constraint actually applied by default: agentic-workspace ONLY.
 #:
 #: This admitted BOTH publishers during the cutover, so that a deployment still
@@ -118,6 +98,21 @@ AGENTIC_WORKSPACE_IDENTITY_REGEXP = (
 #: ``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` to it, or to an alternation
 #: of both, for that case only.
 WORKSPACE_IMAGE_IDENTITY_REGEXP = AGENTIC_WORKSPACE_IDENTITY_REGEXP
+
+#: Every default ``.env.example`` ever shipped for
+#: ``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` other than the current one,
+#: oldest first, verbatim (#1398). A value in ``.env`` overrides the code
+#: default, so an operator who copied the example keeps verifying against the
+#: identity of the day they installed; once the pins name images from a new
+#: publisher, every provision then fails closed. ``just selfhost-update`` moves
+#: a listed value to ``WORKSPACE_IMAGE_IDENTITY_REGEXP`` and the API names it at
+#: startup. When the default changes, append the outgoing value here; a test
+#: fails if ``.env.example`` ever shipped a value that is neither.
+PREVIOUS_DEFAULT_IMAGE_IDENTITY_REGEXPS: Final[tuple[str, ...]] = (
+    AGENTIC_PRIMITIVES_IDENTITY_REGEXP,  # 737a6783, 49a11ed1
+    # The cutover alternation that admitted both publishers.
+    f"(?:{AGENTIC_PRIMITIVES_IDENTITY_REGEXP}|{AGENTIC_WORKSPACE_IDENTITY_REGEXP})",
+)
 
 #: Lowest cosign major version accepted by the verifier probe.
 #: v2 introduced ``--certificate-identity-regexp``; v3 is current and keeps it.

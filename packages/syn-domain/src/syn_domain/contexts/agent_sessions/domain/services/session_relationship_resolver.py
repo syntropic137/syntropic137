@@ -57,7 +57,11 @@ from .invocation_lifecycle import lifecycle_gaps
 from .native_relationships import native_relationships
 from .superseded_revisions import without_superseded_revision_issues
 
-RESOLVER_VERSION = "syn-session-relationships/9"
+# /10: three named launch-failure gaps (claude_nested_auth_unavailable,
+# parent_permissions_unavailable, nested_journal_unavailable; agentic-workspace
+# v0.3.0). Evidence acquired before it stored those wire reasons as None (an
+# unknown reason), so it still resolves to the generic invocation_launch_failed.
+RESOLVER_VERSION = "syn-session-relationships/10"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:

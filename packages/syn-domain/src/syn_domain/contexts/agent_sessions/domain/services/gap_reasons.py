@@ -23,6 +23,13 @@ class GapReason(StrEnum):
     LAUNCH_FAILED_CAPTURE_HOOK_FAILED = "invocation_launch_failed_capture_hook_failed"
     LAUNCH_FAILED_HOOK_WATCHDOG = "invocation_launch_failed_hook_watchdog"
     LAUNCH_FAILED_CAPTURE_HOOK_UNREACHABLE = "invocation_launch_failed_capture_hook_unreachable"
+    LAUNCH_FAILED_CLAUDE_NESTED_AUTH_UNAVAILABLE = (
+        "invocation_launch_failed_claude_nested_auth_unavailable"
+    )
+    LAUNCH_FAILED_PARENT_PERMISSIONS_UNAVAILABLE = (
+        "invocation_launch_failed_parent_permissions_unavailable"
+    )
+    LAUNCH_FAILED_NESTED_JOURNAL_UNAVAILABLE = "invocation_launch_failed_nested_journal_unavailable"
     # Failed with no launch ever observed and no native id ever claimed: the
     # transport broke before the wrapper announced, so the agent is not known
     # to have run. Distinct from a launched-then-failed ``invocation_failed``.
@@ -69,6 +76,15 @@ LAUNCH_FAILURE_GAPS: dict[LaunchFailureReason, GapReason] = {
     LaunchFailureReason.CAPTURE_HOOK_FAILED: GapReason.LAUNCH_FAILED_CAPTURE_HOOK_FAILED,
     LaunchFailureReason.HOOK_WATCHDOG: GapReason.LAUNCH_FAILED_HOOK_WATCHDOG,
     LaunchFailureReason.CAPTURE_HOOK_UNREACHABLE: GapReason.LAUNCH_FAILED_CAPTURE_HOOK_UNREACHABLE,
+    LaunchFailureReason.CLAUDE_NESTED_AUTH_UNAVAILABLE: (
+        GapReason.LAUNCH_FAILED_CLAUDE_NESTED_AUTH_UNAVAILABLE
+    ),
+    LaunchFailureReason.PARENT_PERMISSIONS_UNAVAILABLE: (
+        GapReason.LAUNCH_FAILED_PARENT_PERMISSIONS_UNAVAILABLE
+    ),
+    LaunchFailureReason.NESTED_JOURNAL_UNAVAILABLE: (
+        GapReason.LAUNCH_FAILED_NESTED_JOURNAL_UNAVAILABLE
+    ),
 }
 
 # Every gap that means "this child never started": it needs no body.

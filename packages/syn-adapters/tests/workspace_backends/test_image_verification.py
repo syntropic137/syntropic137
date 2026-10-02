@@ -33,9 +33,17 @@ from syn_adapters.workspace_backends.image_verification import (
     verify_image,
 )
 from syn_shared.settings.image_verification import (
+    AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
     AGENTIC_WORKSPACE_IDENTITY_REGEXP,
     GITHUB_ACTIONS_OIDC_ISSUER,
+    PREVIOUS_DEFAULT_IMAGE_IDENTITY_REGEXPS,
     ImageVerificationSettings,
+)
+from syn_shared.settings.workspace_images import (
+    AP_ROLLBACK_IMAGES,
+    DEFAULT_WORKSPACE_IMAGE,
+    PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
+    WorkspaceImageProvider,
 )
 
 if TYPE_CHECKING:
@@ -339,6 +347,53 @@ class TestVerificationFailsClosed:
             verify_image(PINNED_REF, settings())
 
         assert "certificate identity mismatch" in str(exc_info.value)
+
+    @pytest.mark.parametrize("identity", PREVIOUS_DEFAULT_IMAGE_IDENTITY_REGEXPS)
+    def test_stale_shipped_identity_names_the_env_var(self, identity: str) -> None:
+        """A copied old default identity is the usual post-upgrade cause; say which var (#1398)."""
+        with (
+            fake_cosign(FakeCompleted(1, stderr="none of the expected identities matched")),
+            pytest.raises(ImageVerificationError) as exc_info,
+        ):
+            verify_image(DEFAULT_WORKSPACE_IMAGE, settings(certificate_identity_regexp=identity))
+
+        message = str(exc_info.value)
+        assert "Likely cause: SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP is" in message
+        assert AGENTIC_WORKSPACE_IDENTITY_REGEXP in message.split("Likely cause:", 1)[1]
+        assert "SYN_WORKSPACE_DOCKER_IMAGE" not in message
+
+    def test_custom_image_with_shipped_identity_adds_no_identity_hint(self) -> None:
+        """An AP rollback digest needs the AP identity; that pairing is not stale."""
+        rollback = AP_ROLLBACK_IMAGES[WorkspaceImageProvider.CLAUDE_CLI]
+        with (
+            fake_cosign(FakeCompleted(1, stderr="no matching signatures")),
+            pytest.raises(ImageVerificationError) as exc_info,
+        ):
+            verify_image(
+                rollback,
+                settings(certificate_identity_regexp=AGENTIC_PRIMITIVES_IDENTITY_REGEXP),
+            )
+
+        assert "Likely cause" not in str(exc_info.value)
+
+    def test_stale_shipped_image_names_the_env_var(self) -> None:
+        stale = next(i for i in PREVIOUS_DEFAULT_WORKSPACE_IMAGES if "@sha256:" in i)
+        with (
+            fake_cosign(FakeCompleted(1, stderr="no matching signatures")),
+            pytest.raises(ImageVerificationError) as exc_info,
+        ):
+            verify_image(stale, settings())
+
+        assert "Likely cause: SYN_WORKSPACE_DOCKER_IMAGE is" in str(exc_info.value)
+
+    def test_current_defaults_add_no_stale_hint(self) -> None:
+        with (
+            fake_cosign(FakeCompleted(1, stderr="no matching signatures")),
+            pytest.raises(ImageVerificationError) as exc_info,
+        ):
+            verify_image(PINNED_REF, settings())
+
+        assert "Likely cause" not in str(exc_info.value)
 
     def test_missing_cosign_raises(self) -> None:
         """cosign absent is a hard failure, not a silent skip.

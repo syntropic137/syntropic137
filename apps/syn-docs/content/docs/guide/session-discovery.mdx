@@ -119,7 +119,7 @@ missing delegates.
 | `invocation_running` | A launched process has no outcome yet |
 | `invocation_pending` | A committed launch was never acknowledged (killed or denied before it started) |
 | `invocation_launch_failed` | The process never started, cause not recorded |
-| `invocation_launch_failed_<cause>` | The process never started, with a named cause: `process_start_failed`, `codex_sandbox_unavailable`, `native_tool_failed`, `native_tool_interrupted`, `capture_hook_failed`, `hook_watchdog`, `capture_hook_unreachable` |
+| `invocation_launch_failed_<cause>` | The process never started, with a named cause: `process_start_failed`, `codex_sandbox_unavailable`, `native_tool_failed`, `native_tool_interrupted`, `capture_hook_failed`, `hook_watchdog`, `capture_hook_unreachable`, `claude_nested_auth_unavailable` (a Claude delegated from inside Claude has no credential it can read: Claude Code removes its OAuth token from Bash subprocesses), `parent_permissions_unavailable` (the parent Claude's permission grant could not be read, so the delegated Claude was not started), `nested_journal_unavailable` (a nested delegate could not write the child journal, for example inside a read-only Codex sandbox) |
 | `invocation_transport_failed_before_announce` | Failed before the wrapper announced it; the agent is not known to have run |
 | `invocation_<outcome>` | Any other abnormal outcome, for example `invocation_failed` or `invocation_cancelled` |
 | `conflicting_invocation_lifecycle` | Producers disagree about a process outcome |
