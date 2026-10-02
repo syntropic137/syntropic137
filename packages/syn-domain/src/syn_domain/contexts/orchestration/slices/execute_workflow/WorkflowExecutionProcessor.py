@@ -392,7 +392,6 @@ class WorkflowExecutionProcessor:
                     started_at,
                     cancel_reason=aggregate.cancel_reason,
                     phase_id=dispatch_ctx.current_phase_id,
-                    inputs=dispatch_ctx.inputs,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -422,7 +421,6 @@ class WorkflowExecutionProcessor:
                 started_at,
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
-                inputs=dispatch_ctx.inputs,
             )
         finally:
             # A shutdown may cancel the minutes-long agent await before either
@@ -518,7 +516,6 @@ class WorkflowExecutionProcessor:
         started_at: datetime,
         cancel_reason: str | None = None,
         phase_id: str | None = None,
-        inputs: dict[str, Any] | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions as cancelled and return cancelled result.
 
@@ -539,8 +536,9 @@ class WorkflowExecutionProcessor:
         try:
             saved = await runtime.save_unpushed_work(phase_id, execution_id=execution_id)
             # The workflow changes the rescue could not push, stored while
-            # this is still the run that knows them (#1437).
-            dropped = await self._workspaces_for(execution_id, inputs or {}).keep_dropped_workflows(
+            # this is still the run that knows them (#1437). No inputs: they
+            # are read only to provision, and storing an artifact is not that.
+            dropped = await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
                 saved.quarantined,
                 workflow_id=workflow_id,
                 phase_id=phase_id,
@@ -590,7 +588,6 @@ class WorkflowExecutionProcessor:
         started_at: datetime,
         failed_phase_id: str | None = None,
         kept_artifact_ids: list[str] | None = None,
-        inputs: dict[str, Any] | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions, save failure event, and return failed result.
 
@@ -648,9 +645,7 @@ class WorkflowExecutionProcessor:
         # Whichever of the two saved it, the workflow changes a rescue had to
         # leave out are stored now, while the run still knows them, and
         # pointed at from the failed phase like everything else it kept (#1437).
-        for artifact_id in await self._workspaces_for(
-            execution_id, inputs or {}
-        ).keep_dropped_workflows(
+        for artifact_id in await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
             quarantined_records(error, saved),
             workflow_id=workflow_id,
             phase_id=failed_phase_id,
