@@ -8685,6 +8685,13 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
           }
         },
         "type": "object",
@@ -12982,11 +12989,6 @@
             "type": "boolean",
             "title": "Clone Repos",
             "default": true
-          },
-          "can_open_pr": {
-            "type": "boolean",
-            "title": "Can Open Pr",
-            "default": false
           },
           "delivers_repo_changes": {
             "type": "boolean",
@@ -18176,6 +18178,13 @@
             },
             "type": "array",
             "title": "Errors"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
           }
         },
         "type": "object",
