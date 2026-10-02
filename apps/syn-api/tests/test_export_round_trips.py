@@ -655,9 +655,7 @@ class TestARetiredFieldIsNotExported:
             classification="simple",
             description="retired-key probe",
         ).to_dict()
-        stored["phases"] = [
-            {"id": "open_pr", "name": "Open PR", "order": 1, "can_open_pr": True}
-        ]
+        stored["phases"] = [{"id": "open_pr", "name": "Open PR", "order": 1, "can_open_pr": True}]
 
         response = _map_phase(WorkflowDetail.from_dict(stored).phases[0])
         entry = _parsed_phase(response)

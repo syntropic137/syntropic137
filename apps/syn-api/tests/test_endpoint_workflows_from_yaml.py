@@ -447,3 +447,38 @@ async def test_endpoint_identical_reinstall_succeeds_as_unchanged() -> None:
 
     assert second.id == first.id
     assert second.status == "unchanged"
+
+
+async def test_install_reports_retired_key_notice() -> None:
+    """A retired key installs, and the notice comes back on every install.
+
+    Including the unchanged reinstall: that is the run an author repeats from
+    CI, so it is where the notice has to keep appearing until the line goes.
+    """
+    retired = WITH_REPO_YAML.replace(
+        '    prompt_template: "Plan the change."\n',
+        '    prompt_template: "Plan the change."\n    can_open_pr: true\n',
+    )
+    assert "can_open_pr" in retired
+
+    service = await create_workflow_from_yaml(retired, version="0.3.0", source_digest="aaa111")
+    assert isinstance(service, Ok)
+    assert service.value.changed is True
+    assert len(service.value.warnings) == 1
+    assert "'can_open_pr'" in service.value.warnings[0]
+
+    request = _make_request(body=retired.encode(), content_type="application/yaml")
+    again = await create_workflow_from_yaml_endpoint(
+        request, version="0.3.0", source_digest="aaa111"
+    )
+
+    assert again.status == "unchanged"
+    assert len(again.warnings) == 1
+    assert "'can_open_pr'" in again.warnings[0]
+
+
+async def test_install_without_a_retired_key_has_no_warnings() -> None:
+    request = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    response = await create_workflow_from_yaml_endpoint(request)
+
+    assert response.warnings == []
