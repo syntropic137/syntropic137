@@ -242,10 +242,12 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
     )
+    from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.workspace import WorkspaceSettings
 
     ws_settings = WorkspaceSettings()
     _warn_if_stale_default_image(ws_settings.docker_image)
+    _warn_if_stale_default_identity(ImageVerificationSettings().certificate_identity_regexp)
     # The workspace service is the Docker headless path: claude -p and
     # codex exec both run there, keeping the stream-json pipeline, Envoy
     # token accounting, and telemetry.
@@ -1523,16 +1525,29 @@ def _warn_if_stale_default_image(image: str) -> None:
     condition for every other path (npx setup, hand-managed hosts) without
     overriding an operator's configuration.
     """
-    from syn_shared.settings.workspace_images import (
-        DEFAULT_WORKSPACE_IMAGE,
-        PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
+    from syn_shared.settings.workspace_image_migration import (
+        WORKSPACE_IMAGE_RULE,
+        stale_default_message,
     )
 
-    if image in PREVIOUS_DEFAULT_WORKSPACE_IMAGES:
-        logger.warning(
-            "SYN_WORKSPACE_DOCKER_IMAGE is %s, a default shipped by an older release; "
-            "this release defaults to %s. Remove the variable to use the default, "
-            "or run `just selfhost-update`, which migrates it.",
-            image,
-            DEFAULT_WORKSPACE_IMAGE,
-        )
+    message = stale_default_message(image, WORKSPACE_IMAGE_RULE)
+    if message is not None:
+        logger.warning("%s", message)
+
+
+def _warn_if_stale_default_identity(identity: str) -> None:
+    """Same as the image check, for the cosign signer identity (#1398).
+
+    A copied ``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` names the
+    publisher of the day it was copied. Once the pins name images from a new
+    publisher every provision fails verification, so name it before the first
+    one does.
+    """
+    from syn_shared.settings.workspace_image_migration import (
+        IMAGE_IDENTITY_RULE,
+        stale_default_message,
+    )
+
+    message = stale_default_message(identity, IMAGE_IDENTITY_RULE)
+    if message is not None:
+        logger.warning("%s", message)
