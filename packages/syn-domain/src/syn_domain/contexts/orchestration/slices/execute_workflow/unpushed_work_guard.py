@@ -100,6 +100,10 @@ bundle. Three choices in that sentence are load-bearing:
 - building the second commit can fail, and that failure is REPORTED, not
   raised. Raising would throw away this repository's record - the first
   refusal and the patch with it - in the walk's handler.
+- "the phase's tree", not "the phase's tree if it differs". GitHub inspects
+  every new commit, so a workflow edit that a later commit reverted still
+  refuses the push. The rescue is then the same flattened commit, with no
+  patch because nothing in the tree was left out.
 
 The patch rides out in the record as well as in the commit, and the processor
 stores it as a phase artifact: when the second push fails too, that artifact
@@ -820,7 +824,7 @@ async def _rescue(
 async def _prepare_rescue(
     workspace: GitWorkspace, repo: str, *, tree: str, ref: str, attempt: _RescueAttempt
 ) -> str | None:
-    """The commit GitHub will take from this App, or None if there is nothing to drop.
+    """The commit GitHub will take from this App, or None if there is nothing to change.
 
     ITS TREE is ``tree`` - the phase's whole worktree - with
     ``.github/workflows/`` exactly as ``base`` has it, and ITS ONLY PARENT is
@@ -831,6 +835,13 @@ async def _prepare_rescue(
     edit, cannot be parents. What that costs is kept in the same commit, in a
     directory checked to be free: the dropped changes as a patch, and the
     original commits as a bundle.
+
+    THE HISTORY ALONE CAN BE THE REFUSAL. When the phase's commits edited a
+    workflow and later restored it, the tree holds nothing to drop, yet the
+    first push was refused for those commits all the same. The rescue is then
+    built anyway - flattened onto ``base``, with no patch and the bundle - and
+    only when there is neither a path to drop nor a local commit to flatten is
+    there nothing it could change.
 
     The worktree is never touched - every index change goes to the scratch
     index the first push already filled. The patch is written before any of
@@ -855,26 +866,36 @@ async def _prepare_rescue(
         workspace, repo, "diff-tree", "-r", "--name-only", "--no-renames", since, tree, *scope
     )
     paths = tuple(line for line in changed.splitlines() if line)
-    if not paths:
+    if not paths and not local:
+        # Nothing to drop and no history to flatten: whatever GitHub saw, this
+        # rescue could not change it, so the first refusal stands alone.
         return None
-    await git(
-        workspace,
-        repo,
-        "diff-tree",
-        "-p",
-        "--binary",
-        "--no-renames",
-        f"--output={_SCRATCH_PATCH}",
-        since,
-        tree,
-        *scope,
-    )
-    patch_blob = (await git(workspace, repo, "hash-object", "-w", _SCRATCH_PATCH)).strip()
+    # NO PATH CHANGED IS NOT NO REFUSAL. An unpushed commit that edited a
+    # workflow and a later one that put it back leave the tree equal to the
+    # base, and GitHub still refuses the edit in the history. Flattening is
+    # then the whole fix, and there is simply no patch to keep.
+    patch_blob: str | None = None
+    patch = ""
+    if paths:
+        await git(
+            workspace,
+            repo,
+            "diff-tree",
+            "-p",
+            "--binary",
+            "--no-renames",
+            f"--output={_SCRATCH_PATCH}",
+            since,
+            tree,
+            *scope,
+        )
+        patch_blob = (await git(workspace, repo, "hash-object", "-w", _SCRATCH_PATCH)).strip()
+        patch = await git(workspace, repo, "cat-file", "blob", patch_blob)
     attempt.dropped = DroppedWorkflows(
         paths=paths,
         refusal=attempt.refusal,
         base=base,
-        patch=await git(workspace, repo, "cat-file", "blob", patch_blob),
+        patch=patch,
         artifact_title=(
             f"{repo.rsplit('/', 1)[-1]}: {UNPUSHABLE_WORKFLOW_DIR} changes this App "
             f"could not push (#1437)"
@@ -914,7 +935,8 @@ async def _prepare_rescue(
             UNPUSHABLE_WORKFLOW_DIR,
             index=_SCRATCH_INDEX,
         )
-    await _add_blob(workspace, repo, patch_blob, f"{rescue_dir}/{RESCUE_PATCH_NAME}")
+    if patch_blob is not None:
+        await _add_blob(workspace, repo, patch_blob, f"{rescue_dir}/{RESCUE_PATCH_NAME}")
     if local:
         await git(
             workspace,
@@ -988,8 +1010,9 @@ def _record(
         logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
         return landed
     if rescue is None or (rescue.second is None and rescue.failure is None):
-        # Not refused for workflows, or refused for them with no workflow path
-        # actually changed: the first refusal is the whole story, as before.
+        # Not refused for workflows, or refused for them with neither a
+        # workflow path to drop nor a local commit to flatten: the first
+        # refusal is the whole story, as before.
         logger.error("Quarantine push failed for %s -> %s: %s", repo, ref, pushed.stderr)
         return replace(
             landed, pushed_ref=None, push_error=_push_failure("The quarantine push", pushed)
@@ -1165,14 +1188,18 @@ def _cut_off(what: str, seconds: float) -> ExecutionResult:
     and name the ref. Reading it as a success is the false reassurance this
     whole module exists to refuse, and reading it as "nothing was attempted"
     would send an operator past a ref that might be there.
+
+    It does not say the phase was cancelled: the deadline holds whether or
+    not anything cancelled it, and a rescue that simply ran long is the
+    case that most needs reporting truthfully.
     """
     return ExecutionResult(
         exit_code=BOUND_FIRED_EXIT_CODE,
         success=False,
         duration_ms=0.0,
         stderr=(
-            f"{what} was still running {seconds:.0f}s after this phase was "
-            f"cancelled and was abandoned. Whether the ref exists is unknown."
+            f"{what} was still running {seconds:.0f}s after it began and was "
+            f"abandoned. Whether the ref exists is unknown."
         ),
         timed_out=True,
     )
@@ -1191,6 +1218,15 @@ def _commit_message(ref: str, *, dropped: DroppedWorkflows | None = None) -> str
             "the local tips carrying commits the remote did not have.\n"
         )
     onto = dropped.base if dropped.base is not None else "no parent"
+    if not dropped.paths:
+        return message + (
+            f"This commit's tree is the working tree as it stood. The first push "
+            f"of this work was refused because an unpushed commit changed "
+            f"{UNPUSHABLE_WORKFLOW_DIR}/, which this App may not push (#1024); "
+            f"the tree has it exactly as {onto} does, so nothing was left out.\n\n"
+            f"History was flattened onto {onto}; the original commits are in "
+            f"{dropped.rescue_dir}/{RESCUE_BUNDLE_NAME}.\n"
+        )
     lines = [
         message + f"This commit's tree is the working tree as it stood, EXCEPT "
         f"{UNPUSHABLE_WORKFLOW_DIR}/, which is exactly as {onto} has it: "

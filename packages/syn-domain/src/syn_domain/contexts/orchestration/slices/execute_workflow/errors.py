@@ -486,6 +486,9 @@ class DroppedWorkflows:
     """
 
     #: Every path under the directory whose content differs from ``base``.
+    #: EMPTY when the refusal was for history alone: an unpushed commit edited
+    #: a workflow and a later one restored it, so the tree drops nothing and
+    #: only the flattening was needed. ``patch`` is then empty too.
     paths: tuple[str, ...]
     #: Why the first push was refused, as `describe_process_failure` says it.
     refusal: str
@@ -544,11 +547,18 @@ class QuarantinedWork:
         dropped = self.dropped
         if dropped is None:
             return
-        if not dropped.paths or not dropped.patch:
+        if bool(dropped.paths) != bool(dropped.patch):
             raise ValueError(
-                f"QuarantinedWork for {self.repo!r} says workflow changes were "
-                f"dropped but names no path or carries no patch. A drop with "
-                f"nothing kept is a loss reported as a save."
+                f"QuarantinedWork for {self.repo!r} names dropped workflow paths "
+                f"without a patch, or a patch without the paths it changes. A "
+                f"drop with nothing kept is a loss reported as a save."
+            )
+        if self.pushed_ref is not None and not dropped.paths and not dropped.has_bundle:
+            raise ValueError(
+                f"QuarantinedWork for {self.repo!r} landed a workflow-safe rescue "
+                f"at {self.pushed_ref!r} that dropped nothing and kept no bundle. "
+                f"Flattening history is the only reason such a rescue exists, so "
+                f"the original commits have to be in it."
             )
         if self.pushed_ref is not None and dropped.rescue_dir is None:
             raise ValueError(
@@ -635,12 +645,26 @@ def _render_dropped_workflows(work: QuarantinedWork, dropped: DroppedWorkflows) 
     """
     paths = [f"      dropped: {path}" for path in dropped.paths]
     if not work.is_recoverable:
+        if not dropped.paths:
+            return [f"    NOT RECOVERABLE: {work.push_error}"]
         return [
             f"    NOT RECOVERABLE: {work.push_error}",
             *paths,
             f'    the workflow changes alone are kept as the phase artifact "{dropped.artifact_title}"',
         ]
     where = dropped.base if dropped.base is not None else "no commit (the rescue has no parent)"
+    if not dropped.paths:
+        # The refusal was for history alone (see `DroppedWorkflows.paths`).
+        return [
+            f"    quarantined at {work.pushed_ref} with its history flattened: the first "
+            f"push was refused ({dropped.refusal}).",
+            f"    An unpushed commit changed .github/workflows/, which this App cannot push "
+            f"(#1024); the tree as left has it exactly as {where} does, so nothing was dropped.",
+            f"    the {work.commit_count} unpushed commit(s) were flattened onto {where}; "
+            f"the originals are in {dropped.rescue_dir}/{RESCUE_BUNDLE_NAME}",
+            f"    recover with: git fetch origin {work.pushed_ref} && "
+            f"git switch -c recovered FETCH_HEAD",
+        ]
     patch = f"{dropped.rescue_dir}/{RESCUE_PATCH_NAME}"
     lines = [
         f"    quarantined at {work.pushed_ref} WITHOUT {len(dropped.paths)} workflow "

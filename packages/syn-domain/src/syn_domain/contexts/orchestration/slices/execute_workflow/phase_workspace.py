@@ -309,7 +309,9 @@ class PhaseWorkspace:
         kept: list[str] = []
         for work in quarantined:
             dropped = work.dropped
-            if dropped is None:
+            if dropped is None or not dropped.patch:
+                # No patch: the refusal was for history alone, and the tree
+                # left nothing out to keep.
                 continue
             artifact_id = str(uuid4())
             try:
