@@ -267,6 +267,48 @@ states whether all, some or none of the work can be fetched back, and it is coun
 from the refs that actually exist.
 </Callout>
 
+### Work That Changed a GitHub Actions Workflow
+
+The Syntropic137 GitHub App does not hold the `workflows` permission, and GitHub
+refuses **the whole push** when any commit in it changes a file under
+`.github/workflows/`. Without special handling, that one file would make every other
+change the phase made unrecoverable.
+
+So when GitHub refuses the quarantine push for that reason - and only then - a second
+commit is pushed to the same ref:
+
+- Its tree is the working tree as the agent left it, **except** `.github/workflows/`,
+  which is exactly as the last commit origin had (the commit named in the report).
+- Its only parent is that commit. History is flattened, because GitHub inspects every
+  pushed commit and the originals carry the workflow change.
+- It adds a `.syn-quarantine/` directory, or `.syn-quarantine-2/` and so on if the
+  phase already used that name. The directory holds:
+  - `workflows.patch`, the dropped workflow changes;
+  - `unpushed.bundle`, the original commits, when there were any.
+
+The report names every dropped file, and the patch is also stored as a phase artifact.
+To get everything back, including the workflow changes:
+
+```bash
+git fetch origin refs/syn/lost/<execution-id>/<phase-id>
+git switch -c recovered FETCH_HEAD
+git apply .syn-quarantine/workflows.patch
+```
+
+To get the original commits instead of the flattened one:
+
+```bash
+git bundle unbundle .syn-quarantine/unpushed.bundle
+```
+
+That lists each tip with its commit id; `git switch -c original <commit-id>` checks one out.
+
+Pushing the recovered workflow change still needs a credential that holds the
+`workflows` permission - yours, not the App's.
+
+If the second push fails too, the report says `NOT RECOVERABLE` and names both
+refusals, but the workflow changes are still kept as the phase artifact.
+
 Work committed inside a **submodule** of a cloned repo is detected - the superproject
 reports a modified gitlink, so the phase still fails rather than quietly succeeding -
 but the submodule's own objects are not quarantined, because they belong to a different

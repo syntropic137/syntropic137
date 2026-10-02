@@ -79,6 +79,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
+    quarantined_records,
     refuse_to_complete_unsaved_phase,
 )
 
@@ -527,12 +528,24 @@ class WorkflowExecutionProcessor:
         name another execution's phase.
         """
         runtime = self._runtimes.of(execution_id)
+        session_ids = runtime.timings().session_ids
         # BEFORE the teardown below. `abandon_all` destroys the cancelled
         # phase's container and commits that exist only in it go with it. The
         # user asked for the run to stop, not for the work to be deleted
         # (#1231).
         try:
             saved = await runtime.save_unpushed_work(phase_id, execution_id=execution_id)
+            # The workflow changes the rescue could not push, stored while
+            # this is still the run that knows them (#1437). No inputs: they
+            # are read only to provision, and storing an artifact is not that.
+            dropped = await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
+                saved.quarantined,
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+                execution_id=execution_id,
+                session_id=session_ids.get(phase_id or "", ""),
+            )
+            all_artifact_ids.extend(i for i in dropped if i not in all_artifact_ids)
             cancellation = cancelled_execution(
                 cancel_reason, phase_results, all_artifact_ids, saved=saved
             )
@@ -629,6 +642,19 @@ class WorkflowExecutionProcessor:
             if already_saved_by_the_completion_gate(error)
             else await runtime.save_unpushed_work(failed_phase_id, execution_id=execution_id)
         )
+        # Whichever of the two saved it, the workflow changes a rescue had to
+        # leave out are stored now, while the run still knows them, and
+        # pointed at from the failed phase like everything else it kept (#1437).
+        for artifact_id in await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
+            quarantined_records(error, saved),
+            workflow_id=workflow_id,
+            phase_id=failed_phase_id,
+            execution_id=execution_id,
+            session_id=timings.session_ids.get(failed_phase_id or "", ""),
+        ):
+            kept.append(artifact_id)
+            if artifact_id not in all_artifact_ids:
+                all_artifact_ids.append(artifact_id)
         observed = await runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
             error,
