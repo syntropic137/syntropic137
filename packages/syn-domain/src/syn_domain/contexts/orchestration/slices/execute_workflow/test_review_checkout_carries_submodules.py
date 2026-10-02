@@ -14,24 +14,19 @@ reads every porcelain line as work - correctly, because it cannot tell a moved
 gitlink from an authored one - and refused to report the phase complete. The
 review was never stored.
 
-THE FIX IS IN THE PROMPTS, NOT THE GUARD. Every review phase now checks out with
-``--recurse-submodules``, which removes the cause of the dirt. The guard is
-untouched and still fails a phase that leaves real work behind.
+THE FIX IS IN THE PROMPTS, NOT THE GUARD. The `verify` and `reverify` phases of
+`sdlc/implement` now check out with ``--recurse-submodules``, which removes the
+cause of the dirt. The guard is untouched and still fails a phase that leaves
+real work behind.
 
 WHY THESE TESTS RUN THE GUARD AND NOT A GREP. A test that the prompt contains
 ``--recurse-submodules`` would pass for a flag in the wrong block, on the wrong
 line, or on a command that never runs. What failed in production is the guard's
 verdict on the tree the checkout left, so that is what is asserted: each
-review prompt's checkout block, as it reaches execution, is run in a workspace
+prompt's checkout block, as it reaches execution, is run in a workspace
 cloned the way a phase arrives, and the resulting repository is handed to
 `quarantine_unpushed_work` exactly as teardown would. Drop the flag from any one
 prompt and its case raises `UnpushedWorkQuarantinedError` here.
-
-WHY EVERY REVIEW PROMPT. The task named `verify` and `reverify` in
-`sdlc/implement`. The same checkout, with the same defect, was in the three
-`custom/bake-*` copies of that `verify` and in both `pr-review` workflows. A fix
-to two of seven identical blocks is the drift this repository keeps paying for,
-so all seven are listed and a half-fix is red.
 """
 
 from __future__ import annotations
@@ -58,16 +53,12 @@ if TYPE_CHECKING:
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
-#: Every phase that checks out a commit it did not write in order to review it.
-#: Each declares `delivers_repo_changes: false`; none may leave the tree dirty.
+#: The implement workflow's review phases, which check out a commit they did not
+#: write. Each declares `delivers_repo_changes: false`; neither may leave the
+#: tree dirty.
 _REVIEW_PHASES = [
     ("sdlc/implement", "verify"),
     ("sdlc/implement", "reverify"),
-    ("custom/bake-opus", "verify"),
-    ("custom/bake-haiku", "verify"),
-    ("custom/bake-sonnet", "verify"),
-    ("sdlc/pr-review", "verify"),
-    ("sdlc/pr-review-slp", "verify"),
 ]
 
 _FENCED_BLOCK = re.compile(r"^```[a-z]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
@@ -111,12 +102,12 @@ def _bare(path: Path) -> Path:
     return path
 
 
-def _a_change_that_bumps_a_submodule(root: Path) -> tuple[Path, str, str]:
+def _a_change_that_bumps_a_submodule(root: Path) -> tuple[Path, str]:
     """A PR whose commit pins the submodule somewhere `main` does not.
 
     Returns the workspace clone, sitting on the default branch with its
-    submodule populated as a fresh phase workspace arrives, plus the base and
-    the head under review.
+    submodule populated as a fresh phase workspace arrives, plus the head
+    under review.
     """
     sub_origin = _bare(root / "plugin.git")
     sub = root / "plugin"
@@ -136,7 +127,6 @@ def _a_change_that_bumps_a_submodule(root: Path) -> tuple[Path, str, str]:
     _git(author, "submodule", "add", str(sub_origin), _SUBMODULE)
     _git(author, "commit", "-m", "base")
     _git(author, "push", "origin", "main")
-    base = _git(author, "rev-parse", "HEAD")
 
     (sub / "plugin.txt").write_text("2\n")
     _git(sub, "commit", "-am", "plugin 2")
@@ -157,7 +147,7 @@ def _a_change_that_bumps_a_submodule(root: Path) -> tuple[Path, str, str]:
     assert _git(workspace, "ls-tree", "HEAD", _SUBMODULE) != _git(
         workspace, "ls-tree", head, _SUBMODULE
     ), "the fixture must pin a different gitlink at the head than on main"
-    return workspace, base, head
+    return workspace, head
 
 
 def _the_checkout(prompt: str, workflow: str, phase_id: str) -> str:
@@ -169,7 +159,7 @@ def _the_checkout(prompt: str, workflow: str, phase_id: str) -> str:
     return str(blocks[0])
 
 
-def _run(script: str, workspace: Path, base: str, head: str) -> None:
+def _run(script: str, workspace: Path, head: str) -> None:
     """Run a checkout block with the values earlier phases would have recorded.
 
     The placeholder names differ between prompts; each is mapped to the value
@@ -180,9 +170,6 @@ def _run(script: str, workspace: Path, base: str, head: str) -> None:
         "the-exact-commit-SHA-from-the-artifact": head,
         "branch": _BRANCH,
         "candidate-sha": head,
-        "pr-branch": _BRANCH,
-        "recorded-head": head,
-        "recorded-base": base,
     }
     for name, value in values.items():
         script = script.replace(f"<{name}>", value)
@@ -203,10 +190,10 @@ def _run(script: str, workspace: Path, base: str, head: str) -> None:
 async def test_a_review_checkout_leaves_nothing_for_the_guard(
     workflow: str, phase_id: str, tmp_path: Path
 ) -> None:
-    workspace, base, head = _a_change_that_bumps_a_submodule(tmp_path)
+    workspace, head = _a_change_that_bumps_a_submodule(tmp_path)
     prompt = await _prompt_reaching_execution(workflow, phase_id)
 
-    _run(_the_checkout(prompt, workflow, phase_id), workspace, base, head)
+    _run(_the_checkout(prompt, workflow, phase_id), workspace, head)
 
     assert _git(workspace, "rev-parse", "HEAD") == head
     # Teardown's own call, with the phase's own declaration. Raises

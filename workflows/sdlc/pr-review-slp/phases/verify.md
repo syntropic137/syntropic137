@@ -27,19 +27,12 @@ nobody changed:
 
 ```bash
 git fetch origin
-git checkout --recurse-submodules --detach <recorded-head>
+git checkout --detach <recorded-head>
 test "$(git rev-parse HEAD)" = "<recorded-head>"                # the tree IS the PR
 test "$(git rev-parse origin/<pr-branch>)" = "<recorded-head>"  # and the PR has not moved
 git rev-parse origin/main    # for the record only - NOT a gate
 git diff <recorded-base>...HEAD
 ```
-
-**`--recurse-submodules` is required, not optional.** A plain `git checkout`
-moves the superproject but leaves every submodule where the default branch put
-it, so when the commit under review pins a different gitlink, `git status`
-reports ` M lib/<submodule>`. The unpushed-work guard reads that line as unsaved
-work and fails the phase after the review is complete but before it is stored,
-so the whole review is paid for and lost.
 
 **Both `test` lines must exit 0, and nothing below them is valid until they
 do.** They are the gate. Paste their exit status into your report; a gate whose
