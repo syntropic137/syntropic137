@@ -6,6 +6,7 @@ Location: orchestration/domain/aggregate_execution/ (per ADR-020)
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
 
@@ -23,24 +24,19 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
-    ForkExecutionCommand,
     InterruptExecutionCommand,
-    PauseExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
-    StartForkCommand,
     StartPhaseCommand,
+    StartResumeCommand,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_rules import (
-    ForkRefused,
-    decide_fork,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_start import (
-    fork_start_command,
-    fork_started_event,
-    refuse_fork_start,
+from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    ResumedEventShape,
+    classify_resumed_payload,
+    payload_of,
+    shape_of_resumed_payload,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
     completed_event,
@@ -51,11 +47,21 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import 
     evt,
     parse_phase_definitions,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_rules import (
+    ResumeRefused,
+    decide_resume,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    refuse_resume_start,
+    resume_start_command,
+    resume_started_event,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
-    AdmittedFork,
-    ForkOrigin,
+    AdmittedResume,
+    ResumeOrigin,
     StartPins,
-    read_admitted_fork,
+    read_admitted_forked_resume,
+    read_admitted_resume,
     read_start_pins,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -64,6 +70,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FinishedAgentRun,
     PhaseDefinition,
     ReportedFailureReason,
+    SideEffectStatus,
     StrandedDeliverable,
 )
 from syn_shared.control import ControlSignalType
@@ -77,12 +84,6 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
-    )
-    from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
-        ExecutionForkedEvent,
-    )
-    from syn_domain.contexts.orchestration.domain.events.ExecutionPausedEvent import (
-        ExecutionPausedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
@@ -127,6 +128,9 @@ if TYPE_CHECKING:
 #: diminishing share of the remaining faults at full price each, and an
 #: unbounded one bills until the phase timeout does the refusing instead.
 MAX_PHASE_ATTEMPTS: Final[int] = 2
+
+
+logger = logging.getLogger(__name__)
 
 
 @aggregate("WorkflowExecution")
@@ -198,24 +202,28 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: same restart hazard as the message above, and here for the same
         #: reason rather than because the value is expensive to recompute.
         self._recovered_phases: set[str] = set()
+        #: What each phase's latest agent run said about its external writes.
+        #: Same restart hazard as `_recovered_phases`: reported when the agent
+        #: finishes, needed when the phase completes.
+        self._reported_side_effects: dict[str, SideEffectStatus | None] = {}
         #: Phases that completed, and what each one's collection stored. The
-        #: inputs to a fork's inherited prefix (ADR-014 s7), which is decided
+        #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
         #: projection that is merely lagging would read as missing artifacts,
-        #: and a parent may be forked only once.
+        #: and a parent may be resumed only once.
         self._completed_phase_ids: set[str] = set()
         self._phase_artifact_ids: dict[str, list[str]] = {}
-        #: Whether this execution has admitted a fork. THIS is the
-        #: "forked at most once" rule, deliberately separate from the child's
+        #: Whether this execution has admitted a resume. THIS is the
+        #: "resumed at most once" rule, deliberately separate from the child's
         #: id below, which under ADR-023 can replay as None and would make the
-        #: rule fail OPEN - see `fork_rules.refuse_fork`.
-        self._forked: bool = False
+        #: rule fail OPEN - see `resume_rules.refuse_resume`.
+        self._resumed: bool = False
 
         #: The child's id: for the refusal message, and the id its start is
         #: built under - where a None refuses the start rather than naming one.
-        self._fork_execution_id: str | None = None
-        self._admitted_fork = AdmittedFork()
-        #: What this run was started with, pinned so a fork of it runs the same
+        self._resume_execution_id: str | None = None
+        self._admitted_resume = AdmittedResume()
+        #: What this run was started with, pinned so a resume of it runs the same
         #: thing (#1454, #1457). Never read back from the workflow template.
         self._pins = StartPins()
 
@@ -256,8 +264,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def accepts_control(self, signal: ControlSignalType) -> bool:
         """Whether an operator may ask this execution to do `signal` now.
 
-        The one place the rule lives (ADR-014 section 7). The pause, resume and
-        cancel handlers guard on it, and the control plane asks it before it
+        The one place the rule lives (ADR-014 section 7). The cancel handler
+        guards on it, and the control plane asks it before it
         queues a signal, so the answer an operator gets is the answer the
         command will get. That only holds when this is asked of the aggregate
         rehydrated from its stream: a read model that has not yet caught up
@@ -267,12 +275,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self.id is None:
             return False
         match signal:
-            case ControlSignalType.PAUSE:
-                return self._status is ExecutionStatus.RUNNING
-            case ControlSignalType.RESUME:
-                return self._status is ExecutionStatus.PAUSED
             case ControlSignalType.CANCEL | ControlSignalType.INJECT:
-                return self._status in (ExecutionStatus.RUNNING, ExecutionStatus.PAUSED)
+                return self._status is ExecutionStatus.RUNNING
 
     def attempts_for(self, phase_id: str) -> int:
         """How many times this phase has been attempted, 0 if never started."""
@@ -358,23 +362,23 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
     @property
     def start_pins(self) -> StartPins:
-        """What this run pinned at start, including `forked_from` for a fork."""
+        """What this run pinned at start, including `resumed_from` for a resume."""
         return self._pins
 
     @property
-    def fork_execution_id(self) -> str | None:
-        """The fork this run admitted, or None. The other half of `forked_from`."""
-        return self._fork_execution_id
+    def resume_execution_id(self) -> str | None:
+        """The resume this run admitted, or None. The other half of `resumed_from`."""
+        return self._resume_execution_id
 
-    def fork_start_command(self) -> StartForkCommand:
-        """The start of the fork this run admitted, from this stream alone."""
-        return fork_start_command(
+    def resume_start_command(self) -> StartResumeCommand:
+        """The start of the resume this run admitted, from this stream alone."""
+        return resume_start_command(
             parent_execution_id=self.id,
             workflow_id=self._workflow_id or "",
             workflow_name=self._workflow_name or "",
             pins=self._pins,
-            forked=self._forked,
-            admitted=self._admitted_fork,
+            resumed=self._resumed,
+            admitted=self._admitted_resume,
         )
 
     @command_handler("StartExecutionCommand")
@@ -387,9 +391,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._initialize(command.aggregate_id)
         self._apply(started_event(command))
 
-    @command_handler("StartForkCommand")
-    def start_fork(self, command: StartForkCommand) -> None:
-        """Handle StartForkCommand - start the run a parent's fork admitted.
+    @command_handler("StartResumeCommand")
+    def start_resume(self, command: StartResumeCommand) -> None:
+        """Handle StartResumeCommand - start the run a parent's resume admitted.
 
         Addressed to the CHILD's new stream. Its inherited phases are closed
         from its first event on (`on_execution_started`), so no later command
@@ -398,12 +402,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self.id is not None:
             msg = "Execution already started"
             raise ValueError(msg)
-        refusal = refuse_fork_start(command)
+        refusal = refuse_resume_start(command)
         if refusal is not None:
             raise ValueError(refusal)
 
         self._initialize(command.aggregate_id)
-        self._apply(fork_started_event(command))
+        self._apply(resume_started_event(command))
 
     @command_handler("CompleteExecutionCommand")
     def complete_execution(self, command: CompleteExecutionCommand) -> None:
@@ -430,7 +434,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         each corrupts it differently: a second start lets a retry drop the
         artifacts of the attempt that did complete, a second completion inflates
         the completed count and can append another attempt's artifact, and a
-        late collection injects artifacts into a phase that finished. A fork
+        late collection injects artifacts into a phase that finished. A resume
         inherits the completed prefix, so all three end up handing a child work
         whose inputs are not what the record says (ADR-014 s7).
 
@@ -530,6 +534,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             # only honest source is the stream. It also keeps
             # CompletePhaseCommand - and every caller of it - unchanged.
             deliverable_recovered=command.phase_id in self._recovered_phases,
+            reported_side_effects=self._reported_side_effects.get(command.phase_id),
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
             cache_creation_tokens=command.cache_creation_tokens,
@@ -581,6 +586,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
             last_agent_message=command.last_agent_message,
+            reported_side_effects=command.reported_side_effects,
         )
         self._apply(event)
 
@@ -633,45 +639,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
                 return phase_def
         return None
 
-    @command_handler("PauseExecutionCommand")
-    def pause_execution(self, command: PauseExecutionCommand) -> None:
-        """Handle PauseExecutionCommand."""
-        from syn_domain.contexts.orchestration.domain.events.ExecutionPausedEvent import (
-            ExecutionPausedEvent,
-        )
-
-        if not self.accepts_control(ControlSignalType.PAUSE):
-            msg = f"Cannot pause execution in status {self._status}"
-            raise ValueError(msg)
-
-        event = ExecutionPausedEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            paused_at=datetime.now(UTC),
-            reason=command.reason,
-        )
-        self._apply(event)
-
-    @command_handler("ResumeExecutionCommand")
-    def resume_execution(self, command: ResumeExecutionCommand) -> None:
-        """Handle ResumeExecutionCommand."""
-        from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
-            ExecutionResumedEvent,
-        )
-
-        if not self.accepts_control(ControlSignalType.RESUME):
-            msg = f"Cannot resume execution in status {self._status}"
-            raise ValueError(msg)
-
-        event = ExecutionResumedEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            resumed_at=datetime.now(UTC),
-        )
-        self._apply(event)
-
     @command_handler("CancelExecutionCommand")
     def cancel_execution(self, command: CancelExecutionCommand) -> None:
         """Handle CancelExecutionCommand."""
@@ -719,25 +686,25 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
-    @command_handler("ForkExecutionCommand")
-    def fork_execution(self, command: ForkExecutionCommand) -> None:
-        """Handle ForkExecutionCommand - admit, or refuse, one fork of this run.
+    @command_handler("ResumeExecutionCommand")
+    def resume_execution(self, command: ResumeExecutionCommand) -> None:
+        """Handle ResumeExecutionCommand - admit, or refuse, one resume of this run.
 
-        Decided on the PARENT, which records `ExecutionForked` on its own
+        Decided on the PARENT, which records `ExecutionResumed` on its own
         stream and is otherwise untouched: it stays terminal, and nothing it
         already recorded is rewritten (ADR-014 s7). Creating and starting the
-        fork is not done here - this is the admission, and every fact the fork
+        resume is not done here - this is the admission, and every fact the resume
         needs from its parent is fixed on the event.
 
-        The rules themselves are in `fork_rules`, where they are pure functions
+        The rules themselves are in `resume_rules`, where they are pure functions
         of this replayed state and testable without an aggregate.
         """
-        decision = decide_fork(
+        decision = decide_resume(
             execution_id=self.id,
             workflow_id=self._workflow_id or "",
             status=self._status,
-            forked=self._forked,
-            fork_execution_id=self._fork_execution_id,
+            resumed=self._resumed,
+            resume_execution_id=self._resume_execution_id,
             phase_definitions=self._phase_definitions,
             completed_phase_ids=self._completed_phase_ids,
             phase_artifact_ids=self._phase_artifact_ids,
@@ -745,7 +712,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             started_phase_ids=self._phase_attempts,
             command=command,
         )
-        if isinstance(decision, ForkRefused):
+        if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
         self._apply(decision.event)
 
@@ -761,14 +728,14 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
         self._status = ExecutionStatus.RUNNING
         self._pins = read_start_pins(event)
-        if self._pins.forked_from is not None:
-            self._inherit(self._pins.forked_from)
+        if self._pins.resumed_from is not None:
+            self._inherit(self._pins.resumed_from)
 
-    def _inherit(self, origin: ForkOrigin) -> None:
+    def _inherit(self, origin: ResumeOrigin) -> None:
         """Take over the parent's completed prefix as this run's own.
 
         As completed, not as merely skipped: `_refuse_if_completed` then closes
-        each one to start, completion and collection alike, and a fork of THIS
+        each one to start, completion and collection alike, and a resume of THIS
         run inherits them onward with the same artifacts - and with the
         execution that holds them, which is not this one (#1462).
         """
@@ -779,7 +746,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
     def _inherited_owners(self) -> dict[str, str]:
         """Who holds the artifacts of each phase this run inherited, by phase id."""
-        origin = self._pins.forked_from
+        origin = self._pins.resumed_from
         return {} if origin is None else origin.owners()
 
     @event_sourcing_handler("WorkflowCompleted")
@@ -850,7 +817,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         no phase rather than naming the abandoned attempt.
 
         `_completed_phases` is deliberately untouched: nothing completed.
-        Anything the abandoned attempt collected goes with it, so a fork never
+        Anything the abandoned attempt collected goes with it, so a resume never
         inherits an artifact from an attempt that was given up.
         """
         self._running_phase_id = None
@@ -864,6 +831,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @event_sourcing_handler("AgentExecutionCompleted")
     def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:
         """Apply AgentExecutionCompletedEvent — keep what the agent left behind."""
+        reported_for: str = evt(event, "phase_id") or ""
+        if reported_for:
+            # Overwritten by every run, so a retry that says nothing does not
+            # inherit the abandoned attempt's report.
+            self._reported_side_effects[reported_for] = SideEffectStatus.from_stored(
+                evt(event, "reported_side_effects")
+            )
         said = evt(event, "last_agent_message")
         if not said:
             return
@@ -896,16 +870,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:
         """Apply NextPhaseReadyEvent — to-do list projection reacts, not aggregate."""
 
-    @event_sourcing_handler("ExecutionPaused")
-    def on_execution_paused(self, _event: ExecutionPausedEvent) -> None:
-        """Apply ExecutionPausedEvent."""
-        self._status = ExecutionStatus.PAUSED
-
-    @event_sourcing_handler("ExecutionResumed")
-    def on_execution_resumed(self, _event: ExecutionResumedEvent) -> None:
-        """Apply ExecutionResumedEvent."""
-        self._status = ExecutionStatus.RUNNING
-
     @event_sourcing_handler("ExecutionCancelled")
     def on_execution_cancelled(self, event: ExecutionCancelledEvent) -> None:
         """Apply ExecutionCancelledEvent."""
@@ -919,13 +883,53 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_at = evt(event, "interrupted_at")
         self._status = ExecutionStatus.INTERRUPTED
 
-    @event_sourcing_handler("ExecutionForked")
-    def on_execution_forked(self, event: ExecutionForkedEvent) -> None:
-        """Apply ExecutionForkedEvent - the parent's one fork is spent.
+    @event_sourcing_handler("ExecutionResumed")
+    def on_execution_resumed(self, event: ExecutionResumedEvent) -> None:
+        """Apply ExecutionResumedEvent - the parent's one resume is spent.
 
         Status is deliberately untouched: the parent stays the terminal run it
         was, and only this fact about it is new.
+
+        THE SHAPE IS CHECKED HERE, not only in the event's validator. Under
+        ADR-023 the store catches a validation error and falls back to
+        `GenericDomainEvent` with the event type preserved, so a payload the
+        validator refused arrives here anyway and routes on its name. The
+        validator is the early warning; this is the gate.
         """
-        self._forked = True
-        self._fork_execution_id = evt(event, "fork_execution_id")
-        self._admitted_fork = read_admitted_fork(event)
+        payload = payload_of(event)
+        shape = shape_of_resumed_payload(payload)
+        if shape is ResumedEventShape.PRE_RENAME_UNPAUSE:
+            # Not a resume at all: this recorded un-pausing a paused execution,
+            # which no longer exists. Applying it would spend the parent's one
+            # resume on a child nobody asked for and cannot be undone, so it is
+            # ignored - loudly, because a stream holding one needs migrating.
+            logger.warning(
+                "Ignoring a pre-rename ExecutionResumed (un-pause) on %s: it is not a resume",
+                self.id,
+                extra={"execution_id": self.id},
+            )
+            return
+        if shape is ResumedEventShape.AMBIGUOUS:
+            classify_resumed_payload(payload)  # raises, with the reason
+        self._resumed = True
+        self._resume_execution_id = evt(event, "resume_execution_id")
+        self._admitted_resume = read_admitted_resume(event)
+
+    @event_sourcing_handler("ExecutionForked")
+    def on_execution_forked(self, event: ExecutionResumedEvent) -> None:
+        """Apply a pre-rename `ExecutionForked` as the resume it always was.
+
+        Registered because the rename moved the `@event` registration to
+        `ExecutionResumed`, so a stored `ExecutionForked` resolves to no
+        concrete class, replays as a generic event and would route NOWHERE.
+        Being dropped is worse than failing: the parent would look unresumed
+        and a second resume would be admitted, which is the one thing the
+        one-resume rule exists to prevent.
+
+        The concept never changed, only its name, so the payload maps field for
+        field (`upcast_forked_payload`).
+        """
+        admitted = read_admitted_forked_resume(event)
+        self._resumed = True
+        self._resume_execution_id = admitted.resume_execution_id
+        self._admitted_resume = admitted

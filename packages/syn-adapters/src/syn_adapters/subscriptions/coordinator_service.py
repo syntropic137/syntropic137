@@ -477,8 +477,8 @@ def create_coordinator_service(
         TriggerHistoryProjection,
     )
     from syn_domain.contexts.orchestration import (
-        ForkStarter,
-        ForkStartProcessManager,
+        ResumeStarter,
+        ResumeStartProcessManager,
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
@@ -541,10 +541,10 @@ def create_coordinator_service(
                 budget_checker=cast("_BudgetChecker | None", budget_checker),
                 max_dispatches_per_hour=max_dispatches_per_hour,
             ),
-            # ADR-014 s7: starts the child of each admitted fork. The same
-            # dispatcher as above, through its gated `start_fork`.
-            ForkStartProcessManager(
-                fork_starter=cast("ForkStarter | None", execution_service),
+            # ADR-014 s7: starts the child of each admitted resume. The same
+            # dispatcher as above, through its gated `start_resume`.
+            ResumeStartProcessManager(
+                resume_starter=cast("ResumeStarter | None", execution_service),
                 store=projection_store,
             ),
             TriggerQueryProjection(projection_store),

@@ -2,7 +2,7 @@
 
 Activated by setting ``SYN_RECORD_WEBHOOKS=true``.  Captures incoming
 ``POST /webhooks/github`` requests to timestamped JSONL files following
-the same convention as SessionRecorder from agentic-primitives.
+the same convention as SessionRecorder from agentic-workspace.
 
 Output directory: ``fixtures/webhooks/`` (relative to working directory).
 

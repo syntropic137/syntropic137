@@ -81,7 +81,11 @@ from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdent
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
-from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_domain.contexts.orchestration import (
+    FailureClassification,
+    ReportedFailureReason,
+    SideEffectStatus,
+)
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
 # so `syn_shared.agents` is needed at RUNTIME, which makes a type-checking-only
@@ -520,10 +524,9 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
-    # #1429. A phase that cannot publish rendered identically to one that can,
-    # so `syn workflow show`, the dashboard and the API all agreed while the
-    # run failed at `gh pr create`. can_open_pr decides the GitHub token's
-    # permission level, so it has to be visible.
+    # #1429 surfaced can_open_pr when it decided the GitHub token's permission
+    # level. Since #1477 it decides nothing: every phase token carries the
+    # installation's own permissions. Kept readable until the field is removed.
     clone_repos: bool = True
     can_open_pr: bool = False
     delivers_repo_changes: bool = True
@@ -701,6 +704,22 @@ class ExecutionDetail(BaseModel):
     Distinct from `unknown`, which is the word a phase writes to say it could
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
+    """
+    deliverable_produced: bool = False
+    """True when any phase stored an artifact, whatever `status` says.
+
+    A run can fail after its deliverable exists, and complete while a phase's
+    write-back was refused; this is the one field that answers "is there work
+    to read" without inferring it from `artifact_ids`. Scoped, like every
+    per-phase field here, to the phases this execution ran: a resumed run's
+    inherited phases are on its parent.
+    """
+    reported_side_effects: SideEffectStatus | None = None
+    """The most severe side-effect status any phase reported, ``None`` if none did.
+
+    What the AGENTS SAID about their external writes (a PR comment, a push):
+    ``denied`` beside a completed run means the deliverable is finished and a
+    write-back was refused - grant the permission, do not re-run the work.
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
@@ -1200,6 +1219,10 @@ class PhaseExecution(BaseModel):
     serves, and not only on `PhaseCompletedEvent`, because a fact that reaches
     no read model reaches no reader.
     """
+    reported_side_effects: SideEffectStatus | None = None
+    """What this phase's agent said happened to its external writes, ``None``
+    when it said nothing. A report, never a measurement, and it never decides
+    whether the phase completed."""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -1356,6 +1379,22 @@ class ExecutionDetailFull(BaseModel):
     Distinct from `unknown`, which is the word a phase writes to say it could
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
+    """
+    deliverable_produced: bool = False
+    """True when any phase stored an artifact, whatever `status` says.
+
+    A run can fail after its deliverable exists, and complete while a phase's
+    write-back was refused; this is the one field that answers "is there work
+    to read" without inferring it from `artifact_ids`. Scoped, like every
+    per-phase field here, to the phases this execution ran: a resumed run's
+    inherited phases are on its parent.
+    """
+    reported_side_effects: SideEffectStatus | None = None
+    """The most severe side-effect status any phase reported, ``None`` if none did.
+
+    What the AGENTS SAID about their external writes (a PR comment, a push):
+    ``denied`` beside a completed run means the deliverable is finished and a
+    write-back was refused - grant the permission, do not re-run the work.
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""

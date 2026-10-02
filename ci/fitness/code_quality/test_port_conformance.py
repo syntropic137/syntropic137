@@ -40,7 +40,7 @@ _SEARCH_ROOTS = ("packages", "apps")
 _UNIMPLEMENTED: dict[str, str] = {
     "DelegateIdentityPort": (
         "By design, the implementation is a harness concern and lands in "
-        "agentic-primitives (#895). Contract-tested against a local double in "
+        "agentic-workspace (#895). Contract-tested against a local double in "
         "packages/syn-domain/tests/contexts/agent_sessions/"
         "test_delegate_identity_port.py."
     ),

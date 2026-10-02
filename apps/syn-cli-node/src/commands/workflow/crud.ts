@@ -236,9 +236,8 @@ function renderInputDeclarations(declarations: WorkflowResponse["input_declarati
 
 /** The phase's non-default capabilities, as short display notes.
  *
- * #1429: a phase that CANNOT publish rendered identically to one that can, so
- * a missing `can_open_pr` looked like a GitHub App misconfiguration rather
- * than a one-line omission.
+ * `can_open_pr` is not shown: since #1477 every phase may open a PR, so a
+ * note on some phases would imply the others cannot.
  *
  * Only non-defaults are returned. Printing every default would bury the one
  * line that matters, and `sandbox` at the default says nothing a reader needs.
@@ -247,13 +246,11 @@ function renderInputDeclarations(declarations: WorkflowResponse["input_declarati
  * took that function to cognitive 23 and cyclomatic 11, over both thresholds.
  */
 function phaseCapabilityNotes(phase: {
-  can_open_pr?: boolean;
   clone_repos?: boolean;
   delivers_repo_changes?: boolean;
   sandbox?: string;
 }): string[] {
   const notes: string[] = [];
-  if (phase.can_open_pr) notes.push(style("can open PR", GREEN));
   if (phase.clone_repos === false) notes.push(style("no repo checkout", DIM));
   if (phase.delivers_repo_changes === false) notes.push(style("no repo deliverable", DIM));
   if (phase.sandbox && phase.sandbox !== "full-access") {

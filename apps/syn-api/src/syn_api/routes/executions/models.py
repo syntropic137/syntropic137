@@ -10,7 +10,11 @@ from pydantic import BaseModel, Field, computed_field
 # `PhaseActivityInfo` is also called at runtime as a field default.
 from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import BranchObservationInfo, PhaseActivityInfo
-from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_domain.contexts.orchestration import (
+    FailureClassification,
+    ReportedFailureReason,
+    SideEffectStatus,
+)
 from syn_shared.display import EM_DASH
 from syn_shared.observed_model import format_observed_model
 
@@ -77,6 +81,10 @@ class PhaseExecutionInfo(BaseModel):
     model -> here. A client auditing which runs stood on a salvage reads this;
     `status` says `completed` either way.
     """
+    reported_side_effects: SideEffectStatus | None = None
+    """What this phase's agent said happened to its external writes, ``None``
+    when it said nothing. A report, never a measurement, and it never decides
+    whether the phase completed."""
     model: ObservedModelId | None = None
     """The model the harness REPORTED for this phase, or null (ADR-067 D9).
 
@@ -233,6 +241,22 @@ class ExecutionDetailResponse(BaseModel):
     so a report that stops short of here never reaches a client - and a
     dashboard with nothing to quote falls back to showing the measurement
     alone, which is the state #1392 was opened about.
+    """
+    deliverable_produced: bool = False
+    """True when any phase stored an artifact, whatever `status` says.
+
+    A run can fail after its deliverable exists, and complete while a phase's
+    write-back was refused; this is the one field that answers "is there work
+    to read" without inferring it from `artifact_ids`. Scoped, like every
+    per-phase field here, to the phases this execution ran: a resumed run's
+    inherited phases are on its parent.
+    """
+    reported_side_effects: SideEffectStatus | None = None
+    """The most severe side-effect status any phase reported, ``None`` if none did.
+
+    What the AGENTS SAID about their external writes (a PR comment, a push):
+    ``denied`` beside a completed run means the deliverable is finished and a
+    write-back was refused - grant the permission, do not re-run the work.
     """
     repos: list[str] = Field(default_factory=list)
     task: str | None = None

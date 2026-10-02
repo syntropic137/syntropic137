@@ -97,7 +97,7 @@ class ArtifactQueryServicePort(Protocol):
     ) -> dict[str, list[PhaseOutputFile]]:
         """The files of exactly these artifacts, per phase they were named under.
 
-        What a fork hands forward from its parent (ADR-014 s7): the artifacts
+        What a resume hands forward from its parent (ADR-014 s7): the artifacts
         the parent KEPT for each inherited phase, not every artifact that
         phase's attempts ever produced.
 

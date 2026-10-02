@@ -563,6 +563,7 @@ class AgentExecutionHandler:
             # between here and artifact collection cannot lose the salvage
             # input (#1195, #1300).
             last_agent_message=stream_result.last_agent_message,
+            reported_side_effects=stream_result.verdict.reported_side_effects,
         )
 
         return AgentExecutionResult(

@@ -13,6 +13,7 @@ describe("health command", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
   });
 

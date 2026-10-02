@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.32.0"
+    "version": "0.33.0b1"
   },
   "paths": {
     "/workflows": {
@@ -949,116 +949,13 @@
         }
       }
     },
-    "/executions/{execution_id}/pause": {
-      "post": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Pause Execution Endpoint",
-        "description": "Pause a running execution.",
-        "operationId": "pause_execution_endpoint_executions__execution_id__pause_post",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/PauseRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Request"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/executions/{execution_id}/resume": {
-      "post": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Resume Execution Endpoint",
-        "description": "Resume a paused execution.",
-        "operationId": "resume_execution_endpoint_executions__execution_id__resume_post",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/executions/{execution_id}/cancel": {
       "post": {
         "tags": [
           "control"
         ],
         "summary": "Cancel Execution Endpoint",
-        "description": "Cancel a running or paused execution.",
+        "description": "Cancel a running execution.",
         "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -1208,14 +1105,14 @@
         }
       }
     },
-    "/executions/{execution_id}/fork": {
+    "/executions/{execution_id}/resume": {
       "post": {
         "tags": [
-          "fork"
+          "resume"
         ],
-        "summary": "Fork Execution Endpoint",
-        "description": "Fork a failed or interrupted execution so it resumes where it stopped.",
-        "operationId": "fork_execution_endpoint_executions__execution_id__fork_post",
+        "summary": "Resume Execution Endpoint",
+        "description": "Resume a failed or interrupted execution so it resumes where it stopped.",
+        "operationId": "resume_execution_endpoint_executions__execution_id__resume_post",
         "parameters": [
           {
             "name": "execution_id",
@@ -1233,7 +1130,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/ForkRequest"
+                    "$ref": "#/components/schemas/ResumeRequest"
                   },
                   {
                     "type": "null"
@@ -1250,7 +1147,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ForkResponse"
+                  "$ref": "#/components/schemas/ResumeResponse"
                 }
               }
             }
@@ -7007,6 +6904,25 @@
           }
         }
       }
+    },
+    "/version": {
+      "get": {
+        "summary": "Version",
+        "description": "Which build is serving this API.\n\nReturns the same ``BuildInfo`` block ``/health`` carries, rather than a\nflat mapping holding ``version_string()``. That function yields the\n``\"unknown\"`` sentinel when package metadata cannot be read, and a bare\nstring in a version field is indistinguishable to a client from a release\nactually called that - the defect #1380 exists to remove. ``BuildInfo``\nmakes the absence a declared state (``version: null`` plus\n``version_status``) instead of a word.",
+        "operationId": "version_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildInfo"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9387,6 +9303,21 @@
               }
             ]
           },
+          "deliverable_produced": {
+            "type": "boolean",
+            "title": "Deliverable Produced",
+            "default": false
+          },
+          "reported_side_effects": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SideEffectStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "repos": {
             "items": {
               "type": "string"
@@ -10953,68 +10884,6 @@
         "type": "object",
         "title": "FeedbackUpdate",
         "description": "Request model for updating feedback."
-      },
-      "ForkRequest": {
-        "properties": {
-          "override_cancellation": {
-            "type": "boolean",
-            "title": "Override Cancellation",
-            "description": "Fork a CANCELLED parent. A cancel is an instruction to stop, so forking past it needs a fresh decision rather than inheriting the old one.",
-            "default": false
-          },
-          "acknowledge_external_effects": {
-            "type": "boolean",
-            "title": "Acknowledge External Effects",
-            "description": "Accept that the phase the fork restarts may already have pushed or published something in the parent, which re-running it repeats.",
-            "default": false
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "ForkRequest",
-        "description": "What an operator must decide before a fork is admitted.\n\nBoth flags default to the REFUSAL, because both exist to make an operator\nsay something out loud. Neither implies the other."
-      },
-      "ForkResponse": {
-        "properties": {
-          "parent_execution_id": {
-            "type": "string",
-            "title": "Parent Execution Id"
-          },
-          "execution_id": {
-            "type": "string",
-            "title": "Execution Id"
-          },
-          "resume_phase_id": {
-            "type": "string",
-            "title": "Resume Phase Id"
-          },
-          "inherited_phase_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Inherited Phase Ids"
-          },
-          "cancellation_overridden": {
-            "type": "boolean",
-            "title": "Cancellation Overridden"
-          },
-          "external_effects_acknowledged": {
-            "type": "boolean",
-            "title": "External Effects Acknowledged"
-          }
-        },
-        "type": "object",
-        "required": [
-          "parent_execution_id",
-          "execution_id",
-          "resume_phase_id",
-          "inherited_phase_ids",
-          "cancellation_overridden",
-          "external_effects_acknowledged"
-        ],
-        "title": "ForkResponse",
-        "description": "The fork that was admitted, and what the child will do."
       },
       "GitEventData": {
         "properties": {
@@ -12917,24 +12786,6 @@
         "title": "OrganizationSummaryResponse",
         "description": "Summary of an organization for list views."
       },
-      "PauseRequest": {
-        "properties": {
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "type": "object",
-        "title": "PauseRequest",
-        "description": "Request to pause an execution."
-      },
       "PhaseActivityInfo": {
         "properties": {
           "telemetry_available": {
@@ -13315,6 +13166,16 @@
             "type": "boolean",
             "title": "Deliverable Recovered",
             "default": false
+          },
+          "reported_side_effects": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SideEffectStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model": {
             "anyOf": [
@@ -14516,6 +14377,68 @@
         ],
         "title": "ReportedFailureReason",
         "description": "What a phase says CAUSED the failure it is reporting (#1372).\n\nTHE QUESTION THIS ANSWERS, and why it had to be asked rather than worked\nout. A readable ``success=false`` says THAT a phase failed and nothing\nmore, so every reported failure was recorded as a correct refusal - the\nsystem working - including the one whose agent had just written \"GH_TOKEN\nis not set\", which is the system not working, and the one that said the\ntask was impossible, which is neither. Those three take opposite responses:\nretry, fix the platform, rewrite the brief. An operator re-dispatching off\na record that cannot tell them apart spends a whole run to find out.\n\nTHE SPELLINGS ARE classify.md's, which is the vocabulary analysts already\nsort failures into by hand and the one `FailureClassification` was built\nfrom. Three words, closed, written here and nowhere else - a closed set in\none place is what separates a contract from the habit of adding one more\nstring every time a run is lost, and it is the definition the negative\ntests are written against.\n\nIT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,\nan exception message or an exit status to reach a member of this; the only\nway into one is a phase that wrote it.\n\nAND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A\nMEASUREMENT (#1392). This is the whole of what the type means, and the\nreason it is spelled `reported_failure_reason` everywhere it is carried:\nthe platform's only corroboration of anything written here is that the\nprocess exited cleanly and its stream arrived intact, which is evidence\nabout the HARNESS and not about whether the task was possible. A run that\nnamed itself ``task`` established nothing about the request; it said\nsomething about it. So the word travels the whole way to the operator - who\nwants to know what the agent said - and `FailureClassification`, which is\nwhat failure NUMBERS are computed from, is never decided by it. The one\nthing a phase can do to that record is WITHDRAW a claim; see\n`_corroborated_classification`, which holds the whole rule.\n\nAND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when\nediting anything here. This decides a LABEL on a failure already decided by\n``success``. A word nobody recognises, a sentence, a number, or no key at\nall all read as \"no reason given\" and leave the verdict exactly as it was.\nMaking a misspelling fatal would let a tally field refuse a finished run,\nwhich is #1324's defect bought back in exchange for nothing."
+      },
+      "ResumeRequest": {
+        "properties": {
+          "override_cancellation": {
+            "type": "boolean",
+            "title": "Override Cancellation",
+            "description": "Resume a CANCELLED parent. A cancel is an instruction to stop, so resuming past it needs a fresh decision rather than inheriting the old one.",
+            "default": false
+          },
+          "acknowledge_external_effects": {
+            "type": "boolean",
+            "title": "Acknowledge External Effects",
+            "description": "Accept that the phase the resume restarts may already have pushed or published something in the parent, which re-running it repeats.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ResumeRequest",
+        "description": "What an operator must decide before a resume is admitted.\n\nBoth flags default to the REFUSAL, because both exist to make an operator\nsay something out loud. Neither implies the other."
+      },
+      "ResumeResponse": {
+        "properties": {
+          "parent_execution_id": {
+            "type": "string",
+            "title": "Parent Execution Id"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "resume_phase_id": {
+            "type": "string",
+            "title": "Resume Phase Id"
+          },
+          "inherited_phase_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Inherited Phase Ids"
+          },
+          "cancellation_overridden": {
+            "type": "boolean",
+            "title": "Cancellation Overridden"
+          },
+          "external_effects_acknowledged": {
+            "type": "boolean",
+            "title": "External Effects Acknowledged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parent_execution_id",
+          "execution_id",
+          "resume_phase_id",
+          "inherited_phase_ids",
+          "cancellation_overridden",
+          "external_effects_acknowledged"
+        ],
+        "title": "ResumeResponse",
+        "description": "The resume that was admitted, and what the child will do."
       },
       "RootResponse": {
         "properties": {
@@ -16139,6 +16062,17 @@
         ],
         "title": "SetMaintenanceModeRequest",
         "description": "Set or clear maintenance mode (#1387).\n\nThe response is not sent until the state is durably persisted, so a caller\nthat has seen a 200 knows no further execution can be admitted."
+      },
+      "SideEffectStatus": {
+        "type": "string",
+        "enum": [
+          "none",
+          "succeeded",
+          "denied",
+          "failed"
+        ],
+        "title": "SideEffectStatus",
+        "description": "What a phase says happened to the external writes it attempted.\n\nTHE CONFLATION THIS SPLITS. A phase that wrote its deliverable and was then\nrefused a PR comment had one word for both facts - `success` - so it wrote\n`false` and the run failed with the finished review still on disk. 17 runs\nof one canary were recorded as failures that way. The deliverable and the\nwrite-back are separate outcomes and take separate responses: a missing\ndeliverable is a failed phase, a refused comment is a permission to grant.\n\nA REPORT, NEVER A MEASUREMENT, and spelled `reported_side_effects` wherever\nit is carried for the reason `ReportedFailureReason` is: the agent chose\nthe word and nothing corroborates it. It never decides whether a phase\ncompletes - `success` does that, unchanged."
       },
       "SkillDetailResponse": {
         "properties": {
@@ -18594,7 +18528,7 @@
     },
     {
       "name": "control",
-      "description": "Pause, resume, cancel, and inject context into running executions"
+      "description": "Cancel and inject context into running executions"
     },
     {
       "name": "conversations",
@@ -18623,10 +18557,6 @@
     {
       "name": "feedback",
       "description": ""
-    },
-    {
-      "name": "fork",
-      "description": "Fork a failed execution so it restarts at the first phase that did not finish"
     },
     {
       "name": "github",
@@ -18659,6 +18589,10 @@
     {
       "name": "repos",
       "description": ""
+    },
+    {
+      "name": "resume",
+      "description": "Resume a failed execution so it restarts at the first phase that did not finish"
     },
     {
       "name": "sessions",

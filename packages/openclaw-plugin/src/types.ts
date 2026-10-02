@@ -148,6 +148,16 @@ export interface ControlResponse {
   error: string | null;
 }
 
+/** What `POST /executions/{id}/resume` returns: the child run it created. */
+export interface ResumeResponse {
+  parent_execution_id: string;
+  execution_id: string;
+  resume_phase_id: string;
+  inherited_phase_ids: string[];
+  cancellation_overridden: boolean;
+  external_effects_acknowledged: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------

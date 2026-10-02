@@ -15,6 +15,7 @@ from syn_shared.settings.workspace_image_migration import (
 )
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
+    DEFAULT_WORKSPACE_PROVIDER,
     PINNED_DIGESTS,
     PREVIOUS_DEFAULT_WORKSPACE_IMAGES,
     WorkspaceImageProvider,
@@ -24,15 +25,15 @@ pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
 OLD = (
-    "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:"
-    "89189b6c9cf67ac6a9b137fa7427990ca5535077e53e729a0ff4635053e6970d"
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:"
+    "27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8"
 )
 CUSTOM = "ghcr.io/example/my-omni@sha256:" + "ab" * 32
 
 
 def test_the_current_default_is_never_a_previous_one() -> None:
     assert DEFAULT_WORKSPACE_IMAGE not in PREVIOUS_DEFAULT_WORKSPACE_IMAGES
-    assert DEFAULT_WORKSPACE_IMAGE.endswith(PINNED_DIGESTS[WorkspaceImageProvider.OMNI_AGENT])
+    assert DEFAULT_WORKSPACE_IMAGE.endswith(PINNED_DIGESTS[DEFAULT_WORKSPACE_PROVIDER])
     assert len(set(PREVIOUS_DEFAULT_WORKSPACE_IMAGES)) == len(PREVIOUS_DEFAULT_WORKSPACE_IMAGES)
     # The default this change replaced is the most recent previous one.
     assert PREVIOUS_DEFAULT_WORKSPACE_IMAGES[-1] == OLD

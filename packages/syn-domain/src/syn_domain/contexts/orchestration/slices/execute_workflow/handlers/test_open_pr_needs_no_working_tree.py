@@ -704,6 +704,14 @@ def _run_gh(
 #:   a phase that could not tell is not a property of which prompt it got.
 #:   Nothing in the fences is left to substitute, so #1324's copyability holds;
 #:   pinned by `test_each_failure_fence_copied_verbatim_carries_the_class_it_names`.
+#: * The success fence gained `side_effects`, and the prose above the fences
+#:   now says `success` is about the deliverable. A review canary wrote its
+#:   review, was refused the PR comment, reported `success: false` because one
+#:   word had to cover both facts, and 17 finished runs were recorded as
+#:   failures. The write-back now has a word of its own beside `success`, and
+#:   it never decides completion. Still one fence per outcome and nothing left
+#:   to substitute except a closed word the prose names, so #1324's
+#:   copyability holds.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -830,6 +838,22 @@ ordinary reported failure, which is what every report written before this key
 existed means, and it is the one thing here you cannot use to say "I could not
 tell".
 
+**`success` is about your deliverable, not about every action around it.** If
+you produced what this phase asked for but an external write was refused or
+broke - posting a PR comment, pushing a branch, opening an issue - the task is
+NOT failed. Report `success: true`, and say what happened to the writes in
+`side_effects`, which is exactly one of four words:
+
+| `side_effects` | when |
+|---|---|
+| `none` | you attempted no external write |
+| `succeeded` | you made external writes and every one went through |
+| `denied` | a write was refused - permissions, a protected branch, a read-only token |
+| `failed` | a write was attempted and broke - network, API error, a tool that crashed |
+
+Name what was refused in `comments`. Writing `success: false` over a refused
+comment throws away a finished deliverable.
+
 Your `comments` are specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
@@ -847,10 +871,11 @@ the `comments` text with your own. **Write both lines. A block whose
 `TASK_RESULT_END` line is missing is failed as UNREADABLE instead of completed,
 so stopping after the JSON loses the run.**
 
-You completed the task - copy both lines:
+You completed the task - copy both lines, and change `none` to `succeeded`,
+`denied` or `failed` if you made external writes:
 
 ```
-TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplished"}
+TASK_RESULT: {"success": true, "side_effects": "none", "comments": "Brief summary of what was accomplished"}
 TASK_RESULT_END
 ```
 

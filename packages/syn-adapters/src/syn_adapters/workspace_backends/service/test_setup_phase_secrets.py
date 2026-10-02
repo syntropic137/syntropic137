@@ -522,7 +522,7 @@ class TestSetupPhaseSecretsCreate:
         # One token minted despite two repos
         # One token, scoped to both repos by name (#725).
         mock_client.mint_agent_token.assert_called_once_with(
-            "inst-1", can_open_pr=False, repositories=["repo-a", "repo-b"]
+            "inst-1", repositories=["repo-a", "repo-b"]
         )
         assert secrets.repo_tokens[repos[0]] == "tok-inst1"
         assert secrets.repo_tokens[repos[1]] == "tok-inst1"

@@ -89,7 +89,7 @@ repository, ahead of the adapters and the composition layer. It holds 1377 lines
 of vendor wire-format parsing, including a regex over the codex binary's own
 tracing module names (`CodexStreamProcessor.py:139`).
 
-Meanwhile agentic-primitives does not own invocation at all.
+Meanwhile agentic-workspace (moved from agentic-primitives, 2026-09, see #1417) does not own invocation at all.
 `harnesses/__init__.py` states twice that `HarnessPlugin` covers transcript
 extraction and "never launch or auth". There is no `-p`, no `codex exec` and no
 `stream-json` anywhere in the submodule.
@@ -173,7 +173,7 @@ standard. The translation from a phase definition to an argv line stays in this
 repository behind a port, satisfying the AGENTS.md rule without paying the
 submodule delivery tax while the design is still moving.
 
-Do not move invocation into agentic-primitives yet. A change there reaches a
+Do not move invocation into agentic-workspace yet. A change there reaches a
 running workspace only after merge, image build, the protected release channel,
 and a `PINNED_DIGESTS` bump here. That cost is worth paying for a stable
 contract and not for one still being designed.

@@ -8,7 +8,7 @@ return, and for which inputs.
 
 The corresponding correctness test, that each REAL adapter returns the right id
 from recorded output containing malformed lines and misleading id-shaped
-fields, belongs in agentic-primitives, because it changes with those formats.
+fields, belongs in agentic-workspace, because it changes with those formats.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class _ConformingAdapter:
     """A minimal adapter that honours the whole contract.
 
     Its format is invented for this test. Any real harness shape is one of
-    agentic-primitives' concerns.
+    agentic-workspace' concerns.
     """
 
     def native_session_id_from_stream(self, line: str) -> str | None:

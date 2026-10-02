@@ -2,7 +2,7 @@ import { SyntropicClient, resolveConfig } from "./client.js";
 import type { SyntropicClientConfig } from "./client.js";
 import { formatError } from "./errors.js";
 import { synGetArtifact, synListArtifacts, artifactToolDefs } from "./tools/artifacts.js";
-import { synCancelExecution, synInjectContext, synPauseExecution, synResumeExecution, controlToolDefs } from "./tools/control.js";
+import { synCancelExecution, synInjectContext, synResumeExecution, controlToolDefs } from "./tools/control.js";
 import { synGetExecution, synListExecutions, executionToolDefs } from "./tools/executions.js";
 import { synGetExecutionCost, synGetMetrics, synGetSession, observabilityToolDefs } from "./tools/observability.js";
 import { synGetSessionInventory, sessionInventoryToolDefs } from "./tools/session_inventory.js";
@@ -34,7 +34,6 @@ const toolHandlers: Record<string, ToolHandler> = {
   syn_list_executions: synListExecutions,
   syn_get_execution: synGetExecution,
   syn_get_session_inventory: synGetSessionInventory,
-  syn_pause_execution: synPauseExecution,
   syn_resume_execution: synResumeExecution,
   syn_cancel_execution: synCancelExecution,
   syn_inject_context: synInjectContext,

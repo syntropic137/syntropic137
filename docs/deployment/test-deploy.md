@@ -197,7 +197,7 @@ generated from.
 > ```
 >
 > Without it, both fail with `Distribution not found at .../agentic_logging` -
-> `agentic-logging` is a path dependency into `lib/agentic-primitives`, so the
+> `agentic-logging` is a path dependency into `lib/agentic-workspace`, so the
 > directory does not exist until the submodule is checked out. The error names
 > a Python distribution and says nothing about submodules, which is why it costs
 > ten minutes the first time.

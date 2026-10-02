@@ -41,7 +41,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 pytestmark = pytest.mark.unit
 
 _REPO = "https://github.com/org/repo-a"
-_SOURCE = CredentialSource(repositories=(_REPO,), can_open_pr=False)
+_SOURCE = CredentialSource(repositories=(_REPO,))
 
 #: The provider-level failure every test below injects. Deliberately a bare
 #: `RuntimeError`: the point is that renewal normalizes what it does not

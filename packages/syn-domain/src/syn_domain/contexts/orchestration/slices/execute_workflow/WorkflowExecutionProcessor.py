@@ -19,7 +19,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
     StartExecutionCommand,
-    StartForkCommand,
+    StartResumeCommand,
     WorkflowExecutionAggregate,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
@@ -39,10 +39,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.failure_teardown import (
     record_failure_and_release,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
-    inherited_outputs,
-    inherited_phase_ids,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
@@ -74,6 +70,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     # import time, which is why TC001 is silenced here rather than obeyed.
     WorkflowExecutionResult,  # noqa: TC001
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
+    inherited_outputs,
+    inherited_phase_ids,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
     refuse_to_complete_unsaved_phase,
@@ -97,7 +97,7 @@ if TYPE_CHECKING:
         ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
-        ForkOrigin,
+        ResumeOrigin,
         SourceCommit,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -247,14 +247,14 @@ class WorkflowExecutionProcessor:
             inputs=inputs,
         )
 
-    async def resolve_inheritance(self, origin: ForkOrigin | None) -> None:
-        """Raise unless a fork's inherited outputs can be handed over.
+    async def resolve_inheritance(self, origin: ResumeOrigin | None) -> None:
+        """Raise unless a resume's inherited outputs can be handed over.
 
         For a caller that must find that out BEFORE dispatching the start rather
         than inside it: a refusal raised in the background task is reported
         after the record was already written `dispatched`, and a refusal known
-        before the dispatch is cheaper and clearer. `start_fork` calls this through the processor it already holds,
-        rather than importing `fork_handoff` - a slice may not import another
+        before the dispatch is cheaper and clearer. `start_resume` calls this through the processor it already holds,
+        rather than importing `resume_handoff` - a slice may not import another
         slice's modules, and depending on an injected collaborator is the way
         across that boundary.
         """
@@ -301,13 +301,13 @@ class WorkflowExecutionProcessor:
         aggregate.start_execution(start_cmd)
         return await self._run_started(aggregate, workflow_id, phases, inputs, repos, admitted)
 
-    async def run_fork(
+    async def run_resume(
         self,
-        command: StartForkCommand,
+        command: StartResumeCommand,
         repos: list[RepositoryRef] | None = None,
         admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult:
-        """Start and run the fork a parent admitted (ADR-014 s7).
+        """Start and run the resume a parent admitted (ADR-014 s7).
 
         The same drain as `run`, over the parent's PINNED phases (#1454) and
         from the resume phase on: the aggregate and the to-do list both start
@@ -315,7 +315,7 @@ class WorkflowExecutionProcessor:
         handed forward from the parent's artifacts.
         """
         aggregate = WorkflowExecutionAggregate()
-        aggregate.start_fork(command)
+        aggregate.start_resume(command)
         return await self._run_started(
             aggregate,
             command.workflow_id,
@@ -323,7 +323,7 @@ class WorkflowExecutionProcessor:
             dict(command.inputs),
             repos,
             admitted,
-            origin=command.forked_from,
+            origin=command.resumed_from,
         )
 
     async def _run_started(
@@ -334,13 +334,13 @@ class WorkflowExecutionProcessor:
         inputs: dict[str, Any],
         repos: list[RepositoryRef] | None,
         admitted: AdmissionTicket | None,
-        origin: ForkOrigin | None = None,
+        origin: ResumeOrigin | None = None,
     ) -> WorkflowExecutionResult:
         """Record the start, then drain the to-do list until the run ends."""
         started_at = datetime.now(UTC)
         execution_id = aggregate.id or ""
         phase_map = {p.phase_id: p for p in phases}
-        # Before the stream opens: a fork whose inheritance cannot be read
+        # Before the stream opens: a resume whose inheritance cannot be read
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
         await self._journal.open(aggregate)

@@ -1,27 +1,15 @@
-"""Only the publication phase may hold a token that can open a PR (#1197).
+"""Every phase holds the same GitHub credential: the installation's grant, scoped by repo (#1477).
 
-WHAT WENT WRONG. On `exec-0bac0e1ed2b2` the `implement` phase called
-`gh pr create` at 02:37:40 - four minutes before it finished, fourteen before
-the verifier started - and `open_pr` never ran at all. The verifier then
-crashed without rendering a verdict, so PR #1193 was indistinguishable from
-one that had passed. `open_pr` refuses to publish when verification finds a
-blocking defect, and has done so correctly on real runs; that refusal is worth
-nothing if an earlier phase can publish before the gate is consulted.
+#1197 handed every phase except `open_pr` a token with `pull_requests: read`, to
+stop `implement` publishing early. GitHub cannot express "may comment but may
+not open a PR", so that token also refused every PR comment, through GraphQL
+`addComment` and the REST issues endpoint alike (measured 2026-10-01). Phases
+are ephemeral and open their own PRs, so the downgrade is gone.
 
-WHY THE ASSERTIONS ARE WHERE THEY ARE. The implement prompt already said "Do
-not open a PR - that is the last phase's job", in those words, so a test that
-checked the prompt would have passed on the run that broke. What decides the
-outcome is the credential. It used to reach the agent by two independent
-routes - the `gh` hosts.yml entry the setup script writes, and a
-`GITHUB_TOKEN` environment variable `gh` preferred - and both had to be
-scoped or the boundary was decorative. Since #725 hosts.yml is the only
-route (an env var cannot be renewed), and that is asserted here too: a
-second route coming back would reopen the question.
-
-So these drive the real workflow file through the real chain and assert on the
-bash the workspace executes and the env the agent is handed. `can_open_pr` is
-asserted on the phase objects too, but only as a locator: it is true at the
-top of six hops, any of which could drop it while both ends still look right.
+These drive the real `sdlc/implement` workflow file through the real chain and
+assert on the bash the workspace executes and the env the agent is handed:
+- every phase mints with no permission subset, scoped to its repositories (#725);
+- hosts.yml is still the ONLY route `gh` gets a credential by (#725).
 """
 
 from __future__ import annotations
@@ -75,20 +63,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[9]
 _IMPLEMENT_YAML = _REPO_ROOT / "workflows" / "sdlc" / "implement" / "workflow.yaml"
 _REPO_URL = "https://github.com/syntropic137/syntropic137"
 
-#: Distinguishable on sight, so an assertion cannot pass on the wrong one.
-_PUBLISHING_TOKEN = "ghs_may_open_pull_requests"
-_SCOPED_TOKEN = "ghs_pull_requests_read_only"
+_TOKEN = "ghs_installation_grant"
 
 
 class _FakeGitHubClient:
-    """One fake for both credential paths, so they cannot silently diverge.
+    """Records every mint, with the repositories it was scoped to."""
 
-    Records every mint. `mint_agent_token` is the single place a phase's
-    entitlement turns into a token, which is why both routes are made to go
-    through it rather than each deciding for itself.
-    """
-
-    mints: ClassVar[list[tuple[str, bool]]] = []
+    mints: ClassVar[list[tuple[str, tuple[str, ...] | None]]] = []
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         del args, kwargs
@@ -107,12 +88,12 @@ class _FakeGitHubClient:
         self,
         installation_id: str,
         *,
-        can_open_pr: bool,
         repositories: Collection[str] | None = None,
     ) -> _Minted:
-        del repositories
-        type(self).mints.append((installation_id, can_open_pr))
-        return _Minted(_PUBLISHING_TOKEN if can_open_pr else _SCOPED_TOKEN)
+        type(self).mints.append(
+            (installation_id, None if repositories is None else tuple(repositories))
+        )
+        return _Minted(_TOKEN)
 
     async def revoke_installation_token(self, token: str) -> None:
         del token
@@ -253,58 +234,27 @@ async def _provision(phase: ExecutablePhase) -> _Provisioned:
     return _Provisioned(secrets.build_setup_script(), dict(result.agent_env))
 
 
-class TestOnlyOpenPrCanPublish:
-    """The reproduction, at every hop that could have stopped it."""
+_ALL_PHASES = ["premise", "implement", "verify", "fix", "reverify", "open_pr"]
 
-    async def test_implements_gh_credential_cannot_create_a_pull_request(self) -> None:
-        """The bash the workspace actually runs, for the phase that published."""
-        provisioned = await _provision((await _executable_phases())["implement"])
 
-        assert f"oauth_token: {_SCOPED_TOKEN}" in provisioned.setup_script
-        assert _PUBLISHING_TOKEN not in provisioned.setup_script
+class TestEveryPhaseHoldsTheInstallationGrant:
+    @pytest.mark.parametrize("phase_id", _ALL_PHASES)
+    async def test_every_phase_gets_the_credential_gh_uses(self, phase_id: str) -> None:
+        """hosts.yml carries the token, so `gh pr comment` and `gh pr create` both work."""
+        provisioned = await _provision((await _executable_phases())[phase_id])
 
-    async def test_implements_github_token_env_cannot_either(self) -> None:
-        """`gh` prefers $GITHUB_TOKEN, so a token there would outrank hosts.yml (#725).
+        assert f"oauth_token: {_TOKEN}" in provisioned.setup_script
 
-        There is none: hosts.yml is the only credential `gh` is given, so its
-        scoping above is the whole of the boundary.
-        """
-        provisioned = await _provision((await _executable_phases())["implement"])
-
-        assert ENV_GITHUB_TOKEN not in provisioned.agent_env
-
-    async def test_open_pr_still_gets_the_token_its_whole_job_needs(self) -> None:
-        """The negative control.
-
-        Without it, everything above passes just as well against a change that
-        took publication away from every phase - which would break the gate
-        itself rather than enforce it.
-        """
-        provisioned = await _provision((await _executable_phases())["open_pr"])
-
-        assert f"oauth_token: {_PUBLISHING_TOKEN}" in provisioned.setup_script
-        assert _SCOPED_TOKEN not in provisioned.setup_script
-
-    @pytest.mark.parametrize("phase_id", ["premise", "implement", "verify"])
-    async def test_no_earlier_phase_asks_for_publication(self, phase_id: str) -> None:
-        """Every mint this phase performs states it may not publish.
-
-        Asserted on the mint calls rather than the returned token so that a
-        second, unscoped credential path added later fails here instead of
-        going unnoticed because the first one happened to be right.
-        """
+    @pytest.mark.parametrize("phase_id", _ALL_PHASES)
+    async def test_every_mint_is_scoped_to_the_phase_repository(self, phase_id: str) -> None:
+        """WHAT is the installation's grant; WHERE is still the provisioned repo (#725)."""
         await _provision((await _executable_phases())[phase_id])
 
         assert _FakeGitHubClient.mints, "no token was minted at all"
-        assert all(not can_open_pr for _, can_open_pr in _FakeGitHubClient.mints)
+        assert all(repos == ("syntropic137",) for _, repos in _FakeGitHubClient.mints)
 
-    async def test_the_entitlement_survives_the_event_round_trip(self) -> None:
-        """The locator assertion: six hops separate the YAML from the mint.
+    async def test_hosts_yml_is_still_the_only_route(self) -> None:
+        """`gh` prefers $GITHUB_TOKEN; an env var cannot be renewed, so there is none (#725)."""
+        provisioned = await _provision((await _executable_phases())["implement"])
 
-        `verify` runs on codex, where a tool allowlist would not have applied
-        at all - which is why the entitlement rides the credential and this
-        assertion covers it alongside the claude phases.
-        """
-        phases = await _executable_phases()
-
-        assert [p.phase_id for p in phases.values() if p.can_open_pr] == ["open_pr"]
+        assert ENV_GITHUB_TOKEN not in provisioned.agent_env

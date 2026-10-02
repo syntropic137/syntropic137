@@ -1,7 +1,7 @@
-"""A fork's resumed phase is handed its predecessors' FILES (#1462, #1465).
+"""A resume's resumed phase is handed its predecessors' FILES (#1462, #1465).
 
-`test_start_fork` pins which phases run and what their prompts were given. This
-pins what forking exists for: the resumed phase's workspace holds the files its
+`test_start_resume` pins which phases run and what their prompts were given. This
+pins what resuming exists for: the resumed phase's workspace holds the files its
 inherited predecessors produced, byte for byte, at their recorded paths.
 
 Nothing between the agent and the workspace is a double. The parent's agent
@@ -12,12 +12,12 @@ that asks the wrong execution finds nothing, exactly as it does in production.
 The only doubles are the agents, and the resumed one is there to read its own
 workspace before it does anything.
 
-Two failures these exist to catch, both of which left every other fork test
+Two failures these exist to catch, both of which left every other resume test
 green:
 
 * injection switched off at `phase_workspace.provision` (#1465) - the resumed
   phase provisions without its inheritance and nothing else notices;
-* a fork of a fork (#1462) - the grandchild's inheritance names artifacts the
+* a resume of a resume (#1462) - the grandchild's inheritance names artifacts the
   ORIGINAL parent stored, and asking the child for them finds none.
 """
 
@@ -50,28 +50,28 @@ from syn_domain.contexts.artifacts.slices.list_artifacts.projection import (
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
-    read_admitted_fork,
+    read_admitted_resume,
     read_start_pins,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
     ExecutionStatus,
-    ForkOrigin,
     InheritedPhase,
+    ResumeOrigin,
     SourceCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-    ForkExecutionCommand,
+    ResumeExecutionCommand,
     WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
-    ExecutionForkedEvent,
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
+from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     InheritanceUnavailableError,
     inherited_outputs,
 )
@@ -81,7 +81,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
-from syn_domain.contexts.orchestration.slices.start_fork import StartForkHandler
+from syn_domain.contexts.orchestration.slices.start_resume import StartResumeHandler
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_shared.agents import AgentRunner
@@ -336,18 +336,18 @@ async def _parent_failed_in_plan(executions: _Executions, artifacts: _ProjectedA
         workflow_id=WORKFLOW,
         workflow_name="Hand me my files",
         phases=[_phase(p, i + 1) for i, p in enumerate(PHASE_IDS)],
-        inputs={"task": "fork me"},
+        inputs={"task": "resume me"},
         execution_id=PARENT,
     )
     assert result.status == "failed", result
 
 
-async def _fork(executions: _Executions, parent_id: str, fork_id: str) -> None:
+async def _resume(executions: _Executions, parent_id: str, resume_id: str) -> None:
     parent = await executions.get_by_id(parent_id)
     assert parent is not None
-    parent.fork_execution(
-        ForkExecutionCommand(
-            execution_id=parent_id, fork_execution_id=fork_id, acknowledge_external_effects=True
+    parent.resume_execution(
+        ResumeExecutionCommand(
+            execution_id=parent_id, resume_execution_id=resume_id, acknowledge_external_effects=True
         )
     )
     await executions.save(parent)
@@ -359,13 +359,13 @@ async def _start(
     parent_id: str,
     agent: _ReadsItsInputs,
 ) -> str:
-    """Start the fork ``parent_id`` admitted, the way the dispatcher does.
+    """Start the resume ``parent_id`` admitted, the way the dispatcher does.
 
     `validate` first, because that is the synchronous check the dispatcher
     makes before it spawns the start - and the one place a refusal is still
     visible to the to-do list. Returns the child's final status.
     """
-    handler = StartForkHandler(_processor(executions, artifacts, agent), executions)
+    handler = StartResumeHandler(_processor(executions, artifacts, agent), executions)
     await handler.validate(parent_id)
     result = await handler.handle(parent_id)
     assert result is not None
@@ -377,7 +377,7 @@ class TestTheResumedPhaseReceivesTheInheritedFiles:
         """RED if `phase_workspace.provision` passes `artifacts=None` (#1465)."""
         executions, artifacts = _Executions(), _ProjectedArtifacts()
         await _parent_failed_in_plan(executions, artifacts)
-        await _fork(executions, PARENT, CHILD)
+        await _resume(executions, PARENT, CHILD)
 
         child = _ReadsItsInputs(FakeAgentExecutionHandler.success())
         assert await _start(executions, artifacts, PARENT, child) == "completed"
@@ -386,10 +386,10 @@ class TestTheResumedPhaseReceivesTheInheritedFiles:
         assert child.inputs["plan"] == EXPECTED_INPUT_TREE
 
 
-class TestAForkOfAForkReceivesTheOriginalParentsFiles:
+class TestAResumeOfAResumeReceivesTheOriginalParentsFiles:
     """The child inherited research from the parent and failed in plan again.
 
-    Forking the CHILD must hand the grandchild research's files - which were
+    Resuming the CHILD must hand the grandchild research's files - which were
     only ever stored under the PARENT's execution, because the child never ran
     research.
     """
@@ -398,11 +398,11 @@ class TestAForkOfAForkReceivesTheOriginalParentsFiles:
         self, executions: _Executions, artifacts: _ProjectedArtifacts
     ) -> None:
         await _parent_failed_in_plan(executions, artifacts)
-        await _fork(executions, PARENT, CHILD)
+        await _resume(executions, PARENT, CHILD)
         child = _ReadsItsInputs(FakeAgentExecutionHandler.failed(exit_code=1))
         assert await _start(executions, artifacts, PARENT, child) == "failed"
         assert executions.streams[CHILD].status is ExecutionStatus.FAILED
-        await _fork(executions, CHILD, GRANDCHILD)
+        await _resume(executions, CHILD, GRANDCHILD)
 
     async def test_the_grandchild_starts(self) -> None:
         """RED before #1462: refused as 'resolved to no files', for ever."""
@@ -430,17 +430,17 @@ class TestAForkOfAForkReceivesTheOriginalParentsFiles:
             executions, artifacts, CHILD, _ReadsItsInputs(FakeAgentExecutionHandler.success())
         )
 
-        origin = executions.streams[GRANDCHILD].start_pins.forked_from
+        origin = executions.streams[GRANDCHILD].start_pins.resumed_from
         assert origin is not None
         assert origin.parent_execution_id == CHILD
         (research,) = origin.inherited_phases
         assert origin.owner_of(research) == PARENT
 
 
-class TestAForkOfAChildThatRanAPhaseItself:
+class TestAResumeOfAChildThatRanAPhaseItself:
     """Mixed ownership: the child INHERITED research and RAN plan, then failed.
 
-    Forking that child hands the grandchild two phases held by two different
+    Resuming that child hands the grandchild two phases held by two different
     executions - research by the parent, plan by the child - so an inheritance
     read from any ONE execution is short a phase. Read back from the stored
     JSON (``wire``), since the owners are what a serializer could drop.
@@ -451,7 +451,7 @@ class TestAForkOfAChildThatRanAPhaseItself:
         executions: _Executions, artifacts: _ProjectedArtifacts
     ) -> None:
         await _parent_failed_in_plan(executions, artifacts)
-        await _fork(executions, PARENT, CHILD)
+        await _resume(executions, PARENT, CHILD)
         child = _ReadsItsInputs(
             FakeAgentExecutionHandler.scripted(
                 FakeAgentExecutionHandler.success(produces=list(PLAN_WRITES)),
@@ -460,7 +460,7 @@ class TestAForkOfAChildThatRanAPhaseItself:
         )
         assert await _start(executions, artifacts, PARENT, child) == "failed"
         assert list(child.inputs) == ["plan", "implement"]
-        await _fork(executions, CHILD, GRANDCHILD)
+        await _resume(executions, CHILD, GRANDCHILD)
 
     async def _grandchild(self) -> tuple[_Executions, _ReadsItsInputs, str]:
         executions, artifacts = _Executions(wire=True), _ProjectedArtifacts()
@@ -479,7 +479,7 @@ class TestAForkOfAChildThatRanAPhaseItself:
     async def test_the_stored_stream_names_each_owner(self) -> None:
         executions, _, _ = await self._grandchild()
 
-        origin = executions.replayed(GRANDCHILD).start_pins.forked_from
+        origin = executions.replayed(GRANDCHILD).start_pins.resumed_from
         assert origin is not None
         assert origin.parent_execution_id == CHILD
         assert origin.owners() == {"research": PARENT, "plan": CHILD}
@@ -488,7 +488,7 @@ class TestAForkOfAChildThatRanAPhaseItself:
         """The other event carrying owners, read back as the start reads it."""
         executions, _, _ = await self._grandchild()
 
-        admitted = executions.replayed(CHILD).fork_start_command().forked_from
+        admitted = executions.replayed(CHILD).resume_start_command().resumed_from
         assert admitted.owners() == {"research": PARENT, "plan": CHILD}
 
 
@@ -504,7 +504,7 @@ class TestThisReleaseReadsTheCarriedOwnersBack:
     @staticmethod
     async def _written() -> _Executions:
         executions, artifacts = _Executions(wire=True), _ProjectedArtifacts()
-        await TestAForkOfAChildThatRanAPhaseItself._child_ran_plan_and_failed_in_implement(
+        await TestAResumeOfAChildThatRanAPhaseItself._child_ran_plan_and_failed_in_implement(
             executions, artifacts
         )
         await _start(
@@ -515,38 +515,38 @@ class TestThisReleaseReadsTheCarriedOwnersBack:
     async def test_typed(self) -> None:
         executions = await self._written()
 
-        forked = ExecutionForkedEvent.model_validate_json(
-            executions.payload(CHILD, "ExecutionForked")
+        resumed = ExecutionResumedEvent.model_validate_json(
+            executions.payload(CHILD, "ExecutionResumed")
         )
         started = WorkflowExecutionStartedEvent.model_validate_json(
             executions.payload(GRANDCHILD, "WorkflowExecutionStarted")
         )
 
-        assert {p.phase_id: p.origin_execution_id for p in forked.inherited_phases} == {
+        assert {p.phase_id: p.origin_execution_id for p in resumed.inherited_phases} == {
             "research": PARENT,
             "plan": None,  # the child ran it: the execution the event names
         }
-        assert started.forked_from is not None
-        assert started.forked_from.owners() == {"research": PARENT, "plan": CHILD}
+        assert started.resumed_from is not None
+        assert started.resumed_from.owners() == {"research": PARENT, "plan": CHILD}
 
     async def test_generic(self) -> None:
         executions = await self._written()
 
-        forked = GenericDomainEvent(
-            event_type="ExecutionForked",
-            **json.loads(executions.payload(CHILD, "ExecutionForked")),
+        resumed = GenericDomainEvent(
+            event_type="ExecutionResumed",
+            **json.loads(executions.payload(CHILD, "ExecutionResumed")),
         )
         started = GenericDomainEvent(
             event_type="WorkflowExecutionStarted",
             **json.loads(executions.payload(GRANDCHILD, "WorkflowExecutionStarted")),
         )
 
-        admitted = read_admitted_fork(forked).inherited_phases
+        admitted = read_admitted_resume(resumed).inherited_phases
         assert {p.phase_id: p.origin_execution_id for p in admitted} == {
             "research": PARENT,
             "plan": None,
         }
-        origin = read_start_pins(started).forked_from
+        origin = read_start_pins(started).resumed_from
         assert origin is not None
         assert origin.owners() == {"research": PARENT, "plan": CHILD}
 
@@ -567,7 +567,7 @@ class _V031InheritedPhase(BaseModel):
     artifact_ids: list[str]
 
 
-class _V031ForkOrigin(BaseModel):
+class _V031ResumeOrigin(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     parent_execution_id: str
@@ -575,13 +575,13 @@ class _V031ForkOrigin(BaseModel):
     resume_phase_id: str
 
 
-class _V031ExecutionForked(DomainEvent):
+class _V031ExecutionResumed(DomainEvent):
     workflow_id: str
     execution_id: str
-    fork_execution_id: str
+    resume_execution_id: str
     inherited_phases: list[_V031InheritedPhase]
     resume_phase_id: str
-    forked_at: datetime
+    resumed_at: datetime
     cancellation_overridden: bool = False
     external_effects_acknowledged: bool = False
 
@@ -597,7 +597,7 @@ class _V031WorkflowExecutionStarted(DomainEvent):
     phase_definitions: list[object] | None = None
     pinned_phases: list[ExecutablePhase] | None = None
     source_commits: list[SourceCommit] | None = None
-    forked_from: _V031ForkOrigin | None = None
+    resumed_from: _V031ResumeOrigin | None = None
 
 
 def _v031_load(event_class: type[DomainEvent], event_type: str, payload: str) -> DomainEvent:
@@ -608,15 +608,15 @@ def _v031_load(event_class: type[DomainEvent], event_type: str, payload: str) ->
         return GenericDomainEvent(event_type=event_type, **json.loads(payload))
 
 
-def _v031_read_origin(payload: str) -> _V031ForkOrigin:
-    """v0.31's `read_fork_origin`, on v0.31's load of a start event."""
+def _v031_read_origin(payload: str) -> _V031ResumeOrigin:
+    """v0.31's `read_resume_origin`, on v0.31's load of a start event."""
     event = _v031_load(_V031WorkflowExecutionStarted, "WorkflowExecutionStarted", payload)
-    return _V031ForkOrigin.model_validate(evt(event, "forked_from"))
+    return _V031ResumeOrigin.model_validate(evt(event, "resumed_from"))
 
 
 def _v031_read_admitted(payload: str) -> list[_V031InheritedPhase]:
-    """v0.31's `read_inherited_phases`, on v0.31's load of an `ExecutionForked`."""
-    event = _v031_load(_V031ExecutionForked, "ExecutionForked", payload)
+    """v0.31's `read_inherited_phases`, on v0.31's load of an `ExecutionResumed`."""
+    event = _v031_load(_V031ExecutionResumed, "ExecutionResumed", payload)
     return TypeAdapter(list[_V031InheritedPhase]).validate_python(evt(event, "inherited_phases"))
 
 
@@ -624,40 +624,40 @@ class TestAReleaseBeforeTheOwnerReadsWhatThisOneWrites:
     """The codex review of #1466: a ROLLBACK must still replay these streams.
 
     The owner first went INSIDE `InheritedPhase`, and every model that nests it
-    forbids extra fields - so v0.31 could not read any fork this release wrote,
-    and a fork's origin that fails to read is deliberately fatal. It is carried
+    forbids extra fields - so v0.31 could not read any resume this release wrote,
+    and a resume's origin that fails to read is deliberately fatal. It is carried
     beside the phases instead. These read what the real flow wrote with the
     frozen v0.31 shapes above.
     """
 
-    async def test_a_first_fork_is_written_exactly_as_v031_wrote_it(self) -> None:
+    async def test_a_first_resume_is_written_exactly_as_v031_wrote_it(self) -> None:
         """Nothing new at all: v0.31 validates both events TYPED."""
         executions, artifacts = _Executions(), _ProjectedArtifacts()
         await _parent_failed_in_plan(executions, artifacts)
-        await _fork(executions, PARENT, CHILD)
+        await _resume(executions, PARENT, CHILD)
         await _start(
             executions, artifacts, PARENT, _ReadsItsInputs(FakeAgentExecutionHandler.success())
         )
 
-        forked = executions.payload(PARENT, "ExecutionForked")
+        resumed = executions.payload(PARENT, "ExecutionResumed")
         started = executions.payload(CHILD, "WorkflowExecutionStarted")
 
-        assert isinstance(_V031ExecutionForked.model_validate_json(forked), _V031ExecutionForked)
+        assert isinstance(_V031ExecutionResumed.model_validate_json(resumed), _V031ExecutionResumed)
         assert isinstance(
             _V031WorkflowExecutionStarted.model_validate_json(started),
             _V031WorkflowExecutionStarted,
         )
 
-    async def test_v031_replays_a_mixed_fork_and_loses_only_the_owner(self) -> None:
+    async def test_v031_replays_a_mixed_resume_and_loses_only_the_owner(self) -> None:
         executions, artifacts = _Executions(wire=True), _ProjectedArtifacts()
-        await TestAForkOfAChildThatRanAPhaseItself._child_ran_plan_and_failed_in_implement(
+        await TestAResumeOfAChildThatRanAPhaseItself._child_ran_plan_and_failed_in_implement(
             executions, artifacts
         )
         await _start(
             executions, artifacts, CHILD, _ReadsItsInputs(FakeAgentExecutionHandler.success())
         )
 
-        admitted = _v031_read_admitted(executions.payload(CHILD, "ExecutionForked"))
+        admitted = _v031_read_admitted(executions.payload(CHILD, "ExecutionResumed"))
         origin = _v031_read_origin(executions.payload(GRANDCHILD, "WorkflowExecutionStarted"))
 
         assert [p.phase_id for p in admitted] == ["research", "plan"]
@@ -670,26 +670,26 @@ class TestStreamsWrittenBeforeTheOwnerWasRecorded:
     """`origin_execution_id` is an event field, so old streams have none."""
 
     def test_an_inherited_phase_without_one_is_owned_by_the_parent_named(self) -> None:
-        origin = ForkOrigin(
+        origin = ResumeOrigin(
             parent_execution_id=PARENT,
             inherited_phases=[InheritedPhase(phase_id="research", artifact_ids=["art-1"])],
             resume_phase_id="plan",
         )
         assert origin.owners() == {"research": PARENT}
 
-    async def test_a_fork_its_child_admitted_before_the_fix_still_starts(self) -> None:
+    async def test_a_resume_its_child_admitted_before_the_fix_still_starts(self) -> None:
         """The admission #1462 stranded: recorded on the CHILD, naming no owner.
 
-        The child's own `forked_from` knows research came from the parent, so
+        The child's own `resumed_from` knows research came from the parent, so
         the start names it rather than asking the child, which holds nothing.
         """
         executions, artifacts = _Executions(), _ProjectedArtifacts()
-        await TestAForkOfAForkReceivesTheOriginalParentsFiles()._child_failed_in_plan_too(
+        await TestAResumeOfAResumeReceivesTheOriginalParentsFiles()._child_failed_in_plan_too(
             executions, artifacts
         )
         child = executions.streams[CHILD]
-        admitted = child._admitted_fork
-        child._admitted_fork = admitted.model_copy(
+        admitted = child._admitted_resume
+        child._admitted_resume = admitted.model_copy(
             update={
                 "inherited_phases": [
                     InheritedPhase(phase_id=p.phase_id, artifact_ids=p.artifact_ids)
@@ -711,7 +711,7 @@ class TestARefusalNamesTheExecutionItAsked:
         The refusal now says WHICH execution was asked, so a wrong owner is
         visible on its face.
         """
-        origin = ForkOrigin(
+        origin = ResumeOrigin(
             parent_execution_id=CHILD,
             inherited_phases=[
                 InheritedPhase(

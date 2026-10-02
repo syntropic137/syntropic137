@@ -99,7 +99,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.orchestration.slices.register_skill.projection import (
         SkillLockProjection,
     )
-    from syn_domain.contexts.orchestration.slices.start_fork import ForkStartProcessManager
+    from syn_domain.contexts.orchestration.slices.start_resume import ResumeStartProcessManager
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
     )
@@ -140,8 +140,8 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         ArtifactListProjection(dummy),
         # GitHub — dispatch and trigger index
         WorkflowDispatchProjection(execution_service=None, store=dummy),
-        # Orchestration — starts the child of an admitted fork (ADR-014 s7)
-        ForkStartProcessManager(fork_starter=None, store=dummy),
+        # Orchestration — starts the child of an admitted resume (ADR-014 s7)
+        ResumeStartProcessManager(resume_starter=None, store=dummy),
         TriggerQueryProjection(dummy),
         # Organization — adapted namespace projections
         OrganizationListAdapter(OrganizationProjection(dummy)),

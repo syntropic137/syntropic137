@@ -36,6 +36,7 @@ describe("workflow packages", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
   });
 
   function stdout(): string {

@@ -1,6 +1,6 @@
 """Two fail-open paths the codex review of #1459 found (ADR-014 s7).
 
-Both were found by review, not by CI, and both concern a fork that STARTS when
+Both were found by review, not by CI, and both concern a resume that STARTS when
 it should not have: one running without the outputs it inherited, one thrown
 away because a store blinked.
 """
@@ -18,11 +18,11 @@ from event_sourcing import DomainEvent, EventEnvelope, EventMetadata, Projection
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.artifacts import PhaseOutputFile
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
-    StartForkCommand,
+    StartResumeCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
-    ForkOrigin,
     InheritedPhase,
+    ResumeOrigin,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -31,20 +31,20 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.fork_handoff import (
+from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     InheritanceUnavailableError,
     inherited_outputs,
 )
-from syn_domain.contexts.orchestration.slices.start_fork.ForkStartProcessManager import (
-    ForkStartProcessManager,
+from syn_domain.contexts.orchestration.slices.start_resume.ResumeStartProcessManager import (
+    ResumeStartProcessManager,
 )
-from syn_domain.contexts.orchestration.slices.start_fork.StartForkHandler import (
-    StartForkHandler,
+from syn_domain.contexts.orchestration.slices.start_resume.StartResumeHandler import (
+    StartResumeHandler,
 )
-from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
+from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
     DISPATCH_GRACE,
     MAX_START_ATTEMPTS,
-    ForkStartRecord,
+    ResumeStartRecord,
 )
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel, JsonValue
 
-    from syn_domain.contexts.orchestration.slices.start_fork.ForkStartProcessManager import (
+    from syn_domain.contexts.orchestration.slices.start_resume.ResumeStartProcessManager import (
         StartFailureReporter,
     )
 
@@ -61,8 +61,8 @@ pytestmark = pytest.mark.unit
 PARENT = "exec-parent"
 
 
-def _origin(*, artifacts: list[str]) -> ForkOrigin:
-    return ForkOrigin(
+def _origin(*, artifacts: list[str]) -> ResumeOrigin:
+    return ResumeOrigin(
         parent_execution_id=PARENT,
         inherited_phases=[InheritedPhase(phase_id="research", artifact_ids=artifacts)],
         resume_phase_id="plan",
@@ -84,7 +84,7 @@ class _Query:
         return self.answer
 
 
-class TestAForkWillNotStartWithoutItsInheritance:
+class TestAResumeWillNotStartWithoutItsInheritance:
     """Finding 2. The resumed phase reads its predecessors' files.
 
     Returning a short cache meant the child ran the wrong work at full price and
@@ -117,21 +117,21 @@ class TestAForkWillNotStartWithoutItsInheritance:
         assert [f.content for f in cache.files["research"]] == ["the parent's work"]
 
 
-class TestAnInfrastructureBlipDoesNotDiscardAnAdmittedFork:
-    """Finding 3. `except Exception -> failed` threw away admitted forks.
+class TestAnInfrastructureBlipDoesNotDiscardAnAdmittedResume:
+    """Finding 3. `except Exception -> failed` threw away admitted resumes.
 
-    A store that is down says nothing about whether a fork MAY start. The
+    A store that is down says nothing about whether a resume MAY start. The
     distinction is carried by the exception TYPE, never by matching its prose.
     """
 
     @staticmethod
-    def _record(attempts: int = 0) -> ForkStartRecord:
-        return ForkStartRecord(
+    def _record(attempts: int = 0) -> ResumeStartRecord:
+        return ResumeStartRecord(
             parent_execution_id=PARENT, recorded_at=datetime.now(UTC), attempts=attempts
         )
 
     def test_retryable_is_owed_and_failed_is_not(self) -> None:
-        from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
+        from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
             OWED_STATUSES,
         )
 
@@ -163,14 +163,14 @@ class TestAnInfrastructureBlipDoesNotDiscardAnAdmittedFork:
 class _Starter:
     raising: Exception
 
-    async def start_fork(
+    async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
     ) -> None:
         del parent_execution_id, on_failure
         raise self.raising
 
 
-async def _offer(manager: ForkStartProcessManager, record: ForkStartRecord) -> bool:
+async def _offer(manager: ResumeStartProcessManager, record: ResumeStartRecord) -> bool:
     """`_start` as `process_pending` calls it: on a record the store holds.
 
     A pass only ever offers what it read, and `_start` dispatches only over
@@ -180,46 +180,46 @@ async def _offer(manager: ForkStartProcessManager, record: ForkStartRecord) -> b
     return await manager._start(record)
 
 
-async def _stored(store: InMemoryProjectionStore) -> ForkStartRecord:
-    row = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+async def _stored(store: InMemoryProjectionStore) -> ResumeStartRecord:
+    row = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
     assert row is not None, "nothing was recorded"
-    return ForkStartRecord.model_validate(row)
+    return ResumeStartRecord.model_validate(row)
 
 
-async def _run_start(record: ForkStartRecord, *, raising: Exception) -> ForkStartRecord:
+async def _run_start(record: ResumeStartRecord, *, raising: Exception) -> ResumeStartRecord:
     """One `_start` against a starter that raises, returning what was stored."""
     store = InMemoryProjectionStore()
-    manager = ForkStartProcessManager(fork_starter=_Starter(raising), store=store)
+    manager = ResumeStartProcessManager(resume_starter=_Starter(raising), store=store)
     await _offer(manager, record)
-    stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+    stored = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
     assert stored is not None, "the attempt recorded nothing"
-    return ForkStartRecord.model_validate(stored)
+    return ResumeStartRecord.model_validate(stored)
 
 
 class TestADispatchIsNotAStart:
     """Finding 1. The crash window between spawning a start and a child existing.
 
-    `ForkStarter.start_fork` hands the work to a background task and returns, so
+    `ResumeStarter.start_resume` hands the work to a background task and returns, so
     marking the record `started` at that point recorded a child that might never
     be written. A process death in between left the parent having admitted a
-    fork, no child stream, and nothing owed - the fork was simply lost.
+    resume, no child stream, and nothing owed - the resume was simply lost.
 
     Re-offering is safe, which is what makes "stay owed" the right answer rather
     than a bespoke recovery path: the child's id is fixed by the parent's
-    `ExecutionForked`, and `StartForkHandler.handle` returns early when that
+    `ExecutionResumed`, and `StartResumeHandler.handle` returns early when that
     child already exists.
     """
 
     @staticmethod
-    def _record(status: str = "pending") -> ForkStartRecord:
-        return ForkStartRecord(
+    def _record(status: str = "pending") -> ResumeStartRecord:
+        return ResumeStartRecord(
             parent_execution_id=PARENT,
             recorded_at=datetime.now(UTC),
             status=status,  # pyright: ignore[reportArgumentType]
         )
 
     def test_dispatched_is_still_owed(self) -> None:
-        from syn_domain.contexts.orchestration.slices.start_fork.value_objects import (
+        from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
             OWED_STATUSES,
         )
 
@@ -229,35 +229,35 @@ class TestADispatchIsNotAStart:
 
     async def test_a_successful_dispatch_records_dispatched_not_started(self) -> None:
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         assert await _offer(manager, self._record()) is True
 
-        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        stored = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
         assert stored is not None
-        assert ForkStartRecord.model_validate(stored).status == "dispatched"
+        assert ResumeStartRecord.model_validate(stored).status == "dispatched"
 
     async def test_the_childs_own_start_event_settles_it(self) -> None:
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await _offer(manager, self._record())
 
-        await manager._settle_if_a_fork_started(_ChildStarted(PARENT))
+        await manager._settle_if_a_resume_started(_ChildStarted(PARENT))
 
-        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        stored = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
         assert stored is not None
-        assert ForkStartRecord.model_validate(stored).status == "started"
+        assert ResumeStartRecord.model_validate(stored).status == "started"
 
     async def test_an_ordinary_execution_starting_settles_nothing(self) -> None:
-        """A run that is not a fork carries no `forked_from` and owes nothing."""
+        """A run that is not a resume carries no `resumed_from` and owes nothing."""
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await _offer(manager, self._record())
 
-        await manager._settle_if_a_fork_started(_ChildStarted(None))
+        await manager._settle_if_a_resume_started(_ChildStarted(None))
 
-        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        stored = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
         assert stored is not None
-        assert ForkStartRecord.model_validate(stored).status == "dispatched"
+        assert ResumeStartRecord.model_validate(stored).status == "dispatched"
 
 
 class TestALateReportFromTheTask:
@@ -269,50 +269,52 @@ class TestALateReportFromTheTask:
     """
 
     @staticmethod
-    def _record() -> ForkStartRecord:
-        return ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+    def _record() -> ResumeStartRecord:
+        return ResumeStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
 
     async def test_it_does_not_unsettle_a_child_that_started(self) -> None:
         store = InMemoryProjectionStore()
         starter = _Reporting()
-        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        manager = ResumeStartProcessManager(resume_starter=starter, store=store)
         await _offer(manager, self._record())
-        await manager._settle_if_a_fork_started(_ChildStarted(PARENT))
+        await manager._settle_if_a_resume_started(_ChildStarted(PARENT))
 
         assert starter.on_failure is not None
         await starter.on_failure(ValueError("the child's second phase was refused"))
 
-        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        stored = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
         assert stored is not None
-        assert ForkStartRecord.model_validate(stored).status == "started"
+        assert ResumeStartRecord.model_validate(stored).status == "started"
 
     async def test_it_does_not_speak_for_a_later_dispatch(self) -> None:
         store = InMemoryProjectionStore()
         first, second = _Reporting(), _Reporting()
-        await _offer(ForkStartProcessManager(fork_starter=first, store=store), self._record())
+        await _offer(ResumeStartProcessManager(resume_starter=first, store=store), self._record())
         # The later pass offers what IT reads: the first dispatch, past its grace.
-        await ForkStartProcessManager(fork_starter=second, store=store)._start(await _stored(store))
+        await ResumeStartProcessManager(resume_starter=second, store=store)._start(
+            await _stored(store)
+        )
 
         assert first.on_failure is not None
         await first.on_failure(ConnectionError("from the first task"))
 
-        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        stored = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
         assert stored is not None
-        saved = ForkStartRecord.model_validate(stored)
+        saved = ResumeStartRecord.model_validate(stored)
         assert (saved.status, saved.attempts) == ("dispatched", 0)
 
     async def test_a_current_report_is_recorded(self) -> None:
         store = InMemoryProjectionStore()
         starter = _Reporting()
-        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        manager = ResumeStartProcessManager(resume_starter=starter, store=store)
         await _offer(manager, self._record())
 
         assert starter.on_failure is not None
         await starter.on_failure(ConnectionError("store down"))
 
-        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        stored = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
         assert stored is not None
-        saved = ForkStartRecord.model_validate(stored)
+        saved = ResumeStartRecord.model_validate(stored)
         assert (saved.status, saved.attempts, saved.status_reason) == (
             "retryable",
             1,
@@ -342,7 +344,7 @@ class TestALateReportFromTheTask:
         """
         store = InMemoryProjectionStore()
         starter = _Reporting()
-        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        manager = ResumeStartProcessManager(resume_starter=starter, store=store)
         await _offer(manager, self._record().model_copy(update={"attempts": attempts}))
 
         read = store.get
@@ -380,7 +382,7 @@ class _Reporting:
 
     on_failure: StartFailureReporter | None = None
 
-    async def start_fork(
+    async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
     ) -> None:
         del parent_execution_id
@@ -390,7 +392,7 @@ class _Reporting:
 class _Spawning:
     """A starter that returns without producing a child, as the real one does."""
 
-    async def start_fork(
+    async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
     ) -> None:
         del parent_execution_id, on_failure
@@ -408,7 +410,7 @@ class _ChildStarted:
     parent: str | None
 
     @property
-    def forked_from(self) -> _Origin | None:
+    def resumed_from(self) -> _Origin | None:
         return None if self.parent is None else _Origin(self.parent)
 
 
@@ -417,15 +419,15 @@ class TestTheEventActuallyReachesTheSettle:
 
     Written because a mutation proved it was missing: replacing the
     `handle_event` dispatch with `pass` killed NO test, since every test above
-    calls `_settle_if_a_fork_started` directly. A method that works and is never
+    calls `_settle_if_a_resume_started` directly. A method that works and is never
     reached is the same as a method that does not work.
     """
 
     async def test_a_childs_start_envelope_settles_the_record(self) -> None:
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await _offer(
-            manager, ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+            manager, ResumeStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
         )
 
         result = await manager.handle_event(
@@ -434,15 +436,15 @@ class TestTheEventActuallyReachesTheSettle:
         )
 
         assert result is ProjectionResult.SUCCESS
-        stored = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+        stored = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
         assert stored is not None
-        assert ForkStartRecord.model_validate(stored).status == "started", (
+        assert ResumeStartRecord.model_validate(stored).status == "started", (
             "the child's start event did not reach the settle"
         )
 
     async def test_the_started_event_type_is_subscribed(self) -> None:
         """Handling it is moot if the coordinator never delivers it."""
-        subscribed = ForkStartProcessManager().get_subscribed_event_types()
+        subscribed = ResumeStartProcessManager().get_subscribed_event_types()
         assert subscribed is not None
         assert "WorkflowExecutionStarted" in subscribed
 
@@ -464,16 +466,16 @@ def _real_child_start(parent: str) -> WorkflowExecutionStartedEvent:
     """The child's ACTUAL start event, not a stand-in.
 
     The envelope validates its event as a `DomainEvent`, and using the real one
-    also pins that `forked_from` is where the parent's id genuinely lives.
+    also pins that `resumed_from` is where the parent's id genuinely lives.
     """
     return WorkflowExecutionStartedEvent(
         workflow_id="wf-1",
         execution_id="exec-child",
-        workflow_name="Forked",
+        workflow_name="Resumed",
         started_at=datetime.now(UTC),
         total_phases=3,
         inputs={},
-        forked_from=ForkOrigin(
+        resumed_from=ResumeOrigin(
             parent_execution_id=parent,
             inherited_phases=[InheritedPhase(phase_id="research", artifact_ids=["a1"])],
             resume_phase_id="plan",
@@ -499,8 +501,8 @@ class TestTheSequencesTheSecondReviewNamed:
     three sequences, each of which passed the previous tests."""
 
     @staticmethod
-    def _pending() -> ForkStartRecord:
-        return ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+    def _pending() -> ResumeStartRecord:
+        return ResumeStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
 
     async def test_a_settle_that_lands_first_is_not_overwritten(self) -> None:
         """The race: `_start` used to save `dispatched` AFTER spawning.
@@ -511,11 +513,11 @@ class TestTheSequencesTheSecondReviewNamed:
         event. Here the settle is forced to land first and must survive.
         """
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await manager._save(self._pending())
 
         # The child's event arrives before anything writes `dispatched`.
-        await manager._settle_if_a_fork_started(_real_child_start(PARENT))
+        await manager._settle_if_a_resume_started(_real_child_start(PARENT))
         # A late dispatch write must not walk it back.
         await manager._save(
             self._pending().model_copy(
@@ -527,7 +529,7 @@ class TestTheSequencesTheSecondReviewNamed:
 
     async def test_a_failed_record_is_not_walked_back_either(self) -> None:
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await manager._save(
             self._pending().model_copy(update={"status": "failed", "status_reason": "refused"})
         )
@@ -544,7 +546,7 @@ class TestTheSequencesTheSecondReviewNamed:
         emits no second start event to put the record back.
         """
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await manager._save(self._pending().model_copy(update={"status": "started"}))
 
         await manager._save(
@@ -556,12 +558,12 @@ class TestTheSequencesTheSecondReviewNamed:
     async def test_the_child_starting_still_settles_a_failed_record(self) -> None:
         """The converse: a start that happened anyway is the truth."""
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await manager._save(
             self._pending().model_copy(update={"status": "failed", "status_reason": "refused"})
         )
 
-        await manager._settle_if_a_fork_started(_real_child_start(PARENT))
+        await manager._settle_if_a_resume_started(_real_child_start(PARENT))
 
         assert await _status(store) == "started"
 
@@ -570,7 +572,7 @@ class TestTheSequencesTheSecondReviewNamed:
         semaphore slot before finding the child - so a slow start must not be
         dispatched on every pass."""
         store = InMemoryProjectionStore()
-        manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await manager._save(
             self._pending().model_copy(
                 update={"status": "dispatched", "dispatched_at": datetime.now(UTC)}
@@ -580,10 +582,10 @@ class TestTheSequencesTheSecondReviewNamed:
         assert await manager.process_pending() == 0, "an in-flight start was dispatched again"
 
     async def test_a_dispatch_stuck_past_the_grace_is_re_offered(self) -> None:
-        """The other half: the grace must not become a way to lose a fork."""
+        """The other half: the grace must not become a way to lose a resume."""
         store = InMemoryProjectionStore()
         starter = _Spawning()
-        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        manager = ResumeStartProcessManager(resume_starter=starter, store=store)
         await manager._save(
             self._pending().model_copy(
                 update={
@@ -599,29 +601,29 @@ class TestTheSequencesTheSecondReviewNamed:
         """Nothing is running for pending, paused or retryable, so none waits."""
         for status in ("pending", "paused", "retryable"):
             store = InMemoryProjectionStore()
-            manager = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+            manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
             await manager._save(self._pending().model_copy(update={"status": status}))
             assert await manager.process_pending() == 1, f"{status} was not offered"
 
 
 async def _status(store: InMemoryProjectionStore) -> str:
-    row = await store.get(ForkStartProcessManager.PROJECTION_NAME, PARENT)
+    row = await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT)
     assert row is not None
-    return ForkStartRecord.model_validate(row).status
+    return ResumeStartRecord.model_validate(row).status
 
 
 class TestValidateResolvesTheInheritanceBeforeDispatch:
     """Where the refusal has to happen, proved by driving `validate` itself.
 
     A mutation exposed this as untested: replacing the `inherited_outputs` call
-    in `StartForkHandler.validate` with `pass` killed nothing, because every
+    in `StartResumeHandler.validate` with `pass` killed nothing, because every
     inheritance test called `inherited_outputs` directly. The point of the change
     is WHERE it is called - synchronously, before the dispatcher spawns anything -
     so the test has to go through `validate`.
     """
 
     async def test_a_vanished_artifact_is_refused_synchronously(self) -> None:
-        handler = StartForkHandler(
+        handler = StartResumeHandler(
             _Processor(query=_Query(answer={})),  # pyright: ignore[reportArgumentType]
             _Executions(),  # pyright: ignore[reportArgumentType]
         )
@@ -635,7 +637,7 @@ class TestValidateResolvesTheInheritanceBeforeDispatch:
         query = _Query(
             answer={"research": [PhaseOutputFile(source_path=None, content="the parent's work")]}
         )
-        handler = StartForkHandler(
+        handler = StartResumeHandler(
             _Processor(query=query),  # pyright: ignore[reportArgumentType]
             _Executions(),  # pyright: ignore[reportArgumentType]
         )
@@ -655,7 +657,7 @@ class _Processor:
 
 
 class _Executions:
-    """A parent that admitted a fork of one inherited phase with one artifact."""
+    """A parent that admitted a resume of one inherited phase with one artifact."""
 
     async def get_by_id(self, aggregate_id: str) -> _Parent:
         del aggregate_id
@@ -663,7 +665,7 @@ class _Executions:
 
 
 def _phase(phase_id: str, order: int) -> ExecutablePhase:
-    """A pinned phase, so `refuse_fork_start` passes and the inheritance check
+    """A pinned phase, so `refuse_resume_start` passes and the inheritance check
     is what the test actually reaches."""
     return ExecutablePhase(
         phase_id=phase_id,
@@ -677,18 +679,18 @@ def _phase(phase_id: str, order: int) -> ExecutablePhase:
 
 
 class _Parent:
-    def fork_start_command(self) -> StartForkCommand:
-        return StartForkCommand(
+    def resume_start_command(self) -> StartResumeCommand:
+        return StartResumeCommand(
             execution_id="exec-child",
             workflow_id="wf-1",
-            workflow_name="Forked",
+            workflow_name="Resumed",
             inputs={},
             pinned_phases=[
                 _phase("research", 1),
                 _phase("plan", 2),
             ],
             source_commits=[],
-            forked_from=ForkOrigin(
+            resumed_from=ResumeOrigin(
                 parent_execution_id=PARENT,
                 inherited_phases=[InheritedPhase(phase_id="research", artifact_ids=["a1"])],
                 resume_phase_id="plan",
@@ -708,13 +710,13 @@ class TestTwoPassesOfferingTheSameRecord:
     """
 
     @staticmethod
-    def _pending() -> ForkStartRecord:
-        return ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+    def _pending() -> ResumeStartRecord:
+        return ResumeStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
 
     async def test_the_stale_dispatch_neither_lands_nor_starts(self) -> None:
         store = InMemoryProjectionStore()
         starter = _ReportingAll()
-        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        manager = ResumeStartProcessManager(resume_starter=starter, store=store)
         await manager._save(self._pending())
 
         # read, read - both passes see the same pending record
@@ -736,25 +738,27 @@ class TestTwoPassesOfferingTheSameRecord:
         assert len(starter.reports) == 1, "the stale pass started a second child"
 
     async def test_a_synchronous_failure_does_not_speak_for_a_later_dispatch(self) -> None:
-        """The other unfenced write: `start_fork` raising, after the record moved on.
+        """The other unfenced write: `start_resume` raising, after the record moved on.
 
-        While this attempt's `start_fork` was failing, a later pass dispatched
+        While this attempt's `start_resume` was failing, a later pass dispatched
         again. The failure belongs to the attempt that was replaced, and
         recording it would put back an attempt count and reason the later
         dispatch had already cleared.
         """
         store = InMemoryProjectionStore()
-        later = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        later = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
 
         class _RaisingAfterALaterDispatch:
-            async def start_fork(
+            async def start_resume(
                 self, parent_execution_id: str, *, on_failure: StartFailureReporter
             ) -> None:
                 del parent_execution_id, on_failure
                 assert await later._start(await _stored(store)) is True
                 raise ConnectionError("from the replaced attempt")
 
-        manager = ForkStartProcessManager(fork_starter=_RaisingAfterALaterDispatch(), store=store)
+        manager = ResumeStartProcessManager(
+            resume_starter=_RaisingAfterALaterDispatch(), store=store
+        )
         assert await _offer(manager, self._pending()) is False
         redispatched = await _stored(store)
 
@@ -768,7 +772,7 @@ class TestTwoPassesOfferingTheSameRecord:
         """The converse, so the fence is not simply "never dispatch twice"."""
         store = InMemoryProjectionStore()
         starter = _ReportingAll()
-        manager = ForkStartProcessManager(fork_starter=starter, store=store)
+        manager = ResumeStartProcessManager(resume_starter=starter, store=store)
         await manager._save(self._pending())
 
         [first_read] = await manager._owed_records()
@@ -788,7 +792,7 @@ class _ReportingAll:
 
     reports: list[StartFailureReporter] = field(default_factory=list)
 
-    async def start_fork(
+    async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
     ) -> None:
         del parent_execution_id
@@ -839,14 +843,14 @@ class TestTwoManagersSharingOneStore:
     """
 
     @staticmethod
-    def _pending() -> ForkStartRecord:
-        return ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
+    def _pending() -> ResumeStartRecord:
+        return ResumeStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))
 
     async def test_a_stale_dispatch_does_not_erase_the_attempt_the_other_counted(self) -> None:
         store = _HoldsOneRead()
         first_starter, second_starter = _ReportingAll(), _ReportingAll()
-        first = ForkStartProcessManager(fork_starter=first_starter, store=store)
-        second = ForkStartProcessManager(fork_starter=second_starter, store=store)
+        first = ResumeStartProcessManager(resume_starter=first_starter, store=store)
+        second = ResumeStartProcessManager(resume_starter=second_starter, store=store)
         await first._save(self._pending())
 
         # read, read
@@ -876,15 +880,15 @@ class TestTwoManagersSharingOneStore:
         """The child's own start is the other writer of this row."""
         store = _HoldsOneRead()
         second_starter = _ReportingAll()
-        first = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
-        second = ForkStartProcessManager(fork_starter=second_starter, store=store)
+        first = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
+        second = ResumeStartProcessManager(resume_starter=second_starter, store=store)
         await first._save(self._pending())
 
         [second_read] = await second._owed_records()
         store.hold_next_read()
         second_dispatch = asyncio.create_task(second._start(second_read))
         await store.read.wait()
-        await first._settle_if_a_fork_started(_ChildStarted(PARENT))
+        await first._settle_if_a_resume_started(_ChildStarted(PARENT))
         store.release.set()
 
         assert await second_dispatch is False
@@ -896,8 +900,8 @@ class TestTwoManagersSharingOneStore:
         task reports on, which is the one that can arrive late."""
         store = _HoldsOneRead()
         first_starter = _ReportingAll()
-        first = ForkStartProcessManager(fork_starter=first_starter, store=store)
-        second = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        first = ResumeStartProcessManager(resume_starter=first_starter, store=store)
+        second = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
         await first._save(self._pending())
         assert await first._start(await _stored(store)) is True
 
@@ -921,21 +925,21 @@ class TestTwoManagersSharingOneStore:
             None,
         )
 
-    async def test_a_replayed_fork_does_not_reset_the_attempt_the_other_counted(self) -> None:
+    async def test_a_replayed_resume_does_not_reset_the_attempt_the_other_counted(self) -> None:
         """The first writer of the row, not only the later ones.
 
-        Both managers handle the same `ExecutionForked`. The second looked for
+        Both managers handle the same `ExecutionResumed`. The second looked for
         a record before the first had written one; by the time it writes, the
         first has dispatched and counted a failed attempt. A fresh `pending`
         written then would put the attempt count back to nothing.
         """
         store = _HoldsOneRead()
         first_starter = _ReportingAll()
-        first = ForkStartProcessManager(fork_starter=first_starter, store=store)
-        second = ForkStartProcessManager(fork_starter=_Spawning(), store=store)
+        first = ResumeStartProcessManager(resume_starter=first_starter, store=store)
+        second = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
 
         store.hold_next_read()
-        replay = asyncio.create_task(second._record_fork(PARENT))
+        replay = asyncio.create_task(second._record_resume(PARENT))
         # Held after reading "no record" - or finished already, when recording
         # does not read first at all; either way, the first now moves on.
         await asyncio.wait(
@@ -943,7 +947,7 @@ class TestTwoManagersSharingOneStore:
             return_when=asyncio.FIRST_COMPLETED,
         )
         store.stop_holding()
-        await first._record_fork(PARENT)
+        await first._record_resume(PARENT)
         [owed] = await first._owed_records()
         assert await first._start(owed) is True
         await first_starter.reports[0](ConnectionError("first start failed"))
@@ -974,10 +978,10 @@ async def test_a_store_that_refuses_every_write_is_reported_not_retried_for_ever
     A bug in a store's comparison is the realistic way to get here - one was
     written and caught while this fence was built, as a test run that hung.
     """
-    manager = ForkStartProcessManager(fork_starter=_Spawning(), store=_RefusesEveryWrite())
+    manager = ResumeStartProcessManager(resume_starter=_Spawning(), store=_RefusesEveryWrite())
 
     written = await asyncio.wait_for(
-        manager._save(ForkStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))),
+        manager._save(ResumeStartRecord(parent_execution_id=PARENT, recorded_at=datetime.now(UTC))),
         timeout=5,
     )
 

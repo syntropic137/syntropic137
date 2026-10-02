@@ -153,8 +153,6 @@ syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
 
 ```bash
 syn control status <execution-id>
-syn control pause <execution-id> --reason "investigating"
-syn control resume <execution-id>
 syn control cancel <execution-id>
 ```
 

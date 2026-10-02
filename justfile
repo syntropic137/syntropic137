@@ -672,9 +672,12 @@ workspace-versions:
 # pinned image was missing, unsigned, or unable to start a harness - and the
 # failure would surface at workspace provision, far from the pin.
 #
-# Both harnesses are required, not just one: omni's contract is that it hosts
-# claude AND codex, and its manifest treats a single working harness as broken
-# rather than degraded.
+# Both harnesses are required, not just one: omni's contract (which buildfloor
+# inherits) is that it hosts claude AND codex, and its manifest treats a single
+# working harness as broken rather than degraded. The default is buildfloor, so
+# its build floor is probed too: rustup (no toolchain baked), bun, and the C
+# compiler. pnpm is not probed here because corepack may fetch it on first use;
+# the AW release gate runs the full compile smoke (cargo, pnpm install, bun).
 # Assert every pinned workspace image is a release-channel build (#941).
 # Separate from check-default-workspace-image, which probes only the DEFAULT
 # image - that blind spot is how the CLAUDE_CLI pin drifted unnoticed.
@@ -693,6 +696,12 @@ check-default-workspace-image:
     IMAGE="$(uv run python -c 'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')"
     echo "🔎 Default workspace image: $IMAGE"
     docker pull --quiet "$IMAGE" >/dev/null
+    # Run it the way a workspace does. Without the /home/agent tmpfs the probe
+    # sees root-owned dirs the image build leaves in that layer, which every
+    # real workspace masks, so the gate failed on an image that works.
+    read -r -a RUN_ARGS <<< "$(uv run python -c 'from agentic_isolation.config import SecurityConfig; print(" ".join(a for a in SecurityConfig.production().to_docker_run_args() if not a.startswith("--runtime")))')"
+    # Stands in for the per-workspace /workspace mount the backend always adds.
+    RUN_ARGS+=("--tmpfs=/workspace:rw,exec,nosuid,uid=1000,gid=1000")
     FAILED=0
     # Probe THROUGH the image's entrypoint, not around it. `--entrypoint <bin>`
     # would prove the binaries exist while bypassing /opt/agentic/entrypoint.sh,
@@ -700,8 +709,8 @@ check-default-workspace-image:
     # entrypoint regression reaching :latest is the documented incident that
     # motivated digest pinning in the first place. A check that cannot catch the
     # regression it exists for is worse than no check.
-    for probe in claude codex skills; do
-        if OUT=$(docker run --rm "$IMAGE" "$probe" --version 2>&1); then
+    for probe in claude codex skills rustup bun cc; do
+        if OUT=$(docker run --rm "${RUN_ARGS[@]}" "$IMAGE" "$probe" --version 2>&1); then
             # The entrypoint logs plugin discovery before handing off, so the
             # version is the LAST line, not the whole output.
             echo "  ✅ $probe: $(echo "$OUT" | tail -1)"

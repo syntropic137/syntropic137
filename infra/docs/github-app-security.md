@@ -155,20 +155,18 @@ Installation tokens are scoped to:
 - Only the repositories the workspace was provisioned for. The token request
   names them (#725); without that, a token reaches every repository the
   installation covers
-- Only permissions granted to the app (contents, issues, PRs, etc.)
-- Only `pull_requests: read`, unless the phase holding the token declares
-  `can_open_pr: true` in its workflow YAML (#1197)
+- Only permissions granted to the app (contents, issues, PRs, etc.). Every
+  phase holds the installation's own grant (#1477)
 
-That last one is ours, not GitHub's. Publication is a capability a phase either
-holds or does not, and a phase that does not hold it gets a token that cannot
-call `POST /repos/{owner}/{repo}/pulls` - so `gh pr create` fails for it no
-matter what its prompt says. (`gh` reads only `~/.config/gh/hosts.yml`;
-`$GITHUB_TOKEN` is not set in agent containers, #725.) It can still read
-and check out pull requests, and still push branches.
-
-The reduced set is *derived* from `GET /app/installations/{id}` rather than
-enumerated, because GitHub rejects a request for permissions the installation
-does not hold. See `syn_adapters.github.agent_token.mint_agent_token`.
+Phases do not get a narrower permission set. #1197 used to mint
+`pull_requests: read` for any phase without `can_open_pr: true`, to stop an
+early phase opening a PR. GitHub has no permission that allows commenting on a
+pull request without also allowing opening one: a `pull_requests: read` token
+is refused `gh pr comment` through GraphQL `addComment` and the REST issues
+endpoint alike (measured 2026-10-01). Phases are ephemeral and open their own
+PRs, so the downgrade was removed. `can_open_pr` is still accepted in workflow
+YAML but no longer changes the token. (`gh` reads only
+`~/.config/gh/hosts.yml`; `$GITHUB_TOKEN` is not set in agent containers, #725.)
 
 ```python
 # Example: a token for a workspace provisioned for these two repos

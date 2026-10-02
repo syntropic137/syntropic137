@@ -17,6 +17,9 @@ from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
 from syn_domain.contexts.orchestration._shared.resolved_skill import (
     ResolvedSkill,  # noqa: TC001 - needed at runtime for dataclass field default
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    classify_resumed_payload,
+)
 from syn_shared.agents import (
     DEFAULT_PHASE_SANDBOX,
     AgentProvider,
@@ -24,7 +27,7 @@ from syn_shared.agents import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +37,6 @@ class ExecutionStatus(StrEnum):
 
     NOT_STARTED = "not_started"
     RUNNING = "running"
-    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -280,6 +282,80 @@ class ReportedFailureReason(StrEnum):
                 [member.value for member in cls],
             )
         return matched
+
+
+class SideEffectStatus(StrEnum):
+    """What a phase says happened to the external writes it attempted.
+
+    THE CONFLATION THIS SPLITS. A phase that wrote its deliverable and was then
+    refused a PR comment had one word for both facts - `success` - so it wrote
+    `false` and the run failed with the finished review still on disk. 17 runs
+    of one canary were recorded as failures that way. The deliverable and the
+    write-back are separate outcomes and take separate responses: a missing
+    deliverable is a failed phase, a refused comment is a permission to grant.
+
+    A REPORT, NEVER A MEASUREMENT, and spelled `reported_side_effects` wherever
+    it is carried for the reason `ReportedFailureReason` is: the agent chose
+    the word and nothing corroborates it. It never decides whether a phase
+    completes - `success` does that, unchanged.
+    """
+
+    NONE = "none"
+    """The phase attempted no external write."""
+
+    SUCCEEDED = "succeeded"
+    """Every external write the phase attempted went through."""
+
+    DENIED = "denied"
+    """A write was refused: missing permission, protected branch, read-only token."""
+
+    FAILED = "failed"
+    """A write was attempted and broke: network, API error, tool crash."""
+
+    @classmethod
+    def from_stored(cls, value: object) -> SideEffectStatus | None:
+        """What a stored row or payload names, None when it names nothing known.
+
+        Total and never raises, for `ReportedFailureReason.from_stored`'s
+        reason: an unknown string must not take down a projection replay.
+        """
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value)
+        except ValueError:
+            return None
+
+    @classmethod
+    def from_reported(cls, value: object) -> SideEffectStatus | None:
+        """What a TASK_RESULT block named, None when it named nothing known.
+
+        Crosses the agent trust boundary, so it never raises; an unknown word
+        is logged so a key that quietly stops working stays visible.
+        """
+        if value is None:
+            return None
+        matched = cls.from_stored(value)
+        if matched is None:
+            logger.warning(
+                "TASK_RESULT block named side_effects this reader does not know (%r). "
+                "It must be exactly one of %s. Recorded as not reported.",
+                value,
+                [member.value for member in cls],
+            )
+        return matched
+
+    @classmethod
+    def most_severe(cls, reported: Iterable[SideEffectStatus | None]) -> SideEffectStatus | None:
+        """The worst status any phase reported, None when no phase reported one.
+
+        FAILED outranks DENIED outranks SUCCEEDED outranks NONE: an execution whose second
+        phase was refused is not one whose side effects succeeded because the
+        first phase's did.
+        """
+        rank = {cls.NONE: 0, cls.SUCCEEDED: 1, cls.DENIED: 2, cls.FAILED: 3}
+        present = [r for r in reported if r is not None]
+        return max(present, key=rank.__getitem__) if present else None
 
 
 class PhaseStatus(StrEnum):
@@ -598,11 +674,11 @@ class BranchObservation(BaseModel):
 
 
 class InheritedPhase(BaseModel):
-    """One completed phase a fork takes over from its parent (ADR-014 s7).
+    """One completed phase a resume takes over from its parent (ADR-014 s7).
 
-    The phase is not re-run and its artifacts are not copied: the fork names
+    The phase is not re-run and its artifacts are not copied: the resume names
     them. A Pydantic model rather than a dataclass because it travels on
-    ``ExecutionForkedEvent`` and must serialise as event data.
+    ``ExecutionResumedEvent`` and must serialise as event data.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -615,7 +691,7 @@ class InheritedPhase(BaseModel):
     origin_execution_id: str | None = Field(default=None, exclude=True)
     """The execution that RAN this phase, and so holds its artifacts (#1462).
 
-    Not always the parent: a fork of a fork inherits phases its parent itself
+    Not always the parent: a resume of a resume inherits phases its parent itself
     inherited, whose artifacts were only ever stored under the execution that
     ran them. Carried rather than looked up, so the stream says whose output a
     run is resting on.
@@ -628,23 +704,23 @@ class InheritedPhase(BaseModel):
     such a reader loses only the owner.
 
     None on every event written before #1462. Read it through
-    `ForkOrigin.owner_of`, never directly: absent means the parent the event
+    `ResumeOrigin.owner_of`, never directly: absent means the parent the event
     names, which is what it meant when those events were written."""
 
 
-#: The key under which a fork's events carry the execution that ran each
+#: The key under which a resume's events carry the execution that ran each
 #: inherited phase (#1462), beside the phases rather than inside them.
 #:
 #: Why beside: every model a phase is nested in forbids extra fields, and so
 #: did the releases before this key existed. A reader from one of those - a
-#: rollback - fails on an unknown field INSIDE a forked origin, and that
-#: failure is deliberately fatal (`start_pins.read_fork_origin`). An unknown
+#: rollback - fails on an unknown field INSIDE a resumed origin, and that
+#: failure is deliberately fatal (`start_pins.read_resume_origin`). An unknown
 #: key at the top of an event only fails its typed validation, and ADR-023 then
 #: replays it as a `GenericDomainEvent`, whose readers ignore what they do not
 #: name. So that reader still replays the stream, and loses only the owner.
 #:
 #: Written only for a phase that the execution the event already names did not
-#: run, which is exactly the case the key exists for. A first fork writes none,
+#: run, which is exactly the case the key exists for. A first resume writes none,
 #: so its events are identical to those written before the key existed.
 INHERITED_PHASE_OWNERS = "inherited_phase_owners"
 
@@ -698,9 +774,25 @@ def payload_with_owners_restored(data: object) -> object:
     return payload
 
 
+def resumed_payload_for_replay(data: object) -> object:
+    """A stored `ExecutionResumed` payload, checked and then normalised.
+
+    Two steps the EVENT must not hold itself, for the reason given on
+    `payload_with_owners_restored`: vsa requires an event file to be a
+    declaration, and both steps need isinstance guards.
+
+    First the meaning is settled. `ExecutionResumed` recorded un-pausing before
+    2026-09-29 and records resume-from-unfinished after it, so the payload shape
+    decides which it is and an ambiguous one is refused rather than guessed
+    (`classify_resumed_payload`). Only then are carried owners restored (#1462).
+    """
+    classify_resumed_payload(data)
+    return payload_with_owners_restored(data)
+
+
 def payload_with_origin_owners_restored(data: object) -> object:
     """As `payload_with_owners_restored`, for a payload whose phases sit inside
-    `forked_from` rather than at the top level (#1462).
+    `resumed_from` rather than at the top level (#1462).
 
     Same reason for living here: the event file declares a payload and holds no
     logic, because vsa forbids it importing `collections.abc` for the isinstance
@@ -710,9 +802,9 @@ def payload_with_origin_owners_restored(data: object) -> object:
         return data
     payload = dict(data)
     owners = payload.pop(INHERITED_PHASE_OWNERS)
-    origin = payload.get("forked_from")
+    origin = payload.get("resumed_from")
     if isinstance(origin, Mapping):
-        payload["forked_from"] = {
+        payload["resumed_from"] = {
             **origin,
             "inherited_phases": restore_owners(origin.get("inherited_phases"), owners),
         }
@@ -811,16 +903,13 @@ class ExecutablePhase:
     # contains, not how the agent is invoked.
     clone_repos: bool = True
 
-    # Whether this phase may create a pull request (#1197). Like clone_repos
-    # this decides what the WORKSPACE gets - specifically the permissions of
-    # the GitHub token in it - rather than how the agent is invoked, which is
-    # why it is not on `agent_config`. A prompt saying "do not open a PR" was
-    # already in place when `implement` opened one; this is the same statement
-    # made somewhere the agent cannot decline it.
+    # Whether this phase was meant to create a pull request (#1197). Inert
+    # since #1477: nothing reads it, and every phase token carries the
+    # installation's own permissions. Kept until the field is removed.
     can_open_pr: bool = False
 
     # Whether a change to the repositories is part of what this phase delivers
-    # (#1308). Unlike clone_repos and can_open_pr this decides nothing about
+    # (#1308). Unlike clone_repos this decides nothing about
     # the workspace - it decides how the unpushed-work gate READS the workspace
     # at the end. `git status` cannot tell an agent's edit from a rewrite
     # `cargo check` made while inspecting the toolchain, so the phase says
@@ -839,12 +928,12 @@ class ExecutablePhase:
     skills: tuple[ResolvedSkill, ...] = ()
 
 
-# --- what a fork's start event carries ------------------------------------
+# --- what a resume's start event carries ------------------------------------
 #
 # These two live HERE rather than beside the rest of `start_pins` because
 # `WorkflowExecutionStarted` carries them, and a domain EVENT may import value
 # objects from this module but not from an aggregate's internals - vsa enforces
-# that, and `ExecutionForkedEvent` already depends on this module the same way.
+# that, and `ExecutionResumedEvent` already depends on this module the same way.
 
 
 class SourceCommit(BaseModel):
@@ -862,12 +951,12 @@ class SourceCommit(BaseModel):
     sha: str | None = None
 
 
-class ForkOrigin(BaseModel):
-    """Where a forked execution came from (ADR-014 s7).
+class ResumeOrigin(BaseModel):
+    """Where a resumed execution came from (ADR-014 s7).
 
-    Copied from the parent's `ExecutionForked`, which is the decision; this is
+    Copied from the parent's `ExecutionResumed`, which is the decision; this is
     the child recording which decision it is carrying out, so the child's own
-    stream answers "what was this a fork of" without reading the parent's.
+    stream answers "what was this a resume of" without reading the parent's.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

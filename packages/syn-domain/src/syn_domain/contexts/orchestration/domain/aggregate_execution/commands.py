@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
-        ForkOrigin,
+        ResumeOrigin,
         SourceCommit,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         FailureClassification,
         PhaseDefinition,
         ReportedFailureReason,
+        SideEffectStatus,
     )
 
 
@@ -53,12 +54,12 @@ class StartExecutionCommand:
         self.source_commits = source_commits
 
 
-class StartForkCommand:
-    """Command to start the execution a parent's fork admitted (ADR-014 s7).
+class StartResumeCommand:
+    """Command to start the execution a parent's resume admitted (ADR-014 s7).
 
-    Addressed to the CHILD: `execution_id` is the fork's own id, the one the
-    parent's `ExecutionForked` named. Built from the parent's stream by
-    `WorkflowExecutionAggregate.fork_start_command`, never from the workflow
+    Addressed to the CHILD: `execution_id` is the resume's own id, the one the
+    parent's `ExecutionResumed` named. Built from the parent's stream by
+    `WorkflowExecutionAggregate.resume_start_command`, never from the workflow
     template, so every field here is what the parent ran with (#1454, #1457).
     """
 
@@ -70,7 +71,7 @@ class StartForkCommand:
         inputs: dict[str, str],
         pinned_phases: list[ExecutablePhase],
         source_commits: list[SourceCommit],
-        forked_from: ForkOrigin,
+        resumed_from: ResumeOrigin,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -78,7 +79,7 @@ class StartForkCommand:
         self.inputs = inputs
         self.pinned_phases = pinned_phases
         self.source_commits = source_commits
-        self.forked_from = forked_from
+        self.resumed_from = resumed_from
 
 
 class CompleteExecutionCommand:
@@ -265,32 +266,6 @@ class CompletePhaseCommand:
         self.duration_seconds = duration_seconds
 
 
-class PauseExecutionCommand:
-    """Command to pause a workflow execution."""
-
-    def __init__(
-        self,
-        execution_id: str,
-        phase_id: str,
-        reason: str | None = None,
-    ) -> None:
-        self.aggregate_id = execution_id
-        self.phase_id = phase_id
-        self.reason = reason
-
-
-class ResumeExecutionCommand:
-    """Command to resume a paused workflow execution."""
-
-    def __init__(
-        self,
-        execution_id: str,
-        phase_id: str,
-    ) -> None:
-        self.aggregate_id = execution_id
-        self.phase_id = phase_id
-
-
 class CancelExecutionCommand:
     """Command to cancel a workflow execution."""
 
@@ -363,6 +338,7 @@ class AgentExecutionCompletedCommand:
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
         last_agent_message: str | None = None,
+        reported_side_effects: SideEffectStatus | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -373,6 +349,7 @@ class AgentExecutionCompletedCommand:
         self.cache_creation_tokens = cache_creation_tokens
         self.cache_read_tokens = cache_read_tokens
         self.last_agent_message = last_agent_message
+        self.reported_side_effects = reported_side_effects
 
 
 class ArtifactsCollectedCommand:
@@ -399,28 +376,28 @@ class ArtifactsCollectedCommand:
         self.deliverable_recovered = deliverable_recovered
 
 
-class ForkExecutionCommand:
-    """Command to fork a terminal execution into a new one (ADR-014 s7).
+class ResumeExecutionCommand:
+    """Command to resume a terminal execution into a new one (ADR-014 s7).
 
-    Addressed to the PARENT: `execution_id` is the execution being forked and
-    `fork_execution_id` the id the new run will have. The parent decides.
+    Addressed to the PARENT: `execution_id` is the execution being resumed and
+    `resume_execution_id` the id the new run will have. The parent decides.
 
     Both flags are separate, explicit operator decisions and default to the
-    refusal. `override_cancellation` is the only way to fork a CANCELLED
-    parent: a cancel is an instruction to stop, and a fork must not defeat it
+    refusal. `override_cancellation` is the only way to resume a CANCELLED
+    parent: a cancel is an instruction to stop, and a resume must not defeat it
     without a fresh decision. `acknowledge_external_effects` accepts that the
-    phase the fork re-runs may have pushed or published something in the
+    phase the resume re-runs may have pushed or published something in the
     parent that re-running repeats. Neither implies the other.
     """
 
     def __init__(
         self,
         execution_id: str,
-        fork_execution_id: str,
+        resume_execution_id: str,
         override_cancellation: bool = False,
         acknowledge_external_effects: bool = False,
     ) -> None:
         self.aggregate_id = execution_id
-        self.fork_execution_id = fork_execution_id
+        self.resume_execution_id = resume_execution_id
         self.override_cancellation = override_cancellation
         self.acknowledge_external_effects = acknowledge_external_effects

@@ -6,6 +6,16 @@ to WorkspaceImageProvider and a matching entry to PINNED_DIGESTS.
 
 See ADR-056: Workspace Tooling Architecture
 
+Publisher
+---------
+Workspace images are built and signed by AgentParadise/agentic-workspace
+(vendored at ``lib/agentic-workspace``). Its release workflow
+(``.github/workflows/release-images.yml``) publishes ONLY on a push to the
+protected ``release`` branch, signs each index digest keyless with cosign, and
+never pushes ``latest``. Tags are ``<commit sha>``, ``<manifest version>`` and
+``v<repo version>``. The former publisher, AgentParadise/agentic-primitives,
+remains available as a rollback target only (see "Rollback" below).
+
 Why digests and not tags
 ------------------------
 Tags are mutable in OCI by design, so a tag-pinned reference means an upstream
@@ -26,35 +36,65 @@ agentic-session-exporter v0.1.1, which wrote an out-of-spec
 ``origin.environment``, while main had already built v0.2.1. A digest taken
 from ``:latest`` that day would have pinned the defect.
 
-Take digests from the upstream build run, never from a mutable tag.
+Take digests from the upstream release run, never from a mutable tag.
 
 A digest is the only immutable reference. The registry cannot repoint it,
 because the digest *is* the content hash of the image index.
 
-**Pinning ``:latest`` is not supported.** No release process on the publishing
-side makes a tag a guarantee; only a digest does.
+**Pinning a tag is not supported.** No release process on the publishing side
+makes a tag a guarantee; only a digest does.
 
 Bumping a pinned digest
 -----------------------
 A digest bump is a dependency update and is reviewed like one: a PR that
-changes only the constants below, with the new digest in the diff so a
-reviewer can see exactly what is changing and check it against the upstream
-build.
+changes the constants below and the ``lib/agentic-workspace`` gitlink together,
+with the new digests in the diff so a reviewer can check them against the
+upstream release run.
 
-To bump::
+1. Merge the agentic-workspace change to its ``main``, then promote it to
+   ``release`` by PR. The push to ``release`` runs ``release-images.yml``.
+2. From that run's summary take each image's top-level index digest (the
+   multi-arch index, not a per-platform manifest). Cross-check with::
 
-    docker buildx imagetools inspect \\
-        ghcr.io/agentparadise/agentic-workspace-claude:<commit sha>
+       docker buildx imagetools inspect \\
+           ghcr.io/agentparadise/agentic-workspace-toolchain:<release commit sha>
 
-Take the top-level ``Digest:`` value (the multi-arch image index digest, not a
-per-platform manifest digest), record which agentic-workspace commit produced
-it, and open a PR. There is no ``:latest`` to inspect: the publisher never
-moves one, which is deliberate. Signature verification
-(``syn_adapters.workspace_backends.image_verification``) runs against the
-digest at provision time, so a bump to an unsigned or unexpectedly-built image
-fails closed rather than running.
+   Take the top-level ``Digest:`` value (the multi-arch image index digest,
+   not a per-platform manifest digest).
+3. Move ``lib/agentic-workspace`` to that same release commit. Every pin must
+   come from the one revision the submodule ships
+   (``scripts/check_pinned_image_channels.py`` enforces it).
+4. Record the commit, run id and the CLI / exporter versions read OUT OF the
+   digest in the comment beside the pin.
 
-When the omni-agent pin moves, append the outgoing ``DEFAULT_WORKSPACE_IMAGE``
+Signature verification (``syn_adapters.workspace_backends.image_verification``)
+runs against the digest at provision time, so a bump to an unsigned or
+unexpectedly-built image fails closed rather than running.
+
+Rollback to agentic-primitives
+------------------------------
+The last agentic-primitives pins are kept below as ``AP_ROLLBACK_IMAGES``
+(release-branch build of AP 6b9f81e, omni-agent 1.7.0). Rolling back is a
+configuration change, no code revert and no image rebuild:
+
+1. Drain in-flight executions (no phase may straddle the swap).
+2. Set, in the deployment's ``.env``::
+
+       SYN_WORKSPACE_DOCKER_IMAGE=<AP_ROLLBACK_IMAGES[OMNI_AGENT]>
+       SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP=<AGENTIC_PRIMITIVES_IDENTITY_REGEXP>
+
+   (both values printed by
+   ``uv run python -c "from syn_shared.settings.workspace_images import *;
+   print(AP_ROLLBACK_IMAGES)"`` and
+   ``syn_shared.settings.image_verification.AGENTIC_PRIMITIVES_IDENTITY_REGEXP``).
+3. Restart the API; ``syn doctor`` reports the image actually configured.
+
+The AP omni image lacks the toolchain (C toolchain, rustup, pnpm, bun), so
+workflows that compile native code regress to their pre-switchover behaviour
+under rollback. Everything else - entrypoint contract, capability runtime,
+session-store, exporter 0.5.0 - is the same contract.
+
+When the default provider's pin moves, append the outgoing ``DEFAULT_WORKSPACE_IMAGE``
 to ``PREVIOUS_DEFAULT_WORKSPACE_IMAGES`` and regenerate ``.env.example``, so
 ``just selfhost-update`` moves operators who copied the old default (#1398).
 A test fails if ``.env.example`` ever shipped a value that is neither.
@@ -64,7 +104,7 @@ Overriding without a code change
 Operators override the full image reference through the existing workspace
 settings, no code change required:
 
-- ``SYN_WORKSPACE_DOCKER_IMAGE`` overrides the claude-cli image
+- ``SYN_WORKSPACE_DOCKER_IMAGE`` overrides the default workspace image
 
 It accepts any reference form. A registry reference is required to be
 digest-pinned; a registry tag is rejected, because verifying a tag does not
@@ -100,21 +140,20 @@ IMAGE_PREFIX: str = "agentic-workspace"
 class WorkspaceImageProvider(StrEnum):
     """Available workspace image providers.
 
-    Each provider corresponds to a Docker image built by agentic-workspace.
+    Each provider corresponds to a Docker image built and signed by
+    agentic-workspace's release workflow.
     """
 
     CLAUDE_CLI = "claude-cli"
+    """Claude-only image. Published as ``agentic-workspace-claude`` - see
+    IMAGE_NAME_OVERRIDES."""
+
     OMNI_AGENT = "omni-agent"
     """Multi-harness image: claude AND codex on the shared ADR-040 runtime.
 
-    The claude-cli image carries a codex binary too, so codex phases run there
-    today. Omni is the image where hosting both harnesses is the contract
-    rather than a side effect - its manifest treats one working harness as a
-    broken image, not a degraded one.
-
-    Published by agentic-workspace as ``agentic-workspace-omni-agent``, which
-    is the derived name, so it needs no override. It DID need one while
-    agentic-primitives published it as ``omni-agent-workspace``.
+    Omni is the image where hosting both harnesses is the contract rather than
+    a side effect - its manifest treats one working harness as a broken image,
+    not a degraded one.
     """
 
     TOOLCHAIN = "toolchain"
@@ -170,9 +209,43 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # Pinned digests
 #
 # These are multi-arch image *index* digests, so the same pin resolves on both
-# linux/amd64 and linux/arm64. Each entry below records its OWN verification
-# date; there is no single date for the whole table, because pins move
-# independently.
+# linux/amd64 and linux/arm64. Each entry records its OWN verification date;
+# there is no single date for the whole table, because pins move independently.
+# ---------------------------------------------------------------------------
+
+#: Placeholder for a digest that does not exist yet. Syntactically a digest so
+#: every reference builds, but no registry holds it: a pull or a cosign verify
+#: of it fails closed, and ``test_no_pin_is_the_pending_placeholder`` keeps the
+#: suite red until it is gone. It must never reach a release.
+AW_RELEASE_DIGEST_PENDING: Final[str] = "sha256:" + "0" * 64
+
+
+# ---------------------------------------------------------------------------
+# Rollback: the last agentic-primitives pins
+#
+# Full references, because AP publishes under different repository names
+# (omni as `omni-agent-workspace`) and signs with a different identity
+# (image_verification.AGENTIC_PRIMITIVES_IDENTITY_REGEXP). Procedure: module
+# docstring, "Rollback to agentic-primitives". Remove once AP stops publishing
+# workspace images and the rollback window has closed.
+#
+# ---------------------------------------------------------------------------
+
+AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
+    {
+        WorkspaceImageProvider.CLAUDE_CLI: (
+            "ghcr.io/agentparadise/agentic-workspace-claude-cli@sha256:"
+            "ed7c7f1ef3b2112c16c53ca71036bcdb18eb5a406f94ecc5daf5ac455bf11b19"
+        ),
+        WorkspaceImageProvider.OMNI_AGENT: (
+            "ghcr.io/agentparadise/omni-agent-workspace@sha256:"
+            "a6ba94d71507384d33df7abe2050f7255bdae8b81dc5a37dbe92b7972f154773"
+        ),
+    }
+)
+
+# History of the agentic-primitives pins, kept for the record and because the
+# first entry is what AP_ROLLBACK_IMAGES holds.
 #
 #                  Previous pins, for the record:
 #
@@ -202,7 +275,7 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # 36040151207 of agentic-primitives 6b9f81e (release PR #425), and both carry
 # agentic.image.channel=release and revision 6b9f81e on linux/amd64 AND
 # linux/arm64. cosign verify passes for each against
-# AGENTIC_PRIMITIVES_IDENTITY_REGEXP.
+# AGENTIC_PRIMITIVES_IDENTITY_REGEXP (now the rollback identity).
 #
 # omni-agent       omni-agent manifest 1.7.0. Verified by running OUT OF THIS
 #                  DIGEST on both architectures: "2.1.281 (Claude Code)",
@@ -300,7 +373,6 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 #                  image than this pin. Take digests from the build run, not
 #                  from a mutable tag.
 #
-# Bump procedure: see the module docstring.
 # ---------------------------------------------------------------------------
 
 # PUBLISHER CUTOVER, 2026-09-25. The pins below are the first images published
@@ -405,14 +477,13 @@ PINNED_EXPORTER_VERSIONS: Final[Mapping[WorkspaceImageProvider, str]] = MappingP
     }
 )
 
-
 # ---------------------------------------------------------------------------
 # Image reference builder
 # ---------------------------------------------------------------------------
 
 
 def workspace_image_ref(
-    provider: WorkspaceImageProvider = WorkspaceImageProvider.CLAUDE_CLI,
+    provider: WorkspaceImageProvider = WorkspaceImageProvider.TOOLCHAIN,
     tag: str | None = None,
     *,
     digest: str | None = None,
@@ -445,8 +516,8 @@ def workspace_image_ref(
         msg = "workspace_image_ref accepts tag or digest, not both"
         raise ValueError(msg)
 
-    # workspace_image_name, not f"{IMAGE_PREFIX}-{provider.value}": omni-agent
-    # publishes as `omni-agent-workspace`, so the prefix pattern is wrong for it.
+    # workspace_image_name, not f"{IMAGE_PREFIX}-{provider.value}": claude-cli
+    # publishes as `agentic-workspace-claude`, so the prefix pattern is wrong for it.
     repository = f"{registry}/{owner}/{workspace_image_name(provider)}"
 
     if tag is not None:
@@ -459,15 +530,19 @@ def workspace_image_ref(
 # Convenience constants (the most common references)
 # ---------------------------------------------------------------------------
 
-DEFAULT_WORKSPACE_IMAGE: str = workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
-"""Default workspace image - omni-agent, digest-pinned, from GHCR.
 
-Omni hosts BOTH harnesses (claude and codex) on the shared ADR-040 capability
-runtime. claude-cli happens to carry a codex binary, so codex phases ran there
-before this default moved, but that was a side effect rather than a contract:
-omni's manifest treats an image with one working harness as broken, not
-degraded. Making omni the default is what turns a codex phase into a supported
-configuration.
+DEFAULT_WORKSPACE_PROVIDER: Final[WorkspaceImageProvider] = WorkspaceImageProvider.TOOLCHAIN
+"""The provider behind DEFAULT_WORKSPACE_IMAGE, for code that reports on it."""
+
+DEFAULT_WORKSPACE_IMAGE: str = workspace_image_ref(DEFAULT_WORKSPACE_PROVIDER)
+"""Default workspace image - toolchain, digest-pinned, from GHCR.
+
+toolchain is omni-agent (claude AND codex on the shared ADR-040 capability
+runtime) plus a native build floor, built FROM the exact omni digest of the
+same release run. As a strict superset it runs every phase omni runs, and
+additionally repositories whose own gates compile native code (cargo, pnpm,
+bun). Per-phase image selection is deliberately not offered: one default image
+keeps what a workflow ran reproducible from the pin alone.
 
 Operators pin a different image with ``SYN_WORKSPACE_DOCKER_IMAGE``. It must be
 a digest reference; a registry tag is rejected.
@@ -501,4 +576,7 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/omni-agent-workspace@sha256:a6ba94d71507384d33df7abe2050f7255bdae8b81dc5a37dbe92b7972f154773",  # bdd0ba5d
     "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:123ab8497e224871b83fc3148774b7be1b59753638f6516673acf5400f049053",  # 9a720d66
     "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:89189b6c9cf67ac6a9b137fa7427990ca5535077e53e729a0ff4635053e6970d",  # ab974fd8
+    # #1398 branch history only (AW v0.2.0 omni, before #1418 made toolchain the default).
+    "ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:12e7dc55d7aad558798552f2f373ddc0aebd3205e5b30543ff8751a2a12a0189",  # #1398
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8",  # f1647f93
 )

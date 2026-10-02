@@ -54,7 +54,7 @@ syntropic137/
 ├── justfile                    # Task runner
 │
 ├── lib/                        # Git submodules (external deps)
-│   ├── agentic-primitives/
+│   ├── agentic-workspace/
 │   └── event-sourcing-platform/
 │
 ├── apps/                       # Deployable applications

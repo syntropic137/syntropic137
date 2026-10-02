@@ -9,6 +9,7 @@ describe("version command", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
   });
 
   function stdout(): string {

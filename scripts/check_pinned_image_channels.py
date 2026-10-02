@@ -8,11 +8,15 @@ digest whose own OCI labels said:
 
 So the image every agent ran was an unreviewed `main` build, bypassing the
 documented chain: merge -> image build -> protected `release` -> a
-`PINNED_DIGESTS` bump. It went unnoticed for weeks.
+`PINNED_DIGESTS` bump (agentic-primitives at the time;
+agentic-workspace now). It went unnoticed for weeks.
 
-WHY COSIGN DID NOT CATCH IT. Signature verification accepts identities from
-both `main` and `release`. It proves an image was built by our CI, not that it
-was approved for release. Provenance is not approval.
+WHY COSIGN DID NOT CATCH IT. The agentic-primitives signing identity accepted
+both `main` and `release`, so it proved an image was built by CI, not that it
+was approved for release. Provenance is not approval. The agentic-workspace
+identity admits only its protected `release` branch, which closes that hole at
+provision time; this label check stays as an independent, offline-testable
+control that also catches the staleness a signature cannot (invariants 2, 3).
 
 WHY THE EXISTING GATE DID NOT CATCH IT. `check-default-workspace-image` probes
 only `DEFAULT_WORKSPACE_IMAGE`. `CLAUDE_CLI` was pinned to a stale digest from
@@ -292,6 +296,7 @@ def evaluate(results: list[ImageChannel], gitlink: str) -> tuple[int, list[str]]
     # THIRD: that revision is the submodule we vendor.
     #
     # THIS IS OUR POLICY, NOT AN UPSTREAM CONTRACT. A codex review checked the
+    # upstream workflow: agentic-workspace documents `agentic.image.channel`,
     # upstream workflow: the publishing repo documents `agentic.image.channel`,
     # but nothing upstream promises that `org.opencontainers.image.revision`
     # equals a consumer's gitlink - the label comes from docker/metadata-action's

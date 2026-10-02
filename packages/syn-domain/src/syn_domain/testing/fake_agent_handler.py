@@ -218,6 +218,10 @@ class FakeAgentExecutionHandler:
             # that set only the stream result would leave every processor
             # test salvaging from a value production no longer uses.
             last_agent_message=self._says,
+            # Read off the same verdict the stream result carries, exactly as
+            # the real handler does, so processor tests see what production
+            # records about the phase's write-backs.
+            reported_side_effects=stream_result.verdict.reported_side_effects,
         )
         return AgentExecutionResult(
             stream_result=stream_result,

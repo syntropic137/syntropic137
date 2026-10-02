@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Execution statuses that indicate an active (in-progress) execution
-_ACTIVE_STATUSES = frozenset({"running", "paused", "not_started"})
+_ACTIVE_STATUSES = frozenset({"running", "not_started"})
 
 
 class _ExecutionSummary(Protocol):

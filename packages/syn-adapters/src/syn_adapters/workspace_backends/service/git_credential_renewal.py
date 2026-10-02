@@ -76,13 +76,11 @@ class CredentialSource:
     Recorded when the setup phase runs, because that is the only moment that
     holds both the workspace and the answers - and because a renewal that
     guessed either of them would hand the phase a DIFFERENT credential from
-    the one it was provisioned with. ``can_open_pr`` in particular decides
-    what the token is allowed to do (#1197): re-minting without it would
-    quietly promote a phase that was deliberately denied publication.
+    the one it was provisioned with: the repository list decides WHERE the
+    token reaches (#725).
     """
 
     repositories: tuple[str, ...]
-    can_open_pr: bool
 
 
 async def renew_git_credential(
@@ -117,7 +115,6 @@ async def renew_git_credential(
             # them would be both wasteful and, on the teardown path, capable of
             # overwriting the very work being rescued.
             clone_repos=False,
-            can_open_pr=source.can_open_pr,
             require_github=bool(source.repositories),
             ledger=ledger,
         )

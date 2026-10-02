@@ -290,46 +290,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/executions/{execution_id}/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pause Execution Endpoint
-         * @description Pause a running execution.
-         */
-        post: operations["pause_execution_endpoint_executions__execution_id__pause_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/executions/{execution_id}/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Resume Execution Endpoint
-         * @description Resume a paused execution.
-         */
-        post: operations["resume_execution_endpoint_executions__execution_id__resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/executions/{execution_id}/cancel": {
         parameters: {
             query?: never;
@@ -341,7 +301,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel Execution Endpoint
-         * @description Cancel a running or paused execution.
+         * @description Cancel a running execution.
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -390,7 +350,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/executions/{execution_id}/fork": {
+    "/executions/{execution_id}/resume": {
         parameters: {
             query?: never;
             header?: never;
@@ -400,10 +360,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Fork Execution Endpoint
-         * @description Fork a failed or interrupted execution so it resumes where it stopped.
+         * Resume Execution Endpoint
+         * @description Resume a failed or interrupted execution so it resumes where it stopped.
          */
-        post: operations["fork_execution_endpoint_executions__execution_id__fork_post"];
+        post: operations["resume_execution_endpoint_executions__execution_id__resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2193,6 +2153,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Version
+         * @description Which build is serving this API.
+         *
+         *     Returns the same ``BuildInfo`` block ``/health`` carries, rather than a
+         *     flat mapping holding ``version_string()``. That function yields the
+         *     ``"unknown"`` sentinel when package metadata cannot be read, and a bare
+         *     string in a version field is indistinguishable to a client from a release
+         *     actually called that - the defect #1380 exists to remove. ``BuildInfo``
+         *     makes the absence a declared state (``version: null`` plus
+         *     ``version_status``) instead of a word.
+         */
+        get: operations["version_version_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3269,6 +3257,12 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /**
+             * Deliverable Produced
+             * @default false
+             */
+            deliverable_produced: boolean;
+            reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Repos */
             repos?: string[];
             /** Task */
@@ -3964,45 +3958,6 @@ export interface components {
              * @description Updated comment
              */
             comment?: string | null;
-        };
-        /**
-         * ForkRequest
-         * @description What an operator must decide before a fork is admitted.
-         *
-         *     Both flags default to the REFUSAL, because both exist to make an operator
-         *     say something out loud. Neither implies the other.
-         */
-        ForkRequest: {
-            /**
-             * Override Cancellation
-             * @description Fork a CANCELLED parent. A cancel is an instruction to stop, so forking past it needs a fresh decision rather than inheriting the old one.
-             * @default false
-             */
-            override_cancellation: boolean;
-            /**
-             * Acknowledge External Effects
-             * @description Accept that the phase the fork restarts may already have pushed or published something in the parent, which re-running it repeats.
-             * @default false
-             */
-            acknowledge_external_effects: boolean;
-        };
-        /**
-         * ForkResponse
-         * @description The fork that was admitted, and what the child will do.
-         */
-        ForkResponse: {
-            /** Parent Execution Id */
-            parent_execution_id: string;
-            /** Execution Id */
-            execution_id: string;
-            /** Resume Phase Id */
-            resume_phase_id: string;
-            /** Inherited Phase Ids */
-            inherited_phase_ids: string[];
-            /** Cancellation Overridden */
-            cancellation_overridden: boolean;
-            /** External Effects Acknowledged */
-            external_effects_acknowledged: boolean;
         };
         /**
          * GitEventData
@@ -4798,14 +4753,6 @@ export interface components {
             repo_count: number;
         };
         /**
-         * PauseRequest
-         * @description Request to pause an execution.
-         */
-        PauseRequest: {
-            /** Reason */
-            reason?: string | null;
-        };
-        /**
          * PhaseActivityInfo
          * @description What a phase was DOING when it ended, and against what budget (#1262).
          *
@@ -4984,6 +4931,7 @@ export interface components {
              * @default false
              */
             deliverable_recovered: boolean;
+            reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Model */
             model?: string | null;
             /** Requested Model */
@@ -5745,6 +5693,45 @@ export interface components {
          */
         ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
         /**
+         * ResumeRequest
+         * @description What an operator must decide before a resume is admitted.
+         *
+         *     Both flags default to the REFUSAL, because both exist to make an operator
+         *     say something out loud. Neither implies the other.
+         */
+        ResumeRequest: {
+            /**
+             * Override Cancellation
+             * @description Resume a CANCELLED parent. A cancel is an instruction to stop, so resuming past it needs a fresh decision rather than inheriting the old one.
+             * @default false
+             */
+            override_cancellation: boolean;
+            /**
+             * Acknowledge External Effects
+             * @description Accept that the phase the resume restarts may already have pushed or published something in the parent, which re-running it repeats.
+             * @default false
+             */
+            acknowledge_external_effects: boolean;
+        };
+        /**
+         * ResumeResponse
+         * @description The resume that was admitted, and what the child will do.
+         */
+        ResumeResponse: {
+            /** Parent Execution Id */
+            parent_execution_id: string;
+            /** Execution Id */
+            execution_id: string;
+            /** Resume Phase Id */
+            resume_phase_id: string;
+            /** Inherited Phase Ids */
+            inherited_phase_ids: string[];
+            /** Cancellation Overridden */
+            cancellation_overridden: boolean;
+            /** External Effects Acknowledged */
+            external_effects_acknowledged: boolean;
+        };
+        /**
          * RootResponse
          * @description Payload of ``GET /`` — what this API is, and which build is serving it.
          *
@@ -6475,6 +6462,24 @@ export interface components {
              */
             actor: string;
         };
+        /**
+         * SideEffectStatus
+         * @description What a phase says happened to the external writes it attempted.
+         *
+         *     THE CONFLATION THIS SPLITS. A phase that wrote its deliverable and was then
+         *     refused a PR comment had one word for both facts - `success` - so it wrote
+         *     `false` and the run failed with the finished review still on disk. 17 runs
+         *     of one canary were recorded as failures that way. The deliverable and the
+         *     write-back are separate outcomes and take separate responses: a missing
+         *     deliverable is a failed phase, a refused comment is a permission to grant.
+         *
+         *     A REPORT, NEVER A MEASUREMENT, and spelled `reported_side_effects` wherever
+         *     it is carried for the reason `ReportedFailureReason` is: the agent chose
+         *     the word and nothing corroborates it. It never decides whether a phase
+         *     completes - `success` does that, unchanged.
+         * @enum {string}
+         */
+        SideEffectStatus: "none" | "succeeded" | "denied" | "failed";
         /**
          * SkillDetailResponse
          * @description Every registration sharing one skill name.
@@ -8347,72 +8352,6 @@ export interface operations {
             };
         };
     };
-    pause_execution_endpoint_executions__execution_id__pause_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                execution_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["PauseRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ControlResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    resume_execution_endpoint_executions__execution_id__resume_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                execution_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ControlResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     cancel_execution_endpoint_executions__execution_id__cancel_post: {
         parameters: {
             query?: never;
@@ -8514,7 +8453,7 @@ export interface operations {
             };
         };
     };
-    fork_execution_endpoint_executions__execution_id__fork_post: {
+    resume_execution_endpoint_executions__execution_id__resume_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -8525,7 +8464,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["ForkRequest"] | null;
+                "application/json": components["schemas"]["ResumeRequest"] | null;
             };
         };
         responses: {
@@ -8535,7 +8474,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ForkResponse"];
+                    "application/json": components["schemas"]["ResumeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11990,6 +11929,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    version_version_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildInfo"];
                 };
             };
         };
