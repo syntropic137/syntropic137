@@ -106,12 +106,7 @@ from syn_shared.settings.image_verification import (
     MINIMUM_COSIGN_MAJOR,
     ImageVerificationSettings,
 )
-from syn_shared.settings.workspace_image_migration import (
-    IMAGE_IDENTITY_RULE,
-    WORKSPACE_IMAGE_RULE,
-    image_is_custom,
-    stale_default_message,
-)
+from syn_shared.settings.workspace_image_migration import stale_default_notes
 
 logger = logging.getLogger(__name__)
 
@@ -508,29 +503,12 @@ def _run_cosign_verify(
             f"{settings.certificate_oidc_issuer}. The image is not run. "
             f"cosign said: {detail}"
         )
-        stale = _stale_default_notes(image_ref, settings)
+        # After an upgrade the usual cause is a copied .env still holding an old
+        # shipped identity or image (#1398); name the exact variable to fix.
+        stale = stale_default_notes(image_ref, settings.certificate_identity_regexp)
         if stale:
             msg += " Likely cause: " + " ".join(stale)
         raise ImageVerificationError(msg)
-
-
-def _stale_default_notes(image_ref: str, settings: ImageVerificationSettings) -> list[str]:
-    """Name each env var still holding a default an older release shipped (#1398).
-
-    A copied ``.env`` overrides the code defaults, so after an upgrade the
-    usual cause of a failed verification is an old identity, an old image, or
-    both. Naming the exact variable turns a cosign error into one edit.
-    """
-    # A custom image may legitimately need a previously shipped identity (an
-    # agentic-primitives rollback digest), so the identity is only called
-    # stale when the image is one of ours.
-    identity_note = (
-        None
-        if image_is_custom(image_ref)
-        else stale_default_message(settings.certificate_identity_regexp, IMAGE_IDENTITY_RULE)
-    )
-    notes = (identity_note, stale_default_message(image_ref, WORKSPACE_IMAGE_RULE))
-    return [note for note in notes if note is not None]
 
 
 def verify_image(

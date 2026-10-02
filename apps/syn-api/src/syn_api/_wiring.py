@@ -246,9 +246,8 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_shared.settings.workspace import WorkspaceSettings
 
     ws_settings = WorkspaceSettings()
-    _warn_if_stale_default_image(ws_settings.docker_image)
-    _warn_if_stale_default_identity(
-        ImageVerificationSettings().certificate_identity_regexp, ws_settings.docker_image
+    _warn_if_stale_defaults(
+        ws_settings.docker_image, ImageVerificationSettings().certificate_identity_regexp
     )
     # The workspace service is the Docker headless path: claude -p and
     # codex exec both run there, keeping the stream-json pipeline, Envoy
@@ -1517,43 +1516,17 @@ def reset_skill_singletons() -> None:
     _skill_materializer_singleton = None
 
 
-def _warn_if_stale_default_image(image: str) -> None:
-    """Say so when the configured image is a default an older release shipped (#1398).
+def _warn_if_stale_defaults(image: str, identity: str) -> None:
+    """Name a copied, previously shipped image or signer identity at startup (#1398).
 
-    ``SYN_WORKSPACE_DOCKER_IMAGE`` in ``.env`` overrides the code default, and
-    ``.env.example`` carries the default of the day it was copied, so a
-    deployment updated by any path that does not rewrite ``.env`` keeps running
-    the old image. ``just selfhost-update`` migrates it; this names the
-    condition for every other path (npx setup, hand-managed hosts) without
-    overriding an operator's configuration.
+    ``.env`` overrides the code defaults and ``.env.example`` carries the
+    defaults of the day it was copied, so any update path that does not rewrite
+    ``.env`` keeps the old image, or verifies new images against the old
+    publisher and refuses them. ``just selfhost-update`` migrates both; this
+    names the condition for every other path (npx setup, hand-managed hosts)
+    without overriding an operator's configuration.
     """
-    from syn_shared.settings.workspace_image_migration import (
-        WORKSPACE_IMAGE_RULE,
-        stale_default_message,
-    )
+    from syn_shared.settings.workspace_image_migration import stale_default_notes
 
-    message = stale_default_message(image, WORKSPACE_IMAGE_RULE)
-    if message is not None:
-        logger.warning("%s", message)
-
-
-def _warn_if_stale_default_identity(identity: str, image: str) -> None:
-    """Same as the image check, for the cosign signer identity (#1398).
-
-    A copied ``SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP`` names the
-    publisher of the day it was copied. Once the pins name images from a new
-    publisher every provision fails verification, so name it before the first
-    one does. Quiet when ``image`` is custom: the identity must match that
-    image's publisher, which may well be the one a previous default named.
-    """
-    from syn_shared.settings.workspace_image_migration import (
-        IMAGE_IDENTITY_RULE,
-        image_is_custom,
-        stale_default_message,
-    )
-
-    if image_is_custom(image):
-        return
-    message = stale_default_message(identity, IMAGE_IDENTITY_RULE)
-    if message is not None:
-        logger.warning("%s", message)
+    for note in stale_default_notes(image, identity):
+        logger.warning("%s", note)

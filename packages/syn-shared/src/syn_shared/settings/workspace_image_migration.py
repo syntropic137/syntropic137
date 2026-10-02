@@ -185,6 +185,20 @@ def image_is_custom(image: str) -> bool:
     )
 
 
+def stale_default_notes(image: str, identity: str) -> list[str]:
+    """One message per setting still holding a default an older release shipped.
+
+    The identity is judged only beside one of our images: a custom image (an
+    agentic-primitives rollback digest, say) may need a previously shipped
+    identity, so pairing them is not evidence of staleness.
+    """
+    notes = (
+        None if image_is_custom(image) else stale_default_message(identity, IMAGE_IDENTITY_RULE),
+        stale_default_message(image, WORKSPACE_IMAGE_RULE),
+    )
+    return [note for note in notes if note is not None]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     path = Path(args[0] if args else ".env")
