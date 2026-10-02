@@ -1,7 +1,7 @@
 # ADR-014: Workflow Execution Model
 
 ## Status
-Accepted
+Accepted. Revised in place 2026-09-26 (section 7) and 2026-10-02 (section 8).
 
 ## Date
 2025-12-04
@@ -119,6 +119,11 @@ class SessionStartedEvent(DomainEvent):
     phase_id: str
     ...
 ```
+
+This section covers only the platform's own link from a session to the
+execution that started it. Which sessions an execution actually ran, including
+subagents and resumed transcripts the platform did not start, is the session
+inventory: see [ADR-071](ADR-071-session-inventory-and-discovery.md).
 
 ### 5. New API Endpoints
 
@@ -254,6 +259,99 @@ git branch is taken from a commit. See
 
 **API.** `POST /executions/{execution_id}/resume`, CLI `syn execution resume`.
 
+### 8. A phase's deliverable and its side effects are separate outcomes (2026-10-02)
+
+Issue: #1474. Public guide: `apps/syn-docs/content/docs/guide/phase-outcomes.mdx`.
+
+**The problem.** Section 2 gives an execution one `status`. A phase does two
+different kinds of thing, and one word cannot describe both: it produces a
+DELIVERABLE (a report, a patch, a pushed branch), and it attempts SIDE EFFECTS
+around it (a PR comment, a label, a push to a protected branch). Collapsed into
+`status`, a phase whose analysis was finished and whose PR comment was then
+refused looked identical to a phase that produced nothing. Operators re-ran
+finished work to retry a write, and a failed run whose work survived read as
+"nothing to see".
+
+**Decision.** The phase outcome is three separate facts, and none of them is
+derived from another.
+
+| Fact | Who states it | Decides completion? | Where it is read |
+|---|---|---|---|
+| `success` | the agent, in its TASK_RESULT block | yes, together with the exit status and the artifact rule | phase and execution `status` |
+| `side_effects` (`none` / `succeeded` / `denied` / `failed`) | the agent | **never** | `reported_side_effects` per phase and per execution |
+| a stored artifact | the platform, by collecting `artifacts/output/` or recovering the last message | yes, a phase with no artifact fails | `deliverable_produced` on the execution, `deliverable_recovered` per phase |
+
+1. **`success` is about the deliverable, not every action around it.** The
+   prompt contract says so explicitly: a phase that produced its deliverable
+   and was then refused a write reports `success: true, side_effects: denied`
+   (`execute_workflow/workspace_prompt.py:350-364`). Completion is refused only
+   on a FAILURE or UNREADABLE verdict (`phase_verdict.py:414-416`); the
+   side-effects word is not consulted.
+2. **`side_effects` is a report, never a measurement.** It is parsed leniently
+   at the trust boundary (an unknown word is logged and stored as not reported,
+   `value_objects.py:330-345`), carried on `AgentExecutionCompleted` and then
+   on `PhaseCompleted` (`WorkflowExecutionAggregate.py:537`, `:589`). Nothing
+   verifies it. A phase that FAILED does not complete, so its word is not
+   recorded; this is accepted, because a failed phase's status already tells
+   the operator to look.
+3. **The execution-level side effect is the most severe phase report**,
+   FAILED > DENIED > SUCCEEDED > NONE, or null when no phase reported one
+   (`value_objects.py:348-358`, `workflow_execution_detail.py:328-335`). A
+   refused write in one phase is not hidden by another phase's success.
+4. **`deliverable_produced` is independent of `status`.** It is true when the
+   execution detail links an artifact, either in `artifact_ids` or as a phase's
+   `artifact_id` (`workflow_execution_detail.py:316-326`). Phases that fail or
+   are cancelled or interrupted keep their output before teardown
+   (`WorkflowExecutionProcessor.py:758-769`, `:797-800`;
+   `ArtifactCollector.collect_from_unfinished_phase`). A failed phase's kept
+   artifacts reach the read model on `WorkflowFailed`
+   (`get_execution_detail/projection.py:494-495`), so `failed` with
+   `deliverable_produced: true` is a real and common state: the run failed and
+   there is work to read.
+
+   **Known limitation:** a cancelled or interrupted phase's kept artifact is
+   stored but not linked. `ExecutionCancelledEvent` carries no artifact IDs,
+   and the projection's `WorkflowInterrupted` handler does not read the
+   event's `partial_artifact_ids`
+   (`get_execution_detail/projection.py:545-591`). A cancelled or interrupted
+   execution whose only artifact is that partial one therefore reads
+   `deliverable_produced: false` although the artifact exists. Linking those
+   IDs in the projection would close it; this revision records the gap rather
+   than changing code.
+5. **Every phase produces an artifact (#1195, #1300, #1479).** A phase that
+   wrote no collectable file, or an empty one, has its last message recovered
+   as a marked artifact if it says something a later phase could act on, and
+   fails otherwise (`ArtifactCollector.py:640-720`,
+   `artifact_recovery.py:224-319`). This is what makes `deliverable_produced`
+   meaningful: an artifact exists for every phase that completed.
+6. **The agent's failure word is kept apart from the platform's measurement
+   for the same reason.** `reported_failure_reason` records what the agent
+   wrote; `failure_classification` is what the platform concluded, and the
+   agent's word may only withdraw a claim (`unknown` -> `unclassified`), never
+   add one (`phase_verdict.py:482-528`). This predates #1474 (#1357, #1392)
+   and is restated here because it is the same split: report beside
+   measurement, never one overwriting the other.
+
+Both execution-level fields are scoped to the phases the execution ran. A
+resumed execution's inherited phases (section 7) are reported on the parent.
+
+**Rejected alternatives.**
+
+- *A new execution status such as `completed_with_warnings`.* It would make
+  `status` carry the side-effects fact again, every consumer that switches on
+  `status` would need a new branch, and it cannot express `failed` with a
+  surviving deliverable.
+- *Failing the phase when `side_effects` is `denied` or `failed`.* That throws
+  away finished work to report a permission problem, which is the defect being
+  fixed. It would also let an unverified agent report decide completion.
+- *Verifying side effects by observing GitHub.* Desirable, and not this
+  decision: it is a measurement that would sit beside the report, not replace
+  this split.
+
+**Consequences.** Operators read three fields instead of one. The API exposes
+them (`GET /executions/{execution_id}`, `apps/syn-api/src/syn_api/routes/executions/queries.py:685-740`);
+the CLI does not yet render them (#1501 item A).
+
 ## Consequences
 
 ### Positive
@@ -289,6 +387,8 @@ git branch is taken from a commit. See
 ```
 
 ## Related ADRs
+- **ADR-071: Session Inventory and Discovery** - Which sessions an execution ran, beyond the
+  platform-started session linked in section 4
 - ADR-013: Event Sourcing Projection Consistency
 - ADR-012: Artifact Storage
 - **ADR-023: Workspace-First Execution Model** - Specifies how `WorkflowExecutionEngine`
