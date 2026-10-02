@@ -26,6 +26,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
+    require_codex_sandbox,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
     install_skill,
 )
@@ -404,6 +407,7 @@ class WorkspaceProvisionHandler:
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
             await self._install_baked_delegation_skill(workspace, phase)
+            await require_codex_sandbox(workspace, phase)
             await self._install_attribution_hook(workspace)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], outputs, todo
