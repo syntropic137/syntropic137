@@ -62,6 +62,8 @@ class _HistoricalPhase(TypedDict):
     provider: str
     agent_id: str
     """The tmux pane selector. Gone from ``PhaseDefinition``; still in history."""
+    can_open_pr: bool
+    """Retired after #1477. Gone from ``PhaseDefinition``; still in history."""
 
 
 class _HistoricalTemplate(TypedDict):
@@ -111,6 +113,7 @@ def _historical_created_event(provider: str = REMOVED_INTERACTIVE_PROVIDER) -> _
                     prompt_template="do the thing",
                     provider=provider,
                     agent_id="codex",
+                    can_open_pr=True,
                 )
             ],
         )

@@ -64,11 +64,6 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # whether the setup script contains `git clone` at all (#1187). Applied,
     # not validated: any boolean is legal, and both values do something.
     "clone_repos": ("ExecutablePhase", "clone_repos"),
-    # KNOWN INERT since #1477: still passed to ExecutablePhase, but nothing
-    # reads it there; every phase token carries the installation's own
-    # permissions. Listed here only so existing YAML loads until the field is
-    # removed. Do not cite this entry as proof the field does anything.
-    "can_open_pr": ("ExecutablePhase", "can_open_pr"),
     # Read by the unpushed-work gate at COMPLETE_PHASE to decide whether an
     # uncommitted change is a deliverable or a build tool's side effect
     # (#1308). Applied, not validated: both values are legal and both do
@@ -231,6 +226,23 @@ class TestEveryAuthoredFieldHasAFate:
         ]
         for label, overlap in pairs:
             assert not overlap, f"{label} overlap: {sorted(overlap)}"
+
+    def test_a_retired_key_is_not_a_live_field(self) -> None:
+        """A retired key is outside this gate's universe, and must stay out.
+
+        It cannot be authored with effect: `_drop_retired_fields` removes it
+        by name before validation. So if a real field with a retired name were
+        declared again, the drop would swallow every value an author wrote for
+        it - accepted and silently ignored, which is #961 and this gate's whole
+        subject. Retire the key or declare the field, never both.
+        """
+        from syn_domain.contexts.orchestration import RETIRED_PHASE_FIELDS
+
+        retired = {f.name for f in RETIRED_PHASE_FIELDS}
+
+        assert not retired & _phase_schema_fields(), (
+            f"Retired phase keys declared as live fields: {sorted(retired & _phase_schema_fields())}"
+        )
 
 
 class TestAppliedFieldsReachExecution:

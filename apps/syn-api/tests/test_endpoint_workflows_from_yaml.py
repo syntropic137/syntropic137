@@ -447,3 +447,51 @@ async def test_endpoint_identical_reinstall_succeeds_as_unchanged() -> None:
 
     assert second.id == first.id
     assert second.status == "unchanged"
+
+
+RETIRED_KEY_YAML = """
+id: retired-key-wf
+name: Retired Key
+type: custom
+classification: simple
+
+phases:
+  - id: open_pr
+    name: Open PR
+    order: 1
+    prompt_template: "Open the PR."
+    can_open_pr: true
+"""
+
+
+async def test_install_reports_retired_key_notice() -> None:
+    """The key installs, ignored, and the author is told - on every install.
+
+    The second call is the case that matters for packages already installed:
+    an unchanged reinstall must still carry the warning, or the authors who
+    most need to delete the line are the ones who never see it.
+    """
+    first = await create_workflow_from_yaml(RETIRED_KEY_YAML, version="1.0.0")
+    assert isinstance(first, Ok)
+    assert first.value.changed is True
+    assert len(first.value.warnings) == 1
+    assert "'open_pr'" in first.value.warnings[0]
+    assert "can_open_pr" in first.value.warnings[0]
+
+    again = await create_workflow_from_yaml(RETIRED_KEY_YAML, version="1.0.0")
+    assert isinstance(again, Ok)
+    assert again.value.changed is False
+    assert again.value.warnings == first.value.warnings
+
+    response = await create_workflow_from_yaml_endpoint(
+        _make_request(body=RETIRED_KEY_YAML.encode()), version="1.0.0"
+    )
+    assert response.status == "unchanged"
+    assert response.warnings == list(first.value.warnings)
+
+
+async def test_install_without_the_key_reports_nothing() -> None:
+    response = await create_workflow_from_yaml_endpoint(
+        _make_request(body=WITH_REPO_YAML.encode())
+    )
+    assert response.warnings == []

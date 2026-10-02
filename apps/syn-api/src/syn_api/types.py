@@ -928,6 +928,8 @@ class WorkflowValidation(BaseModel):
     workflow_type: str | None = None
     phase_count: int = 0
     errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    """Things the author should change that do not make the YAML invalid."""
 
 
 # ---------------------------------------------------------------------------

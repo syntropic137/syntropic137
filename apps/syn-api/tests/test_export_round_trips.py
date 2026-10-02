@@ -556,17 +556,13 @@ class TestARefusedDeclarationDoesNotLaunder:
 
 
 # ---------------------------------------------------------------------------
-# #1429: the four fields the comment claimed were not dropped
+# #1429: the fields the comment claimed were not dropped
 # ---------------------------------------------------------------------------
 #
-# `can_open_pr` decides the GitHub token's permission level. A dropped
-# declaration reinstalls the phase with `pull_requests: read`, so it pushes a
-# branch and then fails at `gh pr create` - which reads as a GitHub App
-# misconfiguration, not a lost YAML field. That cost a multi-hour
-# investigation into app permissions, installation repo selection and app
-# identity, all of which were correct.
+# #1429 named four. The fourth, `can_open_pr`, decided the GitHub token's
+# permission level until #1477 and has since been retired: it is never
+# exported (`TestARetiredFieldIsNotExported`).
 #
-# The inverse direction matters just as much and is easier to get wrong.
 # `clone_repos` and `delivers_repo_changes` default TRUE, so a truthy-only
 # emit guard drops an explicit `false` and reinstalls it as `true`. The phase
 # then clones repos it declared it did not want, or has the unpushed-work gate
@@ -590,7 +586,6 @@ class _ExportedPhase:
     prompt_file: str
     top_level_keys: frozenset[str]
     agent_keys: frozenset[str]
-    can_open_pr: bool | None
     clone_repos: bool | None
     delivers_repo_changes: bool | None
     agent_sandbox: str | None
@@ -599,7 +594,7 @@ class _ExportedPhase:
     def declares(self, key: str) -> bool:
         """Whether the exported YAML carries `key` at the phase's top level.
 
-        PRESENCE, not truthiness and not non-null. An emitted `can_open_pr:
+        PRESENCE, not truthiness and not non-null. An emitted `clone_repos:
         null` is present and would satisfy an `is None` check written to mean
         "absent", while the loader reads it as a declared null rather than an
         inherited default. A test that means absence must ask this.
@@ -630,7 +625,6 @@ def _parsed_phase(phase: PhaseDefinitionResponse) -> _ExportedPhase:
         prompt_file=str(entry["prompt_file"]),
         top_level_keys=frozenset(str(k) for k in entry),
         agent_keys=frozenset(str(k) for k in agent_map),
-        can_open_pr=entry.get("can_open_pr"),
         clone_repos=entry.get("clone_repos"),
         delivers_repo_changes=entry.get("delivers_repo_changes"),
         agent_sandbox=None if sandbox is None else str(sandbox),
@@ -638,32 +632,39 @@ def _parsed_phase(phase: PhaseDefinitionResponse) -> _ExportedPhase:
     )
 
 
-class TestCanOpenPrSurvivesExport:
-    def test_true_is_emitted(self) -> None:
-        entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": True}))
-        assert entry.can_open_pr is True
+class TestARetiredFieldIsNotExported:
+    """`can_open_pr` is retired (#1477 follow-up): served and exported nowhere.
 
-    def test_false_is_the_default_and_stays_absent(self) -> None:
-        """Absent means False to the loader, so emitting it would add noise."""
-        entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": False}))
-        assert not entry.declares("can_open_pr")
-        assert (
-            PhaseYamlDefinition(id="x", name="x", order=1, prompt_file="x.md").can_open_pr is False
+    Driven from the stored shape, because that is where the key still exists:
+    a workflow-detail row written before the retirement carries it, and the
+    projection is deliberately not re-versioned. The row is read, mapped to the
+    API response and exported, which is the path `syn workflow export` takes.
+    """
+
+    def test_a_stored_row_carrying_it_does_not_export_it(self) -> None:
+        from syn_api.routes.workflows.queries import _map_phase
+        from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
+            WorkflowDetail,
         )
 
-    def test_the_loader_reads_back_what_export_wrote(self) -> None:
-        entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": True}))
-        loaded = PhaseYamlDefinition(
-            id=entry.phase_id,
-            name=entry.name,
-            order=entry.order,
-            prompt_file=entry.prompt_file,
-            can_open_pr=bool(entry.can_open_pr),
-        )
-        assert loaded.can_open_pr is True, (
-            "export wrote can_open_pr but the loader did not read it back as True; "
-            "a publishing phase would reinstall unable to publish"
-        )
+        stored = WorkflowDetail(
+            id="wf",
+            name="wf",
+            workflow_type="research",
+            classification="simple",
+            description="pre-retirement row",
+        ).to_dict()
+        stored["phases"] = [
+            {"id": "open_pr", "name": "Open PR", "order": 1, "can_open_pr": True}
+        ]
+        phase = WorkflowDetail.from_dict(stored).phases[0]
+        exported = _parsed_phase(_map_phase(phase))
+
+        assert not exported.declares("can_open_pr")
+        assert "can_open_pr" not in _map_phase(phase).model_dump()
+
+    def test_the_response_does_not_declare_it(self) -> None:
+        assert "can_open_pr" not in PhaseDefinitionResponse.model_fields
 
 
 class TestDefaultTrueFieldsSurviveExport:
@@ -722,7 +723,8 @@ class TestTheSchemaClaimIsChecked:
 
     `_yaml_phase_lines` carried the line "Nothing that CAN be expressed is
     dropped here". It was false for can_open_pr, clone_repos,
-    delivers_repo_changes and agent.sandbox.
+    delivers_repo_changes and agent.sandbox. `can_open_pr` has since been
+    retired (#1477 follow-up), so three remain to round-trip.
 
     THE FIRST VERSION OF THIS TEST WAS A DECOY, and a codex review said so.
     It asserted the schema had phase properties, that the response model had
@@ -754,11 +756,14 @@ class TestTheSchemaClaimIsChecked:
             )
         return frozenset(str(name) for name in props)
 
-    def test_the_four_fields_are_expressible_in_the_schema(self) -> None:
+    def test_the_three_fields_are_expressible_in_the_schema(self) -> None:
         """Where each field lives. `sandbox` is under `agent`, not top level."""
         props = self._schema_phase_properties()
-        for name in ("can_open_pr", "clone_repos", "delivers_repo_changes"):
+        for name in ("clone_repos", "delivers_repo_changes"):
             assert name in props, f"{name} is not a top-level phase property in the schema"
+        assert "can_open_pr" not in props, (
+            "the retired can_open_pr is advertised by the published schema again"
+        )
         assert "sandbox" not in props, (
             "sandbox became a top-level phase property; the export emits it under "
             "`agent:` and would now be writing it to the wrong place"
@@ -773,7 +778,6 @@ class TestTheSchemaClaimIsChecked:
         """
         phase = _valid_phase().model_copy(
             update={
-                "can_open_pr": True,
                 "clone_repos": False,
                 "delivers_repo_changes": False,
                 "sandbox": "read-only",
@@ -788,11 +792,9 @@ class TestTheSchemaClaimIsChecked:
             name=entry.name,
             order=entry.order,
             prompt_file=entry.prompt_file,
-            can_open_pr=bool(entry.can_open_pr),
             clone_repos=bool(entry.clone_repos),
             delivers_repo_changes=bool(entry.delivers_repo_changes),
         )
-        assert loaded.can_open_pr is True
         assert loaded.clone_repos is False
         assert loaded.delivers_repo_changes is False
         assert entry.agent_sandbox == "read-only"
@@ -802,8 +804,7 @@ class TestTheSchemaClaimIsChecked:
 
         Found by codex review. The projection built a phase carrying these,
         stored `to_dict()` without them, and `get_by_id` reloaded the defaults
-        - so the API reported a publishing phase as can_open_pr: false and a
-        read-only phase as full-access. Export then wrote the wrong phase from
+        - so the API reported a read-only phase as full-access. Export then wrote the wrong phase from
         correct-looking in-memory state.
         """
         from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
@@ -822,7 +823,6 @@ class TestTheSchemaClaimIsChecked:
                     id="review",
                     name="Review",
                     order=1,
-                    can_open_pr=True,
                     clone_repos=False,
                     delivers_repo_changes=False,
                     sandbox="read-only",
@@ -832,7 +832,6 @@ class TestTheSchemaClaimIsChecked:
         stored = detail.to_dict()
         phase = stored["phases"][0]
         for key, want in (
-            ("can_open_pr", True),
             ("clone_repos", False),
             ("delivers_repo_changes", False),
             ("sandbox", "read-only"),
@@ -844,7 +843,6 @@ class TestTheSchemaClaimIsChecked:
             assert phase[key] == want
 
         reloaded = WorkflowDetail.from_dict(stored).phases[0]
-        assert reloaded.can_open_pr is True
         assert reloaded.clone_repos is False
         assert reloaded.delivers_repo_changes is False
         assert reloaded.sandbox == "read-only", (
@@ -893,7 +891,7 @@ class TestAnInvalidSandboxIsNotLaundered:
 class TestPresentNullIsNotAbsent:
     """A pass-2 review found the typed view could conflate the two.
 
-    `_parsed_phase` reads with `.get()`, so an emitted `can_open_pr: null` and
+    `_parsed_phase` reads with `.get()`, so an emitted `clone_repos: null` and
     an omitted key both arrive as `None`. Those mean different things to the
     loader: omitted inherits the default, null is a declared null. Any test
     that means "absent" has to assert on the KEY, and these pin that the view
@@ -916,7 +914,6 @@ class TestPresentNullIsNotAbsent:
             prompt_file=str(entry.get("prompt_file", "")),
             top_level_keys=frozenset(str(k) for k in entry),
             agent_keys=frozenset(str(k) for k in agent_map),
-            can_open_pr=entry.get("can_open_pr"),
             clone_repos=entry.get("clone_repos"),
             delivers_repo_changes=entry.get("delivers_repo_changes"),
             agent_sandbox=None if sandbox is None else str(sandbox),
@@ -925,18 +922,18 @@ class TestPresentNullIsNotAbsent:
 
     def test_an_explicit_null_reads_as_declared(self) -> None:
         entry = self._parse(
-            "phases:\n  - id: p\n    name: P\n    order: 1\n    can_open_pr: null\n"
+            "phases:\n  - id: p\n    name: P\n    order: 1\n    clone_repos: null\n"
         )
-        assert entry.can_open_pr is None
-        assert entry.declares("can_open_pr"), (
+        assert entry.clone_repos is None
+        assert entry.declares("clone_repos"), (
             "a present null read as absent; a test meaning 'inherited the default' "
             "would pass against YAML that declares a null"
         )
 
     def test_an_omitted_key_reads_as_absent(self) -> None:
         entry = self._parse("phases:\n  - id: p\n    name: P\n    order: 1\n")
-        assert entry.can_open_pr is None
-        assert not entry.declares("can_open_pr")
+        assert entry.clone_repos is None
+        assert not entry.declares("clone_repos")
 
     def test_the_same_holds_inside_the_agent_block(self) -> None:
         declared = self._parse(
