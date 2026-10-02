@@ -275,6 +275,7 @@ describe("installWorkflowsViaApi retired-key warnings", () => {
 
     await installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })]);
 
+    expect(stdout()).toContain(status === "unchanged" ? "already installed" : "done");
     expect(stdout()).toContain("warning:");
     expect(stdout()).toContain(NOTICE);
   });

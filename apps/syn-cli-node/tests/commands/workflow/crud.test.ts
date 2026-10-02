@@ -448,6 +448,8 @@ describe("workflow crud commands", () => {
       expect(url).toContain("/workflows/validate");
       const sent = JSON.parse(await body) as { content: string; filename: string };
       expect(JSON.parse(sent.content)).toMatchObject({ id: "retired-pkg" });
+      // The CLI does not strip the key itself: the server owns the policy.
+      expect(sent.content).toContain("can_open_pr");
       expect(sent.filename).toBe("Retired Pkg.json");
       expect(stdout()).toContain(NOTICE);
       expect(stdout()).toContain("Valid single package");
