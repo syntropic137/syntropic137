@@ -37,7 +37,7 @@ A native transcript ID is **never** a platform session ID. Do not pass one to
 
 A **binding** records that a platform session or invocation *represents* a
 native transcript, so one piece of work is not counted as two unrelated
-sessions. Each node, membership, edge and binding carries a confidence:
+sessions. Each membership, edge and binding carries a confidence:
 `registered`, `corroborated`, `candidate` or `conflicting`.
 
 ### Membership
@@ -357,17 +357,17 @@ jq -r '.pages[] | select(.kind == "edge") | .items[]
 
 ```bash
 mkdir -p transcripts
-jq -r '.pages[] | select(.kind == "capture") | .items[]
+jq -c '.pages[] | select(.kind == "capture") | .items[]
   | select((.destination // "local") == "local" and .availability == "present")
-  | [.node.harness, .node.local_id, .archived_byte_hash] | @tsv' inventory.json | sort -u |
-while IFS=$'\t' read -r harness native sha; do
-  syn execution transcript "$EXEC" "$harness" "$native" "$sha" --json \
-    > "transcripts/${harness}-${native//\//_}-${sha:0:12}.json" \
-    || echo "unavailable: $harness $native"
+  | {harness: .node.harness, native: .node.local_id, sha: .archived_byte_hash}' inventory.json | sort -u |
+while IFS= read -r rec; do
+  harness=$(jq -r .harness <<<"$rec"); native=$(jq -r .native <<<"$rec"); sha=$(jq -r .sha <<<"$rec")
+  syn execution transcript "$EXEC" "$harness" "$native" "$sha" --json > "transcripts/$sha.json" \
+    || echo "unavailable: $rec"
 done
 ```
 
-Each file holds the normalized `conversation` for review and the exact bytes in
+Files are named by archived-bytes SHA-256 (native IDs are opaque and may not be path safe). Each holds the normalized `conversation` for review and the exact bytes in
 `content_base64`. A capture that was present when recorded but has since been
 deleted, expired or revoked is reported as unavailable rather than skipped
 silently.
@@ -375,7 +375,7 @@ silently.
 ### 4. Review
 
 Hand the inventory and transcripts to a reviewing agent (the Syntropic137
-Claude Code plugin's `session-discovery` skill teaches this procedure), or read
+Claude Code plugin's `session-discovery` skill, from plugin 0.12.0, teaches this procedure), or read
 them yourself. Useful questions: which delegates failed and why, which phase
 spent its effort where, which prompts produced work that a later phase redid.
 Turn findings into changes to your workflow YAML and phase prompts, then
