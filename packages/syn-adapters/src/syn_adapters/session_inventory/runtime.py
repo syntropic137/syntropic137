@@ -17,6 +17,7 @@ from syn_domain.contexts.agent_sessions import (
     CaptureLocalTranscriptHandler,
     HostSessionEvidenceProjector,
     InventoryJobLease,
+    InventoryStepOutcome,
     InventoryReconciliationAggregate,
     InventoryReconciliationProcessManager,
     InventoryStepHandler,
@@ -138,8 +139,8 @@ class InventoryWork:
         # Same tick: journaled history wakes the ordinary reconciliation outbox.
         await self.scheduler.handle()
 
-    async def execute(self, lease: InventoryJobLease) -> None:
-        await self.step.handle(lease)
+    async def execute(self, lease: InventoryJobLease) -> InventoryStepOutcome:
+        return await self.step.handle(lease)
 
 
 async def create_inventory_runtime(
@@ -244,7 +245,7 @@ async def create_inventory_runtime(
         )
         if recovery is not None
         else None,
-        scheduler=SchedulePendingInventoryHandler(evidence, inventory, repository),
+        scheduler=SchedulePendingInventoryHandler(evidence, inventory, repository, jobs),
         step=InventoryStepHandler(
             repository, jobs, builder, evidence, lease_seconds=settings.lease_seconds
         ),

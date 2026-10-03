@@ -113,6 +113,7 @@ from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
     InventoryJob,
     InventoryJobLease,
     InventoryLeaseLost,
+    InventoryStepOutcome,
     SessionInventoryJobPort,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionInventoryReadPort import (
@@ -290,6 +291,7 @@ __all__ = [
     "InventoryJob",
     "InventoryJobLease",
     "InventoryLeaseLost",
+    "InventoryStepOutcome",
     "InventoryNamespaceCount",
     "InventoryNode",
     "InventoryNodeRef",

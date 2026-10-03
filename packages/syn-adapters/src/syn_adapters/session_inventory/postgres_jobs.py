@@ -128,6 +128,18 @@ class PostgresSessionInventoryJobs:
                 retry_seconds,
             )
 
+    async def park(self, lease: InventoryJobLease) -> None:
+        # 'infinity' is never <= now(), so claim() skips the row until project()
+        # resets retry_at for a newer step. A newer step bumps lease_token, so a
+        # superseded lease matches no row and cannot park the re-armed job.
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE session_inventory_jobs SET leased_until='-infinity',retry_at='infinity'
+                WHERE job_id=$1 AND lease_token=$2""",
+                lease.job.job_id,
+                lease.token,
+            )
+
     async def publish(self, lease: InventoryJobLease) -> None:
         request = lease.job.state.request
         async with self._pool.acquire() as conn, conn.transaction():
