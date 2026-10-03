@@ -398,6 +398,17 @@ class CoordinatorSubscriptionService:
 
         await run_coordinator(self)
 
+    async def wait_for_process_managers(self) -> None:
+        """Wait until every ProcessManager drain is idle with no wake pending.
+
+        ProcessManagers drain on their own task, off the dispatch path (ESP
+        #334, #1528), so a projection checkpoint reaching an event does not
+        mean its processor side has run. Tests and tooling that observe those
+        side effects wait here. A service that never started has none.
+        """
+        if self._coordinator is not None:
+            await self._coordinator.wait_for_process_managers()
+
     async def stop(self) -> None:
         """Stop the coordinator subscription service gracefully."""
         from syn_adapters.subscriptions.coordinator_helpers import stop_coordinator_service
