@@ -1007,6 +1007,13 @@ fitness-check: aps-build check-untyped-dicts check-test-markers
     @uv run python scripts/check_stale_exceptions.py .topology/fitness-report.json
     @echo "✅ Fitness threshold checks passed"
 
+# `fitness-check` in a workspace that may have no Rust toolchain: installs
+# stable if needed, then runs the recipe above unchanged, or prints
+# `FITNESS NOT RUN: <reason>` and fails (exit 69) unless
+# SYN_ALLOW_FITNESS_NOT_RUN=1. Part of `preflight-agent` (#1498).
+fitness-agent:
+    @bash scripts/agent-fitness.sh
+
 # Check structural & ES invariants (pytest-based, AST analysis)
 fitness-invariants:
     @echo "Checking structural & ES invariants..."
@@ -1030,12 +1037,26 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels check-compose-images-public
+preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels check-compose-images-public
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
 
-# The subset of `preflight` that RUNS inside an agent workspace container.
+# Detect endpoint drift between the code and the committed OpenAPI spec.
+#
+# CI ran this as a raw `run:` step inside `python-qa`, marked BLOCKING, with no
+# `just` target at all - so it was reachable from no local command, and
+# `check_ci_parity.py` could not see it because that script compares JOBS, not
+# the steps inside them (#1124). It is portable, so it belongs in the agent
+# gate, not only in preflight.
+check-openapi-drift:
+    @uv run python scripts/check_openapi_drift.py
+
+# The static gates that need only `just`, `uv` and `node` (~1m). The fast inner
+# loop, and the shared base of `preflight` and `preflight-agent`.
+preflight-portable: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift check-no-public-ports
+
+# Every `preflight` gate that RUNS inside an agent workspace container.
 #
 # WHY THIS EXISTS (issue #1109). The workspace image ships `just`, `uv` and
 # `node` and nothing else. Agents were told to gate their work on `just qa-ci`,
@@ -1047,10 +1068,10 @@ preflight: preflight-agent check-submodules vsa-validate fitness codegen-check c
 # omni-fable51:2.1.258 on a fresh clone with the public submodules initialised
 # and `uv sync --frozen` done (2026-09-03):
 #
-#   in this list                       exit 0
+#   preflight-portable                 exit 0
+#   fitness-check                      exit 0    via fitness-agent (re-measured 2026-10-03)
 #   check-submodules                   exit 1    private submodules, no token
 #   vsa-validate                       exit 127  no `vsa` (Rust, built in CI)
-#   fitness                            exit 127  no `cargo` (aps-build)
 #   codegen-check                      exit 127  no `pnpm`
 #   check-compose-overlays             exit 127  no docker CLI
 #   check-default-workspace-image      exit 127  no docker CLI
@@ -1059,11 +1080,20 @@ preflight: preflight-agent check-submodules vsa-validate fitness codegen-check c
 # Re-measure before moving a recipe across the line. "It should work" is how
 # a gate ends up passing because it never ran.
 #
-# THE COMPOSITION: `preflight` is defined as this list PLUS the host-only gates,
-# so a static gate added here is in both by construction. That direction is
-# deliberate - the failure mode worth preventing is a gate that runs in neither.
-# A gate that genuinely needs host tooling goes in `preflight`'s own list above,
-# where the comment table says why.
+# THE COMPOSITION: both `preflight` and `preflight-agent` start from
+# `preflight-portable`, so a static gate added THERE is in both by construction.
+# That direction is deliberate - the failure mode worth preventing is a gate
+# that runs in neither. A gate that genuinely needs host tooling goes in
+# `preflight`'s own list above, where the comment table says why.
+#
+# FITNESS (#1498). The table used to list `fitness` as exit 127, and agents
+# shipped LOC and complexity violations only CI caught: 3 of 4 agent PRs on
+# 2026-10-03 (#1525, #1527, #1529) went red on Architectural Fitness after
+# their verify phases had passed. `fitness-agent` installs the stable Rust
+# toolchain if the workspace has none, builds aps, and runs the same
+# `fitness-check` CI runs - or prints `FITNESS NOT RUN: <reason>` and fails.
+# `preflight` does not include it: it runs `fitness` directly, so the gate is
+# not run twice there.
 #
 # WHAT THIS DOES NOT GUARANTEE. Composition only helps a gate that someone
 # already added to one of these lists. The mechanical guard meant to catch a
@@ -1075,22 +1105,12 @@ preflight: preflight-agent check-submodules vsa-validate fitness codegen-check c
 # poka-yoke believed to be airtight is worse than one known to be partial.
 #
 # This is NOT a lighter standard. CI still runs everything; an agent that opens
-# a PR having passed this can still be failed by vsa or fitness on GitHub, and
+# a PR having passed this can still be failed by vsa or codegen on GitHub, and
 # that is the correct division of labour - CI has the toolchain, the workspace
 # does not.
-# Detect endpoint drift between the code and the committed OpenAPI spec.
-#
-# CI ran this as a raw `run:` step inside `python-qa`, marked BLOCKING, with no
-# `just` target at all - so it was reachable from no local command, and
-# `check_ci_parity.py` could not see it because that script compares JOBS, not
-# the steps inside them (#1124). It is portable, so it belongs in the agent
-# gate, not only in preflight.
-check-openapi-drift:
-    @uv run python scripts/check_openapi_drift.py
-
-preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift check-no-public-ports
+preflight-agent: preflight-portable fitness-agent
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
-    @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
+    @echo "   Not run here (no toolchain in the image): vsa-validate,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
     @echo "   check-default-workspace-image, check-pinned-image-channels,"
     @echo "   check-compose-images-public."
