@@ -302,7 +302,7 @@ async def _prompt(
     workflow_id: str,
     repo_url: str | None,
     phase_outputs: dict[str, str],
-    inputs: dict[str, object],
+    inputs: object,
 ) -> str:
     del execution_id, workflow_id, repo_url, phase_outputs, inputs
     return phase.prompt_template
