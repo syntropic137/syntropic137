@@ -412,28 +412,31 @@ class TestAResumeIsProvisionedAtItsParentsCommit:
         assert guard.endswith(f"exit {PINNED_COMMIT_UNREACHABLE_EXIT_CODE}; fi")
 
 
-class TestARunThatIsNotAResumeIsUnchanged:
-    async def test_the_parent_clones_the_default_branch_and_checks_out_nothing(self) -> None:
-        """A fresh run records its commits too, and is NOT pinned to them."""
+class TestAFreshRunIsProvisionedAtItsOwnRecordedCommit:
+    async def test_every_phase_the_parent_runs_checks_out_the_commit_it_recorded(self) -> None:
+        """RED before verification of #1525: the parent cloned whatever HEAD was by then.
+
+        Its record was read at start and its clone made later, so a push in
+        between left it running a commit its resume would never check out.
+        """
         executions = _Executions()
         parent = await _parent_failed_in_plan(executions, PINNED)
 
         assert list(parent.scripts) == ["research", "plan"]
         for phase_id, script in parent.scripts.items():
             assert f"git clone https://github.com/{REPO} {DEST}" in script, phase_id
-            assert PINNED not in script, phase_id
-            assert "checkout --quiet --detach" not in script, phase_id
+            assert _checkout_line(PINNED) in script.splitlines(), phase_id
 
-    async def test_a_resume_whose_parent_recorded_no_commit_clones_the_default_branch(
-        self,
-    ) -> None:
+
+class TestAnUnresolvedCommitPinsNothing:
+    async def test_a_run_that_recorded_no_commit_clones_the_default_branch(self) -> None:
         """`sha=None` is "nothing could resolve it": there is no commit to hold to."""
         executions = _Executions()
-        await _parent_failed_in_plan(executions, None)
+        parent = await _parent_failed_in_plan(executions, None)
 
         child = await _resumed_child(executions)
 
-        for phase_id, script in child.scripts.items():
+        for phase_id, script in [*parent.scripts.items(), *child.scripts.items()]:
             assert f"git clone https://github.com/{REPO} {DEST}" in script, phase_id
             assert "checkout --quiet --detach" not in script, phase_id
 
@@ -490,22 +493,24 @@ class TestAnUnreachableCommitRefusesThePhase:
 
 
 class TestTheDecisionIsTheExecutions:
-    """`StartPins.checkout_commits` - which runs pin, and to what."""
+    """`StartPins.checkout_commits` - every run pins what it recorded, and only that."""
 
     _commits: ClassVar[list[SourceCommit]] = [
         SourceCommit(repository=REPO, sha=PINNED),
         SourceCommit(repository="syntropic137/unresolved", sha=None),
     ]
 
-    async def test_a_fresh_run_pins_nothing(self) -> None:
+    async def test_a_fresh_run_pins_what_it_recorded_and_skips_the_unknown(self) -> None:
         executions = _Executions()
         await _parent_failed_in_plan(executions, PINNED)
 
         parent = await executions.get_by_id(PARENT)
 
         assert parent is not None
-        assert parent.start_pins.source_commits == [SourceCommit(repository=REPO, sha=PINNED)]
-        assert parent.start_pins.checkout_commits() == []
+        assert parent.start_pins.resumed_from is None
+        assert parent.start_pins.checkout_commits() == [SourceCommit(repository=REPO, sha=PINNED)]
+        pins = parent.start_pins.model_copy(update={"source_commits": self._commits})
+        assert pins.checkout_commits() == [SourceCommit(repository=REPO, sha=PINNED)]
 
     async def test_a_resume_pins_what_its_parent_recorded_and_skips_the_unknown(self) -> None:
         executions = _Executions()

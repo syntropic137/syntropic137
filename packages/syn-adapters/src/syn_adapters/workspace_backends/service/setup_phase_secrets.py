@@ -528,8 +528,8 @@ class SetupPhaseSecrets:
     pinned_commits: dict[str, str] = field(default_factory=dict)
     """The commit to check a repository out at, by ``owner/name`` (#1458).
 
-    A repository absent from it is checked out at its default branch's head,
-    which is every repository of a run that is not a resume. Keyed like
+    A repository absent from it is checked out at its default branch's head:
+    one whose commit nothing could resolve when its run started. Keyed like
     ``repo_tokens``, by the repository rather than by position, so the two
     lists can never fall out of step. Whether a run pins anything is the
     execution's decision (`StartPins.checkout_commits`); this only carries it
@@ -577,7 +577,7 @@ class SetupPhaseSecrets:
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
             pinned_commits: ``owner/name`` -> the commit to check that
-                repository out at (#1458). Empty for a run that is not a resume.
+                repository out at (#1458). Empty when no commit was recorded.
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.

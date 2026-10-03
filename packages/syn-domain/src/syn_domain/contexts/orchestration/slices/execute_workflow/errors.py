@@ -101,12 +101,12 @@ class NonZeroExitError(RuntimeError):
 class PinnedCommitUnreachableError(NonZeroExitError):
     """A repository cannot be checked out at the commit its run pinned it to (#1458).
 
-    A resume provisions every phase at the commits its parent recorded, and
-    when one of them is on no branch of origin any more - force-pushed away,
-    its branch deleted - the phase is refused rather than run on the default
-    branch's head. Running it there would produce a run that looks like a
-    resume and is not one: its inherited phases saw one tree, and it would
-    work on another, with nothing on the record to say so.
+    Every phase is provisioned at the commits its run recorded - a resume's
+    being its parent's - and when one of them is on no branch or tag of origin
+    any more - force-pushed away, its branch deleted - the phase is refused
+    rather than run on the default branch's head. Running it there would make
+    the run's record a lie: a resume's inherited phases saw one tree, and it
+    would work on another, with nothing on the record to say so.
 
     The message names the repository and the commit, from the setup script's
     own refusal. Classified as the platform's failure like every other
@@ -117,7 +117,7 @@ class PinnedCommitUnreachableError(NonZeroExitError):
     def __init__(self, *, phase_name: str, detail: str, exit_code: int) -> None:
         super().__init__(
             f"Phase '{phase_name}' will not be run: a repository could not be checked "
-            f"out at the commit this resume is pinned to, and it is not run on any "
+            f"out at the commit this run is pinned to, and it is not run on any "
             f"other. {detail}",
             exit_code=exit_code,
         )

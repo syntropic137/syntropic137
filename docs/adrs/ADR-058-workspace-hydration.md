@@ -75,7 +75,7 @@ mkdir -p /workspace/repos
 
 The idempotency guard (`[ -d "..." ] || ...`) ensures re-running the setup phase on a partially-hydrated workspace (e.g. after a crash and restart) does not re-clone repos that are already present.
 
-A fresh run clones the default branch's head. A **resume** does not: each repository its parent recorded a commit for is checked out at that commit, between the clone and the submodule init, and a commit that cannot be reached refuses the phase rather than falling back. See the addendum [Resumes Check Out Their Recorded Commits (#1458)](#addendum-resumes-check-out-their-recorded-commits-1458).
+Every repository a run recorded a commit for (`WorkflowExecutionStarted.source_commits`) is then checked out at that commit, between the clone and the submodule init - a resume's record being its parent's - and a commit that cannot be reached refuses the phase rather than falling back. A repository with no recorded commit stays at the default branch's head. See the addendum [Runs Check Out Their Recorded Commits (#1458)](#addendum-runs-check-out-their-recorded-commits-1458).
 
 ### 2. Inject Both `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`
 
@@ -353,7 +353,7 @@ holds a literal golden that fails on any drift - and a phase that does not is
 told what it actually has: git credentials, a `gh` hosts.yml entry, and
 `GH_REPO`, which is the whole of what this ADR provisions for it.
 
-## Addendum: Resumes Check Out Their Recorded Commits (#1458)
+## Addendum: Runs Check Out Their Recorded Commits (#1458)
 
 **Date:** 2026-10-03
 
@@ -374,12 +374,20 @@ the aggregate, by `StartPins.checkout_commits()`:
 
 | Run | `checkout_commits()` |
 |---|---|
-| Fresh (`resumed_from` is None) | nothing - clone the default branch's head, exactly as before |
-| Resume | every `source_commits` entry with a sha |
-| Resume, entry with `sha: None` | nothing for that repo - nothing resolved it when the parent started, so there is no commit to hold to |
+| Fresh | every `source_commits` entry with a sha - the commits it recorded at start |
+| Resume | every `source_commits` entry with a sha - its parent's, copied onto its own start |
+| Either, entry with `sha: None` | nothing for that repo - nothing resolved it when the run started, so there is no commit to hold to |
 
-A fresh run records its commits too and is deliberately NOT pinned to them: it
-was started at "now", which is what the default branch's head already is.
+**A fresh run is pinned too.** The first cut pinned resumes only, reasoning that
+a fresh run "started at now". It did not: `source_commits` is read when the run
+starts and each phase clones when it is provisioned, so a push landing in
+between - or between two of its phases - had the parent run a commit nothing
+recorded, while its resume checked out the recorded one. Verification of #1525
+reproduced it against a real git: both runs exited 0 on different HEADs. The
+invariant is that **a run's recorded commit is the code it ran on**, and only
+pinning the run that recorded it makes that true; recording each phase's actual
+clone HEAD instead would give a multi-phase run several commits and a resume no
+single one to hold to.
 
 `PhaseWorkspace.provision` hands that answer to `WorkspaceProvisionHandler`,
 which keys it by `owner/name` into `SetupPhaseSecrets.pinned_commits`.
@@ -436,5 +444,7 @@ quietly do the exact thing this addendum exists to prevent.
   execution's answer and can become per-phase without re-threading anything
   between the aggregate and the script. Nothing here creates a local branch or
   forbids one.
-- **Pinning fresh runs.** A fresh run's recorded commits are an audit fact, not
-  a checkout instruction; making them one would change every existing workflow.
+- **Following the default branch within one run.** A run that wants a later
+  phase to see commits merged to `main` while it ran cannot have that and a
+  faithful record at once. None does today; it would be a per-phase choice at
+  the same seam as #1513, recorded as its own commit.

@@ -1,10 +1,11 @@
-"""Checking a cloned repository out at the commit a resume pinned it to (#1458).
+"""Checking a cloned repository out at the commit its run pinned it to (#1458).
 
-The setup script clones each repository at its default branch. A resumed
-execution must instead run on the commits its parent ran on, so for every
-repository with a recorded commit this module appends the lines that verify
-origin still publishes that commit, check it out detached, or end the script
-with `PINNED_COMMIT_UNREACHABLE_EXIT_CODE` refusing to run on anything else.
+The setup script clones each repository at its default branch. An execution
+must instead run on the commits it recorded - a resume, on its parent's - so
+for every repository with a recorded commit this module appends the lines
+that verify origin still publishes that commit, check it out detached, or end
+the script with `PINNED_COMMIT_UNREACHABLE_EXIT_CODE` refusing to run on
+anything else.
 
 `SetupPhaseSecrets` decides WHICH repositories are pinned and where they are
 cloned; everything about HOW a pin is honoured, or refused, lives here.
@@ -44,7 +45,7 @@ def append_pinned_checkout(lines: list[str], *, repository: str, dest: str, sha:
     retains, and a commit absent from it is one nothing on origin reaches:
     force-pushed away, or its branch deleted. That absence is the refusal.
     Fetching it by id instead - GitHub often still serves it - is not tried:
-    nothing retains it, so the next phase of the same resume could find it
+    nothing retains it, so the next phase of the same run could find it
     collected, and two phases of one run would disagree about what it ran on.
 
     A commit only a TAG retains is accepted (a release tag outliving a
@@ -54,9 +55,9 @@ def append_pinned_checkout(lines: list[str], *, repository: str, dest: str, sha:
     alone the pin is recorded as `_PIN_REMOTE_REF`, under `refs/remotes`
     because origin does hold it; a commit some branch contains needs nothing.
 
-    NEVER A FALLBACK TO THE DEFAULT BRANCH. A resume runs the rest of its
-    parent's work, and the rest of it on different code is not the same work;
-    a run that quietly did that would look like a resume and be a new run.
+    NEVER A FALLBACK TO THE DEFAULT BRANCH. A run's recorded commit is the
+    code it ran on, and a resume of it runs the rest of the same work on that
+    code; a phase that quietly ran elsewhere would make the record a lie.
     The refusal names the repository and the commit, and exits with
     `PINNED_COMMIT_UNREACHABLE_EXIT_CODE` so it is told apart without parsing.
 

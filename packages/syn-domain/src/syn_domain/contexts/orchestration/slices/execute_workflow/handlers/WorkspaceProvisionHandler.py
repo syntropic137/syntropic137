@@ -380,8 +380,8 @@ class WorkspaceProvisionHandler:
                 the previous phases' output TREES can be rebuilt (#988).
             inputs: Workflow execution inputs dict.
             pinned_commits: The commits to check ``repos`` out at instead of
-                their default branches' heads - a resume's, and empty for any
-                other run (`StartPins.checkout_commits`, #1458).
+                their default branches' heads - the run's recorded commits, a
+                resume's being its parent's (`StartPins.checkout_commits`, #1458).
         """
         assert todo.phase_id is not None
 

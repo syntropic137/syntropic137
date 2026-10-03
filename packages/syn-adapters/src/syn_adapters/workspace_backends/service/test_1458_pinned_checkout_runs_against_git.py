@@ -20,6 +20,11 @@ from syn_adapters.workspace_backends.service.pinned_checkout import (
     PINNED_COMMIT_UNREACHABLE_EXIT_CODE,
 )
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import StartPins
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ResumeOrigin,
+    SourceCommit,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -172,6 +177,40 @@ class TestAPinnedRepositoryIsCheckedOutAtItsCommit:
 
         assert run.returncode == 0, run.stderr
         assert origin.head() == head
+
+
+def _pinned_by(pins: StartPins) -> dict[str, str]:
+    """The execution's decision, keyed as `WorkspaceProvisionHandler` hands it on."""
+    return {c.repository: c.sha for c in pins.checkout_commits() if c.sha is not None}
+
+
+class TestAResumeRunsOnWhatItsParentRanOn:
+    """The invariant, across the transition that breaks it: a push between a
+    run recording its commit and its workspace being cloned (verification of
+    #1525). The decision is the real `StartPins.checkout_commits`, so this
+    goes red if fresh runs stop being held to what they recorded."""
+
+    def test_a_push_after_the_parent_recorded_its_commit(self, origin: _Origin) -> None:
+        recorded = origin.commit("HEAD when the parent started")
+        parent = StartPins(source_commits=[SourceCommit(repository=REPO, sha=recorded)])
+        pushed_since = origin.commit("landed before the parent's workspace was cloned")
+
+        parent_run = origin.provision(_pinned_by(parent))
+        assert parent_run.returncode == 0, parent_run.stderr
+        parent_head = origin.head()
+
+        shutil.rmtree(origin.workspace)
+        child = StartPins(
+            source_commits=parent.source_commits,
+            resumed_from=ResumeOrigin(
+                parent_execution_id="exec-parent", inherited_phases=[], resume_phase_id="plan"
+            ),
+        )
+        child_run = origin.provision(_pinned_by(child))
+        assert child_run.returncode == 0, child_run.stderr
+
+        assert parent_head == recorded != pushed_since
+        assert origin.head() == parent_head
 
 
 class TestAnUnreachableCommitIsRefusedNotReplaced:
