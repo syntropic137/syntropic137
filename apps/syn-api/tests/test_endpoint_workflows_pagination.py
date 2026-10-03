@@ -38,6 +38,7 @@ class _Summary:
     created_at: str | None = None
     runs_count: int = 0
     is_archived: bool = False
+    tags: tuple[str, ...] = ()
     requires_repos: bool = False
 
 

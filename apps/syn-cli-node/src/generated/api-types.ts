@@ -7794,6 +7794,8 @@ export interface components {
             repos?: string[];
             /** Requires Repos */
             requires_repos: boolean;
+            /** Tags */
+            tags?: string[];
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -7819,6 +7821,8 @@ export interface components {
             is_archived: boolean;
             /** Requires Repos */
             requires_repos: boolean;
+            /** Tags */
+            tags?: string[];
         };
         /**
          * CostSummaryResponse
