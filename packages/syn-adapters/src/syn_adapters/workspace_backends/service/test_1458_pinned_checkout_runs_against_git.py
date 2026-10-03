@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_adapters.workspace_backends.service.setup_phase_secrets import (
+from syn_adapters.workspace_backends.service.pinned_checkout import (
     PINNED_COMMIT_UNREACHABLE_EXIT_CODE,
-    SetupPhaseSecrets,
 )
+from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 
 if TYPE_CHECKING:
     from pathlib import Path
