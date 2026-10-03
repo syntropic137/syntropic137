@@ -8,11 +8,21 @@ snapshot whose revision, resolver and watermark match it, against the run's
 current head. Events reach the manager only when ``_Harness.deliver()`` says so,
 which is how projection lag is reproduced: the store runs ahead of the to-do
 rows exactly as it did in production.
+
+Run as a script (``APP_ENVIRONMENT=test TEST_ENV=true uv run python <this file>``), this
+module measures ``process_pending`` wall time per stage
+at a realistic job and evidence count (``--help``); the PR for #1528 records
+its raw output.
 """
 
 from __future__ import annotations
 
+import argparse
+import asyncio
 import logging
+import os
+import platform
+import statistics
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -56,6 +66,9 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
+_PROJECTION_LOGGER = (
+    "syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection"
+)
 SOURCE = "drain-test"
 RETRY_SECONDS = 10
 LEASE_SECONDS = 60
@@ -373,7 +386,7 @@ async def test_evidence_arriving_during_an_open_job_is_coalesced_into_the_next_o
 async def test_process_pending_logs_wall_time_per_stage(caplog: pytest.LogCaptureFixture) -> None:
     harness = _Harness()
     await _stale_jobs(harness)
-    logger = "syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection"
+    logger = _PROJECTION_LOGGER
     with caplog.at_level(logging.DEBUG, logger=logger):
         await harness.tick()
     records = [record for record in caplog.records if record.name == logger]
@@ -384,3 +397,143 @@ async def test_process_pending_logs_wall_time_per_stage(caplog: pytest.LogCaptur
     ]
     assert [getattr(record, "job_id", None) for record in records[1:]] == harness.work.executed
     assert all(getattr(record, "duration_ms", -1.0) >= 0 for record in records)
+
+
+@dataclass(frozen=True)
+class StageTiming:
+    stage: str
+    calls: int
+    total_ms: float
+    max_ms: float
+
+
+@dataclass(frozen=True)
+class Measurement:
+    """Wall time of every process_pending call, and of each stage inside them."""
+
+    call_ms: tuple[float, ...]
+    stages: tuple[StageTiming, ...]
+    executed: int
+
+    @property
+    def dominant(self) -> StageTiming:
+        return max(self.stages, key=lambda timing: timing.total_ms)
+
+
+@dataclass(frozen=True)
+class _StageSample:
+    stage: str
+    duration_ms: float
+
+
+class _StageRecorder(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.samples: list[_StageSample] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        stage, duration = getattr(record, "stage", None), getattr(record, "duration_ms", None)
+        if isinstance(stage, str) and isinstance(duration, float):
+            self.samples.append(_StageSample(stage=stage, duration_ms=duration))
+
+
+async def measure(
+    *, stale: int, live: int, batches: int, records: int, ticks: int, arrivals: int
+) -> Measurement:
+    """``stale`` crash-orphaned jobs plus ``live`` runs that keep receiving evidence.
+
+    Each live run starts with ``batches`` batches of ``records`` nodes and gets
+    ``arrivals`` more per tick, which keeps rebuilding its snapshot: the shape
+    of the production incident (31 stale jobs, 3 executions still running).
+    """
+    harness = _Harness()
+    await _stale_jobs(harness, stale)
+    await harness.deliver()
+    runs = [_run(f"live-{n}") for n in range(live)]
+    for run in runs:
+        for _ in range(batches):
+            await _add_evidence(harness, run, records)
+    recorder = _StageRecorder()
+    logger = logging.getLogger(_PROJECTION_LOGGER)
+    level = logger.level
+    logger.addHandler(recorder)
+    logger.setLevel(logging.DEBUG)
+    try:
+        for _ in range(ticks):
+            for run in runs:
+                for _ in range(arrivals):
+                    await _add_evidence(harness, run, records)
+            await harness.tick()
+            await harness.deliver()
+    finally:
+        logger.removeHandler(recorder)
+        logger.setLevel(level)
+    stages: list[StageTiming] = []
+    for stage in dict.fromkeys(sample.stage for sample in recorder.samples):
+        durations = [s.duration_ms for s in recorder.samples if s.stage == stage]
+        stages.append(StageTiming(stage, len(durations), sum(durations), max(durations)))
+    return Measurement(
+        call_ms=tuple(harness.call_ms), stages=tuple(stages), executed=len(harness.work.executed)
+    )
+
+
+async def test_measurement_accounts_for_every_call_by_stage() -> None:
+    measured = await measure(stale=STALE_JOBS, live=3, batches=5, records=10, ticks=20, arrivals=1)
+
+    assert len(measured.call_ms) == 20
+    by_stage = {timing.stage: timing for timing in measured.stages}
+    assert set(by_stage) == {"schedule", "execute"}
+    assert by_stage["schedule"].calls == 20
+    assert by_stage["execute"].calls == measured.executed > STALE_JOBS
+    # The stages are inside the calls, so they cannot account for more time.
+    assert sum(timing.total_ms for timing in measured.stages) <= sum(measured.call_ms)
+
+
+def _main() -> None:
+    parser = argparse.ArgumentParser(description="Measure process_pending per stage (#1528).")
+    parser.add_argument("--stale", type=int, default=STALE_JOBS)
+    parser.add_argument("--live", type=int, default=3)
+    parser.add_argument("--batches", type=int, default=800, help="initial batches per live run")
+    parser.add_argument("--records", type=int, default=10, help="nodes per evidence batch")
+    parser.add_argument("--arrivals", type=int, default=1, help="batches per live run per tick")
+    parser.add_argument("--ticks", type=int, default=40)
+    parser.add_argument("--repeats", type=int, default=5)
+    args = parser.parse_args()
+    print(
+        f"# {platform.platform()} | {platform.processor() or platform.machine()} | "
+        f"{os.cpu_count()} cpus | python {platform.python_version()}"
+    )
+    print(f"# {vars(args)}")
+    runs: list[Measurement] = []
+    for repeat in range(args.repeats):
+        measured = asyncio.run(
+            measure(
+                stale=args.stale,
+                live=args.live,
+                batches=args.batches,
+                records=args.records,
+                ticks=args.ticks,
+                arrivals=args.arrivals,
+            )
+        )
+        runs.append(measured)
+        stages = "  ".join(
+            f"{t.stage}: n={t.calls} total={t.total_ms:.1f}ms max={t.max_ms:.1f}ms"
+            for t in measured.stages
+        )
+        print(
+            f"run {repeat}: calls total={sum(measured.call_ms):.1f}ms "
+            f"median={statistics.median(measured.call_ms):.1f}ms "
+            f"max={max(measured.call_ms):.1f}ms | {stages} | dominant={measured.dominant.stage}"
+        )
+    totals = [sum(measured.call_ms) for measured in runs]
+    worst = [max(measured.call_ms) for measured in runs]
+    print(
+        f"summary: per-run call total median={statistics.median(totals):.1f}ms "
+        f"min={min(totals):.1f}ms max={max(totals):.1f}ms; worst call median="
+        f"{statistics.median(worst):.1f}ms min={min(worst):.1f}ms max={max(worst):.1f}ms"
+    )
+
+
+if __name__ == "__main__":
+    _main()
