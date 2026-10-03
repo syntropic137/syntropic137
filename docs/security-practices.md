@@ -34,6 +34,8 @@ CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every p
 
 **Enforcement:** OSV is a blocking CI job. A reported vulnerability fails the pull request gate.
 
+**Fix first, ignore only when no fix exists.** An advisory with a patched release is fixed: a pnpm `overrides:` entry in `pnpm-workspace.yaml`, or a uv `constraint-dependencies` floor for a transitive Python package. An advisory with **no** patched release goes in the root [`osv-scanner.toml`](../osv-scanner.toml) as an `[[IgnoredVulns]]` entry. Its `reason` must give the osv.dev evidence that no fix exists, the dependency path (`pnpm why <pkg> -r`) and the condition for revisiting it. It must also set an `ignoreUntil` date, so an ignore that nobody revisits fails CI again instead of going stale. osv-scanner picks the file up because it sits next to the root lockfiles. Nested lockfiles do not inherit it.
+
 ### npm/pnpm install hygiene
 
 `--ignore-scripts` is applied to all package installs in CI to block `postinstall` hooks — the primary npm supply chain attack vector (event-stream, ua-parser-js style). Applied per-project:
