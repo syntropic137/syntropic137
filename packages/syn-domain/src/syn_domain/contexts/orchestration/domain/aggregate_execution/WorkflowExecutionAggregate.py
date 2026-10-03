@@ -684,46 +684,26 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("AddExecutionTagsCommand")
     def add_tags(self, command: AddExecutionTagsCommand) -> None:
         """Add tags to the current set. None new, no event."""
-        from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
-            ExecutionTagsAddedEvent,
-        )
-
         if self.id is None:
             msg = "Execution does not exist"
             raise ValueError(msg)
-        if not command.tags:
-            msg = "At least one tag is required"
-            raise ValueError(msg)
-        added = self._tags.newly_added(command.tags)
-        if added:
-            self._apply(
-                ExecutionTagsAddedEvent(
-                    execution_id=str(self.id), workflow_id=self._workflow_id or "", tags=list(added)
-                )
-            )
+        event = self._tags.add(
+            command.tags, execution_id=str(self.id), workflow_id=self._workflow_id or ""
+        )
+        if event is not None:
+            self._apply(event)
 
     @command_handler("RemoveExecutionTagsCommand")
     def remove_tags(self, command: RemoveExecutionTagsCommand) -> None:
         """Remove tags from the current set. None present, no event."""
-        from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
-            ExecutionTagsRemovedEvent,
-        )
-
         if self.id is None:
             msg = "Execution does not exist"
             raise ValueError(msg)
-        if not command.tags:
-            msg = "At least one tag is required"
-            raise ValueError(msg)
-        removed = self._tags.actually_removed(command.tags)
-        if removed:
-            self._apply(
-                ExecutionTagsRemovedEvent(
-                    execution_id=str(self.id),
-                    workflow_id=self._workflow_id or "",
-                    tags=list(removed),
-                )
-            )
+        event = self._tags.remove(
+            command.tags, execution_id=str(self.id), workflow_id=self._workflow_id or ""
+        )
+        if event is not None:
+            self._apply(event)
 
     @command_handler("InterruptExecutionCommand")
     def interrupt_execution(self, command: InterruptExecutionCommand) -> None:

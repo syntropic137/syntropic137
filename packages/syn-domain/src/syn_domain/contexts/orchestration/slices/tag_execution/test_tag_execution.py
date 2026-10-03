@@ -18,7 +18,7 @@ from event_sourcing import DomainEvent, EventEnvelope, EventStoreRepository
 from event_sourcing.client.memory import MemoryEventStoreClient
 
 from syn_adapters.storage.repositories import RepositoryAdapter
-from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration._shared.tags import MAX_TAGS, TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     StartExecutionCommand,
 )
@@ -147,3 +147,65 @@ class TestRemoveExecutionTags:
         assert result is not None
         assert result.success
         assert publisher.events == []
+
+
+@pytest.mark.unit
+class TestTagEditRules:
+    """The edit rules ExecutionTags decides, read through the handlers that apply them."""
+
+    async def test_the_added_event_carries_only_the_new_tags(self) -> None:
+        repository, publisher = _repository(), _Publisher()
+        await _launched_with(repository, ["nightly"])
+
+        await AddExecutionTagsHandler(repository, publisher).handle(
+            AddExecutionTagsCommand(aggregate_id=EXECUTION_ID, tags=TagSet(["nightly", "x"]))
+        )
+
+        (added,) = publisher.events
+        assert added.model_dump()["tags"] == ["x"]
+
+    async def test_adding_present_tags_writes_nothing(self) -> None:
+        repository, publisher = _repository(), _Publisher()
+        await _launched_with(repository, ["nightly"])
+
+        result = await AddExecutionTagsHandler(repository, publisher).handle(
+            AddExecutionTagsCommand(aggregate_id=EXECUTION_ID, tags=TagSet(["nightly"]))
+        )
+
+        assert result is not None
+        assert result.success
+        assert publisher.events == []
+
+    @pytest.mark.parametrize("handler", [AddExecutionTagsHandler, RemoveExecutionTagsHandler])
+    async def test_an_empty_edit_is_refused(
+        self, handler: type[AddExecutionTagsHandler] | type[RemoveExecutionTagsHandler]
+    ) -> None:
+        repository, publisher = _repository(), _Publisher()
+        await _launched_with(repository, ["a"])
+        command_type = (
+            AddExecutionTagsCommand
+            if handler is AddExecutionTagsHandler
+            else RemoveExecutionTagsCommand
+        )
+
+        result = await handler(repository, publisher).handle(
+            command_type(aggregate_id=EXECUTION_ID, tags=TagSet())
+        )
+
+        assert result is not None
+        assert not result.success
+        assert "At least one tag is required" in result.error
+        assert publisher.events == []
+
+    async def test_adding_past_the_limit_is_refused(self) -> None:
+        repository, publisher = _repository(), _Publisher()
+        await _launched_with(repository, [f"t{i}" for i in range(MAX_TAGS)])
+
+        result = await AddExecutionTagsHandler(repository, publisher).handle(
+            AddExecutionTagsCommand(aggregate_id=EXECUTION_ID, tags=TagSet(["one-more"]))
+        )
+
+        assert result is not None
+        assert not result.success
+        assert publisher.events == []
+        assert len((await _replayed(repository)).current) == MAX_TAGS
