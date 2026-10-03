@@ -333,9 +333,10 @@ async def repositories(workspace: GitWorkspace) -> list[str]:
 
     SCOPE, stated because it is a real limit. Repositories are the ones cloned
     directly under ``/workspace/repos``. Work committed inside a SUBMODULE of
-    one of those is DETECTED - the superproject reports a modified gitlink, so
-    the phase still fails rather than silently succeeding - but the submodule's
-    own objects are not quarantined, because they belong to a different remote.
+    one of those is DETECTED - the gate asks the submodule itself for commits no
+    remote has and for a dirty worktree, so the phase still fails rather than
+    silently succeeding (#1499) - but the submodule's own objects are not
+    quarantined, because they belong to a different remote.
     A submodule's commits are recoverable only if the phase pushed them itself.
     """
     found = await checked(
