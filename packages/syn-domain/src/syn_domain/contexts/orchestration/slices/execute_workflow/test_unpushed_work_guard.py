@@ -4058,6 +4058,8 @@ async def test_work_inside_a_moved_submodule_at_a_quoted_path_still_fails_the_ph
         ('"lib/quote\\"d\\\\"', 'lib/quote"d\\'),
         ('"lib/caf\\303\\251"', "lib/caf\u00e9"),
         ('"lib/bad\\9"', '"lib/bad\\9"'),
+        ('"lib/short\\12"', '"lib/short\\12"'),
+        ('"lib/trailing\\"', "lib/trailing\\"),
     ],
 )
 def test_a_porcelain_path_is_decoded_as_git_quotes_it(porcelain: str, path: str) -> None:
