@@ -3,30 +3,32 @@ title: Workspace Images
 description: Production-ready, multi-arch Docker images for isolated agent execution with built-in observability, token compression, and security hardening.
 ---
 
-Syntropic137 runs AI agents inside **isolated workspace containers**. Each workspace is a disposable Docker container pre-loaded with everything an agent needs: the agent CLIs, language tooling, and observability hooks. The same container serves both harnesses, so whether a phase declares `agent.provider: claude` or `agent.provider: codex`, the container boundary is the same. Process-level authority is not: only codex phases enforce the declared `sandbox` level on top of the container.
+Syntropic137 runs AI agents inside **isolated workspace containers**. Each workspace is a disposable Docker container pre-loaded with everything an agent needs: the agent CLIs, language tooling, and observability hooks. The same container serves both harnesses, so whether a phase declares `agent.provider: claude` or `agent.provider: codex`, the container boundary is the same. On top of the container, codex phases can declare `sandbox: workspace-write`, which codex enforces inside it.
 
 ## What's in a Workspace Image
 
-Workspace images are built by [agentic-primitives](https://github.com/AgentParadise/agentic-primitives) and published to GHCR. Two images matter:
+Workspace images are built by [agentic-workspace](https://github.com/AgentParadise/agentic-workspace) and published to GHCR. Three images matter:
 
 | Image | Harnesses | Notes |
 |-------|-----------|-------|
-| `ghcr.io/agentparadise/omni-agent-workspace` | claude and codex | The default. `SYN_WORKSPACE_DOCKER_IMAGE` pins it by digest. |
-| `ghcr.io/agentparadise/agentic-workspace-claude-cli` | claude and codex | The heavier image. Adds LSP servers and the Rust toolchain, which back Claude Code LSP plugin identifiers and are harness-specific weight. |
+| `ghcr.io/agentparadise/agentic-workspace-buildfloor` | claude and codex | The default. `omni-agent` plus build tooling (build-essential, pkg-config, unzip, rustup, pnpm, bun). `SYN_WORKSPACE_DOCKER_IMAGE` pins it by digest. |
+| `ghcr.io/agentparadise/agentic-workspace-omni-agent` | claude and codex | The lighter base, without the extra build/language tooling. |
+| `ghcr.io/agentparadise/agentic-workspace-claude` | claude and codex | The heaviest image. Adds LSP servers and the Rust toolchain, which back Claude Code LSP plugin identifiers and are harness-specific weight. |
 
-Both images ship both CLIs, pinned to explicit versions. What varies is the tooling stacked around them:
+All three images ship both CLIs, pinned to explicit versions. What varies is the tooling stacked around them:
 
-| Component | omni-agent | claude-cli |
-|-----------|------------|------------|
-| Claude CLI | Yes | Yes |
-| Codex CLI | Yes | Yes |
-| Python 3.12 + uv | Yes | Yes |
-| Node.js 22 LTS | Yes | Yes |
-| GitHub CLI | Yes | Yes |
-| RTK token compression | Yes | No |
-| Rust toolchain | No | Yes |
-| LSP servers (pyright, typescript-language-server, rust-analyzer) | No | Yes |
-| Claude Code plugins (sdlc, workspace, observability, delegation) | Yes | Yes |
+| Component | omni-agent | buildfloor | claude |
+|-----------|------------|------------|--------|
+| Claude CLI | Yes | Yes | Yes |
+| Codex CLI | Yes | Yes | Yes |
+| Python 3.12 + uv | Yes | Yes | Yes |
+| Node.js 22 LTS | Yes | Yes | Yes |
+| GitHub CLI | Yes | Yes | Yes |
+| RTK token compression | Yes | Yes | No |
+| Build tooling (build-essential, pkg-config, unzip, rustup, pnpm, bun) | No | Yes | No |
+| Rust toolchain | No | No | Yes |
+| LSP servers (pyright, typescript-language-server, rust-analyzer) | No | No | Yes |
+| Claude Code plugins (sdlc, workspace, observability, delegation) | Yes | Yes | Yes |
 
 The plugins and LSP servers exist to back Claude Code features. A codex phase does not use them on either image.
 
@@ -46,10 +48,10 @@ The intended manifest, which orchestrators would read after container creation:
 ```json
 {
   "provider": "omni-agent",
-  "provider_version": "1.6.0",
+  "provider_version": "1.7.1",
   "components": {
-    "claude_cli": "2.1.250",
-    "codex_cli": "0.150.1",
+    "claude_cli": "2.1.281",
+    "codex_cli": "0.156.1",
     "rtk": "0.48.0",
     "node": "22",
     "python": "3.12"

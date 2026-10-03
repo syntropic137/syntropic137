@@ -19,11 +19,11 @@ We need to test the Syn137 event pipeline without spending API tokens. Manual te
 
 - VCR.py and pytest-recording for HTTP request recording
 - Playwright's trace recording for browser tests
-- agentic-primitives already has `SessionRecorder`/`SessionPlayer`
+- agentic-primitives already has `SessionRecorder`/`SessionPlayer` (2026-09: this lives in `agentic-workspace` now, see #1417)
 
 ## Decision
 
-Use recorded agent sessions from `agentic-primitives` with a new `RecordingEventStreamAdapter` that implements `EventStreamPort`.
+Use recorded agent sessions from `agentic-workspace` (moved from `agentic-primitives`, 2026-09, see #1417) with a new `RecordingEventStreamAdapter` that implements `EventStreamPort`.
 
 ### Architecture
 
@@ -51,8 +51,8 @@ Use recorded agent sessions from `agentic-primitives` with a new `RecordingEvent
 
 ### Components
 
-1. **SessionRecorder** (agentic-primitives): Captures agent events with timing to JSONL
-2. **SessionPlayer** (agentic-primitives): Replays recordings at configurable speed
+1. **SessionRecorder** (agentic-workspace): Captures agent events with timing to JSONL
+2. **SessionPlayer** (agentic-workspace): Replays recordings at configurable speed
 3. **RecordingEventStreamAdapter** (syn-adapters): Bridges recordings to Syn137's event pipeline
 
 ### Usage
@@ -123,7 +123,7 @@ packages/syn-adapters/tests/workspace_backends/recording/
 ### Recordings Location
 
 ```
-lib/agentic-primitives/providers/workspaces/claude-cli/fixtures/recordings/
+lib/agentic-workspace/implementations/docker/images/claude-cli/fixtures/recordings/
 ├── v2.0.74_claude-sonnet-4-5_simple-bash.jsonl
 ├── v2.0.74_claude-sonnet-4-5_file-create.jsonl
 ├── v2.0.74_claude-sonnet-4-5_multi-tool.jsonl

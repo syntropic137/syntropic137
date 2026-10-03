@@ -11,7 +11,12 @@ class TestDomainPackage:
         """Test that domain package can be imported."""
         import syn_domain
 
-        assert syn_domain.__version__ == "0.1.0"
+        assert syn_domain is not None
+        # No ``__version__``: the release lives in pyproject.toml and nowhere
+        # else. Asserting its absence, not just dropping the old assertion,
+        # because a literal reintroduced here is guaranteed to be wrong -
+        # `just bump-version` does not write dunders (#1380).
+        assert not hasattr(syn_domain, "__version__")
 
     def test_import_contexts(self):
         """Test that contexts can be imported."""

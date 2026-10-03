@@ -1,5 +1,6 @@
 import type { SyntropicClient } from "../client.js";
 import { formatError } from "../errors.js";
+import { formatStarted } from "./format.js";
 import type {
   ExecuteWorkflowResponse,
   WorkflowListResponse,
@@ -73,18 +74,17 @@ export async function synExecuteWorkflow(
   if (!result.ok) return formatError(result.error);
 
   const { execution_id, workflow_id, status, message } = result.data;
-  return {
-    content: [
-      `## Workflow Execution Started`,
-      "",
-      `- **Execution ID:** ${execution_id}`,
-      `- **Workflow:** ${workflow_id}`,
-      `- **Status:** ${status}`,
-      `- ${message}`,
-      "",
-      `Use \`syn_get_execution\` with ID \`${execution_id}\` to monitor progress.`,
-    ].join("\n"),
-  };
+  return formatStarted(
+    client,
+    "Workflow Execution Started",
+    [
+      ["Execution ID", execution_id],
+      ["Workflow", workflow_id],
+      ["Status", status],
+      ["Message", message],
+    ],
+    [`Use \`syn_get_execution\` with ID \`${execution_id}\` to monitor progress.`],
+  );
 }
 
 /** Tool definitions for workflow tools. */

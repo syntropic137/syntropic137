@@ -6,22 +6,72 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    CostField,
+    SessionCost,
+)
+from syn_domain.contexts.agent_sessions.recorded_model_rows import (
+    pick_primary_model,
+    recorded_model_from_row,
+    recorded_model_group_by,
+    recorded_model_select,
+)
+from syn_domain.storable_text import pg_safe
+from syn_shared.pricing import parse_vendor_cost
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
     import asyncpg
+
+    from syn_shared.observed_model import RecordedModel
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_shared.events import (
     SESSION_STARTED,
     SESSION_SUMMARY,
     TOKEN_USAGE,
-    TOOL_EXECUTION_COMPLETED,
 )
 
 # --- The four queries, all keyed by a session-id ARRAY -----------------------
+#
+# WHY THESE STILL READ RAW EVENTS, AND WHAT THAT DOES AND DOES NOT BOUND
+# (#1338).
+#
+# All four filter `event_type`, which is in neither compress_segmentby
+# (session_id) nor compress_orderby (time), so inside a compressed chunk it
+# cannot be answered from an index - the segment is decompressed and filtered
+# row by row. #1338 asked whether that makes them the next /executions-style
+# latency bug. These are NARROWER than the execution-keyed paths, for a reason
+# that is about the id they lead on rather than about event_type:
+#
+#   `session_id` IS the segmentby column. A compressed chunk stores one
+#   independently addressable segment per session_id, so `session_id = ANY($1)`
+#   discards whole segments before decompressing any of them. Sessions that are
+#   not on the page are never touched.
+#
+# NARROWER IS NOT BOUNDED, and this comment used to say bounded. Nothing here
+# limits the events WITHIN a selected session: a session that emitted a million
+# events is a million rows decompressed and filtered, for one row of output.
+# What is bounded is the number of sessions per round-trip, and only because
+# `calculate_many` caps it - see MAX_SESSIONS_PER_QUERY. Before that cap the
+# only limit was `le=200` on the HTTP query parameter, which is not where these
+# queries run and does not constrain any other caller.
+#
+# The per-session ceiling is the part still outstanding, and it is the same
+# shape of debt as the execution-keyed paths next door: only a maintained
+# per-session read model removes it.
+#
+# The rule for changing anything here: a query in this file MUST keep leading
+# on session_id. Re-keying one on execution_id or on time alone returns
+# identical numbers and every correctness test still passes, while giving up
+# the segment discard and reading every chunk in range. Pinned by
+# packages/syn-domain/tests/test_cost_read_paths_scan_agent_events_by_event_type.py.
+#
+# #1338 also shipped `idx_events_session_type (session_id, event_type, time)`,
+# which removes the per-row event_type recheck on the UNCOMPRESSED chunks. It
+# helps recent data, and it does not change either bound above.
 #
 # WHY (issue #1114). `calculate` ran up to four round-trips per session, and the
 # sessions list endpoint called it once per row: `limit=50` cost 2.4s and
@@ -37,7 +87,7 @@ from syn_shared.events import (
 # DISTINCT ON is how the summary query keeps its per-session `ORDER BY time DESC
 # LIMIT 1` semantics under an array: `ORDER BY session_id, time DESC` makes the
 # first row of each session group the newest one, which is what LIMIT 1 picked.
-_SESSION_SUMMARY_BATCH_QUERY = """
+_SESSION_SUMMARY_BATCH_QUERY = f"""
 SELECT DISTINCT ON (session_id)
     session_id,
     (data->>'total_input_tokens')::int as total_input,
@@ -46,7 +96,9 @@ SELECT DISTINCT ON (session_id)
     (data->>'cache_read_tokens')::int as cache_read,
     (data->>'total_cost_usd')::numeric as sdk_cost,
     (data->>'duration_ms')::bigint as duration_ms_val,
-    data->>'model' as agent_model,
+    {recorded_model_select(model_column="agent_model")},
+    data->>'workspace_id' as workspace_id,
+    (data->>'num_turns')::int as num_turns,
     time as completed_at,
     execution_id,
     phase_id
@@ -70,10 +122,10 @@ ORDER BY session_id, time DESC
 # Grouping by model lets each group be priced with its own rate and lets
 # COUNT(*) be summed for unpriced groups ONLY - mirroring
 # execution_cost/timescale_query.py, which already had to solve this.
-_TOKEN_USAGE_FALLBACK_BATCH_QUERY = """
+_TOKEN_USAGE_FALLBACK_BATCH_QUERY = f"""
 SELECT
     session_id,
-    data->>'model' as agent_model,
+    {recorded_model_select(model_column="agent_model")},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -86,14 +138,7 @@ SELECT
     phase_id
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
-GROUP BY session_id, execution_id, phase_id, data->>'model'
-"""
-
-_COUNT_BATCH_QUERY = """
-SELECT session_id, COUNT(*) as cnt
-FROM agent_events
-WHERE session_id = ANY($1::text[]) AND event_type = $2
-GROUP BY session_id
+GROUP BY session_id, execution_id, phase_id, {recorded_model_group_by()}
 """
 
 _MIN_TIME_BATCH_QUERY = """
@@ -102,6 +147,20 @@ FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
 GROUP BY session_id
 """
+
+#: The most session ids `calculate_many` will bind into one round-trip.
+#:
+#: Each of the four queries above decompresses every segment it selects, so the
+#: work of one round-trip grows with the number of ids in the array. Something
+#: has to cap that array, and until #1338 the only thing that did was `le=200`
+#: on the sessions-list HTTP parameter - a constraint on one caller, in a layer
+#: these queries know nothing about, silently absent from every other caller
+#: and from every direct use of the query service.
+#:
+#: 200 is that page cap restated where the query runs, so the HTTP path behaves
+#: exactly as it did (a full page is still one round-trip) and a caller asking
+#: for more pays extra round-trips rather than one unbounded one.
+MAX_SESSIONS_PER_QUERY = 200
 
 
 def _extract_tokens(token_result: asyncpg.Record) -> tuple[int, int, int, int]:
@@ -146,6 +205,11 @@ class PricedSessionTotals:
     cost_by_model: dict[str, Decimal]
     unpriced_observation_count: int
     primary_model: str | None
+    """The OBSERVED model that did most of the work, or None if none was reported."""
+    requested_model: str | None
+    """The requested model behind most of the work, or None if none was recorded."""
+    tokens_by_model: dict[str, int]
+    tokens_by_requested_model: dict[str, int]
     started_at: datetime | None
     last_observation: datetime | None
     workspace_id: str | None
@@ -170,8 +234,7 @@ class _PageRows:
 
 def _row_sdk_cost(row: asyncpg.Record) -> Decimal | None:
     """The harness-reported cost for a row, when it has one."""
-    raw = row.get("sdk_cost")
-    return None if raw is None else Decimal(str(raw))
+    return parse_vendor_cost(row.get("sdk_cost"))
 
 
 def _pick_primary_model(token_totals_by_model: dict[str, int]) -> str | None:
@@ -181,11 +244,10 @@ def _pick_primary_model(token_totals_by_model: dict[str, int]) -> str | None:
     so one has to be chosen. Most tokens wins, ties broken by name so the answer
     is stable across queries. The previous ``MAX(data->>'model')`` picked
     whichever id sorted last, which is arbitrary and, worse, was ALSO used to
-    price the whole session.
+    price the whole session. Only OBSERVED models are ever passed in: an alias
+    or the unknown bucket is not a claim about what ran (ADR-067).
     """
-    if not token_totals_by_model:
-        return None
-    return max(token_totals_by_model.items(), key=lambda kv: (kv[1], kv[0]))[0]
+    return pick_primary_model(token_totals_by_model)
 
 
 def _min_time(current: datetime | None, candidate: datetime | None) -> datetime | None:
@@ -212,7 +274,10 @@ class _SessionAccumulator:
     cache_read: int = 0
     total_cost: Decimal = Decimal("0")
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
+    #: Tokens per OBSERVED model. Groups whose model was never reported are
+    #: deliberately absent, so the primary model is always one that ran.
     tokens_by_model: dict[str, int] = field(default_factory=dict)
+    tokens_by_requested_model: dict[str, int] = field(default_factory=dict)
     unpriced_observation_count: int = 0
     started_at: datetime | None = None
     last_observation: datetime | None = None
@@ -221,7 +286,7 @@ class _SessionAccumulator:
     phase_id: str | None = None
     rows_seen: int = 0
 
-    def add_tokens(self, row: asyncpg.Record, model: str | None) -> _GroupTokens:
+    def add_tokens(self, row: asyncpg.Record, model: RecordedModel) -> _GroupTokens:
         """Fold one group's tokens and metadata in; returns that group's tokens."""
         group = _GroupTokens(*_extract_tokens(row))
         self.input_tokens += group.input_tokens
@@ -233,16 +298,26 @@ class _SessionAccumulator:
         self.workspace_id = self.workspace_id or row.get("workspace_id")
         self.execution_id = self.execution_id or row.get("execution_id")
         self.phase_id = self.phase_id or row.get("phase_id")
-        if model:
-            self.tokens_by_model[model] = self.tokens_by_model.get(model, 0) + group.total
+        if model.observed:
+            self.tokens_by_model[model.observed] = (
+                self.tokens_by_model.get(model.observed, 0) + group.total
+            )
+        if model.requested:
+            self.tokens_by_requested_model[model.requested] = (
+                self.tokens_by_requested_model.get(model.requested, 0) + group.total
+            )
         self.rows_seen += 1
         return group
 
-    def add_cost(self, model: str | None, cost: Decimal) -> None:
-        """Record a priced group's contribution to the total and the breakdown."""
+    def add_cost(self, model: RecordedModel, cost: Decimal) -> None:
+        """Record a priced group's contribution to the total and the breakdown.
+
+        Keyed by what RAN (``cost_key``): a group whose model was never
+        reported is filed under the unknown bucket, never under its alias.
+        """
         self.total_cost += cost
-        if model:
-            self.cost_by_model[model] = self.cost_by_model.get(model, Decimal("0")) + cost
+        key = model.cost_key
+        self.cost_by_model[key] = self.cost_by_model.get(key, Decimal("0")) + cost
 
     def to_totals(self) -> PricedSessionTotals:
         return PricedSessionTotals(
@@ -254,6 +329,9 @@ class _SessionAccumulator:
             cost_by_model=self.cost_by_model,
             unpriced_observation_count=self.unpriced_observation_count,
             primary_model=_pick_primary_model(self.tokens_by_model),
+            requested_model=pick_primary_model(self.tokens_by_requested_model),
+            tokens_by_model=dict(self.tokens_by_model),
+            tokens_by_requested_model=dict(self.tokens_by_requested_model),
             started_at=self.started_at,
             last_observation=self.last_observation,
             workspace_id=self.workspace_id,
@@ -301,6 +379,11 @@ def price_session_rows(
     contributes its tokens to the totals and its ``COUNT(*)`` to
     ``unpriced_observation_count``, but nothing to ``total_cost``.
 
+    "Its own model" is ``RecordedModel.pricing_model``: the reported model when
+    there is one, else the requested one, so a legacy alias-only row keeps the
+    cost it always had while its cost is filed under ``cost_key`` - the
+    reported id, or the unknown bucket - and never under the alias (ADR-067).
+
     Returns ``None`` when there is nothing to report, so callers keep their
     existing "no cost data" behaviour.
     """
@@ -308,9 +391,9 @@ def price_session_rows(
     for row in rows:
         if row["total_input"] is None and row.get("total_output") is None:
             continue
-        model = row.get("agent_model")
+        model = recorded_model_from_row(row, model_column="agent_model")
         group = acc.add_tokens(row, model)
-        cost = _price_one_group(row, group, model, cost_calculator, session_id)
+        cost = _price_one_group(row, group, model.pricing_model, cost_calculator, session_id)
         if cost is None:
             acc.unpriced_observation_count += _row_observation_count(row)
             continue
@@ -364,6 +447,7 @@ class TimescaleSessionCostQuery:
         started_at: datetime | None,
         completed_at: datetime | None,
         duration_ms: int | None,
+        summary: asyncpg.Record | None,
     ) -> SessionCost:
         """Assemble a SessionCost from priced, model-grouped totals.
 
@@ -373,6 +457,23 @@ class TimescaleSessionCostQuery:
         rather than asserted (issue #890). ``cost_by_model`` carries only the
         groups that were actually priced; an entry there claims that model cost
         that much.
+
+        ``compute_cost_usd``, ``tokens_by_tool`` and ``cost_by_tool_tokens``
+        are deliberately NOT assigned here, and are not assignable: a
+        ``tool_completed`` observation records ``{tool_name, tool_use_id,
+        success, output_preview}`` and a ``token_usage`` observation records no
+        tool, so no query over ``agent_events`` can attribute tokens to a tool,
+        and no compute rate table exists to price one. They keep their
+        ``SessionCost`` defaults and stay listed in ``unmeasured_fields``,
+        which is what stops the resulting zeroes from reading as measurements
+        (#1041).
+
+        ``summary`` is the authoritative ``session_summary`` row this was
+        priced from, or ``None`` when it fell back to ``token_usage``. It is
+        the only thing that can answer whether the session finished and how
+        many turns it took, and passing the row rather than two extra
+        arguments keeps those two answers from drifting apart: both are true
+        exactly when a summary exists.
         """
         sc = SessionCost(session_id=session_id)
         sc.input_tokens = totals.input_tokens
@@ -384,12 +485,22 @@ class TimescaleSessionCostQuery:
         sc.total_cost_usd = totals.total_cost
         sc.unpriced_observation_count = totals.unpriced_observation_count
         sc.cost_by_model = dict(totals.cost_by_model)
-        if totals.primary_model:
-            sc.agent_model = totals.primary_model
+        sc.agent_model = totals.primary_model
+        sc.requested_model = totals.requested_model
+        sc.tokens_by_model = dict(totals.tokens_by_model)
+        sc.tokens_by_requested_model = dict(totals.tokens_by_requested_model)
         sc.started_at = started_at
         sc.execution_id = totals.execution_id
         sc.phase_id = totals.phase_id
         sc.workspace_id = totals.workspace_id
+        if summary is not None:
+            # A summary row IS the session's completion record, so its presence
+            # is what "finalized" means on this path - the list path already
+            # read it that way and this one reported every finished session as
+            # still running.
+            sc.is_finalized = True
+            sc.turns = summary.get("num_turns") or 0
+            sc.record_measured(CostField.TURNS)
         if completed_at:
             sc.completed_at = completed_at
         if duration_ms is not None:
@@ -404,28 +515,43 @@ class TimescaleSessionCostQuery:
         two things that have to agree about pricing, and nothing would force
         them to.
         """
+        session_id = pg_safe(session_id)
         return (await self.calculate_many([session_id])).get(session_id)
 
     async def calculate_many(self, session_ids: Sequence[str]) -> dict[str, SessionCost]:
-        """Calculate cost for many sessions in a fixed number of round-trips.
+        """Calculate cost for many sessions, four round-trips per batch.
 
         Sessions with no cost data are absent from the result, exactly as
         ``calculate`` returns ``None`` for them. Order is not meaningful; the
-        caller indexes by session id.
+        caller indexes by session id - by the STORED id, which is what the
+        result is keyed by and what the rows carry.
+
+        agent_events holds every id in its stored (sanitised) form, because
+        AgentEvent's validator applies pg_safe on the way in. A read binds text
+        against those columns, so it has to ask for the same spelling or it
+        matches nothing and reports that as "nothing was recorded" (#1241).
+
+        ANY NUMBER OF IDS IS ACCEPTED; NO NUMBER OF IDS IS ONE QUERY. Ids are
+        taken ``MAX_SESSIONS_PER_QUERY`` at a time, so the size of each array
+        bound into the four queries is capped here rather than trusted to the
+        caller. Up to a full page that is the single batch it always was; past
+        it, the caller pays another four round-trips instead of handing the
+        database an array of unbounded length. See the comment on that
+        constant for why this layer is where the cap belongs.
         """
-        ids = list(dict.fromkeys(session_ids))
-        if not ids:
-            return {}
-        page = await self._fetch_page(ids)
+        ids = list(dict.fromkeys(pg_safe(sid) for sid in session_ids))
         results: dict[str, SessionCost] = {}
-        for sid in ids:
-            cost = self._cost_for(sid, page)
-            if cost is not None:
-                results[sid] = cost
+        for start in range(0, len(ids), MAX_SESSIONS_PER_QUERY):
+            batch = ids[start : start + MAX_SESSIONS_PER_QUERY]
+            page = await self._fetch_page(batch)
+            for sid in batch:
+                cost = self._cost_for(sid, page)
+                if cost is not None:
+                    results[sid] = cost
         return results
 
     async def _fetch_page(self, ids: list[str]) -> _PageRows:
-        """The four queries, once, for the whole page."""
+        """The three ``agent_events`` queries, once, plus the tool-call tally."""
         async with self._pool.acquire() as conn:
             summary_rows = await conn.fetch(_SESSION_SUMMARY_BATCH_QUERY, ids, SESSION_SUMMARY)
             summaries = {row["session_id"]: row for row in summary_rows}
@@ -443,10 +569,12 @@ class TimescaleSessionCostQuery:
                 ):
                     fallback.setdefault(row["session_id"], []).append(row)
 
-            tool_counts = {
-                row["session_id"]: row["cnt"]
-                for row in await conn.fetch(_COUNT_BATCH_QUERY, ids, TOOL_EXECUTION_COMPLETED)
-            }
+            # The tally, not a COUNT(*) over agent_events. Counting
+            # tool_execution_completed rows there meant decompressing every
+            # segment of every session on the page, because event_type is in
+            # neither compress_segmentby nor compress_orderby: 60,562 buffer
+            # hits and 905ms for sixteen sessions at 219,140 rows (#1322).
+            tool_counts = await tool_call_counts.by_session(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             started = {
                 row["session_id"]: row["started_at"]
                 for row in await conn.fetch(_MIN_TIME_BATCH_QUERY, ids, SESSION_STARTED)
@@ -475,4 +603,5 @@ class TimescaleSessionCostQuery:
             started_at=started_at,
             completed_at=completed_at,
             duration_ms=duration_ms,
+            summary=summary,
         )

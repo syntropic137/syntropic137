@@ -151,7 +151,7 @@ class MockAssistantMessage:
 - Portable: Can be shared across test modules
 - SDK-agnostic: Works even if SDK types aren't exported
 
-**Consider for agentic-primitives**: These mock patterns could become canonical test fixtures that all Syn137 packages share.
+**Consider for agentic-workspace** (moved from agentic-primitives, 2026-09): These mock patterns could become canonical test fixtures that all Syn137 packages share.
 
 ### Fast Development Mode (from event-sourcing-platform)
 
@@ -305,8 +305,8 @@ Key insight: The platform uses **persistent dev containers** for fast iteration,
 ## References
 
 - [pytest-testcontainers](https://github.com/testcontainers/testcontainers-python)
-- [event-sourcing-platform testing docs](lib/event-sourcing-platform/docs-site/docs/development/fast-testing.md)
-- [agentic-primitives TDD ADR](lib/agentic-primitives/docs/adrs/008-test-driven-development.md)
+- [event-sourcing-platform testing docs](../../lib/event-sourcing-platform/docs-site/docs/development/fast-testing.md)
+- [agentic-primitives TDD ADR](../../lib/agentic-primitives/docs/adrs/008-test-driven-development.md)
 - ADR-004: Environment Configuration
 - ADR-006: Event Sourcing with EventStoreDB
 - ADR-018: Commands vs Observations Event Architecture

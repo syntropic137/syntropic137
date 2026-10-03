@@ -32,7 +32,7 @@ CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every p
 - `uv.lock` — Python workspace
 - `pnpm-lock.yaml` — Node.js workspace (root, shared across all pnpm apps)
 
-**Rollout:** OSV runs in warn mode (`continue-on-error: true`) until a clean baseline is established, then switches to blocking. See `TODO(#259)` in `ci.yml`.
+**Enforcement:** OSV is a blocking CI job. A reported vulnerability fails the pull request gate.
 
 ### npm/pnpm install hygiene
 
@@ -59,10 +59,14 @@ The `onlyBuiltDependencies` approach for pnpm is preferred over blanket `--ignor
 
 ## Credential Management
 
-Secrets are managed via **1Password** and injected at runtime through environment variables. They are never hardcoded or committed.
+Secrets are managed via **1Password** and injected at runtime through environment
+variables or Docker secret files. Database and Redis passwords and the GitHub App
+private key use files under `/run/secrets` in the self-host stack. Secret values
+are never hardcoded or committed.
 
 - API keys and tokens live in 1Password vaults
 - `.op-save-secrets.sh` (gitignored) handles local secret injection
+- `docker/secrets/` supplies file-backed secrets to containers and is gitignored
 - CI secrets are stored as GitHub Actions secrets scoped to this repository
 
 **Rotation:** All tokens should have an expiry date. Rotate on any suspected exposure.
@@ -187,7 +191,7 @@ Everything else (images, volumes, secrets, swarm, system, plugins) is blocked by
 - [ ] Pre-commit secret gate (`gitleaks`) — ISS-259
 - [x] `dependency-review-action` — added; warn-only until repo goes public (requires GitHub Advanced Security, free for public repos)
 - [ ] Dependabot for Actions + npm — ISS-259
-- [ ] OSV Scanner switched to blocking mode (after baseline) — ISS-259 `TODO(#259)`
+- [x] OSV Scanner switched to blocking mode
 - [ ] CodeQL SAST — post-launch
 - [ ] Container scanning (Docker Scout) — post-launch
 - [ ] gitleaks CI secret scanning — ISS-259

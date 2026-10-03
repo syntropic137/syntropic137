@@ -1,16 +1,17 @@
 import { Terminal } from 'lucide-react'
 
 import { Card, CardContent, CardHeader } from '../../components'
-import type { InputDeclaration } from '../../types'
+import type { InputDeclaration, PhaseDefinition } from '../../types'
 import { WorkflowExecutionForm } from './WorkflowExecutionForm'
 
 interface KickoffCardProps {
   workflowId: string
   declarations: InputDeclaration[]
+  phases: PhaseDefinition[]
   onExecutionStarted?: () => void
 }
 
-export function KickoffCard({ workflowId, declarations, onExecutionStarted }: KickoffCardProps) {
+export function KickoffCard({ workflowId, declarations, phases, onExecutionStarted }: KickoffCardProps) {
   return (
     <Card>
       <CardHeader title="Kickoff Execution" subtitle="Start a new workflow run" />
@@ -32,6 +33,7 @@ export function KickoffCard({ workflowId, declarations, onExecutionStarted }: Ki
         <WorkflowExecutionForm
           workflowId={workflowId}
           declarations={declarations}
+          phases={phases}
           onExecutionStarted={onExecutionStarted}
           layout="stacked"
         />

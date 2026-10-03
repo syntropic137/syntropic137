@@ -153,6 +153,11 @@ class LocalStorage:
             content_type: MIME type (not used for local storage).
             metadata: Custom metadata (not used for local storage).
 
+        No readability confirmation, unlike the MinIO adapter (#700), and that
+        is not an omission: a closed write on a POSIX filesystem is visible to
+        the next open() on the same host, so there is no window to wait out and
+        a re-read would only prove the page cache works.
+
         Returns:
             UploadResult with key and size.
         """

@@ -135,7 +135,9 @@ async def _fail_a_phase(error: Exception, writer: _RecordingWriter) -> None:
     # Reaching into the private failure path deliberately: it is the code
     # under test, and it has no public entry point that does not also run a
     # whole workflow.
-    processor._runtime.begin("verify", session_manager=manager, started_at=datetime.now(UTC))
+    processor._runtimes.of("exec-1").begin(
+        "verify", session_manager=manager, started_at=datetime.now(UTC)
+    )
 
     await processor._fail_execution(
         error=error,
@@ -242,7 +244,9 @@ async def test_every_record_of_the_failure_says_the_same_thing() -> None:
     # A recorded start is what makes a PhaseResult exist at all; without it
     # `failed_phase_outcome` correctly returns none and this test would assert
     # over an empty list.
-    processor._runtime.begin("verify", session_manager=manager, started_at=datetime.now(UTC))
+    processor._runtimes.of("exec-1").begin(
+        "verify", session_manager=manager, started_at=datetime.now(UTC)
+    )
     aggregate = MagicMock()
 
     result = await processor._fail_execution(

@@ -49,6 +49,8 @@ class InMemoryFeedbackStorage(FeedbackStorageProtocol):
             "css_selector": data.css_selector,
             "xpath": data.xpath,
             "component_name": data.component_name,
+            "subject_kind": data.subject_kind,
+            "subject_id": data.subject_id,
             "feedback_type": data.feedback_type,
             "comment": data.comment,
             "status": "open",
@@ -98,6 +100,11 @@ class InMemoryFeedbackStorage(FeedbackStorageProtocol):
         feedback_type: str | None = None,
         priority: str | None = None,
         app_name: str | None = None,
+        route: str | None = None,
+        subject_kind: str | None = None,
+        subject_id: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         search: str | None = None,
         page: int = 1,
         page_size: int = 50,
@@ -116,6 +123,16 @@ class InMemoryFeedbackStorage(FeedbackStorageProtocol):
             items = [i for i in items if i["priority"] == priority]
         if app_name:
             items = [i for i in items if i["app_name"] == app_name]
+        if route:
+            items = [i for i in items if i["route"] == route]
+        if subject_kind:
+            items = [i for i in items if i["subject_kind"] == subject_kind]
+        if subject_id:
+            items = [i for i in items if i["subject_id"] == subject_id]
+        if created_after:
+            items = [i for i in items if i["created_at"] >= created_after]
+        if created_before:
+            items = [i for i in items if i["created_at"] < created_before]
         if search:
             items = [i for i in items if search.lower() in (i["comment"] or "").lower()]
 

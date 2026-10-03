@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getArtifact } from '../api/artifacts'
 import { getExecution } from '../api/executions'
+import { ifStillWanted } from './serialRefreshLoop'
 import { useExecutionStream } from './useExecutionStream'
 import { useLiveTimer } from './useLiveTimer'
-import { useRefetchWhileRunning } from './useRefetchWhileRunning'
+import { RUNNING_POLL_INTERVAL_MS, useSerialRefresh } from './useSerialRefresh'
 import type { ArtifactResponse, ExecutionDetailResponse } from '../types'
 import { SSE_EVENTS } from '../types'
 import { isTerminalExecutionStatus } from '../utils/terminalStatus'
@@ -56,37 +57,47 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
   const isRunning = execution?.status === 'running'
   const now = useLiveTimer(isRunning)
 
-  const refreshExecution = useCallback(() => {
-    if (!executionId) return
-    getExecution(executionId)
-      .then((exec) => {
-        setExecution(exec)
-        // A poll that succeeds clears the last one's failure. Without this the
-        // first transient 502 in a run latched `error` for the life of the
-        // page, and the detail view rendered "Execution not found" on top of
-        // execution data that was still refreshing underneath it (#1048).
-        setError(null)
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false))
-  }, [executionId])
+  // `signal` aborts when the execution being viewed changes, and all three
+  // handlers are wrapped because all three would otherwise describe the
+  // PREVIOUS execution: its data under this one's id, its failure, or a settled
+  // state that belongs to a request this view is no longer waiting on.
+  const fetchExecution = useCallback(
+    (signal: AbortSignal): Promise<void> => {
+      if (!executionId) return Promise.resolve()
+      return getExecution(executionId, signal)
+        .then(
+          ifStillWanted(signal, (exec: ExecutionDetailResponse) => {
+            setExecution(exec)
+            // A poll that succeeds clears the last one's failure. Without this the
+            // first transient 502 in a run latched `error` for the life of the
+            // page, and the detail view rendered "Execution not found" on top of
+            // execution data that was still refreshing underneath it (#1048).
+            setError(null)
+          }),
+        )
+        .catch(ifStillWanted(signal, (err: Error) => setError(err.message)))
+        .finally(ifStillWanted<void>(signal, () => setLoading(false)))
+    },
+    [executionId],
+  )
+
+  // SSE only fires on lifecycle transitions; tokens/cost/duration update
+  // continuously, so poll while non-terminal (#1048) - but never on top of a
+  // request that has not come back yet (#1095).
+  const { refetch: refreshExecution } = useSerialRefresh({
+    fetch: fetchExecution,
+    pollIntervalMs:
+      execution && !isTerminalExecution(execution) ? RUNNING_POLL_INTERVAL_MS : null,
+  })
 
   useEffect(() => {
     refreshExecution()
-  }, [refreshExecution])
+  }, [refreshExecution, fetchExecution])
 
   const { isConnected } = useExecutionStream(executionId, {
     onEvent: (event) => {
       if (isRefreshEvent(event)) refreshExecution()
     },
-  })
-
-  // SSE only fires on lifecycle transitions; tokens/cost/duration update
-  // continuously, so poll while non-terminal (#1048).
-  useRefetchWhileRunning({
-    items: execution ? [execution] : [],
-    isTerminal: isTerminalExecution,
-    refetch: refreshExecution,
   })
 
   useEffect(() => {

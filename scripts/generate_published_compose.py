@@ -125,6 +125,20 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
     return result
 
 
+def _merge_volume_mounts(base: list[str], overlay: list[str]) -> list[str]:
+    """Compose short-form mounts merge by container target, not by whole list."""
+    by_target: dict[str, str] = {}
+    for mount in (*base, *overlay):
+        if not isinstance(mount, str):
+            raise ValueError("published compose currently requires short-form volume mounts")
+        parts = mount.split(":")
+        if len(parts) > 3:
+            raise ValueError("unsupported published volume mount syntax")
+        target = parts[1] if len(parts) > 1 else parts[0]
+        by_target[target] = mount
+    return list(by_target.values())
+
+
 def _merge_service(base_svc: dict, overlay_svc: dict) -> dict:
     """Merge a base service with its overlay, normalizing environment."""
     base_env = _env_to_dict(base_svc.get("environment"))
@@ -137,6 +151,9 @@ def _merge_service(base_svc: dict, overlay_svc: dict) -> dict:
     if merged_env:
         merged["environment"] = merged_env
 
+    volumes = _merge_volume_mounts(base_svc.get("volumes", []), overlay_svc.get("volumes", []))
+    if volumes:
+        merged["volumes"] = volumes
     return merged
 
 
@@ -399,8 +416,8 @@ def generate() -> dict:
     merged_nets = {**selfhost_nets, **base_nets}
     # selfhost networks first, then base (agent-net)
 
-    # Volumes from selfhost
-    volumes = selfhost.get("volumes", {}) or {}
+    # Named volumes inherit from the base just like service mounts.
+    volumes = {**(base.get("volumes", {}) or {}), **(selfhost.get("volumes", {}) or {})}
 
     return {
         "name": "syntropic137_selfhost",

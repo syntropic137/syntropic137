@@ -6,13 +6,14 @@
 
 import type {
   ArtifactDetail,
-  ArtifactSummary,
+  ArtifactListResponse,
   ControlResponse,
   ExecutionCost,
   ExecutionDetail,
   ExecutionListResponse,
   ExecuteWorkflowResponse,
   MetricsResponse,
+  ResumeResponse,
   SessionDetail,
   TriggerCreateResponse,
   TriggerListResponse,
@@ -135,20 +136,13 @@ export const executionDetail: ExecutionDetail = {
   error_message: null,
 };
 
-export const controlPause: ControlResponse = {
-  success: true,
-  execution_id: "exec-abc-123",
-  state: "paused",
-  message: "Execution paused",
-  error: null,
-};
-
-export const controlResume: ControlResponse = {
-  success: true,
-  execution_id: "exec-abc-123",
-  state: "running",
-  message: "Execution resumed",
-  error: null,
+export const resumeCreated: ResumeResponse = {
+  parent_execution_id: "exec-abc-123",
+  execution_id: "exec-def-456",
+  resume_phase_id: "implement",
+  inherited_phase_ids: ["research", "plan"],
+  cancellation_overridden: false,
+  external_effects_acknowledged: false,
 };
 
 export const controlCancel: ControlResponse = {
@@ -269,17 +263,29 @@ export const metricsResponse: MetricsResponse = {
   phases: [],
 };
 
-export const artifactList: ArtifactSummary[] = [
-  {
-    id: "art-001",
-    workflow_id: "wf-issue-001",
-    phase_id: "phase-analyze",
-    artifact_type: "analysis",
-    title: "Issue Analysis Report",
-    size_bytes: 4096,
-    created_at: "2026-03-16T12:02:00Z",
-  },
-];
+export const artifactList: ArtifactListResponse = {
+  artifacts: [
+    {
+      id: "art-001",
+      workflow_id: "wf-issue-001",
+      phase_id: "phase-analyze",
+      artifact_type: "analysis",
+      title: "Issue Analysis Report",
+      size_bytes: 4096,
+      created_at: "2026-03-16T12:02:00Z",
+    },
+  ],
+  total: 1,
+  page: 1,
+  page_size: 20,
+};
+
+export const artifactListPaged: ArtifactListResponse = {
+  artifacts: artifactList.artifacts,
+  total: 137,
+  page: 2,
+  page_size: 50,
+};
 
 export const artifactDetail: ArtifactDetail = {
   id: "art-001",

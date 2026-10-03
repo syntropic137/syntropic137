@@ -163,7 +163,7 @@ class TestIdentity:
 
     def test_differing_source_with_same_name_and_version_is_different(self) -> None:
         a = SkillRef.model_validate("upstream/skills/foo@v1")
-        b = SkillRef.model_validate("fork/skills/foo@v1")
+        b = SkillRef.model_validate("downstream/skills/foo@v1")
         assert a != b
         assert len({a, b}) == 2
 

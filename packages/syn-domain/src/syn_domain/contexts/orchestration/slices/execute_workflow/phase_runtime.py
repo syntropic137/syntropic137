@@ -23,11 +23,12 @@ what makes the drift unrepresentable.
 WHAT THIS DOES NOT DECIDE. It never talks to the aggregate, builds a command,
 or judges whether a phase succeeded. It is asked to hold, to hand back, and to
 let go - the caller decides when, and the ORDER in which it decides is
-load-bearing on two paths that are documented at their call sites rather than
-here: the unpushed-work guard must run before anything is popped (#1184), and a
-failing phase's branches must be read before teardown (#1200). Those orderings
-stay in the processor precisely so a reader of the completion path can see them
-without opening this file.
+load-bearing on three paths that are documented at their call sites rather
+than here: the unpushed-work guard must run before anything is popped (#1184),
+a failing phase's branches must be read before teardown (#1200), and a dying
+phase's work must be pushed out of its container before that same teardown
+(#1231). Those orderings stay in the processor precisely so a reader of any one
+path can see them without opening this file.
 """
 
 from __future__ import annotations
@@ -36,13 +37,25 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.artifacts import AgentIdentity
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    PhaseUsage,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.branch_observation import (
+    PhaseStartingPoints,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    SavedWork,
+    describe_observed_branches,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
     remember_leader_native_id,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    PhaseStartingPoints,
+    rehearse_quarantine_credential,
+    save_unpushed_work,
 )
 
 if TYPE_CHECKING:
@@ -118,8 +131,100 @@ class PhaseTimings:
     session_ids: Mapping[str, str]
 
 
+class PhaseRuntimes:
+    """One `PhaseRuntime` per execution, for a processor that serves many.
+
+    WHY THE KEY LIVES HERE AND NOT INSIDE. A run has one `implement`, so phase
+    id is the whole key any single run needs. What a run does not have is one
+    `implement` ACROSS runs: a workflow names its own phases, so every run of
+    it names them identically. For as long as one `PhaseRuntime` was shared by
+    every concurrent dispatch, each of its maps had two writers and one slot -
+    the second run to provision took the first run's workspace, env, command
+    line and session out from under it, and whichever run finalised first
+    popped the single shared entry and left the other launching into a
+    `KeyError`. That is #1311, and it is the same defect `_said` was in #1256,
+    where run A recovered its deliverable from run B's report and reported a
+    success in place of its own failure.
+
+    Keying every map by `(execution_id, phase_id)` would have answered the
+    question. Handing each run its own object REMOVES it: there is no longer a
+    slot two runs could both write, so a crossing is not something the code
+    avoids, it is something it cannot express. `finalize` and `abandon_all`,
+    which are handed no execution id at all and clear everything they can
+    reach, become correct for the same reason rather than by being taught a
+    new parameter - and one failing run tearing down a healthy one's
+    containers stops being reachable.
+
+    WHAT THE CALLER GETS TO NOT KNOW: that there is more than one runtime,
+    when a run's is built, and when it is thrown away. It asks for the runtime
+    of the execution it is already holding an id for and is handed a runtime
+    that is only ever that run's.
+    """
+
+    def __init__(
+        self,
+        *,
+        capture_port: SessionCapturePort | None,
+        session_store: SessionStorePort | None,
+        writer: ObservabilityRecorder | None,
+        ledger: ImportLedgerPort | None,
+    ) -> None:
+        self._capture_port = capture_port
+        self._session_store = session_store
+        self._writer = writer
+        self._ledger = ledger
+        self._by_execution: dict[str, PhaseRuntime] = {}
+
+    def of(self, execution_id: str) -> PhaseRuntime:
+        """This run's runtime, built on first use.
+
+        Built on demand rather than at the start of `run()` because the
+        processor reaches for it from every dispatch path and from both
+        terminal paths, and a run that fails before it ever provisioned still
+        asks - for the counts it is on its way out to report. An empty runtime
+        answers that correctly; a missing one would make every caller handle an
+        absence that means nothing.
+        """
+        runtime = self._by_execution.get(execution_id)
+        if runtime is None:
+            runtime = PhaseRuntime(
+                capture_port=self._capture_port,
+                session_store=self._session_store,
+                writer=self._writer,
+                ledger=self._ledger,
+            )
+            self._by_execution[execution_id] = runtime
+        return runtime
+
+    @property
+    def is_idle(self) -> bool:
+        """True when no run is still held - what a drained processor looks like.
+
+        The registry's own postcondition, and the one `PhaseRuntime.is_idle`
+        cannot state: a runtime that let go of everything is still a runtime
+        this object is keeping alive for a run that ended.
+        """
+        return not self._by_execution
+
+    def release(self, execution_id: str) -> None:
+        """Let go of a finished run's runtime.
+
+        The processor outlives every run it dispatches, so without this the
+        registry is a leak with one entry per execution for the life of the
+        process - holding, at worst, a workspace handle belonging to a run that
+        ended hours ago. Called from `run()`'s `finally`, so it happens on
+        every way out including the ones that raise.
+        """
+        self._by_execution.pop(execution_id, None)
+
+
 class PhaseRuntime:
-    """The workspaces, sessions and tallies of the phases currently running."""
+    """The workspaces, sessions and tallies of ONE execution's running phases.
+
+    One of these per execution, vended by `PhaseRuntimes`. Everything below is
+    keyed by phase id alone and that is now the whole key, because the only
+    phases this object ever sees are one run's.
+    """
 
     def __init__(
         self,
@@ -151,17 +256,70 @@ class PhaseRuntime:
         #: The id each phase's own harness announced on its stream, which is
         #: what the delegate import subtracts from the sweep.
         #:
-        #: Keyed by (execution_id, phase_id), NOT phase_id alone. The processor
-        #: that owns this runtime is shared across concurrent dispatches, so two
-        #: runs of the same workflow share a phase id. A phase-only key lets one
-        #: run read the OTHER run's leader, and a leader id absent from this
-        #: run's sweep takes the refusal path: no delegate imported, only a log
-        #: line. Popped on success so a completed phase leaves nothing behind.
+        #: Keyed by (execution_id, phase_id). Since #1311 one runtime serves
+        #: one execution, so the phase id alone would now be a whole key and
+        #: this pair is belt and braces. It is kept because `record_agent_run`
+        #: is handed the execution id anyway and the pair costs nothing, and
+        #: because the failure it guards is silent: a leader id read from the
+        #: wrong run is absent from this run's sweep, which takes the refusal
+        #: path - no delegate imported, only a log line.
+        #: Popped on success so a completed phase leaves nothing behind.
         self._leader_native_ids: dict[tuple[str, str], str] = {}
         self._tokens: dict[str, TokenAccumulator] = {}
-        self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
+        #: What each phase spent, in input/output/cache-creation/cache-read
+        #: order, as `FinalUsage.resolve` settled it: the harness's own terminal
+        #: totals when it reported them, and the deltas observed while it ran
+        #: when it was killed before reporting. So "auth" is the USUAL case, not
+        #: the only one - a timed-out phase's entry is an estimate, and that
+        #: estimate is the whole of what is known about what it cost (#1262).
+        #:
+        #: Written by `record_agent_run`, which runs BEFORE the exit-status
+        #: check that fails the phase, so an entry exists here for every phase
+        #: whose agent ran at all - including every one that then died.
+        #:
+        #: Keyed by (execution_id, phase_id), for the reason `_leader_native_ids`
+        #: above is, and kept for one more: what it guards is worse than a
+        #: wrong leader. These counts are the whole basis for telling a stalled
+        #: phase from one that needed a bigger budget (#1262), and a number
+        #: attributed to the wrong execution reads as measurement. The pair is
+        #: what #1332's regression tests pin, and #1311 making it redundant is
+        #: not a reason to take a second lock off a number nobody can audit.
+        #:
+        #: TAKEN, never merely read: `harvest` pops the entry on the success
+        #: path and `usage_for` pops it on the failure path, which between them
+        #: are every way a phase ends. `abandon_all` clears nothing here on
+        #: purpose - it runs AFTER `usage_for` on the failure path, so clearing
+        #: it there would erase the counts the run is on its way out to report.
+        self._auth_tokens: dict[tuple[str, str], tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
-        self._said: dict[str, str] = {}  # last agent message, for #1195 recovery
+        #: The model each phase's harness announced on its own stream (#1284).
+        #: Held here rather than re-read at collection time because the stream
+        #: is gone by then; absent means the harness announced nothing.
+        #:
+        #: Keyed by phase id alone, which is now the whole key: #1311 gave each
+        #: execution its own runtime, so the only phases this map can ever see
+        #: are one run's. Two concurrent runs of the same workflow no longer
+        #: overwrite each other here.
+        #:
+        #: A RESTART still loses it, which #1311 did not address and this is
+        #: the right place to keep saying so: the object is process-local by
+        #: construction. That is the second of the two hazards that moved
+        #: `last_agent_message` onto the event stream in #1300, and the fix for
+        #: it is the same - put the announced model in the record, not in the
+        #: processor. Tracked under #865, which needs it for other reasons.
+        self._announced_models: dict[str, str] = {}
+        #: What each phase's definition declares about repository changes,
+        #: recorded when its workspace is attached because that is the only
+        #: frame that has both (#1231). Read by `save_unpushed_work` on the
+        #: terminal paths, which are handed a phase id and no definition.
+        #:
+        #: Written by `attach_workspace` in the same breath as the workspace, so
+        #: a phase that HAS a container has an entry here. The reader still
+        #: needs a value for the gap that cannot happen, and takes the strict
+        #: one (True): judging a workspace strictly saves work that might not
+        #: have been the phase's, and judging it leniently drops work that was.
+        #: Only the second is unrecoverable, so the default goes the other way.
+        self._delivers_repo_changes: dict[str, bool] = {}
         self._started_at: dict[str, datetime] = {}
 
     # ── while a phase is being provisioned ────────────────────────────────
@@ -185,12 +343,28 @@ class PhaseRuntime:
         workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
         agent_env: dict[str, str],
         claude_cmd: list[str],
+        delivers_repo_changes: bool,
     ) -> None:
-        """Hold the container this phase will run in, and how to close it again."""
+        """Hold the container this phase will run in, and how to close it again.
+
+        ``delivers_repo_changes`` is the phase's own declaration, taken HERE
+        because this is the moment the workspace it describes starts existing,
+        and because the paths that need it later have no phase definition to
+        ask: `_fail_execution` and `_cancel_execution` are handed an exception
+        and a phase id (#1231). Recording it beside the container is what lets
+        `save_unpushed_work` below judge a dying workspace by exactly the rule
+        the completion gate judges a finishing one by, without either caller
+        having to know the rule exists.
+
+        Required rather than defaulted, for the reason it is required on
+        `refuse_to_complete_unsaved_phase`: a hop that forgot it would silently
+        restore #1308, and a default would make forgetting invisible.
+        """
         self._workspaces[phase_id] = workspace
         self._workspace_cms[phase_id] = workspace_cm
         self._envs[phase_id] = agent_env
         self._cmds[phase_id] = claude_cmd
+        self._delivers_repo_changes[phase_id] = delivers_repo_changes
 
     async def record_starting_point(self, phase_id: str) -> None:
         """Read where this phase's repositories stand, before its agent runs.
@@ -203,6 +377,30 @@ class PhaseRuntime:
         workspace = self._workspaces.get(phase_id)
         if workspace is not None:
             await self._starting_points.record(phase_id, workspace)
+
+    async def rehearse_quarantine_credential(self, phase_id: str, *, execution_id: str) -> None:
+        """Prove this phase can reach origin with a credential, before it runs (#1393).
+
+        The other step here whose timing is a domain decision, and for the
+        mirror-image reason to `record_starting_point`'s: the quarantine push
+        happens once, at teardown, so the only moment its credential can be
+        TESTED without something riding on it is before the agent starts.
+
+        Named for what it establishes and not for the quarantine path as a
+        whole (#1396): the dry run it makes never reaches the remote's update
+        checks, so server-side acceptance of ``refs/syn/lost`` is not among
+        the things a green rehearsal has shown.
+
+        Raises:
+            QuarantinePathUnusableError: it could not, so the phase does not
+                run. See `rehearse_quarantine_credential` in the guard for why
+                that is the better of two bad trades.
+        """
+        workspace = self._workspaces.get(phase_id)
+        if workspace is not None:
+            await rehearse_quarantine_credential(
+                workspace, execution_id=execution_id, phase_id=phase_id
+            )
 
     # ── while its agent runs ──────────────────────────────────────────────
 
@@ -229,26 +427,57 @@ class PhaseRuntime:
         """Note the id this phase's own harness announced, for the delegate sweep."""
         remember_leader_native_id(self._leader_native_ids, (execution_id, phase_id), stream_result)
 
-    def record_agent_run(self, phase_id: str, result: AgentExecutionResult) -> None:
+    def record_agent_run(
+        self,
+        phase_id: str,
+        *,
+        execution_id: str,
+        result: AgentExecutionResult,
+    ) -> None:
         """Keep what the agent produced until the phase reports or dies."""
         self._tokens[phase_id] = result.tokens
-        self._said[phase_id] = result.stream_result.last_agent_message or ""
+        # What the agent SAID is deliberately not held here. It is the salvage
+        # input (#1195, #1300) and is read by a LATER to-do item, so anything
+        # this object remembers about it is lost to a restart in between. It
+        # rides `AgentExecutionCompletedCommand` onto the event stream instead
+        # and is read back off the aggregate.
+        announced = result.stream_result.announced_model
+        if announced is not None:
+            self._announced_models[phase_id] = announced
+            # So a session that later closes as failed or cancelled names the
+            # model that ran rather than only the one requested (ADR-067).
+            session_mgr = self._session_managers.get(phase_id)
+            if session_mgr is not None:
+                session_mgr.note_observed_model(announced)
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
-        self._auth_tokens[phase_id] = (
-            result.command.input_tokens,
-            result.command.output_tokens,
-            result.command.cache_creation_tokens,
-            result.command.cache_read_tokens,
+        # From the resolved usage rather than the completion command, because a
+        # cancelled run has no command and still spent what it spent (#1341).
+        prior = self._auth_tokens.get((execution_id, phase_id), (0, 0, 0, 0))
+        self._auth_tokens[execution_id, phase_id] = (
+            prior[0] + result.usage.input_tokens,
+            prior[1] + result.usage.output_tokens,
+            prior[2] + result.usage.cache_creation,
+            prior[3] + result.usage.cache_read,
         )
 
     def workspace_for(self, phase_id: str) -> ManagedWorkspace | None:
         """This phase's workspace, or None once it has been finalised."""
         return self._workspaces.get(phase_id)
 
-    def take_last_message(self, phase_id: str) -> str | None:
-        """What the agent said last, read once and forgotten (#1195)."""
-        return self._said.pop(phase_id, None)
+    def agent_for(self, phase_id: str, *, provider: str | None) -> AgentIdentity:
+        """Who ran this phase: the harness launched, and the model it announced.
+
+        ``provider`` is the caller's because the platform CHOSE it - it picked
+        the binary and started it, so there is no observation to make. The
+        model is this runtime's because only the stream ever said it, and the
+        stream is gone by the time artifacts are collected.
+
+        A phase whose harness announced nothing yields a None model rather than
+        the configured one. That is the point: the requested model wearing the
+        name of the one that ran would read as proof and not be any (#1284).
+        """
+        return AgentIdentity(provider=provider, model=self._announced_models.get(phase_id))
 
     def record_artifacts(self, phase_id: str, artifact_ids: list[str]) -> None:
         """Hold what this phase collected until it reports."""
@@ -265,13 +494,20 @@ class PhaseRuntime:
         """
         return self._workspaces
 
-    def harvest(self, phase_id: str) -> PhaseHarvest:
-        """Take everything a completing phase accumulated, and stop holding it."""
+    def harvest(self, execution_id: str, phase_id: str) -> PhaseHarvest:
+        """Take everything a completing phase accumulated, and stop holding it.
+
+        ``execution_id`` names WHOSE phase this is. Since #1311 this runtime
+        holds one execution's phases and nothing else, so it can only ever be
+        this run's - it comes off the caller's to-do item, which is the run
+        doing the completing. It stays in the key because `_auth_tokens` keeps
+        its pair; see that field for why.
+        """
         self._tokens.pop(phase_id, None)
         return PhaseHarvest(
             started_at=self._started_at.pop(phase_id, datetime.now(UTC)),
             artifact_ids=self._artifact_ids.pop(phase_id, []),
-            auth_tokens=self._auth_tokens.pop(phase_id, None),
+            auth_tokens=self._auth_tokens.pop((execution_id, phase_id), None),
         )
 
     async def finalize(
@@ -303,6 +539,7 @@ class PhaseRuntime:
         session_id = self._session_ids.pop(phase_id, "")
         self._envs.pop(phase_id, None)
         self._cmds.pop(phase_id, None)
+        self._announced_models.pop(phase_id, None)
         workspace_cm = self._workspace_cms.pop(phase_id, None)
 
         # BEFORE teardown: once the container is gone so is the spool, and a
@@ -321,6 +558,37 @@ class PhaseRuntime:
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
 
+    async def abandon_phase(self, execution_id: str, phase_id: str, *, reason: str) -> None:
+        """Release one failed attempt while retaining its authoritative usage."""
+        session_mgr = self._session_managers.pop(phase_id, None)
+        if session_mgr is not None:
+            await session_mgr.complete_failure(error_message=reason)
+
+        workspace = self._workspaces.pop(phase_id, None)
+        self._starting_points.forget(phase_id)
+        session_id = self._session_ids.pop(phase_id, "")
+        self._envs.pop(phase_id, None)
+        self._cmds.pop(phase_id, None)
+        self._announced_models.pop(phase_id, None)
+        self._tokens.pop(phase_id, None)
+        self._artifact_ids.pop(phase_id, None)
+        self._started_at.pop(phase_id, None)
+        workspace_cm = self._workspace_cms.pop(phase_id, None)
+
+        await capture_and_import_phase(
+            self._capture_port,
+            workspace,
+            session_store=self._session_store,
+            writer=self._writer,
+            leader_native_ids=self._leader_native_ids,
+            session_id=session_id,
+            phase_id=phase_id,
+            ledger=self._ledger,
+        )
+        self._leader_native_ids.pop((execution_id, phase_id), None)
+        if workspace_cm is not None:
+            await workspace_cm.__aexit__(None, None, None)
+
     # ── when the execution ends ───────────────────────────────────────────
 
     def timings(self) -> PhaseTimings:
@@ -331,9 +599,83 @@ class PhaseRuntime:
         """
         return PhaseTimings(started_at=dict(self._started_at), session_ids=dict(self._session_ids))
 
+    def usage_for(self, execution_id: str, phase_id: str | None) -> PhaseUsage:
+        """What THIS run's phase had spent, for a caller about to report it.
+
+        ``execution_id`` is half the key `_auth_tokens` is written under. Since
+        #1311 this runtime holds one execution's phases, so it can only be this
+        run's; the caller always has it - it is the failing run's own - and the
+        pair is kept for the reason given on that field.
+
+        TAKES the entry rather than reading it, the way `harvest` does on the
+        success path. Between them those are every way a phase ends, so nothing
+        is left behind for a processor that outlives the run - and since the
+        failure path never harvests, a read that left the entry in place would
+        make this map grow for the life of the process. One read per phase is
+        what the counts are for: this is the last frame in which anything can
+        ask (#1262).
+
+        MUST still be called before the caller's first await on a terminal path,
+        for the reason `timings` must be. A frozen `PhaseUsage` rather than the
+        live accumulator is what makes that a snapshot instead of a promise.
+
+        Zeros for a phase whose agent never ran - it spent nothing, and there is
+        no "unknown" to distinguish; see `PhaseUsage`.
+        """
+        inp, out, cache_creation, cache_read = self._auth_tokens.pop(
+            (execution_id, phase_id or ""), (0, 0, 0, 0)
+        )
+        return PhaseUsage(
+            input_tokens=inp,
+            output_tokens=out,
+            cache_creation_tokens=cache_creation,
+            cache_read_tokens=cache_read,
+        )
+
+    async def save_unpushed_work(self, phase_id: str | None, *, execution_id: str) -> SavedWork:
+        """Push a dying phase's unsaved work out of its container (#1231).
+
+        MUST be called before `abandon_all`, for the reason `observe` must be:
+        once teardown has run, work that was only in that workspace is not
+        somewhere else, it is nowhere. That ordering is the whole of this
+        method's contract and it is documented at the two call sites, beside
+        the teardown it has to precede.
+
+        The caller says which phase died and which execution it belonged to.
+        Which container that is, what the phase declared about repository
+        changes, and what it means for there to be no container at all are
+        decided here: a phase with no workspace is holding nothing that dying
+        could erase, which is `SavedWork()` - the same silence a workspace that
+        was genuinely clean produces, because for a caller deciding what to
+        tell an operator the two really are one answer.
+        """
+        workspace = self._workspaces.get(phase_id) if phase_id is not None else None
+        if phase_id is None or workspace is None:
+            return SavedWork()
+        return await save_unpushed_work(
+            workspace,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            delivers_repo_changes=self._delivers_repo_changes.get(phase_id, True),
+        )
+
     async def observe(self, phase_id: str | None) -> ObservedBranches | None:
         """Where a dying phase's branches stand, or None when nobody looked."""
         return await self._starting_points.observe(phase_id)
+
+    async def describe_work(self, phase_id: str | None) -> str | None:
+        """The same reading as `observe`, in the words an operator reads.
+
+        Two callers need this fact and they need it in two shapes: a failing
+        execution stores the structured `ObservedBranches` on its event, and a
+        SALVAGED phase - which does not fail, so never reaches that path -
+        needs it as prose to put in the artifact it recovered (#1300). Saying
+        it here rather than at either call site keeps one answer to "where does
+        this phase's work stand", and keeps the collector from ever learning
+        what a remote or a starting point is.
+        """
+        observed = await self.observe(phase_id)
+        return describe_observed_branches(observed) if observed is not None else None
 
     async def report_cancelled(self, reason: str) -> None:
         """Close every open session as cancelled."""
@@ -368,6 +710,7 @@ class PhaseRuntime:
         self._starting_points.forget_all()
         self._envs.clear()
         self._cmds.clear()
+        self._delivers_repo_changes.clear()
 
     @property
     def is_idle(self) -> bool:

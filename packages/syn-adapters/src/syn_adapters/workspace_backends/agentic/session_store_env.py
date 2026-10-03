@@ -1,6 +1,6 @@
 """Build the session-store contract injected into workspace containers.
 
-The session-store capability ships inside the agentic-primitives workspace
+The session-store capability ships inside the agentic-workspace workspace
 image and activates purely from environment variables. Syntropic137's entire
 job is to write those variables into the container environment at provision
 time; there is no capture code on this side.
@@ -29,11 +29,14 @@ one of them is the write token.
 
 Partition safety
 ----------------
-The capability HARD-FAILS the workspace if the partition is absolute or
-contains ``..``. Identifiers reaching this module come from the orchestration
-domain and are normally opaque ids, but they are sanitised here rather than
-trusted: a workflow-supplied id must never be able to take down provisioning or
-escape its partition prefix.
+The capability refuses a partition that is absolute or contains ``..``. Since
+agentic-workspace #27 that refusal DEGRADES the workspace (it starts with
+capture disabled) rather than failing it, unless AGENTIC_SESSION_STORE_REQUIRED=1
+restores the hard fail. Either way the run loses its capture. Identifiers
+reaching this module come from the orchestration domain and are normally opaque
+ids, but they are sanitised here rather than trusted: a workflow-supplied id
+must never be able to disable capture, take down provisioning, or escape its
+partition prefix.
 
 Tag identity
 ------------
@@ -97,7 +100,7 @@ TAG_PHASE_ID = "phase_id"
 TAG_DEPLOYMENT = "deployment"
 
 #: Value of the ``source`` tag. Lets the store distinguish Syn137-originated
-#: sessions from sessions captured by any other agentic-primitives consumer.
+#: sessions from sessions captured by any other agentic-workspace consumer.
 SOURCE_SYNTROPIC137 = "syntropic137"
 
 #: Separator in the ``<app>__<tier>`` deployment convention (APS-V1-0004

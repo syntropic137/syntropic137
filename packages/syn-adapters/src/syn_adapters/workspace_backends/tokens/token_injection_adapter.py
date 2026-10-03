@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_GITHUB_TOKEN
+from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.tokens.token_vending_adapter import (
@@ -31,7 +31,10 @@ logger = logging.getLogger(__name__)
 class SidecarTokenInjectionAdapter:
     """Injects tokens into workspace via sidecar proxy.
 
-    Implements TokenInjectionPort from the workspace domain.
+    Does NOT implement TokenInjectionPort, despite the shape: inject() here
+    requires a sidecar_handle the port has no slot for, and ignores the
+    isolation handle the port is built around. The claim that it did was in
+    this docstring and checked by nothing (#1305).
 
     This is the preferred method for token injection because:
     - Tokens never enter the workspace filesystem
@@ -77,7 +80,7 @@ class SidecarTokenInjectionAdapter:
 
     async def inject(
         self,
-        _handle: IsolationHandle,  # Not used - sidecar handles injection
+        handle: IsolationHandle,  # Not used - sidecar handles injection
         execution_id: str,
         token_types: list[TokenType],
         *,
@@ -100,6 +103,7 @@ class SidecarTokenInjectionAdapter:
         Returns:
             TokenInjectionResult with injection details
         """
+        del handle  # named for the port; unused here
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             InjectionMethod,
             TokenInjectionResult,
@@ -155,7 +159,12 @@ class DirectTokenInjectionAdapter:
 
     Tokens are injected as environment variables:
     - ANTHROPIC_API_KEY
-    - GITHUB_TOKEN
+
+    NEVER GITHUB (#725). A GitHub installation token lives 60 minutes and an
+    environment variable in a running process can never be replaced, so a
+    `GITHUB_TOKEN` here would outrank the renewable hosts.yml entry `gh` reads
+    and die mid-phase. GitHub credentials reach a workspace only through the
+    setup phase's credential files; asking for one here is refused.
     """
 
     def __init__(self, vending_adapter: TokenVendingServiceAdapter) -> None:
@@ -168,7 +177,7 @@ class DirectTokenInjectionAdapter:
 
     async def inject(
         self,
-        _handle: IsolationHandle,  # Not used - env vars set at creation time
+        handle: IsolationHandle,  # Not used - env vars set at creation time
         execution_id: str,
         token_types: list[TokenType],
         *,
@@ -187,11 +196,19 @@ class DirectTokenInjectionAdapter:
         Returns:
             TokenInjectionResult with environment variable names
         """
+        del handle  # named for the port; unused here
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             InjectionMethod,
             TokenInjectionResult,
             TokenType,
         )
+
+        if TokenType.GITHUB in token_types:
+            msg = (
+                "GitHub tokens are never injected as env vars (#725): an env var cannot "
+                "be renewed. The setup phase installs the GitHub credential."
+            )
+            raise ValueError(msg)
 
         # Vend tokens
         tokens = await self._vending.vend_tokens(
@@ -203,7 +220,6 @@ class DirectTokenInjectionAdapter:
         # Map to environment variables
         env_mapping = {
             TokenType.ANTHROPIC: ENV_ANTHROPIC_API_KEY,
-            TokenType.GITHUB: ENV_GITHUB_TOKEN,
         }
 
         env_vars = {}

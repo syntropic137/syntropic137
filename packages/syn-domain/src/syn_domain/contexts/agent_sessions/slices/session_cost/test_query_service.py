@@ -16,15 +16,18 @@ from decimal import Decimal
 
 import pytest
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
     _LIST_ALL_FROM_SUMMARY_QUERY,
     _LIST_ALL_FROM_TOKEN_USAGE_QUERY,
     _STARTED_AT_BY_SESSION_QUERY,
-    _TOOL_COUNT_BY_SESSION_QUERY,
     SessionCostQueryService,
 )
 
 _FakeRow = Mapping[str, object]
+
+#: Stands in for whatever SQL the tool-call tally issues - see ``_StubConnection``.
+_TALLY = "<tool call tally>"
 
 _OPUS_MODEL = "claude-opus-4-20250514"
 _SONNET_MODEL = "claude-sonnet-4-20250514"
@@ -51,6 +54,7 @@ def _summary_row(agent_model: str | None) -> _FakeRow:
         "agent_model": agent_model,
         "num_turns": 1,
         "tool_count": 0,
+        "workspace_id": "ws-from-summary",
         "completed_at": None,
         "execution_id": "exec-1",
         "phase_id": "phase-1",
@@ -67,6 +71,7 @@ def _token_usage_row(agent_model: str | None) -> _FakeRow:
         "started_at": None,
         "last_observation": None,
         "agent_model": agent_model,
+        "workspace_id": "ws-from-token-usage",
         "execution_id": "exec-2",
         "phase_id": "phase-2",
         "observation_count": 7,
@@ -204,12 +209,14 @@ class _StubConnection:
         self._by_query = {
             _LIST_ALL_FROM_SUMMARY_QUERY: summary_rows,
             _LIST_ALL_FROM_TOKEN_USAGE_QUERY: token_rows,
-            _TOOL_COUNT_BY_SESSION_QUERY: tool_rows,
+            _TALLY: tool_rows,
             _STARTED_AT_BY_SESSION_QUERY: started_rows,
         }
 
     async def fetch(self, query: str, *_args: object) -> list[_FakeRow]:
-        return self._by_query[query]
+        # The tally is matched by the table it reads, not by its text: how
+        # ``tool_call_counts`` spells that read is its own business (#1322).
+        return self._by_query[_TALLY if tool_call_counts.TABLE in query else query]
 
 
 class _StubAcquire:
@@ -248,6 +255,7 @@ def _list_token_row(
         "started_at": None,
         "last_observation": None,
         "observation_count": observation_count,
+        "workspace_id": "ws-from-list-token-usage",
         "execution_id": "exec-1",
         "phase_id": "phase-1",
     }
@@ -266,6 +274,7 @@ def _list_summary_row(session_id: str, agent_model: str | None) -> _FakeRow:
         "agent_model": agent_model,
         "num_turns": 1,
         "tool_count": 0,
+        "workspace_id": "ws-from-list-summary",
         "completed_at": None,
         "execution_id": "exec-1",
         "phase_id": "phase-1",

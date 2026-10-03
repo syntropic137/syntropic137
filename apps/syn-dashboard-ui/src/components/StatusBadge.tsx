@@ -1,7 +1,18 @@
 import { clsx } from 'clsx'
 
+import type { FailureClassification } from '../types'
+import { REFUSED, TASK_FAILED, outcomeTone } from '../utils/executionOutcome'
+
 interface StatusBadgeProps {
   status: string
+  /**
+   * Why a `failed` run failed, when the server said (#1357).
+   *
+   * Optional because most callers - sessions, phases, trigger firings - have
+   * no such thing to report, and a badge with nothing to say must keep saying
+   * exactly what it said before.
+   */
+  failureClassification?: FailureClassification
   size?: 'sm' | 'md' | 'lg'
   pulse?: boolean
 }
@@ -12,10 +23,31 @@ const statusColors: Record<string, { bg: string; text: string; ring: string }> =
   running: { bg: 'bg-blue-500/20', text: 'text-blue-400', ring: 'ring-blue-500/30' },
   completed: { bg: 'bg-emerald-500/20', text: 'text-emerald-400', ring: 'ring-emerald-500/30' },
   failed: { bg: 'bg-red-500/20', text: 'text-red-400', ring: 'ring-red-500/30' },
+  // A failure the platform was RIGHT to record: amber, beside `cancelled`,
+  // because both ended without delivering and neither is something broken.
+  // Red is reserved for the machinery failing, which is the only kind of
+  // failure an operator can act on (#1357).
+  [REFUSED]: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
+  // A run that could not be done as asked (#1372): amber for the same reason
+  // - the platform delivered the run intact - but its own LABEL, because the
+  // operator's next move is to rewrite the brief and not to read and close.
+  [TASK_FAILED]: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
   cancelled: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
   interrupted: { bg: 'bg-orange-500/20', text: 'text-orange-400', ring: 'ring-orange-500/30' },
   skipped: { bg: 'bg-slate-500/20', text: 'text-slate-400', ring: 'ring-slate-500/30' },
 }
+
+/*
+ * The word this badge shows is also its colour key, which is why the badge
+ * needs no rule of its own: `outcomeTone` decides, and the label falls out of
+ * the same answer. A correct refusal is therefore drawn apart by its LABEL as
+ * well as its colour - two reds differing by hue alone would be unreadable to
+ * an operator who cannot distinguish them, and the point of #1357 is that
+ * these are different facts, not different shades.
+ *
+ * This used to be a local `badgeKey`, and being local is exactly how four
+ * other surfaces stayed red (#1367).
+ */
 
 const sizeClasses = {
   sm: 'px-1.5 py-0.5 text-xs',
@@ -23,9 +55,14 @@ const sizeClasses = {
   lg: 'px-3 py-1.5 text-sm',
 }
 
-export function StatusBadge({ status, size = 'md', pulse = false }: StatusBadgeProps) {
+export function StatusBadge({
+  status,
+  failureClassification,
+  size = 'md',
+  pulse = false,
+}: StatusBadgeProps) {
   // Guard against undefined/null status
-  const safeStatus = status ?? 'unknown'
+  const safeStatus = outcomeTone(status ?? 'unknown', failureClassification)
   const colors = statusColors[safeStatus] ?? statusColors.pending
   const isActive = safeStatus === 'running' || safeStatus === 'in_progress'
 

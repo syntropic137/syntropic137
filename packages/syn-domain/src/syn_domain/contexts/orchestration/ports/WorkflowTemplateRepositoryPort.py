@@ -19,7 +19,11 @@ class WorkflowTemplateRepositoryPort(Protocol):
     concrete implementations (e.g., EventStoreRepository, InMemoryRepository).
     """
 
-    async def get_by_id(self, workflow_id: str) -> "WorkflowTemplateAggregate | None":
+    # The identifier below is positional-only. The implementation is the generic
+    # RepositoryAdapter[TAggregate], which necessarily names it aggregate_id, and
+    # Protocol matching compares parameter NAMES for anything not positional-only
+    # -- so a domain-specific name here would leave this port unsatisfiable (#1305).
+    async def get_by_id(self, workflow_id: str, /) -> "WorkflowTemplateAggregate | None":
         """Retrieve workflow aggregate by ID.
 
         Args:
@@ -42,7 +46,7 @@ class WorkflowTemplateRepositoryPort(Protocol):
         """
         ...
 
-    async def exists(self, workflow_id: str) -> bool:
+    async def exists(self, workflow_id: str, /) -> bool:
         """Check if a workflow exists.
 
         Args:

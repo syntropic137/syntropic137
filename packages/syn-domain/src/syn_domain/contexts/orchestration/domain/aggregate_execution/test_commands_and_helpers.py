@@ -13,9 +13,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     ProvisionWorkspaceCompletedCommand,
     StartExecutionCommand,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-    _evt,
-    _parse_phase_definitions,
+from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
+    evt,
+    parse_phase_definitions,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
 )
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
@@ -24,54 +27,54 @@ pytestmark = pytest.mark.unit
 
 
 class TestEvtHelper:
-    """Tests for _evt() event field extraction helper."""
+    """Tests for evt() event field extraction helper."""
 
     def test_typed_event_attribute(self) -> None:
-        """_evt returns attribute value from typed events."""
+        """evt returns attribute value from typed events."""
 
         class FakeEvent:
             workflow_id = "wf-1"
 
-        assert _evt(FakeEvent(), "workflow_id") == "wf-1"
+        assert evt(FakeEvent(), "workflow_id") == "wf-1"
 
     def test_dict_event_fallback(self) -> None:
-        """_evt falls back to dict access for GenericDomainEvent."""
+        """evt falls back to dict access for GenericDomainEvent."""
 
         class DictEvent:
             def __iter__(self):
                 return iter({"workflow_id": "wf-dict"}.items())
 
-        assert _evt(DictEvent(), "workflow_id") == "wf-dict"
+        assert evt(DictEvent(), "workflow_id") == "wf-dict"
 
     def test_missing_field_returns_default(self) -> None:
-        """_evt returns default when field is not found."""
+        """evt returns default when field is not found."""
 
         class EmptyEvent:
             def __iter__(self):
                 return iter({}.items())
 
-        assert _evt(EmptyEvent(), "missing", 42) == 42
+        assert evt(EmptyEvent(), "missing", 42) == 42
 
     def test_pydantic_event_model_dump(self) -> None:
-        """_evt uses model_dump() for Pydantic-style events without the attribute."""
+        """evt uses model_dump() for Pydantic-style events without the attribute."""
 
         class PydanticEvent:
             def model_dump(self) -> dict:
                 return {"status": "completed"}
 
-        assert _evt(PydanticEvent(), "status") == "completed"
+        assert evt(PydanticEvent(), "status") == "completed"
 
 
 class TestParsePhaseDefinitions:
-    """Tests for _parse_phase_definitions helper."""
+    """Tests for parse_phase_definitions helper."""
 
     def test_empty_list(self) -> None:
-        result = _parse_phase_definitions([])
+        result = parse_phase_definitions([])
         assert result == []
 
     def test_single_phase(self) -> None:
         raw = [{"phase_id": "p-1", "name": "Research", "order": 1}]
-        result = _parse_phase_definitions(raw)
+        result = parse_phase_definitions(raw)
         assert len(result) == 1
         assert result[0].phase_id == "p-1"
         assert result[0].name == "Research"
@@ -84,12 +87,12 @@ class TestParsePhaseDefinitions:
             {"phase_id": "p-1", "name": "Research", "order": 1},
             {"phase_id": "p-3", "name": "Review", "order": 3},
         ]
-        result = _parse_phase_definitions(raw)
+        result = parse_phase_definitions(raw)
         assert [p.phase_id for p in result] == ["p-1", "p-2", "p-3"]
 
     def test_custom_timeout(self) -> None:
         raw = [{"phase_id": "p-1", "name": "Long", "order": 1, "timeout_seconds": 600}]
-        result = _parse_phase_definitions(raw)
+        result = parse_phase_definitions(raw)
         assert result[0].timeout_seconds == 600
 
 
@@ -128,8 +131,10 @@ class TestCommandsImportable:
             failed_phase_id="p-1",
             completed_phases=0,
             total_phases=1,
+            classification=FailureClassification.PLATFORM,
         )
         assert cmd.error == "boom"
+        assert cmd.classification is FailureClassification.PLATFORM
 
     def test_interrupt_with_partial_state(self) -> None:
         cmd = InterruptExecutionCommand(

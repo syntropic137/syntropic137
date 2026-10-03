@@ -1,7 +1,7 @@
 # ADR-016: UI Feedback Module
 
 ## Status
-**Proposed** - December 2025
+**Accepted** - September 2026
 
 ## Context
 
@@ -20,6 +20,15 @@ Vercel's Toolbar/Comments feature demonstrates an effective pattern for in-conte
 ## Decision
 
 Build a self-contained `ui-feedback` module with two packages:
+
+In Syn137, the backend is an optional `syn-api[feedback]` extra. The supplied
+API image includes it, while `SYN_UI_FEEDBACK_ENABLED` defaults to false. When
+disabled, startup creates no feedback tables and the dashboard does not load
+the widget chunk. When enabled, the API uses the existing PostgreSQL database
+and applies its feedback migrations on startup. The external gateway listener
+authenticates the routes, permits microphone access, and allows 6 MB multipart
+requests for the API's 5 MB per-file limit. Screenshot and voice-note uploads
+are restricted to recognized raster image and audio formats.
 
 ### 1. Frontend: `ui-feedback-react`
 A React component library that can be integrated into any React application.
@@ -104,19 +113,19 @@ CREATE INDEX idx_feedback_media_feedback ON feedback_media(feedback_id);
 
 ```
 # Feedback Items
-GET    /api/feedback                    # List (filterable: status, type, app, priority)
-GET    /api/feedback/:id                # Get single item with media
-POST   /api/feedback                    # Create new feedback
-PATCH  /api/feedback/:id                # Update status/priority/assignment/notes
-DELETE /api/feedback/:id                # Delete feedback
+GET    /api/v1/feedback                    # List (filterable: status, type, app, priority)
+GET    /api/v1/feedback/:id                # Get single item with media
+POST   /api/v1/feedback                    # Create new feedback
+PATCH  /api/v1/feedback/:id                # Update status/priority/assignment/notes
+DELETE /api/v1/feedback/:id                # Delete feedback
 
 # Media (separate for large files)
-POST   /api/feedback/:id/media          # Upload media (screenshot/voice)
-GET    /api/feedback/:id/media/:mediaId # Get media file
-DELETE /api/feedback/:id/media/:mediaId # Delete media
+POST   /api/v1/feedback/:id/media          # Upload media (screenshot/voice)
+GET    /api/v1/feedback/:id/media/:mediaId # Get media file
+DELETE /api/v1/feedback/:id/media/:mediaId # Delete media
 
 # Stats
-GET    /api/feedback/stats              # Aggregate stats for dashboard
+GET    /api/v1/feedback/stats              # Aggregate stats for dashboard
 ```
 
 ### Module Structure
@@ -135,11 +144,10 @@ lib/ui-feedback/
 │           ├── FeedbackWidget.tsx
 │           ├── components/
 │           │   ├── FeedbackModal.tsx
-│           │   ├── FeedbackButton.tsx
+│           │   ├── WidgetButton.tsx
 │           │   ├── AreaSelector.tsx
 │           │   ├── VoiceRecorder.tsx
-│           │   ├── ScreenshotUploader.tsx
-│           │   └── LocationPin.tsx
+│           │   └── ScreenshotUploader.tsx
 │           ├── hooks/
 │           │   ├── useFeedbackApi.ts
 │           │   ├── useScreenCapture.ts
@@ -173,9 +181,10 @@ lib/ui-feedback/
         │       │   ├── __init__.py
         │       │   ├── protocol.py      # Abstract interface
         │       │   ├── postgres.py
-        │       │   └── s3.py            # Future
+        │       │   └── memory.py        # Tests only
         │       └── migrations/
-        │           └── 001_feedback_tables.sql
+        │           ├── 001_feedback_tables.sql
+        │           └── 002_feedback_subject.sql
         └── tests/
             ├── __init__.py
             ├── test_api.py

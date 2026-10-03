@@ -170,6 +170,6 @@ print(meta.description)    # "Creates a new workflow with phases"
 - **SDK Dependency**: Tied to event-sourcing-platform SDK patterns
 
 ## References
-- [Event Sourcing Platform - Python SDK](../lib/event-sourcing-platform/event-sourcing/python)
-- [ADR-010: Decorator Patterns (ES Platform)](../lib/event-sourcing-platform/docs/adrs/ADR-010-decorator-patterns.md)
-- [VSA Concepts - Vertical Slices](../lib/event-sourcing-platform/docs-site/docs/vsa/concepts/vertical-slices.md)
+- [Event Sourcing Platform - Python SDK](../../lib/event-sourcing-platform/event-sourcing/python)
+- [ADR-010: Decorator Patterns (ES Platform)](../../lib/event-sourcing-platform/docs/adrs/ADR-010-decorator-patterns-framework.md)
+- [VSA Concepts - Vertical Slices](../../lib/event-sourcing-platform/docs-site/docs/vsa/concepts/vertical-slices.md)

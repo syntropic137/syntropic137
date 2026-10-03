@@ -25,6 +25,25 @@ export type Priority = 'low' | 'medium' | 'high' | 'critical';
 
 export type MediaType = 'screenshot' | 'voice_note';
 
+/**
+ * What a page is ABOUT, when it is about one thing.
+ *
+ * One (kind, id) pair rather than one field per entity type: the host app
+ * decides what its pages are about, and a new page type needs no change
+ * here, in the API, or in the schema.
+ */
+export type SubjectKind =
+  | 'execution'
+  | 'session'
+  | 'workflow'
+  | 'artifact'
+  | 'trigger';
+
+export interface FeedbackSubject {
+  kind: SubjectKind;
+  id: string;
+}
+
 // =====================================================
 // Location Context
 // =====================================================
@@ -85,6 +104,8 @@ export interface FeedbackCreate {
   css_selector?: string;
   xpath?: string;
   component_name?: string;
+  subject_kind?: SubjectKind;
+  subject_id?: string;
   feedback_type?: FeedbackType;
   comment?: string;
   priority?: Priority;
@@ -117,6 +138,8 @@ export interface FeedbackItem {
   css_selector?: string;
   xpath?: string;
   component_name?: string;
+  subject_kind?: SubjectKind;
+  subject_id?: string;
   feedback_type: FeedbackType;
   comment?: string;
   status: Status;
@@ -221,6 +244,12 @@ export interface FeedbackProviderConfig {
   gitBranch?: string;
   /** Hostname where the app is running */
   hostname?: string;
+  /**
+   * What the current page is about, when it is about one domain object.
+   * Re-read on every render, so a host that derives this from its router
+   * gets the right subject recorded at submit time, not at mount time.
+   */
+  subject?: FeedbackSubject | null;
 }
 
 // =====================================================
@@ -243,5 +272,5 @@ export interface FeedbackContextValue extends FeedbackState {
   addMedia: (media: MediaUpload) => void;
   removeMedia: (index: number) => void;
   clearMedia: () => void;
-  submitFeedback: (data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname'>) => Promise<FeedbackItem>;
+  submitFeedback: (data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname' | 'subject_kind' | 'subject_id'>) => Promise<FeedbackItem>;
 }

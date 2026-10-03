@@ -83,7 +83,7 @@ function DetailOverlay({ onClose, children }: { onClose: () => void; children: R
   );
 }
 
-function DetailHeader({ feedback, onClose }: { feedback: { feedback_type: string; priority: string; status: string; url: string }; onClose: () => void }) {
+function DetailHeader({ feedback, onClose }: { feedback: { feedback_type: string; priority: string; status: Status; url: string }; onClose: () => void }) {
   return (
     <div className="ui-feedback-modal-header">
       <div className="ui-feedback-modal-header-content">

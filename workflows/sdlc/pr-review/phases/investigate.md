@@ -44,16 +44,18 @@ would compare main against itself and show you nothing, and an empty diff read a
 
 So name the refs explicitly:
 
-```
+```bash
 git fetch origin
-git rev-parse origin/main origin/<pr-branch>     # record both SHAs
+git rev-parse origin/main            # the BASE SHA - record it
+git rev-parse origin/<pr-branch>     # the HEAD SHA - record it
 git diff origin/main...origin/<pr-branch>
 ```
 
 If the diff is empty, stop and say so - that means the refs are wrong, not that
-the PR is trivial. **Record both SHAs in your output**: the next phase gets its
-own fresh clone and must read exactly the same code, and a review of two
-different commits is not a review.
+the PR is trivial. **Record both SHAs in your output, labelled base and head.**
+The next phase gets its own fresh clone and checks out the head SHA you record;
+without it that phase reviews the default branch, and a review of two different
+commits is not a review.
 
 Do not stop at the diff. Most of this phase is reading code the diff does not
 contain.

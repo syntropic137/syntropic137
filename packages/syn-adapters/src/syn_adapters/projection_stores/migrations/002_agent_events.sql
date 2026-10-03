@@ -32,8 +32,42 @@ CREATE INDEX IF NOT EXISTS idx_events_session ON agent_events (session_id, time 
 CREATE INDEX IF NOT EXISTS idx_events_type ON agent_events (event_type, time DESC);
 CREATE INDEX IF NOT EXISTS idx_events_execution ON agent_events (execution_id, time DESC);
 
+-- The two composite indexes the cost read paths need (#1338).
+--
+-- Every cost query pairs an id with an event_type: the session-cost batch
+-- queries are `session_id = ANY($1) AND event_type = $2`, the execution-cost
+-- ones are `execution_id = $1 AND event_type = $2`. Neither pair is served by
+-- the three indexes above, which lead on one column and then on `time` - so
+-- the id narrows the scan and `event_type` is then re-checked on every row the
+-- id matched.
+--
+-- WHAT THESE DO AND DO NOT FIX. They cover the UNCOMPRESSED chunks only.
+-- `event_type` is in neither compress_segmentby (session_id) nor
+-- compress_orderby (time), so inside a compressed chunk it cannot be answered
+-- from an index at all - the batch is decompressed and filtered row by row,
+-- whatever indexes exist on the hypertable. With a 1-day compression policy
+-- (below) that makes these indexes the fix for today's data and no fix at all
+-- for yesterday's.
+--
+-- For `session_id` that ceiling is narrower: session_id IS the segmentby
+-- column, so a compressed chunk discards whole segments it does not need
+-- before decompressing anything, and a session that is not on the page is
+-- never read. It is narrower and not bounded - nothing limits the events
+-- within a session that IS on the page, and the number of sessions per
+-- round-trip is capped by the query service (MAX_SESSIONS_PER_QUERY), not by
+-- anything here. For `execution_id` not even that holds: execution_id is
+-- neither segmentby nor orderby, so an execution-keyed query decompresses
+-- every segment of every chunk in range. Both paths need a read model, not an
+-- index (#1338, still open).
+CREATE INDEX IF NOT EXISTS idx_events_session_type ON agent_events (session_id, event_type, time DESC);
+CREATE INDEX IF NOT EXISTS idx_events_execution_type ON agent_events (execution_id, event_type, time DESC);
+
 -- GIN index on data for JSONB queries
-CREATE INDEX IF NOT EXISTS idx_events_data ON agent_events USING GIN (data);
+-- idx_events_data (GIN over `data`) was declared here and never created by
+-- any install. It is removed rather than honoured: nothing queries `data` by
+-- containment, and EventStoreSchema._create_indexes runs at API startup, where
+-- a non-concurrent GIN build would hold writes off agent_events for the length
+-- of the build. See the matching note in events/schema.py.
 
 -- Configure compression (for scale - compress after 1 day)
 ALTER TABLE agent_events SET (

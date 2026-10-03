@@ -3,6 +3,7 @@
   "root": true,
   "pages": [
     "index",
+    "version",
     "artifacts",
     "claude-plugin",
     "config",
@@ -11,6 +12,7 @@
     "costs",
     "events",
     "execution",
+    "feedback",
     "github",
     "insights",
     "marketplace",

@@ -25,11 +25,17 @@ if TYPE_CHECKING:
     )
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    CostField,
+    SessionCost,
+)
+from syn_domain.contexts.agent_sessions.recorded_model_rows import pick_primary_model
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
 )
+from syn_shared.observed_model import RecordedModel, split_observation_model
+from syn_shared.pricing import parse_vendor_cost
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -61,6 +67,25 @@ def _set_linkage(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
         session_cost.workspace_id = event_data["workspace_id"]
 
 
+def _count_model_tokens(session_cost: SessionCost, model: RecordedModel, tokens: int) -> None:
+    """Fold one row's tokens into the per-model tallies and re-pick the primaries.
+
+    The same most-tokens rule the SQL path applies (``pick_primary_model``),
+    over OBSERVED models only for ``agent_model``: a row whose model was never
+    reported adds nothing to it, so an alias can never become the model that ran.
+    """
+    if model.observed:
+        session_cost.tokens_by_model[model.observed] = (
+            session_cost.tokens_by_model.get(model.observed, 0) + tokens
+        )
+    if model.requested:
+        session_cost.tokens_by_requested_model[model.requested] = (
+            session_cost.tokens_by_requested_model.get(model.requested, 0) + tokens
+        )
+    session_cost.agent_model = pick_primary_model(session_cost.tokens_by_model)
+    session_cost.requested_model = pick_primary_model(session_cost.tokens_by_requested_model)
+
+
 def _reported[N: (int, float)](value: N | None, current: N) -> N:
     """``value`` when the summary actually reported one, else ``current``.
 
@@ -81,7 +106,11 @@ def _get_or_create_session_cost(existing: dict[str, Any] | None, session_id: str
 
 
 def _apply_finalized_costs(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
-    """Apply finalized cost values from a SessionCostFinalized event."""
+    """Apply finalized cost values from a SessionCostFinalized event.
+
+    An event that carries ``compute_cost_usd`` is the only thing in the system
+    that measures it, so this is also where that field stops being unmeasured.
+    """
     for field, attr in [
         ("total_cost_usd", "total_cost_usd"),
         ("token_cost_usd", "token_cost_usd"),
@@ -90,6 +119,8 @@ def _apply_finalized_costs(session_cost: SessionCost, event_data: dict[str, Any]
         value = event_data.get(field)
         if value is not None:
             setattr(session_cost, attr, Decimal(str(value)))
+            if field == CostField.COMPUTE_COST_USD:
+                session_cost.record_measured(CostField.COMPUTE_COST_USD)
 
 
 def _apply_finalized_tokens(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
@@ -108,13 +139,19 @@ def _apply_finalized_tokens(session_cost: SessionCost, event_data: dict[str, Any
 
 
 def _apply_finalized_breakdowns(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
-    """Apply model and tool cost breakdowns."""
+    """Apply model and tool cost breakdowns.
+
+    An event carrying ``cost_by_tool`` is the only thing that measures it - no
+    read path attributes cost to a tool - so this is where that field stops
+    being unmeasured, exactly as ``compute_cost_usd`` does above.
+    """
     cost_by_model = event_data.get("cost_by_model", {})
     if cost_by_model:
         session_cost.cost_by_model = {k: Decimal(str(v)) for k, v in cost_by_model.items()}
     cost_by_tool = event_data.get("cost_by_tool", {})
     if cost_by_tool:
         session_cost.cost_by_tool = {k: Decimal(str(v)) for k, v in cost_by_tool.items()}
+        session_cost.record_measured(CostField.COST_BY_TOOL)
 
 
 class SessionCostProjection:
@@ -199,10 +236,19 @@ class SessionCostProjection:
         session_cost.cache_creation_tokens += cache_creation
         session_cost.cache_read_tokens += cache_read
 
+        # Classified exactly as the SQL read path classifies the same row, so a
+        # replay and a live query agree (ADR-067): priced as the reported
+        # model, else the requested one, and filed under what RAN.
+        model = split_observation_model(data)
+        _count_model_tokens(
+            session_cost,
+            model,
+            input_tokens + output_tokens + cache_creation + cache_read,
+        )
+
         # Resolve pricing STRICTLY: an unknown/missing model contributes
         # zero cost, never a guessed default model's price (issue #788).
-        model = data.get("model")
-        pricing = self._cost_calculator.resolve_pricing(model)
+        pricing = self._cost_calculator.resolve_pricing(model.pricing_model)
         if pricing is None:
             token_cost = Decimal("0")
             session_cost.unpriced_observation_count += 1
@@ -214,9 +260,11 @@ class SessionCostProjection:
         session_cost.total_cost_usd += token_cost
 
         # Update cost by model (only for observations we could actually price)
-        if model and pricing is not None:
-            current = session_cost.cost_by_model.get(model, Decimal("0"))
-            session_cost.cost_by_model[model] = current + token_cost
+        if pricing is not None:
+            key = model.cost_key
+            session_cost.cost_by_model[key] = (
+                session_cost.cost_by_model.get(key, Decimal("0")) + token_cost
+            )
 
         # Increment turns (each token_usage = one turn)
         session_cost.turns += 1
@@ -291,8 +339,18 @@ class SessionCostProjection:
         session_cost.turns = _reported(data.get("num_turns"), session_cost.turns)
         session_cost.duration_ms = _reported(data.get("duration_ms"), session_cost.duration_ms)
 
-        if data.get("model"):
-            session_cost.agent_model = data["model"]
+        # The summary SUPERSEDES the per-turn attribution, as it does on the
+        # SQL path, which reads only the summary row once one exists.
+        summary_model = split_observation_model(data)
+        session_tokens = session_cost.total_tokens
+        session_cost.tokens_by_model = (
+            {summary_model.observed: session_tokens} if summary_model.observed else {}
+        )
+        session_cost.tokens_by_requested_model = (
+            {summary_model.requested: session_tokens} if summary_model.requested else {}
+        )
+        session_cost.agent_model = summary_model.observed
+        session_cost.requested_model = summary_model.requested
 
         # An absent cost leaves the running one alone, and nothing recomputes it
         # here: it was priced per observation with that observation's own model
@@ -300,9 +358,18 @@ class SessionCostProjection:
         # would be wrong for any session that spanned two. Leaving it is also
         # what keeps a killed phase agreeing with the last figure the live path
         # reported, instead of dropping to $0.00.
-        if data.get("total_cost_usd") is not None:
-            session_cost.total_cost_usd = Decimal(str(data["total_cost_usd"]))
+        if (reported_cost := parse_vendor_cost(data.get("total_cost_usd"))) is not None:
+            session_cost.total_cost_usd = reported_cost
             session_cost.token_cost_usd = session_cost.total_cost_usd
+            # The breakdown follows the summary too, keyed as the SQL path keys
+            # a summary row (`recorded.cost_key`). Keeping the per-turn estimate
+            # here made a replayed session's parts disagree with its total, and
+            # with what the SQL read path reports for the same rows.
+            session_cost.cost_by_model = (
+                {summary_model.cost_key: session_cost.total_cost_usd}
+                if session_cost.total_cost_usd
+                else {}
+            )
 
         session_cost.completed_at = _parse_timestamp(event_data.get("timestamp"))
         session_cost.is_finalized = bool(data.get("totals_are_authoritative", True))

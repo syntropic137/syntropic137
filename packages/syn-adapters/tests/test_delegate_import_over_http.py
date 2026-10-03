@@ -183,3 +183,56 @@ async def test_a_server_fault_is_reported_differently_from_an_absence() -> None:
     _, usage, reason = recorder.calls[0]
     assert usage is None
     assert reason and "store lookup failed" in reason
+
+
+@pytest.mark.parametrize("wrong_identity", [False, True])
+async def test_qualified_import_prices_native_fixture_and_rejects_misrouted_body(
+    wrong_identity: bool,
+) -> None:
+    from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+        QualifiedSessionIdentity,
+    )
+
+    identity = QualifiedSessionIdentity(
+        kind="transcript", source_instance_id="installation", harness="claude", local_id=DELEGATE
+    )
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(request.url.path)
+        assert request.url.path == "/v1/transcripts"
+        assert request.url.params["source_instance_id"] == identity.source_instance_id
+        assert request.url.params["harness"] == identity.harness
+        assert request.url.params["native_session_id"] == DELEGATE
+        assert request.headers["Authorization"] == "Bearer read-token"
+        return httpx.Response(
+            200,
+            json={
+                "session_id": LEADER if wrong_identity else DELEGATE,
+                "source_format": "claude-code-jsonl",
+                "raw": _claude_transcript(),
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        store = HttpSessionStore("http://store.invalid", auth_token="read-token", client=client)
+        recorder = _Recorder()
+        result = await import_phase_delegates(
+            store,
+            recorder,
+            leader_native_session_id=LEADER,
+            captured_session_ids=(LEADER, DELEGATE),
+            execution_id="qualified-execution",
+            phase_id="phase",
+            attempts_remaining=0,
+            qualified_session_identities=(identity,),
+        )
+    assert requested == ["/v1/transcripts"]
+    assert len(recorder.calls) == 1
+    assert result.imported[0].priced is not wrong_identity
+    if wrong_identity:
+        assert recorder.calls[0][1] is None
+        assert "when asked for" in (recorder.calls[0][2] or "")
+    else:
+        assert recorder.calls[0][1] is not None
+        assert recorder.calls[0][2] is None

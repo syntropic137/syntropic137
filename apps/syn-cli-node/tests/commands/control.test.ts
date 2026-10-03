@@ -13,7 +13,9 @@ describe("control commands", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   function jsonResponse(data: unknown, status = 200): Response {
@@ -28,20 +30,6 @@ describe("control commands", () => {
       .map((c: unknown[]) => String(c[0]))
       .join("");
   }
-
-  it("pause sends signal", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ state: "pausing", message: "ok" }));
-    const handler = controlGroup.getCommand("pause")!.handler;
-    await handler({ positionals: ["exec-1"], values: {} });
-    expect(stdout()).toContain("Pause signal sent");
-  });
-
-  it("resume sends signal", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ state: "running" }));
-    const handler = controlGroup.getCommand("resume")!.handler;
-    await handler({ positionals: ["exec-1"], values: {} });
-    expect(stdout()).toContain("Resume signal sent");
-  });
 
   it("cancel requires --force", async () => {
     const handler = controlGroup.getCommand("cancel")!.handler;

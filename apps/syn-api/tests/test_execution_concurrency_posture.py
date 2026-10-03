@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from syn_api._wiring import BackgroundWorkflowDispatcher
+from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.services.lifecycle import _log_execution_concurrency_posture
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings import get_settings

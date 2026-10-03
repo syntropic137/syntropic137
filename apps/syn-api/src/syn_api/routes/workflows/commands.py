@@ -27,7 +27,9 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider
+from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider, require_runnable_sandbox
+from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -136,6 +138,16 @@ def _agent_field(phase: Mapping[str, Any], name: str, default: Any = None) -> An
     return default
 
 
+def _runnable_sandbox(declared: object, phase_id: object) -> str:
+    """The phase's sandbox, refused here if a phase cannot finish under it (#1434).
+
+    Checked before the template is persisted, not only at execution: a level
+    a phase cannot finish under should never be stored with a 201.
+    """
+    require_runnable_sandbox(declared, phase_id=None if phase_id is None else str(phase_id))
+    return str(declared) if declared else DEFAULT_PHASE_SANDBOX
+
+
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
     from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
@@ -157,13 +169,15 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # installed through the API that declared it did not need one
                 # (#1187) - the bootstrap cost the declaration exists to avoid.
                 clone_repos=_as_bool(p.get("clone_repos", True), "clone_repos"),
-                # Dropping this silently GRANTS publication to a phase that
-                # never asked for it, because the default it would fall back
-                # to is the field's own - and the whole point of #1197 is that
-                # a phase which may not publish must not hold a token that
-                # can. Defaulting to False here means the failure mode of
-                # forgetting is a phase that cannot publish, not one that can.
-                can_open_pr=_as_bool(p.get("can_open_pr", False), "can_open_pr"),
+                # Dropping this silently re-arms the unpushed-work gate against
+                # a phase that declared it delivers no repository changes, so a
+                # build tool touching a tracked lockfile fails a phase that did
+                # its job (#1308). True is the field's own default, so
+                # forgetting it judges the phase strictly rather than leaving
+                # it unjudged.
+                delivers_repo_changes=_as_bool(
+                    p.get("delivers_repo_changes", True), "delivers_repo_changes"
+                ),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as
@@ -180,7 +194,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # authority to the default, which for a review phase means it
                 # can write the code it certifies (#1161). Caught by the
                 # roundtrip assertion in test_phase_create_carries_every_field.
-                sandbox=_agent_field(p, "sandbox", DEFAULT_PHASE_SANDBOX),
+                sandbox=_runnable_sandbox(_agent_field(p, "sandbox"), p.get("phase_id")),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=_expand_skills(p.get("skills")),
             )
@@ -261,23 +275,29 @@ async def create_workflow(
         WorkflowTemplateConflictError,
     )
 
-    command = CreateWorkflowTemplateCommand(
-        aggregate_id=workflow_id or str(uuid4()),
-        name=name,
-        description=description or f"Workflow: {name}",
-        workflow_type=_resolve_workflow_type(workflow_type),
-        classification=_resolve_classification(classification),
-        repository_url=repository_url,
-        repository_ref=repository_ref,
-        phases=_build_phase_defs(phases),
-        project_name=project_name,
-        input_declarations=_build_input_declarations(input_declarations),
-        repos=repos or [],
-        requires_repos=requires_repos,
-        version=version,
-        source_digest=source_digest,
-        force=force,
-    )
+    # Inside the error handling: building the phases validates them (a
+    # non-bool flag, an unrunnable sandbox), and a ValueError raised here
+    # used to escape as a 500 instead of INVALID_INPUT (#1434).
+    try:
+        command = CreateWorkflowTemplateCommand(
+            aggregate_id=workflow_id or str(uuid4()),
+            name=name,
+            description=description or f"Workflow: {name}",
+            workflow_type=_resolve_workflow_type(workflow_type),
+            classification=_resolve_classification(classification),
+            repository_url=repository_url,
+            repository_ref=repository_ref,
+            phases=_build_phase_defs(phases),
+            project_name=project_name,
+            input_declarations=_build_input_declarations(input_declarations),
+            repos=repos or [],
+            requires_repos=requires_repos,
+            version=version,
+            source_digest=source_digest,
+            force=force,
+        )
+    except ValueError as e:
+        return Err(WorkflowError.INVALID_INPUT, message=str(e))
 
     await ensure_connected()
     repository = get_workflow_repo()
@@ -285,6 +305,7 @@ async def create_workflow(
     handler = CreateWorkflowTemplateHandler(
         repository=repository,
         event_publisher=publisher,
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     try:
@@ -324,6 +345,7 @@ async def validate_yaml(
     from syn_domain.contexts.orchestration import WorkflowDefinition, validate_workflow_yaml
 
     is_valid, error_msg = validate_workflow_yaml(yaml_content)
+    warnings = _retired_field_notices(yaml_content)
 
     if is_valid:
         definition = WorkflowDefinition.from_yaml(yaml_content)
@@ -333,6 +355,7 @@ async def validate_yaml(
                 name=definition.name,
                 workflow_type=definition.type,
                 phase_count=len(definition.phases),
+                warnings=warnings,
             )
         )
 
@@ -340,8 +363,26 @@ async def validate_yaml(
         WorkflowValidation(
             valid=False,
             errors=[error_msg] if error_msg else ["Unknown validation error"],
+            warnings=warnings,
         )
     )
+
+
+def _retired_field_notices(yaml_content: str) -> list[str]:
+    """What the author should be told about retired keys in ``yaml_content``.
+
+    The one place notices are derived from text, and it never raises: YAML that
+    does not parse is reported by validation, not here, so a syntax error stays
+    an invalid result rather than becoming a 500.
+    """
+    import yaml
+
+    from syn_domain.contexts.orchestration import retired_field_notices
+
+    try:
+        return retired_field_notices(yaml.safe_load(yaml_content))
+    except yaml.YAMLError:
+        return []
 
 
 def _classify_workflow_error(error_msg: str) -> WorkflowError:
@@ -409,7 +450,7 @@ class CreateWorkflowRequest(BaseModel):
         default=None,
         min_length=1,
         max_length=100,
-        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+        pattern=PHASE_ID_PATTERN,
     )
     name: str
     workflow_type: str = "custom"
@@ -504,6 +545,7 @@ class CreateWorkflowResponse(BaseModel):
     repository_url: str
     requires_repos: bool
     status: str
+    warnings: list[str] = Field(default_factory=list)
 
 
 class UpdatePhaseResponse(BaseModel):
@@ -518,6 +560,7 @@ class ValidateYamlResponse(BaseModel):
     workflow_type: str = ""
     phase_count: int = 0
     errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -563,9 +606,8 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
     )
 
 
-@router.post("/validate", response_model=ValidateYamlResponse)
-async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlResponse:
-    """Validate a workflow YAML definition."""
+def _validate_request_content(body: ValidateYamlRequest) -> str:
+    """The YAML to validate, or the 400 that says why there is none."""
     if body.content is None and body.file is not None:
         raise HTTPException(
             status_code=400,
@@ -579,8 +621,13 @@ async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlRespo
             status_code=400,
             detail="The 'content' field is required.",
         )
-    assert body.content is not None  # guaranteed by guards above
-    result = await validate_yaml(yaml_content=body.content)
+    return body.content
+
+
+@router.post("/validate", response_model=ValidateYamlResponse)
+async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlResponse:
+    """Validate a workflow YAML definition."""
+    result = await validate_yaml(yaml_content=_validate_request_content(body))
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
@@ -592,6 +639,7 @@ async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlRespo
         workflow_type=v.workflow_type or "",
         phase_count=v.phase_count or 0,
         errors=v.errors or [],
+        warnings=v.warnings or [],
     )
 
 
@@ -675,6 +723,7 @@ async def update_phase_prompt(
     handler = UpdateWorkflowPhaseHandler(
         repository=repository,
         event_publisher=publisher,
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     try:
@@ -752,6 +801,8 @@ class _YamlCreateOutcome(BaseModel):
     requires_repos: bool
     changed: bool = True
     """False when the package was already installed byte-identical (#822)."""
+    warnings: tuple[str, ...] = ()
+    """Notices for the author, reported whether or not anything changed."""
 
 
 async def create_workflow_from_yaml(
@@ -792,6 +843,7 @@ async def create_workflow_from_yaml(
         definition = WorkflowDefinition.from_yaml(yaml_content)
     except yaml.YAMLError as e:
         raise ValueError(f"Malformed YAML: {e}") from e
+    warnings = tuple(_retired_field_notices(yaml_content))
 
     # Implicit fetch: any claude_plugins ref the YAML declares must be
     # present in the lock projection before we register the workflow.
@@ -814,6 +866,7 @@ async def create_workflow_from_yaml(
     handler = CreateWorkflowTemplateHandler(
         repository=get_workflow_repo(),
         event_publisher=get_publisher(),
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     # Domain-invariant failures (invalid fields, empty phases) raise ValueError;
@@ -847,6 +900,7 @@ async def create_workflow_from_yaml(
             classification=command.classification.value,
             repository_url=command.repository_url,
             requires_repos=command.requires_repos,
+            warnings=warnings,
         )
     )
 
@@ -936,4 +990,5 @@ async def create_workflow_from_yaml_endpoint(
         repository_url=outcome.repository_url,
         requires_repos=outcome.requires_repos,
         status="created" if outcome.changed else "unchanged",
+        warnings=list(outcome.warnings),
     )

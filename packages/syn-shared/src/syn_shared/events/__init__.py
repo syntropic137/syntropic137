@@ -40,7 +40,7 @@ PHASE_COMPLETED = "phase_completed"
 # Error events
 ERROR = "error"
 
-# Git observability events (from agentic-primitives observability plugin)
+# Git observability events (from agentic-workspace observability plugin)
 # Emitted by post-commit, pre-push, post-merge, post-rewrite hooks and
 # PreToolUse/PostToolUse git command detection (agentic-primitives PR #82)
 GIT_COMMIT = "git_commit"
@@ -74,6 +74,10 @@ USER_PROMPT_SUBMITTED = "user_prompt_submitted"
 
 # OTLP observability events (from workspace OTel push — ADR-056)
 OTLP_LOG = "otlp_log"
+
+# Credential lifecycle (#725). Produced by Syn137 itself when the agent's git
+# credential expired and no renewal succeeded before it did.
+GIT_CREDENTIAL_LAPSED = "git_credential_lapsed"
 
 # Type-safe literal union (like TypeScript)
 # MUST match the constants above and agentic_isolation.EventType
@@ -116,6 +120,8 @@ EventType = Literal[
     # path, so a type the domain knows about and this Literal does not is a
     # write that fails validation at the point of recording.
     "session_capture",
+    # Credential lifecycle (#725), produced by Syn137 for the same gating reason.
+    "git_credential_lapsed",
 ]
 
 # Runtime validation set (auto-generated from Literal)
@@ -135,6 +141,7 @@ __all__ = [
     "GIT_BRANCH_CHANGED",
     "GIT_CHECKOUT",
     "GIT_COMMIT",
+    "GIT_CREDENTIAL_LAPSED",
     "GIT_MERGE",
     "GIT_OPERATION",
     "GIT_PUSH",

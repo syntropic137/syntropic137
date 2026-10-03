@@ -34,7 +34,7 @@ _TEARDOWN_SECONDS = 30.0
 async def test_duration_excludes_teardown_and_the_session_id_survives() -> None:
     processor = _make_processor(FakeAgentExecutionHandler())
 
-    runtime = processor._runtime
+    runtime = processor._runtimes.of("exec-1")
     started = datetime.now(UTC) - timedelta(seconds=5)
     runtime._started_at[PHASE] = started
     runtime._session_ids[PHASE] = "sess-real"

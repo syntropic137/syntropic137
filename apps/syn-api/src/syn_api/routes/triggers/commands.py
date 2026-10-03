@@ -119,7 +119,23 @@ async def register_trigger(
     installation_id = await _resolve_installation_id(installation_id, repository)
 
     workflow_repo = get_workflow_repo()
-    if not await workflow_repo.exists(workflow_id):
+    # `exists` RAISES when the store cannot be read (ESP #310). Before that it
+    # answered False, so an outage reached this branch as "no such workflow" -
+    # a confident wrong answer. Catching it here keeps the two apart instead of
+    # letting the exception escape as a 500 with no explanation.
+    try:
+        workflow_exists = await workflow_repo.exists(workflow_id)
+    except Exception as exc:
+        logger.warning("could not determine whether workflow %s exists", workflow_id, exc_info=True)
+        return Err(
+            TriggerError.STORE_UNAVAILABLE,
+            message=(
+                f"Could not determine whether workflow '{workflow_id}' exists: "
+                f"the event store could not be read ({type(exc).__name__}). "
+                "This is not a statement that the workflow is missing."
+            ),
+        )
+    if not workflow_exists:
         return Err(
             TriggerError.WORKFLOW_NOT_FOUND,
             message=f"Workflow '{workflow_id}' does not exist. Seed workflows before creating triggers.",
@@ -224,7 +240,22 @@ async def enable_preset(
         return Err(TriggerError.PRESET_NOT_FOUND, message=f"Preset '{preset_name}' not found")
 
     workflow_repo = get_workflow_repo()
-    if not await workflow_repo.exists(command.workflow_id):
+    # Same distinction as above: an unreadable store is not a missing workflow.
+    try:
+        workflow_exists = await workflow_repo.exists(command.workflow_id)
+    except Exception as exc:
+        logger.warning(
+            "could not determine whether workflow %s exists", command.workflow_id, exc_info=True
+        )
+        return Err(
+            TriggerError.STORE_UNAVAILABLE,
+            message=(
+                f"Could not determine whether workflow '{command.workflow_id}' exists: "
+                f"the event store could not be read ({type(exc).__name__}). "
+                "This is not a statement that the workflow is missing."
+            ),
+        )
+    if not workflow_exists:
         return Err(
             TriggerError.WORKFLOW_NOT_FOUND,
             message=f"Workflow '{command.workflow_id}' does not exist. Seed workflows before creating triggers.",

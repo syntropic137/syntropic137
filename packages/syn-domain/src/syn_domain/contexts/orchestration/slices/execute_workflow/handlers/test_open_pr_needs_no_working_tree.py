@@ -54,6 +54,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
+from syn_adapters.workspace_backends.service.setup_phase_secrets import _GitHubAuth
 from syn_api._wiring import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
@@ -82,7 +83,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_shared.env_constants import ENV_CLAUDE_CODE_OAUTH_TOKEN, ENV_GH_REPO, ENV_GITHUB_TOKEN
 
 if TYPE_CHECKING:
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        SourceCommit,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
@@ -100,9 +105,9 @@ _REPO_URL = "https://github.com/syntropic137/syntropic137"
 #: that this reaches the agent verbatim: the refusal is the agent reading THIS
 #: and declining, so a test that injected a bland placeholder would prove
 #: nothing about the decision it is supposed to protect.
-_BLOCKING_VERIFY_REPORT = """# Verification report
+_BLOCKING_REVERIFY_REPORT = """BLOCKED
 
-**Verdict: BLOCKING DEFECT.** The migration drops the `session_id` column
+The migration drops the `session_id` column
 before the projection has been rebuilt, so every in-flight execution loses its
 attribution. Do not open a PR for this.
 """
@@ -129,8 +134,10 @@ class _CapturingProcessor:
         inputs: dict[str, str],
         execution_id: str,
         repos: list[RepositoryRef],
+        admitted: AdmissionTicket | None = None,
+        source_commits: list[SourceCommit] | None = None,
     ) -> WorkflowExecutionResult:
-        del workflow_name, inputs, repos
+        del workflow_name, inputs, repos, admitted
         self.phases = list(phases)
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
@@ -187,9 +194,11 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
     await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
 
     assert [p.phase_id for p in processor.phases] == [
-        "bootstrap",
+        "premise",
         "implement",
         "verify",
+        "fix",
+        "reverify",
         "open_pr",
     ], "the workflow's phase list changed; these assertions name phases by id"
     return {p.phase_id: p for p in processor.phases}
@@ -256,15 +265,15 @@ async def _provision(phase: ExecutablePhase, *, completed: dict[str, str]) -> _P
         phase_id=phase.phase_id,
     )
 
-    with (
-        patch(
-            "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_github_auth",
-            AsyncMock(return_value=({_REPO_URL: "tok-a"}, "syn-bot", "bot@example.com")),
-        ),
-        patch(
-            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers."
-            "WorkspaceProvisionHandler._resolve_github_app_token",
-            AsyncMock(return_value="tok-a"),
+    with patch(
+        "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_github_auth",
+        AsyncMock(
+            return_value=_GitHubAuth(
+                repo_tokens={_REPO_URL: "tok-a"},
+                gh_token="tok-a",
+                author_name="syn-bot",
+                author_email="bot@example.com",
+            )
         ),
     ):
         result = await handler.handle(
@@ -347,7 +356,7 @@ class TestTheCheckoutIsGoneForOpenPrAndOnlyForOpenPr:
 
 
 class TestTheRefusalSurvivesTheChange:
-    """A verify report naming a blocking defect must still stop the PR.
+    """A reverify report naming a blocking defect must still stop the PR.
 
     Refusal is the agent's decision, and this file cannot make the agent
     decide. What it CAN pin is the two inputs that decision needs, both of
@@ -357,22 +366,22 @@ class TestTheRefusalSurvivesTheChange:
     it happens to do.
     """
 
-    async def test_the_blocking_verify_report_is_in_the_workspace(self) -> None:
+    async def test_the_blocking_reverify_report_is_in_the_workspace(self) -> None:
         phases = await _executable_phases()
         provisioned = await _provision(
             phases["open_pr"],
-            completed={"verify": _BLOCKING_VERIFY_REPORT},
+            completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
-        verify_inputs = {
+        reverify_inputs = {
             path: body
             for path, body in provisioned.injected.items()
-            if path.startswith("artifacts/input/verify")
+            if path.startswith("artifacts/input/reverify")
         }
-        assert verify_inputs, (
-            "the phase was given no verify artifact, so it has nothing to refuse on"
+        assert reverify_inputs, (
+            "the phase was given no reverify artifact, so it has nothing to refuse on"
         )
-        assert any(b"BLOCKING DEFECT" in body for body in verify_inputs.values())
+        assert any(b"BLOCKED" in body for body in reverify_inputs.values())
 
     async def test_the_refusal_instruction_reaches_the_agent(self) -> None:
         """Asserted on the ARGV, not on the prompt file.
@@ -385,10 +394,10 @@ class TestTheRefusalSurvivesTheChange:
         phases = await _executable_phases()
         provisioned = await _provision(
             phases["open_pr"],
-            completed={"verify": _BLOCKING_VERIFY_REPORT},
+            completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
-        assert "If verification failed, or found a defect, do not open a PR." in provisioned.prompt
+        assert "If it says BLOCKED, do not open a PR." in provisioned.prompt
 
     async def test_the_happy_path_opens_a_pr_from_the_remote_branch_without_pushing(
         self,
@@ -404,7 +413,7 @@ class TestTheRefusalSurvivesTheChange:
         phases = await _executable_phases()
         provisioned = await _provision(
             phases["open_pr"],
-            completed={"verify": "# Verification report\n\nVerdict: PASS. No defects.\n"},
+            completed={"reverify": "CERTIFIED\n\nThe final head is safe to publish.\n"},
         )
 
         assert "existing remote branch" in provisioned.prompt
@@ -643,6 +652,73 @@ def _run_gh(
 #:   shared template and `implement` hits it too. Confining the fix to the
 #:   no-checkout rendering would have left the same bug in the branch the
 #:   experiment measures, which is a carve-out, not a fix.
+#: * #1256 gave the result block a `TASK_RESULT_END` terminator and stopped the
+#:   prompt from ever closing one itself. Also shared, also seen by every
+#:   phase, and not optional: the reader can only tell a report from a
+#:   quotation of the template if the template is not a complete report, and
+#:   the template is in these bytes. Leaving the examples closed would have
+#:   left the parser's contract unhonoured by the only thing that produces it.
+#: * #1324 gave each outcome ONE complete fence - marker, JSON and terminator
+#:   together - after #1256 left the terminator in a fence with no JSON and the
+#:   JSON in fences with no terminator, so an agent had to assemble the block
+#:   from two places and could silently omit the terminator. Shared, seen by
+#:   every phase.
+#: * #1324 again, reworked, and these bytes move a second time. The first fix
+#:   kept #1256's emitter guarantee by making ``comments`` a ``<"...">`` slot,
+#:   so the fences were complete but still not COPYABLE - an agent that copied
+#:   one faithfully wrote no readable verdict and lost the run exactly as
+#:   before. The JSON is now literal in both fences and nothing in them is left
+#:   to substitute. That gives up "the prompt closes no block of its own",
+#:   which cannot be kept alongside verbatim copyability - the bytes of a
+#:   copyable example ARE the bytes of a report - and keeps the half that
+#:   protects #1256: quoting these bytes can only refuse a phase, never
+#:   complete one. Argued in `workspace_prompt`'s docstring, pinned by
+#:   `test_the_prompt_can_never_manufacture_a_completion`.
+#: * #1324 a third time, and the bytes move again. Literal fences fixed what an
+#:   agent copying them writes and nothing about an agent that writes its own
+#:   schema instead: exec-cd5e75eaeb63 pushed its commit and then reported
+#:   `{"status": "completed", ...}`, which named no `success` at all. The key
+#:   and its value type are now a rule stated above the fences rather than
+#:   something only demonstrated inside them. Shared, seen by every phase, and
+#:   prose only - no fence changed, so the manufacture-a-completion guarantee
+#:   above is untouched.
+#: * #1372 gave the failure fences a `failure_reason`, and there are now three
+#:   of them rather than one. The classification an operator reads to decide
+#:   whether to re-dispatch could not express "the task was impossible" at
+#:   all, and nothing in a `success=false` report carried the evidence - the
+#:   comments are prose, and the platform cannot read prose. So the phase names
+#:   the cause in the block it already writes. Shared, seen by every phase, and
+#:   necessarily so: a vocabulary offered to some phases and not others would
+#:   make the classification depend on which prompt a run happened to get.
+#:   Nothing in the fences is left to substitute, so the copyability the #1324
+#:   entries above argue for is preserved; pinned by
+#:   `test_each_failure_fence_copied_verbatim_carries_the_class_it_names`.
+#: * #1392 added a fourth word, `unknown`, and the prose that tells an agent
+#:   what each of the four is read AS. The table offered no way to say "I could
+#:   not tell", and the sentence that stood in for one - leave the key out -
+#:   described an omission the parser does not treat that way: an absent reason
+#:   reads as an ordinary reported failure, which is what every report written
+#:   before the key existed means and is the one thing it cannot be used to
+#:   say. So the state got a word of its own, and the paragraph now describes
+#:   what happens rather than what was intended. Shared, seen by every phase:
+#:   a phase that could not tell is not a property of which prompt it got.
+#:   Nothing in the fences is left to substitute, so #1324's copyability holds;
+#:   pinned by `test_each_failure_fence_copied_verbatim_carries_the_class_it_names`.
+#: * The success fence gained `side_effects`, and the prose above the fences
+#:   now says `success` is about the deliverable. A review canary wrote its
+#:   review, was refused the PR comment, reported `success: false` because one
+#:   word had to cover both facts, and 17 finished runs were recorded as
+#:   failures. The write-back now has a word of its own beside `success`, and
+#:   it never decides completion. Still one fence per outcome and nothing left
+#:   to substitute except a closed word the prose names, so #1324's
+#:   copyability holds.
+#: * #1437 added one line to "Important": never change `.github/workflows/`.
+#:   This App cannot push workflow files (#1024), and GitHub refuses the WHOLE
+#:   push that carries one, so a phase that edited a YAML file lost everything
+#:   it wrote. The quarantine now rescues the rest, but a phase that is told
+#:   beforehand never needs rescuing. Shared, seen by every phase: the
+#:   credential is the same in all of them. Prose only, outside the fences, so
+#:   #1324's copyability holds.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -729,6 +805,10 @@ the previous phase failed - report this in your output.
 - **Ephemeral workspace** - all files destroyed when session ends
 - **Only `artifacts/output/` collected** - everything else is lost
 - **Push code before session ends** - unpushed commits are lost
+- **Never change `.github/workflows/`** - this workspace's GitHub credential cannot
+  push workflow files, so a commit touching them is refused, and so is every
+  other change pushed with it. If the task needs a workflow change, write it as
+  a patch to `artifacts/output/` and say so in your summary.
 - **Use feature branches** - never push directly to main/master
 - **Write REAL content** - never copy example templates literally
 
@@ -736,23 +816,109 @@ the previous phase failed - report this in your output.
 
 ## Task Result (REQUIRED)
 
-**The very last thing in your response must be a `TASK_RESULT` block.**
+**The very last thing in your response must be a `TASK_RESULT` block.** It is
+three parts - the marker, one JSON object, and `TASK_RESULT_END` on the line
+after it - and it is read as your result only when all three are there.
 
-If you completed the task successfully:
-```
-TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplished"}
-```
+**The key that carries your outcome is named `success`, never `status`, and its
+value is the JSON boolean `true` or `false`** - not the quoted string `"true"`,
+not a number, and not a word like `completed`. Agents that invented their own
+key here have lost finished, pushed work: `success` is the field the
+orchestrator reads, and a block naming the outcome anything else is not
+guaranteed to be read at all.
 
-If you could NOT complete the task (blocked, missing access, error, etc.):
-```
-TASK_RESULT: {"success": false, "comments": "Specific reason why — what was missing or what failed"}
-```
+**When `success` is `false`, a second key says WHAT KIND of failure it was.**
+`failure_reason` is exactly one of four words - never a sentence, which is
+what `comments` is for:
 
-Examples of failure reasons:
+| `failure_reason` | what it means | what someone does about it |
+|---|---|---|
+| `task` | the request was wrong, impossible, or too big for one phase | rewrite the brief |
+| `platform` | the machinery broke - a missing credential, a tool that crashed, a workspace that was not what it claimed | fix the platform |
+| `refused` | neither: you could have done the work and judged you should not | read what you found |
+| `unknown` | you cannot honestly tell which of the three it was | somebody reads the run |
+
+Those four go to four different people, so the wrong word fetches the wrong one
+and the right one never hears. Write `unknown` rather than guessing: it is
+recorded as a failure nobody has classified, which is exactly what it is.
+
+What it is read as is what you SAID, recorded beside the outcome and shown to
+whoever opens the run - not as a finding about the platform. Leaving the key
+out is not the same as writing `unknown`: an omitted reason is read as an
+ordinary reported failure, which is what every report written before this key
+existed means, and it is the one thing here you cannot use to say "I could not
+tell".
+
+**`success` is about your deliverable, not about every action around it.** If
+you produced what this phase asked for but an external write was refused or
+broke - posting a PR comment, pushing a branch, opening an issue - the task is
+NOT failed. Report `success: true`, and say what happened to the writes in
+`side_effects`, which is exactly one of four words:
+
+| `side_effects` | when |
+|---|---|
+| `none` | you attempted no external write |
+| `succeeded` | you made external writes and every one went through |
+| `denied` | a write was refused - permissions, a protected branch, a read-only token |
+| `failed` | a write was attempted and broke - network, API error, a tool that crashed |
+
+Name what was refused in `comments`. Writing `success: false` over a refused
+comment throws away a finished deliverable.
+
+Your `comments` are specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
+
+Write ONE complete block, for your outcome only. A complete block is read as
+your report wherever it sits, so do not copy out any of the others to explain
+the format - once it is closed it is a report and not a quotation, whatever the
+words around it say. Discussing the format in prose is free; closing a second
+block is not.
+
+Copy the ONE block below that matches your outcome - both lines - and replace
+the `comments` text with your own. **Write both lines. A block whose
+`TASK_RESULT_END` line is missing is failed as UNREADABLE instead of completed,
+so stopping after the JSON loses the run.**
+
+You completed the task - copy both lines, and change `none` to `succeeded`,
+`denied` or `failed` if you made external writes:
+
+```
+TASK_RESULT: {"success": true, "side_effects": "none", "comments": "Brief summary of what was accomplished"}
+TASK_RESULT_END
+```
+
+The REQUEST was the problem - wrong, impossible, or too big for one phase, so
+running it again unchanged fails the same way - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "task", "comments": "Specific reason why — what about the request could not be done"}
+TASK_RESULT_END
+```
+
+The PLATFORM was the problem - you were blocked, lacked access, or hit an error
+in the machinery - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "platform", "comments": "Specific reason why — what was missing or what failed"}
+TASK_RESULT_END
+```
+
+You could have done the work and judged you should NOT - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "refused", "comments": "Specific reason why — what you found and why you stopped"}
+TASK_RESULT_END
+```
+
+It failed and you cannot honestly tell which of the three - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "unknown", "comments": "Specific reason why — what happened, and what you could not establish about it"}
+TASK_RESULT_END
+```
 
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 
@@ -817,7 +983,7 @@ class TestThePromptTellsTheTruthAboutCloning:
         phases = await _executable_phases()
         provisioned = await _provision(
             phases["open_pr"],
-            completed={"verify": _BLOCKING_VERIFY_REPORT},
+            completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
         assert "pre-cloned" not in provisioned.prompt.lower()
@@ -929,11 +1095,10 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
     ) -> None:
         """Without this, hosts.yml could be empty and the test above stays green.
 
-        The provisioned environment also carries GITHUB_TOKEN, and `gh`
-        prefers it (#1129). So the file is exercised by taking that token
-        away, leaving hosts.yml as the only credential - and the deletion
-        control below is what stops THIS test passing on an unauthenticated
-        `gh` that never needed a credential at all.
+        hosts.yml is the ONLY credential `gh` is given (#725: the renewable
+        one, where GITHUB_TOKEN used to shadow it). The deletion control
+        below is what stops THIS test passing on an unauthenticated `gh`
+        that never needed a credential at all.
         """
         phases = await _executable_phases()
         provisioned = await _provision(phases["open_pr"], completed={})
@@ -941,9 +1106,8 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
             provisioned.setup_script, tmp_path
         )
         hosts_yml = home / ".config" / "gh" / "hosts.yml"
-        without_token = {
-            name: value for name, value in provisioned.agent_env.items() if name != ENV_GITHUB_TOKEN
-        }
+        assert ENV_GITHUB_TOKEN not in provisioned.agent_env
+        without_token = dict(provisioned.agent_env)
 
         with _FakeGitHubApi(tmp_path) as github:
             on_hosts_yml_alone = _run_gh(
@@ -971,7 +1135,7 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
 
         A codex phase gets an EMPTY agent env by design: it authenticates from
         ~/.codex/auth.json and must not be handed claude credentials. So the
-        obvious place to put GH_REPO - beside GITHUB_TOKEN in
+        obvious place to put GH_REPO - beside the credentials in
         `_build_agent_env` - is the one place it must not go, because that
         function does not run for codex at all. Asserted on the real `verify`
         phase, which is the codex phase this workflow ships.

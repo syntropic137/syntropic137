@@ -34,8 +34,8 @@ async function main() {
     packages: ['syn-domain', 'syn-adapters', 'syn-collector', 'syn-shared'],
     libraries: [
       { 
-        name: 'agentic-primitives',
-        repo: 'github.com/neuralempowerment/agentic-primitives'
+        name: 'agentic-workspace',
+        repo: 'github.com/AgentParadise/agentic-workspace'
       },
       { 
         name: 'event-sourcing-platform',

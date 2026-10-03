@@ -7,6 +7,7 @@ import {
   listCommand,
   showCommand,
   deleteCommand,
+  validateCommand,
 } from "../../../src/commands/workflow/crud.js";
 import { CLIError } from "../../../src/framework/errors.js";
 
@@ -21,6 +22,7 @@ describe("workflow crud commands", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -33,6 +35,12 @@ describe("workflow crud commands", () => {
 
   function stdout(): string {
     return (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+  }
+
+  function stderr(): string {
+    return (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("");
   }
@@ -215,6 +223,69 @@ describe("workflow crud commands", () => {
     });
   });
 
+  describe("validate", () => {
+    // A retired key is accepted by the server with a notice (#1477 follow-up).
+    // The CLI must carry the file to the server untouched and print what comes
+    // back; it holds no list of retired keys of its own.
+    const NOTICE = "phase 'p1': 'can_open_pr' is retired (#1477) and ignored";
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "syn-crud-validate-"));
+      fs.writeFileSync(
+        path.join(tmpDir, "workflow.yaml"),
+        "id: pkg-wf\nname: Pkg WF\ntype: custom\nphases:\n" +
+          "  - id: p1\n    name: Phase\n    order: 1\n    prompt_template: hi\n    can_open_pr: true\n",
+        "utf-8",
+      );
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("a package directory sends each resolved workflow and prints its warnings", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: true, name: "Pkg WF", phase_count: 1, errors: [], warnings: [NOTICE] }),
+      );
+
+      await validateCommand.handler({ positionals: [tmpDir], values: {} });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const request = mockFetch.mock.calls[0]![0] as Request;
+      expect(request.url).toContain("/workflows/validate");
+      const body = JSON.parse(await request.text()) as { content: string };
+      expect(body.content).toContain("can_open_pr");
+      expect(stdout()).toContain("Valid");
+      expect(stderr()).toContain(NOTICE);
+    });
+
+    it("a package directory with an invalid workflow exits 1", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: false, errors: ["phases.0.prompt: Extra inputs are not permitted"] }),
+      );
+
+      await expect(
+        validateCommand.handler({ positionals: [tmpDir], values: {} }),
+      ).rejects.toThrow(CLIError);
+      expect(stdout()).toContain("Extra inputs are not permitted");
+    });
+
+    it("a single file prints warnings and stays exit 0", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ valid: true, name: "Pkg WF", phase_count: 1, errors: [], warnings: [NOTICE] }),
+      );
+
+      await validateCommand.handler({
+        positionals: [path.join(tmpDir, "workflow.yaml")],
+        values: {},
+      });
+
+      expect(stdout()).toContain("Valid workflow definition");
+      expect(stderr()).toContain(NOTICE);
+    });
+  });
+
   describe("list", () => {
     it("renders workflows table", async () => {
       mockFetch.mockResolvedValue(
@@ -272,7 +343,10 @@ describe("workflow crud commands", () => {
             name: "Test Workflow",
             workflow_type: "custom",
             classification: "single-phase",
-            phases: [{ name: "build" }, { name: "test" }],
+            phases: [
+              { name: "build", model: "gpt-sol", model_display: "gpt-sol → gpt-6-sol" },
+              { name: "test" },
+            ],
             input_declarations: [
               { name: "pr_number", required: true, description: "Pull request number" },
               { name: "branch", required: false, description: "Target branch", default: "main" },
@@ -290,6 +364,8 @@ describe("workflow crud commands", () => {
       expect(out).toContain("Workflow Details");
       expect(out).toContain("build");
       expect(out).toContain("test");
+      // A definition surface shows what its alias resolves to.
+      expect(out).toContain("gpt-sol → gpt-6-sol");
       // Regression: show must display required inputs so users know what --input flags to pass
       expect(out).toContain("pr_number");
       expect(out).toContain("required");

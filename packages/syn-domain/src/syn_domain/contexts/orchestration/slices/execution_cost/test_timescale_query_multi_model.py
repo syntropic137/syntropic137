@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     TimescaleExecutionCostQuery,
 )
@@ -76,7 +77,12 @@ def _grouped_token_rows() -> list[_FakeRow]:
 def _make_mock_pool() -> MagicMock:
     """No session_summary rows exist yet; only grouped token_usage rows."""
 
-    async def fetch_side_effect(_query: str, _execution_id: str, event_type: str) -> list[_FakeRow]:
+    async def fetch_side_effect(query: str, *args: object) -> list[_FakeRow]:
+        # The tool-call tally is read from its own table and binds only the ids
+        # (#1322); this test is about pricing, so it has no tool calls to serve.
+        if tool_call_counts.TABLE in query:
+            return []
+        event_type = args[1]
         if event_type == SESSION_SUMMARY:
             return []  # no session_summary rows yet
         assert event_type == TOKEN_USAGE

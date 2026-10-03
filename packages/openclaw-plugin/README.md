@@ -52,7 +52,7 @@ Once installed, just talk to your OpenClaw agent:
 
 > "Set up a trigger to automatically run code review on new PRs in org/repo"
 
-The agent uses 15 tools under the hood — you don't need to know their names.
+The agent uses 16 tools under the hood — you don't need to know their names.
 
 ## Tools Reference
 
@@ -67,12 +67,12 @@ The agent uses 15 tools under the hood — you don't need to know their names.
 |------|-------------|
 | `syn_list_executions` | List recent/active executions |
 | `syn_get_execution` | Detailed status: phases, tokens, costs |
+| `syn_get_session_inventory` | Run sessions, relationships, captures, and gaps: revision-pinned pages, `all` traversal with separate coverage/traversal completeness, phase/attempt filters, node lookup |
 
 ### Control
 | Tool | What it does |
 |------|-------------|
-| `syn_pause_execution` | Pause a running execution |
-| `syn_resume_execution` | Resume a paused execution |
+| `syn_resume_execution` | Resume a failed execution into a new one |
 | `syn_cancel_execution` | Cancel an execution |
 | `syn_inject_context` | Send a message to a running agent |
 

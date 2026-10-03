@@ -22,12 +22,17 @@ type SessionDetail = components["schemas"]["SessionResponse"];
 
 const listCommand: CommandDef = {
   name: "list",
-  description: "List agent sessions",
+  description: "List platform sessions. For every session of a run (native transcripts, lineage, gaps, coverage) use `syn execution sessions <execution-id>`",
   options: {
+    execution: { type: "string", description: "Filter platform sessions by execution ID (complete run inventory: `syn execution sessions <execution-id>`)" },
     workflow: { type: "string", short: "w", description: "Filter by workflow ID" },
     status: { type: "string", short: "s", description: "Filter by status" },
     limit: { type: "string", short: "n", description: "Max results", default: "50" },
   },
+  examples: [
+    "syn sessions list --execution <execution-id>   # platform sessions only",
+    "syn execution sessions <execution-id> --all    # every session: delegates, native transcripts, lineage, gaps",
+  ],
   handler: async (parsed: ParsedArgs) => {
     const workflow = parsed.values["workflow"] as string | undefined;
     const status = parsed.values["status"] as string | undefined;
@@ -37,6 +42,7 @@ const listCommand: CommandDef = {
       params: {
         query: {
           workflow_id: workflow ?? null,
+          execution_id: (parsed.values["execution"] as string | undefined) ?? null,
           status: status ?? null,
           limit: parseInt(limitStr, 10),
         },
@@ -58,7 +64,9 @@ const listCommand: CommandDef = {
       table.addRow(
         s.id.slice(0, 8) + "\u2026",
         formatStatus(s.status),
-        s.agent_model_display ?? s.agent_provider ?? "\u2014",
+        // The model that RAN, or "unknown (requested: X)" (ADR-067 D9). Never
+        // the provider: a harness name is not a model.
+        s.agent_model_display,
         formatTimestamp(s.started_at),
         s.total_tokens_display,
         s.total_cost_display,
@@ -84,7 +92,9 @@ const showCommand: CommandDef = {
     print(`  Workflow:    ${d.workflow_name ?? d.workflow_id ?? "\u2014"}`);
     print(`  Status:      ${formatStatus(d.status)}`);
     print(`  Provider:    ${d.agent_provider ?? "\u2014"}`);
-    print(`  Model:       ${d.agent_model_display ?? d.agent_model ?? "\u2014"}`);
+    print(`  Model:       ${d.agent_model_display}`);
+    // Context only when the model was observed; otherwise the display already says it.
+    if (d.agent_model && d.requested_model) print(`  Requested:   ${d.requested_model}`);
     print(`  Started:     ${formatTimestamp(d.started_at)}`);
     if (d.completed_at) print(`  Completed:   ${formatTimestamp(d.completed_at)}`);
     if (d.duration_seconds != null) print(`  Duration:    ${d.duration_display}`);

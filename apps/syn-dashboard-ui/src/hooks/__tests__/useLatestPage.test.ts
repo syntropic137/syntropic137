@@ -19,7 +19,7 @@
  * size" is expressible here and nowhere above it.
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 
 import { listAllExecutions } from '../../api/executions'
@@ -144,25 +144,44 @@ describe('useLatestPage', () => {
     expect((lastPage - 1) * pageSize + result.current.result.rows.length).toBe(total)
   })
 
-  it('discards a response that was overtaken by a later query', async () => {
+  it('opens no second request when the query changes with a page still pending', async () => {
     const first = deferred<ListPage<{ id: string }>>()
     const second = deferred<ListPage<{ id: string }>>()
     const responses = [first, second]
-    const fetchPage = vi.fn(() => responses.shift()!.promise)
+    const signals: (AbortSignal | undefined)[] = []
+    let active = 0
+    let maxActive = 0
+    const fetchPage = vi.fn((_query: ListQuery, signal?: AbortSignal) => {
+      signals.push(signal)
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      return responses.shift()!.promise.finally(() => {
+        active -= 1
+      })
+    })
 
     const pageTwo: ListQuery = { page: 2, page_size: LIST_PAGE_SIZE }
     const { result, rerender } = renderHook(({ query }) => useLatestPage(fetchPage, query), {
       initialProps: { query: FIRST_PAGE },
     })
 
+    await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(1))
+
+    // Paging while page 1 is still on the wire - a filter change, a page
+    // button, twice on an endpoint slow enough to make it likely. Page 1's
+    // query is still running on the server whatever the browser does with its
+    // answer, so page 2 may not be issued alongside it (#1095).
     rerender({ query: pageTwo })
-    await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(2))
+    await act(async () => {})
+    expect(fetchPage).toHaveBeenCalledTimes(1)
 
-    second.resolve(page(['page-2-row'], 120))
-    await waitFor(() => expect(result.current.result.rows).toEqual([{ id: 'page-2-row' }]))
+    // Not merely left running: told to stop, which is also how this hook knows
+    // the answer is about a query nobody is asking any more.
+    expect(signals[0]?.aborted).toBe(true)
 
-    // Page 1's answer arrives late. Rendering it would put another page's rows
-    // under the current page's controls.
+    // Page 1's answer arrives. Rendering it would put another page's rows
+    // under the current page's controls, and reporting it settled would show
+    // them as though they were what page 2 returned.
     //
     // Resolved inside `act`, which returns only once React has run what
     // settling that promise scheduled AND committed the result. Awaiting a
@@ -174,9 +193,23 @@ describe('useLatestPage', () => {
     await act(async () => {
       first.resolve(page(['page-1-row'], 999))
     })
+    expect(result.current.result.rows).toEqual([])
+    expect(result.current.loading).toBe(true)
 
+    // And only now is page 2 asked for - exactly once, for the rerender and
+    // the refetch it triggered between them.
+    expect(fetchPage).toHaveBeenCalledTimes(2)
+    expect(fetchPage.mock.calls.at(-1)?.[0]).toBe(pageTwo)
+
+    await act(async () => {
+      second.resolve(page(['page-2-row'], 120))
+    })
     expect(result.current.result.rows).toEqual([{ id: 'page-2-row' }])
     expect(result.current.result.total).toBe(120)
+
+    // The number #1095 is about: two of these were in pg_stat_activity, and a
+    // browser discarding one of the answers did not make it one.
+    expect(maxActive).toBe(1)
   })
 
   it('refetches when the query changes identity', async () => {
@@ -219,6 +252,41 @@ describe('useLatestPage', () => {
 
     await waitFor(() => expect(result.current.result.rows).toEqual([{ id: 'b' }]))
     expect(fetchPage.mock.calls.at(-1)?.[0]).toBe(FIRST_PAGE)
+  })
+
+  // The list-shaped half of #1095. The poll used to be a `setInterval` beside
+  // this hook, and a timer outside it cannot see the fetch the hook does on
+  // mount - so a list whose FIRST page took longer than the interval was
+  // already being polled while that first page was still on the wire. Asking
+  // again had to move inside for the count to be enforceable at all.
+  describe('a list endpoint slower than its poll interval', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    /** Rows are still moving, so this list wants to poll - from mount onwards. */
+    const pollEvery3s = () => 3000
+
+    it('does not poll a first page that has not come back yet', async () => {
+      const pending = deferred<ListPage<{ id: string }>>()
+      const fetchPage = vi.fn(() => pending.promise)
+
+      renderHook(() => useLatestPage(fetchPage, FIRST_PAGE, pollEvery3s))
+      await vi.waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(1))
+
+      // Six intervals with that page still outstanding.
+      await vi.advanceTimersByTimeAsync(18_000)
+      expect(fetchPage).toHaveBeenCalledTimes(1)
+
+      // It resumes once the page lands - after a gap that respects how long
+      // that page actually took, which is why 20s and not 3s.
+      pending.resolve(page(['a'], 1))
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(fetchPage.mock.calls.length).toBeGreaterThan(1)
+    })
   })
 
   it('leaves the last good page on screen when a request fails', async () => {

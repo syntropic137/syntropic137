@@ -32,6 +32,8 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
+from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 
@@ -43,6 +45,11 @@ class _ExecutionService(Protocol):
     Orchestration contexts (ADR-063). Repository identity is passed
     as typed ``RepositoryRef`` values, not smuggled through the
     ``inputs`` dict.
+
+    ``run_workflow`` returns the admission ticket rather than ``None`` (#1387)
+    so this context depends on the admission DECISION and not on the absence of
+    an exception. A trigger record is written from the ticket, which is the
+    only thing that can honestly say the work was admitted.
     """
 
     async def run_workflow(
@@ -52,7 +59,7 @@ class _ExecutionService(Protocol):
         execution_id: str,
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
-    ) -> None: ...
+    ) -> AdmissionTicket | None: ...
 
 
 class _BudgetChecker(Protocol):
@@ -74,10 +81,24 @@ class _BudgetChecker(Protocol):
 
 logger = logging.getLogger(__name__)
 
+#: The announcement that admission is open again (#1387). Read from the event
+#: class so the string cannot drift from the thing that writes it.
+_ADMISSION_OPEN = AdmissionOpenEvent.event_type
+
 # Event types this projection subscribes to
 _SUBSCRIBED_EVENTS = {
     "github.TriggerFired",
+    # Not a trigger and it writes no record. It is here for its SIDE EFFECT on
+    # the coordinator: `process_pending()` runs only after a subscribed event
+    # is handled live, so subscribing is the only way a paused record is ever
+    # re-offered. Without it a trigger held back by a deploy waits for the next
+    # unrelated GitHub event - which on a quiet repository may never come.
+    _ADMISSION_OPEN,
 }
+
+#: Dispatch held back because execution admission is closed (#1387). Reversible:
+#: unlike "failed", a record in this state is re-offered on every later tick.
+_PAUSED = "paused"
 
 
 _Scalar = str | int | float | bool | None
@@ -145,6 +166,12 @@ class WorkflowDispatchProjection(ProcessManager):
 
         Writes a pending dispatch record for each TriggerFired event.
         The record is processed later by process_pending() (live-only).
+
+        `maintenance.AdmissionOpen` writes nothing: the to-do list already
+        holds the paused records and the announcement adds no work, it only
+        says the work may be retried. Checkpointing and returning SUCCESS is
+        the whole of its handling - that is what makes the coordinator run the
+        processor side, which re-offers them (#1387).
         """
         event_type = envelope.metadata.event_type or "Unknown"
         event_data: dict[str, _EventValue] = envelope.event.model_dump()  # type: ignore[assignment]  # model_dump() -> dict[str, Any]
@@ -199,14 +226,26 @@ class WorkflowDispatchProjection(ProcessManager):
             )
             return 0
 
-        pending = await self._store.query(self.PROJECTION_NAME, filters={"status": "pending"})
         processed = 0
-
-        for record in pending:
+        for record in await self._pending_records():
             if await self._dispatch_record(record):
                 processed += 1
 
         return processed
+
+    async def _pending_records(self) -> list[dict[str, str | int | float | bool | None]]:
+        """Records still owed a dispatch: never attempted, or parked by #1387.
+
+        ``paused`` is a reversible state, not a terminal one. A trigger that
+        arrived during a deploy is picked up again on the next tick after
+        maintenance mode clears, which is what stops "recorded as paused" from
+        being a dropped trigger wearing a nicer label. The existing hourly
+        dispatch rate limit bounds the catch-up burst.
+        """
+        assert self._store is not None
+        records = await self._store.query(self.PROJECTION_NAME, filters={"status": "pending"})
+        records.extend(await self._store.query(self.PROJECTION_NAME, filters={"status": _PAUSED}))
+        return records
 
     async def _dispatch_record(self, record: dict[str, str | int | float | bool | None]) -> bool:
         """Dispatch a single pending record. Returns True if dispatched."""
@@ -230,6 +269,21 @@ class WorkflowDispatchProjection(ProcessManager):
         try:
             await self._execute_and_record(record, execution_id, workflow_id, trigger_id)
             return True
+        except MaintenancePausedError as exc:
+            # #1387: refused, not broken. The execution service raises this
+            # SYNCHRONOUSLY, before any task exists, so nothing was started and
+            # this record is the whole truth about the trigger. Recording it as
+            # `failed` would say the dispatch was attempted and went wrong;
+            # `paused` says it was held back, and _pending_records() picks it up
+            # again once the gate clears.
+            logger.info(
+                "Dispatch of workflow %s for trigger %s held: %s",
+                workflow_id,
+                trigger_id,
+                exc.mode.refusal_detail,
+            )
+            await self._save_record_status(execution_id, record, _PAUSED, "maintenance_mode")
+            return False
         except Exception:
             logger.exception(
                 "Failed to dispatch workflow %s for trigger %s", workflow_id, trigger_id
@@ -269,7 +323,15 @@ class WorkflowDispatchProjection(ProcessManager):
                     repo_slug,
                 )
 
-        await self._execution_service.run_workflow(
+        # #1387: `run_workflow` either raises MaintenancePausedError - which
+        # _dispatch_record records as `paused` - or hands back the admission
+        # ticket the gate issued under its transition lock. The record below is
+        # written FROM that ticket, so "dispatched" cannot be a guess: there is
+        # no way to reach the next line without the gate having said yes.
+        #
+        # `None` means this dispatcher was built without a gate, which only
+        # happens in fixtures; the timestamp falls back to now.
+        ticket = await self._execution_service.run_workflow(
             workflow_id=workflow_id,
             inputs=str_inputs,
             execution_id=execution_id,
@@ -277,7 +339,9 @@ class WorkflowDispatchProjection(ProcessManager):
         )
 
         record["status"] = "dispatched"
-        record["dispatched_at"] = datetime.now(UTC).isoformat()
+        record["dispatched_at"] = (
+            ticket.granted_at if ticket is not None else datetime.now(UTC)
+        ).isoformat()
         if execution_id:
             await self._store.save(self.PROJECTION_NAME, execution_id, record)
 
@@ -331,10 +395,12 @@ class WorkflowDispatchProjection(ProcessManager):
         status: str,
         reason: str,
     ) -> None:
-        """Update a record's status and persist it."""
+        """Update a record's status and the reason for it, and persist."""
         assert self._store is not None
         record["status"] = status
-        record["failure_reason"] = reason
+        # Named for the status, not for failure: #1387 writes a `paused` status
+        # here and "failure_reason" would have described a refusal as a fault.
+        record["status_reason"] = reason
         if execution_id:
             await self._store.save(self.PROJECTION_NAME, execution_id, record)
 

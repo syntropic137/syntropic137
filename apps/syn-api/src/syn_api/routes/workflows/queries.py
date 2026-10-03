@@ -23,6 +23,15 @@ from syn_api.types import (
     WorkflowSummary,
 )
 
+# Imported from the context's public surface, not its internals (ADR-062).
+from syn_domain.contexts.orchestration import (
+    FailureClassification,
+    ReportedFailureReason,
+    is_phase_id,
+)
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, resolve_definition_model
+from syn_shared.display import format_phase_model_definition
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
         InputDeclarationDetail,
@@ -116,6 +125,25 @@ class ExecutionRunSummary(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    Same field, same meaning, as on `ExecutionSummaryResponse`, and here for
+    the reason that one is: this is the model behind Workflow Runs, which
+    renders the same rows the executions list does. Without it that page had
+    nothing to pass its badge, so every correct refusal on it read as a plain
+    red failure however classification-aware the badge became (#1367).
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `ExecutionSummaryResponse`: what the AGENT
+    SAID, beside the classification the platform measured and never folded
+    into it. Here for the same reason the field above is - this page renders
+    the same rows the executions list does, and a row that carries the
+    measurement without the report is the half that reads as more certain than
+    it is.
+    """
 
 
 class ExecutionRunListResponse(BaseModel):
@@ -150,29 +178,38 @@ class ExportManifestResponse(BaseModel):
 
 def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDefinitionResponse]:
     """Map domain PhaseDefinitionDetail objects to API response models."""
-    return [
-        PhaseDefinitionResponse(
-            phase_id=p.id,
-            name=p.name,
-            order=p.order,
-            description=p.description,
-            agent_type=p.agent_type,
-            prompt_template=p.prompt_template,
-            timeout_seconds=p.timeout_seconds or 300,
-            allowed_tools=list(p.allowed_tools),
-            argument_hint=p.argument_hint,
-            model=p.model,
-            provider=p.provider,
-            allow_delegation=p.allow_delegation,
-            claude_plugins=[_ref_response(r) for r in p.claude_plugins],
-            skills=[_ref_response(r) for r in p.skills],
-            execution_type=p.execution_type,
-            max_tokens=p.max_tokens,
-            input_artifact_types=list(p.input_artifact_types),
-            output_artifact_types=list(p.output_artifact_types),
-        )
-        for p in (raw_phases or [])
-    ]
+    return [_map_phase(p) for p in (raw_phases or [])]
+
+
+def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
+    """One phase; the model resolves by the same rule execution applies."""
+    resolution = resolve_definition_model(p.provider, p.model)
+    return PhaseDefinitionResponse(
+        phase_id=p.id,
+        name=p.name,
+        order=p.order,
+        description=p.description,
+        agent_type=p.agent_type,
+        prompt_template=p.prompt_template,
+        timeout_seconds=p.timeout_seconds or 300,
+        allowed_tools=list(p.allowed_tools),
+        argument_hint=p.argument_hint,
+        model=p.model,
+        resolved_model=resolution.concrete,
+        resolution_basis=resolution.alias.basis if resolution.alias else None,
+        model_display=format_phase_model_definition(resolution),
+        provider=p.provider,
+        allow_delegation=p.allow_delegation,
+        clone_repos=p.clone_repos,
+        delivers_repo_changes=p.delivers_repo_changes,
+        sandbox=p.sandbox,
+        claude_plugins=[_ref_response(r) for r in p.claude_plugins],
+        skills=[_ref_response(r) for r in p.skills],
+        execution_type=p.execution_type,
+        max_tokens=p.max_tokens,
+        input_artifact_types=list(p.input_artifact_types),
+        output_artifact_types=list(p.output_artifact_types),
+    )
 
 
 def _map_input_declarations(
@@ -291,7 +328,6 @@ async def export_workflow(
 # -- Export helpers -----------------------------------------------------------
 
 _SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
-_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 # Characters that require quoting in YAML scalar values.
 _YAML_SPECIAL_RE = re.compile(r"[:{}\[\],&*?|>!%#@`\"\'\n]")
@@ -302,14 +338,14 @@ def _sanitize_slug(name: str) -> str:
     slug = name.lower().replace(" ", "-")
     slug = re.sub(r"[^a-z0-9._-]", "", slug)
     slug = slug.strip(".-")
-    if not slug or not _SAFE_SLUG_RE.match(slug):
+    if not slug or not _SAFE_SLUG_RE.fullmatch(slug):
         slug = "workflow"
     return slug
 
 
 def _validate_phase_id(phase_id: str) -> str:
     """Validate a phase ID is safe for use in file paths."""
-    if not _SAFE_ID_RE.match(phase_id):
+    if not is_phase_id(phase_id):
         msg = f"Phase ID contains unsafe characters: {phase_id!r}"
         raise ValueError(msg)
     return phase_id
@@ -426,6 +462,20 @@ def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
         entries.append(f"      model: {_yaml_quote(phase.model)}")
     if phase.allow_delegation:
         entries.append("      allow_delegation: true")
+    # #1429. `sandbox` is an `agent.` field in the authoring schema, not a
+    # top-level one, so it round-trips here. Emitted only when it differs from
+    # the loader default: writing the default back would turn "inherits" into
+    # "explicitly declares", which is the distinction the guards above keep.
+    # Every value that is not the default, INCLUDING an invalid one. The
+    # first version guarded on `if phase.sandbox`, which omitted `""`: the
+    # untyped JSON create path can store that, execution preserves it for
+    # rejection, and export was quietly turning it into the default
+    # full-access. Laundering an invalid declaration into a valid, MORE
+    # permissive one is the worst outcome available here - an uninstallable
+    # package names the problem instead of hiding it (the same reasoning the
+    # block above applies to a refused execution_type).
+    if phase.sandbox != DEFAULT_PHASE_SANDBOX:
+        entries.append(f"      sandbox: {_yaml_quote(phase.sandbox)}")
     return ["    agent:", *entries] if entries else []
 
 
@@ -514,11 +564,28 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # `max_tokens` is the ONE exception, and it is a different case: it is not
     # in the authoring schema at all, so there is no spelling that round-trips.
     # It can only arrive via the untyped JSON create path (#1015 follow-up).
-    # Nothing that CAN be expressed is dropped here.
+    #
+    # That claim was FALSE for clone_repos, delivers_repo_changes and
+    # agent.sandbox until #1429: all are in the authoring schema and all were
+    # dropped. They are emitted below. A comment asserting an invariant is worth less than the
+    # invariant, so there is now a test that walks the schema.
     if phase.argument_hint:
         lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
     if phase.allowed_tools:
         lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
+    # #1429. These were dropped, so export -> reinstall silently changed what
+    # the reinstalled phase does, with nothing in the YAML, the API or
+    # `syn workflow show` to say why.
+    #
+    # Emitted whenever they differ from the loader's default rather than only
+    # when truthy. `clone_repos` and `delivers_repo_changes` default TRUE: a
+    # truthy-only test would drop an explicit `false` and reinstall it as
+    # `true`, which is the same laundering in the opposite direction. So the
+    # guard compares against the default.
+    if not phase.clone_repos:
+        lines.append("    clone_repos: false")
+    if not phase.delivers_repo_changes:
+        lines.append("    delivers_repo_changes: false")
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))
@@ -795,6 +862,8 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 error_message=e.error_message,
+                failure_classification=e.failure_classification,
+                reported_failure_reason=e.reported_failure_reason,
             )
             for e in exec_result.value
         ],

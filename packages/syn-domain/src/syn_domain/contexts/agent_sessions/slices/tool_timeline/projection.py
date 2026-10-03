@@ -90,6 +90,11 @@ class ToolTimelineProjection:
             # Update existing record
             existing["status"] = "completed"
             existing["completed_at"] = event_data.get("timestamp")
+            # Only what the producer measured. Deriving a duration from this
+            # record's own two stamps would be a second copy of the rule in
+            # `syn_adapters.projections.session_tools_dispatch.resolve_durations`,
+            # which is the one the API reads through (#1064); a copy here has no
+            # reader to serve and would drift from that one unnoticed.
             existing["duration_ms"] = event_data.get("duration_ms")
             existing["success"] = event_data.get("success", True)
             existing["tool_output"] = event_data.get("tool_output")

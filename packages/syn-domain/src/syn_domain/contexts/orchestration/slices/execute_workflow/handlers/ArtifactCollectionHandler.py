@@ -16,9 +16,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
-    from syn_domain.contexts.artifacts import PhaseOutputFile
+    from syn_domain.contexts.artifacts import AgentIdentity, PhaseOutputFile
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
+        DescribeWork,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
@@ -30,7 +33,7 @@ logger = logging.getLogger(__name__)
 class ArtifactCollectionResult:
     """Result of artifact collection."""
 
-    __slots__ = ("artifact_ids", "command", "files", "first_content")
+    __slots__ = ("artifact_ids", "command", "deliverable_recovered", "files", "first_content")
 
     def __init__(
         self,
@@ -38,10 +41,15 @@ class ArtifactCollectionResult:
         first_content: str | None,
         command: ArtifactsCollectedCommand,
         files: list[PhaseOutputFile] | None = None,
+        deliverable_recovered: bool = False,
     ) -> None:
         self.artifact_ids = artifact_ids
         self.first_content = first_content
         self.command = command
+        #: Whether the deliverable was salvaged from the transcript (#1300).
+        #: Already on `command`, and repeated here because the processor
+        #: reports collection and phase outcome from this object.
+        self.deliverable_recovered = deliverable_recovered
         #: Every file the phase produced, with its path (#988). The next
         #: phase's workspace is built from this, not from first_content.
         self.files: list[PhaseOutputFile] = files if files is not None else []
@@ -64,7 +72,9 @@ class ArtifactCollectionHandler:
         session_id: str,
         phase_name: str,
         output_artifact_types: tuple[str, ...],
+        agent: AgentIdentity,
         last_agent_message: str | None = None,
+        describe_work: DescribeWork | None = None,
     ) -> ArtifactCollectionResult:
         """Collect artifacts from workspace after agent execution.
 
@@ -78,10 +88,20 @@ class ArtifactCollectionHandler:
                 produces. Empty means it declared nothing and may legitimately
                 produce nothing; non-empty and unproduced is a failure the
                 collector raises on (#1167).
+            agent: The harness that ran this phase and the model it announced,
+                stamped on every artifact so a later phase can name who
+                produced its inputs (#1284).
             last_agent_message: The last thing this phase's agent said on its
-                stream. Used only when a file it wrote turns out to be empty,
-                as the fallback that stops a lost write failing the whole
-                execution (#1195).
+                stream. The fallback deliverable whenever the declared one is
+                not readable from disk - the file was written empty (#1195) or
+                no collectable file was written at all (#1300) - so that a
+                finished phase is not discarded over a missing report. Stored
+                marked as recovered, never silently.
+            describe_work: Asked where this phase's branches stand, and only
+                when a salvage is actually happening. A salvaged phase does not
+                fail, so it never reaches the failure path that normally
+                reports this (#1200), and the artifact becomes the only place
+                the surviving branch is named.
 
         Returns:
             ArtifactCollectionResult with artifact IDs and aggregate command
@@ -96,7 +116,9 @@ class ArtifactCollectionHandler:
             session_id=session_id,
             phase_name=phase_name,
             output_artifact_types=output_artifact_types,
+            agent=agent,
             last_agent_message=last_agent_message,
+            describe_work=describe_work,
         )
 
         command = ArtifactsCollectedCommand(
@@ -107,6 +129,7 @@ class ArtifactCollectionHandler:
             if collected.first_content
             else None,
             session_id=session_id,
+            deliverable_recovered=collected.deliverable_recovered,
         )
 
         return ArtifactCollectionResult(
@@ -114,4 +137,5 @@ class ArtifactCollectionHandler:
             first_content=collected.first_content,
             command=command,
             files=collected.files,
+            deliverable_recovered=collected.deliverable_recovered,
         )

@@ -1,6 +1,7 @@
 """Regression tests for provider-specific agent command construction.
 
-These pin the DEFAULT sandbox level, which is currently ``danger-full-access``.
+These pin the DEFAULT sandbox level, which is currently full access
+(``PhaseSandbox.FULL_ACCESS``).
 
 That value is unchanged from before #1157, but it is no longer hardcoded: it is
 now a per-phase declaration that merely defaults here. A phase wanting LESS
@@ -25,11 +26,16 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
+from syn_shared.agents import CODEX_SANDBOX_FLAGS, PhaseSandbox
 
 # Without this the whole module collects ZERO under CI's `pytest -m unit`, and
 # the gate goes green having run none of it - including the argv pin that
 # guards the #964 --tools change.
 pytestmark = pytest.mark.unit
+
+# Built from the typed mapping, never hand-written: the repository forbids a
+# literal sandbox-disabling invocation (test_no_codex_sandbox_bypass, #1398).
+FULL_ACCESS_FLAG = CODEX_SANDBOX_FLAGS[PhaseSandbox.FULL_ACCESS]
 
 
 def _phase(
@@ -53,7 +59,7 @@ def test_codex_command_passes_actual_model_and_prompt_as_individual_args() -> No
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
         "--model",
         "gpt-5.6",
@@ -67,7 +73,7 @@ def test_codex_command_omits_model_option_when_model_is_not_provided() -> None:
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
         "do the thing",
     ]
@@ -83,11 +89,13 @@ def test_codex_command_omits_claude_alias_model() -> None:
     assert _build_codex_command("do the thing", "o3")[-3:] == ["--model", "o3", "do the thing"]
 
 
-def test_codex_command_via_domain_default_model_omits_model_flag() -> None:
-    """Regression (#788 follow-up, PR #795): a codex phase that omits
-    `model:` must resolve to a command with NO `--model` flag - codex runs
-    model-unforced (its own account default), not `--model codex` (which
-    an earlier fix synthesized and which is not a real codex model id).
+def test_codex_command_via_domain_default_model_forces_gpt_6_sol() -> None:
+    """A codex phase that omits `model:` runs the codex default, FORCED.
+
+    Regression history (#788, PR #795): an earlier fix synthesized
+    `--model codex`, which is not a real model id. The default is now the
+    platform alias `gpt-sol`, which must reach codex as the concrete slug
+    `gpt-6-sol` - codex has no alias feature and would reject `gpt-sol`.
     """
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         PhaseDefinition,
@@ -95,7 +103,7 @@ def test_codex_command_via_domain_default_model_omits_model_flag() -> None:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
         _build_agent_config_from_phase,
     )
-    from syn_shared.agents import AgentProvider
+    from syn_shared.agents import AgentProvider, CodexModelAlias, ModelId
 
     phase_def = PhaseDefinition(
         phase_id="p1",
@@ -105,7 +113,7 @@ def test_codex_command_via_domain_default_model_omits_model_flag() -> None:
         provider=AgentProvider.CODEX,
     )
     cfg = _build_agent_config_from_phase(phase_def)
-    assert cfg.model is None
+    assert cfg.model == CodexModelAlias.GPT_SOL
 
     cmd = _build_codex_command("do the thing", cfg.model)
     assert cmd == [
@@ -113,11 +121,13 @@ def test_codex_command_via_domain_default_model_omits_model_flag() -> None:
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
+        "--model",
+        ModelId.GPT_6_SOL,
         "do the thing",
     ]
-    assert "--model" not in cmd
+    assert CodexModelAlias.GPT_SOL not in cmd
 
 
 def test_agent_command_dispatches_on_provider_string() -> None:

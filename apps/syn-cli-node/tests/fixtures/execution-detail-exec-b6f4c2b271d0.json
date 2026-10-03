@@ -1,0 +1,78 @@
+{
+  "workflow_execution_id": "exec-b6f4c2b271d0",
+  "workflow_id": "pr-review-comment-test",
+  "workflow_name": "Test: PR Review with Comment",
+  "status": "completed",
+  "started_at": "2026-10-01T20:28:39.138431+00:00",
+  "completed_at": "2026-10-01T20:29:52.792596+00:00",
+  "phases": [
+    {
+      "phase_id": "review",
+      "name": "Review the PR",
+      "status": "completed",
+      "session_id": "a4333bf7-23ad-4cf3-946c-ae7966a731b9",
+      "artifact_id": "5617a85e-3e3e-4066-8942-079f71d16ad3",
+      "input_tokens": 24,
+      "output_tokens": 4615,
+      "cache_creation_tokens": 25439,
+      "cache_read_tokens": 232319,
+      "total_tokens": 262397,
+      "duration_seconds": 70.599761,
+      "cost_usd": "0.1944178",
+      "unpriced_observation_count": 0,
+      "started_at": "2026-10-01 20:28:39.202490+00:00",
+      "completed_at": "2026-10-01 20:29:49.824180+00:00",
+      "error_message": null,
+      "deliverable_recovered": false,
+      "reported_side_effects": "denied",
+      "model": "claude-sonnet-5",
+      "requested_model": "sonnet",
+      "cost_by_model": {
+        "claude-sonnet-5": "0.1944178"
+      },
+      "agent_session_ids": [
+        "514263f3-cc49-457d-a237-679397d92424"
+      ],
+      "exit_code": null,
+      "observed_branches": null,
+      "activity": {
+        "telemetry_available": true,
+        "operations_count": 15,
+        "last_push_at": null,
+        "seconds_since_last_push": null,
+        "elapsed_seconds": 70.599761,
+        "timeout_seconds": 300
+      },
+      "model_display": "claude-sonnet-5"
+    }
+  ],
+  "total_phases": 1,
+  "completed_phases": 1,
+  "total_input_tokens": 24,
+  "total_output_tokens": 4615,
+  "total_cache_creation_tokens": 25439,
+  "total_cache_read_tokens": 232319,
+  "total_tokens": 262397,
+  "total_cost_usd": "0.1944178",
+  "unpriced_observation_count": 0,
+  "cache_read_rate_display": "0.1x rate",
+  "cache_write_rate_display": "1.25x rate",
+  "total_duration_seconds": 70.599761,
+  "unknown_duration_phase_count": 0,
+  "artifact_ids": [
+    "5617a85e-3e3e-4066-8942-079f71d16ad3"
+  ],
+  "error_message": null,
+  "failure_classification": "unclassified",
+  "reported_failure_reason": null,
+  "deliverable_produced": true,
+  "reported_side_effects": "denied",
+  "repos": [
+    "https://github.com/syntropic137/sandbox_syn-engineer-beta"
+  ],
+  "task": "Review PR #159 in syntropic137/sandbox_syn-engineer-beta (use: gh pr view 159 and gh pr diff 159). Then post your 2-3 findings as ONE comment on that PR with: gh pr comment 159 --repo syntropic137/sandbox_syn-engineer-beta --body-file <file>. Report the comment URL. In your TASK_RESULT, set side_effects to succeeded if the comment posted, denied if GitHub refused it (permission/403), failed if it broke otherwise.",
+  "inputs": {
+    "task": "Review PR #159 in syntropic137/sandbox_syn-engineer-beta (use: gh pr view 159 and gh pr diff 159). Then post your 2-3 findings as ONE comment on that PR with: gh pr comment 159 --repo syntropic137/sandbox_syn-engineer-beta --body-file <file>. Report the comment URL. In your TASK_RESULT, set side_effects to succeeded if the comment posted, denied if GitHub refused it (permission/403), failed if it broke otherwise.",
+    "repos": "https://github.com/syntropic137/sandbox_syn-engineer-beta"
+  }
+}

@@ -5,16 +5,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final
 
+from syn_shared.observed_model import UNKNOWN_MODEL_KEY
+from syn_shared.pricing import canonical_cost_usd
+
 UNATTRIBUTED_PHASE_ID: Final[str] = "unattributed"
-
-UNATTRIBUTED_MODEL: Final[str] = "unattributed-model"
-"""Bucket for cost that is AUTHORITATIVE but names no model.
-
-A session_summary can carry an SDK-reported ``total_cost_usd`` with no model
-id. That cost is real and counts toward the phase total, so omitting it from
-the per-model breakdown makes the parts sum to less than the whole - the exact
-reconciliation failure #812 fixed for phases and this restores for models.
-"""
 """Bucket for cost that belongs to an execution but to no particular phase.
 
 ``agent_events.phase_id`` is nullable, so a session_summary can be recorded
@@ -22,6 +16,16 @@ against an execution without a phase. The execution total counts that spend;
 if the per-phase breakdown silently skipped it, the parts would not add up
 to the whole (issue #812). Naming the bucket keeps the breakdown honest and
 the gap visible instead of invisible.
+"""
+
+UNATTRIBUTED_MODEL: Final[str] = UNKNOWN_MODEL_KEY
+"""Bucket for cost whose model the harness did not report (ADR-067).
+
+An alias of ``syn_shared.observed_model.UNKNOWN_MODEL_KEY``, kept under its
+old name for existing importers. It began as the bucket for authoritative cost
+naming no model (#812: without it the per-model breakdown summed to less than
+the whole) and now also holds cost from rows that named only the REQUESTED
+model, since a request is not a record of what ran.
 """
 
 
@@ -49,6 +53,11 @@ def _coerce_decimal_dict(raw: dict[str, str | Decimal] | None) -> dict[str, Deci
     if not raw:
         return {}
     return {k: _coerce_decimal(v) for k, v in raw.items()}
+
+
+def _canonical_map(raw: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Each cost in *raw* in canonical form (see ``canonical_cost_usd``)."""
+    return {k: canonical_cost_usd(v) for k, v in raw.items()}
 
 
 @dataclass
@@ -157,6 +166,22 @@ class ExecutionCost:
 
     completed_at: datetime | None = None
     """When the last session completed."""
+
+    def __post_init__(self) -> None:
+        """Hold every money field in canonical form (``canonical_cost_usd``).
+
+        Every read path builds this record fresh, so canonicalising here is
+        what keeps a harness's double noise (``0.30566780000000005``) and a
+        Decimal sum's trailing zeros out of every API response, without each
+        query service having to remember to.
+        """
+        self.total_cost_usd = canonical_cost_usd(self.total_cost_usd)
+        self.token_cost_usd = canonical_cost_usd(self.token_cost_usd)
+        self.compute_cost_usd = canonical_cost_usd(self.compute_cost_usd)
+        self.cost_by_phase = _canonical_map(self.cost_by_phase)
+        self.models_by_phase = {k: _canonical_map(v) for k, v in self.models_by_phase.items()}
+        self.cost_by_model = _canonical_map(self.cost_by_model)
+        self.cost_by_tool = _canonical_map(self.cost_by_tool)
 
     @property
     def total_tokens(self) -> int:

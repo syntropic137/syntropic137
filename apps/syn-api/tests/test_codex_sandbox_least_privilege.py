@@ -1,6 +1,6 @@
 """A codex phase must not receive more authority than it declared (#1157, #1161).
 
-Every codex phase used to be built with ``--sandbox danger-full-access``
+Every codex phase used to be built with the full-access sandbox level
 regardless of what its workflow said. On ``exec-dff4ff410bb1`` a verify phase
 used that grant to merge, commit and push the change it then certified, and
 the resulting verdict was indistinguishable from a real one.
@@ -182,7 +182,8 @@ class TestTheWholePathFromYaml:
     test whose docstring claims more than it does is worse than no test.
     """
 
-    def test_yaml_read_only_reaches_the_codex_argv(self) -> None:
+    def test_yaml_declared_level_reaches_the_codex_argv(self) -> None:
+        # A non-default level, so only the declared value reaching argv passes.
         from syn_domain.contexts.orchestration._shared.workflow_definition import (
             WorkflowDefinition,
         )
@@ -200,15 +201,15 @@ phases:
     agent:
       provider: codex
       model: gpt-5.6-sol
-      sandbox: read-only
+      sandbox: workspace-write
 """
         )
         phase = definition.phases[0].to_domain()
-        assert phase.sandbox == "read-only", "dropped between YAML and PhaseDefinition"
+        assert phase.sandbox == "workspace-write", "dropped between YAML and PhaseDefinition"
 
         argv = _build_codex_command(
             "check the work",
             phase.model,
             _resolve_sandbox(phase.sandbox, phase_id=phase.phase_id),
         )
-        assert _sandbox_arg(argv) == "read-only"
+        assert _sandbox_arg(argv) == "workspace-write"

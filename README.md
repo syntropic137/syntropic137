@@ -153,8 +153,6 @@ syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
 
 ```bash
 syn control status <execution-id>
-syn control pause <execution-id> --reason "investigating"
-syn control resume <execution-id>
 syn control cancel <execution-id>
 ```
 
@@ -172,16 +170,19 @@ phases:
   - id: review
     agent:
       provider: codex           # a different model reviews the work
-      model: gpt-5.6-sol        # name a concrete model, see note below
-      sandbox: read-only        # codex honours this, claude does not yet
+      model: gpt-sol            # platform alias for gpt-6-sol, see note below
 ```
 
 Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, a phase
 with `agent.provider: codex` fails to provision.
 
-Name a concrete model id on codex phases. Codex does not report its model on
-the wire, so omitting `model` leaves the run unpriced rather than wrongly
-priced, and no cost lands in your reports.
+A phase that names no model gets the platform default: `opus` on claude
+phases, `gpt-sol` on codex phases. `gpt-sol` is a platform alias that runs
+and prices as `gpt-6-sol`; codex has no aliases of its own, so the platform
+translates it before calling codex. Override the defaults with
+`SYN_DEFAULT_CLAUDE_MODEL` and `SYN_DEFAULT_CODEX_MODEL` in your `.env`. A
+default is recorded in the workflow when you install it, so changing the
+setting later only affects workflows installed afterwards.
 
 ### Artifacts
 
@@ -261,7 +262,7 @@ syntropic137/
 │   ├── syn-perf/                # Performance benchmarking
 │   └── openclaw-plugin/         # OpenClaw integration
 ├── lib/                         # Git submodules (our own projects)
-│   ├── agentic-primitives/      # Agent building blocks, isolation providers
+│   ├── agentic-workspace/       # Workspace images, isolation providers, event recording
 │   ├── event-sourcing-platform/ # Rust event store, Python SDK, VSA tool
 │   ├── syntropic137-claude-plugin/ # Claude Code plugin
 │   └── agent-paradise-standards-system/ # Architecture fitness functions

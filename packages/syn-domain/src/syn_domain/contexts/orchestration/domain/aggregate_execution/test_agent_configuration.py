@@ -12,7 +12,7 @@ import pytest
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
 )
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import DEFAULT_CODEX_MODEL, AgentProvider
 
 
 @pytest.mark.unit
@@ -24,9 +24,9 @@ class TestAgentConfigurationProviders:
         config = AgentConfiguration(provider=AgentProvider.CODEX)
         assert config.provider == AgentProvider.CODEX
 
-    def test_codex_phase_keeps_no_synthesized_model(self) -> None:
-        """A codex phase with no model stays unpriced rather than Haiku (#788)."""
-        assert AgentConfiguration(provider=AgentProvider.CODEX).model is None
+    def test_codex_phase_gets_the_codex_default_not_a_claude_one(self) -> None:
+        """A codex phase with no model gets gpt-sol, never Haiku (#788)."""
+        assert AgentConfiguration(provider=AgentProvider.CODEX).model == DEFAULT_CODEX_MODEL
 
 
 @pytest.mark.unit

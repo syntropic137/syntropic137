@@ -65,6 +65,23 @@ class CreateArtifactCommand(BaseModel):
         "is the case for every artifact created before v5 of ArtifactCreated.",
     )
 
+    # Who produced it (issue #1284). Flat rather than a nested AgentIdentity
+    # because this crosses a serialization boundary: the event payload the
+    # projection reads is a flat dict, and the API answers flat fields.
+    agent_provider: str | None = Field(
+        default=None,
+        description="Harness the platform launched for the producing phase "
+        "(claude, codex, ...). None means no phase produced this artifact - "
+        "it was created directly, or predates issue #1284.",
+    )
+    agent_model: str | None = Field(
+        default=None,
+        description="Model the running harness ANNOUNCED on its own stream, "
+        "never the model the phase requested (issue #1284). None means the "
+        "harness reported none - true of every codex phase today - and must "
+        "not be read as 'the requested model'.",
+    )
+
     # Storage (ADR-012: Two-tier storage)
     storage_uri: str | None = Field(
         default=None,

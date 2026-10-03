@@ -54,6 +54,7 @@ describe("claude-plugin install", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
     clearRegistry();
   });

@@ -11,6 +11,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.stream_helpers import (
     _build_exec_command,
     _cleanup_process,
@@ -19,6 +20,7 @@ from syn_adapters.workspace_backends.agentic.stream_reader import (
     StreamOutcome,
     read_lines,
 )
+from syn_shared.diagnostics import SignalDeath, name_exit_status
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -73,6 +75,17 @@ class AgenticEventStreamAdapter:
         """Initialize the adapter."""
         self._provider: WorkspaceDockerProvider | None = None
         self._last_exit_code: int | None = None
+        self._last_signal_death: SignalDeath | None = None
+
+    @property
+    def last_signal_death(self) -> SignalDeath | None:
+        """Why the most recent stream() call's process was KILLED, if it was.
+
+        Paired with :attr:`last_exit_code` and read the same way: it belongs to
+        the last stream and is replaced by the next. None means the process was
+        not killed by a signal, or that no stream has run.
+        """
+        return self._last_signal_death
 
     @property
     def last_exit_code(self) -> int | None:
@@ -184,9 +197,21 @@ class AgenticEventStreamAdapter:
                 )
             exit_code = _resolve_stream_exit_code(exit_code, timed_out=outcome.timed_out)
             self._last_exit_code = exit_code
-            if exit_code and exit_code != 0:
+            # THE MOMENT OF DEATH for the agent process itself - the shape that
+            # takes a whole phase with tokens=0+0 and no terminal event. Read
+            # here because `finally` is the last code that runs while the
+            # process still exists to be asked about, and the container is
+            # reaped immediately after (#1295, #1319).
+            self._last_signal_death = await capture_signal_death(exec_cmd, exit_code)
+            if self._last_signal_death is not None:
+                logger.error(
+                    "Agent process died on a signal (container=%s):\n%s",
+                    container_name,
+                    self._last_signal_death.describe(),
+                )
+            elif exit_code and exit_code != 0:
                 logger.warning(
-                    "Stream process exited with code %d (container=%s)",
-                    exit_code,
+                    "Stream process %s (container=%s)",
+                    name_exit_status(exit_code),
                     container_name,
                 )

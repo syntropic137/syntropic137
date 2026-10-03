@@ -8,10 +8,12 @@ See: Ports & Adapters (Hexagonal Architecture)
 
 from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
     ArtifactContentStoragePort,
+    ArtifactStorageError,
     StorageResult,
 )
 
 __all__ = [
     "ArtifactContentStoragePort",
+    "ArtifactStorageError",
     "StorageResult",
 ]

@@ -48,6 +48,19 @@ from event_sourcing import AutoDispatchProjection
 if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        ResumeOrigin,
+    )
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+    read_resume_origin,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    INHERITED_PHASE_OWNERS,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
+    PhaseRetryScheduledEvent,
+)
 from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
     TodoAction,
     TodoItem,
@@ -197,6 +210,13 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not phase_defs:
             return  # Legacy mode — no to-do list management
 
+        origin = read_resume_origin(
+            event_data.get("resumed_from"), event_data.get(INHERITED_PHASE_OWNERS)
+        )
+        if origin is not None:
+            await self._start_resume(execution_id, origin)
+            return
+
         # Sort by order, take first phase
         sorted_phases = sorted(phase_defs, key=lambda p: p.get("order", 0))
         first_phase = sorted_phases[0]
@@ -276,6 +296,43 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 session_id=event_data.get("session_id"),
             ),
         )
+
+    async def on_phase_retry_scheduled(self, event_data: PhaseRetryScheduledEvent) -> None:
+        """Phase attempt abandoned → queue PROVISION_WORKSPACE for it again (#1335).
+
+        THE ONE HANDLER THAT MOVES A PHASE BACKWARDS, and the only one that is
+        allowed to. Every other writer merges `phase_progress` monotonically
+        because a lower rank arriving out of order is a stale writer; here the
+        lower rank IS the decision - the aggregate has said this phase runs
+        again from the top - so the phase's mark is SET rather than merged.
+        Merging it would leave the mark at whatever the dead attempt reached,
+        `get_pending` would filter the new item out as stale, and the retry
+        would go missing with nothing anywhere saying so.
+
+        Other phases' marks are left exactly as they are: the retried phase is
+        the only thing being reconsidered, and the phases already completed
+        keep their results and their cost - that is the whole point.
+        """
+        event = PhaseRetryScheduledEvent.model_validate(event_data)
+        execution_id = event.execution_id
+        if not execution_id:
+            return
+        phase_id = event.phase_id
+        if not phase_id:
+            return
+
+        async with self._lock_for(execution_id):
+            current, progress = await self._read_state(execution_id)
+            remaining = [t for t in current if t.phase_id != phase_id]
+            remaining.append(
+                TodoItem(
+                    execution_id=execution_id,
+                    action=TodoAction.PROVISION_WORKSPACE,
+                    phase_id=phase_id,
+                )
+            )
+            progress[phase_id] = _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]
+            await self._save_state(execution_id, remaining, progress)
 
     async def on_phase_completed(self, event_data: dict) -> None:
         """Phase completed → remove COMPLETE_PHASE to-do for this phase only.
@@ -402,6 +459,33 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 execution_id,
                 [new_todo],
                 _merge_progress(progress, {phase_id: new_rank}),
+            )
+
+    async def _start_resume(self, execution_id: str, origin: ResumeOrigin) -> None:
+        """A resume's list starts at its resume phase, its inherited ones done.
+
+        Marked done rather than merely left out (ADR-014 s7): the phase's
+        highwater is what `get_pending` filters by, so an inherited phase is
+        closed here as the aggregate closes it, and no late or replayed event
+        can put a to-do for it back on the list.
+        """
+        resume = origin.resume_phase_id
+        provision = _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]
+        inherited = {p.phase_id: _RANK_PHASE_DONE for p in origin.inherited_phases}
+        async with self._lock_for(execution_id):
+            _items, progress = await self._read_state(execution_id)
+            if progress.get(resume, 0) >= provision:
+                return  # Replayed, and the run has moved on; leave it.
+            await self._save_state(
+                execution_id,
+                [
+                    TodoItem(
+                        execution_id=execution_id,
+                        action=TodoAction.PROVISION_WORKSPACE,
+                        phase_id=resume,
+                    )
+                ],
+                _merge_progress(progress, {**inherited, resume: provision}),
             )
 
     async def _clear_execution(self, execution_id: str) -> None:

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_domain.contexts.artifacts import PhaseOutputFile
+from syn_domain.contexts.artifacts import UNREPORTED_AGENT, PhaseOutputFile
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
@@ -85,6 +85,7 @@ async def _run_handoff(outputs: Sequence[tuple[str, bytes]]) -> _Workspace:
         session_id="sess-1",
         phase_name="Phase One",
         output_artifact_types=("markdown",),
+        agent=UNREPORTED_AGENT,
     )
 
     phase_two_ws = _Workspace([])

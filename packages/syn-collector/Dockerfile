@@ -13,6 +13,9 @@ WORKDIR /app
 # Copy root pyproject.toml and uv.lock for dependency resolution
 COPY pyproject.toml uv.lock ./
 
+# Shared inventory contract from the pinned APSS submodule.
+COPY lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python/ ./lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python/
+
 # -----------------------------------------------------------------------------
 # Copy local dependencies (order matters for layer caching)
 # -----------------------------------------------------------------------------
@@ -21,9 +24,9 @@ COPY pyproject.toml uv.lock ./
 COPY packages/syn-shared/ ./packages/syn-shared/
 
 # 2. Agentic primitives packages
-COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
-COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
-COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
+COPY lib/agentic-workspace/lib/python/agentic_logging/ ./lib/agentic-workspace/lib/python/agentic_logging/
+COPY lib/agentic-workspace/lib/python/agentic_events/ ./lib/agentic-workspace/lib/python/agentic_events/
+COPY lib/agentic-workspace/lib/python/agentic_isolation/ ./lib/agentic-workspace/lib/python/agentic_isolation/
 
 # 3. Event sourcing SDK
 COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/

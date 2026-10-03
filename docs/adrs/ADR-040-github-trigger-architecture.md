@@ -187,9 +187,8 @@ This enables:
 
 ## References
 
-- [ADR-023: Workspace-First Execution Model](ADR-023-workspace-first-execution-architecture.md)
+- [ADR-023: Workspace-First Execution Model](ADR-023-workspace-first-execution-model.md)
 - [ADR-024: Setup Phase Secrets](ADR-024-setup-phase-secrets.md)
-- [Research Spec: Webhook-Triggered Workflows](../RESEARCH-SPEC-WEBHOOK-TRIGGERED-WORKFLOWS.md)
 - [GitHub Webhook Events and Payloads](https://docs.github.com/en/webhooks/webhook-events-and-payloads)
 - [GitHub Apps: check_run event](https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_run)
 - [GitHub Apps: pull_request_review event](https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review)

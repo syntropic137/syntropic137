@@ -1,15 +1,16 @@
-[submodule "lib/agentic-primitives"]
-	path = lib/agentic-primitives
-	url = https://github.com/AgentParadise/agentic-primitives.git
-	branch = main
 [submodule "lib/event-sourcing-platform"]
 	path = lib/event-sourcing-platform
 	url = https://github.com/NeuralEmpowerment/event-sourcing-platform.git
-	branch = main
+	active = true
 [submodule "lib/agent-paradise-standards-system"]
 	path = lib/agent-paradise-standards-system
 	url = https://github.com/AgentParadise/agent-paradise-standards-system.git
-	branch = main
+	active = true
 [submodule "lib/syntropic137-claude-plugin"]
 	path = lib/syntropic137-claude-plugin
 	url = https://github.com/syntropic137/syntropic137-claude-plugin.git
+	active = true
+[submodule "lib/agentic-workspace"]
+	path = lib/agentic-workspace
+	url = https://github.com/AgentParadise/agentic-workspace.git
+	branch = release

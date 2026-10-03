@@ -30,6 +30,10 @@ from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
 from syn_domain.contexts.orchestration._shared.resolved_skill import (
     ResolvedSkill,
 )
+from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
+    RETIRED_PHASE_FIELDS,
+    retired_field_notices,
+)
 from syn_domain.contexts.orchestration._shared.skill_errors import (
     SkillError,
     SkillInvalidName,
@@ -39,8 +43,10 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
+    PHASE_ID_PATTERN,
     RESERVED_INPUT_NAMES,
     WorkflowDefinition,
+    is_phase_id,
     validate_workflow_yaml,
 )
 from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
@@ -62,10 +68,18 @@ from syn_domain.contexts.orchestration.domain import (
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
+    ResumeExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionStatus,
+    FailureClassification,
+    PhaseUsage,
+    ReportedFailureReason,
+    SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -96,6 +110,9 @@ from syn_domain.contexts.orchestration.domain.commands import (
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
+)
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
 )
@@ -107,7 +124,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
     announce_as,
     mint_wrapper_name,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    AttemptClock,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    CredentialRenewalFailedError,
     DuplicateExecutionError,
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
@@ -121,6 +142,16 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
+    InheritanceUnavailableError,
+    inherited_outputs,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    salvage_stranded_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
@@ -144,6 +175,15 @@ from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins impor
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
 )
+from syn_domain.contexts.orchestration.slices.start_resume import (
+    MAX_START_ATTEMPTS,
+    ResumeStarter,
+    ResumeStartProcessManager,
+    ResumeStartRecord,
+    ResumeStartStatus,
+    StartResumeHandler,
+    read_record,
+)
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
@@ -151,14 +191,21 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
+    "MAX_START_ATTEMPTS",
+    "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
+    "RETIRED_PHASE_FIELDS",
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
+    # A phase's own verdict on itself - the type of `StreamResult.verdict` (#1256)
+    "AgentVerdict",
     # Commands
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    # The clock a phase's retry budget is measured on (#1303)
+    "AttemptClock",
     # Claude plugin types + errors (issue #726)
     "ClaudePluginError",
     "ClaudePluginInvalidName",
@@ -172,6 +219,7 @@ __all__ = [
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
+    "CredentialRenewalFailedError",
     # Errors
     "DuplicateExecutionError",
     # Value objects - execution
@@ -181,14 +229,17 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
+    "FailureClassification",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     # Aggregates
     "HandlerResult",
     # Value objects - workspace
     "ImageManifest",
+    "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
@@ -196,14 +247,24 @@ __all__ = [
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
+    # What a phase spent, as the failure path reports it (#1262)
+    "PhaseUsage",
+    "ReportedFailureReason",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
+    "ResumeExecutionCommand",
+    "ResumeStartProcessManager",
+    "ResumeStartRecord",
+    "ResumeStartStatus",
+    "ResumeStarter",
     "SecurityPolicy",
+    "SideEffectStatus",
     "SidecarConfig",
     "SkillError",
     "SkillInvalidName",
     "SkillNotRegistered",
     "SkillRef",
+    "StartResumeHandler",
     "StreamResult",
     "SubagentTracker",
     "TerminateWorkspaceCommand",
@@ -228,9 +289,15 @@ __all__ = [
     "WorkspaceAggregate",
     "announce_as",
     "build_command_from_definition",
+    "inherited_outputs",
+    "is_phase_id",
     "mint_wrapper_name",
+    "read_record",
+    "refuse_resume_start",
     "render_workspace_prompt",
     "require_supported_execution_type",
+    "retired_field_notices",
+    "salvage_stranded_phase",
     "validate_phase_declarations",
     "validate_workflow_yaml",
 ]

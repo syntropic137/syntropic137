@@ -1,7 +1,9 @@
+import type { BuildInfo } from "../client/server-build.js";
 import { api, unwrap } from "../client/typed.js";
 import type { CommandDef } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
 import { BOLD, DIM, GREEN, RED, YELLOW, style } from "../output/ansi.js";
+import { describeBuild } from "../output/build.js";
 import { print } from "../output/console.js";
 
 /** `degraded_reasons` is a JSON array of strings. It was previously read as a
@@ -56,9 +58,19 @@ export const healthCommand: CommandDef = {
   handler: async () => {
     const data = unwrap(await api.GET("/health"), "Health check");
 
-    // Health endpoint returns { [key: string]: string } in the spec
-    const status = data["status"] ?? "";
-    const mode = data["mode"] ?? "";
+    const status = data.status ?? "";
+    const mode = data.mode ?? "";
+
+    // FIRST, above the verdict. `syn health` is how an agent or an operator
+    // answers "is the new build live yet?", and until #1380 the API could not
+    // tell them: openapi.json claimed 0.5.1 against a 0.29.1b3 deployment and
+    // /health said nothing, leaving `docker inspect` over SSH as the only
+    // read. Printing it below a "Degraded" line would bury the answer in the
+    // case it is most needed.
+    // `data.build` is typed as always present and is not, against an older
+    // server; see describeBuild. The cast is where that gap is acknowledged
+    // rather than somewhere it can be forgotten.
+    print(style(describeBuild(data.build as BuildInfo | undefined), DIM));
 
     if (status === "healthy" && mode === "full") {
       print(style("Healthy", BOLD, GREEN) + " — all systems operational");

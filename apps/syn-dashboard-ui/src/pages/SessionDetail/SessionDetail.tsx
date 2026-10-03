@@ -1,11 +1,12 @@
 import { Activity, XCircle } from 'lucide-react'
 import { useLayoutEffect, useRef } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 
 import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, PageLoader, SubagentList } from '../../components'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import type { SessionResponse } from '../../types'
 import { useSessionData } from '../../hooks'
+import { sessionInventoryHref } from '../../utils/sessionInventoryLinks'
 import { ConversationLogViewer } from './ConversationLogViewer'
 import { OperationTimeline } from './OperationTimeline'
 import { SessionHeader } from './SessionHeader'
@@ -104,6 +105,14 @@ export function SessionDetail() {
 
       <Breadcrumbs items={buildSessionBreadcrumbs(session)} />
       <SessionHeader session={session} onViewConversationLog={() => setShowConversationLog(true)} />
+      {session.execution_id && (
+        <Link
+          className="session-inventory-link"
+          to={sessionInventoryHref(session.execution_id, session.phase_id)}
+        >
+          All sessions for this {session.phase_id ? 'phase' : 'run'} (native transcripts, delegates, lineage)
+        </Link>
+      )}
       <SessionMetrics session={session} now={now} />
 
       {session.error_message && <SessionErrorCard message={session.error_message} />}

@@ -1,6 +1,7 @@
 """Abstract storage protocol for UI Feedback."""
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from uuid import UUID
 
 from ui_feedback.models import (
@@ -38,6 +39,11 @@ class FeedbackStorageProtocol(ABC):
         feedback_type: str | None = None,
         priority: str | None = None,
         app_name: str | None = None,
+        route: str | None = None,
+        subject_kind: str | None = None,
+        subject_id: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         search: str | None = None,
         page: int = 1,
         page_size: int = 50,

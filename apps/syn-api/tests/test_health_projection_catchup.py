@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from syn_adapters.subscriptions.coordinator_service import SubscriptionServiceStatus
 from syn_adapters.subscriptions.read_model_lag import (
     STALLED_AFTER_SECONDS,
     CheckpointState,
@@ -69,8 +70,8 @@ class _SubscriptionServiceStub:
     def __init__(self, lag: ReadModelLag) -> None:
         self._lag = lag
 
-    def get_status(self) -> dict:
-        return {"running": True, "projection_count": 25, "realtime_enabled": True}
+    def get_status(self) -> SubscriptionServiceStatus:
+        return SubscriptionServiceStatus(running=True, projection_count=25, realtime_enabled=True)
 
     async def describe_read_model_lag(self) -> ReadModelLag:
         return self._lag

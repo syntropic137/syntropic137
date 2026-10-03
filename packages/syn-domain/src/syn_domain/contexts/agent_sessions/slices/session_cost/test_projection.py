@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import CostField
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
     _parse_timestamp,
@@ -421,6 +422,49 @@ class TestSessionCostFinalized:
         assert session_cost.total_cost_usd == Decimal("1.50")
         assert session_cost.tool_calls == 10
         assert session_cost.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_a_finalized_cost_by_tool_stops_being_unmeasured(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """The projection is the only thing that measures cost_by_tool.
+
+        No read path attributes cost to a tool, so cost_by_tool defaults to
+        "unmeasured" and this event is what clears it. Without the clearing,
+        a real per-tool breakdown would ship alongside a label calling it
+        unmeasured - the #1041 defect inverted, and just as misleading.
+        """
+        await projection.on_session_cost_finalized(
+            {
+                "session_id": "session-tools",
+                "total_cost_usd": "2.00",
+                "cost_by_tool": {"Bash": "1.25", "Read": "0.75"},
+                "completed_at": datetime.now().isoformat(),
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-tools")
+        assert session_cost is not None
+        assert session_cost.cost_by_tool == {"Bash": Decimal("1.25"), "Read": Decimal("0.75")}
+        assert CostField.COST_BY_TOOL not in session_cost.unmeasured_fields
+
+    @pytest.mark.asyncio
+    async def test_cost_by_tool_stays_unmeasured_when_the_event_omits_it(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """Finalizing without a breakdown must not claim one was measured."""
+        await projection.on_session_cost_finalized(
+            {
+                "session_id": "session-no-tools",
+                "total_cost_usd": "2.00",
+                "completed_at": datetime.now().isoformat(),
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-no-tools")
+        assert session_cost is not None
+        assert session_cost.cost_by_tool == {}
+        assert CostField.COST_BY_TOOL in session_cost.unmeasured_fields
 
 
 class TestOnSessionSummary:

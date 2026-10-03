@@ -902,7 +902,7 @@ have spent all day writing about checking premises.
 **Still outstanding from the review:** fenced code blocks are counted as
 citations; `path:1` and `path:1-1` count twice; and the PR claim that every
 phase gets a scoped toolset is **false** — the codex review phase has no
-allowlist and runs `--sandbox danger-full-access`.
+allowlist and runs with the full-access sandbox level.
 
 ### Tick 20 — I withdrew four conclusions that turn out to have been right
 
@@ -973,8 +973,8 @@ accepted a finding wholesale; the correct posture is the same in both
 directions — **a review finding is a hypothesis until something runs.**
 
 **What WAS true, verified myself:** the codex phase has no tool enforcement and
-cannot be given any — `_build_codex_command` hardcodes `--sandbox
-danger-full-access` and takes only a prompt and a model. Filed **#1009**. The
+cannot be given any — `_build_codex_command` hardcodes the
+full-access sandbox level and takes only a prompt and a model. Filed **#1009**. The
 container is still the isolation boundary, so this is not host security; the
 cost is review independence, since the reviewer can rewrite the document it was
 asked to critique and the artifact collector will pick up the rewrite.
@@ -1073,7 +1073,7 @@ is now merged.
 ### Tick 24 — #1009 planning dispatched through Syntropic (n=3 for H6)
 
 All five listed priorities are closed, so the work moved to the open issues.
-Picked **#1009** (every codex phase runs `--sandbox danger-full-access`; a
+Picked **#1009** (every codex phase runs at the full-access sandbox level; a
 workflow cannot make a review phase read-only) because I filed AND verified it
 this session, and because it is the one open issue that degrades the SDLC
 workflow itself: the cross-model review phase can write to the workspace whose

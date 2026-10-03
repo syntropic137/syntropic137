@@ -122,13 +122,23 @@ jobs:
       # reads the gitlink, so any bump invalidates the cache exactly.
       - name: Resolve APSS submodule commit
         id: apss-commit
-        run: echo "sha=$(git rev-parse HEAD:lib/agent-paradise-standards-system)" >> "$GITHUB_OUTPUT"
+        run: |
+          sha=$(git rev-parse HEAD:lib/agent-paradise-standards-system)
+          rust=$(rustc -vV | sha256sum | cut -d ' ' -f 1)
+          image=$(sha256sum /etc/os-release | cut -d ' ' -f 1)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
 
+      # Cache the executable, not Cargo's target tree: fresh source mtimes can
+      # invalidate that tree and rebuild everything after a successful restore.
+      # No fallback keys. The helper also verifies the checkout is at this pin.
       - name: Cache APS CLI binary
+        id: aps-cache
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
-          path: lib/agent-paradise-standards-system/target/release
-          key: aps-cli-${{ runner.os }}-${{ steps.apss-commit.outputs.sha }}
+          path: lib/agent-paradise-standards-system/target/release/apss-dev
+          key: aps-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.apss-commit.outputs.image }}-${{ steps.apss-commit.outputs.rust }}-${{ steps.apss-commit.outputs.sha }}-${{ hashFiles('.github/workflows/ci.yml', 'scripts/build-aps.sh', '.cargo/config', '.cargo/config.toml') }}
 
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
@@ -168,6 +178,8 @@ jobs:
       # they could only fail after a push (#931). Add new gates to `preflight`
       # in the justfile, never here.
       - name: Preflight (every gate, same target the hook runs)
+        env:
+          SYN_APS_CACHE_HIT: ${{ steps.aps-cache.outputs.cache-hit }}
         run: just preflight
 
   #############################################################################
@@ -208,6 +220,7 @@ jobs:
             --cov=packages/syn-adapters/src \
             --cov=packages/syn-shared/src \
             --cov-report=term-missing \
+            --durations=20 \
             -x -q
 
   #############################################################################
@@ -426,8 +439,8 @@ jobs:
           git submodule status
 
           # Verify submodules are initialized
-          if [ ! -f "lib/agentic-primitives/README.md" ]; then
-            echo "❌ agentic-primitives submodule not initialized"
+          if [ ! -f "lib/agentic-workspace/README.md" ]; then
+            echo "❌ agentic-workspace submodule not initialized"
             exit 1
           fi
 
@@ -467,7 +480,7 @@ jobs:
         with:
           fetch-depth: 0
           # The recipe resolves the pin by importing syn_shared, and this repo's
-          # uv workspace has editable members inside lib/agentic-primitives, so
+          # uv workspace has editable members inside lib/agentic-workspace, so
           # `uv run` cannot resolve the environment without them.
           submodules: true
 
@@ -567,35 +580,9 @@ jobs:
       - name: Audit Python dependencies
         run: |
           uv export --format requirements-txt --no-hashes --frozen --quiet \
-            | uv tool run pip-audit --disable-pip --no-deps \
-              --ignore-vuln GHSA-5239-wwwm-4pmq \
-              --ignore-vuln GHSA-p423-j2cm-9vmq \
-              --ignore-vuln GHSA-6w46-j5rx-g56g \
-              --ignore-vuln GHSA-mj87-hwqh-73pj \
-              --ignore-vuln GHSA-65pc-fj4g-8rjx \
-              --ignore-vuln PYSEC-2026-179 \
-              --ignore-vuln PYSEC-2026-175 \
-              --ignore-vuln PYSEC-2026-177 \
-              --ignore-vuln PYSEC-2026-178 \
-              --ignore-vuln GHSA-pp6c-gr5w-3c5g \
-              --ignore-vuln PYSEC-2026-161 \
-              --ignore-vuln PYSEC-2026-142 \
-              --ignore-vuln PYSEC-2026-141 \
-              --ignore-vuln GHSA-4xgf-cpjx-pc3j \
-              --ignore-vuln PYSEC-2026-3552 \
-              -r /dev/stdin
-          # TODO(#805): remove --ignore-vuln PYSEC-2026-3552 once cryptography 50.0.0 resolves through uv (published, but absent from the simple index)
-          # TODO(#345): remove --ignore-vuln once pygments releases a fix
-          # TODO(#776): remove --ignore-vuln GHSA-4xgf-cpjx-pc3j once pydantic-settings 2.14.2 is on PyPI (secrets_nested_subdir symlink escape; feature unused here)
-          # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI
-          # TODO(#678): remove --ignore-vuln GHSA-6w46-j5rx-g56g once pytest 9.0.3 is available on PyPI
-          # TODO(#696): remove --ignore-vuln GHSA-mj87-hwqh-73pj once python-multipart 0.0.26 is available on PyPI
-          # TODO(#766): June 2026 audit allowlist — remove each as the upstream fix lands in uv.lock:
-          #   - GHSA-65pc-fj4g-8rjx (idna >= 3.15)
-          #   - PYSEC-2026-179 / 175 / 177 / 178 (pyjwt >= 2.13.0)
-          #   - GHSA-pp6c-gr5w-3c5g (python-multipart >= 0.0.27)
-          #   - PYSEC-2026-161 (starlette >= 1.0.1)
-          #   - PYSEC-2026-142 / 141 (urllib3 >= 2.7.0)
+            | uv tool run pip-audit --disable-pip --no-deps -r /dev/stdin
+          # No allowlist. A new advisory fails this job; fix it with a pin or an
+          # exclude-newer-package entry in pyproject.toml, not an --ignore-vuln.
 
   #############################################################################
   # DEPENDENCY REVIEW - Block new CVE-laden packages on PRs (ISS-259)

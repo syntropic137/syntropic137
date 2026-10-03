@@ -855,7 +855,7 @@ async def test_claude_jsonl_lines_survive_noise_filter(mock_conversation_store):
 async def test_claude_tool_use_bash_surfaces_name_and_command(mock_conversation_store):
     """A real Claude Code ``tool_use`` line (Bash) surfaces its name and command.
 
-    Raw line taken from a recorded session (agentic-primitives
+    Raw line taken from a recorded session (agentic-workspace
     ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``) with the ``usage`` object
     trimmed to ``input_tokens`` - the shape under test is unaffected by the
     token fields. This is issue #1067's premise: the nested
@@ -1054,7 +1054,7 @@ async def test_claude_real_recorded_multi_tool_transcript_has_no_blank_tool_rows
     """End-to-end regression guard against issue #1067 using a real recording.
 
     Runs the full, unmodified ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``
-    recording (agentic-primitives fixture) through the pipeline and asserts
+    recording (agentic-workspace fixture) through the pipeline and asserts
     every tool_use/tool_result line - not just hand-picked ones - gets a
     non-null tool_name or content_preview. Before this fix, all of these
     rendered as (None, None): the exact defect from the issue.
@@ -1064,9 +1064,10 @@ async def test_claude_real_recorded_multi_tool_transcript_has_no_blank_tool_rows
     fixture_path = (
         pathlib.Path(__file__).parents[3]
         / "lib"
-        / "agentic-primitives"
-        / "providers"
-        / "workspaces"
+        / "agentic-workspace"
+        / "implementations"
+        / "docker"
+        / "images"
         / "claude-cli"
         / "fixtures"
         / "recordings"
@@ -1840,9 +1841,10 @@ async def test_endpoint_response_survives_a_real_recorded_piped_command(
     fixture_path = (
         pathlib.Path(__file__).parents[3]
         / "lib"
-        / "agentic-primitives"
-        / "providers"
-        / "workspaces"
+        / "agentic-workspace"
+        / "implementations"
+        / "docker"
+        / "images"
         / "claude-cli"
         / "fixtures"
         / "recordings"

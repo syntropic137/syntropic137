@@ -8,7 +8,10 @@ from datetime import datetime
 from typing import Any
 
 import asyncpg
+from pydantic import BaseModel
 
+from syn_adapters.postgres_text import pg_safe
+from syn_adapters.projection_stores.record_match import holds
 from syn_shared.settings import get_settings
 
 
@@ -93,9 +96,16 @@ class PostgresProjectionStore:
 
         return json_serializer(obj)
 
+    # A projection key is a session or execution id, and a harness supplies its
+    # own, so it is untrusted text in a TEXT primary key. Every method below
+    # normalises it through ``pg_safe`` before using it as a key OR as a lookup,
+    # together: sanitising only the write stores the row under a name the read
+    # cannot ask for, and a delete that matches nothing reports success (#1241).
+
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
         await self._ensure_table(projection)
+        key = pg_safe(key)
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
@@ -112,9 +122,50 @@ class PostgresProjectionStore:
                 self._serialize(data),
             )
 
+    async def save_if(
+        self, projection: str, key: str, record: BaseModel, *, expected: BaseModel | None
+    ) -> bool:
+        """Save only while the store still holds ``expected``. True if saved.
+
+        One transaction. An existing row is locked (`FOR UPDATE`) before it is
+        compared, so no other writer can change it between the comparison and
+        the update. For no row, the insert itself is the check: `ON CONFLICT DO
+        NOTHING` inserts nothing if another writer inserted first.
+        """
+        data = self._serialize(record.model_dump(mode="json"))
+        await self._ensure_table(projection)
+        key = pg_safe(key)
+        pool = await self._get_pool()
+        table_name = self._table_name(projection)
+
+        async with pool.acquire() as conn, conn.transaction():
+            if expected is None:
+                status = await conn.execute(
+                    f"""
+                    INSERT INTO {table_name} (id, data, updated_at)
+                    VALUES ($1, $2::jsonb, NOW())
+                    ON CONFLICT (id) DO NOTHING
+                """,
+                    key,
+                    data,
+                )
+                return status == "INSERT 0 1"
+            row = await conn.fetchrow(
+                f"SELECT data FROM {table_name} WHERE id = $1 FOR UPDATE", key
+            )
+            if row is None or not holds(self._deserialize(row["data"]), expected):
+                return False
+            await conn.execute(
+                f"UPDATE {table_name} SET data = $2::jsonb, updated_at = NOW() WHERE id = $1",
+                key,
+                data,
+            )
+            return True
+
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
         """Get a single projection record by key."""
         await self._ensure_table(projection)
+        key = pg_safe(key)
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
@@ -146,6 +197,7 @@ class PostgresProjectionStore:
     async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
         """Get all records whose key starts with the given prefix."""
         await self._ensure_table(projection)
+        prefix = pg_safe(prefix)
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
@@ -162,6 +214,7 @@ class PostgresProjectionStore:
     async def delete(self, projection: str, key: str) -> None:
         """Delete a projection record."""
         await self._ensure_table(projection)
+        key = pg_safe(key)
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 

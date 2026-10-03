@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from datetime import (
     datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
 )
+from decimal import Decimal  # noqa: TC003 - Pydantic needs Decimal at runtime for model validation
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from syn_adapters.projections.session_tools import call_identity
 from syn_api._wiring import ensure_connected, get_event_store_instance, get_projection_mgr
 from syn_api.types import (
     Err,
@@ -24,6 +26,7 @@ from syn_api.types import (
     TimelineEntry,
     ToolUsageSummary,
 )
+from syn_shared.pricing import canonical_cost_usd
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
@@ -75,7 +78,7 @@ class CostSummaryResponse(BaseModel):
     total_tokens: int = 0
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
-    estimated_cost_usd: float | None = None
+    estimated_cost_usd: Decimal | None = None
 
 
 class ToolSummary(BaseModel):
@@ -200,11 +203,12 @@ class _ToolStatsAccumulator:
     def _call_for(self, op: AdapterToolOperation) -> _CallState:
         """Return the call `op` belongs to, counting it if this is its first row.
 
-        Identity is `tool_use_id`, falling back to `observation_id` when the
-        row carries none; `_accumulate_tool_stats` explains why.
+        Identity is `session_tools.call_identity`, the same rule the phase
+        activity summary counts by (#1262); `_accumulate_tool_stats` below
+        explains why it is that rule and not another.
         """
         name = op.tool_name or "unknown"
-        identity = op.tool_use_id or op.observation_id
+        identity = call_identity(op)
 
         call = self._calls.get(identity)
         if call is None:
@@ -310,6 +314,12 @@ def _accumulate_tool_stats(
     `tests/test_tool_execution_identity.py` is what holds that true - it
     fails if an unidentified tool_execution pair ever starts being produced,
     which is the point at which this paragraph would need revisiting.
+
+    The rule itself now lives in `session_tools.call_identity`, because a
+    second caller needed it: the phase activity summary counts a timed-out
+    phase's calls to tell a stall from a budget that was too short (#1262),
+    and a second copy of this reasoning would be a second chance to get it
+    wrong.
     """
     accumulator = _ToolStatsAccumulator()
     for op in operations:
@@ -565,7 +575,11 @@ async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
         total_tokens=data.get("total_tokens", 0),
         cache_creation_tokens=data.get("cache_creation_tokens", 0),
         cache_read_tokens=data.get("cache_read_tokens", 0),
-        estimated_cost_usd=float(data["total_cost_usd"]) if "total_cost_usd" in data else None,
+        # Decimal, never float: a float here reintroduced the binary noise the
+        # read models canonicalise away (0.3056678 -> 0.30566780000000005).
+        estimated_cost_usd=canonical_cost_usd(data["total_cost_usd"])
+        if "total_cost_usd" in data
+        else None,
     )
 
 

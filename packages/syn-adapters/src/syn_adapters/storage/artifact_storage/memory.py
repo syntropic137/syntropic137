@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from syn_adapters.in_memory import InMemoryAdapter, InMemoryAdapterError
+from syn_domain.contexts.artifacts.ports import ArtifactStorageError
 
 # Re-export for backwards compatibility
 TestOnlyAdapterError = InMemoryAdapterError
@@ -27,7 +28,7 @@ class StorageResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class ArtifactNotFoundError(Exception):
+class ArtifactNotFoundError(ArtifactStorageError):
     """Raised when an artifact is not found in storage."""
 
     def __init__(self, artifact_id: str) -> None:

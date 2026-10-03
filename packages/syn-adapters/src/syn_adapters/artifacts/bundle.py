@@ -264,16 +264,18 @@ class ArtifactBundle:
     def get_storage_prefix(self) -> str:
         """Get the storage key prefix for this bundle.
 
+        Delegates to `resolve_storage_prefix`, which the download path also
+        uses, so the key this bundle is written under is the key a later reader
+        computes from the same ids (#1241).
+
         Returns:
             Storage prefix like 'workflows/{workflow_id}/bundles/{bundle_id}/'
         """
-        parts = []
-        if self.workflow_id:
-            parts.append(f"workflows/{self.workflow_id}")
-        if self.session_id:
-            parts.append(f"sessions/{self.session_id}")
-        parts.append(f"bundles/{self.bundle_id}")
-        return "/".join(parts) + "/"
+        from syn_adapters.artifacts.bundle_storage import resolve_storage_prefix
+
+        return resolve_storage_prefix(
+            self.bundle_id, workflow_id=self.workflow_id, session_id=self.session_id
+        )
 
     async def save_to_storage(
         self,

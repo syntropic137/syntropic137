@@ -29,6 +29,7 @@ import type { RegistryEntry } from "../../marketplace/models.js";
 export const addCommand: CommandDef = {
   name: "add",
   description: "Register a GitHub repo as a workflow marketplace",
+  skipPreflight: true,
   args: [{ name: "repo", description: "GitHub repo (org/repo shorthand)", required: true }],
   options: {
     ref: { type: "string", short: "r", description: "Git branch or tag", default: "main" },
@@ -100,6 +101,7 @@ export const addCommand: CommandDef = {
 export const listMarketplaceCommand: CommandDef = {
   name: "list",
   description: "List registered marketplace registries",
+  skipPreflight: true,
   handler: async () => {
     const config = loadRegistries();
 
@@ -134,6 +136,7 @@ export const listMarketplaceCommand: CommandDef = {
 export const removeCommand: CommandDef = {
   name: "remove",
   description: "Remove a registered marketplace",
+  skipPreflight: true,
   args: [{ name: "name", description: "Registry name to remove", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
@@ -174,6 +177,7 @@ export const removeCommand: CommandDef = {
 export const refreshCommand: CommandDef = {
   name: "refresh",
   description: "Force-refresh cached marketplace indexes",
+  skipPreflight: true,
   args: [{ name: "name", description: "Registry name (refreshes all if omitted)" }],
   handler: async (parsed: ParsedArgs) => {
     const nameFilter = parsed.positionals[0] as string | undefined;

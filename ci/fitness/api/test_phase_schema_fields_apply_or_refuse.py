@@ -64,11 +64,12 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # whether the setup script contains `git clone` at all (#1187). Applied,
     # not validated: any boolean is legal, and both values do something.
     "clone_repos": ("ExecutablePhase", "clone_repos"),
-    # Decides which GitHub permissions the phase's token carries, so it is
-    # applied by `WorkspaceProvisionHandler` minting a token whose
-    # `pull_requests` is `read` (#1197). Applied, not validated: both values
-    # are legal and both do something.
-    "can_open_pr": ("ExecutablePhase", "can_open_pr"),
+    # Read by the unpushed-work gate at COMPLETE_PHASE to decide whether an
+    # uncommitted change is a deliverable or a build tool's side effect
+    # (#1308). Applied, not validated: both values are legal and both do
+    # something - and dropping it is not inert, it silently restores the
+    # failure the field exists to stop.
+    "delivers_repo_changes": ("ExecutablePhase", "delivers_repo_changes"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),
@@ -212,6 +213,25 @@ class TestEveryAuthoredFieldHasAFate:
         stale = classified - _phase_schema_fields()
 
         assert not stale, f"Classified fields absent from the schema: {sorted(stale)}"
+
+    def test_a_retired_key_is_not_a_live_field(self) -> None:
+        """A retired key sits outside the universe above, and must stay there.
+
+        It cannot be authored with effect, so it has no fate to classify: the
+        authoring model drops it by name before validating. That drop is only
+        safe while no live field shares the name. Re-declare one and the drop
+        would swallow it silently, which is #961 by another route.
+        """
+        from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
+            RETIRED_PHASE_FIELDS,
+        )
+
+        overlap = {f.name for f in RETIRED_PHASE_FIELDS} & _phase_schema_fields()
+
+        assert not overlap, (
+            f"Retired phase keys are also live fields: {sorted(overlap)}. "
+            "Remove them from RETIRED_PHASE_FIELDS or from PhaseYamlDefinition."
+        )
 
     def test_a_field_is_not_classified_twice(self) -> None:
         """Applied AND refused is incoherent, and would hide a real conflict."""

@@ -113,6 +113,7 @@ export function WorkflowDetail() {
         <KickoffCard
           workflowId={workflowId!}
           declarations={workflow.input_declarations ?? []}
+          phases={workflow.phases}
           onExecutionStarted={refetch}
         />
         <WorkflowArtifactsList artifacts={artifacts} workflowId={workflowId!} />

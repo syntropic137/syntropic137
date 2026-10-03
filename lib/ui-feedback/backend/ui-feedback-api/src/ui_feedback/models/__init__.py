@@ -13,6 +13,7 @@ from ui_feedback.models.feedback import (
     PriorityCount,
     Status,
     StatusCount,
+    SubjectKind,
     TypeCount,
 )
 from ui_feedback.models.media import (
@@ -35,6 +36,7 @@ __all__ = [
     "PriorityCount",
     "Status",
     "StatusCount",
+    "SubjectKind",
     "TypeCount",
     # Media
     "MediaCreate",

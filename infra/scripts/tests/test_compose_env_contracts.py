@@ -5,7 +5,7 @@ key, the feature reads an unset value, and an unset value is a legitimate
 configuration meaning "this is deliberately off". A misconfigured stack is
 therefore indistinguishable from an opted-out one, and nothing anywhere says so.
 
-That has now happened twice.
+That has now happened three times.
 
 **2026-08-21, session capture.** The variables were declared only in
 ``docker-compose.selfhost.yaml`` and the generated
@@ -21,9 +21,16 @@ actually matters would have produced commits with no trailer and no error. It
 was caught in review, not by a test, because the test that existed knew about
 one feature rather than about the shape of the mistake.
 
+**2026-09-17, session-store deployment identity (#1089).** The setting, code,
+docs, and unit tests shipped, but no compose file named the variable. The
+feature therefore remained inert in every containerized deployment.
+``SYN_SESSION_STORE_READ_TOKEN`` had the same gap, and the existing contract
+listed only two of the five variables the feature reads.
+
 So this module is written per CONTRACT rather than per feature. Adding a new
-group to ``_CONTRACTS`` gets it every check below. The fix in both cases is the
+group to ``_CONTRACTS`` gets it every check below. The fix in every case is the
 same: declare it once in ``docker-compose.yaml``, which every stack layers on.
+When a feature gains a variable, extend its existing contract too.
 """
 
 from __future__ import annotations
@@ -52,11 +59,19 @@ class EnvContract:
 _CONTRACTS: tuple[EnvContract, ...] = (
     EnvContract(
         name="session capture",
-        variables=("SYN_SESSION_STORE_URL", "SYN_SESSION_STORE_AUTH_TOKEN"),
+        variables=(
+            "SYN_SESSION_STORE_URL",
+            "SYN_SESSION_STORE_AUTH_TOKEN",
+            "SYN_SESSION_STORE_LABEL",
+            "SYN_SESSION_STORE_READ_TOKEN",
+            "SYN_SESSION_STORE_DEPLOYMENT",
+        ),
         consequence=(
             "session capture is off on that stack, and an empty URL reads as "
             "'capture deliberately disabled', so the misconfiguration is "
-            "indistinguishable from the intended state"
+            "indistinguishable from the intended state. A missing read token "
+            "misreports authorization as a store outage, while a missing "
+            "deployment identity merges distinct installs in the corpus (#1089)"
         ),
     ),
     EnvContract(
@@ -115,10 +130,10 @@ class TestBaseDeclaresEveryContract:
     ) -> None:
         """It must interpolate from the environment, not carry a literal."""
         text = _BASE.read_text()
-        assert re.search(rf"{var}:\s*\$\{{{var}:-\}}", text), (
-            f"{var} in {_BASE.name} must be `{var}: ${{{var}:-}}` so the value "
-            f"comes from the resolved environment and an unset value is empty "
-            f"rather than a literal string."
+        assert re.search(rf"^\s+{var}:\s*(?:\$\{{{var}:-\}})?\s*$", text, re.M), (
+            f"{var} in {_BASE.name} must be a bare Compose pass-through or "
+            f"`${{{var}:-}}`, so the value comes from the resolved environment "
+            "rather than a fixed literal."
         )
 
 
@@ -164,7 +179,11 @@ class TestOverlaysDoNotShadowItAway:
             for var in contract.variables:
                 # `VAR: ""` or `- VAR=` with nothing after it would override
                 # the base with an empty value.
-                blanked = re.search(rf'^\s*-?\s*{var}[:=]\s*(""|\'\')?\s*$', text, re.M)
+                blanked = re.search(
+                    rf'^\s+{var}:\s*(""|\'\')\s*$|^\s*-\s*{var}=\s*$',
+                    text,
+                    re.M,
+                )
                 assert not blanked, (
                     f"{path.name} sets {var} to an empty literal, which "
                     f"overrides the base with no error: {contract.consequence}. "

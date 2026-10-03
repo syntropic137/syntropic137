@@ -1,6 +1,6 @@
 """Verify workspace image signatures with cosign before a container is created.
 
-agentic-primitives signs every published workspace image with cosign keyless
+agentic-workspace signs every published workspace image with cosign keyless
 OIDC. This module is the consumer half of that: it runs ``cosign verify``
 against the exact digest that is about to be run, with the publisher's identity
 constraints, and raises if verification does not succeed.
@@ -23,7 +23,7 @@ which runs the same policy on a worker thread.
    can move between the verify call and the pull, and cosign would be attesting
    to a digest that is not necessarily the one Docker resolves. Pin the digest.
 
-3. **Reference with no registry host** (``agentic-workspace-claude-cli:dev``,
+3. **Reference with no registry host** (``agentic-workspace-claude:dev``,
    ``myorg/image:latest``, ``ubuntu@sha256:...``)
    Rejected unless local images are explicitly enabled by configuration.
 
@@ -92,7 +92,11 @@ import subprocess
 import threading
 from dataclasses import dataclass
 
-from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.errors import (
+    ProvisionFailureReason,
+    WorkspaceProvisionError,
+)
+from syn_shared.diagnostics import name_exit_status
 from syn_shared.env_constants import (
     ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES,
     ENV_SYN_IMAGE_VERIFY_COSIGN_PATH,
@@ -102,6 +106,7 @@ from syn_shared.settings.image_verification import (
     MINIMUM_COSIGN_MAJOR,
     ImageVerificationSettings,
 )
+from syn_shared.settings.workspace_image_migration import stale_default_notes
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +127,8 @@ class ImageVerificationError(WorkspaceProvisionError):
     context, while callers that care specifically about a supply-chain failure
     can still match the narrower type.
     """
+
+    reason = ProvisionFailureReason.IMAGE_VERIFICATION_FAILED
 
 
 #: An immutable local Docker image ID, as reported by ``docker image inspect``.
@@ -232,7 +239,7 @@ def _resolve_local_image_id(image_ref: str) -> str:
         raise ImageVerificationError(msg)
 
     image_id = completed.stdout.strip()
-    if not _IMAGE_ID_PATTERN.match(image_id):
+    if not _IMAGE_ID_PATTERN.fullmatch(image_id):
         msg = (
             f"Could not read an image ID for {image_ref!r}: docker reported "
             f"{image_id!r}, which is not a sha256 image ID. Refusing to run an "
@@ -491,11 +498,16 @@ def _run_cosign_verify(
         detail = (completed.stderr or completed.stdout or "").strip()
         msg = (
             f"Signature verification FAILED for {image_ref} "
-            f"(cosign exit {completed.returncode}). Expected a signature from "
+            f"(cosign {name_exit_status(completed.returncode)}). Expected a signature from "
             f"identity matching {settings.certificate_identity_regexp!r} issued by "
             f"{settings.certificate_oidc_issuer}. The image is not run. "
             f"cosign said: {detail}"
         )
+        # After an upgrade the usual cause is a copied .env still holding an old
+        # shipped identity or image (#1398); name the exact variable to fix.
+        stale = stale_default_notes(image_ref, settings.certificate_identity_regexp)
+        if stale:
+            msg += " Likely cause: " + " ".join(stale)
         raise ImageVerificationError(msg)
 
 

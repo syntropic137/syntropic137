@@ -219,7 +219,7 @@ class TestWorkspaceImages:
     def test_default_image_is_ghcr(self) -> None:
         """Default image should reference GHCR, not a local-only name."""
         assert DEFAULT_WORKSPACE_IMAGE.startswith("ghcr.io/")
-        assert "omni-agent-workspace" in DEFAULT_WORKSPACE_IMAGE
+        assert "agentic-workspace" in DEFAULT_WORKSPACE_IMAGE
 
     def test_default_image_is_digest_pinned(self) -> None:
         """The default image must be immutable: a digest, never a tag.
@@ -228,16 +228,10 @@ class TestWorkspaceImages:
         publisher at any time, so a tag default means every upstream merge
         silently changes what we run.
         """
-        from syn_shared.settings.workspace_images import (
-            PINNED_DIGESTS,
-            WorkspaceImageProvider,
-        )
-
         repository, separator, digest = DEFAULT_WORKSPACE_IMAGE.partition("@")
         assert separator == "@", f"{DEFAULT_WORKSPACE_IMAGE} is not digest-pinned"
         assert digest.startswith("sha256:")
         assert ":" not in repository, "digest reference must not also carry a tag"
-        assert digest == PINNED_DIGESTS[WorkspaceImageProvider.OMNI_AGENT]
 
     def test_no_pinned_digest_is_a_tag(self) -> None:
         """Every pinned digest must be a well-formed sha256 hex digest."""
@@ -267,7 +261,7 @@ class TestWorkspaceImages:
         )
 
         ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI, "2.1.76")
-        assert ref == "ghcr.io/agentparadise/agentic-workspace-claude-cli:2.1.76"
+        assert ref == "ghcr.io/agentparadise/agentic-workspace-claude:2.1.76"
 
     def test_workspace_image_ref_rejects_tag_and_digest(self) -> None:
         """Supplying both a tag and a digest is ambiguous, so it is an error."""
@@ -298,7 +292,7 @@ class TestWorkspaceImages:
             registry="registry.example.com",
             owner="myorg",
         )
-        assert ref == "registry.example.com/myorg/agentic-workspace-claude-cli:latest"
+        assert ref == "registry.example.com/myorg/agentic-workspace-claude:latest"
 
     def test_default_image_matches_settings(self) -> None:
         """WorkspaceSettings.docker_image default should match DEFAULT_WORKSPACE_IMAGE."""

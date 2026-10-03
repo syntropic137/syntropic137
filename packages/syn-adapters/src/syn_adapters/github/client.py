@@ -46,8 +46,13 @@ from syn_adapters.github.client_jwt import (
     JWT_ALGORITHM as JWT_ALGORITHM,
 )
 from syn_adapters.github.client_token import get_installation_token as _get_installation_token
+from syn_adapters.github.client_token import (
+    revoke_installation_token as _revoke_installation_token,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from syn_shared.settings.github import GitHubAppSettings
 
 logger = logging.getLogger(__name__)
@@ -250,9 +255,18 @@ class GitHubAppClient:
         """Get a valid installation access token. See client_token.get_installation_token."""
         return await _get_installation_token(self, installation_id, force_refresh)
 
-    async def mint_agent_token(self, installation_id: str, *, can_open_pr: bool) -> str:
+    async def mint_agent_token(
+        self,
+        installation_id: str,
+        *,
+        repositories: Collection[str] | None = None,
+    ) -> InstallationToken:
         """Mint the token an agent phase holds. See agent_token.mint_agent_token."""
-        return await _mint_agent_token(self, installation_id, can_open_pr=can_open_pr)
+        return await _mint_agent_token(self, installation_id, repositories=repositories)
+
+    async def revoke_installation_token(self, token: str) -> None:
+        """Revoke an installation token. See client_token.revoke_installation_token."""
+        await _revoke_installation_token(self, token)
 
     async def api_get(self, path: str, installation_id: str | None = None) -> dict:
         """Make an authenticated GET request. See client_api.api_get for details."""

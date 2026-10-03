@@ -87,6 +87,42 @@ class TestSchemaConsistency:
                 f"Python expects '{expected_type}' but SQL has '{sql_type}'"
             )
 
+    def test_rollup_key_matches_the_code_that_creates_it(self, migrations_dir: Path) -> None:
+        """005 documents the rollup; ensure_schema() creates it. They must agree.
+
+        Only ensure_schema() ever runs (see EventStoreSchema's docstring), so
+        this file cannot put a wrong key into a database - but it can put one
+        into a reader's head, and it did: it carried the COALESCE key, and the
+        comment explaining why, for the whole life of #1371. The three
+        statements that name the rollup's grain are compared here so the next
+        change to the key cannot land in one place only.
+        """
+        from syn_adapters.events.schema import (
+            ROLLUP_BACKFILL_SQL,
+            ROLLUP_KEY_SQL,
+            ROLLUP_TRIGGER_FUNCTION_SQL,
+        )
+
+        documented = (migrations_dir / "005_agent_event_day_rollup.sql").read_text()
+        # Comments are prose about the change, including its history, so they
+        # name the old key on purpose. Only the executable half is compared.
+        executable = "\n".join(
+            line for line in documented.splitlines() if not line.lstrip().startswith("--")
+        )
+
+        assert "UNIQUE NULLS NOT DISTINCT (day, session_id, execution_id)" in executable, (
+            "the migration documents a different key from the one ROLLUP_KEY_SQL creates"
+        )
+        assert executable.count("ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key") == 2, (
+            "both the trigger upsert and the backfill must name the key"
+        )
+        assert "COALESCE" not in executable.upper(), (
+            "the documented rollup collapses execution_id onto another value "
+            "(#1371), so it no longer describes what ensure_schema() creates"
+        )
+        for sql in (ROLLUP_KEY_SQL, ROLLUP_TRIGGER_FUNCTION_SQL, ROLLUP_BACKFILL_SQL):
+            assert "COALESCE" not in sql.upper()
+
     def test_session_conversations_in_init_db(self, init_db_path: Path) -> None:
         """Docker init-db must include session_conversations table."""
         assert init_db_path.exists(), f"Init-db script not found: {init_db_path}"

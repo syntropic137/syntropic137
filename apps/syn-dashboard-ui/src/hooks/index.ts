@@ -15,6 +15,8 @@ export type {
   UseExecutionStreamOptions,
   UseExecutionStreamResult,
 } from './useExecutionStream'
+export { useFeatures } from './useFeatures'
+export { subjectFromPath, useFeedbackSubject } from './useFeedbackSubject'
 export { useLiveTimer } from './useLiveTimer'
 export { useSessionData, type UseSessionDataResult } from './useSessionData'
 export { useSessionList, type UseSessionListResult } from './useSessionList'

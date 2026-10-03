@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 import socket
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NoReturn
 from unittest.mock import patch
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 import pytest
@@ -25,6 +27,11 @@ import infra.scripts.env_manager as em
 # there. All 50 passed locally the whole time, which is why nobody noticed
 # that the env/secret handling they cover was ungated (#825).
 pytestmark = pytest.mark.unit
+
+# An explicit sentinel, deliberately not derived from any path: `tmp_path` is
+# named after the test that asked for it, so a substring check against a
+# captured path can match the test's own name and pass for the wrong reason.
+_SOCKET_OPENED = "env_manager opened a host socket during _allocate"
 
 # ---------------------------------------------------------------------------
 # Slugification
@@ -320,54 +327,116 @@ class TestEnvToDict:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class AllocatorSandbox:
+    """Where a sandboxed `_allocate` keeps the state it writes."""
+
+    root: Path
+    registry_file: Path
+    lock_file: Path
+
+
+@pytest.fixture
+def allocator_sandbox(tmp_path: Path) -> Iterator[AllocatorSandbox]:
+    """`em._allocate` with every piece of ambient host state redirected.
+
+    `_allocate` reaches outside the process in two ways its signature does
+    not hint at, and both make it fail for reasons unrelated to the code
+    under test (#1292):
+
+    * it probes real host ports through `_port_free`, so any unrelated
+      process holding one of slot 2-5's ports changes which slot it picks;
+    * it locks `REGISTRY_LOCK_FILE`, which is derived from `REPO_ROOT` at
+      import time and therefore keeps pointing into the real repo even when
+      `REPO_ROOT` itself is patched.
+
+    Under this fixture every port reads as free and every file lands in
+    `tmp_path`, so the slot `_allocate` returns is a function of the
+    registry alone. `TestAllocateIsHermetic` guards both properties.
+    """
+    sandbox = AllocatorSandbox(
+        root=tmp_path,
+        registry_file=tmp_path / "environments.json",
+        lock_file=tmp_path / ".environments.lock",
+    )
+    with (
+        patch.object(em, "REPO_ROOT", sandbox.root),
+        patch.object(em, "REGISTRY_FILE", sandbox.registry_file),
+        patch.object(em, "REGISTRY_LOCK_FILE", sandbox.lock_file),
+        patch.object(em, "_port_free", return_value=True),
+    ):
+        yield sandbox
+
+
 class TestAllocate:
-    def test_allocates_new_environment(self, tmp_path: Path) -> None:
-        registry_file = tmp_path / "environments.json"
-        with (
-            patch.object(em, "REGISTRY_FILE", registry_file),
-            patch.object(em, "REPO_ROOT", tmp_path),
-        ):
-            _, env = em._allocate("feat/cool-feature")
+    def test_allocates_new_environment(self, allocator_sandbox: AllocatorSandbox) -> None:
+        _, env = em._allocate("feat/cool-feature")
 
         assert env.name == "cool-feature"
         assert env.branch == "feat/cool-feature"
+        # Lowest slot in the 2-5 range. Absolute values are safe to assert
+        # only because the sandbox reports every port free; un-sandboxed,
+        # this is whatever the host happens to have spare (#1292).
         assert env.slot == 2
         assert env.ports["gateway"] == 28137
 
         # Registry was saved
-        data = json.loads(registry_file.read_text())
+        data = json.loads(allocator_sandbox.registry_file.read_text())
         assert len(data["environments"]) == 1
 
         # Env file was written
-        env_file = tmp_path / ".env.ondemand-cool-feature"
+        env_file = allocator_sandbox.root / ".env.ondemand-cool-feature"
         assert env_file.exists()
 
-    def test_returns_existing_if_already_allocated(self, tmp_path: Path) -> None:
-        registry_file = tmp_path / "environments.json"
-        with (
-            patch.object(em, "REGISTRY_FILE", registry_file),
-            patch.object(em, "REPO_ROOT", tmp_path),
-        ):
-            _, env1 = em._allocate("feat/cool-feature")
-            _, env2 = em._allocate("feat/cool-feature")
+    def test_returns_existing_if_already_allocated(
+        self, allocator_sandbox: AllocatorSandbox
+    ) -> None:
+        _, env1 = em._allocate("feat/cool-feature")
+        _, env2 = em._allocate("feat/cool-feature")
 
         assert env1.slot == env2.slot
         # Only one entry in registry
-        data = json.loads(registry_file.read_text())
+        data = json.loads(allocator_sandbox.registry_file.read_text())
         assert len(data["environments"]) == 1
 
-    def test_second_branch_gets_next_slot(self, tmp_path: Path) -> None:
-        registry_file = tmp_path / "environments.json"
-        with (
-            patch.object(em, "REGISTRY_FILE", registry_file),
-            patch.object(em, "REPO_ROOT", tmp_path),
-        ):
-            _, env1 = em._allocate("feat/first")
-            _, env2 = em._allocate("feat/second")
+    def test_second_branch_gets_next_slot(self, allocator_sandbox: AllocatorSandbox) -> None:
+        _, env1 = em._allocate("feat/first")
+        _, env2 = em._allocate("feat/second")
 
         assert env1.slot == 2
         assert env2.slot == 3
         assert env1.ports["gateway"] != env2.ports["gateway"]
+
+
+class TestAllocateIsHermetic:
+    """Pins the two ambient couplings `allocator_sandbox` exists to sever.
+
+    These fail the moment `_allocate` is let back out to the host, which is
+    what turned green branches red on unrelated pull requests (#1292). They
+    assert on observable effects rather than on the patches themselves, so
+    they still mean something if the fixture is rewritten.
+    """
+
+    def test_allocate_opens_no_host_sockets(self, allocator_sandbox: AllocatorSandbox) -> None:
+        def _forbidden(*_args: object, **_kwargs: object) -> NoReturn:
+            raise AssertionError(_SOCKET_OPENED)
+
+        # Patched below `_port_free`, so this fires whether the port probe is
+        # doubled or not - it cannot pass by agreeing with the fixture.
+        with patch.object(em.socket, "socket", _forbidden):
+            _, env = em._allocate("feat/no-host-ports")
+
+        assert env.slot == 2
+        assert allocator_sandbox.registry_file.exists()
+
+    def test_allocate_locks_inside_the_sandbox(self, allocator_sandbox: AllocatorSandbox) -> None:
+        # `_registry_lock` creates REGISTRY_LOCK_FILE. Finding it in tmp_path
+        # is what proves it was not created in the real repo's infra/ dir -
+        # patching REPO_ROOT alone does not move it, since it was derived at
+        # import time.
+        em._allocate("feat/lock-stays-in-tmp")
+
+        assert allocator_sandbox.lock_file.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -376,46 +445,36 @@ class TestAllocate:
 
 
 class TestRollback:
-    def test_rollback_removes_registry_entry_and_env_file(self, tmp_path: Path) -> None:
-        registry_file = tmp_path / "environments.json"
-        lock_file = tmp_path / ".environments.lock"
-        with (
-            patch.object(em, "REGISTRY_FILE", registry_file),
-            patch.object(em, "REGISTRY_LOCK_FILE", lock_file),
-            patch.object(em, "REPO_ROOT", tmp_path),
-            patch.object(em, "_compose_run", return_value=0),
-        ):
+    def test_rollback_removes_registry_entry_and_env_file(
+        self, allocator_sandbox: AllocatorSandbox
+    ) -> None:
+        with patch.object(em, "_compose_run", return_value=0):
             _, env = em._allocate("feat/doomed")
             # Verify allocation succeeded
-            assert registry_file.exists()
-            env_file = tmp_path / ".env.ondemand-doomed"
+            assert allocator_sandbox.registry_file.exists()
+            env_file = allocator_sandbox.root / ".env.ondemand-doomed"
             assert env_file.exists()
 
             # Rollback
             em._rollback(env)
 
         # Registry should be empty
-        data = json.loads(registry_file.read_text())
+        data = json.loads(allocator_sandbox.registry_file.read_text())
         assert len(data["environments"]) == 0
 
         # Env file should be gone
         assert not env_file.exists()
 
-    def test_rollback_preserves_other_environments(self, tmp_path: Path) -> None:
-        registry_file = tmp_path / "environments.json"
-        lock_file = tmp_path / ".environments.lock"
-        with (
-            patch.object(em, "REGISTRY_FILE", registry_file),
-            patch.object(em, "REGISTRY_LOCK_FILE", lock_file),
-            patch.object(em, "REPO_ROOT", tmp_path),
-            patch.object(em, "_compose_run", return_value=0),
-        ):
+    def test_rollback_preserves_other_environments(
+        self, allocator_sandbox: AllocatorSandbox
+    ) -> None:
+        with patch.object(em, "_compose_run", return_value=0):
             em._allocate("feat/keeper")
             _, env2 = em._allocate("feat/doomed")
 
             em._rollback(env2)
 
-        data = json.loads(registry_file.read_text())
+        data = json.loads(allocator_sandbox.registry_file.read_text())
         assert len(data["environments"]) == 1
         assert data["environments"][0]["name"] == "keeper"
 

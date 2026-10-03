@@ -47,7 +47,7 @@ onboard-dev *flags:
     echo ""
 
     # 1. Submodules
-    if [ ! -d lib/agentic-primitives/.git ] || [ ! -d lib/event-sourcing-platform/.git ]; then
+    if [ ! -d lib/agentic-workspace/.git ] || [ ! -d lib/event-sourcing-platform/.git ]; then
         echo "📦 Initializing git submodules..."
         just submodules-init
     else
@@ -85,7 +85,7 @@ onboard-dev *flags:
     # 6. Kick off workspace image build in background (if needed)
     #    Runs while the user does interactive GitHub App / Cloudflare setup.
     BUILD_PID=""
-    if ! docker image inspect agentic-workspace-claude-cli:latest >/dev/null 2>&1; then
+    if ! docker image inspect agentic-workspace-claude:latest >/dev/null 2>&1; then
         echo "🐳 Building workspace image in background..."
         just workspace-build > /tmp/syn-workspace-build.log 2>&1 &
         BUILD_PID=$!
@@ -559,8 +559,17 @@ dashboard-build:
 dashboard-lint:
     cd apps/syn-dashboard-ui && pnpm run lint
 
-# Mirrors ci.yml dashboard-ui, which installs deps before linting. Use this,
-# not dashboard-qa, when the question is "will CI pass".
+# Run dashboard frontend tests (#1288)
+dashboard-test:
+    cd apps/syn-dashboard-ui && NO_COLOR=1 pnpm run test
+
+# Follows ci.yml dashboard-ui, which installs deps before linting. It is no
+# longer a strict mirror: dashboard-qa now runs the suite and that job does not
+# (#1288). The 257 tests here were in the same position as openclaw-plugin's -
+# declared, green, and gating nothing - so the local half is closed first and
+# this recipe deliberately runs MORE than CI until `- run: pnpm run test` is
+# added to ci.yml's dashboard-ui job. Erring that way means a failure shows up
+# here rather than nowhere.
 dashboard-ci:
     # CI=true because GitHub Actions sets it, and pnpm refuses to remove a stale
     # modules directory without it. This matches ci.yml's dashboard-ui COMMAND
@@ -570,8 +579,9 @@ dashboard-ci:
     cd apps/syn-dashboard-ui && CI=true pnpm install --frozen-lockfile --ignore-scripts
     just dashboard-qa
 
-# Full dashboard QA (lint + build)
-dashboard-qa: dashboard-lint dashboard-build
+# Full dashboard QA (lint + test + build). Adds ~140s; a "full QA" that skipped
+# 257 tests is what #1288 is about.
+dashboard-qa: dashboard-lint dashboard-test dashboard-build
     @echo "✅ Dashboard UI checks passed!"
 
 # --- Pulse UI ---
@@ -632,19 +642,26 @@ replay-webhooks *args:
 
 # --- Workspace ---
 
-# Build the Claude workspace Docker image using agentic-primitives
+# Build the Claude workspace Docker image using agentic-workspace
 # This uses the fully-tested claude-cli provider from the submodule
 workspace-build:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "🔨 Building workspace image from agentic-primitives..."
-    cd lib/agentic-primitives && uv run scripts/build-provider.py claude-cli
-    echo "✅ Image built: agentic-workspace-claude-cli:latest"
+    echo "🔨 Building workspace image from agentic-workspace..."
+    # --tag is explicit, and it has to be. Without it build-provider.py takes
+    # the name from the vendored provider manifest, which still reads
+    # `agentic-workspace-claude-cli` (AgentParadise/agentic-workspace#5), so
+    # the recipe built one tag and announced another, and the checks below
+    # inspected the third. Naming it here makes the built tag, the reported
+    # tag and the inspected tag one string.
+    cd lib/agentic-workspace && uv run scripts/build-provider.py claude-cli \
+        --tag agentic-workspace-claude:latest
+    echo "✅ Image built: agentic-workspace-claude:latest"
 
 # List all workspace image versions
 workspace-versions:
     @echo "📦 Workspace image versions:"
-    @docker images agentic-workspace-claude-cli | head -20
+    @docker images agentic-workspace-claude | head -20
 
 # Smoke-test the image every deployment ACTUALLY pulls.
 #
@@ -655,14 +672,23 @@ workspace-versions:
 # pinned image was missing, unsigned, or unable to start a harness - and the
 # failure would surface at workspace provision, far from the pin.
 #
-# Both harnesses are required, not just one: omni's contract is that it hosts
-# claude AND codex, and its manifest treats a single working harness as broken
-# rather than degraded.
+# Both harnesses are required, not just one: omni's contract (which buildfloor
+# inherits) is that it hosts claude AND codex, and its manifest treats a single
+# working harness as broken rather than degraded. The default is buildfloor, so
+# its build floor is probed too: rustup (no toolchain baked), bun, and the C
+# compiler. pnpm is not probed here because corepack may fetch it on first use;
+# the AW release gate runs the full compile smoke (cargo, pnpm install, bun).
 # Assert every pinned workspace image is a release-channel build (#941).
 # Separate from check-default-workspace-image, which probes only the DEFAULT
 # image - that blind spot is how the CLAUDE_CLI pin drifted unnoticed.
 check-pinned-image-channels:
     @uv run python scripts/check_pinned_image_channels.py
+
+# Every fixed (non-${VAR}) image in the compose files must pull anonymously.
+# quay.io/minio/minio withdrew public pulls on 2026-09-24 with no diff on our
+# side; only the post-merge smoke test noticed. Needs network, no credentials.
+check-compose-images-public:
+    @uv run python scripts/check_compose_images_public.py
 
 check-default-workspace-image:
     #!/usr/bin/env bash
@@ -670,6 +696,12 @@ check-default-workspace-image:
     IMAGE="$(uv run python -c 'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')"
     echo "🔎 Default workspace image: $IMAGE"
     docker pull --quiet "$IMAGE" >/dev/null
+    # Run it the way a workspace does. Without the /home/agent tmpfs the probe
+    # sees root-owned dirs the image build leaves in that layer, which every
+    # real workspace masks, so the gate failed on an image that works.
+    read -r -a RUN_ARGS <<< "$(uv run python -c 'from agentic_isolation.config import SecurityConfig; print(" ".join(a for a in SecurityConfig.production().to_docker_run_args() if not a.startswith("--runtime")))')"
+    # Stands in for the per-workspace /workspace mount the backend always adds.
+    RUN_ARGS+=("--tmpfs=/workspace:rw,exec,nosuid,uid=1000,gid=1000")
     FAILED=0
     # Probe THROUGH the image's entrypoint, not around it. `--entrypoint <bin>`
     # would prove the binaries exist while bypassing /opt/agentic/entrypoint.sh,
@@ -677,8 +709,8 @@ check-default-workspace-image:
     # entrypoint regression reaching :latest is the documented incident that
     # motivated digest pinning in the first place. A check that cannot catch the
     # regression it exists for is worse than no check.
-    for probe in claude codex skills; do
-        if OUT=$(docker run --rm "$IMAGE" "$probe" --version 2>&1); then
+    for probe in claude codex skills rustup bun cc; do
+        if OUT=$(docker run --rm "${RUN_ARGS[@]}" "$IMAGE" "$probe" --version 2>&1); then
             # The entrypoint logs plugin discovery before handing off, so the
             # version is the LAST line, not the whole output.
             echo "  ✅ $probe: $(echo "$OUT" | tail -1)"
@@ -998,7 +1030,7 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels
+preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels check-compose-images-public
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
@@ -1060,7 +1092,8 @@ preflight-agent: check-agent-docs lint format-check typecheck validate-domain-ev
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
     @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
-    @echo "   check-default-workspace-image, check-pinned-image-channels."
+    @echo "   check-default-workspace-image, check-pinned-image-channels,"
+    @echo "   check-compose-images-public."
     @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.
@@ -1111,7 +1144,7 @@ check-ci-parity:
 #   osv-scan, pip-audit  - query remote vulnerability databases
 #   dependency-review    - a GitHub API action with no local equivalent
 #   python-integration-tests - skipped on PR branches in CI too (needs services)
-qa-ci: preflight test-unit-ci cli-node-ci dashboard-ci docs-site-ci
+qa-ci: preflight test-unit-ci cli-node-ci openclaw-plugin-ci dashboard-ci docs-site-ci
     @echo ""
     @echo "✅ qa-ci: every PR-gating CI JOB with a local equivalent passed."
     @echo "   This is job-level coverage, not proof of equivalence: CI runs on"
@@ -1137,6 +1170,7 @@ test-unit-ci:
         --cov=packages/syn-adapters/src \
         --cov=packages/syn-shared/src \
         --cov-report=term-missing \
+        --durations=20 \
         -x -q
 
 # Mirrors ci.yml cli-node. cli-node-qa alone omits the two drift checks, which
@@ -1148,6 +1182,26 @@ cli-node-ci:
     cd apps/syn-cli-node && pnpm run build
     cd apps/syn-cli-node && pnpm run check:api-drift
     cd apps/syn-cli-node && pnpm run check:untyped-api
+
+# The openclaw-plugin equivalent of cli-node-ci (#1288). Unlike its siblings
+# this one does NOT yet mirror a ci.yml job, because there is no such job: the
+# package's suite ran under no gate at all, locally or in CI, which is how it
+# came to sit red for three tests against a response shape the API stopped
+# returning at c467de3b (#1204). This recipe closes the local half. The CI half
+# needs one job added to .github/workflows/ci.yml, and when it lands it must
+# arrive with `"ci.yml:openclaw-plugin": "openclaw-plugin-ci"` in
+# scripts/check_ci_parity.py's LOCAL_EQUIVALENT - that map rejects a job with no
+# target AND a target for a job that does not exist, so the two cannot be split
+# across commits.
+#
+# No `pnpm run build` step: here `build` is `tsc` and `typecheck` is
+# `tsc --noEmit` over the same inputs, so building would re-run the check just
+# performed and differ only in emitting. cli-node runs both because its build is
+# tsup, a different toolchain.
+openclaw-plugin-ci:
+    cd packages/openclaw-plugin && pnpm install --frozen-lockfile --ignore-scripts
+    cd packages/openclaw-plugin && pnpm run typecheck
+    cd packages/openclaw-plugin && NO_COLOR=1 pnpm run test
 
 # Mirrors ci.yml docs-site. Note this is NOT docs-site-build, which first runs
 # codegen; CI builds the committed tree as-is.
@@ -1213,7 +1267,7 @@ check-submodules:
     # ci.yml's submodule-check asserts these files exist, so a gitlink that is
     # correct but points at a commit without them still fails CI. Keep both
     # invariants or the mapping is a false claim of equivalence.
-    for required in lib/agentic-primitives/README.md lib/event-sourcing-platform/README.md; do
+    for required in lib/agentic-workspace/README.md lib/event-sourcing-platform/README.md; do
         if [ ! -f "$required" ]; then
             echo "❌ $required is missing; ci.yml's submodule-check requires it"
             exit 1
@@ -1275,12 +1329,10 @@ vsa-validate:
 # `apss install` produces at .apss/bin/apss is NOT built here - see #807.
 _aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-# Build APS CLI. Always delegate freshness to cargo - a shell guard keyed on
-# Cargo.lock mtime misses APSS source, manifest, and [[bin]]-name changes, so it
-# happily reuses a binary compiled from a different submodule revision.
+# Build APS CLI. Local freshness belongs to Cargo. CI can reuse an executable
+# only after an exact source/toolchain/platform cache hit and checkout validation.
 aps-build:
-    @echo "🔨 Building APS CLI..."
-    cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
+    bash scripts/build-aps.sh
 
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
@@ -1316,6 +1368,11 @@ validate-pre-merge-quick:
 # --- Selfhost Deployment ---
 
 # Pre-flight check: platform, Docker, env, secrets, workspaces
+# Load the Codex sandbox AppArmor profile on this Docker host and persist it
+# under /etc/apparmor.d (#1398). No-op on hosts without AppArmor.
+apparmor-setup *args:
+    bash infra/scripts/apparmor-setup.sh {{args}}
+
 _selfhost-preflight:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1340,6 +1397,11 @@ _selfhost-preflight:
         if ! docker info &>/dev/null; then
             echo "  ❌ Docker is not running or user not in docker group"
             exit 1
+        fi
+        # Codex workspaces need the agentic-codex-sandbox AppArmor profile on
+        # AppArmor hosts (#1398). Installs + loads it (sudo); skips elsewhere.
+        if ! bash infra/scripts/apparmor-setup.sh; then
+            ERRORS=$((ERRORS + 1))
         fi
     fi
 
@@ -1462,7 +1524,22 @@ _selfhost-preflight:
     fi
     echo ""
 
+# Exit 0 = clear, 1 = executions running, 2 = could not tell (never an all-clear).
+# Pass --force to deploy anyway. Also runnable on a host with no repo checkout:
+#   python3 infra/scripts/predeploy_check.py
+# Report what a deploy would orphan; non-zero if executions are in flight (#1179)
+predeploy-check *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
+
 # Start self-hosted Syn137 stack (no Cloudflare)
+#
+# NOT gated by predeploy-check: its normal precondition is a stopped stack, so
+# the API is unreachable and the check would fail closed on every legitimate
+# start. An operator forced to pass --force routinely stops reading it, which
+# would disarm the gate on the recipes that do need it.
 selfhost-up: _selfhost-preflight _workspace-check
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1500,10 +1577,11 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     echo "   Update: Zero Trust → Networks → Connectors → Create a tunnel → Select Cloudflared"
 
 # Stop self-host stack (auto-detects Cloudflare Tunnel)
-selfhost-down:
+selfhost-down *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
     echo "Stopping Syn137 self-host stack..."
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         echo "  (Cloudflare Tunnel detected)"
@@ -1541,9 +1619,16 @@ selfhost-logs *service:
     fi
 
 # Restart specific self-host service
-selfhost-restart service:
-    @echo "Restarting {{service}}..."
-    @{{compose_selfhost}} restart {{service}}
+selfhost-restart service *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    # Every service here can orphan an execution: api and gateway directly,
+    # timescaledb/redis/event-store by dropping the connections the API is
+    # mid-execution on. Gating only some would be a carve-out to remember.
+    uv run python infra/scripts/predeploy_check.py {{args}}
+    echo "Restarting {{service}}..."
+    {{compose_selfhost}} restart {{service}}
 
 # Seed workflows and triggers into selfhost stack
 # Runs seed scripts in a temporary API container (DB ports not exposed to host)
@@ -1566,10 +1651,13 @@ selfhost-seed:
     echo "✅ Seeding complete"
 
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
-selfhost-update:
+selfhost-update *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    # Refuse to orphan running executions (#1179). Runs before the pull so an
+    # abort leaves the checkout untouched rather than half-updated.
+    uv run python infra/scripts/predeploy_check.py {{args}}
     # Detect Cloudflare tunnel
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         COMPOSE="{{compose_selfhost_cf}}"
@@ -1588,10 +1676,19 @@ selfhost-update:
     echo "3️⃣ Syncing Python dependencies..."
     uv sync
     echo ""
-    echo "4️⃣ Rebuilding and restarting services..."
+    # After the submodule update (the AppArmor profile ships in it) and before
+    # compose restarts anything (#1398): reload the Codex sandbox profile and
+    # move a copied old default workspace image in .env to the new default.
+    echo "4️⃣ Host upgrade steps (AppArmor profile, workspace image pin)..."
+    bash infra/scripts/selfhost-update-host.sh .env
+    # .env may have changed: re-export it, since the shell value sourced above
+    # would otherwise override the file for compose.
+    source infra/scripts/selfhost-env.sh
+    echo ""
+    echo "5️⃣ Rebuilding and restarting services..."
     $COMPOSE up -d --build
     echo ""
-    echo "5️⃣ Waiting for services to be healthy..."
+    echo "6️⃣ Waiting for services to be healthy..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
     echo ""
     just selfhost-status
@@ -1599,10 +1696,11 @@ selfhost-update:
     echo "✅ Update complete!"
 
 # Full self-host reset (removes volumes - DATA LOSS!)
-selfhost-reset:
+selfhost-reset *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
     echo "⚠️  WARNING: This will delete ALL data including the database!"
     echo "Press Ctrl+C within 5 seconds to cancel..."
     sleep 5
@@ -1846,12 +1944,22 @@ codex-auth-status:
 codex-auth-clip *flags:
     uv run python scripts/copy_codex_auth.py {{flags}}
 
-# Generate published Docker Compose (docker-compose.syntropic137.yaml) from base + selfhost
+# Generate the compose forwarding block, then the published compose from it.
+#
+# Order matters: settings_forwarding.py rewrites the api environment in the
+# BASE file, and generate_published_compose.py merges that base with the
+# selfhost overlay. Reversed, the published file would be a release behind
+# every new setting -- which is the #1101 gap with an extra step.
 gen-compose:
+    uv run python scripts/settings_forwarding.py
     uv run python scripts/generate_published_compose.py
 
-# Check published compose is up to date (CI mode -- fails if stale)
+# Check both compose artifacts are up to date (CI mode -- fails if stale).
+# The first check is why a setting added to a Settings class cannot ship
+# documented-but-inert: .env.example gains a line and so must the api
+# environment (#1101).
 check-compose:
+    uv run python scripts/settings_forwarding.py --check
     uv run python scripts/generate_published_compose.py --check
 
 # Plugin JSON schemas must match the Pydantic models. These are what third-party
@@ -2211,14 +2319,14 @@ _webhook-stop:
     @-pkill -f "smee-client" 2>/dev/null || true
 
 # Check if workspace image exists AND matches current submodule commit
-# Poka-yoke: Automatically rebuilds if agentic-primitives was updated
+# Poka-yoke: Automatically rebuilds if agentic-workspace was updated
 _workspace-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    IMAGE="agentic-workspace-claude-cli:latest"
+    IMAGE="agentic-workspace-claude:latest"
 
     # Auto-init submodules if not yet initialized (worktree-safe)
-    if [ ! -f lib/agentic-primitives/.git ] && [ ! -d lib/agentic-primitives/.git ]; then
+    if [ ! -f lib/agentic-workspace/.git ] && [ ! -d lib/agentic-workspace/.git ]; then
         echo "📦 Submodules not initialized — initializing..."
         just submodules-init
     fi
@@ -2231,11 +2339,11 @@ _workspace-check:
     fi
 
     # Get current submodule commit (short hash)
-    SUBMODULE_COMMIT=$(cd lib/agentic-primitives && git rev-parse HEAD 2>/dev/null | cut -c1-12)
+    SUBMODULE_COMMIT=$(cd lib/agentic-workspace && git rev-parse HEAD 2>/dev/null | cut -c1-12)
 
     # Check for uncommitted changes in submodule (dirty state)
     SUBMODULE_DIRTY=""
-    if [ -n "$(cd lib/agentic-primitives && git status --porcelain 2>/dev/null)" ]; then
+    if [ -n "$(cd lib/agentic-workspace && git status --porcelain 2>/dev/null)" ]; then
         SUBMODULE_DIRTY="-dirty"
     fi
 
@@ -2245,11 +2353,11 @@ _workspace-check:
     # Compare - rebuild if mismatch OR if submodule is dirty
     if [ -n "$SUBMODULE_DIRTY" ]; then
         echo "⚠️  Workspace submodule has uncommitted changes"
-        echo "   Rebuilding to include latest agentic-primitives changes..."
+        echo "   Rebuilding to include latest agentic-workspace changes..."
         just workspace-build
     elif [ "$IMAGE_COMMIT" != "$SUBMODULE_COMMIT" ]; then
         echo "⚠️  Workspace image is stale (image: ${IMAGE_COMMIT:-none}, submodule: $SUBMODULE_COMMIT)"
-        echo "   Rebuilding to include latest agentic-primitives changes..."
+        echo "   Rebuilding to include latest agentic-workspace changes..."
         just workspace-build
     fi
 
@@ -2257,7 +2365,7 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across every version-carrying file (manifests, schemas, uv.lock)
+# Bump version across every version-carrying file (manifests, schemas, uv.lock, openapi.json)
 bump-version version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2268,6 +2376,19 @@ bump-version version:
     echo ""
     echo "Regenerating uv.lock..."
     uv lock
+    echo ""
+    # openapi.json became version-carrying in #1380: info.version is now read
+    # from the installed package instead of a literal that had drifted twenty
+    # releases. That is the point of the fix, and it means the committed spec -
+    # and the CLI and dashboard types generated from it - go stale on every
+    # bump. `just codegen-check` would catch that, but only after the release
+    # PR is already open, so it is regenerated here instead.
+    #
+    # The sync is what makes the metadata report the new version; without it
+    # codegen would faithfully re-emit the old one.
+    echo "Reinstalling and regenerating the API contract..."
+    uv sync --quiet
+    just codegen
     echo ""
     python3 scripts/workflows/bump_version.py --check
 
@@ -2283,6 +2404,15 @@ release-local version:
     set -euo pipefail
     echo "🚀 Local release: {{version}}"
     echo ""
+
+    # syn-api reports this as its commit on /version (#1473). A dirty tree is
+    # not the commit HEAD names, and stamping nothing would ship `commit: null`,
+    # so refuse before anything is logged in to or pushed.
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "❌ Working tree is dirty: commit or stash first, so syn-api's /version names the tree that shipped" >&2
+        exit 1
+    fi
+    build_commit="$(git rev-parse HEAD)"
 
     # Login to GHCR
     gh auth token | docker login ghcr.io -u syntropic137 --password-stdin
@@ -2311,7 +2441,9 @@ release-local version:
                               # rather than inheriting it silently - inheriting
                               # it silently is the exact shape of the bug this
                               # line closes.
-                              build_args="--build-arg INCLUDE_DOCKER_CLI=1" ;;
+                              # SYN_BUILD_* are the image's identity on
+                              # /version, measured by the same fitness test.
+                              build_args="--build-arg INCLUDE_DOCKER_CLI=1 --build-arg SYN_BUILD_IMAGE_TAG={{version}} --build-arg SYN_BUILD_COMMIT=$build_commit" ;;
             syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;
         esac
         echo "📦 Building $image..."
@@ -2360,6 +2492,21 @@ release-local version:
 #
 # Callable on its own, including from CI:
 #   just verify-image-capabilities syn-api ghcr.io/syntropic137/syn-api:v0.28.0
+# Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
+# Codifies docs/deployment/test-deploy.md (direct path). Not a release.
+#   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain
+#   just pit-stop 0.29.1-beta.5 --stage-only    # safe while executions run
+#   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
+#   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
+[positional-arguments]
+pit-stop version *flags:
+    #!/usr/bin/env bash
+    # Positional parameters, not just-level interpolation: interpolating puts
+    # the arguments through the recipe shell before the script can validate
+    # them, so a --ref carrying a space arrives as two arguments.
+    set -euo pipefail
+    exec ./scripts/pit_stop.sh "$@"
+
 verify-image-capabilities image ref:
     #!/usr/bin/env bash
     set -euo pipefail

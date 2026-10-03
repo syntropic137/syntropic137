@@ -7,12 +7,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+# Runtime import: FailExecutionCommand defaults an absent usage to zeros rather
+# than carrying None into the aggregate, so the class is constructed here.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
+
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        ResumeOrigin,
+        SourceCommit,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        ExecutablePhase,
+        FailureClassification,
         PhaseDefinition,
+        ReportedFailureReason,
+        SideEffectStatus,
     )
 
 
@@ -28,6 +40,8 @@ class StartExecutionCommand:
         inputs: dict[str, Any],
         expected_completion_at: datetime | None = None,
         phase_definitions: list[PhaseDefinition] | None = None,
+        pinned_phases: list[ExecutablePhase] | None = None,
+        source_commits: list[SourceCommit] | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -36,6 +50,36 @@ class StartExecutionCommand:
         self.inputs = inputs
         self.expected_completion_at = expected_completion_at
         self.phase_definitions = phase_definitions
+        self.pinned_phases = pinned_phases
+        self.source_commits = source_commits
+
+
+class StartResumeCommand:
+    """Command to start the execution a parent's resume admitted (ADR-014 s7).
+
+    Addressed to the CHILD: `execution_id` is the resume's own id, the one the
+    parent's `ExecutionResumed` named. Built from the parent's stream by
+    `WorkflowExecutionAggregate.resume_start_command`, never from the workflow
+    template, so every field here is what the parent ran with (#1454, #1457).
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        workflow_name: str,
+        inputs: dict[str, str],
+        pinned_phases: list[ExecutablePhase],
+        source_commits: list[SourceCommit],
+        resumed_from: ResumeOrigin,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.workflow_id = workflow_id
+        self.workflow_name = workflow_name
+        self.inputs = inputs
+        self.pinned_phases = pinned_phases
+        self.source_commits = source_commits
+        self.resumed_from = resumed_from
 
 
 class CompleteExecutionCommand:
@@ -79,8 +123,13 @@ class FailExecutionCommand:
         failed_phase_id: str | None,
         completed_phases: int,
         total_phases: int,
+        classification: FailureClassification,
         failed_phase_duration_seconds: float | None = None,
         observed_branches: tuple[BranchObservation, ...] | None = None,
+        exit_code: int | None = None,
+        failed_phase_artifact_ids: tuple[str, ...] = (),
+        failed_phase_usage: PhaseUsage | None = None,
+        reported_failure_reason: ReportedFailureReason | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -99,6 +148,47 @@ class FailExecutionCommand:
         #: already pushed, so recording every branch would give every failure a
         #: location, and no ref records whose push moved it.
         self.observed_branches = observed_branches
+        #: What the failed phase's process exited with (#1319). None means
+        #: nothing observed a status - an execution stranded by a restart has
+        #: no process left to ask - and is NOT the same as 0. Callers that
+        #: reconcile a run they did not watch leave this absent rather than
+        #: inventing a number the reap already made unknowable.
+        self.exit_code = exit_code
+        #: What the failed phase had already written, kept out of its workspace
+        #: before this failure tore it down (#1321). `()` when it wrote nothing
+        #: collectable, which is every failure that got this far before.
+        #:
+        #: NOT three-valued, unlike the field above: "nothing was kept" and
+        #: "nobody looked" need no telling apart here, because the collection
+        #: is attempted on every path that reaches this command and cannot
+        #: raise. Failing to store an artifact is logged where it happens and
+        #: leaves this empty - the same answer as a phase that wrote nothing,
+        #: and the same consequence either way.
+        self.failed_phase_artifact_ids = failed_phase_artifact_ids
+        #: What the failed phase had spent when it died (#1262), zeros when its
+        #: agent never ran. Here rather than only in `error_message`, which is
+        #: where these counts lived: an exit 124 reporting `(tokens=190+545)` in
+        #: prose was a phase that had stalled, and an exit 124 with 171 messages
+        #: and 133 tool calls behind it needed a bigger budget. Same exit code,
+        #: opposite responses, and no field either could be sorted on.
+        self.failed_phase_usage = failed_phase_usage or PhaseUsage()
+        #: Whether the machinery failed or the work was correctly judged not
+        #: deliverable (#1357). REQUIRED, unlike every optional field above,
+        #: and the only field on this command that is: there are three places
+        #: in production that fail an execution, they fail it for genuinely
+        #: different reasons, and a default here would let a new fourth one
+        #: inherit whichever answer happened to be written years earlier. Two
+        #: of the three are unambiguously the platform - a restart orphaning a
+        #: run, a stale-execution sweep - and saying so at those call sites is
+        #: documentation a default would delete.
+        self.classification = classification
+        #: What the failing PHASE said caused it (#1372), `None` when it said
+        #: nothing this reader knows - which is every one of the three call
+        #: sites above except the one that read an agent's own report, and is
+        #: why this defaults where the field above does not. Carried beside
+        #: the classification and never folded into it (#1392): an operator
+        #: reads the agent's word, and no number is computed from it.
+        self.reported_failure_reason = reported_failure_reason
 
 
 class StartPhaseCommand:
@@ -119,6 +209,27 @@ class StartPhaseCommand:
         self.phase_name = phase_name
         self.phase_order = phase_order
         self.session_id = session_id
+
+
+class RetryPhaseCommand:
+    """Command to abandon this phase's current attempt and start another (#1335).
+
+    Carries `reason` because the aggregate refuses on the budget, not on the
+    fault: whether a fault is worth another attempt is a judgement about the
+    agent harness's stream and belongs to the slice that reads it, while how
+    many attempts a phase may have is a rule about the execution and belongs
+    here. The reason travels so the event can record it either way.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        reason: str,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.reason = reason
 
 
 class CompletePhaseCommand:
@@ -153,32 +264,6 @@ class CompletePhaseCommand:
         self.cache_read_tokens = cache_read_tokens
         self.total_tokens = total_tokens
         self.duration_seconds = duration_seconds
-
-
-class PauseExecutionCommand:
-    """Command to pause a workflow execution."""
-
-    def __init__(
-        self,
-        execution_id: str,
-        phase_id: str,
-        reason: str | None = None,
-    ) -> None:
-        self.aggregate_id = execution_id
-        self.phase_id = phase_id
-        self.reason = reason
-
-
-class ResumeExecutionCommand:
-    """Command to resume a paused workflow execution."""
-
-    def __init__(
-        self,
-        execution_id: str,
-        phase_id: str,
-    ) -> None:
-        self.aggregate_id = execution_id
-        self.phase_id = phase_id
 
 
 class CancelExecutionCommand:
@@ -234,7 +319,13 @@ class ProvisionWorkspaceCompletedCommand:
 
 
 class AgentExecutionCompletedCommand:
-    """Command reported by AgentExecutionHandler after agent finishes."""
+    """Command reported by AgentExecutionHandler after agent finishes.
+
+    `last_agent_message` is the closing message the agent produced on its own
+    stream, and it is on this command - rather than held by the processor -
+    because it is the salvage input (#1195, #1300) and the salvage has to work
+    after a restart. See `AgentExecutionCompletedEvent.last_agent_message`.
+    """
 
     def __init__(
         self,
@@ -246,6 +337,8 @@ class AgentExecutionCompletedCommand:
         output_tokens: int = 0,
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
+        last_agent_message: str | None = None,
+        reported_side_effects: SideEffectStatus | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -255,6 +348,8 @@ class AgentExecutionCompletedCommand:
         self.output_tokens = output_tokens
         self.cache_creation_tokens = cache_creation_tokens
         self.cache_read_tokens = cache_read_tokens
+        self.last_agent_message = last_agent_message
+        self.reported_side_effects = reported_side_effects
 
 
 class ArtifactsCollectedCommand:
@@ -267,9 +362,42 @@ class ArtifactsCollectedCommand:
         artifact_ids: list[str],
         first_content_preview: str | None = None,
         session_id: str | None = None,
+        deliverable_recovered: bool = False,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.artifact_ids = artifact_ids
         self.first_content_preview = first_content_preview
         self.session_id = session_id
+        #: Whether what was stored came from the transcript rather than from
+        #: disk. Collection is the only place that knows, and the phase does
+        #: not complete until a later to-do item, so the fact has to be told
+        #: to the aggregate here or be lost (#1195, #1300).
+        self.deliverable_recovered = deliverable_recovered
+
+
+class ResumeExecutionCommand:
+    """Command to resume a terminal execution into a new one (ADR-014 s7).
+
+    Addressed to the PARENT: `execution_id` is the execution being resumed and
+    `resume_execution_id` the id the new run will have. The parent decides.
+
+    Both flags are separate, explicit operator decisions and default to the
+    refusal. `override_cancellation` is the only way to resume a CANCELLED
+    parent: a cancel is an instruction to stop, and a resume must not defeat it
+    without a fresh decision. `acknowledge_external_effects` accepts that the
+    phase the resume re-runs may have pushed or published something in the
+    parent that re-running repeats. Neither implies the other.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        resume_execution_id: str,
+        override_cancellation: bool = False,
+        acknowledge_external_effects: bool = False,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.resume_execution_id = resume_execution_id
+        self.override_cancellation = override_cancellation
+        self.acknowledge_external_effects = acknowledge_external_effects

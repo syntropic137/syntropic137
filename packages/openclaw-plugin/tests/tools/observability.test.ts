@@ -17,6 +17,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.resetAllMocks();
 });
 
 function jsonResponse(data: unknown): Response {

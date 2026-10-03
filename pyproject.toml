@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.29.0"
+version = "0.33.0"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -37,6 +37,8 @@ dev = [
     "asyncpg>=0.31.0",
     "testcontainers>=4.13.3",
     "pyright>=1.1.408",
+    # Keep feedback available to API codegen and tests; production installs opt in.
+    "ui-feedback-api",
 ]
 
 [build-system]
@@ -49,11 +51,16 @@ build-backend = "uv_build"
 # Supply chain safety: only resolve packages published before this date.
 # Bump intentionally when upgrading dependencies: just bump-exclude-newer
 exclude-newer = "2026-08-20T21:12:36Z"
+# Security patches past the cutoff, each pinned to just after its release:
+#   pyjwt 2.15.0 (2026-09-23): PYSEC-2026-4141 (2.14.0 was GHSA-w6j9-cwv2-h6wq)
+#   urllib3 2.8.0 (2026-09-15): PYSEC-2026-4175/4176/4177
+exclude-newer-package = { pyjwt = "2026-09-24T00:00:00Z", urllib3 = "2026-09-16T00:00:00Z" }
 constraint-dependencies = [
     "idna>=3.15",           # PYSEC-2026-215
     "requests>=2.33.0",      # GHSA-gc5v-m9x4-r6x2
-    "urllib3>=2.7.0",        # GHSA-38jv-5279-wg99, PYSEC-2026-141, PYSEC-2026-142
-    # pygments: GHSA-5239-wwwm-4pmq has no upstream fix yet (2.19.2 is latest).
+    "urllib3>=2.8.0",        # GHSA-38jv-5279-wg99, PYSEC-2026-141, PYSEC-2026-142, PYSEC-2026-4175/4176/4177
+    "pydantic-settings>=2.14.2",  # GHSA-4xgf-cpjx-pc3j
+    "pygments>=2.20.0",           # GHSA-5239-wwwm-4pmq
 ]
 
 [tool.uv.workspace]
@@ -61,6 +68,7 @@ members = ["apps/*", "packages/*"]
 exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-docs", "apps/syn-pulse-ui", "packages/openclaw-plugin"]
 
 [tool.uv.sources]
+apss-session-capture = { path = "lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python" }
 syn-api = { workspace = true }
 syn-collector = { workspace = true }
 syn-domain = { workspace = true }
@@ -70,9 +78,12 @@ syn-perf = { workspace = true }
 syn-tokens = { workspace = true }
 # Submodule dependencies (editable so source changes apply without reinstall)
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python", editable = true }
-agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging", editable = true }
-agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation", editable = true }
-agentic-events = { path = "lib/agentic-primitives/lib/python/agentic_events", editable = true }
+agentic-logging = { path = "lib/agentic-workspace/lib/python/agentic_logging", editable = true }
+agentic-isolation = { path = "lib/agentic-workspace/lib/python/agentic_isolation", editable = true }
+agentic-events = { path = "lib/agentic-workspace/lib/python/agentic_events", editable = true }
+# Vendored in-tree module (ADR-016), not a submodule. Editable so the syn-api
+# integration and the module move together in one commit.
+ui-feedback-api = { path = "lib/ui-feedback/backend/ui-feedback-api", editable = true }
 
 [tool.ruff]
 target-version = "py312"

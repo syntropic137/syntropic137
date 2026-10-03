@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import pytest
 
+from syn_domain.storable_text import pg_safe
+
 # Use centralized event type constants - NO hardcoded strings!
 from syn_shared.events import TOOL_EXECUTION_STARTED
 
@@ -91,6 +93,72 @@ class TestAgentEventStoreIntegration:
         assert events[0]["event_type"] == TOOL_EXECUTION_STARTED
         assert events[0]["session_id"] == session_id
         assert events[0]["data"]["tool_name"] == "Read"
+
+    @pytest.mark.asyncio
+    async def test_hostile_agent_output_does_not_fail_the_write(self, event_store, session_id):
+        """A real NUL and a real lone surrogate, against a real Postgres (#1241).
+
+        This is the one that runs the actual rejection: unit tests assert on the
+        values handed to the driver, and only a live server can say whether it
+        accepts them. Unpatched, this raises
+        `unsupported Unicode escape sequence ... cannot be converted to text`
+        and, in production, took the whole execution with it.
+        """
+        await event_store.initialize()
+
+        hostile = "before" + chr(0) + "middle" + chr(0xDEAD) + "after"
+
+        await event_store.insert_one(
+            tool_completed(
+                session_id=session_id + chr(0),
+                tool_name="Bash",
+                tool_use_id="hostile-1",
+                success=False,
+                error=hostile,
+            )
+        )
+        await event_store.insert_batch(
+            [
+                tool_completed(
+                    session_id=session_id,
+                    tool_name="Bash",
+                    tool_use_id="hostile-2",
+                    success=False,
+                    error=hostile,
+                )
+            ]
+        )
+
+        # THE HOSTILE ID IS ITS OWN SESSION, and that is the whole point.
+        #
+        # Event 1 was written under `session_id + chr(0)`. This assertion used
+        # to read `errors == ["beforemiddleafter", "beforemiddleafter"]`, and
+        # it passed because that id STRIPPED to `session_id`: the event landed
+        # in the CLEAN session's stream. One harness emitting a NUL could write
+        # into another session's history, and a reader of the clean session
+        # could not tell. That is the collision #1241 closed, and this test was
+        # asserting it.
+        clean = await event_store.query(session_id)
+        assert len(clean) == 1, "a NUL-bearing session id wrote into the clean session"
+
+        hostile_session = pg_safe(session_id + chr(0))
+        assert hostile_session != session_id, "the two ids must not share a key"
+        theirs = await event_store.query(hostile_session)
+        assert len(theirs) == 1, "the hostile session's own event is unreachable"
+
+        # Both stored, both readable, and neither carrying a codepoint Postgres
+        # refuses - which is what this test exists to prove against a real
+        # server rather than against the values handed to the driver.
+        for row in (*clean, *theirs):
+            stored = row["data"].get("error")
+            assert isinstance(stored, str)
+            assert stored.startswith("beforemiddleafter"), stored
+            assert chr(0) not in stored
+
+        # Same raw error in both, so the same stored spelling in both: the
+        # derivation depends only on the input, which is what lets a writer and
+        # a reader agree without coordinating.
+        assert clean[0]["data"].get("error") == theirs[0]["data"].get("error")
 
     @pytest.mark.asyncio
     async def test_insert_batch_performance(self, event_store, session_id):

@@ -137,7 +137,8 @@ verify gate from every run. Three executions ran ungated between 00:55 and 02:05
 UTC (`exec-491d046e8db4`, `exec-89ceaffdb011`, `exec-7773369f9032`).
 
 VPS is on **beta.4**, verified in the running image:
-`['codex','exec','--json','--sandbox','danger-full-access','--skip-git-repo-check']`
+`['codex','exec','--json','--sandbox',<full-access level>,'--skip-git-repo-check']`
+(the full-access value is elided: the repository forbids writing that invocation, #1398)
 
 #1157 is reopened. The per-phase mechanism is correct and stays; only the default
 is wrong. The fix worth building is #1167's: let a phase publish its deliverable

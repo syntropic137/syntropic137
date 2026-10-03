@@ -7,17 +7,19 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
     DispatchContext,
+    DomainEvent,
     EventEnvelope,
     ProjectionCheckpoint,
     ProjectionCheckpointStore,
     ProjectionResult,
 )
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from event_sourcing.core.checkpoint import DispatchContext
@@ -65,7 +67,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
 
     async def handle_event(
         self,
-        envelope: EventEnvelope[Any],
+        envelope: EventEnvelope[DomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
         context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
@@ -125,7 +127,7 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
 
     async def handle_event(
         self,
-        envelope: EventEnvelope[Any],
+        envelope: EventEnvelope[DomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
         context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
@@ -216,6 +218,26 @@ class RepoCorrelationAdapter(_NamespacedProjectionAdapter):
     }
 
 
+class _ExecutionTerminal(BaseModel):
+    """The one field this adapter reads off a finished workflow execution.
+
+    ``WorkflowCompleted`` and ``WorkflowFailed`` are orchestration events read
+    here, in the github context, for one purpose: clearing the concurrency
+    guard's running-execution set. Naming that dependency as a model states
+    exactly what the cross-context read costs - one field - instead of
+    re-deriving it from a ``dict[str, Any]`` by string key, where
+    ``event_data.get("executon_id")`` would typecheck (#1268).
+
+    ``extra="ignore"`` rather than the ``extra="forbid"`` a domain event
+    carries (AGENTS.md): this is a consumer-side projection of two larger
+    events, and it must keep working when either of them grows a field.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    execution_id: str = ""
+
+
 class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
     """Adapter for TriggerHistoryProjection.
 
@@ -242,15 +264,14 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
 
     async def handle_event(
         self,
-        envelope: EventEnvelope[Any],
+        envelope: EventEnvelope[DomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
         context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
-        event_data = envelope.event.model_dump()
         event_type = envelope.metadata.event_type or "Unknown"
         global_nonce = envelope.metadata.global_nonce or 0
         try:
-            await self._dispatch(event_data, event_type, global_nonce)
+            await self._dispatch(envelope.event, event_type, global_nonce)
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
                     projection_name=self.PROJECTION_NAME,
@@ -270,26 +291,33 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
 
     async def _dispatch(
         self,
-        event_data: dict[str, Any],
+        event: DomainEvent,
         event_type: str,
         global_nonce: int,
     ) -> None:
-        """Route events to the appropriate handler."""
+        """Route events to the appropriate handler.
+
+        Takes the envelope's event rather than its ``model_dump()``: every
+        branch below narrows straight back to a typed model, so the flattened
+        dict only ever existed as the thing in between (#1268).
+        """
         if event_type in ("WorkflowCompleted", "WorkflowFailed"):
-            await self._handle_execution_terminal(event_data, event_type)
+            await self._handle_execution_terminal(
+                _ExecutionTerminal.model_validate(event.model_dump()), event_type
+            )
             return
         from syn_domain.contexts.github import TriggerBlockedEvent, TriggerFiredEvent
 
         if event_type == "github.TriggerBlocked":
-            blocked = TriggerBlockedEvent.model_validate(event_data)
+            blocked = TriggerBlockedEvent.model_validate(event.model_dump())
             await self._projection.handle_trigger_blocked(blocked, global_nonce=global_nonce)
         else:
-            fired = TriggerFiredEvent.model_validate(event_data)
+            fired = TriggerFiredEvent.model_validate(event.model_dump())
             await self._projection.handle_trigger_fired(fired)
 
     @staticmethod
     async def _handle_execution_terminal(
-        event_data: dict[str, Any],
+        terminal: _ExecutionTerminal,
         event_type: str,
     ) -> None:
         """Clear concurrency guard tracking when a workflow execution finishes.
@@ -302,7 +330,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         blocking the projection. Worst case: one (trigger, PR) pair stays blocked
         until the next process restart (which clears the in-memory set anyway).
         """
-        execution_id = event_data.get("execution_id", "")
+        execution_id = terminal.execution_id
         if not execution_id:
             return
         try:

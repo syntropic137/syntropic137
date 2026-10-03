@@ -37,6 +37,7 @@ from syn_shared.settings.image_verification import (  # noqa: E402
     ImageVerificationSettings,
 )
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
+from syn_shared.settings.session_inventory import SessionInventorySettings  # noqa: E402
 from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
 from syn_shared.settings.storage import StorageSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
@@ -45,6 +46,10 @@ from syn_shared.settings.workspace import (  # noqa: E402
     WorkspaceSecuritySettings,
     WorkspaceSettings,
 )
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from settings_forwarding import NOT_FORWARDED  # noqa: E402
 
 # THE ONLY QUOTING LAYER IN THIS FILE.
 #
@@ -154,6 +159,22 @@ def format_description(description: str | None, max_width: int = 78) -> list[str
     return [f"# {line}" for line in wrapped]
 
 
+def format_refusal(env_name: str) -> list[str]:
+    """Comment lines warning that this variable is ignored, or none if it isn't.
+
+    A setting the deployment discards must SAY so where the operator reads it.
+    Silence is what #1101 was: SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES was set, the
+    API restarted, and the old behaviour continued without a word. The reasons
+    live in scripts/settings_forwarding.py, which is the same table that
+    generates the compose forwarding block, so this line cannot describe a
+    refusal the stack no longer makes.
+    """
+    reason = NOT_FORWARDED.get(env_name)
+    if reason is None:
+        return []
+    return format_description(f"IGNORED IN .env - {reason}")
+
+
 def get_section_from_field_name(field_name: str) -> str:
     """Infer section from field name prefix."""
     prefixes = {
@@ -221,6 +242,8 @@ def generate_settings_section(
             full_description = required_marker + field_description
             desc_lines = format_description(full_description)
             lines.extend(desc_lines)
+
+        lines.extend(format_refusal(env_name))
 
         # Add the variable
         if is_secret_type(field_type):
@@ -358,6 +381,8 @@ def generate_env_example() -> str:
                 desc_lines = format_description(full_description)
                 lines.extend(desc_lines)
 
+            lines.extend(format_refusal(env_name))
+
             if is_secret_type(field_type):
                 lines.append(f"{env_name}=")
             else:
@@ -400,7 +425,7 @@ def generate_env_example() -> str:
 
     # Workspace image signature verification (SYN_IMAGE_VERIFY_* prefix).
     # ON by default and fails closed: a remote workspace image must carry a
-    # valid cosign keyless signature from the agentic-primitives publishing
+    # valid cosign keyless signature from the agentic-workspace publishing
     # workflow before a container is created.
     lines.extend(
         generate_settings_section(
@@ -456,6 +481,15 @@ def generate_env_example() -> str:
             "OBJECT STORAGE (MinIO / artifacts / claude plugins)",
             prefix="SYN_STORAGE_",
             description="MinIO buckets and credentials. See ADR-012 (artifacts) and issue #726 (claude plugins).",
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
+            SessionInventorySettings,
+            "LOCAL SESSION INVENTORY",
+            prefix="SYN_SESSION_INVENTORY_",
+            description="Local discovery and transcript archive work without SeshMagic. Empty archive path uses ~/.syntropic137/session-inventory; Docker uses its persistent inventory volume.",
         )
     )
 

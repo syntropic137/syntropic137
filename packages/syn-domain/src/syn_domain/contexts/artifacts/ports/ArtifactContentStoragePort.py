@@ -31,6 +31,18 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 
+class ArtifactStorageError(Exception):
+    """An artifact's content could not be stored or retrieved.
+
+    The port's failure contract, declared here so callers can name it. Without
+    it the only honest catch at a call site is ``except Exception``, which also
+    swallows the caller's own bugs - a typo in a keyword argument reads exactly
+    like a backend outage and degrades just as quietly. Implementations raise
+    this or a subclass for every failure that is the storage's, and let
+    everything else through.
+    """
+
+
 @dataclass(frozen=True)
 class StorageResult:
     """Result of an artifact upload operation.
@@ -62,9 +74,15 @@ class ArtifactContentStoragePort(Protocol):
     The domain doesn't know about MinIO, S3, or filesystem details.
 
     Contract:
-        - upload() stores content and returns a StorageResult
+        - upload() stores content and returns a StorageResult, only once a read
+          of the stored object returns those exact bytes - callers publish the
+          returned storage_uri and consumers fetch it immediately (#700). That
+          is READABILITY, not durability: whether the bytes survive losing a
+          disk or a node is a property of how the backend is deployed, which no
+          call through this port can establish or report.
         - download() retrieves content by artifact_id
         - delete() removes content (for cleanup)
+        - Failures raise ArtifactStorageError; anything else is a caller bug
         - All operations are async
 
     Thread Safety:
@@ -97,7 +115,8 @@ class ArtifactContentStoragePort(Protocol):
             StorageResult with storage_uri and upload details
 
         Raises:
-            StorageError: If upload fails
+            ArtifactStorageError: If the upload fails, or if the stored
+                object does not become readable as written
         """
         ...
 
@@ -112,7 +131,7 @@ class ArtifactContentStoragePort(Protocol):
 
         Raises:
             ArtifactNotFoundError: If artifact doesn't exist
-            StorageError: If download fails
+            ArtifactStorageError: If download fails
         """
         ...
 
@@ -123,7 +142,7 @@ class ArtifactContentStoragePort(Protocol):
             artifact_id: The artifact ID to delete
 
         Raises:
-            StorageError: If deletion fails (not raised if already deleted)
+            ArtifactStorageError: If deletion fails (not raised if already deleted)
         """
         ...
 

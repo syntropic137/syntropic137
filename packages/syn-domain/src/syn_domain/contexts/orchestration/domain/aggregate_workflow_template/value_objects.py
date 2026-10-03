@@ -154,13 +154,14 @@ class PhaseDefinition(BaseModel):
     needs no working tree. See ``PhaseYamlDefinition.clone_repos`` for why the
     repo list is deliberately still passed when this is False."""
 
-    can_open_pr: bool = False
-    """Whether this phase may create a pull request (#1197).
+    delivers_repo_changes: bool = True
+    """Whether repository changes are part of this phase's deliverable (#1308).
 
-    Sourced from the workflow YAML ``can_open_pr`` field, and enforced by the
-    permissions of the GitHub token the phase's workspace receives rather than
-    by anything the agent is asked to do. See
-    ``PhaseYamlDefinition.can_open_pr`` for why the default is False."""
+    Sourced from the workflow YAML ``delivers_repo_changes`` field, and read by
+    the unpushed-work gate to decide what an uncommitted change MEANS - a
+    deliverable that was never saved, or a build tool's side effect. See
+    ``PhaseYamlDefinition.delivers_repo_changes`` for why the gate cannot work
+    this out for itself."""
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
@@ -168,6 +169,19 @@ class PhaseDefinition(BaseModel):
 
     model: str | None = None
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
+
+    model_defaulted: bool = False
+    """Whether ``model`` was FILLED IN by the platform rather than declared.
+
+    Set by the install and phase-edit handlers, never by a caller. True means
+    the package declared no usable model and the operator's
+    ``SYN_DEFAULT_*_MODEL`` was applied. A reinstall reads it to tell an
+    unchanged undeclared model (a no-op) from a declared model the package has
+    since removed (a change). Events written before this field existed replay
+    as False, which is correct for them: their model was either declared or
+    ``None``. No production event ever persisted a defaulted model without
+    this flag - defaults were first persisted in the same change that added
+    it - so the False default cannot mislabel a real default."""
 
     provider: str | None = None
     """Per-phase agent provider override ('claude' or 'codex').

@@ -16,6 +16,10 @@ class ArtifactRepositoryPort(Protocol):
     - Retrieved for display in dashboard/CLI
     """
 
+    # The identifier below is positional-only. The implementation is the generic
+    # RepositoryAdapter[TAggregate], which necessarily names it aggregate_id, and
+    # Protocol matching compares parameter NAMES for anything not positional-only
+    # -- so a domain-specific name here would leave this port unsatisfiable (#1305).
     async def save(self, aggregate: "ArtifactAggregate") -> None:
         """Save the artifact aggregate.
 
@@ -27,7 +31,7 @@ class ArtifactRepositoryPort(Protocol):
         """
         ...
 
-    async def get_by_id(self, artifact_id: str) -> "ArtifactAggregate | None":
+    async def get_by_id(self, artifact_id: str, /) -> "ArtifactAggregate | None":
         """Retrieve artifact by ID.
 
         Args:
@@ -38,7 +42,7 @@ class ArtifactRepositoryPort(Protocol):
         """
         ...
 
-    async def exists(self, artifact_id: str) -> bool:
+    async def exists(self, artifact_id: str, /) -> bool:
         """Check if an artifact exists.
 
         Args:

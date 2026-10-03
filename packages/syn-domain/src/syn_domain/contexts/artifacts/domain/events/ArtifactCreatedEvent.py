@@ -13,7 +13,7 @@ from syn_domain.contexts.artifacts._shared.value_objects import (  # noqa: TC001
 )
 
 
-@event("ArtifactCreated", "v5")
+@event("ArtifactCreated", "v6")
 class ArtifactCreatedEvent(DomainEvent):
     """Event emitted when an artifact is created.
 
@@ -28,6 +28,12 @@ class ArtifactCreatedEvent(DomainEvent):
     contain. Storing it as a field is what lets a later phase receive the
     producing phase's whole output TREE at its original relative paths
     instead of one arbitrary file flattened to ``<phase-id>.md``.
+    v6: Added agent_provider and agent_model (issue #1284) - which harness ran
+    the producing phase, and which model that harness announced while running.
+    A cross-model review's whole value is that a DIFFERENT model checked the
+    work, and without these the record cannot show that it did; every review
+    produced before v6 opened by saying it could not determine the models that
+    ran its own phases. Same safety as v5: optional, defaulted, no upcaster.
     NOTE the version string here is
     decorator metadata only - it does not set ``DomainEvent.schema_version``,
     and the gRPC serializer writes ``event_version=1`` regardless. Deserialization
@@ -106,6 +112,16 @@ class ArtifactCreatedEvent(DomainEvent):
     # Consumers MUST treat None as "path unknown" and fall back to the flat
     # artifacts/input/<phase-id>.md name rather than inventing a path.
     source_path: str | None = None
+
+    # Who produced it (NEW in v6, issue #1284). See AgentIdentity for why these
+    # two are different KINDS of fact: the provider is what the platform
+    # launched, the model is what the running harness announced on its own
+    # stream. Neither is ever the model the phase REQUESTED - a value that
+    # looked authoritative and was not would be worse than this being absent.
+    # Optional because pre-v6 events genuinely do not carry it and no upcaster
+    # runs; None means "not reported", never "as configured".
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
     # When the artifact was created (NEW in v4, issue #920). Server-side UTC;
     # clients format for their locale.

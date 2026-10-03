@@ -1,6 +1,6 @@
 import { Activity, Bot, Container, FileText } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { AGENT_PROVIDER_LABELS, StatusBadge } from '../../components'
+import { AGENT_PROVIDER_LABELS, ObservedModel, StatusBadge } from '../../components'
 import type { SessionResponse } from '../../types'
 import { PROVIDER_ENVIRONMENTS } from './sessionConstants'
 
@@ -65,6 +65,11 @@ export function SessionHeader({
             </div>
             <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
               <AgentProviderBadge provider={session.agent_provider} />
+              <ObservedModel
+                display={session.agent_model_display}
+                observed={session.agent_model}
+                requested={session.requested_model}
+              />
               <WorkspaceEnvironmentBadge provider={session.agent_provider} />
             </div>
           </div>

@@ -15,7 +15,7 @@ uv sync
 
 ```python
 import syn_api
-print(syn_api.__version__)  # "0.1.0"
+print(syn_api.__version__)  # <installed release>, e.g. "0.29.0"; None if not installed
 ```
 
 ## Quick Start

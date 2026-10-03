@@ -133,3 +133,10 @@ body {
     height: 1.25rem;
   }
 }
+
+/* Platform session -> its execution's full session inventory (#1398). */
+.session-inventory-link {
+  display: inline-block;
+  font-size: 0.85rem;
+  color: var(--color-accent);
+}

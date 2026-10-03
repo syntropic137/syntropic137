@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from syn_collector.collector.dedup import DeduplicationFilter
 from syn_collector.collector.routes import register_routes
+from syn_collector.collector.version import version_string
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -54,7 +55,17 @@ def create_app(
     application = FastAPI(
         title="Syn137 Event Collector",
         description="Scalable event collection for agent observability",
-        version="0.1.0",
+        # The INSTALLED release, not a literal. Hardcoded "0.1.0" here was the
+        # same defect #1380 fixed in syn-api, on the sibling service: it named
+        # a build that had not been current for twenty-odd releases, and the
+        # collector is deployed and scraped exactly like the API is.
+        #
+        # OpenAPI requires info.version to be a non-empty string, so this one
+        # slot cannot report "no metadata" the way /health does (null, plus an
+        # explicit version_status). It says "unknown" instead - deliberately
+        # not a version number, so it cannot be mistaken for the release it is
+        # standing in for. See syn_collector.collector.version.UNKNOWN_VERSION.
+        version=version_string(),
         lifespan=lifespan,
     )
 

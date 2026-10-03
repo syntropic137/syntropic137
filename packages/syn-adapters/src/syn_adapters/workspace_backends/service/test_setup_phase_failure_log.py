@@ -1,10 +1,9 @@
 """The setup-failure LOG line must name which setup, too (#1236).
 
 Same defect as the operator-facing error in ``WorkspaceProvisionHandler``: this
-line said "Setup phase failed", which reads as the workflow phase named
-"Prepare the workspace" rather than the ADR-024 secret-injection step that runs
-inside every phase. No phase name is available at this layer, so the workspace
-id carries the "which run" half.
+line said "Setup phase failed", which reads as a workflow phase rather than the
+ADR-024 secret-injection step that runs inside every phase. No phase name is
+available at this layer, so the workspace id carries the "which run" half.
 """
 
 from __future__ import annotations
@@ -62,5 +61,6 @@ async def test_failure_log_names_the_secret_injection_setup(
     assert "Secret-injection setup failed" in message
     assert "Setup phase failed" not in message
     assert "ws-1236" in message
+    # This adapter log retains its explicit key/value status for operators.
     assert "exit=1" in message
     assert "could not read Username" in message

@@ -52,7 +52,7 @@ class MemorySidecarAdapter(InMemoryAdapter):
     async def start(
         self,
         config: SidecarConfig,
-        _isolation_handle: IsolationHandle,
+        isolation_handle: IsolationHandle,
     ) -> SidecarHandle:
         """Start mock sidecar.
 
@@ -63,6 +63,7 @@ class MemorySidecarAdapter(InMemoryAdapter):
         Returns:
             SidecarHandle for managing the mock sidecar
         """
+        del isolation_handle  # named for the port; unused here
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             SidecarHandle,
         )

@@ -157,13 +157,17 @@ missed. Check `extversion` explicitly.
 
 ### The outage
 
-3. **Confirm nothing is executing**, using the server-side filter rather than
-   filtering one page client-side, and failing closed if the API cannot be read.
-   An empty response is not evidence of an idle queue:
+3. **Confirm nothing is executing.** This rule -- server-side filter, page past
+   the 100-item cap, and fail closed when the API cannot be read, because an
+   empty response is not evidence of an idle queue -- is now implemented in
+   `infra/scripts/predeploy_check.py` (#1179). Copy it to the host and run it;
+   it needs only `python3`, no repo and no `uv`:
 
-       curl -sS --fail -m 25 -o /tmp/running.json \
-         "http://100.114.86.77:8137/api/v1/executions?status=running&page_size=100"
-       python3 -c "import json;d=json.load(open('/tmp/running.json'));print('running:',len(d['executions']))"
+       export SYN_API_URL=http://100.114.86.77:8137 SYN_API_PASSWORD=...
+       python3 predeploy_check.py   # exit 0 clear, 1 in flight, 2 could not tell
+
+   Exit 2 means the check could not reach the API. That is **not** an
+   all-clear: do not continue until it exits 0.
 
 4. **Stop the writers.** Recreating only `timescaledb` does *not* stop its
    consumers: they hold restart policies and reconnect the moment Postgres is

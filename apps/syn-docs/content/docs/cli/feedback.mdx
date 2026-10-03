@@ -1,0 +1,29 @@
+---
+title: syn feedback
+description: "Triage in-app feedback from the dashboard"
+---
+
+Triage in-app feedback from the dashboard
+
+## `syn feedback list`
+
+List in-app feedback, newest first
+
+```bash
+syn feedback list [options]
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--status`, `-s` | `text` | --- | Filter by status (open, in_progress, resolved, closed, wont_fix) |
+| `--type`, `-t` | `text` | --- | Filter by type (bug, feature, ui_ux, performance, question, other) |
+| `--route`, `-r` | `text` | --- | Filter by the page path the feedback was left on |
+| `--execution`, `-e` | `text` | --- | Filter by the execution the page was about |
+| `--since` | `text` | --- | Only feedback created at or after this instant (ISO 8601) |
+| `--search` | `text` | --- | Search in comments |
+| `--page` | `text` | `1` | Page number |
+| `--limit` | `text` | `50` | Items per page (max 100) |
+
+---

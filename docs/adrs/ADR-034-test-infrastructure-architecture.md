@@ -287,6 +287,6 @@ See: `PROJECT-PLAN_20251220_TEST-INFRASTRUCTURE.md`
 
 - [Docker Compose Multiple Files](https://docs.docker.com/compose/multiple-compose-files/)
 - [Testcontainers Python](https://testcontainers-python.readthedocs.io/)
-- [es-p Test Infrastructure Pattern](../lib/event-sourcing-platform/event-store/eventstore-backend-postgres/tests/common/mod.rs)
+- [es-p Test Infrastructure Pattern](../../lib/event-sourcing-platform/event-store/eventstore-backend-postgres/tests/common/mod.rs)
 - [ADR-033: Recording-Based Integration Testing](./ADR-033-recording-based-integration-testing.md)
 - [ADR-060: On-Demand Environment Creation](./ADR-060-on-demand-environment-creation.md)

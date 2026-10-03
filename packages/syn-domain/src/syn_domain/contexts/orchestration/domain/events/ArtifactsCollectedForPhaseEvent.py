@@ -22,3 +22,14 @@ class ArtifactsCollectedForPhaseEvent(DomainEvent):
     collected_at: datetime
     first_content_preview: str | None = None
     session_id: str | None = None
+
+    #: True when the phase's deliverable was recovered from its transcript
+    #: rather than read off disk (#1195, #1300).
+    #:
+    #: Recorded at the moment it is KNOWN - collection - and read back by the
+    #: aggregate when the phase completes, so that `PhaseCompletedEvent` can
+    #: say so without the processor holding the fact in memory across two
+    #: to-do items. Carrying it in memory is the defect #1300's review found
+    #: in the salvage input itself; the fix is the same one, in the same
+    #: place, for the same reason.
+    deliverable_recovered: bool = False

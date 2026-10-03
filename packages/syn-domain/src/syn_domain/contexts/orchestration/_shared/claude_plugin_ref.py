@@ -90,7 +90,7 @@ def _try_parse_github_shorthand(raw: str) -> _ParsedRefDict | None:
     """
     if "://" in raw or raw.startswith("git@"):
         return None
-    match = _GITHUB_SHORTHAND_RE.match(raw)
+    match = _GITHUB_SHORTHAND_RE.fullmatch(raw)
     if match is None:
         return None
     org, repo, version = match.group(1), match.group(2), match.group(3)

@@ -39,6 +39,7 @@ from syn_adapters.events.store_write import (
 from syn_adapters.events.store_write import (
     insert_one as _insert_one,
 )
+from syn_domain import tool_call_counts
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,27 @@ class AgentEventStore:
         )
 
     async def initialize(self) -> None:
-        """Initialize connection pool and create schema if needed."""
+        """Open the pool, ready the schema, and ready the tool-call tally.
+
+        TWO CALLS, ONE POLICY. ``SYN_SKIP_AUTO_CREATE_TABLES`` says who owns
+        the DDL in this deployment, and it is one answer for the whole
+        database: ``agent_events`` and the tally are both auto-created or
+        both left to the migrations. So the flag reaches both, and neither
+        gets to opt out of the half it finds inconvenient.
+
+        What the flag does NOT govern is whether the tally's rows are fit to
+        read. That is the read model's own business and it is settled on every
+        startup in every configuration - see ``tool_call_counts.ensure_ready``,
+        which runs no DDL when it has been told not to and repairs the rows
+        either way. Both halves of this used to be wrong: the repair once hid
+        inside the auto-create branch, so the configuration we deploy skipped
+        it and came up reporting zero tool calls for every session; then the
+        DDL escaped the branch, so a role holding no CREATE privilege could
+        not start at all (#1322).
+
+        Cheap when there is nothing to do: a single-row read of the version
+        stamp and one index probe that stops at the first row.
+        """
         if self._initialized:
             return
 
@@ -90,6 +111,10 @@ class AgentEventStore:
 
         async with self.pool.acquire() as conn:
             await self._schema.ensure_schema(conn)  # type: ignore[arg-type]  # asyncpg PoolConnectionProxy is compatible with Connection
+            await tool_call_counts.ensure_ready(
+                conn,  # type: ignore[arg-type]  # asyncpg satisfies the protocol
+                skip_auto_create=self._schema.skip_auto_create,
+            )
 
         self._initialized = True
         logger.info("AgentEventStore initialized")

@@ -19,6 +19,7 @@ from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import 
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
     CreateWorkflowTemplateHandler,
 )
+from syn_shared.agents import PhaseModelDefaults
 
 SAMPLE_WORKFLOW_YAML = """
 id: seeder-test-workflow
@@ -53,7 +54,9 @@ def handler() -> CreateWorkflowTemplateHandler:
     """Create a handler for testing."""
     repository = get_workflow_repository()
     publisher = get_event_publisher()
-    return CreateWorkflowTemplateHandler(repository=repository, event_publisher=publisher)
+    return CreateWorkflowTemplateHandler(
+        repository=repository, event_publisher=publisher, model_defaults=PhaseModelDefaults()
+    )
 
 
 @pytest.fixture

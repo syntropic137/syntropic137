@@ -10,19 +10,6 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from syn_adapters.control.commands import ControlSignal
-    from syn_adapters.control.state_machine import ExecutionState
-
-
-class ControlStatePort(Protocol):
-    """Port for persisting execution control state."""
-
-    async def save_state(self, execution_id: str, state: ExecutionState) -> None:
-        """Save execution state."""
-        ...
-
-    async def get_state(self, execution_id: str) -> ExecutionState | None:
-        """Get current execution state, or None if not found."""
-        ...
 
 
 class SignalQueuePort(Protocol):

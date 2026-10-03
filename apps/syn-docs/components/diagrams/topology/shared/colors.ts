@@ -9,7 +9,7 @@ export const CONTEXT_COLORS: Record<string, string> = {
   observability: '#1A80B3',
   github: '#8C50DC',
   artifact: '#22cc88',
-  'agentic-primitives': '#ff8844',
+  'agentic-workspace': '#ff8844',
   'event-sourcing-platform': '#44aaff',
   cost: '#ffcc44',
   token: '#ffcc44',

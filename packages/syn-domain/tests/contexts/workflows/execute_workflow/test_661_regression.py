@@ -108,18 +108,26 @@ class TestCancelExitCodeDetection:
     The processor now owns the decision; this function returns the actual process code.
     """
 
-    def test_interrupt_requested_does_not_synthesise_exit_code_1(self):
-        """Exit code must reflect workspace state, not the interrupt flag."""
+    def test_interrupt_requested_synthesises_no_exit_code_at_all(self):
+        """Exit code must reflect workspace state, not the interrupt flag.
+
+        Asserted `== 0` until #1341, which is the same mistake as the 1 this
+        test was written to remove, in the opposite direction: both invented a
+        status for a process nobody observed exiting. The interrupt flag is not
+        an exit code and must not be converted into one - the caller routes
+        cancellation on the flag itself.
+        """
         stream = _make_stream_result(interrupt_requested=True)
         workspace = _make_workspace(last_stream_exit_code=None)
         tokens = _make_tokens()
 
         exit_code = _detect_exit_code(stream, workspace, "p-1", tokens)
 
-        # Must NOT be 1 (the old synthetic value)
-        assert exit_code == 0, (
-            "_detect_exit_code must not return 1 for interrupt_requested=True; "
-            "the caller handles cancellation routing"
+        # Must be neither 1 (the original synthetic failure) nor 0 (the
+        # synthetic success that replaced it).
+        assert exit_code is None, (
+            "_detect_exit_code must synthesise no status for interrupt_requested=True; "
+            f"the caller handles cancellation routing, got {exit_code!r}"
         )
 
     def test_interrupt_with_nonzero_workspace_exit_returns_workspace_code(self):

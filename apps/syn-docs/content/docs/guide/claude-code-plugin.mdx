@@ -65,13 +65,14 @@ Commands resolve the API URL automatically: from `SYN_API_URL` env var, your `~/
 
 ## Domain Skills
 
-The plugin includes 7 domain skills that Claude loads contextually based on your questions:
+The plugin includes domain skills that Claude loads contextually based on your questions, among them:
 
 | Skill | Activates When You Ask About |
 |-------|------------------------------|
 | **workflow-management** | Creating workflows, YAML schema, prompt files, `$ARGUMENTS` substitution |
-| **execution-control** | Running workflows, monitoring progress, pause/resume/cancel, debugging failures |
+| **execution-control** | Running workflows, monitoring progress, cancel/inject, resuming a failed run, debugging failures |
 | **observability** | Sessions, tool timelines, token metrics, cost breakdowns, two-lane architecture |
+| **session-discovery** | Every session of a workflow run, coverage and gaps, transcripts, lineage, learning-loop reviews ([guide](/docs/guide/session-discovery)) |
 | **organization** | Org/System/Repo hierarchy, cost rollup, contribution tracking |
 | **github-automation** | GitHub App setup, webhook triggers, safety limits, input mapping |
 | **setup** | `npx @syntropic137/setup`, Docker stack, secrets, troubleshooting |

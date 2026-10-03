@@ -9,10 +9,13 @@ Run: pytest -m unit packages/syn-adapters/src/syn_adapters/workspace_backends/se
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
 from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     DEFAULT_SETUP_SCRIPT,
     RepoNameCollisionError,
@@ -31,6 +34,18 @@ from syn_adapters.workspace_backends.service.setup_phase_secrets import (
 # marker. Unmarked now means collected but run by no CI job, which the
 # census gate correctly refuses.
 pytestmark = pytest.mark.unit
+
+
+@dataclass(frozen=True)
+class _Minted:
+    """What `mint_agent_token` returns: the token, and when it expires (#725)."""
+
+    token: str
+    expires_at: datetime
+
+
+def _minted(token: str) -> _Minted:
+    return _Minted(token, datetime.now(UTC) + timedelta(hours=1))
 
 
 @pytest.mark.unit
@@ -94,8 +109,12 @@ class TestBuildSetupScript:
         )
         script = secrets.build_setup_script()
         assert "x-access-token:tok-abc@github.com/org/repo-a" in script
-        assert "~/.git-credentials" in script
-        assert "chmod 600 ~/.git-credentials" in script
+        # Written to a staged file at 0600 and renamed onto the destination,
+        # never written into the destination itself (#1396). What that is worth
+        # is asserted against real bash in test_1393_the_credential_is_replaced_
+        # atomically.py; here it is only that the entry and the destination
+        # still appear.
+        assert 'mv -f -- "$syn_staged_secret" ~/.git-credentials' in script
 
     def test_multi_repo_has_multiple_clone_lines(self) -> None:
         """Multiple repos produce one clone line per repo."""
@@ -230,7 +249,7 @@ class TestBuildSetupScript:
 
 
 # =============================================================================
-# SetupPhaseSecrets.create() — multi-installation token resolution
+# SetupPhaseSecrets.create(ledger=IssuanceLedger()) — multi-installation token resolution
 # =============================================================================
 
 
@@ -454,7 +473,7 @@ class TestRepoNameCollision:
 
 @pytest.mark.unit
 class TestSetupPhaseSecretsCreate:
-    """Tests for SetupPhaseSecrets.create() multi-installation resolution."""
+    """Tests for SetupPhaseSecrets.create(ledger=IssuanceLedger()) multi-installation resolution."""
 
     @pytest.mark.anyio
     async def test_no_repos_skips_github(self) -> None:
@@ -463,7 +482,9 @@ class TestSetupPhaseSecretsCreate:
             "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
             return_value=(None, None),
         ):
-            secrets = await SetupPhaseSecrets.create(repositories=[], require_github=False)
+            secrets = await SetupPhaseSecrets.create(
+                ledger=IssuanceLedger(), repositories=[], require_github=False
+            )
 
         assert secrets.repo_tokens == {}
         assert secrets.repositories == []
@@ -473,7 +494,7 @@ class TestSetupPhaseSecretsCreate:
         """Two repos from same installation → one mint_agent_token call."""
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.return_value = "inst-1"
-        mock_client.mint_agent_token.return_value = "tok-inst1"
+        mock_client.mint_agent_token.return_value = _minted("tok-inst1")
 
         repos = [
             "https://github.com/org/repo-a",
@@ -494,10 +515,15 @@ class TestSetupPhaseSecretsCreate:
             MockSettings.return_value.is_configured = True
             MockSettings.return_value.bot_name = "syn-bot"
             MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
-            secrets = await SetupPhaseSecrets.create(repositories=repos, require_github=True)
+            secrets = await SetupPhaseSecrets.create(
+                ledger=IssuanceLedger(), repositories=repos, require_github=True
+            )
 
         # One token minted despite two repos
-        mock_client.mint_agent_token.assert_called_once_with("inst-1", can_open_pr=False)
+        # One token, scoped to both repos by name (#725).
+        mock_client.mint_agent_token.assert_called_once_with(
+            "inst-1", repositories=["repo-a", "repo-b"]
+        )
         assert secrets.repo_tokens[repos[0]] == "tok-inst1"
         assert secrets.repo_tokens[repos[1]] == "tok-inst1"
 
@@ -512,7 +538,7 @@ class TestSetupPhaseSecretsCreate:
 
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.side_effect = fake_get_installation
-        mock_client.mint_agent_token.side_effect = lambda inst_id, **_: (
+        mock_client.mint_agent_token.side_effect = lambda inst_id, **_: _minted(
             "tok-a" if inst_id == "inst-a" else "tok-b"
         )
 
@@ -531,7 +557,7 @@ class TestSetupPhaseSecretsCreate:
             MockSettings.return_value.bot_name = "syn-bot"
             MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
             secrets = await SetupPhaseSecrets.create(
-                repositories=[repo_a, repo_b], require_github=True
+                ledger=IssuanceLedger(), repositories=[repo_a, repo_b], require_github=True
             )
 
         assert mock_client.mint_agent_token.call_count == 2
@@ -562,6 +588,7 @@ class TestSetupPhaseSecretsCreate:
             MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
             with pytest.raises(Exception, match="404"):
                 await SetupPhaseSecrets.create(
+                    ledger=IssuanceLedger(),
                     repositories=["https://github.com/org/private-repo"],
                     require_github=True,
                 )
@@ -589,6 +616,7 @@ class TestSetupPhaseSecretsCreate:
             MockSettings.return_value.bot_name = "syn-bot"
             MockSettings.return_value.bot_email = "syn-bot@users.noreply.github.com"
             secrets = await SetupPhaseSecrets.create(
+                ledger=IssuanceLedger(),
                 repositories=["https://github.com/org/public-repo"],
                 require_github=False,
             )
@@ -613,6 +641,7 @@ class TestSetupPhaseSecretsCreate:
             MockSettings.return_value.is_configured = False
             with pytest.raises(GitHubAppNotConfiguredError):
                 await SetupPhaseSecrets.create(
+                    ledger=IssuanceLedger(),
                     repositories=["https://github.com/org/repo"],
                     require_github=True,
                 )

@@ -27,6 +27,9 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    ExecutionResult,
+)
 from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
     ExecuteWorkflowCommand,
 )
@@ -59,6 +62,8 @@ class _HistoricalPhase(TypedDict):
     provider: str
     agent_id: str
     """The tmux pane selector. Gone from ``PhaseDefinition``; still in history."""
+    can_open_pr: bool
+    """Retired after #1477. Gone from ``PhaseDefinition``; still in history."""
 
 
 class _HistoricalTemplate(TypedDict):
@@ -108,6 +113,7 @@ def _historical_created_event(provider: str = REMOVED_INTERACTIVE_PROVIDER) -> _
                     prompt_template="do the thing",
                     provider=provider,
                     agent_id="codex",
+                    can_open_pr=True,
                 )
             ],
         )
@@ -139,6 +145,16 @@ class ExecutionSpies:
     def __init__(self) -> None:
         self.workspace_service = MagicMock()
         self.workspace_service.create_workspace = MagicMock()
+        # Provisioning is expected to fail here, and a real ExecutionResult is
+        # what it fails FROM: every attribute of an AsyncMock is another
+        # AsyncMock, so the setup result's `stderr` was a mock whose `.strip()`
+        # returns a coroutine nobody awaits.
+        workspace = self.workspace_service.create_workspace.return_value.__aenter__.return_value
+        workspace.run_setup_phase = AsyncMock(
+            return_value=ExecutionResult(
+                exit_code=1, success=False, duration_ms=0.0, stderr="setup failed"
+            )
+        )
         self.command_builder = MagicMock(return_value=["claude", "-p", "do the thing"])
         self.execution_repository = AsyncMock()
 
@@ -183,6 +199,7 @@ def test_rehydration_of_a_stored_interactive_template_still_succeeds() -> None:
     # The stale value survives rehydration verbatim - that is the point. It is
     # execution, not replay, that refuses it.
     assert aggregate.phases[0].provider == REMOVED_INTERACTIVE_PROVIDER
+    assert "can_open_pr" not in aggregate.phases[0].model_dump()
 
 
 @pytest.mark.unit

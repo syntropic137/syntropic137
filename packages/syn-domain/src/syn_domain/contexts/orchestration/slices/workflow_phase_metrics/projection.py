@@ -177,7 +177,12 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
 
         finished = entry.with_run_finished(
             _execution_of(event_data),
-            status="completed" if event_data.get("success", True) else "failed",
+            # An event carrying no `success`, or one carrying something that is
+            # not a bool, has not reported a verdict - and an unreported verdict
+            # is not a passing one. Defaulting it to True was #1256's shape at
+            # the read-model hop: an operator reads "completed" off a phase that
+            # nothing vouched for.
+            status="completed" if event_data.get("success") is True else "failed",
             recorded_seconds=event_data.get("duration_seconds"),
             ended_at=event_data.get("completed_at"),
         )
@@ -187,6 +192,8 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
             output_tokens=entry.output_tokens + event_data.get("output_tokens", 0),
             total_tokens=entry.total_tokens + event_data.get("total_tokens", 0),
             artifact_count=entry.artifact_count + (1 if event_data.get("artifact_id") else 0),
+            recovered_runs=entry.recovered_runs
+            + (1 if event_data.get("deliverable_recovered") else 0),
         )
 
         await self._save_phases(workflow_id, phases)

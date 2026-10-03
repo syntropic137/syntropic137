@@ -24,9 +24,16 @@ implementation is not here yet. Before anything else:
 
 ```
 git fetch origin <branch-from-the-artifact>
-git checkout <the-exact-commit-SHA-from-the-artifact>
+git checkout --recurse-submodules <the-exact-commit-SHA-from-the-artifact>
 git rev-parse HEAD          # must equal that SHA
 ```
+
+**`--recurse-submodules` is required, not optional.** A plain `git checkout`
+moves the superproject but leaves every submodule where the default branch put
+it, so when the commit under review pins a different gitlink, `git status`
+reports ` M lib/<submodule>`. The unpushed-work guard reads that line as unsaved
+work and fails the phase after the review is complete but before it is stored,
+so the whole review is paid for and lost.
 
 Paste that `rev-parse` output. If it does not match, stop and report it: every
 result after this point would describe the wrong code, and a green run against
@@ -214,12 +221,25 @@ something, confirm the recording is durable rather than in-memory - an event
 constructed and never persisted has shipped here before, and every unit test
 passed.
 
-## Output
+## Write to `artifacts/output/verify.md`
 
+**This phase declares a markdown output artifact, so a run that writes
+nothing under `artifacts/output/` FAILS - after the work is done, and the
+work is lost with the workspace.** Write the file before you finish, even
+if the outcome was a refusal: a refusal is a deliverable and is often the
+most valuable one.
+
+The verdict, the gate output, the mutation results, and the exact head you verified.
 A verdict: is the change correct and complete, or not. The `preflight-agent` and
 unit-test output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.
+
+**Name the branch and the full commit SHA you verified**, together with the
+`git rev-parse HEAD` output above. The `fix` phase starts in a fresh clone of
+the default branch and has only your report to learn the branch from; without
+the name it cannot fetch what you reviewed, and without the full SHA it cannot
+tell whether what it fetched is still it.
 
 ## Judge the design, not only the correctness
 
@@ -264,3 +284,57 @@ So verify the claim against the artifact, not the prose:
 
 A right conclusion resting on invented evidence is more dangerous than an
 honest gap, because it looks finished.
+
+## A defect you find is repaired, not fatal
+
+A `fix` phase runs after you, reads this report, and repairs what you name. Then
+a second verification pass checks the repair. So finding a defect no longer ends
+the run and discards the work - it starts the repair.
+
+This changes how to write the finding, not how hard to look. **Write each
+blocking defect as an instruction a fix phase can act on**, not as a verdict:
+
+- name the file and line
+- state what is wrong in one sentence
+- state what would close it
+
+"The tests are insufficient" strands the work. "`test_cancel_isolation` builds
+one execution, so it cannot fail for the reason #1311 exists; it needs a second
+concurrent execution and an assertion that its runtime state is untouched" gets
+fixed in one edit.
+
+Two things not to do with this:
+
+- **Do not lower the bar** because a repair is available. A defect you wave
+  through is one the second pass inherits with less budget to catch it.
+- **Do not widen it either.** The fix phase is scoped to exactly what you name,
+  and the run has already spent most of its budget reaching you. Findings that
+  are genuinely optional belong under a heading that says so, clearly separated
+  from what blocks delivery.
+
+Mark plainly which findings block and which do not. The fix phase will treat
+everything you call blocking as required work.
+
+## Report completion to the workflow
+
+Your task in this phase is to deliver an honest verification report, not to
+make the candidate pass. If you can identify the candidate and write
+`artifacts/output/verify.md`, end with `TASK_RESULT success=true` even when the
+candidate is BLOCKED.
+
+This includes a normal code, test, or design defect; a failing gate; and an
+environment limitation that prevents only part of verification, such as an
+unavailable database. Put each such item under a `BLOCKING` heading with the
+file and line or affected command, the root cause, the exact action required,
+and what would prove it closed. `success=true` means the verification report
+was delivered so the `fix` phase can run; it does not mean the candidate was
+certified.
+
+Use `TASK_RESULT success=false` only when verification itself could not run at
+all: for example, the implementation artifact is missing or unreadable, the
+exact branch and SHA cannot be fetched or checked out, or no verification
+artifact can be written. Do not use `success=false` merely because the
+candidate failed or because one requested check could not run.
+
+Do not open or attempt to open a pull request. Only the `open_pr` phase may do
+that.

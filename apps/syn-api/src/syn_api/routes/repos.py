@@ -15,6 +15,7 @@ from syn_api._wiring import (
     ensure_connected,
     sync_published_events_to_projections,
 )
+from syn_api.model_identity import cost_by_observed_model_text
 from syn_api.types import (
     AssignRepoToSystemRequest,
     Err,
@@ -667,7 +668,12 @@ async def get_repo_cost_endpoint(repo_id: str) -> RepoCostResponse:
     result = await get_repo_cost(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    response = RepoCostResponse(**result.value)
+    # An alias key from a legacy read model is folded into the unknown bucket
+    # (ADR-067 D9) rather than failing the response.
+    data = result.value
+    response = RepoCostResponse(
+        **{**data, "cost_by_model": cost_by_observed_model_text(data.get("cost_by_model"))}
+    )
     # Fix(#542): read model may return empty repo_id — ensure it matches the request
     if not response.repo_id:
         response = response.model_copy(update={"repo_id": repo_id})

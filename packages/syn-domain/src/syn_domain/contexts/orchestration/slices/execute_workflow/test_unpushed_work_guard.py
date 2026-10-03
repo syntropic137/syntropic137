@@ -22,8 +22,14 @@ the sequence under test genuine right up to the point of failure.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import http.server
 import os
+import pathlib
+import socket
 import subprocess
+import threading
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
@@ -31,29 +37,52 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutablePhase,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow import (
+    unpushed_work_guard,
+    workspace_git,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    RESCUE_BUNDLE_NAME,
+    RESCUE_PATCH_NAME,
+    CredentialRenewalFailedError,
+    DroppedWorkflows,
     QuarantinedWork,
+    QuarantinePathUnusableError,
+    SavedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
-    GitWorkspace,
+    _read_only_mount,
     quarantine_unpushed_work,
+    quarantined_records,
     refuse_to_complete_unsaved_phase,
+    rehearse_quarantine_credential,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+    _DispatchContext,
 )
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import PhaseResult
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+        GitWorkspace,
+    )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -62,6 +91,26 @@ _PHASE_ID = "implement"
 _QUARANTINE_REF = f"refs/syn/lost/{_EXECUTION_ID}/{_PHASE_ID}"
 _REPO = "syntropic137"
 _BRANCH = "fix/1184-quarantine-unpushed-work"
+
+#: GitHub's refusal of a workflow change from an App without the permission,
+#: as a `pre-receive` hook (#1437). Every new commit in every update is
+#: inspected, a merge against each parent and a root commit against nothing,
+#: because that is what GitHub does: it is why a rescue cannot keep the
+#: phase's own commits as parents. See `_Clone.refuse_workflow_changes`.
+_REFUSES_WORKFLOWS = r"""#!/bin/sh
+zero=0000000000000000000000000000000000000000
+while read old new ref; do
+  [ "$new" = "$zero" ] && continue
+  if [ "$old" = "$zero" ]; then range="$new --not --all"; else range="$old..$new"; fi
+  for c in $(git rev-list $range); do
+    touched=$(git diff-tree -r -m --root --no-commit-id --name-only "$c" -- .github/workflows/ | head -n 1)
+    if [ -n "$touched" ]; then
+      echo "error: GH013: refusing to allow a GitHub App to create or update workflow \`$touched\` without \`workflows\` permission" >&2
+      exit 1
+    fi
+  done
+done
+"""
 
 
 def _git(*args: str, cwd: Path, home: Path) -> subprocess.CompletedProcess[str]:
@@ -85,7 +134,23 @@ def _git(*args: str, cwd: Path, home: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-class _Workspace:
+class _RenewsCredential:
+    """The credential half of `GitWorkspace`, for a double modelling a healthy one.
+
+    COUNTED, NEVER MERELY ACCEPTED. #1393 is entirely a question of WHEN the
+    credential is renewed relative to the push that spends it, so a double
+    that swallowed the call would let the renewal be deleted with every test
+    in this file still green - which is the shape of the bug, not a fix for
+    it. `renewals` is what `test_the_quarantine_push_renews...` reads.
+    """
+
+    renewals: int = 0
+
+    async def renew_git_credential(self) -> None:
+        self.renewals += 1
+
+
+class _Workspace(_RenewsCredential):
     """Runs the gate's commands for real, against repositories on disk.
 
     Deliberately provides NO git identity and NO global config: the container
@@ -208,6 +273,91 @@ class _Clone:
         self.git("config", "protocol.ext.allow", "always")
         self.git("remote", "set-url", "origin", f"ext::sleep {seconds}")
 
+    def hang_the_clean_filter(self, seconds: int) -> None:
+        """Make reading this repository's worktree run a program that never returns.
+
+        THE LOCAL HALF of `hang_the_remote`, and the one that matters more
+        (#1231): a `clean` filter is code the REPOSITORY supplies and git runs
+        while reading files, so it turns a local command into an unbounded
+        wait without any network being involved. `.gitattributes` names the
+        driver and the repository's own config supplies the program - both of
+        them things a phase's checkout carries - and `git add --all`, which
+        the quarantine runs over every path, invokes it for each one.
+
+        A config value rather than a hook script on purpose: it needs no
+        executable file, so this stages the hang identically on a tmpdir
+        mounted `noexec`, where a hook would simply be ignored and the test
+        would pass for the wrong reason.
+        """
+        (self.path / ".gitattributes").write_text("* filter=syn-hang\n")
+        self.git("config", "filter.syn-hang.clean", f"sleep {seconds}")
+
+    def decline_pushes_server_side(self) -> None:
+        """Make the ORIGIN refuse the update, the way a ruleset does (#1396).
+
+        THE FAILURE A DRY RUN CANNOT SEE, and the reason the phase-start
+        rehearsal is documented as a credential-and-connectivity check rather
+        than a promise of acceptance. `pre-receive` runs only for a real
+        update: git connects, authenticates and negotiates identically either
+        way, so ``--dry-run`` returns 0 against this origin and the real push
+        comes back ``! [remote rejected] ... (deny updating a hidden ref)``.
+
+        ``receive.hideRefs`` is an update-time server policy and remains active
+        when the client disables repository hooks. The fixture's setup pushes
+        are already done before this hides only the quarantine namespace.
+        """
+        subprocess.run(
+            ["git", f"--git-dir={self.origin}", "config", "receive.hideRefs", "refs/syn/lost"],
+            check=True,
+        )
+
+    def refuse_workflow_changes(self) -> str:
+        """Make the ORIGIN refuse what GitHub refuses this App (#1024, #1437).
+
+        A `pre-receive` hook, so the refusal is the server's and the whole push
+        is rejected, which is the property the bug is about: GitHub does not
+        drop the one file, it refuses everything that came with it. The
+        message is GitHub's own wording, because that wording is the only
+        thing the guard can tell this refusal apart from any other by.
+
+        Seeds `.github/workflows/existing.yml` on the branch FIRST, so a phase
+        can edit, delete or add beside a workflow its base already has, and
+        then PROVES the hook is live by being refused: a hook that silently did
+        not run (a ``noexec`` tmpdir, a client-side ``core.hooksPath``) would
+        turn every test that uses this into a test of nothing.
+
+        Returns the seeded commit, which is the rescue's expected base.
+        """
+        workflows = self.path / ".github" / "workflows"
+        workflows.mkdir(parents=True, exist_ok=True)
+        base = self.commit(".github/workflows/existing.yml", "on: push\n")
+        self.git("push", "origin", _BRANCH)
+        hook = self.origin / "hooks" / "pre-receive"
+        hook.write_text(_REFUSES_WORKFLOWS)
+        hook.chmod(0o755)
+
+        (workflows / "existing.yml").write_text("on: probe\n")
+        self.git("add", "--all")
+        tree = self.git("write-tree")
+        self.git("reset", "-q", "--hard", "HEAD")
+        probe = self.git("commit-tree", tree, "-p", base, "-m", "probe")
+        refused = subprocess.run(
+            ["git", "push", "origin", f"{probe}:refs/syn/probe"],
+            cwd=self.path,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_SYSTEM": "/dev/null",
+                "HOME": str(self.root / "home"),
+            },
+        )
+        assert refused.returncode != 0, "the refusing origin did not refuse"
+        assert "without `workflows` permission" in refused.stderr, refused.stderr
+        return base
+
     def break_the_remote(self) -> None:
         """Point origin somewhere that does not exist, so asking it fails.
 
@@ -217,6 +367,92 @@ class _Clone:
         real failure modes, and the code cannot tell it from the others.
         """
         self.git("remote", "set-url", "origin", str(self.root / "no-such-origin.git"))
+
+    @contextlib.contextmanager
+    def silent_origin(self) -> Iterator[None]:
+        """Point origin at a remote that ACCEPTS the connection and then says nothing.
+
+        THE CASE THE GUARD COULD NOT SEE (#1396). A remote that is simply gone
+        fails fast and loudly; this one is the opposite and is the harder
+        failure in production - a hung load balancer, a dropped connection
+        that never resets, a proxy holding the socket open. git connects
+        successfully and then waits for a banner that never comes, so the only
+        thing that ends the command is the bound in its own argv, and the only
+        thing the caller gets back is `BOUND_FIRED_EXIT_CODE`.
+
+        A LISTENING SOCKET THAT IS NEVER ACCEPTED, which is the whole server.
+        The kernel completes the TCP handshake from the listen backlog on its
+        own, so git's connect() succeeds against a process that is doing
+        nothing at all - no thread, no protocol implementation, and nothing
+        that can race. Staged on the REMOTE rather than by handing back a
+        canned `ExecutionResult`, for the reason #1396 gave about the old
+        `_RemoteRejects`: a fabricated result asserts that the caller reads a
+        field and assumes the thing that needs establishing, which here is
+        that a real bound really fires and really reports 124.
+        """
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        try:
+            self.git(
+                "remote", "set-url", "origin", f"git://127.0.0.1:{listener.getsockname()[1]}/r.git"
+            )
+            yield
+        finally:
+            self.restore_the_remote()
+            listener.close()
+
+    @contextlib.contextmanager
+    def origin_answering(self, status: int) -> Iterator[None]:
+        """Point origin at a real HTTP remote that answers every request with ``status``.
+
+        THE PRODUCTION SHAPE, which no local path can stage: the quarantine
+        push goes to ``https://github.com/...`` with a token, and the refusal
+        this guard exists to catch arrives as an HTTP status on the
+        ``info/refs?service=git-receive-pack`` request - 403 when the
+        installation token cannot push to that repository, 401 when it has
+        expired. Neither is reachable through a file:// origin, where the
+        only refusals available are "not a repository" and the update-time
+        hooks a dry run never reaches.
+
+        Real git over real TCP against a real HTTP server, so what the guard
+        classifies is what git actually returned rather than what this file
+        believes git returns.
+        """
+        answered = status
+
+        class _Answers(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(answered)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_POST = do_GET
+
+            def log_message(self, *args: object) -> None:
+                """Keep the suite's output the test's, not the server's."""
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), _Answers)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            self.git("remote", "set-url", "origin", f"http://127.0.0.1:{server.server_port}/r.git")
+            yield
+        finally:
+            self.restore_the_remote()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def restore_the_remote(self) -> None:
+        """Put origin back, so a break can be made to last exactly one command.
+
+        A transport fault is a MOMENT, not a state, and the difference is the
+        whole of #1396's fourth finding: code that retries and code that does
+        not are indistinguishable against a remote that stays broken, and
+        differ completely against one that does not.
+        """
+        self.git("remote", "set-url", "origin", str(self.origin))
 
     def advance_origin_main(self, name: str, content: str) -> None:
         """Move origin/main on, the way another PR merging does, and fetch it."""
@@ -240,9 +476,26 @@ class _Clone:
             == 0
         )
 
-    async def run_gate(self) -> None:
+    async def run_gate(
+        self, *, delivers_repo_changes: bool = True, workspace: GitWorkspace | None = None
+    ) -> None:
+        """Run the gate as `_PHASE_ID` - `implement`, which owns a branch.
+
+        True is the default here because it is what `implement` declares, and
+        because it is the reading every test above this line is about. The
+        tests that pass False say so at the call, where the declaration is the
+        thing under test (#1308).
+
+        ``workspace`` is for the tests that need the phase to have run
+        somewhere other than an ordinary writable checkout. Defaulting to this
+        clone's own is what makes "declared False and still failed" the
+        ordinary case rather than a contrived one.
+        """
         await quarantine_unpushed_work(
-            self.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+            workspace if workspace is not None else self.workspace,
+            execution_id=_EXECUTION_ID,
+            phase_id=_PHASE_ID,
+            delivers_repo_changes=delivers_repo_changes,
         )
 
 
@@ -276,6 +529,19 @@ def _clone_repository(root: Path, name: str = _REPO) -> _Clone:
 def clone(tmp_path: Path) -> _Clone:
     """A pushed-up-to-date clone on a feature branch - a phase's starting point."""
     return _clone_repository(tmp_path)
+
+
+@pytest.fixture
+def instant_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Take the wait out of the rehearsal's bounded retries (#1396).
+
+    The COUNT is the behaviour and the DELAY is the production tuning, so the
+    tests below keep the first and drop the second - otherwise every retry
+    test would spend `_RENEWAL_RETRY_SECONDS` per attempt proving nothing. A
+    module global read at call time is what makes that possible, which is why
+    `_RENEWAL_RETRY_SECONDS` is one.
+    """
+    monkeypatch.setattr(unpushed_work_guard, "_RENEWAL_RETRY_SECONDS", 0.0)
 
 
 async def test_an_unpushed_merge_commit_fails_the_phase_and_survives(clone: _Clone) -> None:
@@ -364,6 +630,177 @@ async def test_d_a_phase_that_changed_nothing_succeeds(clone: _Clone) -> None:
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
 
 
+# --------------------------------------------------------------------------
+# What it takes to exempt a dirty tree (#1308).
+#
+# `test_b` above and the two tests below stage THE SAME EVIDENCE - one
+# modified tracked file, uncommitted - and one of the three ends differently.
+# Nothing in the diff separates them, which is the whole finding: on
+# exec-e7e34af42553 a bootstrap phase ran `cargo check`, `Cargo.lock` was
+# rewritten, and the phase was failed for it.
+#
+# THE DECLARATION IS NOT WHAT SEPARATES THEM, and an earlier cut of this fix
+# said it was. `delivers_repo_changes: false` is a statement of intent by a
+# phase that still holds Bash and Write, so believing it on its own discards
+# an agent's real edit - #1184's exact failure, re-entered through the
+# exemption. What separates them is the declaration AND a read-only mount:
+# the phase disclaimed the change and was unable to make it.
+# --------------------------------------------------------------------------
+
+
+def _rewrite_a_tracked_lockfile(clone: _Clone, content: str) -> None:
+    """Stage #1308's evidence: one TRACKED file, modified, uncommitted.
+
+    Tracked and already pushed, in its own commit, before it is dirtied - so
+    what the gate sees afterwards is exactly the one porcelain line the
+    incident reported and nothing else. An untracked file would be a different
+    status code and a different question.
+    """
+    (clone.path / "Cargo.lock").write_text("written by cargo check\n")
+    clone.git("add", "Cargo.lock")
+    clone.git("commit", "-m", "track a lockfile")
+    clone.git("push", "origin", _BRANCH)
+    (clone.path / "Cargo.lock").write_text(content)
+    # `clone.git` strips, so the porcelain status code arrives without its
+    # leading space.
+    assert clone.git("status", "--porcelain") == "M Cargo.lock", (
+        "this fixture must leave exactly one modified tracked file"
+    )
+
+
+async def test_a_declaration_alone_does_not_exempt_a_writable_repository(
+    clone: _Clone,
+) -> None:
+    """THE CORRECTION #1317 NEEDED, and the one that costs the exemption its bite.
+
+    A phase declaring it delivers no repository changes, in the ordinary
+    workspace every phase actually gets - a checkout the agent owns and can
+    write. The declaration says the dirty file is not a deliverable; nothing
+    says the agent did not write it, and in this workspace the agent could
+    have. So it is treated as work: the phase fails and the change is
+    quarantined where someone can fetch it back.
+
+    This is `test_b` with the declaration flipped and the outcome unchanged,
+    which is the point. The phases that declare False in this repository hold
+    Bash or Write, research-experiment-plan's `experiment` phase among them, so
+    the alternative is an agent-authored edit destroyed with the container by
+    a gate built to prevent exactly that. A phase failed for a lockfile is
+    recoverable in one retry; an edit dropped on the floor is not recoverable
+    at all, and nobody is told it happened.
+    """
+    _rewrite_a_tracked_lockfile(clone, "or was this an agent? nothing here can tell\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "or was this an agent? nothing here can tell"
+    ), "the change the declaration discounted was not kept anywhere"
+
+
+async def test_the_lockfile_a_build_tool_rewrote_does_not_fail_a_read_only_phase(
+    clone: _Clone,
+) -> None:
+    """THE #1308 INCIDENT, in the shape it will have once it can be exempted.
+
+    A tracked lockfile, rewritten by a tool the phase ran while inspecting the
+    toolchain, in a phase whose deliverable is a markdown report AND whose
+    checkout was mounted read-only. Both halves hold, so the phase completes
+    and nothing is quarantined: no agent in that container could have authored
+    the line, whatever the line says.
+
+    NOTHING MOUNTS THEM READ-ONLY TODAY, so this is the contract the
+    provisioning half has to satisfy rather than a path production takes -
+    hence the mount table comes from a double. Until it does, #1308's incident
+    gets the test above instead, which is a phase failed for its tool's churn,
+    and that is the honest trade: it is the cheaper of the two mistakes.
+
+    The path is named `Cargo.lock` because that is what the incident named, and
+    for no other reason - the gate is told nothing about filenames and must
+    not be.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten AGAIN by cargo check\n")
+
+    await clone.run_gate(
+        delivers_repo_changes=False,
+        workspace=_MountedReadOnly(clone.workspace, clone.path),
+    )
+
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_read_only_mount_does_not_exempt_a_phase_that_delivers_changes(
+    clone: _Clone,
+) -> None:
+    """The other half of "both, or neither".
+
+    A read-only mount is evidence about the agent, not permission to skip the
+    gate, so it cannot exempt a phase whose deliverable IS a branch. Without
+    this, reading the mount table first and the declaration never would pass
+    every other test here while switching #1184 off for `implement`.
+    """
+    _rewrite_a_tracked_lockfile(clone, "an edit, in a phase that delivers edits\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(
+            delivers_repo_changes=True,
+            workspace=_MountedReadOnly(clone.workspace, clone.path),
+        )
+
+
+async def test_a_reporting_phase_that_committed_still_fails_and_keeps_its_work(
+    clone: _Clone,
+) -> None:
+    """THE GATE'S PURPOSE, which the declaration must not be able to switch off.
+
+    No build tool writes a commit, so a commit is an authoring act whatever the
+    phase declared. A phase that says it delivers no repository changes and
+    commits anyway has produced work, and that work must still be saved and the
+    phase must still fail - otherwise the declaration is a way to opt out of
+    #1184 entirely, one line at a time.
+    """
+    authored = clone.commit("investigation.py", "committed by a phase that said it would not\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.reachable_in_origin(authored, _QUARANTINE_REF)
+
+
+async def test_a_reporting_phase_holding_commits_quarantines_its_whole_tree(
+    clone: _Clone,
+) -> None:
+    """The declaration decides what COUNTS as work, never what gets SAVED.
+
+    Once a phase is failing for a commit, everything beside that commit is
+    worth keeping - including the uncommitted change the declaration said was
+    not a deliverable, because the judgement that produced that verdict is now
+    known to be about a phase that authored something after all.
+
+    So this holds both at once, and asserts the discounted change on BOTH
+    halves of the output, because they are built from different things and only
+    one of them is automatic. The commit's tree comes from `git add --all`,
+    which was never selective; the error's file list is `_UnsavedWork.files`,
+    which is chosen, and choosing the discounted subset there would hand an
+    operator a ref whose contents their own recovery notes do not mention.
+    """
+    clone.commit("investigation.py", "committed by a phase that said it would not\n")
+    (clone.path / "README.md").write_text("and the tool dirtied this too\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:README.md") == (
+        "and the tool dirtied this too"
+    ), "the quarantine commit is missing the working tree it was built from"
+    reported = [line.strip() for line in str(raised.value).splitlines()]
+    # Two spaces: the report prints the porcelain line verbatim, and its status
+    # code is " M" - modified in the tree, unstaged.
+    assert "uncommitted:  M README.md" in reported, (
+        f"the quarantine saved a path the report it printed does not name: {reported}"
+    )
+
+
 async def test_e_quarantining_touches_no_branch_and_no_tag(clone: _Clone) -> None:
     """(e) The quarantine push writes one ref and moves nothing else."""
     before = clone.origin_refs()
@@ -413,48 +850,14 @@ async def test_the_phase_that_holds_unpushed_work_is_never_reported_completed(
     ``completed`` with its work gone. So this asserts against the aggregate the
     processor would have told, not against the guard's return value.
     """
-    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
-        ExecutionTodoProjection,
-    )
-
     clone.commit("never-pushed.py", "work the workspace was about to eat\n")
-    processor = WorkflowExecutionProcessor(
-        execution_repository=AsyncMock(),
-        session_repository=AsyncMock(),
-        workspace_service=MagicMock(),
-        artifact_repository=AsyncMock(),
-        artifact_content_storage=None,
-        artifact_query=None,
-        conversation_storage=None,
-        observability_writer=None,
-        controller=None,
-        prompt_builder=AsyncMock(return_value="prompt"),
-        command_builder=MagicMock(return_value=["claude"]),
-        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
-    )
-    processor._runtime._workspaces[_PHASE_ID] = clone.workspace  # type: ignore[assignment]
-    aggregate = MagicMock(workflow_id="wf-1")
-    completed_phase_ids: list[str] = []
-
-    async def complete() -> None:
-        await processor._handle_complete_phase(
-            TodoItem(
-                execution_id=_EXECUTION_ID,
-                action=TodoAction.COMPLETE_PHASE,
-                phase_id=_PHASE_ID,
-                session_id="sess-1",
-            ),
-            aggregate,
-            [],
-            completed_phase_ids,
-        )
+    run = _PhaseRun(clone.workspace)
 
     with pytest.raises(UnpushedWorkQuarantinedError):
-        await complete()
+        await run.complete()
 
-    aggregate.complete_phase.assert_not_called()
-    assert completed_phase_ids == []
+    run.aggregate.complete_phase.assert_not_called()
+    assert run.completed_phase_ids == []
 
 
 # --------------------------------------------------------------------------
@@ -474,6 +877,9 @@ class _NeverRun:
 
     async def execute(self, command: list[str]) -> ExecutionResult:
         raise AssertionError(f"ran {command} for a phase it was not asked about")
+
+    async def renew_git_credential(self) -> None:
+        raise AssertionError("renewed the credential of a phase it was not asked about")
 
 
 def _completing(phase_id: str | None, execution_id: str = _EXECUTION_ID) -> TodoItem:
@@ -500,6 +906,7 @@ async def test_the_ref_is_named_from_the_todo_the_hop_was_handed(tmp_path: Path)
         await refuse_to_complete_unsaved_phase(
             {"verify": clone.workspace},
             _completing("verify", execution_id="exec-a-different-run"),
+            delivers_repo_changes=True,
         )
 
     refs = clone.origin_refs()
@@ -524,6 +931,7 @@ async def test_the_hop_inspects_the_phase_its_todo_names_and_no_other(tmp_path: 
     await refuse_to_complete_unsaved_phase(
         {"implement": running.workspace, "verify": completing.workspace},
         _completing("verify"),
+        delivers_repo_changes=True,
     )
 
     saved = [ref for ref in running.origin_refs() if ref.startswith("refs/syn/lost/")]
@@ -537,7 +945,9 @@ async def test_a_phase_whose_workspace_is_already_gone_is_holding_nothing() -> N
     the phase completes - and the gate must not go looking in some other
     phase's workspace for something to say about this one.
     """
-    await refuse_to_complete_unsaved_phase({"implement": _NeverRun()}, _completing("verify"))
+    await refuse_to_complete_unsaved_phase(
+        {"implement": _NeverRun()}, _completing("verify"), delivers_repo_changes=True
+    )
 
 
 async def test_a_todo_with_no_phase_names_no_workspace_and_so_holds_nothing() -> None:
@@ -547,7 +957,9 @@ async def test_a_todo_with_no_phase_names_no_workspace_and_so_holds_nothing() ->
     hop has one answer for "no workspace to inspect" however it arises, rather
     than a `None` key that quietly matches nothing.
     """
-    await refuse_to_complete_unsaved_phase({"implement": _NeverRun()}, _completing(None))
+    await refuse_to_complete_unsaved_phase(
+        {"implement": _NeverRun()}, _completing(None), delivers_repo_changes=True
+    )
 
 
 # --------------------------------------------------------------------------
@@ -583,11 +995,26 @@ _UNREACHABLE = ExecutionResult(
 )
 
 
+def _unbounded(command: list[str]) -> list[str]:
+    """``command`` without the time bound the gate puts in front of every one.
+
+    `timeout --kill-after=<n> <n>` is three arguments the gate prepends to
+    everything it runs (#1231), so anything reading an argv positionally has
+    to step over them first.
+    """
+    return command[3:] if command[:1] == ["timeout"] else command
+
+
 def _operation(command: list[str]) -> str:
-    """What this argv is doing: the git subcommand, or the bare program."""
-    if "git" in command:
-        return command[command.index("git") + 3]  # git, -C, <repo>, <subcommand>
-    return command[0]
+    """What this argv is doing: the git subcommand, or the bare program.
+
+    Found after `-C <repo>` rather than at a fixed offset from `git`: the
+    `-c` overrides that disable hooks sit between the two and would move it.
+    """
+    argv = _unbounded(command)
+    if "-C" in argv:
+        return argv[argv.index("-C") + 2]
+    return argv[0]
 
 
 class _BreaksOn:
@@ -605,21 +1032,164 @@ class _BreaksOn:
     growing a second way to describe a failure.
     """
 
-    def __init__(self, inner: GitWorkspace, failing: str, *, in_repo: str | None = None) -> None:
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        failing: str,
+        *,
+        in_repo: str | None = None,
+        result: ExecutionResult = _UNREACHABLE,
+    ) -> None:
         self._inner = inner
         self._failing = failing
         self._in_repo = in_repo
+        self._result = result
         self.attempted: list[str] = []
+
+    async def renew_git_credential(self) -> None:
+        # Delegated, not counted here: these nest, and a wrapper that answered
+        # for itself would hide whether the workspace underneath was renewed.
+        await self._inner.renew_git_credential()
 
     async def execute(self, command: list[str]) -> ExecutionResult:
         operation = _operation(command)
         self.attempted.append(operation)
         if operation == self._failing and (self._in_repo is None or self._in_repo in command):
-            return _UNREACHABLE
+            return self._result
         return await self._inner.execute(command)
 
 
-class _NoRepositories:
+class _FlakesOn:
+    """A real workspace whose named operation fails a bounded number of times."""
+
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        failing: str,
+        *,
+        times: int,
+        returning: ExecutionResult = _UNREACHABLE,
+    ) -> None:
+        self._inner = inner
+        self._failing = failing
+        self._times = times
+        self._returning = returning
+        self.asked = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) != self._failing:
+            return await self._inner.execute(command)
+        self.asked += 1
+        if self.asked <= self._times:
+            return self._returning
+        return await self._inner.execute(command)
+
+
+async def _skip_retry_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(workspace_git.asyncio, "sleep", no_wait)
+
+
+async def test_a_probe_that_dies_once_can_recover_a_clean_real_repository(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    clone.commit("shipped.py", "work that reached the remote\n")
+    clone.git("push", "origin", _BRANCH)
+    workspace = _FlakesOn(clone.workspace, "rev-parse", times=1)
+
+    await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 2
+
+
+async def test_a_recovered_probe_still_quarantines_real_unpushed_work(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    clone.commit("never-pushed.py", "work that must survive\n")
+    workspace = _FlakesOn(clone.workspace, "status", times=1)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 2
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_every_failed_attempt_still_fails_closed(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    workspace = _FlakesOn(
+        clone.workspace,
+        "find",
+        times=workspace_git._MAX_ATTEMPTS,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    with pytest.raises(WorkspaceInspectionFailedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == workspace_git._MAX_ATTEMPTS  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_a_fired_bound_is_not_retried(clone: _Clone, monkeypatch: pytest.MonkeyPatch) -> None:
+    await _skip_retry_waits(monkeypatch)
+    bound = ExecutionResult(
+        exit_code=124,
+        success=False,
+        duration_ms=0.0,
+        stdout="",
+        stderr="",
+    )
+    workspace = _FlakesOn(clone.workspace, "find", times=1, returning=bound)
+
+    with pytest.raises(WorkspaceInspectionFailedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 1
+
+
+class _MountedReadOnly:
+    """The real workspace, except the given paths are on read-only mounts.
+
+    The enforcement half of #1308's exemption, staged the only way a test can
+    stage it: a real read-only bind mount needs CAP_SYS_ADMIN, which neither
+    this suite nor the agent it stands in for has - that impossibility is the
+    entire reason the gate trusts the mount table and not the phase.
+
+    So `cat /proc/self/mountinfo` is answered with a table in the kernel's own
+    format and EVERY OTHER COMMAND IS REAL, including the git that reads the
+    dirty tree. What is substituted is the world the phase ran in, never the
+    gate's reading of it.
+    """
+
+    def __init__(self, inner: GitWorkspace, *read_only: Path) -> None:
+        self._inner = inner
+        self._read_only = read_only
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    def _table(self) -> str:
+        lines = ["21 20 0:20 / / rw,relatime shared:1 - overlay overlay rw"]
+        lines += [
+            f"{index} 21 0:{index} / {path} ro,relatime shared:{index} - ext4 /dev/sdb rw"
+            for index, path in enumerate(self._read_only, start=30)
+        ]
+        return "\n".join(lines) + "\n"
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _unbounded(command) == ["cat", "/proc/self/mountinfo"]:
+            return ExecutionResult(
+                exit_code=0, success=True, duration_ms=0.0, stdout=self._table(), stderr=""
+            )
+        return await self._inner.execute(command)
+
+
+class _NoRepositories(_RenewsCredential):
     """A reachable workspace holding no repositories at all.
 
     Exit 0 and empty stdout - the TRUE NEGATIVE. `/workspace/repos` is created
@@ -641,12 +1211,13 @@ class _PhaseRun:
     told and what teardown ran, never about the guard's return value.
     """
 
-    def __init__(self, workspace: object) -> None:
+    def __init__(self, workspace: object, *, also_as: str | None = None) -> None:
         from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
         from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
             ExecutionTodoProjection,
         )
 
+        self.workspace = workspace
         self.aggregate = MagicMock(workflow_id="wf-1")
         # What ExecutionJournal reads off an aggregate before every save.
         self.aggregate.get_uncommitted_events.return_value = []
@@ -667,18 +1238,32 @@ class _PhaseRun:
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         )
-        self.processor._runtime._workspaces[_PHASE_ID] = workspace  # type: ignore[assignment]
-        self.processor._runtime.begin(
-            _PHASE_ID,
-            session_manager=self.session,  # type: ignore[arg-type]
-            started_at=datetime.now(UTC),
-        )
+        # `also_as` puts the SAME workspace behind a second phase id, which is
+        # what lets one dirty tree be completed twice under two declarations.
+        for phase_id in (_PHASE_ID, *([also_as] if also_as is not None else [])):
+            self.processor._runtimes.of(_EXECUTION_ID)._workspaces[phase_id] = workspace  # type: ignore[assignment]
+            self.processor._runtimes.of(_EXECUTION_ID).begin(
+                phase_id,
+                session_manager=self.session,  # type: ignore[arg-type]
+                started_at=datetime.now(UTC),
+            )
 
     @property
     def workspace_still_held(self) -> bool:
-        return _PHASE_ID in self.processor._runtime.live_workspaces
+        return _PHASE_ID in self.processor._runtimes.of(_EXECUTION_ID).live_workspaces
 
-    async def complete(self) -> None:
+    async def complete(self, *, delivers_repo_changes: bool = True) -> None:
+        """Complete the phase, as a phase declaring ``delivers_repo_changes``.
+
+        The declaration is carried on a real `ExecutablePhase`, which is what
+        `_dispatch` hands this handler, rather than passed to the handler as a
+        boolean: what has to survive the hop is the FIELD BEING READ off that
+        object, and a test that passed the boolean itself would stay green
+        with the read deleted (#1308).
+
+        True by default because `_PHASE_ID` is `implement`, which owns a
+        branch; the tests about the declaration itself say so at the call.
+        """
         await self.processor._handle_complete_phase(
             TodoItem(
                 execution_id=_EXECUTION_ID,
@@ -686,9 +1271,88 @@ class _PhaseRun:
                 phase_id=_PHASE_ID,
                 session_id="sess-1",
             ),
+            ExecutablePhase(
+                phase_id=_PHASE_ID,
+                name="Make the change",
+                order=1,
+                delivers_repo_changes=delivers_repo_changes,
+            ),
             self.aggregate,
             self.phase_results,
             self.completed_phase_ids,
+        )
+
+    async def start(self) -> None:
+        """START the phase, the hop that hands its agent an hour of workspace.
+
+        Provisioning itself is stubbed - building a container is not what any
+        assertion here is about - but the RESULT carries this run's workspace,
+        so everything `start_phase` then does with it is done with the double
+        the test chose. What is under test is the order of the remaining steps
+        in this frame (#1393).
+        """
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            ProvisionResult,
+        )
+
+        self.processor._journal.append = AsyncMock()  # type: ignore[method-assign]
+        # `_workspaces_for` builds a new seam per access (it reads collaborators
+        # that are replaceable on the processor), so the stub has to go on the
+        # instance this call actually uses.
+        workspaces = self.processor._workspaces_for(_EXECUTION_ID, {})
+        workspaces.provision = AsyncMock(  # type: ignore[method-assign]
+            return_value=ProvisionResult(
+                workspace=self.workspace,  # type: ignore[arg-type]
+                workspace_cm=AsyncMock(),
+                agent_env={},
+                claude_cmd=[],
+                command=MagicMock(),
+            )
+        )
+        await workspaces.start_phase(
+            TodoItem(
+                execution_id=_EXECUTION_ID,
+                action=TodoAction.PROVISION_WORKSPACE,
+                phase_id=_PHASE_ID,
+                session_id="sess-1",
+            ),
+            ExecutablePhase(
+                phase_id=_PHASE_ID,
+                name="Make the change",
+                order=1,
+                delivers_repo_changes=True,
+            ),
+            self.aggregate,
+            None,
+            self.completed_phase_ids,
+            PhaseOutputCache(),
+        )
+
+    async def dispatch_complete(self, phase_id: str, phases: list[ExecutablePhase]) -> None:
+        """Complete `phase_id` THE WAY run() does: through `_dispatch`.
+
+        `complete()` above hands `_handle_complete_phase` a phase built at the
+        call site, which is the wrong end of the hop it is asserting on: the
+        real caller is `_dispatch`, which looks the phase up in `phase_map` by
+        the to-do item's id. That lookup is where a phase's declaration could
+        be read off a DIFFERENT phase, and a test that constructs the phase
+        itself can never see it (#1317 review, MEDIUM 3).
+        """
+        await self.processor._dispatch(
+            todo=TodoItem(
+                execution_id=_EXECUTION_ID,
+                action=TodoAction.COMPLETE_PHASE,
+                phase_id=phase_id,
+                session_id="sess-1",
+            ),
+            aggregate=self.aggregate,
+            phase_map={phase.phase_id: phase for phase in phases},
+            phase_results=self.phase_results,
+            all_artifact_ids=[],
+            completed_phase_ids=self.completed_phase_ids,
+            phase_outputs=PhaseOutputCache(),
+            repos=None,
+            dispatch_ctx=_DispatchContext(),
         )
 
     async def fail_the_way_the_engine_does(self, error: Exception) -> object:
@@ -805,6 +1469,56 @@ async def test_d_a_failed_inspection_leaves_teardown_to_the_failure_path(
     assert not run.workspace_still_held, "the failure path left the workspace open"
 
 
+async def test_the_declaration_reaches_the_gate_from_the_phase_being_completed(
+    clone: _Clone,
+) -> None:
+    """THE HOP #1308 WAS LOST AT, asserted against the aggregate.
+
+    `_handle_complete_phase` was handed a `TodoItem` and nothing else, while
+    `_dispatch` had the `ExecutablePhase` one frame up and gave it to every
+    other handler. So the declaration had nowhere to arrive, and no test of the
+    guard alone can show that it now does: hand the gate the right boolean
+    directly and every one of them stays green with this hop deleted.
+
+    What is asserted is therefore the aggregate being TOLD the phase completed,
+    which is the outcome the incident got wrong - a phase that had done its job
+    reported as failed - with the dirty tree still sitting in the workspace.
+    The workspace is mounted read-only because the declaration alone no longer
+    exempts anything; both halves have to arrive for the hop to be visible at
+    all, and the declaration is the half that travels.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten AGAIN by cargo check\n")
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path))
+
+    await run.complete(delivers_repo_changes=False)
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_the_same_workspace_completing_a_phase_that_owns_a_branch_still_fails(
+    clone: _Clone,
+) -> None:
+    """The other half of the hop, on identical evidence.
+
+    Same dirty lockfile, same workspace, same handler - only the phase's
+    declaration differs, and the outcome inverts. Without this, a hop that
+    ignored the phase and hardcoded False would satisfy the test above while
+    removing the gate from every phase in the system.
+    """
+    _rewrite_a_tracked_lockfile(clone, "edited by an agent that forgot to commit\n")
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await run.complete(delivers_repo_changes=True)
+
+    run.aggregate.complete_phase.assert_not_called()
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "edited by an agent that forgot to commit"
+    )
+
+
 async def test_e_a_workspace_with_no_repositories_still_completes(clone: _Clone) -> None:
     """(e) THE TRUE NEGATIVE THAT MUST NOT REGRESS.
 
@@ -826,7 +1540,10 @@ async def test_e_a_workspace_with_no_repositories_still_completes(clone: _Clone)
 async def test_e_at_the_gate_an_empty_but_reachable_workspace_is_silence() -> None:
     """(e) The same true negative one hop down, at the gate itself."""
     await quarantine_unpushed_work(
-        _NoRepositories(), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        _NoRepositories(),
+        execution_id=_EXECUTION_ID,
+        phase_id=_PHASE_ID,
+        delivers_repo_changes=True,
     )
 
 
@@ -851,6 +1568,42 @@ async def test_f_a_failed_quarantine_push_fails_the_phase_and_says_so(clone: _Cl
     assert "quarantined at" not in message
     assert "git fetch origin" not in message
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_quarantine_push_killed_by_a_signal_says_so_instead_of_quoting_progress(
+    clone: _Clone,
+) -> None:
+    """#1158, one file over: the push's progress output was the whole reason.
+
+    ``push_error`` is the sentence an operator reads to decide whether work
+    they cannot see is gone. It was built from stderr alone and
+    ``QuarantinedWork`` carried no exit status at all, so a push killed
+    mid-transfer reported "Enumerating objects: 5, done." as its reason -
+    output that says the push was going fine. Read at 2am that is worse than
+    silence, because it looks like an answer.
+
+    Asserted on the rendered error rather than the record, because the record
+    is what this change writes and the message is what anyone actually sees.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    progress = "Enumerating objects: 5, done."
+    killed_mid_push = ExecutionResult(
+        exit_code=137,  # 128 + SIGKILL
+        success=False,
+        duration_ms=0.0,
+        stdout="",
+        stderr=progress,
+    )
+    run = _PhaseRun(_BreaksOn(clone.workspace, "push", result=killed_mid_push))
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message, message
+    assert "SIGKILL" in message, message
+    assert "137" in message, message
+    assert message.index("SIGKILL") < message.index(progress), message
 
 
 async def test_a_repository_with_no_commits_yet_is_not_an_unreachable_one(
@@ -1240,3 +1993,1794 @@ def test_a_record_that_names_neither_a_ref_nor_a_reason_is_rejected() -> None:
                 pushed_ref=pushed_ref,
                 push_error=push_error,
             )
+
+
+# --------------------------------------------------------------------------
+# The phase_map lookup (#1317 review, MEDIUM 3).
+#
+# Both tests below run ONE workspace holding ONE dirty tree through the real
+# `_dispatch`, twice, changing only which phase id the to-do item names. The
+# declarations are opposite, so a `_dispatch` that took the wrong entry out of
+# `phase_map` - the first, the last, the one being provisioned - swaps the two
+# outcomes, and neither test can be satisfied by the handler alone.
+# --------------------------------------------------------------------------
+
+_REPORTING_PHASE_ID = "premise"
+
+
+def _two_phases_declaring_opposite_things() -> list[ExecutablePhase]:
+    """The phase map of a workflow with one of each, in that order."""
+    return [
+        ExecutablePhase(
+            phase_id=_REPORTING_PHASE_ID,
+            name="Check the task's premise",
+            order=1,
+            delivers_repo_changes=False,
+        ),
+        ExecutablePhase(
+            phase_id=_PHASE_ID,
+            name="Make the change",
+            order=2,
+            delivers_repo_changes=True,
+        ),
+    ]
+
+
+async def test_dispatch_reads_the_declaration_of_the_phase_the_todo_names(
+    clone: _Clone,
+) -> None:
+    """The reporting phase's own entry, found by id, in a read-only checkout.
+
+    `bootstrap` is first in the map and second would also be a passing
+    accident, so the companion test below names the other one against the same
+    map and the same tree.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten by cargo check\n")
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path), also_as=_REPORTING_PHASE_ID)
+
+    await run.dispatch_complete(_REPORTING_PHASE_ID, _two_phases_declaring_opposite_things())
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_REPORTING_PHASE_ID]
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_dispatch_does_not_lend_one_phases_declaration_to_another(
+    clone: _Clone,
+) -> None:
+    """The same map, the same tree, the same mount - the other phase id.
+
+    `implement` delivers a branch, so its dirty tree is work however
+    read-only the mount was and however its neighbour was declared. If this
+    quarantines nothing, the gate is reading a phase the to-do item did not
+    name, and every phase downstream of a reporting one has lost #1184.
+    """
+    _rewrite_a_tracked_lockfile(clone, "an agent's edit, never committed\n")
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path), also_as=_REPORTING_PHASE_ID)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await run.dispatch_complete(_PHASE_ID, _two_phases_declaring_opposite_things())
+
+    run.aggregate.complete_phase.assert_not_called()
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "an agent's edit, never committed"
+    )
+
+
+# --------------------------------------------------------------------------
+# Reading the mount table (#1308).
+#
+# The gate weakens itself on this answer, so every way of getting it wrong
+# costs work. The tables below are in the kernel's own format; the fields the
+# reader uses are the 5th and 6th, and everything either side of them is
+# present so that a reader counting from the wrong end fails here.
+# --------------------------------------------------------------------------
+
+_ROOT_MOUNT = "21 20 0:20 / / rw,relatime shared:1 - overlay overlay rw"
+
+
+@pytest.mark.parametrize(
+    ("table", "expected", "why"),
+    [
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a read-only mount at the repository itself",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a read-only mount ABOVE it still governs it",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app rw,relatime - ext4 /dev/sdb rw",
+            False,
+            "a writable mount at the repository itself",
+        ),
+        (
+            _ROOT_MOUNT,
+            False,
+            "nothing but a writable root",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/application ro - ext4 /dev/sdb rw",
+            False,
+            "a LONGER sibling path is not this repository - prefix, not path, matching",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n"
+            "30 21 8:1 / /workspace ro,relatime - ext4 /dev/sdb rw\n"
+            "31 30 8:2 / /workspace/repos rw,relatime - ext4 /dev/sdc rw",
+            False,
+            "a WRITABLE mount nested inside a read-only one: the deepest wins",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n"
+            "30 21 8:2 / /workspace/repos rw,relatime - ext4 /dev/sdc rw\n"
+            "31 30 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "and the same nesting the other way round",
+        ),
+        (
+            f"{_ROOT_MOUNT}\ntruncated nonsense\n"
+            "30 21 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a line that is not a record is skipped, not guessed at",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app rw,ro_something - ext4 /dev/sdb rw",
+            False,
+            "an option that merely STARTS with ro is not ro",
+        ),
+    ],
+)
+def test_the_mount_table_is_read_for_the_path_that_governs(
+    table: str, expected: bool, why: str
+) -> None:
+    """One repository path, nine tables, and the reading that decides the gate."""
+    assert _read_only_mount(table, "/workspace/repos/app") is expected, why
+
+
+# --------------------------------------------------------------------------
+# #1393: WHICH credential the quarantine push spends, and WHEN it was minted.
+#
+# The ordinary push and the quarantine push were never reading different
+# credential stores - they read the same `~/.git-credentials`, in the same
+# container, as the same user. They diverge in TIME: the installation token
+# GitHub mints lives one hour and cannot be refreshed, and a phase's
+# quarantine push happens by construction at teardown, after a budget that is
+# additive to setup. `exec-db6f687e991a` pushed successfully minutes before the
+# push that was refused.
+#
+# So the fix is a fresh credential immediately before the push that matters,
+# and a rehearsal of that push at phase start. Both halves are below, and both
+# are written as questions about ORDER and about the ORIGIN's refs, because
+# "a renewal happened" and "a renewal happened in time to be spent" are
+# different claims and only the second one is the bug.
+# --------------------------------------------------------------------------
+
+
+class _RecordsCredentialOrder:
+    """The real workspace, with renewals and pushes written into ONE sequence.
+
+    Two counters could not say what this file needs to say. A renewal that
+    happened after the push is a renewal that changed nothing, and it would
+    satisfy any assertion that merely counted calls - so the thing recorded
+    here is the order, in the order it happened.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.sequence: list[str] = []
+
+    async def renew_git_credential(self) -> None:
+        self.sequence.append("renew")
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.sequence.append("push")
+        return await self._inner.execute(command)
+
+
+class _RecordsPushedRefs:
+    """The real workspace, remembering every ref a push was aimed at.
+
+    Reads the ref off the argv rather than out of the origin afterwards,
+    because the rehearsal deliberately leaves nothing in the origin to read -
+    and "where did the rehearsal aim" is exactly the question a rehearsal
+    against the wrong ref would answer wrongly while passing everything else.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.refs: list[str] = []
+        self.pushes: list[list[str]] = []
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes.append(_unbounded(command))
+            # `<commit>:<ref>`, the last argument of every push this module makes.
+            self.refs.append(_unbounded(command)[-1].split(":", 1)[-1])
+        return await self._inner.execute(command)
+
+
+class _CannotRenew:
+    """The real workspace, except a fresh credential cannot be obtained.
+
+    The adapter raises this when minting fails - a GitHub App outage, a
+    revoked installation, a setup phase that never recorded what to mint for.
+    It says nothing about whether the credential already in the container
+    still works, which is why its two callers are allowed to disagree about
+    what to do next.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise CredentialRenewalFailedError("the installation token could not be minted")
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        return await self._inner.execute(command)
+
+
+async def test_the_quarantine_renews_the_credential_before_it_spends_it(
+    clone: _Clone,
+) -> None:
+    """The fix, stated as the only thing that distinguishes it from the bug.
+
+    A renewal anywhere else in the walk is not this fix. The teardown push is
+    the last thing a dying phase does, and the token it would otherwise use was
+    minted before the phase started - so the renewal has to sit between the
+    commit and the push, and the assertion is on that position.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    workspace = _RecordsCredentialOrder(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.sequence == ["renew", "push"]
+
+
+async def test_a_clean_phase_is_not_charged_for_a_credential_it_never_spends(
+    clone: _Clone,
+) -> None:
+    """Nothing to save means nothing to push, and so nothing to mint.
+
+    Renewing at the top of the walk would have been simpler and would pass the
+    test above. It would also mint a token on every phase in the system, almost
+    all of which push nothing here - a cost paid forever for a path that
+    rarely runs.
+    """
+    workspace = _RecordsCredentialOrder(clone.workspace)
+
+    await clone.run_gate(workspace=workspace)
+
+    assert workspace.sequence == []
+
+
+async def test_a_credential_that_could_not_be_renewed_still_gets_the_push_attempted(
+    clone: _Clone,
+) -> None:
+    """The renewal is an improvement on the old token, never a gate in front of it.
+
+    At teardown the commit already exists and the phase has already failed. A
+    renewal that could not happen is a reason the push MIGHT be refused, not a
+    reason to skip it: the token in the container may have minutes left, and
+    spending it is the only way to find out. Here it does have them, and the
+    work lands - which a fix that raised on the renewal would have lost.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=_CannotRenew(clone.workspace))
+
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert clone.reachable_in_origin(committed, _QUARANTINE_REF)
+    assert "quarantined at" in str(raised.value)
+
+
+async def test_a_rehearsal_that_passes_leaves_the_origin_exactly_as_it_found_it(
+    clone: _Clone,
+) -> None:
+    """The rehearsal is a real push to the real ref that creates nothing.
+
+    Both halves are the test. A rehearsal that skipped the push would leave
+    the origin untouched too, so the sequence is asserted as well: the
+    credential was renewed, a push really was made, and afterwards the
+    quarantine namespace is still empty.
+    """
+    before = clone.origin_refs()
+    order = _RecordsCredentialOrder(clone.workspace)
+    workspace = _RecordsPushedRefs(order)
+
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+
+    assert order.sequence == ["renew", "push"]
+    assert workspace.refs == [_QUARANTINE_REF]
+    assert clone.origin_refs() == before
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_the_rehearsal_aims_at_the_ref_the_real_quarantine_would_use(
+    clone: _Clone,
+) -> None:
+    """Anti-drift, and the one failure a rehearsal can have that is worse than none.
+
+    A rehearsal against a ref the quarantine never uses proves something true
+    about nothing, and reports a working net that was never tested. So both
+    pushes are made in one test, against one workspace, and the refs they
+    named are compared to each other rather than to a literal.
+    """
+    workspace = _RecordsPushedRefs(clone.workspace)
+
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+    rehearsed = list(workspace.refs)
+
+    clone.commit("never-pushed.py", "work\n")
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+    quarantined = workspace.refs[len(rehearsed) :]
+
+    assert rehearsed, "the rehearsal pushed nothing, so it compared nothing"
+    assert quarantined, "the quarantine pushed nothing, so it compared nothing"
+    assert rehearsed == quarantined
+
+
+async def test_the_rehearsal_refuses_the_phase_when_origin_cannot_be_reached(
+    clone: _Clone,
+) -> None:
+    """A REAL push that really fails, at the moment nothing is riding on it.
+
+    Origin is pointed somewhere that is not a repository, so git's own dry run
+    fails for the class of reason this rehearsal exists to catch: it got no
+    further than the connection. Staged on the remote rather than by handing
+    back a failed `ExecutionResult`, which is the correction #1396 asked for -
+    a fabricated failure asserts that the guard reads `exit_code`, and assumes
+    the thing that needed establishing, which is that a dry run comes back
+    non-zero when the push is really impossible.
+
+    The phase must not run, and the message must name the phase, the ref, and
+    what git actually said: an operator reading it is being told why an
+    execution stopped before it started.
+    """
+    clone.break_the_remote()
+
+    with pytest.raises(QuarantinePathUnusableError) as raised:
+        await rehearse_quarantine_credential(
+            clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    message = str(raised.value)
+    assert _PHASE_ID in message
+    assert _QUARANTINE_REF in message
+    assert "does not appear to be a git repository" in message
+
+
+async def test_a_rehearsal_that_passed_is_no_promise_that_the_server_will_accept(
+    clone: _Clone,
+) -> None:
+    """THE LIMIT OF THE REHEARSAL, demonstrated rather than documented (#1396).
+
+    ``--dry-run`` stops before ``git-receive-pack``'s update phase, so no
+    `pre-receive` hook fires, no ruleset is consulted and no ref is locked. A
+    remote that takes the connection and then declines the ref therefore
+    passes the rehearsal and refuses the real push - which is why the
+    rehearsal is named and documented for the credential and the connection,
+    and why nothing anywhere says the quarantine push has been shown to be
+    acceptable.
+
+    Both halves in one test, against ONE origin, because the claim is exactly
+    that these two disagree. If a future dry run does start catching this, the
+    first assertion fails and this file is where the docstrings get corrected.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+    clone.decline_pushes_server_side()
+
+    await rehearse_quarantine_credential(
+        clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+    )
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "remote rejected" in message
+    assert "quarantined at" not in message
+    assert _QUARANTINE_REF not in clone.origin_refs()
+    assert not clone.reachable_in_origin(committed, "refs/heads/main")
+
+
+# --------------------------------------------------------------------------
+# A MINT THAT FAILED IS NOT A VERDICT ABOUT THIS PHASE (#1396)
+#
+# The rehearsal used to refuse a phase whose renewal raised, before making any
+# push at all. That reads one failure as another: minting an installation
+# token is an HTTPS request to GitHub, and it failing says GitHub was briefly
+# unavailable - not that the credential the setup phase installed minutes ago,
+# with most of its hour left, has stopped working. The workspace is already
+# built and the repositories are already cloned by the time this runs, so the
+# cost of being wrong is a whole execution thrown away to protect work that
+# has not been produced yet.
+#
+# So: retry the transient thing, keep what the workspace already holds, and
+# let the push be the one that answers. A rehearsal push that fails after its
+# own retries is a refusal or an origin that is not there, and both of those
+# are reasons not to start.
+# --------------------------------------------------------------------------
+
+
+class _FailsToMintTwice:
+    """The real workspace, except the first two renewals fail and the third works.
+
+    The failure GitHub actually produces: a 5xx or a reset connection on one
+    request, gone by the next. `attempts` is counted because "it was retried"
+    is the behaviour, and a double that merely succeeded eventually would stay
+    green with the loop deleted.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.attempts = 0
+
+    async def renew_git_credential(self) -> None:
+        self.attempts += 1
+        if self.attempts < 3:
+            raise CredentialRenewalFailedError("502 from the installation token endpoint")
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        return await self._inner.execute(command)
+
+
+class _UnreachableForTheFirstPush(_RenewsCredential):
+    """The real workspace, with origin genuinely gone for the first push only.
+
+    A REAL failed push from real git rather than a fabricated result, for the
+    reason #1396 gave about the old `_RemoteRejects`: a canned non-zero
+    `ExecutionResult` asserts that the caller reads `exit_code` and assumes
+    the thing that needs establishing. The remote is broken around exactly one
+    command and put back, so the retry has something to succeed at.
+    """
+
+    def __init__(self, clone: _Clone) -> None:
+        self._clone = clone
+        self.pushes = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) != "push":
+            return await self._clone.workspace.execute(command)
+        self.pushes += 1
+        if self.pushes > 1:
+            return await self._clone.workspace.execute(command)
+        self._clone.break_the_remote()
+        try:
+            return await self._clone.workspace.execute(command)
+        finally:
+            self._clone.restore_the_remote()
+
+
+async def test_a_mint_that_failed_does_not_refuse_a_phase_whose_credential_still_works(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """The finding itself: the old policy refused this phase, and it was viable.
+
+    The workspace is holding the credential its setup phase installed minutes
+    ago. A mint that cannot happen right now says something about GitHub's
+    availability; the rehearsal push that follows says something about this
+    phase, and it passes - the token in the container reaches the origin and
+    the quarantine path it will need in an hour is open.
+    """
+    await rehearse_quarantine_credential(
+        _CannotRenew(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+    )
+
+
+async def test_a_mint_that_fails_transiently_is_retried_before_it_is_given_up_on(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """One request to a third party, so one failure is not an answer.
+
+    COUNTED, because "it was retried" and "it happened to work" are different
+    programs and only the first is the fix. Keeping the fresh token when it
+    can be had is still worth a second and a third try: the phase then runs on
+    a credential with a full hour on it rather than on whatever is left of the
+    one it was provisioned with.
+    """
+    workspace = _FailsToMintTwice(clone.workspace)
+
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+
+    assert workspace.attempts == 3
+
+
+async def test_a_rehearsal_push_that_fails_transiently_is_retried_before_it_is_fatal(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """The same argument one layer out, where being wrong costs a whole phase.
+
+    This push IS the verdict, so a momentary transport fault during it would
+    take an execution off the board for a reason that was over before the
+    agent would have started. Origin is really gone for the first push and
+    really back for the second, and the phase is not refused.
+    """
+    workspace = _UnreachableForTheFirstPush(clone)
+
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+
+    assert workspace.pushes == 2, "the rehearsal never retried, so nothing was tested"
+
+
+# --------------------------------------------------------------------------
+# SILENCE IS NOT A VERDICT (#1396)
+#
+# The rehearsal used to refuse on the third non-zero push for no reason but
+# that it was the third, so a persistent timeout, a hung proxy or a dropped
+# connection ended a phase exactly as a real refusal did. A rehearsal whose
+# stated promise is "credential and connectivity" cannot spend the absence of
+# connectivity as evidence about the credential: an origin that says nothing
+# now says nothing about whether it will answer in an hour, when the push that
+# matters happens.
+#
+# So the OUTCOME is classified, not counted. The three tests below pin the two
+# halves of that classification and its bound; the fourth pins the edge git
+# does not let us classify, so that the limit is visible rather than believed
+# to be closed.
+# --------------------------------------------------------------------------
+
+
+class _CountsPushes(_RenewsCredential):
+    """The real workspace, counting the pushes that reach it.
+
+    The bound is the behaviour here, and "it stopped" and "it stopped after
+    the right number of attempts" are different programs: a classification
+    that gave up after one push would pass a test that only asserted the call
+    returned.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.pushes = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+        return await self._inner.execute(command)
+
+
+@pytest.fixture
+def instant_remote_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cut a hung remote off after a second rather than after twenty.
+
+    Through the module global, which is exactly why `workspace_git` reads its
+    bounds that way: the production number is the tuning and the fact that
+    SOMETHING fires is the behaviour, so a test can keep the second and drop
+    the first. Without this the three attempts below cost a minute.
+    """
+    monkeypatch.setattr(workspace_git, "REMOTE_TIMEOUT_SECONDS", 1)
+
+
+async def test_an_origin_that_never_answers_lets_the_phase_start_with_a_warning(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+    instant_retries: None,
+    instant_remote_bound: None,
+) -> None:
+    """THE FINDING: a phase that would have run fine, refused for the network.
+
+    Origin accepts the connection and then never answers, so every attempt is
+    cut off by its own bound and git never returns a verdict about anything.
+    The old code read the third of those as "definitive" and raised
+    `QuarantinePathUnusableError`, ending an execution whose workspace, agent
+    and repositories were already provisioned - on evidence about a socket.
+
+    The phase must START, and an operator must be TOLD, because proceeding
+    silently would be the other failure: this phase really is running without
+    the assurance the rehearsal normally gives it, and the warning is what
+    connects a later NOT RECOVERABLE to the reason it was not caught earlier.
+    """
+    with clone.silent_origin(), caplog.at_level("WARNING"):
+        await rehearse_quarantine_credential(
+            clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "UNREHEARSED" in said
+    assert _PHASE_ID in said
+    assert "NOT RECOVERABLE" in said, "the warning must say what it is trading away"
+
+
+async def test_an_origin_that_refuses_the_credential_still_refuses_the_phase(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """THE OTHER HALF, which the fix must not trade away to get the first.
+
+    A real HTTP origin answering 403 on ``info/refs?service=git-receive-pack``
+    is what GitHub returns when the installation token cannot push to the
+    repository - the production shape of #1393's failure, and the one thing
+    this rehearsal exists to catch before an agent is handed an hour of work
+    it will not be able to give back. Origin ANSWERED, so this is a verdict,
+    and the phase must not start.
+
+    A file:// origin cannot stage this: the only refusals it has are "not a
+    repository" and the update-time hooks a dry run never reaches.
+    """
+    with clone.origin_answering(403), pytest.raises(QuarantinePathUnusableError) as raised:
+        await rehearse_quarantine_credential(
+            clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    message = str(raised.value)
+    assert _PHASE_ID in message
+    assert _QUARANTINE_REF in message
+    assert "refused by origin" in message
+
+
+async def test_a_silent_origin_cannot_delay_a_phase_start_indefinitely(
+    clone: _Clone,
+    instant_retries: None,
+    instant_remote_bound: None,
+) -> None:
+    """The bound, counted, because "it returned" is not "it was bounded".
+
+    A remote that never answers has no error to return early on, so it is the
+    worst case for the retry loop: nothing ends an attempt but the bound in
+    its own argv, and nothing ends the loop but the attempt count. Both must
+    hold, and the count is the one a future change could quietly remove while
+    every other test here stayed green.
+    """
+    workspace = _CountsPushes(clone.workspace)
+
+    with clone.silent_origin():
+        await rehearse_quarantine_credential(
+            workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    assert workspace.pushes == unpushed_work_guard._RENEWAL_ATTEMPTS
+
+
+async def test_a_transport_fault_that_answers_is_not_yet_told_from_a_refusal(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """THE LIMIT OF THE CLASSIFICATION, pinned so it is visible rather than assumed.
+
+    A 502 is a transport fault and under the rule it should NOT refuse the
+    phase - but git gives nothing to separate it from the 403 above. Measured
+    on the image's git 2.39.5: a DNS failure, a refused connection and an HTTP
+    401, 403, 500 and 502 all exit 128, and `GIT_TRACE2_EVENT` reports the
+    same ``"code":128`` and the same error ``fmt`` for every one of them. Only
+    the prose of the message differs, and a classifier built on prose is one
+    git's next release rewrites without telling anyone.
+
+    So this case is left in the refusing class deliberately, because the
+    conservative error here is the cheaper one: refusing a viable phase costs
+    the provisioning already spent, while admitting one whose credential is
+    actually dead costs the agent-hour AND the work. This test is where that
+    choice is recorded; when a signal that separates the two arrives, this is
+    the test that must be made to fail on purpose and rewritten.
+    """
+    with clone.origin_answering(502), pytest.raises(QuarantinePathUnusableError):
+        await rehearse_quarantine_credential(
+            clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+
+async def test_a_phase_whose_mint_failed_is_still_launched(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """The wiring for the same decision: the viable phase reaches its agent.
+
+    THE HOP, not the function. `start_phase` rehearses between provisioning
+    and telling the aggregate that provisioning completed, and that second
+    call is what lets the agent run - so asserting on the absence of a raise
+    would leave a refusal that happened one line later undetected. Asserted on
+    `provision_workspace_completed`, which is the thing the old policy did not
+    reach.
+    """
+    run = _PhaseRun(_CannotRenew(clone.workspace))
+
+    await run.start()
+
+    run.aggregate.provision_workspace_completed.assert_called_once()
+
+
+async def test_a_workspace_with_no_repositories_has_no_quarantine_path_to_rehearse() -> None:
+    """The true negative: no repositories means no push to make and none to fail.
+
+    `open_pr` runs with credentials and no checkout (#1187). Refusing it here
+    would take a working phase off the board to protect work it cannot produce.
+    """
+    workspace = _NoRepositories()
+
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+
+    assert workspace.renewals == 0
+
+
+async def test_a_phase_whose_quarantine_path_is_unusable_is_never_launched(
+    clone: _Clone,
+) -> None:
+    """The wiring, without which every test above describes unreachable code.
+
+    THE HOP, not the function: `start_phase` provisions the workspace and then
+    tells the aggregate provisioning completed, which is what lets the agent
+    run. The rehearsal sits between those two, so a phase that cannot hand
+    work back never gets given an hour of agent time to produce any. Asserted
+    on `provision_workspace_completed` rather than on the raise, because the
+    raise alone would also be satisfied by a check that ran too late.
+    """
+    clone.break_the_remote()
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(QuarantinePathUnusableError):
+        await run.start()
+
+    run.aggregate.provision_workspace_completed.assert_not_called()
+
+
+async def test_the_quarantine_push_asks_for_a_credential_the_same_way_any_push_does(
+    clone: _Clone,
+) -> None:
+    """The other half of "the same credential", and the half a test can pin.
+
+    The adapter suite proves what the container's store RESOLVES after a
+    renewal. This proves the quarantine push is asking it the same question
+    the agent's own `git push origin` asks: a bare remote name, no credential
+    override, no URL carrying a token of its own. A push that supplied its own
+    credential would be a second credential path - the thing #1393 was
+    reported as, and the thing that would let the two drift apart for real.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    workspace = _RecordsPushedRefs(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.pushes, "nothing pushed, so nothing was inspected"
+    for argv in workspace.pushes:
+        assert "origin" in argv, argv
+        assert not [arg for arg in argv if arg.startswith("credential.")], argv
+        assert not [arg for arg in argv if "@github.com" in arg], argv
+        assert not [arg for arg in argv if arg.startswith("http")], argv
+
+
+class _BreaksItsContract:
+    """The real workspace, except renewal raises what its protocol says it will not.
+
+    The isolation provider's own failures, which is what `renew_git_credential`
+    is made of underneath: injecting a file and running it both reach a real
+    container and both raise whatever docker raises - an API error, a timeout,
+    a handle for a container that has already gone.
+
+    The adapter now normalizes those to `CredentialRenewalFailedError`, and the
+    sibling adapter suite is where that is proved. This class exists because
+    the guard must not DEPEND on it having been proved: an optional improvement
+    to a credential is the last thing that should be able to take the rescue
+    push down with it, and a workspace that breaks the contract is exactly the
+    input that would.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise RuntimeError("no such container: the workspace has already gone")
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        return await self._inner.execute(command)
+
+
+async def test_a_renewal_that_broke_its_own_contract_still_gets_the_push_attempted(
+    clone: _Clone,
+) -> None:
+    """The renewal is an improvement on the old token for EVERY way it can fail.
+
+    Catching only the documented exception made the rescue conditional on every
+    workspace keeping its half of a protocol, and the cost of one that does not
+    is the whole of #1393 twice over: the push is never attempted, so the work
+    dies with the container AND the honest report the push's own result would
+    have produced is never written. Here the old token still works, and the
+    commit lands.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=_BreaksItsContract(clone.workspace))
+
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert clone.reachable_in_origin(committed, _QUARANTINE_REF)
+    assert "quarantined at" in str(raised.value)
+
+
+async def test_a_renewal_that_failed_never_softens_what_the_push_then_reported(
+    clone: _Clone,
+) -> None:
+    """KEEP THE HONEST REPORTING, which is the one thing worse than losing work.
+
+    Two REAL failures - no fresh token, and an origin whose receive policy
+    declines the update - and the message must be about the second one. A
+    phase whose quarantine push was refused has lost the work, and the report
+    that matters is NOT RECOVERABLE with the remote's own words - not "the credential could
+    not be renewed", which reads like an aside, and emphatically not the
+    "quarantined at" line that would send an operator to fetch a ref that does
+    not exist.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    clone.decline_pushes_server_side()
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=_CannotRenew(clone.workspace))
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "remote rejected" in message
+    assert "quarantined at" not in message
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_renewal_that_broke_its_own_contract_is_no_more_a_verdict_than_any_other(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """The same input as the teardown test above, and now the same conclusion.
+
+    One contract, one policy, and neither half of it conditional on the type
+    raised. At both ends a renewal that could not happen is a reason the push
+    MIGHT fail, and at both ends the push is what answers. What still differs
+    is what the answer costs: here a refusal ends the phase before its agent
+    runs, and there it is reported as work that is not recoverable.
+    """
+    await rehearse_quarantine_credential(
+        _BreaksItsContract(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+    )
+
+
+# --------------------------------------------------------------------------
+# A CANCELLATION IS NOT A REASON TO ABANDON THE WORK (#1396)
+#
+# Both "never raises" handlers on the salvage path are written `except
+# Exception`, and `asyncio.CancelledError` is a `BaseException` - so an
+# execution cancelled while the credential was being renewed went straight
+# past them and the rescue push was never made at all. The commit existed, the
+# container was about to go, and nothing was attempted: #1393's outcome
+# reached by the one route its fix did not cover.
+#
+# So the tests below raise a REAL `asyncio.CancelledError`, and a real one
+# delivered by a real `task.cancel()`, and ask the origin whether the push
+# happened anyway - then that the cancellation was re-applied, because a
+# cancelled task that reports normal completion is a task nobody can stop.
+# --------------------------------------------------------------------------
+
+
+class _CancelledWhileRenewing:
+    """The real workspace, cancelled at the await the salvage path starts with.
+
+    Raising `CancelledError` from `renew_git_credential` is not a stand-in for
+    a cancellation: it IS what the runtime raises inside a coroutine that has
+    been cancelled at that await. Everything else stays real, so the push that
+    follows is the phase's own.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise asyncio.CancelledError
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        return await self._inner.execute(command)
+
+
+class _AnnouncesThePush:
+    """The real workspace, which says when a push has STARTED and then sleeps.
+
+    The seam a real `task.cancel()` needs. `_Workspace.execute` is a blocking
+    `subprocess.run`, so a cancellation aimed at the moment of the push could
+    never actually be delivered - there is no await for it to land on. This
+    adds exactly one: the event tells the test the push is in flight, and the
+    sleep is where the cancellation arrives.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.pushing = asyncio.Event()
+        self.pushes = 0
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+            self.pushing.set()
+            await asyncio.sleep(0.05)
+        return await self._inner.execute(command)
+
+
+class _NeverAnswersThePush:
+    """The real workspace, except a push is a wait that never ends.
+
+    A backend that has stopped returning, which is the only thing the salvage
+    path's own bound can protect against: the `timeout` in the push's argv is
+    inside a command this one never runs.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise asyncio.CancelledError
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            await asyncio.sleep(3600)
+        return await self._inner.execute(command)
+
+
+async def test_a_phase_cancelled_during_the_renewal_still_gets_its_work_pushed(
+    clone: _Clone,
+) -> None:
+    """The bug, stated as the thing the origin can be asked about afterwards.
+
+    The cancellation arrives at the renewal - the first await of the salvage -
+    and the commit must still reach the origin, because that is the entire
+    reason this path exists. Read back out of the origin rather than off any
+    return value: the gate never returns here, it re-raises.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+
+    with pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_CancelledWhileRenewing(clone.workspace))
+
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert clone.reachable_in_origin(committed, _QUARANTINE_REF)
+
+
+async def test_a_cancelled_phase_says_where_the_work_it_rescued_went(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The record, which re-raising is what would otherwise destroy.
+
+    A cancellation ends the walk: the `UnpushedWorkQuarantinedError` that
+    names the refs is never built, and the caller sees only that it was
+    cancelled. The ref exists and nobody has been told - which is #1184's own
+    failure, a real thing nobody can find, so the outcome is logged before the
+    cancellation goes back out.
+    """
+    clone.commit("never-pushed.py", "work\n")
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_CancelledWhileRenewing(clone.workspace))
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert _QUARANTINE_REF in said
+    assert "cancelled" in said
+    assert "landed" in said
+
+
+async def test_a_cancelled_phase_whose_rescue_push_was_refused_says_so_honestly(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """KEEP THE HONEST REPORTING, under cancellation too.
+
+    The push is attempted, the remote declines the update, and what is written
+    down is that the work is NOT RECOVERABLE - never a ref an operator would
+    go looking for. Then the cancellation is re-applied, unchanged and
+    unsoftened: it is still what stopped this execution.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    clone.decline_pushes_server_side()
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_CancelledWhileRenewing(clone.workspace))
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "NOT RECOVERABLE" in said
+    assert "remote rejected" in said
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_cancellation_arriving_while_the_push_runs_lets_it_finish(
+    clone: _Clone,
+) -> None:
+    """A REAL `task.cancel()`, delivered at the one await that matters.
+
+    The renewal is not the only place a cancellation can land: the push itself
+    is an await, and teardown is exactly when cancellations arrive. `shield`
+    is what makes the difference, and this is the test that can tell - the
+    cancel is delivered while the push is genuinely in flight, and the ref is
+    in the origin afterwards.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+    workspace = _AnnouncesThePush(clone.workspace)
+
+    running = asyncio.ensure_future(clone.run_gate(workspace=workspace))
+    await asyncio.wait_for(workspace.pushing.wait(), timeout=10)
+    running.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert workspace.pushes == 1
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert clone.reachable_in_origin(committed, _QUARANTINE_REF)
+
+
+async def test_a_cancelled_rescue_push_that_never_answers_is_abandoned_and_reported(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "Cancelled" may not become "waits forever", which is the other half.
+
+    A cancellation is a request to stop, so the extra time the push is given
+    is BOUNDED. Here the backend never answers at all - the bound in the
+    push's own argv is inside a command that never runs - and the phase must
+    still end: the push is abandoned, the work reported as unrecoverable
+    rather than as saved, and the cancellation re-applied.
+
+    The bound is lowered through the module global, the way `workspace_git`'s
+    bounds are, so this costs a second rather than thirty.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_PUSH_SECONDS", 1.0)
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_NeverAnswersThePush(clone.workspace))
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "NOT RECOVERABLE" in said
+    assert "abandoned" in said
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+# --------------------------------------------------------------------------
+# A refusal that names a path is not a refusal of the work (#1437).
+#
+# The App cannot push `.github/workflows/` (#1024) and GitHub refuses the
+# WHOLE push that carries one. Every test below runs against an origin whose
+# pre-receive hook refuses exactly that, in GitHub's words, and reads what
+# survived back out of the origin - or, for the processor hops, out of the
+# artifacts it actually saved.
+# --------------------------------------------------------------------------
+
+_DOCS = (
+    pathlib.Path(__file__).resolve().parents[8]
+    / "apps/syn-docs/content/docs/workspaces/hydration.mdx"
+)
+
+
+def _a_phase_that_edited_a_workflow(clone: _Clone) -> str:
+    """The incident's shape: real work, one workflow edit, one new one, uncommitted notes.
+
+    Returns the commit origin last had, which the rescue must be built on.
+    """
+    base = clone.refuse_workflow_changes()
+    (clone.path / ".github/workflows/existing.yml").write_text("on: edited\n")
+    (clone.path / ".github/workflows/new.yml").write_text("on: added\n")
+    (clone.path / "feature.py").write_text("feature\n")
+    clone.git("add", "--all")
+    clone.git("commit", "-m", "the phase's work, workflow edit included")
+    (clone.path / "notes.md").write_text("never committed\n")
+    return base
+
+
+def _worktree(clone: _Clone, *names: str) -> dict[str, str]:
+    return {name: (clone.path / name).read_text() for name in names}
+
+
+_THE_PHASES_FILES = (
+    "feature.py",
+    "notes.md",
+    ".github/workflows/existing.yml",
+    ".github/workflows/new.yml",
+)
+
+
+def _recovery_line(message: str) -> str:
+    [line] = [line for line in message.splitlines() if "recover with: " in line]
+    return line.split("recover with: ", 1)[1]
+
+
+def _clean_env(clone: _Clone) -> dict[str, str]:
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(clone.root / "home"),
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+    }
+
+
+class _SavesArtifacts:
+    """The artifact repository, keeping what it was handed to be read back."""
+
+    def __init__(self) -> None:
+        self.saved: list[object] = []
+
+    async def save(self, aggregate: object) -> None:
+        self.saved.append(aggregate)
+
+
+class _PushesSlowly:
+    """The real workspace, cancelled at the renewal, whose Nth push is slow or fails."""
+
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        *,
+        slow_push: int,
+        seconds: float,
+        answer: ExecutionResult | None = None,
+    ) -> None:
+        self._inner = inner
+        self._slow_push = slow_push
+        self._seconds = seconds
+        self._answer = answer
+        self.pushes = 0
+
+    async def renew_git_credential(self) -> None:
+        raise asyncio.CancelledError
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+            if self.pushes == self._slow_push:
+                await asyncio.sleep(self._seconds)
+                if self._answer is not None:
+                    return self._answer
+        return await self._inner.execute(command)
+
+
+_STALE = ExecutionResult(
+    exit_code=1,
+    success=False,
+    duration_ms=0.0,
+    stdout="",
+    stderr=" ! [remote rejected] HEAD -> refs/syn/lost/x (cannot lock ref)\n",
+)
+
+
+class _RefusesTheSecondPush(_RenewsCredential):
+    """The real workspace, except the workflow-safe push is refused as well."""
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.pushes = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+            if self.pushes == 2:
+                return _STALE
+        return await self._inner.execute(command)
+
+
+async def test_a_workflow_edit_no_longer_takes_the_rest_of_the_work_with_it(
+    clone: _Clone,
+) -> None:
+    """THE INCIDENT. One YAML edit, and every other file was reported NOT RECOVERABLE.
+
+    The rest of the work must reach the origin, at the ref the report names,
+    with `.github/workflows/` exactly as the base has it - and the phase must
+    still fail, because a rescued phase is not a completed one.
+    """
+    base = _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    run.aggregate.complete_phase.assert_not_called()
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:feature.py") == "feature"
+    assert clone.origin_git("show", f"{pushed}:notes.md") == "never committed"
+    assert clone.origin_git("show", f"{pushed}:.github/workflows/existing.yml") == "on: push"
+    assert not clone.origin_git("ls-tree", pushed, "--", ".github/workflows/new.yml")
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" not in message
+    assert f"quarantined at {_QUARANTINE_REF} WITHOUT 2 workflow file(s)" in message
+    assert "dropped: .github/workflows/existing.yml" in message
+    assert "dropped: .github/workflows/new.yml" in message
+    assert "without `workflows` permission" in message
+
+
+async def test_the_recovery_the_report_prints_gives_back_exactly_what_the_phase_left(
+    clone: _Clone,
+) -> None:
+    """The commands in the report, RUN, in a clone that has never seen the workspace.
+
+    Workflow changes included: the patch puts them back byte for byte. And the
+    original commits come back out of the bundle, because flattening them onto
+    the base was the price of the push and should not be the price of the work.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+    left = _worktree(clone, *_THE_PHASES_FILES)
+    original_head = clone.git("rev-parse", "HEAD")
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    fresh = clone.root / "recovered"
+    _git("clone", "-q", str(clone.origin), str(fresh), cwd=clone.root, home=clone.root / "home")
+    env = _clean_env(clone)
+    subprocess.run(["sh", "-c", _recovery_line(str(raised.value))], cwd=fresh, env=env, check=True)
+    assert {name: (fresh / name).read_text() for name in _THE_PHASES_FILES} == left
+
+    unbundled = subprocess.run(
+        ["git", "bundle", "unbundle", f".syn-quarantine/{RESCUE_BUNDLE_NAME}"],
+        cwd=fresh,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert original_head in unbundled
+    subprocess.run(["git", "cat-file", "-e", original_head], cwd=fresh, env=env, check=True)
+
+
+async def test_the_docs_print_the_recovery_the_report_prints(clone: _Clone) -> None:
+    """The user-facing docs and the report cannot drift: each command is in both."""
+    _a_phase_that_edited_a_workflow(clone)
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    documented = _DOCS.read_text()
+    printed = _recovery_line(str(raised.value)).replace(
+        _QUARANTINE_REF, "refs/syn/lost/<execution-id>/<phase-id>"
+    )
+    for command in printed.split(" && "):
+        assert command in documented, command
+
+
+async def test_a_refusal_for_any_other_reason_is_reported_as_it_always_was(
+    clone: _Clone,
+) -> None:
+    """THE RESCUE IS FOR ONE REFUSAL ONLY, and costs nothing for any other.
+
+    A ruleset or a hidden ref refuses this ref whatever it holds, so a second
+    push would be refused the same way and only delay the report.
+    """
+    (clone.path / ".github/workflows").mkdir(parents=True)
+    clone.commit(".github/workflows/ci.yml", "on: push\n")
+    clone.decline_pushes_server_side()
+    workspace = _CountsPushes(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.pushes == 1
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "WITHOUT" not in message
+    assert "dropped:" not in message
+
+
+async def test_a_deleted_workflow_is_restored_in_the_rescue_and_kept_as_a_deletion(
+    clone: _Clone,
+) -> None:
+    """GitHub refuses a deletion as readily as an edit, so leaving it out is not enough."""
+    base = clone.refuse_workflow_changes()
+    clone.git("rm", "-q", ".github/workflows/existing.yml")
+    clone.commit("feature.py", "feature\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:.github/workflows/existing.yml") == "on: push"
+    assert clone.origin_git("show", f"{pushed}:feature.py") == "feature"
+    patch = clone.origin_git("show", f"{pushed}:.syn-quarantine/{RESCUE_PATCH_NAME}")
+    assert "deleted file mode" in patch
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+
+
+async def test_work_never_committed_needs_no_bundle_and_is_not_told_of_one(
+    clone: _Clone,
+) -> None:
+    """No local commits means nothing was flattened, and the report must not say so."""
+    clone.refuse_workflow_changes()
+    (clone.path / ".github/workflows/existing.yml").write_text("on: edited\n")
+    (clone.path / "feature.py").write_text("feature\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:feature.py") == "feature"
+    assert not clone.origin_git("ls-tree", pushed, "--", f".syn-quarantine/{RESCUE_BUNDLE_NAME}")
+    assert RESCUE_BUNDLE_NAME not in str(raised.value)
+
+
+async def test_the_rescue_never_overwrites_a_directory_the_phase_wrote(clone: _Clone) -> None:
+    """Checked against the tree, not assumed free: the phase's file is work too."""
+    _a_phase_that_edited_a_workflow(clone)
+    (clone.path / ".syn-quarantine").mkdir()
+    (clone.path / ".syn-quarantine" / RESCUE_PATCH_NAME).write_text("the phase's own\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    own = clone.origin_git("show", f"{pushed}:.syn-quarantine/{RESCUE_PATCH_NAME}")
+    assert own == "the phase's own"
+    assert "+on: edited" in clone.origin_git(
+        "show", f"{pushed}:.syn-quarantine-2/{RESCUE_PATCH_NAME}"
+    )
+    assert f".syn-quarantine-2/{RESCUE_PATCH_NAME}" in str(raised.value)
+
+
+async def test_when_the_rescue_is_refused_too_both_refusals_are_named_and_the_patch_kept(
+    clone: _Clone,
+) -> None:
+    """Honest reporting, kept: NOT RECOVERABLE, with both reasons - and the patch still rides out."""
+    _a_phase_that_edited_a_workflow(clone)
+    workspace = _RefusesTheSecondPush(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.pushes == 2
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "without `workflows` permission" in message
+    assert "cannot lock ref" in message
+    assert "dropped: .github/workflows/existing.yml" in message
+    [work] = raised.value.quarantined
+    assert work.dropped is not None
+    assert "+on: edited" in work.dropped.patch
+    assert "+on: added" in work.dropped.patch
+
+
+async def test_a_rescue_that_cannot_be_built_is_reported_rather_than_raised(
+    clone: _Clone,
+) -> None:
+    """A failure building the second commit must not cost the record of the first refusal.
+
+    Raised, it would reach the walk's handler as an inspection failure and
+    take this repository's record - and the patch - with it.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=_BreaksOn(clone.workspace, "bundle"))
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "without `workflows` permission" in message
+    assert "could not be built" in message
+    [work] = raised.value.quarantined
+    assert work.dropped is not None
+    assert "+on: edited" in work.dropped.patch
+
+
+async def test_a_phase_cancelled_during_the_renewal_still_gets_the_workflow_safe_rescue(
+    clone: _Clone,
+) -> None:
+    """The cancellation is re-applied AFTER the second push, never instead of it."""
+    base = _a_phase_that_edited_a_workflow(clone)
+
+    with pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_CancelledWhileRenewing(clone.workspace))
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:feature.py") == "feature"
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+
+
+async def test_the_rescue_has_a_deadline_of_its_own_and_not_a_share_of_the_first(
+    clone: _Clone,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow but healthy second push lands, on a cancelled phase, after the first deadline.
+
+    One deadline over both pushes would cut this rescue off at the first
+    push's bound with nothing wrong at all.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_PUSH_SECONDS", 1.0)
+    workspace = _PushesSlowly(clone.workspace, slow_push=2, seconds=1.5)
+
+    with pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.pushes == 2
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_a_rescue_that_never_answers_is_abandoned_at_its_deadline_and_reported(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "Cancelled" may not become "waits forever" on the second push either."""
+    _a_phase_that_edited_a_workflow(clone)
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_RESCUE_SECONDS", 1.0)
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_PushesSlowly(clone.workspace, slow_push=2, seconds=3600))
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "NOT RECOVERABLE" in said
+    assert "workflow-safe" in said
+    assert "abandoned" in said
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+def _the_patch_artifact(repository: _SavesArtifacts) -> object:
+    [artifact] = [
+        a
+        for a in repository.saved
+        if (getattr(a, "source_path", None) or "").endswith(f"/{RESCUE_PATCH_NAME}")
+    ]
+    return artifact
+
+
+async def test_a_phase_the_gate_refused_keeps_its_workflow_changes_as_an_artifact(
+    clone: _Clone,
+) -> None:
+    """THE CONSUMER: the processor's failure path stores the patch and points at it.
+
+    When both pushes fail, this artifact is the only copy of those changes
+    left once the workspace is gone - so it is read back from what the
+    artifact repository was actually handed, and from the execution result.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(_RefusesTheSecondPush(clone.workspace))
+    artifacts = _SavesArtifacts()
+    run.processor._artifact_repo = artifacts  # type: ignore[assignment]
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+    result = await run.fail_the_way_the_engine_does(raised.value)
+
+    artifact = _the_patch_artifact(artifacts)
+    assert "+on: edited" in artifact.content  # type: ignore[attr-defined]
+    assert artifact.source_path == f"syn-quarantine/{_REPO}/{RESCUE_PATCH_NAME}"  # type: ignore[attr-defined]
+    assert artifact.is_primary_deliverable is False  # type: ignore[attr-defined]
+    assert artifact.id in result.artifact_ids  # type: ignore[attr-defined]
+
+
+async def test_a_phase_that_failed_for_its_own_reason_keeps_its_workflow_changes_too(
+    clone: _Clone,
+) -> None:
+    """The other half of `quarantined_records`: the records came from the save, not the gate."""
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+    artifacts = _SavesArtifacts()
+    run.processor._artifact_repo = artifacts  # type: ignore[assignment]
+
+    result = await run.fail_the_way_the_engine_does(RuntimeError("the agent timed out"))
+
+    artifact = _the_patch_artifact(artifacts)
+    assert "+on: added" in artifact.content  # type: ignore[attr-defined]
+    assert artifact.id in result.artifact_ids  # type: ignore[attr-defined]
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
+    clone: _Clone,
+) -> None:
+    """The cancel path, which saves the work too and must keep the patch with it."""
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+    artifacts = _SavesArtifacts()
+    run.processor._artifact_repo = artifacts  # type: ignore[assignment]
+    all_artifact_ids: list[str] = []
+
+    await run.processor._cancel_execution(
+        _EXECUTION_ID,
+        "wf-1",
+        run.phase_results,
+        all_artifact_ids,
+        datetime.now(UTC),
+        cancel_reason="stopped by the user",
+        phase_id=_PHASE_ID,
+    )
+
+    artifact = _the_patch_artifact(artifacts)
+    assert artifact.id in all_artifact_ids  # type: ignore[attr-defined]
+
+
+def test_records_come_from_the_gate_error_or_the_save_and_never_both() -> None:
+    gate = QuarantinedWork(repo="a", branch="b", commit_count=1, files=("x",), pushed_ref="r")
+    saved = QuarantinedWork(repo="c", branch="d", commit_count=1, files=("x",), pushed_ref="s")
+    refused = UnpushedWorkQuarantinedError(phase_id=_PHASE_ID, quarantined=(gate,))
+
+    assert quarantined_records(refused, SavedWork(quarantined=(saved,))) == (gate,)
+    assert quarantined_records(RuntimeError("x"), SavedWork(quarantined=(saved,))) == (saved,)
+
+
+def test_a_record_cannot_claim_a_rescue_ref_without_naming_where_its_files_are() -> None:
+    dropped = DroppedWorkflows(
+        paths=(".github/workflows/ci.yml",),
+        refusal="refused",
+        base=None,
+        patch="diff",
+        artifact_title="t",
+    )
+    with pytest.raises(ValueError, match="directory its patch"):
+        QuarantinedWork(
+            repo="a", branch="b", commit_count=1, files=("x",), pushed_ref="r", dropped=dropped
+        )
+
+
+async def test_a_workflow_edit_reverted_in_history_still_gets_the_rescue(clone: _Clone) -> None:
+    """THE TREE CAN BE CLEAN AND THE HISTORY STILL REFUSED.
+
+    The phase edited a workflow, then restored its original bytes, then wrote
+    real work. Nothing in the final tree differs from the base, but GitHub
+    inspects every new commit and refuses the edit in the middle - so a rescue
+    that looked only at the tree made no second push and lost all of it.
+    """
+    base = clone.refuse_workflow_changes()
+    clone.commit(".github/workflows/existing.yml", "on: edited\n")
+    clone.commit(".github/workflows/existing.yml", "on: push\n")
+    clone.commit("legit.txt", "legit\n")
+    original_head = clone.git("rev-parse", "HEAD")
+    refused = subprocess.run(
+        ["git", "push", "origin", f"{original_head}:refs/syn/full-history"],
+        cwd=clone.path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_clean_env(clone),
+    )
+    assert refused.returncode != 0, "the origin must still refuse the full history"
+    assert "without `workflows` permission" in refused.stderr
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:legit.txt") == "legit"
+    assert clone.origin_git("show", f"{pushed}:.github/workflows/existing.yml") == "on: push"
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+    assert not clone.origin_git("ls-tree", pushed, "--", f".syn-quarantine/{RESCUE_PATCH_NAME}")
+
+    [work] = raised.value.quarantined
+    assert work.is_recoverable
+    assert work.dropped is not None
+    assert work.dropped.paths == ()
+    assert work.dropped.patch == ""
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" not in message
+    assert "with its history flattened" in message
+    assert "dropped:" not in message
+
+    fresh = clone.root / "recovered"
+    _git("clone", "-q", str(clone.origin), str(fresh), cwd=clone.root, home=clone.root / "home")
+    env = _clean_env(clone)
+    subprocess.run(["sh", "-c", _recovery_line(message)], cwd=fresh, env=env, check=True)
+    assert (fresh / "legit.txt").read_text() == "legit\n"
+    unbundled = subprocess.run(
+        ["git", "bundle", "unbundle", f".syn-quarantine/{RESCUE_BUNDLE_NAME}"],
+        cwd=fresh,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert original_head in unbundled
+
+
+async def test_a_reverted_history_rescue_stores_no_empty_artifact(
+    clone: _Clone, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nothing was dropped, so there is no patch to keep - and no blank artifact either.
+
+    Not even an attempted one: the artifact store refuses empty content, and a
+    refusal logged as a lost patch would report a loss that never happened.
+    """
+    clone.refuse_workflow_changes()
+    clone.commit(".github/workflows/existing.yml", "on: edited\n")
+    clone.commit(".github/workflows/existing.yml", "on: push\n")
+    clone.commit("legit.txt", "legit\n")
+    run = _PhaseRun(clone.workspace)
+    artifacts = _SavesArtifacts()
+    run.processor._artifact_repo = artifacts  # type: ignore[assignment]
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+    with caplog.at_level("WARNING"):
+        await run.fail_the_way_the_engine_does(raised.value)
+
+    assert "Could not store the workflow changes" not in caplog.text
+    assert not [
+        a
+        for a in artifacts.saved
+        if (getattr(a, "source_path", None) or "").endswith(f"/{RESCUE_PATCH_NAME}")
+    ]
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_a_remote_that_accepts_workflows_runs_no_rescue_commands(clone: _Clone) -> None:
+    """A self-hosted App granted `workflows` runs exactly today's commands.
+
+    The rescue is built only AFTER a `workflows` refusal, so a push that lands
+    must not have paid for one - nor risked a command that could fail on it.
+    """
+    (clone.path / ".github/workflows").mkdir(parents=True)
+    clone.commit(".github/workflows/ci.yml", "on: push\n")
+    (clone.path / "notes.md").write_text("never committed\n")
+    workspace = _BreaksOn(clone.workspace, "no-such-operation")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.attempted.count("push") == 1
+    rescue_only = {"diff-tree", "ls-tree", "bundle", "reset", "update-index", "hash-object"}
+    assert not rescue_only.intersection(workspace.attempted), workspace.attempted
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("show", f"{pushed}:.github/workflows/ci.yml") == "on: push"
+    assert not clone.origin_git("ls-tree", pushed, "--", ".syn-quarantine")
+    assert "WITHOUT" not in str(raised.value)
+
+
+async def test_the_rescue_base_is_known_to_origin_not_to_any_remote(clone: _Clone) -> None:
+    """A commit another remote has is still new to origin, and may carry the edit.
+
+    Here it does: X edits a workflow and is pushed to a mirror that refuses
+    nothing. Built on X, the rescue would be refused for X; built on what
+    origin has, it lands.
+    """
+    base = clone.refuse_workflow_changes()
+    mirror = clone.root / f"{clone.name}.mirror.git"
+    _git("init", "--bare", "-q", str(mirror), cwd=clone.root, home=clone.root / "home")
+    clone.git("remote", "add", "mirror", str(mirror))
+    x = clone.commit(".github/workflows/existing.yml", "on: edited\n")
+    clone.git("push", "-q", "mirror", f"HEAD:refs/heads/{_BRANCH}")
+    clone.git("fetch", "-q", "mirror")
+    assert clone.git("rev-parse", f"refs/remotes/mirror/{_BRANCH}") == x
+    clone.commit("legit.txt", "legit\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+    assert clone.origin_git("show", f"{pushed}:legit.txt") == "legit"
+    assert clone.origin_git("show", f"{pushed}:.github/workflows/existing.yml") == "on: push"
+    [work] = raised.value.quarantined
+    assert work.is_recoverable
+    assert work.dropped is not None
+    assert work.dropped.paths == (".github/workflows/existing.yml",)
+
+
+async def test_an_unpushed_merge_that_brought_in_workflows_drops_exactly_those(
+    clone: _Clone,
+) -> None:
+    """Merging an origin/main that changed a workflow makes the merge refusable too.
+
+    The paths are reset to the first-parent base and listed as dropped: the
+    safe error, because the patch holds them and a re-merge restores them.
+    """
+    (clone.seed / ".github/workflows").mkdir(parents=True)
+    clone.advance_origin_main(".github/workflows/main.yml", "on: main\n")
+    base = clone.refuse_workflow_changes()
+    clone.git("merge", "-q", "--no-ff", "-m", "merge main", "origin/main")
+    merge = clone.git("rev-parse", "HEAD")
+    assert len(clone.parents_of(merge)) == 2
+    clone.commit("legit.txt", "legit\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    pushed = clone.origin_refs()[_QUARANTINE_REF]
+    assert clone.origin_git("rev-list", "--parents", "-n", "1", pushed).split()[1:] == [base]
+    assert clone.origin_git("show", f"{pushed}:legit.txt") == "legit"
+    assert clone.origin_git("show", f"{pushed}:README.md") == "seed"
+    assert not clone.origin_git("ls-tree", pushed, "--", ".github/workflows/main.yml")
+    assert clone.origin_git("show", f"{pushed}:.github/workflows/existing.yml") == "on: push"
+    [work] = raised.value.quarantined
+    assert work.dropped is not None
+    assert work.dropped.paths == (".github/workflows/main.yml",)
+    assert "+on: main" in work.dropped.patch
+    assert "dropped: .github/workflows/main.yml" in str(raised.value)
+
+
+class _HangsTheSecondPush(_RenewsCredential):
+    """The real workspace, nothing cancelled, whose workflow-safe push never answers."""
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.pushes = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+            if self.pushes == 2:
+                await asyncio.sleep(3600)
+        return await self._inner.execute(command)
+
+
+async def test_a_rescue_cut_off_with_nothing_cancelled_still_keeps_the_patch(
+    clone: _Clone,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rescue deadline holds without any cancellation, and what it built survives.
+
+    The patch existed before the push hung, so the record carries it and the
+    processor stores it - and the report must not claim a cancellation that
+    never happened.
+    """
+    _a_phase_that_edited_a_workflow(clone)
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_RESCUE_SECONDS", 0.5)
+    workspace = _HangsTheSecondPush(clone.workspace)
+    run = _PhaseRun(workspace)
+    artifacts = _SavesArtifacts()
+    run.processor._artifact_repo = artifacts  # type: ignore[assignment]
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+    result = await run.fail_the_way_the_engine_does(raised.value)
+
+    assert workspace.pushes == 2
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+    [work] = raised.value.quarantined
+    assert not work.is_recoverable
+    assert work.dropped is not None
+    assert "+on: edited" in work.dropped.patch
+    message = str(raised.value)
+    assert "without `workflows` permission" in message
+    assert "abandoned" in message
+    assert "cancelled" not in message
+    artifact = _the_patch_artifact(artifacts)
+    assert artifact.content == work.dropped.patch  # type: ignore[attr-defined]
+    assert artifact.id in result.artifact_ids  # type: ignore[attr-defined]
+
+
+def test_a_record_may_drop_nothing_only_when_it_kept_the_history() -> None:
+    flattened = DroppedWorkflows(
+        paths=(), refusal="refused", base="b", patch="", artifact_title="t", rescue_dir="d"
+    )
+    with pytest.raises(ValueError, match="kept no bundle"):
+        QuarantinedWork(
+            repo="a", branch="b", commit_count=1, files=(), pushed_ref="r", dropped=flattened
+        )
+    with pytest.raises(ValueError, match="without a patch"):
+        QuarantinedWork(
+            repo="a",
+            branch="b",
+            commit_count=1,
+            files=(),
+            pushed_ref="r",
+            dropped=DroppedWorkflows(
+                paths=(".github/workflows/ci.yml",),
+                refusal="refused",
+                base="b",
+                patch="",
+                artifact_title="t",
+                rescue_dir="d",
+            ),
+        )
+    QuarantinedWork(
+        repo="a",
+        branch="b",
+        commit_count=1,
+        files=(),
+        pushed_ref="r",
+        dropped=DroppedWorkflows(
+            paths=(),
+            refusal="refused",
+            base="b",
+            patch="",
+            artifact_title="t",
+            rescue_dir="d",
+            has_bundle=True,
+        ),
+    )

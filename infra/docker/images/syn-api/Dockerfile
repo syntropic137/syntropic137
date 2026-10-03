@@ -17,6 +17,9 @@ WORKDIR /app
 # Copy root pyproject.toml and uv.lock for dependency resolution
 COPY pyproject.toml uv.lock ./
 
+# Shared inventory contract from the pinned APSS submodule.
+COPY lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python/ ./lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python/
+
 # -----------------------------------------------------------------------------
 # Copy local dependencies (order matters for layer caching)
 # -----------------------------------------------------------------------------
@@ -25,9 +28,9 @@ COPY pyproject.toml uv.lock ./
 COPY packages/syn-shared/ ./packages/syn-shared/
 
 # 2. Agentic primitives packages
-COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
-COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
-COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
+COPY lib/agentic-workspace/lib/python/agentic_logging/ ./lib/agentic-workspace/lib/python/agentic_logging/
+COPY lib/agentic-workspace/lib/python/agentic_events/ ./lib/agentic-workspace/lib/python/agentic_events/
+COPY lib/agentic-workspace/lib/python/agentic_isolation/ ./lib/agentic-workspace/lib/python/agentic_isolation/
 
 # 3. Event sourcing SDK
 COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/
@@ -43,6 +46,7 @@ COPY packages/syn-adapters/ ./packages/syn-adapters/
 
 # 7. API application (depends on adapters, domain, shared)
 COPY apps/syn-api/ ./apps/syn-api/
+COPY lib/ui-feedback/backend/ui-feedback-api/ ./lib/ui-feedback/backend/ui-feedback-api/
 
 # -----------------------------------------------------------------------------
 # Create virtual environment and install dependencies
@@ -52,14 +56,15 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Install in dependency order
 RUN uv pip install ./packages/syn-shared
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_logging
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_events
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_isolation
+RUN uv pip install ./lib/agentic-workspace/lib/python/agentic_logging
+RUN uv pip install ./lib/agentic-workspace/lib/python/agentic_events
+RUN uv pip install ./lib/agentic-workspace/lib/python/agentic_isolation
 RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/syn-domain
 RUN uv pip install ./packages/syn-tokens
 RUN uv pip install "./packages/syn-adapters[all]"
-RUN uv pip install ./apps/syn-api
+RUN uv pip install ./lib/ui-feedback/backend/ui-feedback-api
+RUN uv pip install "./apps/syn-api[feedback]"
 
 # =============================================================================
 # Runtime Stage
@@ -116,6 +121,11 @@ COPY --from=builder /app/apps /app/apps
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+# uvicorn runs on uvloop, which spawns every `docker exec` with a real fork().
+# With grpc fork support on, a fork while grpc threads are busy leaves the child
+# holding half-updated grpc state, and it segfaults in cygrpc before exec: the
+# random exit -11 of #1046/#1295. Nothing here uses grpc in a forked child.
+ENV GRPC_ENABLE_FORK_SUPPORT=false
 
 # Default configuration
 ENV SYN_API_HOST=0.0.0.0
@@ -129,6 +139,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gosu && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -m -u 1000 syn && \
     mkdir -p /app/logs && \
+    mkdir -p /app/data/session-inventory && \
     chown -R syn:syn /app
 
 USER syn
@@ -138,6 +149,26 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)" || exit 1
 
 EXPOSE 8000
+
+# Build identity (#1380). The release itself comes from the installed package
+# metadata and needs no stamping; these two are facts only the build knows, so
+# they are passed in as build args and read back by syn_api.build_info. Both
+# default to empty and an empty stamp reports as null, so an image built
+# without them is honest about not knowing rather than reporting a placeholder.
+#
+# LAST ON PURPOSE. Every layer after an ARG that changes per commit is rebuilt
+# on every commit, so these sit below everything expensive.
+#
+# Every path that SHIPS this image must pass both: scripts/pit_stop.sh,
+# `just release-local`, and the release workflow (release-containers.yaml).
+# ci/fitness/infrastructure/test_release_build_args.py fails when one does
+# not, and lists any path still awaiting its fix in AWAITING_WORKFLOW_PATCH.
+# Compose and dry-run builds pass nothing and report null, which is honest
+# for an image that is never shipped (#1473).
+ARG SYN_BUILD_IMAGE_TAG=""
+ARG SYN_BUILD_COMMIT=""
+ENV SYN_BUILD_IMAGE_TAG=${SYN_BUILD_IMAGE_TAG}
+ENV SYN_BUILD_COMMIT=${SYN_BUILD_COMMIT}
 
 # Start the API server
 # Use shell form to respect environment variables

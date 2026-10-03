@@ -67,6 +67,11 @@ phases:
     input_artifacts: []
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Bash]
     skills:
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -84,12 +89,19 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     agent:
       provider: codex
-      # The CONCRETE model id, not the `gpt-5.6` alias. An aliased model
-      # resolves to no rate and the run completes UNPRICED (#892), which
-      # destroys the cost data a workflow comparison depends on.
-      model: gpt-5.6-sol
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
     prompt_file: phases/review-spec.md
 
   - id: revise-spec
@@ -99,6 +111,11 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Bash]
     agent:
       provider: claude
@@ -114,6 +131,11 @@ phases:
     # Longest budget in the workflow: this phase runs things, and running things
     # is slower than reading them.
     timeout_seconds: 3600
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Bash, Write, Task]
     agent:
       provider: claude
@@ -127,7 +149,12 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob]
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    allowed_tools: [Read, Grep, Glob, Write]
     agent:
       provider: claude
       model: opus
@@ -140,7 +167,12 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob]
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    allowed_tools: [Read, Grep, Glob, Write]
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -158,9 +190,19 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     agent:
       provider: codex
-      model: gpt-5.6-sol
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
     prompt_file: phases/review-plan.md
 
   - id: final-plan
@@ -170,7 +212,12 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob]
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    allowed_tools: [Read, Grep, Glob, Write]
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4

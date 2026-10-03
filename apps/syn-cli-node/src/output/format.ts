@@ -7,6 +7,15 @@ import {
   YELLOW,
   style,
 } from "./ansi.js";
+import { UNKNOWN_MODEL_DISPLAY, UNKNOWN_MODEL_KEY } from "../constants.js";
+
+/**
+ * Display for a `cost_by_model` key: the reported model id verbatim, or
+ * "unknown" for cost whose model no harness reported (ADR-067 D9).
+ */
+export function formatCostModelKey(key: string): string {
+  return key === UNKNOWN_MODEL_KEY ? UNKNOWN_MODEL_DISPLAY : key;
+}
 
 export function formatCost(cost: number | string): string {
   const n = typeof cost === "string" ? Number(cost) : cost;
@@ -100,11 +109,12 @@ export function formatBreakdown(
   breakdown: Record<string, string>,
   title: string,
   valueFn?: (v: string) => string,
+  keyFn?: (k: string) => string,
 ): string {
   const lines: string[] = [style(title, BOLD)];
   for (const [key, value] of Object.entries(breakdown)) {
     const formatted = valueFn ? valueFn(value) : value;
-    lines.push(`  ${key}: ${formatted}`);
+    lines.push(`  ${keyFn ? keyFn(key) : key}: ${formatted}`);
   }
   return lines.join("\n");
 }

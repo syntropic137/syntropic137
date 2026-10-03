@@ -461,6 +461,22 @@ class TestOwnedPackagesMatchesThisRepo:
             assert read_pyproject_version(pkg.pyproject) == product, pkg.relpath
 
 
+def _independent_pnpm_members() -> set[str]:
+    """pnpm members that are NOT versioned in lockstep with the product.
+
+    Vendored code lives under `lib/` and carries its own version - the same
+    rule `_lock_workspace_paths` states for the uv side, for the same reason,
+    and structural so that vendoring the next one needs no edit here.
+
+    openclaw-plugin sits inside `packages/`, so nothing about its path tells
+    it apart from a package we do version; it is named, and
+    `test_the_independent_packages_really_are_independent` keeps the naming
+    honest.
+    """
+    declared = yaml.safe_load((ROOT / "pnpm-workspace.yaml").read_text())["packages"]
+    return {d for d in declared if d.startswith("lib/")} | {"packages/openclaw-plugin"}
+
+
 class TestNodeManifestList:
     """The Node manifests have no glob to derive from, so the list is checked."""
 
@@ -474,18 +490,20 @@ class TestNodeManifestList:
         import bump_version as bv
 
         declared = yaml.safe_load((ROOT / "pnpm-workspace.yaml").read_text())["packages"]
-        # openclaw-plugin ships on its own version (0.1.0), by design.
-        independent = {"packages/openclaw-plugin"}
-        expected = {f"{d}/package.json" for d in declared if d not in independent}
+        expected = {f"{d}/package.json" for d in declared if d not in _independent_pnpm_members()}
         assert set(bv.PACKAGE_JSON_RELPATHS) == expected
 
-    def test_the_independent_package_really_is_independent(self) -> None:
-        """If openclaw-plugin ever joins the product version, the exemption in
-        the test above stops being true and must be removed rather than kept
-        as a permanent hole."""
+    def test_the_independent_packages_really_are_independent(self) -> None:
+        """If one of them ever joins the product version, the exemption above
+        stops being true and must be removed rather than kept as a permanent
+        hole."""
         product = json.loads((ROOT / "apps/syn-cli-node/package.json").read_text())["version"]
-        plugin = json.loads((ROOT / "packages/openclaw-plugin/package.json").read_text())["version"]
-        assert plugin != product
+
+        exempt = _independent_pnpm_members()
+        assert exempt, "the exemption list is the thing under test"
+        for member in exempt:
+            version = json.loads((ROOT / member / "package.json").read_text())["version"]
+            assert version != product, member
 
 
 # =============================================================================

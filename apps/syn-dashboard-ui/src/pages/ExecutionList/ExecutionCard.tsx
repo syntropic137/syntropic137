@@ -31,7 +31,11 @@ export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
     <div className="flex flex-col gap-3">
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex items-center gap-2">
-          <StatusBadge status={exec.status} size="sm" />
+          <StatusBadge
+            status={exec.status}
+            failureClassification={exec.failure_classification}
+            size="sm"
+          />
           <span
             className="truncate text-sm font-medium text-[var(--color-text-primary)]"
             title={workflowLabel}

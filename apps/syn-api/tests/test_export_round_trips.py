@@ -20,6 +20,7 @@ enough here.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -391,6 +392,37 @@ class TestValuesCannotRestructureTheDocument:
         assert skills[0]["source"] == "https://github.com/a/b #frag"
 
 
+class TestAPhaseIdIsValidatedWhole:
+    """#1355's defect at the export hop.
+
+    `_validate_phase_id` exists to keep an id safe to interpolate into a path
+    and into hand-built YAML, and it is the LAST thing between a phase id and
+    both. It asked an anchored `^...$` pattern with `.match()`, which in Python
+    stops at a trailing newline rather than at the end of the string, so
+    `premise\n` passed the safety check and was written into two lines of the
+    emitted document.
+
+    Tested at the emitter, not at the pattern: the value was always well-formed
+    where it was checked and only became wrong where it was used.
+    """
+
+    def test_a_phase_id_with_a_trailing_newline_is_refused(self) -> None:
+        phase = PhaseDefinitionResponse(phase_id="premise\n", name="P", order=1)
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _yaml_phase_lines(phase)
+
+    def test_a_dotted_phase_id_still_exports(self) -> None:
+        """The negative control. `.` is legal in the grammar, so tightening the
+        matcher must not start refusing ids that were always valid."""
+        phase = PhaseDefinitionResponse(phase_id="premise.v2", name="P", order=1)
+
+        parsed = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0]
+
+        assert parsed["id"] == "premise.v2"
+        assert parsed["prompt_file"] == "phases/premise.v2.md"
+
+
 class TestAShorthandRefExportsAsAScalar:
     """A ref known only as a shorthand string has no source/version to split.
 
@@ -521,3 +553,398 @@ class TestARefusedDeclarationDoesNotLaunder:
 
         with pytest.raises(ValidationError, match="cannot honour allowed_tools"):
             self._reinstall(phase)
+
+
+# ---------------------------------------------------------------------------
+# #1429: the fields the comment claimed were not dropped
+# ---------------------------------------------------------------------------
+#
+# #1429 covered four fields. The fourth, `can_open_pr`, has been retired since
+# (#1477): it decides nothing, so it is neither served nor exported, and
+# `TestARetiredFieldIsNotExported` pins that instead.
+#
+# The inverse direction matters just as much and is easier to get wrong.
+# `clone_repos` and `delivers_repo_changes` default TRUE, so a truthy-only
+# emit guard drops an explicit `false` and reinstalls it as `true`. The phase
+# then clones repos it declared it did not want, or has the unpushed-work gate
+# treat a build artifact as a lost deliverable. Same laundering, opposite sign,
+# which is why these tests assert BOTH directions per field.
+
+
+@dataclass(frozen=True)
+class _ExportedPhase:
+    """What one exported phase says, read back off the parsed YAML.
+
+    A typed view rather than the raw mapping. `None` means the key was ABSENT,
+    which is the distinction every test here turns on: absent means "inherits
+    the loader default", present means "explicitly declares". A bare dict makes
+    those two look the same at the call site.
+    """
+
+    phase_id: str
+    name: str
+    order: int
+    prompt_file: str
+    top_level_keys: frozenset[str]
+    agent_keys: frozenset[str]
+    clone_repos: bool | None
+    delivers_repo_changes: bool | None
+    agent_sandbox: str | None
+    has_agent_block: bool
+
+    def declares(self, key: str) -> bool:
+        """Whether the exported YAML carries `key` at the phase's top level.
+
+        PRESENCE, not truthiness and not non-null. An emitted `clone_repos:
+        null` is present and would satisfy an `is None` check written to mean
+        "absent", while the loader reads it as a declared null rather than an
+        inherited default. A test that means absence must ask this.
+        """
+        return key in self.top_level_keys
+
+    def declares_agent(self, key: str) -> bool:
+        """Whether the exported `agent:` block carries `key`. Presence again."""
+        return key in self.agent_keys
+
+
+def _parsed_phase(phase: PhaseDefinitionResponse) -> _ExportedPhase:
+    """Export one phase and parse the YAML back, as this file's header requires."""
+    text = "\n".join(["phases:", *_yaml_phase_lines(phase)])
+    parsed = yaml.safe_load(text)
+    assert isinstance(parsed, dict)
+    phases = parsed["phases"]
+    assert isinstance(phases, list) and len(phases) == 1
+    entry = phases[0]
+    assert isinstance(entry, dict)
+    agent = entry.get("agent")
+    agent_map = agent if isinstance(agent, dict) else {}
+    sandbox = agent_map.get("sandbox")
+    return _ExportedPhase(
+        phase_id=str(entry["id"]),
+        name=str(entry["name"]),
+        order=int(entry["order"]),
+        prompt_file=str(entry["prompt_file"]),
+        top_level_keys=frozenset(str(k) for k in entry),
+        agent_keys=frozenset(str(k) for k in agent_map),
+        clone_repos=entry.get("clone_repos"),
+        delivers_repo_changes=entry.get("delivers_repo_changes"),
+        agent_sandbox=None if sandbox is None else str(sandbox),
+        has_agent_block=isinstance(agent, dict),
+    )
+
+
+class TestARetiredFieldIsNotExported:
+    """`can_open_pr` is retired (#1477): never served, never written back out.
+
+    Driven from a stored read-model row that still carries the key, because
+    that is the row a v9 projection holds today (its VERSION was deliberately
+    not bumped for the removal). The path under test is the one a real export
+    takes: stored row -> read model -> API response -> YAML.
+    """
+
+    def test_a_stored_row_carrying_the_key_exports_without_it(self) -> None:
+        from syn_api.routes.workflows.queries import _map_phase
+        from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
+            WorkflowDetail,
+        )
+
+        stored = WorkflowDetail(
+            id="wf",
+            name="wf",
+            workflow_type="research",
+            classification="simple",
+            description="retired-key probe",
+        ).to_dict()
+        stored["phases"] = [{"id": "open_pr", "name": "Open PR", "order": 1, "can_open_pr": True}]
+
+        response = _map_phase(WorkflowDetail.from_dict(stored).phases[0])
+        entry = _parsed_phase(response)
+
+        assert "can_open_pr" not in response.model_dump()
+        assert not entry.declares("can_open_pr"), (
+            "export wrote a retired key back out, so every reinstall of the "
+            "exported package carries it and warns again"
+        )
+
+    def test_the_response_does_not_declare_it(self) -> None:
+        assert "can_open_pr" not in PhaseDefinitionResponse.model_fields
+
+
+class TestDefaultTrueFieldsSurviveExport:
+    """The direction a truthy-only emit guard silently reverses."""
+
+    def test_clone_repos_false_is_emitted(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"clone_repos": False}))
+        assert entry.clone_repos is False, (
+            "an explicit clone_repos: false was dropped, so the phase reinstalls "
+            "cloning repos its author declared it did not need"
+        )
+
+    def test_clone_repos_true_stays_absent(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"clone_repos": True}))
+        assert not entry.declares("clone_repos")
+
+    def test_delivers_repo_changes_false_is_emitted(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"delivers_repo_changes": False}))
+        assert entry.delivers_repo_changes is False, (
+            "an explicit delivers_repo_changes: false was dropped, so the "
+            "unpushed-work gate reinstalls treating build output as a lost deliverable"
+        )
+
+    def test_delivers_repo_changes_true_stays_absent(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"delivers_repo_changes": True}))
+        assert not entry.declares("delivers_repo_changes")
+
+
+class TestSandboxSurvivesExport:
+    """`sandbox` is an `agent.` field in the authoring schema, not top level."""
+
+    def test_non_default_sandbox_is_emitted_under_agent(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "read-only"}))
+        assert entry.has_agent_block
+        assert entry.agent_sandbox == "read-only", (
+            "a read-only verify phase reinstalls at the default full-access level, "
+            "so the verifier regains write access to what it certifies"
+        )
+
+    def test_it_is_not_emitted_at_the_top_level(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "read-only"}))
+        assert not entry.declares("sandbox"), (
+            "sandbox at the top level is not in the authoring schema; the loader "
+            "would ignore it and the phase would reinstall at the default"
+        )
+
+    def test_the_default_stays_absent(self) -> None:
+        from syn_shared.agents import DEFAULT_PHASE_SANDBOX
+
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX}))
+        assert entry.agent_sandbox is None
+
+
+class TestTheSchemaClaimIsChecked:
+    """Replaces a comment that asserted this and was wrong for four fields.
+
+    `_yaml_phase_lines` carried the line "Nothing that CAN be expressed is
+    dropped here". It was false for can_open_pr (since retired, #1477),
+    clone_repos, delivers_repo_changes and agent.sandbox.
+
+    THE FIRST VERSION OF THIS TEST WAS A DECOY, and a codex review said so.
+    It asserted the schema had phase properties, that the response model had
+    fields, and that the two sets overlapped. All three can hold while the
+    export drops every field, because none of them looks at the export. It
+    replaced a false comment with a check that could not fail for the reason
+    the comment was false.
+
+    This version round-trips each field through the emitter and the loader.
+    """
+
+    @staticmethod
+    def _schema_phase_properties() -> frozenset[str]:
+        schema_path = (
+            Path(__file__).resolve().parents[3] / "schemas" / "plugin" / "workflow.schema.json"
+        )
+        if not schema_path.is_file():
+            pytest.fail(f"authoring schema not found at {schema_path}")
+        import json
+
+        schema = json.loads(schema_path.read_text())
+        defs = schema.get("$defs") or schema.get("definitions") or {}
+        phase_def = defs.get("PhaseYamlDefinition") or {}
+        props = phase_def.get("properties") or {}
+        if not props:
+            pytest.fail(
+                "could not locate PhaseYamlDefinition properties in the authoring "
+                "schema; this test must not pass on an empty set"
+            )
+        return frozenset(str(name) for name in props)
+
+    def test_the_three_fields_are_expressible_in_the_schema(self) -> None:
+        """Where each field lives. `sandbox` is under `agent`, not top level."""
+        props = self._schema_phase_properties()
+        for name in ("clone_repos", "delivers_repo_changes"):
+            assert name in props, f"{name} is not a top-level phase property in the schema"
+        assert "can_open_pr" not in props, (
+            "the retired can_open_pr is advertised in the authoring schema again; "
+            "it does nothing, so the schema must not offer it"
+        )
+        assert "sandbox" not in props, (
+            "sandbox became a top-level phase property; the export emits it under "
+            "`agent:` and would now be writing it to the wrong place"
+        )
+
+    def test_each_field_round_trips_through_the_loader(self) -> None:
+        """The assertion the decoy version was missing.
+
+        Export a phase carrying a NON-DEFAULT value for each field, parse the
+        YAML, load it through PhaseYamlDefinition, and compare against what
+        was exported. This is what "nothing expressible is dropped" means.
+        """
+        phase = _valid_phase().model_copy(
+            update={
+                "clone_repos": False,
+                "delivers_repo_changes": False,
+                "sandbox": "read-only",
+            }
+        )
+        entry = _parsed_phase(phase)
+
+        assert entry.has_agent_block, "the agent block vanished, so sandbox cannot survive"
+
+        loaded = PhaseYamlDefinition(
+            id=entry.phase_id,
+            name=entry.name,
+            order=entry.order,
+            prompt_file=entry.prompt_file,
+            clone_repos=bool(entry.clone_repos),
+            delivers_repo_changes=bool(entry.delivers_repo_changes),
+        )
+        assert loaded.clone_repos is False
+        assert loaded.delivers_repo_changes is False
+        assert entry.agent_sandbox == "read-only"
+
+    def test_the_read_model_stores_them(self) -> None:
+        """The third seam: to_dict is what is actually stored and served.
+
+        Found by codex review. The projection built a phase carrying these,
+        stored `to_dict()` without them, and `get_by_id` reloaded the defaults
+        - so the API reported a read-only phase as full-access. Export then wrote the wrong phase from
+        correct-looking in-memory state.
+        """
+        from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
+            PhaseDefinitionDetail,
+            WorkflowDetail,
+        )
+
+        detail = WorkflowDetail(
+            id="wf",
+            name="wf",
+            workflow_type="research",
+            classification="simple",
+            description="round-trip probe",
+            phases=[
+                PhaseDefinitionDetail(
+                    id="review",
+                    name="Review",
+                    order=1,
+                    clone_repos=False,
+                    delivers_repo_changes=False,
+                    sandbox="read-only",
+                )
+            ],
+        )
+        stored = detail.to_dict()
+        phase = stored["phases"][0]
+        for key, want in (
+            ("clone_repos", False),
+            ("delivers_repo_changes", False),
+            ("sandbox", "read-only"),
+        ):
+            assert key in phase, (
+                f"to_dict dropped {key}; the read model carries it but the STORED shape "
+                f"does not, so every reader gets the default"
+            )
+            assert phase[key] == want
+
+        reloaded = WorkflowDetail.from_dict(stored).phases[0]
+        assert reloaded.clone_repos is False
+        assert reloaded.delivers_repo_changes is False
+        assert reloaded.sandbox == "read-only", (
+            "a read-only phase reloaded at a different sandbox level; a security field "
+            "must never read back LESS restricted than it was stored"
+        )
+
+
+@pytest.mark.unit
+class TestAnInvalidSandboxIsNotLaundered:
+    """An invalid stored value must not export as a valid, MORE permissive one.
+
+    Found by codex review. The guard was `if phase.sandbox`, so `""` was
+    omitted and the phase reinstalled at the default full-access. The API
+    create path can store that value and execution preserves it in order to
+    reject it; export was the one step that made it look fine.
+
+    Same reasoning this file already applies to a refused `execution_type`:
+    an uninstallable package names the problem, a silently corrected one does
+    not.
+    """
+
+    def test_an_empty_sandbox_is_still_emitted(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": ""}))
+        assert entry.has_agent_block
+        assert entry.agent_sandbox is not None, (
+            "an invalid empty sandbox was dropped, so the phase reinstalls at "
+            "full-access - export upgraded its privileges"
+        )
+        assert entry.agent_sandbox == ""
+
+    def test_a_bogus_sandbox_is_still_emitted(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "not-a-level"}))
+        assert entry.has_agent_block
+        assert entry.agent_sandbox == "not-a-level"
+
+    def test_the_default_is_still_omitted(self) -> None:
+        """Widening the guard must not start writing the default back."""
+        from syn_shared.agents import DEFAULT_PHASE_SANDBOX
+
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX}))
+        assert entry.agent_sandbox is None
+
+
+@pytest.mark.unit
+class TestPresentNullIsNotAbsent:
+    """A pass-2 review found the typed view could conflate the two.
+
+    `_parsed_phase` reads with `.get()`, so an emitted `clone_repos: null` and
+    an omitted key both arrive as `None`. Those mean different things to the
+    loader: omitted inherits the default, null is a declared null. Any test
+    that means "absent" has to assert on the KEY, and these pin that the view
+    can still tell them apart.
+    """
+
+    @staticmethod
+    def _parse(text: str) -> _ExportedPhase:
+        import yaml as _yaml
+
+        parsed = _yaml.safe_load(text)
+        entry = parsed["phases"][0]
+        agent = entry.get("agent")
+        agent_map = agent if isinstance(agent, dict) else {}
+        sandbox = agent_map.get("sandbox")
+        return _ExportedPhase(
+            phase_id=str(entry["id"]),
+            name=str(entry["name"]),
+            order=int(entry["order"]),
+            prompt_file=str(entry.get("prompt_file", "")),
+            top_level_keys=frozenset(str(k) for k in entry),
+            agent_keys=frozenset(str(k) for k in agent_map),
+            clone_repos=entry.get("clone_repos"),
+            delivers_repo_changes=entry.get("delivers_repo_changes"),
+            agent_sandbox=None if sandbox is None else str(sandbox),
+            has_agent_block=isinstance(agent, dict),
+        )
+
+    def test_an_explicit_null_reads_as_declared(self) -> None:
+        entry = self._parse(
+            "phases:\n  - id: p\n    name: P\n    order: 1\n    clone_repos: null\n"
+        )
+        assert entry.clone_repos is None
+        assert entry.declares("clone_repos"), (
+            "a present null read as absent; a test meaning 'inherited the default' "
+            "would pass against YAML that declares a null"
+        )
+
+    def test_an_omitted_key_reads_as_absent(self) -> None:
+        entry = self._parse("phases:\n  - id: p\n    name: P\n    order: 1\n")
+        assert entry.clone_repos is None
+        assert not entry.declares("clone_repos")
+
+    def test_the_same_holds_inside_the_agent_block(self) -> None:
+        declared = self._parse(
+            "phases:\n  - id: p\n    name: P\n    order: 1\n    agent:\n      sandbox: null\n"
+        )
+        omitted = self._parse(
+            "phases:\n  - id: p\n    name: P\n    order: 1\n    agent:\n      model: sonnet\n"
+        )
+        assert declared.agent_sandbox is None and omitted.agent_sandbox is None
+        assert declared.declares_agent("sandbox")
+        assert not omitted.declares_agent("sandbox")

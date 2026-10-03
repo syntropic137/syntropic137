@@ -11,6 +11,7 @@ Two implementations are available:
 from syn_adapters.subscriptions.coordinator_service import (
     CoordinatorSubscriptionService,
     RealTimeProjectionAdapter,
+    SubscriptionNotLiveError,
     create_coordinator_service,
 )
 from syn_adapters.subscriptions.position_checkpoint import PositionCheckpoint
@@ -21,5 +22,6 @@ __all__ = [
     "EventSubscriptionService",
     "PositionCheckpoint",
     "RealTimeProjectionAdapter",
+    "SubscriptionNotLiveError",
     "create_coordinator_service",
 ]

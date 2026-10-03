@@ -1,5 +1,6 @@
 import type { SyntropicClient } from "../client.js";
 import { formatError } from "../errors.js";
+import { formatStarted } from "./format.js";
 import type {
   TriggerCreateResponse,
   TriggerListResponse,
@@ -73,18 +74,23 @@ export async function synCreateTrigger(
   const result = await client.post<TriggerCreateResponse>("/triggers", body);
   if (!result.ok) return formatError(result.error);
 
+  // A trigger is a standing instruction to start `workflow_id`, and that ID
+  // only resolves on the deployment it was created against — so the result has
+  // to name both, or the ambiguity outlives this call and fires later
+  // (issue #1264).
   const t = result.data;
-  return {
-    content: [
-      `## Trigger Created`,
-      "",
-      `- **Name:** ${t.name}`,
-      `- **ID:** ${t.trigger_id}`,
-      `- **Status:** ${t.status}`,
-      "",
-      "The trigger is now active and will fire when matching GitHub events arrive.",
-    ].join("\n"),
-  };
+  return formatStarted(
+    client,
+    "Trigger Created",
+    [
+      ["Name", t.name],
+      ["ID", t.trigger_id],
+      ["Workflow", args.workflow_id],
+      ["Event", args.event],
+      ["Status", t.status],
+    ],
+    ["The trigger is now active and will fire when matching GitHub events arrive."],
+  );
 }
 
 /** Tool definitions for trigger tools. */

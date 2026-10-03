@@ -9,6 +9,8 @@ from uuid import uuid4
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 from syn_domain.contexts.artifacts._shared.value_objects import (
+    UNREPORTED_AGENT,
+    AgentIdentity,
     ArtifactType,
     ContentType,
     compute_content_hash,
@@ -69,6 +71,9 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._size_bytes: int = 0
         self._title: str | None = None
         self._source_path: str | None = None  # #988: path under artifacts/output/
+        # Who produced it (#1284). One field for the pair because the pair is
+        # one fact - see AgentIdentity.
+        self._agent: AgentIdentity = UNREPORTED_AGENT
         # None only for artifacts written before ArtifactCreated v4 (#920).
         # The aggregate holds it so it can answer the one question the backfill
         # asks -- "is this row still undated?" -- from the event stream rather
@@ -145,6 +150,15 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         None for artifacts created before ArtifactCreated v5 (issue #988).
         """
         return self._source_path
+
+    @property
+    def agent(self) -> AgentIdentity:
+        """The harness and model that produced this artifact (issue #1284).
+
+        Both fields None for an artifact no phase produced, and for every
+        artifact written before ArtifactCreated v6.
+        """
+        return self._agent
 
     @property
     def created_at(self) -> datetime | None:
@@ -225,6 +239,10 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
             size_bytes=size_bytes,
             title=command.title,
             source_path=command.source_path,  # #988: original relative path
+            # #1284: what RAN, so a later phase can show a different model
+            # checked the work. Never the model the phase asked for.
+            agent_provider=command.agent_provider,
+            agent_model=command.agent_model,
             storage_uri=command.storage_uri,  # Object storage reference (ADR-012)
             is_primary_deliverable=command.is_primary_deliverable,
             derived_from=command.derived_from or [],
@@ -336,6 +354,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._size_bytes = event.size_bytes
         self._title = event.title
         self._source_path = event.source_path
+        self._agent = AgentIdentity(provider=event.agent_provider, model=event.agent_model)
         self._created_at = event.created_at
         self._storage_uri = event.storage_uri  # Object storage reference (ADR-012)
         self._is_primary_deliverable = event.is_primary_deliverable

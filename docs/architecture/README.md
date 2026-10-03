@@ -228,8 +228,21 @@ VSA Scanner → Manifest JSON → Diagram Generator → Markdown + Mermaid
 - C4 model integration
 - PlantUML export
 
-**See:** [Project Plan Phase 3](../../PROJECT-PLAN_20260126_PHASE3-EVENT-MODELING.md) (when created)
-
 ---
 
 **Questions?** See [AGENTS.md](../../AGENTS.md) or relevant ADRs.
+
+### Ubiquitous Language
+
+One per bounded context, canonical for that context's domain terms. Named
+`<bounded-context>-ubiquitous-language.md` so a search says which context each
+file speaks for:
+
+- [orchestration](orchestration-ubiquitous-language.md) - Execution, Phase, Resume, Fork (reserved), Pin, Admission
+- [agent_sessions](agent_sessions-ubiquitous-language.md) - Session, Operation, Delegation, Observation
+- [github](github-ubiquitous-language.md) - Installation, Token, Trigger Rule, Dedup Key
+- [artifacts](artifacts-ubiquitous-language.md) - Artifact, Phase Output File, Primary Deliverable
+- [organization](organization-ubiquitous-language.md) - Organization, System, Repo, Repo Claim
+
+`es-glossary.md` covers event-sourcing patterns, not domain terms. A word may
+mean different things in two contexts; one meaning per context is the rule.

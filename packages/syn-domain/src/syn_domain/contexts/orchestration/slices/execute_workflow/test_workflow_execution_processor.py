@@ -11,28 +11,52 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.agent_sessions import SessionInvocationState
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.invocation_attempt import (
+    UnregisteredLaunchError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_agent_attempts import (
+    started_session_manager,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+    _DispatchContext,
 )
 
 
-def _make_processor() -> WorkflowExecutionProcessor:
+def _make_processor(artifact_repository: object | None = None) -> WorkflowExecutionProcessor:
     """Create a processor with mocked dependencies."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
+    )
+
+    # These tests want provisioning to fail, and it does - but every attribute
+    # of an AsyncMock is another AsyncMock, so the setup result's `stderr` was
+    # a mock whose `.strip()` returns a coroutine nobody awaits. The failure is
+    # unchanged; it is now reported from a value that is actually a string.
+    workspace_service = MagicMock()
+    workspace_service.create_workspace.return_value.__aenter__.return_value.run_setup_phase = (
+        AsyncMock(
+            return_value=ExecutionResult(
+                exit_code=1, success=False, duration_ms=0.0, stderr="setup failed"
+            )
+        )
     )
 
     return WorkflowExecutionProcessor(
         execution_repository=AsyncMock(),
         session_repository=AsyncMock(),
-        workspace_service=MagicMock(),
-        artifact_repository=AsyncMock(),
+        workspace_service=workspace_service,
+        artifact_repository=artifact_repository or AsyncMock(),
         artifact_content_storage=None,
         artifact_query=None,
         conversation_storage=None,
@@ -89,12 +113,18 @@ class TestAgentRunnerSelection:
         handler = MagicMock()
         handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
         processor._agent_handler = handler
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "p-1",
             workspace=MagicMock(),
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
+        )
+        processor._runtimes.of("exec-1").begin(
+            "p-1",
+            session_manager=await started_session_manager(execution_id="exec-1", phase_id="p-1"),
+            started_at=datetime.now(UTC),
         )
         phase = ExecutablePhase(
             phase_id="p-1",
@@ -114,6 +144,7 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
 
         assert handler.handle.await_args.kwargs["runner"] == expected_runner
@@ -146,17 +177,26 @@ class TestAgentRunnerSelection:
         handler = MagicMock()
         handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
         processor._agent_handler = handler
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "p-1",
             workspace=MagicMock(),
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
 
         session_mgr = MagicMock()
         session_mgr.mark_launched = AsyncMock()
-        processor._runtime.begin("p-1", session_manager=session_mgr, started_at=datetime.now(UTC))
+        session_mgr.prepare_invocation = AsyncMock(
+            return_value=SessionInvocationState(
+                invocation_id="invocation", attempt_id="attempt", harness="claude"
+            )
+        )
+        session_mgr.finish_invocation = AsyncMock()
+        processor._runtimes.of("exec-1").begin(
+            "p-1", session_manager=session_mgr, started_at=datetime.now(UTC)
+        )
 
         phase = ExecutablePhase(
             phase_id="p-1",
@@ -176,6 +216,7 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
 
         session_mgr.mark_launched.assert_not_awaited()
@@ -184,9 +225,9 @@ class TestAgentRunnerSelection:
         assert handler.handle.await_args.kwargs["on_launch"] is session_mgr.mark_launched
 
     @pytest.mark.anyio
-    async def test_handle_run_agent_tolerates_missing_session_manager(self) -> None:
-        """No session manager registered for the phase (session tracking
-        disabled, repo=None) must not block agent dispatch.
+    async def test_handle_run_agent_refuses_dispatch_without_session_manager(self) -> None:
+        """No session manager for the phase means no durable invocation intent,
+        so the agent is never dispatched (#1398): fail closed, not open.
         """
         from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
             TodoAction,
@@ -201,12 +242,13 @@ class TestAgentRunnerSelection:
         handler = MagicMock()
         handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
         processor._agent_handler = handler
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "p-1",
             workspace=MagicMock(),
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
         # Deliberately no session manager registered for this phase.
 
@@ -218,7 +260,7 @@ class TestAgentRunnerSelection:
             prompt_template="do it",
         )
 
-        with pytest.raises(RuntimeError, match="stop after dispatch"):
+        with pytest.raises(UnregisteredLaunchError):
             await processor._handle_run_agent(
                 TodoItem(
                     execution_id="exec-1",
@@ -228,7 +270,9 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
+        handler.handle.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -425,27 +469,33 @@ class TestProcessorCancellation:
         session_mgr_b = MagicMock()
         session_mgr_b.complete_cancelled = AsyncMock()
         started = datetime.now(UTC)
-        processor._runtime.begin("phase-a", session_manager=session_mgr_a, started_at=started)
-        processor._runtime.begin("phase-b", session_manager=session_mgr_b, started_at=started)
+        processor._runtimes.of("exec-cancel").begin(
+            "phase-a", session_manager=session_mgr_a, started_at=started
+        )
+        processor._runtimes.of("exec-cancel").begin(
+            "phase-b", session_manager=session_mgr_b, started_at=started
+        )
 
         # Seed workspace context managers (async context manager protocol).
         workspace_cm_a = MagicMock()
         workspace_cm_a.__aexit__ = AsyncMock(return_value=None)
         workspace_cm_b = MagicMock()
         workspace_cm_b.__aexit__ = AsyncMock(return_value=None)
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-cancel").attach_workspace(
             "phase-a",
             workspace=MagicMock(),
             workspace_cm=workspace_cm_a,
             agent_env={"FOO": "bar"},
             claude_cmd=["claude", "--model", "haiku"],
+            delivers_repo_changes=True,
         )
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-cancel").attach_workspace(
             "phase-b",
             workspace=MagicMock(),
             workspace_cm=workspace_cm_b,
             agent_env={"BAZ": "qux"},
             claude_cmd=["claude", "--model", "sonnet"],
+            delivers_repo_changes=True,
         )
 
         started_at = datetime.now(UTC)
@@ -469,7 +519,7 @@ class TestProcessorCancellation:
         # Nothing per-phase is still held after cancellation. Asserted through
         # the runtime's own postcondition rather than one dict at a time: the
         # dicts are its business, "is anything still held" is the guarantee.
-        assert processor._runtime.is_idle
+        assert processor._runtimes.of("exec-cancel").is_idle
 
         # The result reflects the cancellation with the reason as error_message.
         assert result.status == "cancelled"
@@ -487,7 +537,7 @@ class TestProcessorCancellation:
 
         session_mgr = MagicMock()
         session_mgr.complete_cancelled = AsyncMock()
-        processor._runtime.begin(
+        processor._runtimes.of("exec-cancel").begin(
             "phase-a", session_manager=session_mgr, started_at=datetime.now(UTC)
         )
 
@@ -495,16 +545,17 @@ class TestProcessorCancellation:
         failing_cm.__aexit__ = AsyncMock(side_effect=RuntimeError("cleanup exploded"))
         healthy_cm = MagicMock()
         healthy_cm.__aexit__ = AsyncMock(return_value=None)
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-cancel").attach_workspace(
             "phase-a",
             workspace=MagicMock(),
             workspace_cm=failing_cm,
             agent_env={},
             claude_cmd=[],
+            delivers_repo_changes=True,
         )
         # phase-b holds a workspace CM and nothing else, which is what a phase
         # that died between provisioning and its first use looks like.
-        processor._runtime._workspace_cms["phase-b"] = healthy_cm
+        processor._runtimes.of("exec-cancel")._workspace_cms["phase-b"] = healthy_cm
 
         result = await processor._cancel_execution(
             execution_id="exec-cancel",
@@ -517,7 +568,7 @@ class TestProcessorCancellation:
 
         failing_cm.__aexit__.assert_awaited_once_with(None, None, None)
         healthy_cm.__aexit__.assert_awaited_once_with(None, None, None)
-        assert processor._runtime.is_idle
+        assert processor._runtimes.of("exec-cancel").is_idle
         assert result.status == "cancelled"
         assert result.error_message == "timeout"
 
@@ -648,9 +699,9 @@ class TestStaleCollectArtifactsGuard:
         all_artifact_ids: list[str] = []
         phase_outputs = PhaseOutputCache()
 
-        assert processor._runtime.workspace_for("p-1") is None
+        assert processor._runtimes.of("exec-1").workspace_for("p-1") is None
 
-        await processor._handle_collect_artifacts(
+        await processor._workspaces_for("exec-1", {}).collect(
             todo,
             phase,
             aggregate,
@@ -664,7 +715,7 @@ class TestStaleCollectArtifactsGuard:
         assert phase_outputs.primary == {}
         # #988: a stale todo must not seed the output TREE either.
         assert phase_outputs.files == {}
-        assert "p-1" not in processor._runtime._artifact_ids
+        assert "p-1" not in processor._runtimes.of("exec-1")._artifact_ids
 
 
 @pytest.mark.unit
@@ -718,12 +769,13 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
         files = [PhaseOutputFile(source_path="artifacts/output/review.yaml", content="r")]
         processor = _make_processor()
         processor._journal.append = AsyncMock()
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "p-1",
             workspace=MagicMock(),
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=[],
+            delivers_repo_changes=True,
         )
 
         handler = MagicMock()
@@ -747,10 +799,12 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
 
         with patch(
             "syn_domain.contexts.orchestration.slices.execute_workflow"
-            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            ".phase_workspace.ArtifactCollectionHandler",
             return_value=handler,
         ):
-            await processor._handle_collect_artifacts(todo, phase, MagicMock(), [], cache)
+            await processor._workspaces_for("exec-1", {}).collect(
+                todo, phase, MagicMock(), [], cache
+            )
 
         assert cache.files == {"p-1": files}
         assert cache.primary == {"p-1": "r"}

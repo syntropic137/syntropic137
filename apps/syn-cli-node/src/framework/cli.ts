@@ -10,11 +10,25 @@ export class CLI {
   private readonly version: string;
   private readonly groups = new Map<string, CommandGroup>();
   private readonly rootCommands = new Map<string, CommandDef>();
+  private readonly preflight: (() => Promise<void>) | undefined;
 
-  constructor(options: { name: string; description: string; version: string }) {
+  /**
+   * `preflight` runs once per command, after its arguments parse and before
+   * its handler, unless the command sets `skipPreflight`. Before the handler
+   * is the point: handlers print their own errors before throwing, so anything
+   * said later (in `run`'s catch, say) reads as an afterthought to an error it
+   * may explain. `--help`, `--version` and group help never reach it.
+   */
+  constructor(options: {
+    name: string;
+    description: string;
+    version: string;
+    preflight?: () => Promise<void>;
+  }) {
     this.name = options.name;
     this.description = options.description;
     this.version = options.version;
+    this.preflight = options.preflight;
   }
 
   addGroup(group: CommandGroup): this {
@@ -101,7 +115,9 @@ export class CLI {
     if (parsed.values["help"]) {
       print(renderCommandHelp(cmd, this.name, groupName));
       process.exit(0);
+      return;
     }
+    if (this.preflight && !cmd.skipPreflight) await this.preflight();
     await cmd.handler(parsed);
   }
 

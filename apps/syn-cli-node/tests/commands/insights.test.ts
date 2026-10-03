@@ -12,6 +12,7 @@ describe("insights commands", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -61,6 +62,23 @@ describe("insights commands", () => {
     const out = stdout();
     expect(out).toContain("$1.50");
     expect(out).toContain("test-repo");
+  });
+
+  it("cost renders the unattributed model bucket as unknown", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        total_cost_usd: "1.50",
+        total_tokens: 100000,
+        cost_by_repo: {},
+        cost_by_model: { "claude-opus-5-5": "1.00", "unattributed-model": "0.50" },
+      }),
+    );
+
+    await insightsGroup.getCommand("cost")!.handler({ positionals: [], values: {} });
+    const out = stdout();
+    expect(out).toContain("claude-opus-5-5");
+    expect(out).toContain("unknown");
+    expect(out).not.toContain("unattributed-model");
   });
 
   it("heatmap renders sparkline", async () => {

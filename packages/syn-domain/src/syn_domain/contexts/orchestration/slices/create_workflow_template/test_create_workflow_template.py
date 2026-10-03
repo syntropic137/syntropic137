@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEven
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
     CreateWorkflowTemplateHandler,
 )
+from syn_shared.agents import PhaseModelDefaults
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
@@ -215,7 +216,9 @@ class TestCreateWorkflowTemplateHandler:
         # Arrange
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
         command = create_test_command()
 
         # Act
@@ -230,7 +233,9 @@ class TestCreateWorkflowTemplateHandler:
         # Arrange
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
         command = create_test_command()
 
         # Act
@@ -246,7 +251,9 @@ class TestCreateWorkflowTemplateHandler:
         # Arrange
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
         command = create_test_command(aggregate_id="test-id")
 
         # Act
@@ -421,7 +428,9 @@ class TestReinstallIsIdempotent:
         """The original P0: a second install of a package id blew up."""
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(create_test_command(aggregate_id="code-review"))
         # Second install with no version declared: plain upsert, no refusal.
@@ -440,7 +449,9 @@ class TestReinstallIsIdempotent:
         """The stream holds Created -> Updated, which is what preserves provenance."""
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(create_test_command(aggregate_id="code-review"))
         await handler.handle(create_test_command(aggregate_id="code-review", name="Changed"))
@@ -462,7 +473,9 @@ class TestReinstallIsIdempotent:
 
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(create_test_command(aggregate_id="code-review", version="0.3.0"))
 
@@ -476,7 +489,9 @@ class TestReinstallIsIdempotent:
         """--force is the escape hatch that performs the upsert."""
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(create_test_command(aggregate_id="code-review", version="0.3.0"))
         await handler.handle(
@@ -497,7 +512,9 @@ class TestReinstallIsIdempotent:
         """A genuine upgrade is the common case and must not need a flag."""
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(create_test_command(aggregate_id="code-review", version="0.3.0"))
         await handler.handle(
@@ -522,7 +539,9 @@ class TestReinstallIsIdempotent:
 
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(
             create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
@@ -548,7 +567,9 @@ class TestReinstallIsIdempotent:
 
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(create_test_command(aggregate_id="code-review"))
 
@@ -586,7 +607,9 @@ class TestProvenanceCannotBeStripped:
         )
 
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         await handler.handle(
             create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
         )
@@ -607,7 +630,9 @@ class TestProvenanceCannotBeStripped:
         )
 
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         await handler.handle(
             create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
         )
@@ -627,7 +652,9 @@ class TestProvenanceCannotBeStripped:
         )
 
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         await handler.handle(
             create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
         )
@@ -639,7 +666,9 @@ class TestProvenanceCannotBeStripped:
     async def test_unversioned_template_stays_installable_without_version(self) -> None:
         """None -> None is the manual/unversioned path and must keep working."""
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(create_test_command(aggregate_id="manual-wf"))
         await handler.handle(create_test_command(aggregate_id="manual-wf", name="Edited"))
@@ -652,7 +681,9 @@ class TestProvenanceCannotBeStripped:
     async def test_unversioned_template_can_adopt_a_version(self) -> None:
         """None -> declared is the legacy migration path and must be allowed."""
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
 
         await handler.handle(create_test_command(aggregate_id="code-review"))
         await handler.handle(
@@ -739,7 +770,9 @@ class TestConcurrentInstall:
 
         repository = BarrieredWorkflowRepository(participants=2)
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowTemplateHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         results = await asyncio.gather(
             handler.handle(create_test_command(aggregate_id="code-review", name="A")),
@@ -760,7 +793,9 @@ class TestConcurrentInstall:
         from event_sourcing import ConcurrencyConflictError
 
         repository = BarrieredWorkflowRepository(participants=2)
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
 
         # Seed the stream. This install passes the barrier alone, so it needs
         # its own participant count of one.
@@ -798,7 +833,9 @@ class TestInstallIsIdempotent:
     @pytest.mark.asyncio
     async def test_identical_reinstall_is_a_successful_no_op(self) -> None:
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         command = create_test_command(
             aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
         )
@@ -814,7 +851,9 @@ class TestInstallIsIdempotent:
     async def test_identical_reinstall_writes_no_event(self) -> None:
         """Stronger than overwriting quietly: nothing is appended at all."""
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         command = create_test_command(
             aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
         )
@@ -833,7 +872,9 @@ class TestInstallIsIdempotent:
         cannot buy a no-op.
         """
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         command = create_test_command(aggregate_id="code-review", version="0.3.0")
 
         await handler.handle(command)
@@ -849,7 +890,9 @@ class TestInstallIsIdempotent:
         )
 
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         await handler.handle(
             create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
         )
@@ -869,7 +912,9 @@ class TestInstallIsIdempotent:
         B, and the only way through was --force.
         """
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
 
         wf_a = create_test_command(aggregate_id="wf-a", version="0.3.0", source_digest="aaa111")
         wf_b = create_test_command(aggregate_id="wf-b", version="0.3.0", source_digest="aaa111")
@@ -897,7 +942,9 @@ class TestNoOpCannotBeForged:
     @pytest.mark.asyncio
     async def test_changed_content_under_a_reused_digest_is_not_a_no_op(self) -> None:
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         await handler.handle(
             create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
         )
@@ -934,7 +981,9 @@ class TestNoOpCannotBeForged:
         )
 
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         command = create_test_command(
             aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
         )
@@ -969,7 +1018,9 @@ class TestNoOpCannotBeForged:
         )
 
         repository = InMemoryWorkflowRepository()
-        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
         command = create_test_command(
             aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
         )

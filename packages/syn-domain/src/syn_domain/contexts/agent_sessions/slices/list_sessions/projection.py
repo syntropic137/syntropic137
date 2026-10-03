@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
-from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
+from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch, SessionStatus
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
@@ -58,11 +58,14 @@ def _build_query_filters(
     status_filter: str | None,
     statuses: list[str] | None,
     parent_session_id: str | None = None,
+    execution_id: str | None = None,
 ) -> dict[str, str]:
     """Build the equality filter map for store.query()."""
     filters: dict[str, str] = {}
     if workflow_id:
         filters["workflow_id"] = workflow_id
+    if execution_id:
+        filters["execution_id"] = execution_id
     if status_filter and not statuses:
         filters["status"] = status_filter
     if parent_session_id:
@@ -108,30 +111,13 @@ def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
         )
 
 
-_OPERATION_FIELDS = [
-    "operation_id",
-    "operation_type",
-    "timestamp",
-    "duration_seconds",
-    "success",
-    "input_tokens",
-    "output_tokens",
-    "total_tokens",
-    "tool_name",
-    "tool_use_id",
-    "tool_input",
-    "tool_output",
-    "message_role",
-    "message_content",
-    "thinking_content",
-]
-
-_OPERATION_DEFAULTS: dict[str, Any] = {"operation_id": "", "operation_type": "", "success": True}
-
-
 def _apply_session_completed(existing: dict[str, Any], event_data: dict) -> None:
     """Apply SessionCompleted fields to an existing session record."""
-    existing["status"] = event_data.get("status", "completed")
+    # `completed` is the name of the EVENT, not of every outcome it reports:
+    # a session that failed or was cancelled arrives here too, carrying its
+    # status. One that carries none has not said how it ended, and reading
+    # that as the success value is #1256's shape (#1256).
+    existing["status"] = event_data.get("status") or SessionStatus.FAILED.value
     existing["completed_at"] = event_data.get("completed_at")
     existing["input_tokens"] = event_data.get("total_input_tokens", 0)
     existing["output_tokens"] = event_data.get("total_output_tokens", 0)
@@ -155,16 +141,6 @@ def _apply_session_completed(existing: dict[str, Any], event_data: dict) -> None
         # would be harmless today and wrong the moment a live AgentLaunched
         # has already landed on the row (#1047, #1065).
         existing["agent_launch"] = launch.value
-
-
-def _append_operation(existing: dict[str, Any], event_data: dict) -> None:
-    """Append an operation record to the session's operations list."""
-    operation = {
-        field: event_data.get(field, _OPERATION_DEFAULTS.get(field)) for field in _OPERATION_FIELDS
-    }
-    operations = existing.get("operations", [])
-    operations.append(operation)
-    existing["operations"] = operations
 
 
 def _update_subagent_record(
@@ -193,7 +169,7 @@ class SessionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "session_summaries"
-    VERSION = 4  # Bumped: agent_launch fact for never-started detection (#1047, #1065)
+    VERSION = 5  # Bumped: operations list dropped; the timeline is Lane 2 only (#1034)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -256,7 +232,13 @@ class SessionListProjection(AutoDispatchProjection):
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_operation_recorded(self, event_data: dict) -> None:
-        """Handle OperationRecorded - update token counts and store operation."""
+        """Handle OperationRecorded - accumulate the session's token totals.
+
+        Totals only. The operation's own trace (tool name, I/O, thinking) is
+        Lane 2 telemetry and is served from ``SessionToolsProjection``; this
+        projection used to append a second copy that no reader ever consulted
+        (#1034).
+        """
         session_id = event_data.get("session_id")
         if not session_id:
             return
@@ -264,7 +246,6 @@ class SessionListProjection(AutoDispatchProjection):
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         if existing:
             _accumulate_tokens(existing, event_data)
-            _append_operation(existing, event_data)
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_session_completed(self, event_data: dict) -> None:
@@ -402,6 +383,7 @@ class SessionListProjection(AutoDispatchProjection):
         self,
         *,
         workflow_id: str | None = None,
+        execution_id: str | None = None,
         parent_session_id: str | None = None,
         statuses: Collection[str] | None = None,
         started_after: datetime | None = None,
@@ -427,7 +409,7 @@ class SessionListProjection(AutoDispatchProjection):
         ``search`` matches case-insensitively against the session id and the
         workflow id.
         """
-        filters = _build_query_filters(workflow_id, None, None, parent_session_id)
+        filters = _build_query_filters(workflow_id, None, None, parent_session_id, execution_id)
 
         def base(record: ProjectionRecord) -> bool:
             return matches_search(search, record.get("id"), record.get("workflow_id"))

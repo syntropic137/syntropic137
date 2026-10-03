@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from syn_api.types import Err, Ok
+from syn_shared.agents import PhaseModelDefaults
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -60,6 +61,7 @@ async def _reset_storage():
     handler = CreateWorkflowTemplateHandler(
         repository=get_workflow_repository(),
         event_publisher=get_event_publisher(),
+        model_defaults=PhaseModelDefaults(),
     )
     workflow_repo = get_workflow_repository()
     if not await workflow_repo.exists("self-heal-pr"):

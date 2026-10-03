@@ -17,6 +17,10 @@ class SessionRepositoryPort(Protocol):
     - Duration
     """
 
+    # The identifier below is positional-only. The implementation is the generic
+    # RepositoryAdapter[TAggregate], which necessarily names it aggregate_id, and
+    # Protocol matching compares parameter NAMES for anything not positional-only
+    # -- so a domain-specific name here would leave this port unsatisfiable (#1305).
     async def save(self, aggregate: "AgentSessionAggregate") -> None:
         """Save the session aggregate.
 
@@ -30,7 +34,7 @@ class SessionRepositoryPort(Protocol):
         """
         ...
 
-    async def get_by_id(self, session_id: str) -> "AgentSessionAggregate | None":
+    async def get_by_id(self, session_id: str, /) -> "AgentSessionAggregate | None":
         """Retrieve session aggregate by ID.
 
         Args:
@@ -41,7 +45,7 @@ class SessionRepositoryPort(Protocol):
         """
         ...
 
-    async def exists(self, session_id: str) -> bool:
+    async def exists(self, session_id: str, /) -> bool:
         """Check if a session exists.
 
         Args:

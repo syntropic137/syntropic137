@@ -55,8 +55,7 @@ phases:
     prompt_file: phases/synthesis.md
     agent:
       provider: codex
-      model: gpt-5.6-sol
-      sandbox: read-only
+      model: gpt-sol
 ```
 
 Phases execute sequentially. Each phase can reference the output of previous phases using `{{phase-id}}` substitution. The `$ARGUMENTS` variable passes user input into the prompt.
@@ -72,7 +71,7 @@ Syntropic137 is not tied to a single agent vendor. Each phase declares which har
 - `provider: claude` runs the phase on Claude Code (`claude -p`). This is the default when no `agent` block is present.
 - `provider: codex` runs the phase on OpenAI Codex (`codex exec`).
 
-Both harnesses use the same workspace image, the same isolation model, the same token accounting, and the same tool-call timeline. They differ in what they can enforce and what telemetry they emit. Claude phases produce hook events, subagent tracking, and todo data. Codex phases produce none of those, and they are the only phases whose `sandbox` level is actually enforced.
+Both harnesses use the same workspace image, the same isolation model, the same token accounting, and the same tool-call timeline. They differ in what they can enforce and what telemetry they emit. Claude phases produce hook events, subagent tracking, and todo data. Codex phases produce none of those.
 
 See [Choosing an Agent Harness](/docs/guide/workflows#choosing-an-agent-harness) for the full field reference and the caveats.
 
@@ -96,27 +95,22 @@ An **execution** is a running instance of a workflow. It progresses through a st
     </div>
     <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
       <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
-      <span className="text-fd-muted-foreground">→ pause →</span>
-      <span className="inline-block w-28 rounded-md bg-amber-500/20 px-3 py-1.5 text-center text-amber-400">PAUSED</span>
-      <span className="text-fd-muted-foreground">→ resume →</span>
-      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary">RUNNING</span>
-    </div>
-    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
-      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
       <span className="text-fd-muted-foreground">→ interrupt →</span>
       <span className="inline-block w-28 rounded-md bg-orange-500/20 px-3 py-1.5 text-center text-orange-400">INTERRUPTED</span>
       <span className="text-fd-muted-foreground">→ retry →</span>
       <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary">RUNNING</span>
     </div>
     <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem+6rem+3.5rem+0.5rem)]">
-      <span className="inline-block w-28 rounded-md bg-amber-500/20 px-3 py-1.5 text-center text-amber-400 opacity-0">PAUSED</span>
+      <span className="inline-block w-28 rounded-md bg-orange-500/20 px-3 py-1.5 text-center text-orange-400 opacity-0">INTERRUPTED</span>
       <span className="text-fd-muted-foreground">→ cancel →</span>
       <span className="inline-block w-28 rounded-md bg-zinc-500/20 px-3 py-1.5 text-center text-zinc-400">CANCELLED</span>
     </div>
   </div>
 </div>
 
-You can **pause**, **resume**, and **cancel** executions in real time via the REST API or the CLI. The agent can only be paused at safe yield points: between phases, after tool calls, or after LLM responses.
+You can **cancel** a running execution or **inject** context into it in real time via the REST API or the CLI. The agent only acts on a signal at safe yield points: between phases, after tool calls, or after LLM responses.
+
+A run that ended without finishing can be **resumed**: that creates a new execution which inherits the phases that completed and restarts at the first one that did not. See [Resuming Failed Executions](/docs/guide/resuming-executions).
 
 ## Sessions
 
@@ -129,7 +123,9 @@ A **session** is an agent's working period within an execution. It captures:
 
 Sessions are the primary unit of observability. When you debug a failed execution or analyze costs, you're looking at session data.
 
-Codex sessions are thinner than claude sessions. Tokens and the tool timeline are captured for both, but codex does not report its model on the wire, so a codex phase that does not name a concrete model id in its `agent` block is recorded unpriced. Vendor cost is always null for codex.
+A run can hold more sessions than its phases: delegates an agent starts inside its workspace, and the native transcripts each harness records. [Finding every session in a workflow run](/docs/guide/session-discovery) explains how to list all of them, with lineage, coverage and gaps.
+
+Codex sessions are thinner than claude sessions. Tokens and the tool timeline are captured for both, but codex does not report its model on the wire, so the platform prices a codex phase from the model it asked codex to run: the phase's `model`, or the `gpt-sol` default (priced as `gpt-6-sol`). Vendor cost is always null for codex.
 
 ## Artifacts
 

@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from syn_api.routes.executions.queries import _map_phase_to_response
+from syn_api.routes.executions.phase_mapping import _map_phase_to_response
 from syn_api.types import PhaseExecution
 from syn_api.types import ToolOperation as ApiToolOperation
 

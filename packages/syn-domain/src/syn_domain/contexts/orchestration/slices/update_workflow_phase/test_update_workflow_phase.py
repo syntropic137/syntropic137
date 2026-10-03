@@ -28,7 +28,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent i
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import AgentProvider, PhaseModelDefaults
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
@@ -256,7 +256,9 @@ class TestUpdateWorkflowPhaseHandler:
         publisher = InMemoryEventPublisher()
         aggregate = _create_aggregate_with_phases()
         repository.seed(aggregate)
-        handler = UpdateWorkflowPhaseHandler(repository, publisher)
+        handler = UpdateWorkflowPhaseHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         command = UpdatePhasePromptCommand(
             aggregate_id=_WORKFLOW_ID,
@@ -276,7 +278,9 @@ class TestUpdateWorkflowPhaseHandler:
         publisher = InMemoryEventPublisher()
         aggregate = _create_aggregate_with_phases()
         repository.seed(aggregate)
-        handler = UpdateWorkflowPhaseHandler(repository, publisher)
+        handler = UpdateWorkflowPhaseHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         command = UpdatePhasePromptCommand(
             aggregate_id=_WORKFLOW_ID,
@@ -294,7 +298,9 @@ class TestUpdateWorkflowPhaseHandler:
         """Handler should raise ValueError when workflow not found."""
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = UpdateWorkflowPhaseHandler(repository, publisher)
+        handler = UpdateWorkflowPhaseHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        )
 
         command = UpdatePhasePromptCommand(
             aggregate_id="nonexistent-id",

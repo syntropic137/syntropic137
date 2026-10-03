@@ -631,13 +631,16 @@ npm install -g @syntropic137/cli@latest
 syn version
 ```
 
-- [ ] Version matches the release being validated (e.g., `<VERSION>`)
+- [ ] Line 1 (the CLI) matches the release being validated (e.g., `<VERSION>`)
+- [ ] Line 2 names the `syn-api` build that answered, with its image tag and commit
+- [ ] No `Warning:` line on stderr (one appears when the CLI and the server are on different major.minor releases)
 
 ```bash
 syn health
 ```
 
 - [ ] API connectivity confirmed
+- [ ] First line reports the running `syn-api` release; image tag and commit appear when the image was stamped
 - [ ] No version mismatch warnings
 
 ### Verify CLI version matches selfhost stack
@@ -646,7 +649,8 @@ The CLI and API must be on the same release version. A mismatch can cause
 subtle issues (missing fields, changed endpoints, broken type contracts).
 
 ```bash
-CLI_VERSION=$(syn version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+# Line 1 only: line 2 is the server's build and carries its own version.
+CLI_VERSION=$(syn version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 API_VERSION=$(docker inspect syn137-api --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null | sed 's/^v//')
 echo "CLI: $CLI_VERSION  API: $API_VERSION"
 [ "$CLI_VERSION" = "$API_VERSION" ] && echo "✅ Versions match" || echo "❌ VERSION MISMATCH"
@@ -696,11 +700,12 @@ syn health
 curl -s http://localhost:<port>/api/v1/health | jq .
 ```
 
-> **Neither of these reports webhook or polling state.** Measured 2026-08-27:
-> `syn health` prints only event-store and subscription lines, and
-> `/api/v1/health` returns exactly `{status, mode, subscription, codex_auth}`.
-> There is no webhook field to read. Use `/health` (no `/api/v1`) and you get the
-> SPA's HTML 200, which looks like a passing check and is not one.
+> **Neither of these reports webhook or polling state.** Verified 2026-09-23:
+> `syn health` prints build identity, status, and read-path details.
+> `/api/v1/health` returns `status`, `mode`, and `build`, plus optional
+> `degraded_reasons`, `subscription`, `codex_auth`, and `warnings` blocks. There
+> is no webhook field to read. Use `/health` (no `/api/v1`) and you get the SPA's
+> HTML 200, which looks like a passing check and is not one.
 >
 > Until a webhook-status field exists, determine the mode from the API logs
 > instead - the poller announces itself at startup:
@@ -729,7 +734,7 @@ curl -s http://localhost:<port>/api/v1/health | jq .
 
 **Polling-available events (17):** `push`, `pull_request`, `pull_request_review`,
 `pull_request_review_comment`, `issue_comment`, `issues`, `create`, `delete`,
-`release`, `fork`, `watch`, `commit_comment`, `discussion`, `gollum`, `member`,
+`release`, `resume`, `watch`, `commit_comment`, `discussion`, `gollum`, `member`,
 `public`, `sponsorship`
 
 **Webhook-only events (CI/CD + security + admin):** `check_run`, `check_suite`,
@@ -1145,8 +1150,6 @@ syn watch activity
 ### Execution control
 
 ```bash
-syn control pause <execution-id>
-syn control resume <execution-id>
 syn control cancel <execution-id> --force     # --force is REQUIRED
 syn control stop <execution-id> --force       # --force is REQUIRED
 ```
@@ -1182,16 +1185,11 @@ remaining phases from starting. Assert that, not "the execution halts".
 > at unit and processor level. Confirming it end to end is a job for this
 > runbook, not a thing to assume.
 
-**PAUSE IS NOT OBSERVABLE.** `syn control pause` returns 200 and prints
-`Pause signal sent`, and then nothing changes: measured, the execution ran to
-completion 45s later. No field in the execution payload reflects a pending
-pause - there is no `paused`, no `pause_requested`, nothing. A following
-`resume` fails with `Cannot resume execution in state running`, which is a
-correct guard that the API surface gives an operator no way to understand.
-
-- [ ] Record what pause actually does; do not mark it passing because the
-      command returned 0. A 200 and a printed acknowledgement are not evidence
-      the signal was honoured
+**PAUSE IS GONE.** It was never observable: `syn control pause` returned 200,
+printed `Pause signal sent`, and nothing changed, because no executor ever read
+the signal. It was deleted rather than finished - `cancel` already covers
+stopping a run, and `resume` now means resuming a FAILED or INTERRUPTED
+execution from its first incomplete phase (`syn execution resume`).
 
 ### Inject context into running execution
 
@@ -1538,28 +1536,37 @@ Installed baked delegation skill delegating-to-claude-p for agent codex
 Installed baked delegation skill delegating-to-codex   for agent claude-code
 ```
 
-#### Codex must bypass its own sandbox when it is the DELEGATE
+#### Codex keeps its own sandbox when it is the DELEGATE
 
-A delegated `codex exec` inside a workspace container must use
-`--dangerously-bypass-approvals-and-sandbox`, never `-s workspace-write`. Codex
-sandboxes itself with bubblewrap, and bubblewrap cannot create an unprivileged
-user namespace inside Docker, so every write in the delegated run fails.
+A delegated Codex inside a workspace runs through `syn-delegate codex`, which
+passes Codex an explicit `--sandbox workspace-write` (or `read-only`) and probes
+that sandbox live before launching. Codex's sandbox is never turned off: the
+repository fitness check `test_no_codex_sandbox_bypass` fails on the bypass flag.
 
-The error is three layers deep and the top two both look like the answer:
+Before agentic-workspace #2 this failed inside Docker: bubblewrap could not
+create a user namespace (seccomp), and on AppArmor hosts could not remount `/`
+(`docker-default` has `deny mount,`). The error is layered and the top line
+misleads:
 
 ```
 warning: Codex could not find bubblewrap on PATH ... will use the bundled
          bubblewrap in the meantime            <- WARNING. codex continues.
-bwrap: No permissions to create a new namespace, likely because the kernel
-       does not allow non-privileged user namespaces.     <- the actual fault
-Failed to write file /workspace/palindrome.py             <- the symptom
+bwrap: No permissions to create a new namespace ...  <- seccomp (fixed by AW #2)
+bwrap: Failed to make / slave: Permission denied     <- AppArmor host, profile not loaded
+Failed to write file /workspace/palindrome.py         <- the symptom
 ```
 
-Installing bubblewrap does not help: a bundled copy is already in use and the
-namespace is what is denied. The flag sounds reckless and is not: the workspace
-container IS the sandbox.
+Images labelled `agentic.codex_cli_version` now run with the Codex seccomp
+profile and, on AppArmor hosts, the `agentic-codex-sandbox` profile, which the
+host must load once (`just apparmor-setup`, see
+`docs/deployment/apparmor-codex-sandbox.md`). A missing profile fails the
+execution with provision reason `apparmor_profile_not_loaded`; an unusable
+sandbox makes `syn-delegate` exit 69 with `launch_failed` /
+`codex_sandbox_unavailable`, which the session inventory reports as the gap
+`invocation_launch_failed_codex_sandbox_unavailable`.
 
-- [ ] Delegated `codex exec` uses the bypass flag, and `< /dev/null`
+- [ ] Delegation uses `syn-delegate codex`, run from under `/workspace`
+- [ ] No `codex_sandbox_unavailable` launch failure in the session inventory
 - [ ] Delegated run's output appears in the parent transcript, not just a claim
       that it ran
 
@@ -3236,7 +3243,7 @@ claude plugin update syntropic137@syntropic137
 
 Invoke these skills and verify they give correct guidance:
 
-- [ ] **`execution-control` skill**: Walk through pause/resume guidance - references valid CLI flags
+- [ ] **`execution-control` skill**: Walk through cancel/resume guidance - `resume` is resume-from-failure, NOT the deleted pause-resume
 - [ ] **`observability` skill**: Query tool timeline for a session from Section 6 - session output uses server-rendered `*_display` fields (`total_cost_display`, `total_tokens_display`, `agent_model_display`, `duration_display`) per ADR-064, not client-formatted numbers
 - [ ] **`marketplace` skill**: Workflow install/list guidance uses `syn workflow packages` (not `syn workflow installed`) with a note that `syn workflow list` shows the live stack
 
@@ -3250,7 +3257,7 @@ whether they still described commands that exist.
 - [ ] **`workflow-management`**: lifecycle guidance; no `syn workflow installed`
 - [ ] **`syn-marketplace`**: matches the `marketplace` skill, no drift between the pair
 - [ ] **`syn-triggers`**: uses `max_attempts` (not `max_fires`) and names the safety guards
-- [ ] **`syn-control`**: pause/resume/cancel flags match `syn control --help`
+- [ ] **`syn-control`**: cancel/inject/stop flags match `syn control --help`; no pause or resume
 - [ ] **`syn-insights`**: references endpoints that exist and cost fields that are current
 - [ ] **`syn-repo`**: repo add/assign guidance matches `syn repo --help`
 - [ ] **`organization`**: org/system/repo hierarchy guidance is current
@@ -3408,7 +3415,7 @@ report ever generated from it.
 **Validated by:** <name or agent>
 **Stack environment:** selfhost (`syntropic137_selfhost`)
 **Webhook mode:** polling-only / webhook active
-**Runbook:** [docs/testing/release-validation.md](../release-validation.md)
+**Runbook:** [docs/testing/release-validation.md](release-validation.md)
 
 ## What Passed
 
@@ -3567,7 +3574,7 @@ Full pass/fail/skip for every command and feature tested.
 | **Executions**                     |        |       |
 | syn execution list/show            |        |       |
 | syn execution list --status        |        |       |
-| syn control status/pause/resume    |        |       |
+| syn control status                 |        |       |
 | syn control cancel/stop/inject     |        |       |
 | syn watch execution/activity       |        |       |
 | **Sessions & Observability**       |        |       |
@@ -3647,7 +3654,7 @@ Map each fix to the Docker image it ships in:
 ### Initialize submodules
 
 The Docker build context requires submodule contents (event-sourcing-platform,
-agentic-primitives). If working in a worktree or fresh clone:
+agentic-workspace). If working in a worktree or fresh clone:
 
 ```bash
 git submodule update --init --recursive
@@ -3692,12 +3699,18 @@ grep 'image:.*syn-api\|image:.*syn-gateway' ~/.syntropic137/docker-compose.syntr
 #    After:  image: syntropic137_development-gateway:latest
 ```
 
-Then recreate only the affected containers:
+Then recreate only the affected containers. Check first -- restarting `api`
+orphans every running execution, discarding its work and leaving any pull
+request it already opened open and unverified (#1179):
 
 ```bash
+python3 predeploy_check.py   # infra/scripts/, copy to the host; needs only python3
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps api
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps gateway
 ```
+
+- [ ] `predeploy_check.py` exited 0 before the restart (exit 2 means it could
+      not tell, which is not an all-clear), or `--force` was a deliberate choice
 
 Verify the containers restarted with the local images:
 

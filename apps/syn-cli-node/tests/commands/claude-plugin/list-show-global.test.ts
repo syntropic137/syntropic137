@@ -13,6 +13,7 @@ describe("claude-plugin list/show/global", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
   });
 

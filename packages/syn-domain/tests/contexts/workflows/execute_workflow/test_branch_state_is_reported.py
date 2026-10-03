@@ -64,9 +64,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow import unpushed_work_guard
 from syn_domain.contexts.orchestration.slices.execute_workflow import (
-    unpushed_work_guard as guard,
+    branch_observation,
+    workspace_git,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.branch_observation import (
+    PhaseStartingPoint,
+    PhaseStartingPoints,
+    record_phase_starting_point,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseProducedNoDeclaredOutputError,
@@ -79,12 +84,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_wor
     _REPO,
     _Clone,
     _clone_repository,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    GitWorkspace,
-    PhaseStartingPoint,
-    PhaseStartingPoints,
-    record_phase_starting_point,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
@@ -105,6 +104,9 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+        GitWorkspace,
     )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -199,10 +201,10 @@ async def _fail_after(start: PhaseStartingPoints | None) -> WorkflowFailedEvent:
     # keep the events inspectable
     processor._journal._repository.save = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     if start is not None:
-        processor._runtime._starting_points = start  # pyright: ignore[reportPrivateUsage]
+        processor._runtimes.of(_EXECUTION_ID)._starting_points = start  # pyright: ignore[reportPrivateUsage]
 
     started_at = datetime.now(UTC) - timedelta(seconds=1671.8)
-    processor._runtime._started_at[_PHASE_ID] = started_at  # pyright: ignore[reportPrivateUsage]
+    processor._runtimes.of(_EXECUTION_ID)._started_at[_PHASE_ID] = started_at  # pyright: ignore[reportPrivateUsage]
     aggregate = _running_aggregate()
 
     await processor._fail_execution(
@@ -506,7 +508,7 @@ async def test_a_hanging_remote_cannot_hold_up_the_failing_phase(
     phase then reports is the same absence of a verdict any unanswered command
     produces, and #1167's own reason is still the reason it failed.
     """
-    monkeypatch.setattr(guard, "_REMOTE_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(workspace_git, "REMOTE_TIMEOUT_SECONDS", 1)
     start = await _provisioned(clone.workspace)
     clone.hang_the_remote(seconds=30)
 
@@ -872,7 +874,7 @@ async def test_a_phase_that_writes_its_deliverable_is_never_even_asked(
 
     # Patched where the question is asked rather than where it is wired in, so
     # this fails for ANY success-path caller, not only the one wired today.
-    monkeypatch.setattr(unpushed_work_guard, "observe_branches", _never_ask)
+    monkeypatch.setattr(branch_observation, "observe_branches", _never_ask)
 
     fake = FakeAgentExecutionHandler.success(
         produces=[("artifacts/output/deliverable.md", b"# Real output")]
@@ -913,7 +915,7 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
     route. So the spy records how many agent runs had happened when it was
     asked, and the answer for phase N must be N.
     """
-    real = unpushed_work_guard.record_phase_starting_point
+    real = branch_observation.record_phase_starting_point
     fake = FakeAgentExecutionHandler.success(
         produces=[("artifacts/output/deliverable.md", b"# Real output")]
     )
@@ -923,7 +925,7 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
         agent_runs_before.append(fake.call_count)
         return await real(workspace)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(unpushed_work_guard, "record_phase_starting_point", _spy)
+    monkeypatch.setattr(branch_observation, "record_phase_starting_point", _spy)
 
     processor = _make_smoke_processor(fake)
     result = await processor.run(
@@ -939,7 +941,11 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
         "each phase must record its starting point once, before its own agent "
         f"runs and after the previous one finished; got {agent_runs_before}"
     )
-    assert not processor._runtime._starting_points._by_phase, (  # pyright: ignore[reportPrivateUsage]
-        "starting points outlived their phases - a later failure would compare "
-        "against a workspace that no longer exists"
+    assert processor._runtimes.is_idle, (  # pyright: ignore[reportPrivateUsage]
+        "the processor still holds state for a run that ended - a later failure "
+        "would compare against a workspace that no longer exists. Asked of the "
+        "registry rather than of one runtime's `_by_phase` since #1311 made the "
+        "runtime itself per-run: `finalize` forgetting the starting point is "
+        "pinned in test_phase_starting_points.py, and this asks the stronger "
+        "question of whether anything at all outlived the run."
     )

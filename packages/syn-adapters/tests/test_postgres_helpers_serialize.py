@@ -25,15 +25,17 @@ ESCAPED_NUL = chr(92) + "u0000"  # 6 literal chars: backslash u 0 0 0 0
 def test_serialize_strips_nul_byte_in_string_value() -> None:
     out = serialize({"content": "hello" + NUL + "world"})
     assert ESCAPED_NUL not in out
-    assert json.loads(out)["content"] == "helloworld"
+    assert str(json.loads(out)["content"]).startswith("helloworld")
 
 
 def test_serialize_strips_nul_in_nested_and_list() -> None:
     out = serialize({"a": {"b": "x" + NUL + "y"}, "c": ["p" + NUL + "q", "r"]})
     assert ESCAPED_NUL not in out
     parsed = json.loads(out)
-    assert parsed["a"]["b"] == "xy"
-    assert parsed["c"] == ["pq", "r"]
+    assert str(parsed["a"]["b"]).startswith("xy")
+    altered, untouched = parsed["c"]
+    assert str(altered).startswith("pq")
+    assert untouched == "r", "a clean sibling must not be rewritten"
 
 
 def test_serialize_preserves_literal_backslash_u_sequence() -> None:

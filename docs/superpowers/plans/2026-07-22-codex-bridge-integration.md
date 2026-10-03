@@ -1,5 +1,9 @@
 # Codex Bridge Integration - reuse the proven docker-exec + observability pipeline
 
+> Note (#1398): full-access sandbox invocations below are written via
+> `CODEX_SANDBOX_FLAGS[PhaseSandbox.FULL_ACCESS]` / `$FULL_ACCESS`; the repository
+> forbids a literal sandbox-disabling invocation (`test_no_codex_sandbox_bypass`).
+>
 > Status: implementation plan (buildable). Scope: the DAYS-AWAY OpenAI demo vertical
 > slice. Explicitly NOT the agentic-primitives `itmux run` / `run_agent` / AP
 > RunExecutor path (that is syn137#778, the ~2-week "build-it-right" target, OUT OF
@@ -473,7 +477,7 @@ process exit from the docker-exec stream), consumed by the handler (Task 5). Rul
    git repo, force at least 2 turns (e.g. a task that requires an initial failed test run
    then a fix):
    ```bash
-   codex exec --json --sandbox danger-full-access --skip-git-repo-check \
+   codex exec --json --sandbox "$FULL_ACCESS" --skip-git-repo-check \
      "Create palindrome.py with is_palindrome(s). Write a pytest with a deliberately failing \
       case first, run it, observe the failure, then correct is_palindrome and re-run until green." \
      > codex_multiturn.jsonl 2>&1
@@ -590,7 +594,7 @@ process exit from the docker-exec stream), consumed by the handler (Task 5). Rul
 **Interfaces:**
 - Produces `def _build_codex_command(phase: ExecutablePhase, prompt: str) -> list[str]`:
   ```python
-  ["codex", "exec", "--json", "--sandbox", "danger-full-access",
+  ["codex", "exec", "--json", "--sandbox", CODEX_SANDBOX_FLAGS[PhaseSandbox.FULL_ACCESS],
    "--skip-git-repo-check", "--model", _resolve_codex_model(phase.agent_config.model), prompt]
   ```
   `danger-full-access` is MANDATORY (workspace-write silently no-ops writes under Docker,
@@ -625,7 +629,7 @@ process exit from the docker-exec stream), consumed by the handler (Task 5). Rul
 
    def test_codex_command_shape():
        cmd = _build_codex_command(_phase("codex"), "do the thing")
-       assert cmd == ["codex","exec","--json","--sandbox","danger-full-access",
+       assert cmd == ["codex","exec","--json","--sandbox",CODEX_SANDBOX_FLAGS[PhaseSandbox.FULL_ACCESS],
                       "--skip-git-repo-check","--model","gpt-5.1-codex","do the thing"]
 
    def test_dispatch_routes_by_provider():

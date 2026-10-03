@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.conversations.object_key import conversation_object_key
 from syn_adapters.conversations.protocol import ConversationStoreUnavailable
 
 if TYPE_CHECKING:
@@ -87,7 +88,7 @@ async def retrieve_session(
     if not storage._initialized:
         await storage.initialize()
 
-    object_key = f"sessions/{session_id}/conversation.jsonl"
+    object_key = conversation_object_key(session_id)
 
     try:
         if storage._client is None:

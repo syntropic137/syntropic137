@@ -16,6 +16,7 @@ semantics) — no runtime coupling to the library.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -29,6 +30,9 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
 )
+from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
+    without_retired_fields,
+)
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
     expand_skill_entry,
@@ -40,10 +44,51 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowClassification,
     require_supported_execution_type,
 )
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX, REMOVED_INTERACTIVE_PROVIDER, AgentProvider
+from syn_shared.agents import (
+    DEFAULT_PHASE_SANDBOX,
+    REMOVED_INTERACTIVE_PROVIDER,
+    AgentProvider,
+    require_runnable_sandbox,
+)
 from syn_shared.tools import require_supported_tools
 
 _SHARED_PREFIX = "shared://"
+
+#: The one grammar for a phase id, in the spelling Pydantic's `pattern=` takes.
+#:
+#: A phase id is INTERPOLATED INTO A FILESYSTEM PATH: outputs from a phase are
+#: injected into the next phase's workspace at `artifacts/input/<phase-id>/`.
+#: `min_length=1` alone accepted `../../../tmp/owned`, which escapes the
+#: workspace on injection - and with the Docker backend the write lands on the
+#: host beside the mount, not merely elsewhere inside the container.
+#:
+#: Workflows are installable from a marketplace, so the author of a phase id is
+#: not necessarily the operator running it. That makes this reachable by an
+#: untrusted party, which is what decides the grammar: an allowlist, not a `..`
+#: denylist. Denylists lose to encoding tricks; a closed character set does not.
+#:
+#: EVERY consumer must come through here. Three hand-written copies of this
+#: pattern existed before #1298, and the fourth one drifted - a workflow-gate
+#: regex left the `.` out, so it read `premise.old.md` as a reference to
+#: `premise` and reported a phase that does not exist as one that does. Two
+#: independently written patterns for one grammar is how that happens, and it
+#: is silent, so there is exactly one pattern now.
+PHASE_ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+
+_PHASE_ID = re.compile(PHASE_ID_PATTERN)
+
+
+def is_phase_id(value: str) -> bool:
+    """True when `value` is a phase id IN ITS ENTIRETY.
+
+    Callers get a decision, not a pattern, because the pattern has a trap in
+    it that every caller would otherwise have to remember: Python's `$` also
+    matches before a trailing newline, so `_PHASE_ID.match("premise\n")`
+    succeeds. That is the same bug as the gate regex above - a matcher
+    answering "is this whole thing an id?" that can succeed on less than the
+    whole thing - and `fullmatch` is the only spelling without it.
+    """
+    return _PHASE_ID.fullmatch(value) is not None
 
 
 def _resolve_shared_prompt_path(
@@ -206,22 +251,14 @@ class AgentYamlDefinition(BaseModel):
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
 
     sandbox: Literal["read-only", "workspace-write", "full-access"] | None = None
-    """How much authority this phase's agent gets. Provider-neutral.
+    """How much authority this phase's agent gets.
 
-    Omitted means ``full-access`` (``DEFAULT_PHASE_SANDBOX``) - today's
-    behaviour, kept deliberately as a stopgap. Both lower levels are unusable
-    until a phase can publish its deliverable without a filesystem write
-    (#1167): ``workspace-write`` was tried in v0.28.0-beta.5 and the write
-    under ``artifacts/output/`` was denied, and ``read-only`` cannot publish
-    at all.
-
-    A review or verify phase must therefore declare ``read-only``
-    EXPLICITLY - leaving it out grants write access. That declaration is what
-    makes "the verifier does not modify what it certifies" enforced rather
-    than merely instructed (#1157, #1161).
-
-    Steers codex phases only. Claude phases scope authority through
-    ``allowed_tools`` and ignore this field."""
+    ``workspace-write`` is the least privilege a phase can finish with: codex
+    may write inside ``/workspace`` (including ``artifacts/output/``) and
+    nothing outside it. Prefer it for review and verify phases. Omitted means
+    ``full-access``. ``read-only`` is REFUSED here and at execution
+    (``require_runnable_sandbox``): it denies the ``artifacts/output/`` write a
+    phase reports through. Claude ignores the field."""
 
     allow_delegation: bool = False
     """When true, stage BOTH agent auths in this phase's workspace so the
@@ -273,21 +310,9 @@ class PhaseYamlDefinition(BaseModel):
         extra="forbid",
     )
 
-    # A phase id is INTERPOLATED INTO A FILESYSTEM PATH: outputs from this
-    # phase are injected into the next phase's workspace at
-    # `artifacts/input/<phase-id>/...`. `min_length=1` alone accepted
-    # `../../../tmp/owned`, which escapes the workspace on injection - and with
-    # the Docker backend the write lands on the host beside the mount, not
-    # merely elsewhere inside the container.
-    #
-    # Workflows are installable from a marketplace, so the author of a phase id
-    # is not necessarily the operator running it. That makes this reachable by
-    # an untrusted party, which is what decides the grammar below: an
-    # allowlist, not a `..` denylist. Denylists lose to encoding tricks; a
-    # closed character set does not.
-    id: str = Field(
-        ..., alias="id", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
-    )
+    # See PHASE_ID_PATTERN for why the grammar is what it is, and why it is
+    # written down once.
+    id: str = Field(..., alias="id", min_length=1, max_length=100, pattern=PHASE_ID_PATTERN)
     name: str = Field(..., min_length=1, max_length=255)
     order: int = Field(..., ge=1)
     execution_type: PhaseExecutionType = PhaseExecutionType.SEQUENTIAL
@@ -321,20 +346,28 @@ class PhaseYamlDefinition(BaseModel):
     #1129 token routing: dropping it would fall back to the first
     installation, which in a multi-org deployment is the wrong one."""
 
-    can_open_pr: bool = False
-    """Whether this phase may create a pull request (#1197).
+    delivers_repo_changes: bool = True
+    """Whether a change to the repositories is part of what this phase delivers (#1308).
 
-    DEFAULTS TO FALSE BECAUSE PUBLICATION IS THE EXCEPTION. `implement`
-    published its own work 14 minutes before the verifier started, on a run
-    where the publication phase never executed at all; its prompt had said
-    not to. Opting in is one line in a workflow that means to publish, and
-    the phases that do are few. Defaulting the other way would mean every
-    phase anyone ever writes is a publisher until someone notices.
+    Read by the unpushed-work gate, and the ONLY thing that tells an authored
+    edit apart from a build tool's side effect. `git status` reports both
+    identically - a rewritten `Cargo.lock` and a half-finished feature look the
+    same - so the gate cannot derive this, and any rule it invented from
+    filenames would be a guess that mis-fires in both directions.
 
-    This is enforced by the token the phase is handed, not by its prompt or
-    its tool list - see ``agent_token.mint_agent_token``. False keeps
-    `pull_requests: read`, so a phase can still read and check out the PR it
-    is reworking; it just cannot open one."""
+    DEFAULTS TO TRUE BECAUSE THE STRICT ANSWER IS THE SAFE ONE. A phase that
+    forgets to declare keeps today's behaviour: everything it holds is treated
+    as a deliverable and an unpushed one fails it (#1184). Defaulting the other
+    way would silently switch the gate off for every phase anyone ever writes -
+    including the implement phase, which is the one the gate exists for.
+
+    FALSE IS A STATEMENT ABOUT THE PHASE, NOT ABOUT THE FILES. It says nothing
+    there was ever going to be delivered, so nothing there can be lost; it does
+    not exempt any path, and it does not exempt COMMITS. A phase that declares
+    False and commits anyway still fails, because committing is an authoring
+    act that no build tool performs. Declare it on a bootstrap, premise, review
+    or verify phase - one whose deliverable is a report - and leave it alone
+    anywhere a branch is the point."""
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
@@ -427,6 +460,22 @@ class PhaseYamlDefinition(BaseModel):
         require_supported_execution_type(str(getattr(value, "value", value)))
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_fields(cls, data: object) -> object:
+        """Ignore a key that is retired, by name, before `extra="forbid"` runs.
+
+        By name and not `extra="ignore"`: ignoring every unknown key is exactly
+        what let a misspelt `prompt:` install and run with no instructions
+        (#961). Only the keys in `RETIRED_PHASE_FIELDS` are dropped, and the
+        author is told about each one (`retired_field_notices`).
+
+        Ignoring is safe here when it was not for the removed provider
+        (`_reject_removed_provider`): a retired key already does nothing, so
+        dropping it changes nothing the phase does.
+        """
+        return without_retired_fields(data)
+
     @field_validator("skills", mode="before")
     @classmethod
     def _expand_skills(cls, value: object) -> object:
@@ -436,6 +485,17 @@ class PhaseYamlDefinition(BaseModel):
         for entry in value:
             expanded.extend(expand_skill_entry(entry))
         return expanded
+
+    @model_validator(mode="after")
+    def validate_sandbox_is_runnable(self) -> PhaseYamlDefinition:
+        """Refuse a sandbox level a phase cannot finish under, at authoring (#1434).
+
+        The level is well-formed and the host cannot honour it, so without
+        this it installed cleanly and killed the phase mid-run, after earlier
+        phases were paid for.
+        """
+        require_runnable_sandbox(self.agent.sandbox if self.agent else None, phase_id=self.id)
+        return self
 
     @model_validator(mode="after")
     def validate_tool_policy_is_supported_by_provider(self) -> PhaseYamlDefinition:
@@ -518,7 +578,7 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
-            can_open_pr=self.can_open_pr,
+            delivers_repo_changes=self.delivers_repo_changes,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,
@@ -543,7 +603,8 @@ class PhaseFrontmatterSchema(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     model: str | None = Field(
-        default=None, description="Model to use for this phase (e.g., 'sonnet', 'opus')."
+        default=None,
+        description="Model to use for this phase (e.g., 'opus', 'sonnet'; 'gpt-sol' on codex).",
     )
     allowed_tools: str | list[str] = Field(
         default_factory=list,

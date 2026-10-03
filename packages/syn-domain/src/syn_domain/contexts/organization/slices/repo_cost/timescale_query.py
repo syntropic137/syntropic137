@@ -21,6 +21,27 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
+from syn_shared.pricing import canonical_cost_usd, parse_vendor_cost
+
+# SAME EXECUTION-KEYED SHAPE AS execution_cost/ (#1338 asked for this to be
+# assessed alongside it). Both queries below are
+# `event_type = $1 AND execution_id = ANY($2)`: execution_id is neither
+# segmentby nor orderby, so a compressed chunk cannot be narrowed by it and
+# every segment in range is decompressed.
+#
+# One thing makes these better than their execution_cost equivalents and it is
+# worth not losing: they are BATCHED. A repo's executions are priced in two
+# round-trips over an id array rather than two per execution, so the scan is
+# paid once over the whole execution-id set rather than once per row - and
+# over the WHOLE set, not once per page: `calculate_all` binds every
+# correlated execution id it was given, with no pagination of its own. The
+# per-row multiplier that made /executions 21.8s is absent; the per-call cost
+# still grows with how many executions the caller hands over.
+#
+# They are covered by `idx_events_execution_type (execution_id, event_type,
+# time)` on the uncompressed chunks, and by nothing on the compressed ones.
+# When the execution-keyed read model in #1338 lands, these are its second
+# consumer - not a separate piece of work.
 
 # Aggregate cost per execution from session_summary (authoritative)
 _EXECUTION_COSTS_QUERY = """
@@ -75,7 +96,17 @@ class TimescaleRepoCostQuery:
         self._store = projection_store
 
     async def _get_execution_ids_for_repo(self, repo_full_name: str) -> list[str]:
-        """Look up execution IDs correlated with a repo."""
+        """Look up execution IDs correlated with a repo.
+
+        THE ONLY SOURCE of the ids this class binds, and they arrive already in
+        the form agent_events holds them: they were READ OUT of the projection
+        store, which writes through ``pg_json`` and therefore hands back the
+        sanitised spelling. Nothing here re-applies ``pg_safe`` for that reason
+        - a call no caller can falsify only asserts a guarantee it does not
+        provide. The value that does come from outside is ``repo_full_name``,
+        and it is canonicalised where it is bound, inside the store's filter
+        builder (#1241).
+        """
         from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 
         correlations = await self._store.query(
@@ -96,9 +127,7 @@ class TimescaleRepoCostQuery:
                     total_output=row["total_output"] or 0,
                     total_cache_creation=row["total_cache_creation"] or 0,
                     total_cache_read=row["total_cache_read"] or 0,
-                    total_cost=Decimal(str(row["total_cost"]))
-                    if row["total_cost"]
-                    else Decimal("0"),
+                    total_cost=parse_vendor_cost(row["total_cost"]) or Decimal("0"),
                 )
         return result
 
@@ -147,7 +176,7 @@ class TimescaleRepoCostQuery:
 
         return RepoCost(
             repo_full_name=repo_full_name,
-            total_cost_usd=total_cost,
+            total_cost_usd=canonical_cost_usd(total_cost),
             # All four components (issue #873) - matches the executions read model.
             total_tokens=total_input + total_output + total_cache_creation + total_cache_read,
             total_input_tokens=total_input,

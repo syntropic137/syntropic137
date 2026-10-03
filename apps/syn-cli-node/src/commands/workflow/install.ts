@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { printError, printSuccess, print, printDim } from "../../output/console.js";
+import { printError, printSuccess, print, printDim, printWarning } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 import { formatTimestamp } from "../../output/format.js";
 import { Table } from "../../output/table.js";
@@ -178,6 +178,11 @@ export async function installWorkflowsViaApi(
       // the distinction that makes a rerun safe to trust.
       const unchanged = data.status === "unchanged";
       print(unchanged ? style("already installed", DIM) : `${style("done", GREEN)} (id: ${wfId})`);
+      // Reported on both outcomes: an unchanged package can still carry a
+      // retired key, and a rerun is exactly when its author is looking.
+      for (const warning of data.warnings ?? []) {
+        printWarning(warning);
+      }
       installed.push({ id: wfId, name: wf.name });
     } catch (err) {
       print(style("failed", "\x1b[31m"));
@@ -401,6 +406,7 @@ function printWorkflowSummary(workflows: ResolvedWorkflow[]): void {
 export const packagesCommand: CommandDef = {
   name: "packages",
   description: "List workflow packages pulled from the marketplace (local CLI history; use 'syn workflow list' to see what is currently on the running stack)",
+  skipPreflight: true,
   handler: async () => {
     const registry = loadInstalled();
 
@@ -471,6 +477,7 @@ export const packagesCommand: CommandDef = {
 export const initCommand: CommandDef = {
   name: "init",
   description: "Scaffold a new workflow package from a template",
+  skipPreflight: true,
   args: [{ name: "directory", description: "Directory to scaffold (defaults to current dir)" }],
   options: {
     name: { type: "string", short: "n", description: "Workflow name" },

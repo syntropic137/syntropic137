@@ -76,8 +76,8 @@ export function useExecutionList(): UseExecutionListResult {
   const { sort, toggleSort, isDefault: isDefaultSort } = useSortUrlState(EXECUTION_SORT_CONFIG)
 
   const fetchPage = useCallback(
-    async (query: ListQuery): Promise<ListPage<ExecutionListItem>> => {
-      const response = await listAllExecutions(query)
+    async (query: ListQuery, signal?: AbortSignal): Promise<ListPage<ExecutionListItem>> => {
+      const response = await listAllExecutions(query, signal)
       return {
         rows: response.executions.map(toExecutionListItem),
         total: response.total,

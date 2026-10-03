@@ -1,0 +1,125 @@
+id: sdlc-pr-review-slp-v1
+name: "SDLC: PR review with leverage-point fan-out (SLP arm)"
+description: >
+  Treatment arm for the software-leverage-points hypothesis. Identical to
+  sdlc-pr-review-v1 except that the first phase fans out one subagent per
+  leverage point instead of mapping the change with a single generalist.
+  Phases 2 and 3 are byte-identical to the control so that any difference in
+  the verdict is attributable to phase 1.
+type: review
+classification: standard
+requires_repos: true
+
+# WHY THIS EXISTS
+#
+# Measured baseline across 40 of the 1,388 recorded selfhost sessions
+# (6,803 tool calls): Bash 90.3%, the Agent fan-out tool used ONCE, and the
+# Skill tool ZERO times. Every workflow shipped today is a single agent
+# shelling out to Bash. The declared SLP skills on sdlc-research-plan-v3 have
+# never once fired (#1269), so the hypothesis that leverage points improve
+# review quality has never actually been tested - not disproven, untested.
+#
+# WHY THE CHANGE IS CONFINED TO PHASE 1
+#
+# verify.md and report.md are copied unmodified from sdlc-pr-review-v1, and
+# the providers and models are unchanged (opus / codex / sonnet). One variable
+# moves. If the verdicts differ, phase 1 is why.
+#
+# WHY FAN-OUT LIVES INSIDE A PHASE
+#
+# `execution_type: parallel` is refused at authoring time (#1039): nothing in
+# the repository branches on that field, so a parallel phase would run
+# sequentially while claiming otherwise. Fan-out therefore happens within one
+# phase, through the Agent tool.
+#
+# WHY THE SKILLS ARE NAMED IN THE PROMPT
+#
+# A phase prompt that supplies a complete numbered procedure leaves no gap for
+# description-based skill routing, which is the root cause in #1269. Naming the
+# skills explicitly was measured to work, so this prompt names them rather than
+# hoping routing fires.
+
+phases:
+  - id: investigate
+    name: Fan out across the leverage points
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    # Larger than the control's 2400s: this phase does N reviews, not one.
+    timeout_seconds: 3300
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+      - Task
+      - Skill
+    skills:
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/software-complexity@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/testing@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/security@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/types@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/error-handling@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/dry@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/dependencies@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/investigate.md
+
+  - id: verify
+    name: Try to falsify the claim
+    order: 2
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    agent:
+      provider: codex
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
+    prompt_file: phases/verify.md
+
+  - id: report
+    name: Write the verdict
+    order: 3
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 900
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/report.md

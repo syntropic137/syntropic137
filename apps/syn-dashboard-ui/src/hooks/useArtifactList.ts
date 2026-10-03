@@ -51,12 +51,16 @@ export function useArtifactList(): UseArtifactListResult {
   const [typeFilter, setTypeFilter] = useState('')
 
   const fetchPage = useCallback(
-    async (query: ListQuery): Promise<ListPage<ArtifactSummary>> => {
-      const response = await listArtifactPage(query, {
-        workflow_id: workflowIdFilter || undefined,
-        phase_id: phaseIdFilter || undefined,
-        artifact_type: typeFilter || undefined,
-      })
+    async (query: ListQuery, signal?: AbortSignal): Promise<ListPage<ArtifactSummary>> => {
+      const response = await listArtifactPage(
+        query,
+        {
+          workflow_id: workflowIdFilter || undefined,
+          phase_id: phaseIdFilter || undefined,
+          artifact_type: typeFilter || undefined,
+        },
+        signal,
+      )
       return {
         rows: response.artifacts,
         total: response.total,

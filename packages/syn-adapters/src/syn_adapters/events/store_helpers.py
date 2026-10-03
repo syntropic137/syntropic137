@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import io
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.events.models import AgentEvent
+from syn_adapters.postgres_text import pg_copy_row
+from syn_domain import tool_call_counts
 
 if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
@@ -18,27 +21,75 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+#: What an event that carries no session at all is stored under. Not an id:
+#: no session lookup asks for it. See ``_event_to_copy_row``.
+NO_SESSION_ID = "unknown"
+
+
 def _event_to_copy_row(validated: AgentEvent) -> str:
-    """Convert a validated AgentEvent to a tab-separated COPY row."""
+    """Render a validated AgentEvent as one row of COPY text format.
+
+    Every field here is agent- or harness-supplied, so any of them can contain
+    the characters COPY reads as framing - a tab in a session id splits it into
+    two columns, and the backslashes JSON writes its own escapes with are eaten
+    before the payload reaches the jsonb parser (#1241). pg_copy_row owns that;
+    this function only says which value goes in which column.
+
+    It says only that, for every value that IS one. The ids arrive canonical
+    from ``to_insert_tuple`` and go through unchanged, because this is the batch
+    spelling of a row ``insert_one`` also writes: a serializer that substitutes
+    an id of its own makes the two writers disagree, and then which path an
+    event happened to take decides whether a reader ever finds it again. An id
+    made entirely of unstorable codepoints used to arrive here as ``""`` and be
+    stored as ``"unknown"`` for exactly that reason. It no longer arrives that
+    way - ``pg_safe`` derives a real id for it - so the substitution below can
+    no longer reach an id, and is written as an explicit ``is None`` rather than
+    ``or`` so that it cannot start reaching one again if an empty id ever
+    becomes representable.
+
+    ``None`` is not an id, and is the one case left: the event carried no
+    session at all. ``session_id`` is ``NOT NULL``, and COPY applies the whole
+    buffer as one statement, so writing NULL here would fail the entire batch -
+    discarding every valid event beside it - to reject one event that is still
+    worth keeping, because its ``execution_id`` is intact and the cost, totals
+    and heatmap readers key on that column alone. It is stored under a name no
+    session lookup asks for, which is the truth about it: it has no session.
+    """
     time, event_type, session_id, exec_id, phase_id, data_json = validated.to_insert_tuple()
-    row = [
-        time.isoformat() if isinstance(time, datetime) else time,
-        event_type,
-        session_id or "unknown",
-        exec_id or "\\N",
-        phase_id or "\\N",
-        data_json,
-    ]
-    return "\t".join(str(v) for v in row) + "\n"
+    return pg_copy_row(
+        [
+            time.isoformat(),
+            event_type,
+            session_id if session_id is not None else NO_SESSION_ID,
+            exec_id,
+            phase_id,
+            data_json,
+        ]
+    )
+
+
+@dataclass(frozen=True)
+class CopyPayload:
+    """One batch, ready to write: the COPY rows and the tool calls they add.
+
+    The two travel together because they are counted from the same validated
+    events, in the same pass, and are applied in the same transaction. An event
+    that failed validation is in neither, which is the only reason the tally
+    cannot be taken from ``events`` by the caller instead (#1322).
+    """
+
+    buffer: io.BytesIO
+    tool_calls: list[tool_call_counts.ToolCallTally]
 
 
 def _build_copy_buffer(
     events: list[dict[str, Any]],
     execution_id: str | None,
     phase_id: str | None,
-) -> io.BytesIO:
-    """Build a BytesIO buffer of tab-separated rows for COPY."""
+) -> CopyPayload:
+    """Build the COPY buffer for a batch, and tally the tool calls in it."""
     buffer = io.BytesIO()
+    counted: list[tuple[str, str, str | None]] = []
     for event in events:
         if execution_id and "execution_id" not in event:
             event = {**event, "execution_id": execution_id}
@@ -50,8 +101,15 @@ def _build_copy_buffer(
             logger.warning("Skipping invalid event: %s", e)
             continue
         buffer.write(_event_to_copy_row(validated).encode("utf-8"))
+        # From the insert tuple, not from `event`: the stored spelling of the
+        # ids and the normalised event type are decided there, and a tally
+        # keyed by anything else is a tally no reader will ever find (#1241).
+        _time, row_type, row_session, row_exec, _phase, _data = validated.to_insert_tuple()
+        counted.append(
+            (row_type, row_session if row_session is not None else NO_SESSION_ID, row_exec)
+        )
     buffer.seek(0)
-    return buffer
+    return CopyPayload(buffer=buffer, tool_calls=tool_call_counts.tally(counted))
 
 
 # Keys in the top-level event dict that must NOT be overridden by user data.

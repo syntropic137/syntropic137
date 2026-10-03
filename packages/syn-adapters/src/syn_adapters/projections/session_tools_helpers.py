@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
     from syn_adapters.projections.session_tools import SessionToolsProjection
 
-from syn_adapters.projections.session_tools_dispatch import row_to_operation
+from syn_adapters.postgres_text import pg_safe
+from syn_adapters.projections.session_tools_dispatch import row_to_operation, rows_to_operations
 from syn_adapters.projections.session_tools_queries import query_session_tools
 from syn_shared.events import (
     SUBAGENT_STARTED,
@@ -25,7 +26,13 @@ logger = logging.getLogger(__name__)
 
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
 
-__all__ = ["get_pool", "get_session_tools", "query_session_tools", "row_to_operation"]
+__all__ = [
+    "get_pool",
+    "get_session_tools",
+    "query_session_tools",
+    "row_to_operation",
+    "rows_to_operations",
+]
 
 
 def get_pool(proj: SessionToolsProjection) -> asyncpg.Pool | None:
@@ -59,7 +66,7 @@ async def get_session_tools(
     tool_execution_completed: str,
     subagent_tool_names: set[str],
     git_event_types: tuple[str, ...],
-) -> list[Any]:
+) -> list[Any] | None:
     """Get all tool operations for a session.
 
     Args:
@@ -72,12 +79,23 @@ async def get_session_tools(
         git_event_types: Tuple of git event type constants.
 
     Returns:
-        List of tool operations ordered by timestamp.
+        Tool operations ordered by timestamp, ``[]`` for a session that
+        recorded none, or ``None`` when the timeline could not be read at all -
+        no pool, or the query failed. Callers that only display rows may treat
+        the last two alike; callers that MEASURE a phase from them may not,
+        because "no operations recorded" is the reading that says a phase
+        stalled, and answering it out of an outage is how #1332 turned a
+        telemetry failure into "do not pay for this run again".
     """
     pool = get_pool(proj)
     if pool is None:
-        logger.debug("No pool available, returning empty list")
-        return []
+        logger.debug("No pool available, cannot read the timeline")
+        return None
+
+    # Every row in agent_events was written with a sanitised session id
+    # (AgentEvent's validator), so a lookup must ask for the same spelling -
+    # see syn_adapters.events.queries, which reads the same table (#1241).
+    session_id = pg_safe(session_id)
 
     try:
         async with pool.acquire() as conn:
@@ -122,11 +140,7 @@ async def get_session_tools(
             )
 
             logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
-            return [
-                op
-                for row in rows
-                if (op := row_to_operation(row, subagent_tool_names, git_event_types)) is not None
-            ]
+            return rows_to_operations(rows, subagent_tool_names, git_event_types)
     except Exception as e:
         logger.error("Failed to query tool operations for %s: %s", session_id, e)
-        return []
+        return None

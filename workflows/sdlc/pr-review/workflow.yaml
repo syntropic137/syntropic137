@@ -44,6 +44,11 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     # Read-only: this phase has no business editing the tree it is describing,
     # and a review that modified the code under review would be unusable.
     allowed_tools:
@@ -66,12 +71,22 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
     agent:
       provider: codex
-      model: gpt-5.6-sol
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
     prompt_file: phases/verify.md
 
   - id: report
@@ -85,6 +100,18 @@ phases:
     # Shorter deliberately: this phase composes findings that already exist. If
     # it needs longer, the verify phase did not finish its job.
     timeout_seconds: 900
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    # No Bash, deliberately, and the prompt agrees with this list rather than
+    # asking past it. #1110 told this phase to `gh pr comment` its verdict; the
+    # grant below stayed as it is, so three reviews reported the missing tool
+    # instead of delivering (#1122). Granting Bash here was tried and closed
+    # unmerged (#1123): it arrives unfiltered under skip-permissions, at the
+    # publication boundary, in a phase composing PR-controlled text next to
+    # write-capable credentials. Delivering the verdict is a platform job.
     allowed_tools:
       - Read
       - Grep

@@ -35,17 +35,18 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
-from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
+from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-        AgentSessionAggregate,
-    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+        UpstreamRetryPolicy,
     )
 
 
@@ -80,13 +81,6 @@ class FakeExecutionRepository:
         return self._aggregates.get(aggregate_id)
 
 
-class FakeSessionRepository:
-    """Minimal in-memory session repository (save-only) for smoke tests."""
-
-    async def save(self, aggregate: AgentSessionAggregate) -> None:
-        pass  # No-op — smoke tests don't assert on session state
-
-
 class FakeArtifactRepository:
     """Minimal in-memory artifact repository for smoke tests."""
 
@@ -117,19 +111,40 @@ def _noop_command_builder(phase: ExecutablePhase, prompt: str) -> list[str]:
     return ["echo", "smoke-test-agent"]
 
 
+#: What a phase that answers a question and stops ends on: a real answer,
+#: long enough to be a conclusion rather than a sign-off.
+_AN_ANSWER = (
+    "The delegated codex run returned the expected checksum, the cost was "
+    "attributed to the parent session, and the workspace token was revoked."
+)
+
+
 def _make_processor(
     agent_handler: FakeAgentExecutionHandler,
     session_capture: object | None = None,
+    artifact_repository: object | None = None,
+    retry_policy: UpstreamRetryPolicy | None = None,
+    execution_repository: FakeExecutionRepository | None = None,
 ) -> WorkflowExecutionProcessor:
-    """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies."""
+    """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies.
+
+    ``artifact_repository`` is overridable so a test can assert on what was
+    STORED rather than only on what the run returned. The default discards
+    everything, which is all most of these tests need.
+
+    ``retry_policy`` is overridable so a test of the retry (#1303) can set the
+    backoff to zero. The DEFAULT IS PRODUCTION'S - a test that does not pass
+    one runs against the real bound and the real schedule, which is what keeps
+    "a phase gets one attempt unless the upstream was busy" true here.
+    """
     todo_store = InMemoryProjectionStore()
     todo_projection = ExecutionTodoProjection(store=todo_store)
 
     return WorkflowExecutionProcessor(
-        execution_repository=FakeExecutionRepository(),
+        execution_repository=execution_repository or FakeExecutionRepository(),
         session_repository=FakeSessionRepository(),
         workspace_service=WorkspaceService.create(backend=WorkspaceBackend.MEMORY),
-        artifact_repository=FakeArtifactRepository(),
+        artifact_repository=artifact_repository or FakeArtifactRepository(),
         artifact_content_storage=None,
         artifact_query=None,
         conversation_storage=None,
@@ -140,6 +155,7 @@ def _make_processor(
         todo_projection=todo_projection,
         agent_handler=agent_handler,
         session_capture=session_capture,  # type: ignore[arg-type]
+        retry_policy=retry_policy,
     )
 
 
@@ -150,6 +166,12 @@ def _one_phase_workflow() -> list[ExecutablePhase]:
     step with an agent double that produces no files, so declaring an output
     type here would (correctly, since #1167) fail every one of them for a
     reason none of them is about.
+
+    The timeout is a realistic phase budget rather than the 30 seconds it used
+    to be, because a phase's timeout now bounds its retries too (#1303): 30
+    seconds cannot fund a second attempt, so every retry case driven through
+    this workflow would have been decided by the fixture's clock instead of by
+    the rule it is about. Nothing here waits on it - the doubles return at once.
     """
     return [
         ExecutablePhase(
@@ -160,7 +182,7 @@ def _one_phase_workflow() -> list[ExecutablePhase]:
             agent_config=AgentConfiguration(),
             prompt_template="do the thing",
             output_artifact_types=(),
-            timeout_seconds=30,
+            timeout_seconds=1800,
         )
     ]
 
@@ -246,7 +268,7 @@ class TestProcessorSmoke:
 
     async def test_success_returns_completed(self) -> None:
         """Clean exit code 0 must return status='completed'."""
-        fake = FakeAgentExecutionHandler.success()
+        fake = FakeAgentExecutionHandler.success(produces=A_DELIVERABLE)
         processor = _make_processor(fake)
 
         result = await processor.run(
@@ -348,16 +370,16 @@ class TestADeclaredOutputMustBeProduced:
             "defect intact - a dropped `verify` still disappears from the run."
         )
 
-    async def test_a_phase_declaring_nothing_may_produce_nothing(self) -> None:
-        """(b) The true negative. Without this the fix breaks legitimate phases.
+    async def test_a_phase_declaring_nothing_completes_on_what_it_said(self) -> None:
+        """(b) The phases that answer a question and stop still pass.
 
         Four phases in the shipped self-host validation workflows declare no
         `output_artifacts` (`delegation:build-and-delegate`,
         `github-ops:exercise`, `skills-injection:report` and `:confirm`). They
-        answer a question and stop, nothing downstream reads them, and they
-        must keep passing. Only a DECLARED-and-unproduced output is a failure.
+        write no file but end with their answer, and since #1476 that answer
+        is stored as their artifact instead of the phase storing nothing.
         """
-        fake = FakeAgentExecutionHandler.success()  # writes nothing, as above
+        fake = FakeAgentExecutionHandler.success(says=_AN_ANSWER)
         processor = _make_processor(fake)
 
         result = await processor.run(
@@ -371,10 +393,26 @@ class TestADeclaredOutputMustBeProduced:
         assert result.status == "completed", (
             f"Expected 'completed' but got '{result.status}' "
             f"({result.error_message!r}). A phase that declares no output "
-            "artifact types is allowed to produce none; failing it would break "
-            "every shipped validation workflow."
+            "artifact types still completes on its last message; failing it would "
+            "break every shipped validation workflow."
         )
         assert fake.call_count == 2, "Both phases should have run to completion"
+
+    async def test_a_phase_declaring_nothing_that_said_nothing_fails(self) -> None:
+        """Every phase produces an artifact (#1476): silence is not an answer."""
+        fake = FakeAgentExecutionHandler.success()  # writes nothing, says nothing
+
+        result = await _make_processor(fake).run(
+            workflow_id="wf-1476-silent",
+            workflow_name="Silent Workflow",
+            phases=_two_phase_workflow(first_declares=()),
+            inputs={},
+            execution_id="exec-1476-silent",
+        )
+
+        assert result.status == "failed"
+        assert "wrote no artifact" in (result.error_message or "")
+        assert fake.call_count == 1, "The run must stop at the silent phase"
 
     async def test_a_phase_that_produces_what_it_declared_is_unaffected(self) -> None:
         """(c) The happy path still completes, and the artifact still lands.
@@ -556,13 +594,13 @@ class TestTheDeclarationSurvivesTheProductionConversion:
         while breaking the four shipped phases that legitimately declare no
         output.
         """
-        fake = FakeAgentExecutionHandler.success()  # writes nothing, as above
+        fake = FakeAgentExecutionHandler.success(says=_AN_ANSWER)
 
         result = await _run_authored(_SILENT_WORKFLOW_YAML, fake)
 
         assert result.status == "completed", (
             f"Expected 'completed' but got '{result.status}' "
             f"({result.error_message!r}). Neither authored phase declares "
-            "`output_artifacts`, so producing none is their contract, not a breach."
+            "`output_artifacts`; each answered on its stream, which is kept (#1476)."
         )
         assert fake.call_count == 2, "Both phases should have run to completion"

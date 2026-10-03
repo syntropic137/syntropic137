@@ -125,6 +125,7 @@ location = /api/v1/webhooks/github {
 
 # API v1 proxy
 location /api/v1/ {
+    client_max_body_size 6M;
     proxy_pass http://api:8000/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -141,7 +142,7 @@ location /api/v1/ {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Permissions-Policy "camera=(), microphone=(self), geolocation=()" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     # A location with its own limit_req does NOT inherit the server-scope auth

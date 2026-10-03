@@ -28,6 +28,10 @@ Model aliases are NOT here - they are not env var names. They live in
 
 ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
 
+# Per-dispatch identity, supplied only after durable invocation registration.
+ENV_AGENTIC_INVOCATION_ID = "AGENTIC_INVOCATION_ID"
+ENV_AGENTIC_ATTEMPT_ID = "AGENTIC_ATTEMPT_ID"
+
 # ---------------------------------------------------------------------------
 # Agent credential env vars
 # Read from Settings (pydantic-settings); these are the raw env var name strings.
@@ -89,12 +93,16 @@ ENV_SYN_AGENT_NETWORK = "SYN_AGENT_NETWORK"
 ENV_SYN_IMAGE_VERIFY_ENABLED = "SYN_IMAGE_VERIFY_ENABLED"
 ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES = "SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES"
 ENV_SYN_IMAGE_VERIFY_COSIGN_PATH = "SYN_IMAGE_VERIFY_COSIGN_PATH"
+ENV_SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP = "SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP"
+
+#: Backed by WorkspaceSettings.docker_image; quoted in stale-default messages.
+ENV_SYN_WORKSPACE_DOCKER_IMAGE = "SYN_WORKSPACE_DOCKER_IMAGE"
 
 # ---------------------------------------------------------------------------
-# Session store capability env vars (agentic-primitives workspace image)
+# Session store capability env vars (agentic-workspace workspace image)
 #
 # These are read INSIDE the workspace container by the session-store capability
-# that ships in the agentic-primitives workspace image. Syn137 does not read
+# that ships in the agentic-workspace workspace image. Syn137 does not read
 # them; it only writes them into the container environment at provision time.
 #
 # The capability is a complete no-op when AGENTIC_SESSION_STORE_PROVIDER is
@@ -140,6 +148,8 @@ SESSION_STORE_CONTRACT_ENV_VARS: frozenset[str] = frozenset(
 )
 
 __all__ = [
+    "ENV_AGENTIC_ATTEMPT_ID",
+    "ENV_AGENTIC_INVOCATION_ID",
     "ENV_AGENTIC_SESSION_STORE_AUTH",
     "ENV_AGENTIC_SESSION_STORE_DEPLOYMENT",
     "ENV_AGENTIC_SESSION_STORE_PARTITION",
@@ -164,10 +174,12 @@ __all__ = [
     "ENV_OTEL_EXPORTER_OTLP_ENDPOINT",
     "ENV_SYN_AGENT_NETWORK",
     "ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES",
+    "ENV_SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP",
     "ENV_SYN_IMAGE_VERIFY_COSIGN_PATH",
     "ENV_SYN_IMAGE_VERIFY_ENABLED",
     "ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES",
     "ENV_SYN_WORKSPACE_CONTAINER_DIR",
+    "ENV_SYN_WORKSPACE_DOCKER_IMAGE",
     "ENV_SYN_WORKSPACE_HOST_DIR",
     "SESSION_STORE_CONTRACT_ENV_VARS",
 ]

@@ -275,7 +275,13 @@ async def test_skills_pipeline_end_to_end_registration_to_install() -> None:
     injected_files = dict(skill_inject_call.args[0])
     assert injected_files[".syn-skills/code-review/SKILL.md"] == _SKILL_MD
 
-    workspace.execute.assert_awaited_with(
+    # assert_any_await, not assert_awaited_with: provisioning keeps running
+    # after the skills install (the operator-attribution hook appends further
+    # execute() calls when SYN_OPERATOR_* is configured), so "was the last
+    # await" is not a property of the skills install and asserting it made
+    # these tests pass or fail on an unrelated variable (#1282). The argv,
+    # timeout and working directory stay exact - that is what is being tested.
+    workspace.execute.assert_any_await(
         ["skills", "add", "/workspace/.syn-skills/code-review", "--agent", "codex", "-y"],
         timeout_seconds=120,
         working_directory="/workspace",

@@ -192,7 +192,7 @@ def record_error(
     Returns:
         RecordOperationCommand configured for ERROR.
     """
-    metadata: dict[str, Any] = {"error_message": error_message}
+    metadata = {"error_message": error_message}
     if error_type:
         metadata["error_type"] = error_type
 

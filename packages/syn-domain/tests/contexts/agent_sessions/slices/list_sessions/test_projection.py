@@ -227,3 +227,61 @@ async def test_page_excludes_an_undated_session_from_rows_total_and_facets_alike
     assert {s.id for s in unbounded.rows} == {"dated", "undated"}
     assert unbounded.total == 2
     assert unbounded.status_counts == {"completed": 1, "pending": 1}
+
+
+def _session_in(execution_id: str, session_id: str) -> dict:
+    event = _session_started_event(session_id)
+    event["execution_id"] = execution_id
+    return event
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_nonsense_execution_id_returns_nothing() -> None:
+    """The direction that decides it (#1263).
+
+    Before the filter existed, the parameter was accepted and silently dropped,
+    so a real id, a nonsense id and no filter all returned the whole
+    collection. "A real id returns some rows" was TRUE of the broken behaviour,
+    which is why asserting that would not have caught it. Only the empty answer
+    distinguishes a filter that works from one that is ignored.
+    """
+    store = _FakeStore()
+    projection = SessionListProjection(store)
+    await projection.on_session_started(_session_in("exec-real", "s-1"))
+    await projection.on_session_started(_session_in("exec-real", "s-2"))
+
+    page = await projection.page(execution_id="exec-TOTALLY-BOGUS")
+
+    assert page.rows == []
+    assert page.total == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_filter_selects_only_its_own_execution() -> None:
+    """Two executions, and the filter must not leak one into the other."""
+    store = _FakeStore()
+    projection = SessionListProjection(store)
+    await projection.on_session_started(_session_in("exec-a", "s-a1"))
+    await projection.on_session_started(_session_in("exec-a", "s-a2"))
+    await projection.on_session_started(_session_in("exec-b", "s-b1"))
+
+    page = await projection.page(execution_id="exec-a")
+
+    assert {r.id for r in page.rows} == {"s-a1", "s-a2"}
+    assert page.total == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_filter_still_returns_everything() -> None:
+    """The filter must be opt-in; omitting it cannot start narrowing."""
+    store = _FakeStore()
+    projection = SessionListProjection(store)
+    await projection.on_session_started(_session_in("exec-a", "s-a1"))
+    await projection.on_session_started(_session_in("exec-b", "s-b1"))
+
+    page = await projection.page()
+
+    assert page.total == 2

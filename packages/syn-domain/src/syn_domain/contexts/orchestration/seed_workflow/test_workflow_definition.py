@@ -17,6 +17,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseExecutionType,
     WorkflowClassification,
 )
+from syn_shared.agents import CodexModelAlias
 
 VALID_WORKFLOW_YAML = """
 id: test-workflow-v1
@@ -589,7 +590,7 @@ def test_mixed_workflow_with_claude_and_codex_parses() -> None:
 
 #: The model every shipped codex example declares. Named once so the examples
 #: and the guard below cannot drift apart silently.
-CODEX_EXAMPLE_MODEL = "gpt-5.6-sol"
+CODEX_EXAMPLE_MODEL: str = CodexModelAlias.GPT_SOL
 
 
 @pytest.mark.unit
@@ -607,10 +608,9 @@ def test_codex_demo_example_yaml_loads_and_validates() -> None:
     phase = definition.phases[0]
     assert phase.agent is not None
     assert phase.agent.provider == "codex"
-    # A concrete model id is REQUIRED, not optional: an unnamed model leaves the
-    # run unpriced, which is the whole reason it was declared here. The older
-    # comment claimed codex rejects an explicit id; that was true of a
-    # claude-style "gpt-5.6", and "gpt-5.6-sol" is accepted under ChatGPT auth.
+    # Pinned explicitly even though `gpt-sol` is also the platform default: an
+    # example people copy should show the model it runs, not rely on a setting.
+    # The alias resolves to a rate (gpt-6-sol), so the run is priced.
     assert phase.agent.model == CODEX_EXAMPLE_MODEL
 
     domain_phase = definition.get_domain_phases()[0]

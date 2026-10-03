@@ -12,8 +12,15 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.postgres_text import pg_safe
+
 if TYPE_CHECKING:
     import asyncpg
+
+# Every write into agent_events normalises its session and execution ids through
+# pg_safe (AgentEvent.to_insert_tuple), so every lookup here must too. Asking for
+# the unnormalised id returns nothing and reports nothing: the events are there,
+# under the name the writer used (#1241).
 
 
 async def query_session_events(
@@ -35,6 +42,7 @@ async def query_session_events(
     Returns:
         List of event dicts with 'time', 'event_type', 'session_id', etc.
     """
+    session_id = pg_safe(session_id)
     async with pool.acquire() as conn:
         if event_type:
             rows = await conn.fetch(
@@ -94,6 +102,7 @@ async def query_execution_events(
     Returns:
         List of event dicts
     """
+    execution_id = pg_safe(execution_id)
     async with pool.acquire() as conn:
         if event_type:
             rows = await conn.fetch(

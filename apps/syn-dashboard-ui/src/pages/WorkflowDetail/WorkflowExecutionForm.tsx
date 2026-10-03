@@ -2,14 +2,17 @@ import { clsx } from 'clsx'
 import { Play } from 'lucide-react'
 import { useState } from 'react'
 
-import type { InputDeclaration } from '../../types'
-import { canSubmitForm, useFormDefaults } from './executionFormUtils'
+import type { InputDeclaration, PhaseDefinition } from '../../types'
+import type { TaskDeliverability } from './executionFormUtils'
+import { assessTaskDeliverability, canSubmitForm, useFormDefaults } from './executionFormUtils'
 import { FormInputField } from './FormInputField'
 import { useExecutionSubmit } from './useExecutionSubmit'
 
 interface WorkflowExecutionFormProps {
   workflowId: string
   declarations: InputDeclaration[]
+  // Needed to answer whether a typed task reaches any phase at all (#1280).
+  phases: PhaseDefinition[]
   onExecutionStarted?: () => void
   layout?: 'inline' | 'stacked'
 }
@@ -42,7 +45,19 @@ function ExecutionMessage({ message }: { message: string | null }) {
   )
 }
 
-export function WorkflowExecutionForm({ workflowId, declarations, onExecutionStarted, layout = 'inline' }: WorkflowExecutionFormProps) {
+function TaskDeliverabilityNotice({ deliverability }: { deliverability: TaskDeliverability }) {
+  if (deliverability.kind === 'ok') return null
+  return (
+    <p className={clsx(
+      'mt-1 text-xs',
+      deliverability.kind === 'discarded' ? 'text-red-400' : 'text-amber-400'
+    )}>
+      {deliverability.kind === 'discarded' ? 'Error: ' : 'Warning: '}{deliverability.message}
+    </p>
+  )
+}
+
+export function WorkflowExecutionForm({ workflowId, declarations, phases, onExecutionStarted, layout = 'inline' }: WorkflowExecutionFormProps) {
   const [taskInput, setTaskInput] = useState('')
   const [formInputs, setFormInputs] = useState<Record<string, string>>({})
   const { isExecuting, executionMessage, handleSubmit } = useExecutionSubmit(onExecutionStarted)
@@ -52,7 +67,8 @@ export function WorkflowExecutionForm({ workflowId, declarations, onExecutionSta
   const canExecute = canSubmitForm(declarations, taskInput, formInputs)
   const taskRequired = declarations.some((d) => d.name === 'task' && d.required)
   const extraDeclarations = declarations.filter(d => d.name !== 'task')
-  const disabled = isExecuting || !canExecute
+  const taskDeliverability = assessTaskDeliverability(phases, declarations, taskInput)
+  const disabled = isExecuting || !canExecute || taskDeliverability.kind === 'discarded'
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -76,6 +92,7 @@ export function WorkflowExecutionForm({ workflowId, declarations, onExecutionSta
           rows={2}
           className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
         />
+        <TaskDeliverabilityNotice deliverability={taskDeliverability} />
       </div>
 
       {extraDeclarations.map((decl) => (

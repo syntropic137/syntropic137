@@ -14,13 +14,22 @@ interface TokenBreakdownProps {
    * so this is what keeps the rows adding up to the headline meanwhile.
    */
   inProgressTokens?: number
+  /**
+   * The API's cache-read rate relative to fresh input for this scope,
+   * rendered verbatim (`cache_read_rate_display`). Null or absent means no single
+   * rate is true for the scope - mixed models, or a model with no price - and
+   * the badge is omitted rather than guessed.
+   */
+  cacheReadRateDisplay?: string | null
+  /** Same, for cache writes (`cache_write_rate_display`). */
+  cacheWriteRateDisplay?: string | null
 }
 
 interface TokenRow {
   label: string
   tokens: number
   color: string
-  rateLabel?: string
+  rateLabel?: string | null
 }
 
 export function TokenBreakdown({
@@ -29,6 +38,8 @@ export function TokenBreakdown({
   cacheCreationTokens,
   cacheReadTokens,
   inProgressTokens = 0,
+  cacheReadRateDisplay = null,
+  cacheWriteRateDisplay = null,
 }: TokenBreakdownProps) {
   const totalAllTokens =
     inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens + inProgressTokens
@@ -36,8 +47,8 @@ export function TokenBreakdown({
   if (totalAllTokens === 0) return null
 
   const rows: TokenRow[] = [
-    { label: 'Cache Read', tokens: cacheReadTokens, color: 'bg-emerald-500', rateLabel: '0.1x rate' },
-    { label: 'Cache Write', tokens: cacheCreationTokens, color: 'bg-amber-500', rateLabel: '1.25x rate' },
+    { label: 'Cache Read', tokens: cacheReadTokens, color: 'bg-emerald-500', rateLabel: cacheReadRateDisplay },
+    { label: 'Cache Write', tokens: cacheCreationTokens, color: 'bg-amber-500', rateLabel: cacheWriteRateDisplay },
     { label: 'Output', tokens: outputTokens, color: 'bg-violet-500' },
     { label: 'Input', tokens: inputTokens, color: 'bg-indigo-500' },
     { label: 'In Progress', tokens: inProgressTokens, color: 'bg-slate-500' },

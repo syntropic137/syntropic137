@@ -30,12 +30,16 @@ class ConversationRecorder:
         phase_id: str,
         workflow_id: str,
         model: str | None,
+        requested_model: str | None,
         input_tokens: int,
         output_tokens: int,
         started_at: datetime,
         success: bool,
     ) -> None:
         """Store conversation log. No-op if storage is None or lines empty. Never raises.
+
+        ``model`` is what the harness REPORTED running (None when it never
+        said); ``requested_model`` is what the phase asked for (ADR-067).
 
         ``success`` means THE AGENT PROCESS EXITED ZERO. It is not the phase's
         verdict, and the two can legitimately disagree.
@@ -66,6 +70,7 @@ class ConversationRecorder:
                 phase_id=phase_id,
                 workflow_id=workflow_id,
                 model=model,
+                requested_model=requested_model,
                 event_count=len(lines),
                 tool_counts={},
                 total_input_tokens=input_tokens,
