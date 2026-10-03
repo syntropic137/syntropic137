@@ -47,6 +47,8 @@ from .coverage_settlement import (
 from .gap_reasons import GapReason
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
         SessionEvidence,
     )
@@ -64,18 +66,10 @@ from .superseded_revisions import without_superseded_revision_issues
 RESOLVER_VERSION = "syn-session-relationships/10"
 
 
-def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
-    refs: dict[str, InventoryNodeRef] = {}
-    origins: dict[str, list[EvidenceReference]] = defaultdict(list)
-
-    def claim(ref: InventoryNodeRef, origin: EvidenceReference | None) -> None:
-        # One key per reference: it hashes a JSON encoding, and the snapshot
-        # build is dominated by this loop on large runs (#1528).
-        key = ref.key
-        refs[key] = ref
-        if origin is not None:
-            origins[key].append(origin)
-
+def _node_claims(
+    evidence: SessionEvidence,
+) -> Iterator[tuple[InventoryNodeRef, EvidenceReference | None]]:
+    """Every node reference the evidence makes, with the evidence that made it."""
     for item in (
         *evidence.nodes,
         *evidence.memberships,
@@ -83,19 +77,31 @@ def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
         *evidence.native_transcripts,
         *evidence.invocation_lifecycle,
     ):
-        claim(item.node, item.evidence)
+        yield item.node, item.evidence
     for context in evidence.invocation_contexts:
-        for ref in (context.controller, context.child):
-            claim(ref, context.evidence)
+        yield context.controller, context.evidence
+        yield context.child, context.evidence
     for edge in evidence.edges:
-        for ref in (edge.parent, edge.child):
-            claim(ref, edge.evidence)
+        yield edge.parent, edge.evidence
+        yield edge.child, edge.evidence
     for binding in evidence.bindings:
-        for ref in (binding.owner, binding.transcript):
-            claim(ref, binding.evidence)
+        yield binding.owner, binding.evidence
+        yield binding.transcript, binding.evidence
     if evidence.coverage_contract is not None:
         for ref in evidence.coverage_contract.expected_nodes:
-            claim(ref, None)
+            yield ref, None
+
+
+def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
+    refs: dict[str, InventoryNodeRef] = {}
+    origins: dict[str, list[EvidenceReference]] = defaultdict(list)
+    for ref, origin in _node_claims(evidence):
+        # One key per reference: it hashes a JSON encoding, and the snapshot
+        # build is dominated by this loop on large runs (#1528).
+        key = ref.key
+        refs[key] = ref
+        if origin is not None:
+            origins[key].append(origin)
     # Validate producer identities across nodes as well as within one node.
     references(ref for items in origins.values() for ref in items)
     return tuple(

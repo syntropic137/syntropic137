@@ -106,14 +106,8 @@ class InMemorySessionInventory(InMemoryAdapter):
             if staged.items.setdefault((kind, offset), item) != item:
                 raise InventoryPublicationConflict("inventory item position reused")
 
-    async def publish(
-        self, run: RunIdentity, snapshot_id: UUID, expected_head: UUID | None
-    ) -> None:
-        current = self._heads.get(run)
-        if current == snapshot_id:
-            return  # Retry after a committed response was lost.
-        if current != expected_head:
-            raise InventoryPublicationConflict("inventory head changed during reconciliation")
+    def _publishable(self, run: RunIdentity, snapshot_id: UUID, current: UUID | None) -> _Staged:
+        """The staged snapshot, if it is complete and not older than the head."""
         staged = self._staged.get((run, snapshot_id))
         if staged is None or staged.published:
             raise InventoryNotFound("no unpublished snapshot in this run")
@@ -126,6 +120,17 @@ class InMemorySessionInventory(InMemoryAdapter):
             stored = sum(1 for item_kind, _ in staged.items if item_kind == kind)
             if stored != getattr(snapshot.counts, kind):
                 raise InventoryPublicationConflict("snapshot still has uncommitted batches")
+        return staged
+
+    async def publish(
+        self, run: RunIdentity, snapshot_id: UUID, expected_head: UUID | None
+    ) -> None:
+        current = self._heads.get(run)
+        if current == snapshot_id:
+            return  # Retry after a committed response was lost.
+        if current != expected_head:
+            raise InventoryPublicationConflict("inventory head changed during reconciliation")
+        staged = self._publishable(run, snapshot_id, current)
         sequence = 1
         if expected_head is not None:
             parent = next(
