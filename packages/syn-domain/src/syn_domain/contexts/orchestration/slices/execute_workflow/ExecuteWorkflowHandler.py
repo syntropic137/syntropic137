@@ -402,6 +402,11 @@ class ExecuteWorkflowHandler:
             self._resolve_repos(command, merged_inputs, workflow) if workflow.requires_repos else []
         )
 
+        # #967: the launch snapshot. Read from the template NOW, so a later
+        # edit to the workflow's tags changes future runs and never this one.
+        # Raises (a ValueError) if the union exceeds the tag limit.
+        tags = workflow.tags.union(command.tags)
+
         execution_id = (
             command.execution_id
             if command.execution_id and command.execution_id.startswith("exec-")
@@ -423,6 +428,7 @@ class ExecuteWorkflowHandler:
                 repos=repos,
                 admitted=admitted,
                 source_commits=await source_commits_for(self._commit_resolver, repos),
+                tags=tags,
             )
         except StreamAlreadyExistsError:
             logger.warning(

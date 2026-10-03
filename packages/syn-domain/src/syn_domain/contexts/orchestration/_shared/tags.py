@@ -27,12 +27,13 @@ tightening a rule later cannot make an already-recorded event fail to replay.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from pydantic_core import core_schema
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
     from pydantic import GetCoreSchemaHandler
 
 MAX_TAGS = 32

@@ -212,6 +212,7 @@ class _CapturingProcessor:
         repos: list[RepositoryRef],
         admitted: AdmissionTicket | None = None,
         source_commits: list[SourceCommit] | None = None,
+        tags: object = None,
     ) -> WorkflowExecutionResult:
         del workflow_name, inputs, repos, admitted
         self.phases = list(phases)

@@ -100,6 +100,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports import (
         ArtifactContentStoragePort,
     )
+    from syn_domain.contexts.orchestration._shared.tags import TagSet
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
         SourceCommit,
@@ -278,6 +279,7 @@ class WorkflowExecutionProcessor:
         expected_completion_at: datetime | None = None,
         admitted: AdmissionTicket | None = None,
         source_commits: list[SourceCommit] | None = None,
+        tags: TagSet | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern.
 
@@ -304,6 +306,7 @@ class WorkflowExecutionProcessor:
             phase_definitions=phase_definitions_of(phases),
             pinned_phases=phases,
             source_commits=source_commits,
+            tags=tags,
         )
         aggregate.start_execution(start_cmd)
         return await self._run_started(aggregate, workflow_id, phases, inputs, repos, admitted)

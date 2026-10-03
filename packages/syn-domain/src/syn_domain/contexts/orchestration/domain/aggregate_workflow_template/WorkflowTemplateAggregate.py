@@ -51,17 +51,17 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
         WorkflowPhaseUpdatedEvent,
     )
-    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
-        WorkflowTemplateArchivedEvent,
-    )
-    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
-        WorkflowTemplateCreatedEvent,
-    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
         WorkflowTagsAddedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
         WorkflowTagsRemovedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+        WorkflowTemplateArchivedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+        WorkflowTemplateCreatedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
         WorkflowTemplateUpdatedEvent,
