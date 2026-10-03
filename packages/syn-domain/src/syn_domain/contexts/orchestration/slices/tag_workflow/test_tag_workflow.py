@@ -173,3 +173,42 @@ class TestRemoveWorkflowTags:
         assert result is not None
         assert result.success
         assert publisher.event_types == []
+
+
+@pytest.mark.unit
+class TestYamlTagsReachTheStream:
+    async def test_yaml_tags_survive_install_and_replay(self) -> None:
+        """YAML -> definition -> command -> REAL create handler -> stream (#967).
+
+        Each hop copies the field by hand, so each is a place it can drop.
+        Asserted on a fresh load of the stream, not on the command.
+        """
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+        from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+            build_command_from_definition,
+        )
+        from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+            CreateWorkflowTemplateHandler,
+        )
+        from syn_shared.agents import PhaseModelDefaults
+
+        definition = WorkflowDefinition.from_yaml(
+            f"id: {WORKFLOW_ID}\n"
+            "name: Tagged\n"
+            "type: research\n"
+            "tags: [Nightly, eval-a]\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: P1\n"
+            "    order: 1\n"
+            "    prompt_template: do it\n"
+        )
+        repository, publisher = _repository(), _Publisher()
+
+        await CreateWorkflowTemplateHandler(
+            repository, publisher, model_defaults=PhaseModelDefaults()
+        ).handle(build_command_from_definition(definition))
+
+        assert await _replayed_tags(repository) == TagSet(["eval-a", "nightly"])
