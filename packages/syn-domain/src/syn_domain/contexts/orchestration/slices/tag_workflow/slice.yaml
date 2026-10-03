@@ -1,0 +1,11 @@
+name: tag-workflow
+type: command
+aggregate: WorkflowTemplate
+emits:
+  - WorkflowTagsAddedEvent
+  - WorkflowTagsRemovedEvent
+projection: WorkflowListProjection
+subscribes_to:
+  - WorkflowTagsAddedEvent
+  - WorkflowTagsRemovedEvent
+returns: TagEditResult[TagSet]
