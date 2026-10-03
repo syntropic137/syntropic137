@@ -17,8 +17,10 @@ from syn_domain.contexts.agent_sessions import (
     InventoryJob,
     InventoryJobLease,
     InventoryLeaseLost,
-    ReconciliationStage,
     RunIdentity,
+)
+from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import (
+    ReconciliationStage,
 )
 
 if TYPE_CHECKING:
