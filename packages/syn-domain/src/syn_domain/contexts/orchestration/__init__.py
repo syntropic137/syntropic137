@@ -42,6 +42,10 @@ from syn_domain.contexts.orchestration._shared.skill_errors import (
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
 )
+from syn_domain.contexts.orchestration._shared.tags import (
+    InvalidTagsError,
+    TagSet,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PHASE_ID_PATTERN,
     RESERVED_INPUT_NAMES,
@@ -243,6 +247,7 @@ __all__ = [
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
+    "InvalidTagsError",
     "IsolationConfig",
     # Value objects - workflow
     "PhaseDefinition",
@@ -267,6 +272,7 @@ __all__ = [
     "StartResumeHandler",
     "StreamResult",
     "SubagentTracker",
+    "TagSet",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
     "UnsupportedExecutionTypeError",

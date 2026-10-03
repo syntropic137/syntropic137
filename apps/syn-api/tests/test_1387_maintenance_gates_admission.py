@@ -26,6 +26,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 from syn_api.routes.executions.commands import execute_workflow_endpoint
 from syn_api.routes.maintenance import get_maintenance_mode, set_maintenance_mode
 from syn_api.types import SetMaintenanceModeRequest
+from syn_domain.contexts.orchestration import TagSet
 
 pytestmark = pytest.mark.unit
 
@@ -37,6 +38,7 @@ class _Request:
     inputs: dict[str, str] = field(default_factory=dict)
     repos: list[str] = field(default_factory=list)
     task: str | None = None
+    tags: TagSet = field(default_factory=TagSet)
     provider: str = "claude"
 
 

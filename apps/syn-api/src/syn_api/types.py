@@ -625,6 +625,8 @@ class ExecutionSummary(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -719,6 +721,8 @@ class ExecutionDetail(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""
@@ -1396,6 +1400,8 @@ class ExecutionDetailFull(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""
