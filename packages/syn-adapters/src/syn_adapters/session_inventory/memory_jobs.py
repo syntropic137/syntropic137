@@ -26,10 +26,8 @@ from syn_domain.contexts.agent_sessions import (
     InventoryNotFound,
     InventoryPublicationConflict,
     InventorySnapshot,
-    RunIdentity,
-)
-from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import (
     ReconciliationStage,
+    RunIdentity,
 )
 
 if TYPE_CHECKING:

@@ -46,6 +46,9 @@ from syn_domain.contexts.agent_sessions._shared import (
     SessionStatus,
     TokenMetrics,
 )
+from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import (
+    ReconciliationStage,
+)
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_SESSION_USAGE_CTE,
     CANONICAL_USAGE_EVENT_FILTER,
@@ -336,6 +339,7 @@ __all__ = [
     "ProcessHistoryBackfillQueueHandler",
     "QualifiedSessionIdentity",
     "ReadLocalTranscriptHandler",
+    "ReconciliationStage",
     "RecordOperationCommand",
     "RecordOperationHandler",
     "RecordSessionInvocationCommand",
