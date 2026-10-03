@@ -14,3 +14,8 @@
 	path = lib/agentic-workspace
 	url = https://github.com/AgentParadise/agentic-workspace.git
 	branch = release
+[submodule "lib/syntropic137-skills"]
+	path = lib/syntropic137-skills
+	url = https://github.com/syntropic137/syntropic137-skills.git
+	branch = main
+	active = true

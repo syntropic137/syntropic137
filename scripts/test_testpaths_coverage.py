@@ -35,6 +35,7 @@ _EXCLUDED = {
     "lib/agentic-workspace",
     "lib/event-sourcing-platform",
     "lib/syntropic137-claude-plugin",
+    "lib/syntropic137-skills",
     # KNOWN GAPS, each with an issue. Listed rather than silently uncovered:
     # an exclusion someone has to read is not the same as a directory nobody
     # knows about.
@@ -43,6 +44,11 @@ _EXCLUDED = {
     # dependencies. Wiring it into the root suite is its own change, not a
     # side effect of a testpaths fix.
     "lib/ui-feedback",
+    # Experiment evidence for ADR-014 section 7, run by hand
+    # (`uv run pytest docs/experiments/resumability-fork -q -s`, optionally
+    # against a real event store via EXP_GRPC_ADDR). They measure behaviour
+    # at a point in time; they are not regression tests.
+    "docs/experiments/resumability-fork",
     # syn_tests/integration (#857): adding it regresses the integration gate.
     # The tests guard on `collector_url`, but the fixture DEFAULTS that to a
     # non-empty localhost URL, so they do not skip in CI - they fail against a
