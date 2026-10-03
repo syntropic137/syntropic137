@@ -286,6 +286,7 @@ async def create_inventory_runtime(
             lease_seconds=settings.lease_seconds,
             retry_seconds=settings.retry_seconds,
             max_jobs_per_tick=settings.max_jobs_per_tick,
+            park_safety_seconds=settings.park_safety_seconds,
             host_evidence=HostSessionEvidenceProjector(
                 evidence,
                 source_id,

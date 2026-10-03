@@ -125,7 +125,7 @@ async def test_parked_job_waits_for_a_newer_step_and_a_superseded_lease_cannot_p
     store = PostgresSessionInventoryJobs(db_pool)
     stale = await store.claim(lease_seconds=60)
     assert stale is not None
-    await store.park(stale)
+    await store.park(stale, safety_seconds=900)
     # No timed retry: a replay of the same step does not re-arm it either (#1528).
     await store.project(job)
     assert await store.claim(lease_seconds=60) is None
@@ -138,7 +138,7 @@ async def test_parked_job_waits_for_a_newer_step_and_a_superseded_lease_cannot_p
         }
     )
     await store.project(publishing)
-    await store.park(stale)
+    await store.park(stale, safety_seconds=900)
     rearmed = await store.claim(lease_seconds=60)
     assert rearmed is not None
     assert rearmed.job == publishing

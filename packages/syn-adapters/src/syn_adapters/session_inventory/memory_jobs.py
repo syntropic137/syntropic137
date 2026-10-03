@@ -215,10 +215,12 @@ class InMemorySessionInventoryJobs(InMemoryAdapter):
         if row is not None:
             row.leased_until, row.retry_at = -math.inf, self._clock() + retry_seconds
 
-    async def park(self, lease: InventoryJobLease) -> None:
+    async def park(self, lease: InventoryJobLease, *, safety_seconds: int) -> None:
+        if safety_seconds < 1:
+            raise ValueError("park safety delay must be positive")
         row = self._held(lease)
         if row is not None:
-            row.leased_until, row.retry_at = -math.inf, math.inf
+            row.leased_until, row.retry_at = -math.inf, self._clock() + safety_seconds
 
     async def publish(self, lease: InventoryJobLease) -> None:
         row = self._held(lease)

@@ -72,6 +72,7 @@ _PROJECTION_LOGGER = (
 SOURCE = "drain-test"
 RETRY_SECONDS = 10
 LEASE_SECONDS = 60
+PARK_SAFETY_SECONDS = 3600
 # Production: 31 open jobs, max_jobs_per_tick=2 (SessionInventorySettings default).
 STALE_JOBS = 31
 MAX_JOBS = 2
@@ -161,6 +162,7 @@ class _Harness:
             lease_seconds=LEASE_SECONDS,
             retry_seconds=RETRY_SECONDS,
             max_jobs_per_tick=MAX_JOBS,
+            park_safety_seconds=PARK_SAFETY_SECONDS,
         )
         self.checkpoints = MemoryCheckpointStore()
         self._delivered = 0
@@ -317,6 +319,32 @@ async def test_stale_jobs_are_not_progress_and_are_not_retried_until_their_event
     events = await harness.events()
     assert [await harness.tick() for _ in range(5)] == [0] * 5
     assert await harness.events() == events
+
+
+async def test_a_parked_job_is_offered_again_after_the_safety_delay_if_nothing_rearms_it() -> None:
+    # Parking waits for project() to re-arm the job. If the newer step never
+    # arrives (a state-model change, a version rebuild), an unbounded park would
+    # strand the job, and per-run coalescing would then block every later job
+    # for that run, silently. The park is bounded instead.
+    harness = _Harness()
+    ids = await _stale_jobs(harness)
+    events = await harness.events()
+    for _ in range(STALE_JOBS * 2):
+        await harness.tick()
+    first_pass = sorted(harness.work.executed)
+    assert first_pass == sorted(ids)
+
+    # Well inside the safety delay: still parked, still quiet.
+    harness.now += PARK_SAFETY_SECONDS // 2
+    assert await harness.tick() == 0
+    assert sorted(harness.work.executed) == first_pass
+
+    # Past it, with no newer step ever projected: each job is looked at again.
+    harness.now += PARK_SAFETY_SECONDS
+    for _ in range(STALE_JOBS * 2):
+        await harness.tick()
+    assert sorted(harness.work.executed) == sorted(ids * 2)
+    assert await harness.events() == events  # re-examining a stale job emits nothing
 
 
 async def test_a_step_waits_for_its_own_event_instead_of_reclaiming_the_stale_row() -> None:

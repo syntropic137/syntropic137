@@ -55,12 +55,15 @@ class SessionInventoryJobPort(Protocol):
         """Offer the job again after ``retry_seconds``: the step failed and may succeed."""
         ...
 
-    async def park(self, lease: InventoryJobLease) -> None:
-        """Offer the job again only when ``project()`` records a newer step for it.
+    async def park(self, lease: InventoryJobLease, *, safety_seconds: int) -> None:
+        """Offer the job again when ``project()`` records a newer step for it.
 
         For a step whose next move depends on an event this projection has not
         observed yet. A newer open step re-arms the job; a terminal one drops it.
-        No-op when the lease was already superseded.
+        ``safety_seconds`` bounds the wait: if no newer step ever arrives (the
+        projected row and the aggregate never compare equal again, for example
+        after a state-model change), the job is offered again after that delay
+        rather than parked forever. No-op when the lease was already superseded.
         """
         ...
 

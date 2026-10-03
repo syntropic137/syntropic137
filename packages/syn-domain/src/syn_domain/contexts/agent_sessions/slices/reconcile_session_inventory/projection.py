@@ -74,12 +74,19 @@ class InventoryReconciliationProcessManager(ProcessManager):
         lease_seconds: int,
         retry_seconds: int,
         max_jobs_per_tick: int,
+        park_safety_seconds: int = 900,
         host_evidence: HostSessionEvidenceProjector | None = None,
     ) -> None:
-        if lease_seconds < 1 or retry_seconds < 0 or max_jobs_per_tick < 1:
+        if (
+            lease_seconds < 1
+            or retry_seconds < 0
+            or max_jobs_per_tick < 1
+            or park_safety_seconds < 1
+        ):
             raise ValueError("invalid inventory worker limits")
         self._jobs, self._work = jobs, work
         self._lease_seconds, self._retry_seconds = lease_seconds, retry_seconds
+        self._park_safety_seconds = park_safety_seconds
         self._max_jobs = max_jobs_per_tick
         self._host_evidence = host_evidence
 
@@ -185,7 +192,7 @@ class InventoryReconciliationProcessManager(ProcessManager):
             # has not projected yet: the one the step just saved, or the newer
             # one the store already holds. A timed retry would only re-claim
             # the same stale row (#1528), so wait for project() to re-arm it.
-            await self._jobs.park(lease)
+            await self._jobs.park(lease, safety_seconds=self._park_safety_seconds)
             if outcome is InventoryStepOutcome.ADVANCED:
                 processed += 1
         return processed
