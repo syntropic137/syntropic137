@@ -14,6 +14,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+        ContinuedBranch,
+        RemoteBranchReading,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
         SourceCommit,
@@ -72,6 +76,7 @@ class StartResumeCommand:
         pinned_phases: list[ExecutablePhase],
         source_commits: list[SourceCommit],
         resumed_from: ResumeOrigin,
+        continuation_candidates: list[ContinuedBranch] | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -80,6 +85,13 @@ class StartResumeCommand:
         self.pinned_phases = pinned_phases
         self.source_commits = source_commits
         self.resumed_from = resumed_from
+        #: The branches the parent's failing attempt at the resumed phase left
+        #: on origin (#1513). Read back from the parent's stream.
+        self.continuation_candidates = continuation_candidates or []
+        #: What the forge says about each candidate now. Filled in by
+        #: `StartResumeHandler` before the start; the aggregate decides from it
+        #: (`branch_continuation.decide_continuation`).
+        self.remote_branches: list[RemoteBranchReading] = []
 
 
 class CompleteExecutionCommand:

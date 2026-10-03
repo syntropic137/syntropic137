@@ -13,7 +13,7 @@ of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
@@ -364,6 +364,7 @@ class WorkspaceProvisionHandler:
         phase_outputs: PhaseOutputCache | None = None,
         inputs: dict[str, object] | None = None,
         pinned_commits: Sequence[SourceCommit] = (),
+        continued_branches: Mapping[str, str] | None = None,
     ) -> ProvisionResult:
         """Provision workspace for a phase.
 
@@ -382,6 +383,9 @@ class WorkspaceProvisionHandler:
             pinned_commits: The commits to check ``repos`` out at instead of
                 their default branches' heads - the run's recorded commits, a
                 resume's being its parent's (`StartPins.checkout_commits`, #1458).
+            continued_branches: ``owner/name`` -> the branch to check a pinned
+                repository out ON, at its head, for a phase that continues it
+                (`StartPins.checkout_for`, #1513).
         """
         assert todo.phase_id is not None
 
@@ -409,6 +413,7 @@ class WorkspaceProvisionHandler:
                 phase_name=phase.name,
                 clone_repos=phase.clone_repos,
                 pinned_commits=pinned_commits,
+                continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
             )
             await self._materialize_claude_plugins(workspace, phase)
@@ -442,6 +447,7 @@ class WorkspaceProvisionHandler:
         phase_name: str,
         clone_repos: bool,
         pinned_commits: Sequence[SourceCommit] = (),
+        continued_branches: Mapping[str, str] | None = None,
         include_codex_auth: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -468,6 +474,7 @@ class WorkspaceProvisionHandler:
             repositories=effective_repos,
             clone_repos=clone_repos,
             pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
+            continued_branches=continued_branches,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
             ledger=workspace.issuance_ledger,

@@ -1009,3 +1009,13 @@ class ResumeOrigin(BaseModel):
     def owners(self) -> dict[str, str]:
         """Every inherited phase's owner, by phase id."""
         return {p.phase_id: self.owner_of(p) for p in self.inherited_phases}
+
+
+# Re-exported for `WorkflowExecutionStarted` (#1513): a domain event imports its
+# value objects from this module, and this one is past the file-size limit.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (  # noqa: E402
+    AbandonedBranch as AbandonedBranch,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (  # noqa: E402
+    ContinuedBranch as ContinuedBranch,
+)

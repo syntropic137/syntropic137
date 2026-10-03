@@ -10,6 +10,8 @@ from pydantic import SerializerFunctionWrapHandler, model_serializer, model_vali
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
+    AbandonedBranch,
+    ContinuedBranch,
     ExecutablePhase,
     ResumeOrigin,
     SourceCommit,
@@ -26,6 +28,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 #: reads it back out have to agree; a second literal spelled somewhere else is
 #: how they stop agreeing.
 TASK_INPUT_KEY = "task"
+
+
+#: Fields a release before #1513 does not know: omitted when None.
+_WRITTEN_ONLY_WHEN_SET = frozenset({"continued_branches", "abandoned_branches"})
 
 
 @event("WorkflowExecutionStarted", "v1")
@@ -69,6 +75,17 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: (ADR-014 s7). The child's own record of "what was this a resume of".
     resumed_from: ResumeOrigin | None = None
 
+    #: Set only on a resume (#1513): the branches its resumed phase continues -
+    #: pushed by the parent's failing attempt at that phase and confirmed still
+    #: where it left them - each with the PR open from it. Top-level rather than
+    #: inside `resumed_from`, whose model forbids extra keys, so a release that
+    #: predates the field still reads the event. None before the field existed.
+    continued_branches: list[ContinuedBranch] | None = None
+
+    #: Set only on a resume (#1513): branches it could have continued and
+    #: started fresh instead, each with why - the recorded warning.
+    abandoned_branches: list[AbandonedBranch] | None = None
+
     @model_validator(mode="before")
     @classmethod
     def _normalise_stored_payload(cls, data: object) -> object:
@@ -83,8 +100,15 @@ class WorkflowExecutionStartedEvent(DomainEvent):
         without them, and could not replay it with them nested. Only phases the
         parent did not run itself are written, so neither a fresh start nor a
         first resume writes the key at all.
+
+        The #1513 branch fields are likewise written only when set, so a run
+        that continues nothing reads exactly as a pre-#1513 release wrote it.
         """
-        payload = handler(self)
+        payload = {
+            k: v
+            for k, v in handler(self).items()
+            if not (k in _WRITTEN_ONLY_WHEN_SET and v is None)
+        }
         origin = self.resumed_from
         owners = (
             {}

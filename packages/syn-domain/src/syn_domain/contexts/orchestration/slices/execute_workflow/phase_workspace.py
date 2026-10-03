@@ -38,6 +38,9 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    SourceCommit,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     StartPhaseCommand,
 )
@@ -230,6 +233,7 @@ class PhaseWorkspace:
             claude_plugin_materializer=self._claude_plugin_materializer,
             skill_materializer=self._skill_materializer,
         )
+        checkout = aggregate.start_pins.checkout_for(phase.phase_id)
         return await provision_handler.handle(
             todo=todo,
             phase=phase,
@@ -240,11 +244,16 @@ class PhaseWorkspace:
             completed_phase_ids=completed_phase_ids,
             phase_outputs=phase_outputs,
             inputs=self._inputs,
-            # The execution decides which commit its repositories are checked
-            # out at - the ones it recorded, a resume's being its parent's
-            # (#1458) - so it is read off the aggregate, never threaded beside
+            # The execution decides what its repositories are checked out at -
+            # the commits it recorded, a resume's being its parent's (#1458),
+            # and for the phase a resume continues, its parent's pushed branch
+            # (#1513) - so it is read off the aggregate, never threaded beside
             # `repos` from the start.
-            pinned_commits=aggregate.start_pins.checkout_commits(),
+            pinned_commits=[
+                SourceCommit(repository=repository, sha=sha)
+                for repository, sha in checkout.commits.items()
+            ],
+            continued_branches=checkout.branches,
         )
 
     async def keep_unfinished_output(

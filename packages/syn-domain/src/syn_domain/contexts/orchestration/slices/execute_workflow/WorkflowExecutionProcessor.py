@@ -76,6 +76,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     inherited_outputs,
     inherited_phase_ids,
+    record_continuation,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
@@ -350,6 +351,7 @@ class WorkflowExecutionProcessor:
         # Before the stream opens: a resume whose inheritance cannot be read
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
+        record_continuation(phase_outputs, aggregate.start_pins)
         await self._journal.open(aggregate)
 
         # #1387: durable, therefore visible. From here the drain counts this

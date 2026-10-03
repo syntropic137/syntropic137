@@ -50,6 +50,7 @@ from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositor
 from syn_domain.contexts.orchestration.ports.ObservabilityServicePort import (
     ObservabilityServicePort,
 )
+from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
 from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
     SessionRepositoryPort,
 )
@@ -75,6 +76,7 @@ __all__ = [
     "CodexRolloutPort",
     "GlobalClaudePluginRegistryRepositoryPort",
     "ObservabilityServicePort",
+    "RemoteBranchPort",
     "SessionRepositoryPort",
     "SourceCommitResolverPort",
     "StoredClaudePluginTree",

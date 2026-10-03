@@ -17,6 +17,9 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    LeftBranches,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
@@ -62,6 +65,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins imp
     StartPins,
     read_admitted_forked_resume,
     read_admitted_resume,
+    read_left_branches,
     read_start_pins,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -226,6 +230,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: What this run was started with, pinned so a resume of it runs the same
         #: thing (#1454, #1457). Never read back from the workflow template.
         self._pins = StartPins()
+        #: The branches the phase this run failed in left on origin (#1513).
+        self._left_branches = LeftBranches()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -379,6 +385,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             pins=self._pins,
             resumed=self._resumed,
             admitted=self._admitted_resume,
+            left=self._left_branches,
         )
 
     @command_handler("StartExecutionCommand")
@@ -778,6 +785,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._reported_failure_reason = ReportedFailureReason.from_stored(
             evt(event, "reported_failure_reason")
         )
+        self._left_branches = read_left_branches(self._pins, event)
 
     @event_sourcing_handler("PhaseStarted")
     def on_phase_started(self, event: PhaseStartedEvent) -> None:
