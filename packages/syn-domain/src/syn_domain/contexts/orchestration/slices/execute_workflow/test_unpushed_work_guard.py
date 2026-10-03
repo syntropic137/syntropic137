@@ -3784,3 +3784,188 @@ def test_a_record_may_drop_nothing_only_when_it_kept_the_history() -> None:
             has_bundle=True,
         ),
     )
+
+
+# --------------------------------------------------------------------------
+# A submodule git moved is not a submodule anybody wrote in (#1499).
+#
+# On exec-5a22616362bd a verify phase checked out the commit under review
+# without --recurse-submodules: the superproject's recorded gitlink moved, the
+# submodule stayed put, `status --porcelain` said ` M lib/...`, and a finished
+# review was failed and lost. That line is byte-identical to the one an agent
+# that edited or committed inside the submodule leaves, so every test below
+# stages it for real - a real submodule of a real local origin, moved by a
+# real checkout - and they differ only in what is inside the submodule.
+# --------------------------------------------------------------------------
+
+_SUBMODULE = "lib/plugin"
+
+
+class _WithSubmodule:
+    """``clone`` with a submodule whose recorded gitlink can be moved under it.
+
+    The superproject's branch holds two commits pinning the submodule at
+    ``old`` then ``new``, both already on the submodule's origin, and the
+    checkout starts clean at the second. `move_the_gitlink` then does exactly
+    what the verify phase did: a superproject checkout without
+    ``--recurse-submodules``.
+    """
+
+    def __init__(self, clone: _Clone) -> None:
+        self.clone = clone
+        home = clone.root / "home"
+        origin = clone.root / "plugin.origin.git"
+        seed = clone.root / "plugin.seed"
+        origin.mkdir()
+        _git("init", "--bare", "--initial-branch=main", ".", cwd=origin, home=home)
+        seed.mkdir()
+        _git("init", "--initial-branch=main", ".", cwd=seed, home=home)
+        shas: list[str] = []
+        for content in ("old\n", "new\n"):
+            (seed / "plugin.txt").write_text(content)
+            _git("add", "plugin.txt", cwd=seed, home=home)
+            _git("commit", "-m", content.strip(), cwd=seed, home=home)
+            shas.append(_git("rev-parse", "HEAD", cwd=seed, home=home).stdout.strip())
+        _git("push", str(origin), "main", cwd=seed, home=home)
+        self.old, self.new = shas
+
+        # Local-path submodules need file transport, which git refuses by
+        # default since 2.38.1; allowed for this one command only.
+        clone.git("-c", "protocol.file.allow=always", "submodule", "add", str(origin), _SUBMODULE)
+        self.git("checkout", "--detach", self.old)
+        clone.git("add", ".gitmodules", _SUBMODULE)
+        clone.git("commit", "-m", "pin the plugin at old")
+        self.git("checkout", "--detach", self.new)
+        clone.git("add", _SUBMODULE)
+        clone.git("commit", "-m", "bump the plugin to new")
+        clone.git("push", "origin", _BRANCH)
+        self.path = clone.path / _SUBMODULE
+
+    def git(self, *args: str) -> str:
+        """git inside the submodule."""
+        return _git(*args, cwd=self.clone.path / _SUBMODULE, home=self.clone.root / "home").stdout
+
+    def move_the_gitlink(self) -> None:
+        """The incident: check out a commit that records ``old``, leave the submodule at ``new``.
+
+        Asserts the shape it produced, so a fixture that stopped staging the
+        bug would fail here rather than pass every test below vacuously.
+        """
+        self.clone.git("checkout", "--detach", "HEAD~1")
+        assert self.clone.git("status", "--porcelain") == f"M {_SUBMODULE}", (
+            "the moved gitlink should be the only change porcelain reports"
+        )
+        assert self.git("rev-parse", "HEAD").strip() == self.new
+
+    def v2_token(self) -> str:
+        """The `S<c><m><u>` field porcelain v2 reports for the submodule."""
+        (entry,) = self.clone.git("status", "--porcelain=v2").splitlines()
+        return entry.split(" ")[2]
+
+
+@pytest.fixture
+def superproject(clone: _Clone) -> _WithSubmodule:
+    return _WithSubmodule(clone)
+
+
+def _quarantined(clone: _Clone) -> list[str]:
+    return [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_gitlink_moved_by_a_checkout_does_not_fail_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """THE INCIDENT: nothing was written, so nothing may be called lost.
+
+    Through the consuming hop rather than the guard alone - the phase must be
+    REPORTED completed, which is what exec-5a22616362bd was denied.
+    """
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+    run = _PhaseRun(superproject.clone.workspace)
+
+    await run.complete()
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+    assert not _quarantined(superproject.clone)
+
+
+async def test_an_edit_inside_a_moved_submodule_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """The same porcelain line, with a tracked file changed inside the submodule."""
+    superproject.move_the_gitlink()
+    (superproject.path / "plugin.txt").write_text("an agent wrote this\n")
+    assert superproject.v2_token() == "SCM."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+    assert _quarantined(superproject.clone) == [_QUARANTINE_REF]
+
+
+async def test_a_new_file_inside_a_submodule_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """Untracked content in the submodule is authored too: the ``u`` of the token."""
+    (superproject.path / "new.py").write_text("an agent wrote this\n")
+    assert superproject.v2_token() == "S..U"
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_commit_inside_a_submodule_that_no_remote_has_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """THE CASE THE TOKEN CANNOT SEE. A committed, unpushed submodule change
+    leaves a clean submodule worktree and a moved gitlink: ``SC..``, exactly
+    the incident's token. Only asking the submodule's own remotes tells them
+    apart, and a gate that stopped at the token would discard this commit.
+    """
+    (superproject.path / "plugin.txt").write_text("committed, never pushed\n")
+    superproject.git("commit", "-am", "work in the submodule")
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_submodule_commit_on_a_branch_not_checked_out_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """Unpushed work parked on a submodule branch, with HEAD back on a pushed commit.
+
+    The checked-out commit is on a remote, so a check of HEAD alone would wave
+    this through as a moved gitlink; the branch tip is on no remote.
+    """
+    superproject.git("checkout", "-b", "agent-work")
+    (superproject.path / "plugin.txt").write_text("committed, never pushed\n")
+    superproject.git("commit", "-am", "work in the submodule")
+    superproject.git("checkout", "--detach", superproject.new)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_moved_gitlink_beside_real_work_does_not_hide_the_work(
+    superproject: _WithSubmodule,
+) -> None:
+    """The exemption removes one line, not the repository from judgement."""
+    superproject.move_the_gitlink()
+    (superproject.clone.path / "README.md").write_text("edited but never committed\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert "README.md" in str(raised.value)

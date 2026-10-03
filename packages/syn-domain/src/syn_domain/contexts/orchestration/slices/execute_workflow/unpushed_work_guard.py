@@ -111,6 +111,13 @@ is the only copy of those changes left.
 
 SCOPE is `workspace_git.repositories`': what it finds is what this gate judges,
 and a submodule's own objects are outside it.
+
+A SUBMODULE IS JUDGED, NOT QUARANTINED (#1499). Its objects belong to another
+remote, so the gate cannot save them, but it can still refuse to report a phase
+completed that wrote in one. What it no longer does is read a gitlink that git
+moved on a checkout as writing: `_moved_gitlinks` is that one distinction, and
+it asks the submodule rather than the porcelain line, because the line for the
+two cases is identical.
 """
 
 from __future__ import annotations
@@ -618,14 +625,27 @@ async def _unsaved_work(
         unpushed = set(reachable.split())
 
     files = tuple(line.rstrip() for line in status.splitlines() if line.strip())
+    # A gitlink git moved is not a change anybody made (#1499), and the
+    # porcelain line cannot say so: see `_moved_gitlinks`.
+    moved = await _moved_gitlinks(workspace, repo) if files else frozenset[str]()
+    authored = tuple(line for line in files if line not in moved)
     # THE ONE LINE THE EXEMPTION DECIDES (#1308). An uncommitted change is
     # evidence of work unless the phase both disclaimed it and was unable to
     # write it, in which case the same line is a build tool that dirtied a
     # tree somebody else's process owns. Commits are untouched by this and
     # are read as work either way - see the module docstring.
-    unsaved_files = files if uncommitted_is_work else ()
+    unsaved_files = authored if uncommitted_is_work else ()
     if not unpushed and not unsaved_files:
-        if files:
+        if moved:
+            logger.info(
+                "Leaving %d submodule(s) in %s checked out where the phase left them: "
+                "each differs from the recorded gitlink only by its commit, which a "
+                "remote already has, with a clean worktree. Paths: %s",
+                len(moved),
+                repo,
+                ", ".join(sorted(moved)),
+            )
+        if authored:
             # Said out loud rather than dropped: the tree IS about to be
             # destroyed, and an operator reading this phase's logs after a
             # surprising rebuild deserves to see which paths the phase's own
@@ -634,9 +654,9 @@ async def _unsaved_work(
                 "Leaving %d uncommitted path(s) in %s to the workspace: this phase "
                 "declares it delivers no repository changes, and could not have "
                 "written them - the repository is mounted read-only. Paths: %s",
-                len(files),
+                len(authored),
                 repo,
-                ", ".join(files),
+                ", ".join(authored),
             )
         return None
 
@@ -653,6 +673,47 @@ async def _unsaved_work(
         files=files,
         parents=_dedup([head_sha, *(sha for sha, _ in named if sha in unpushed)]),
     )
+
+
+async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
+    """The ``status --porcelain`` lines that are a submodule git moved, not work (#1499).
+
+    ``git checkout <sha>`` without ``--recurse-submodules`` moves the gitlink
+    the superproject records and leaves the submodule where it was, and
+    ``status --porcelain`` then reports `` M <path>`` - byte for byte the line
+    a submodule an agent edited or committed in produces. Reading it as work
+    failed finished review phases and discarded what they wrote.
+
+    So the line is only exempted on evidence from both sides of the gitlink:
+
+    - porcelain v2's submodule token is exactly ``SC..``, staged nothing: the
+      checked-out commit differs from the recorded one, and the submodule has
+      neither tracked changes nor untracked files. Any ``m`` or ``u`` is a
+      file somebody wrote in there, and stays work.
+    - no commit in the submodule - its HEAD or any branch - is missing from
+      every one of its remotes. A commit the phase made in the submodule is
+      authored work whose objects nothing here quarantines, so it must keep
+      failing the phase.
+
+    Everything else - a staged gitlink, a rename, a quoted path this does not
+    unquote - is left as the work it looks like. The verdict only ever WEAKENS
+    the gate, so every doubt resolves to keeping the line.
+    """
+    status = await git(workspace, repo, "status", "--porcelain=v2")
+    moved: set[str] = set()
+    for entry in status.splitlines():
+        # `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`: the path is the
+        # ninth field and the only one that may itself contain spaces.
+        fields = entry.split(" ", 8)
+        if len(fields) != 9 or fields[:3] != ["1", ".M", "SC.."] or fields[8].startswith('"'):
+            continue
+        path = fields[8]
+        stranded = await git(
+            workspace, f"{repo}/{path}", "rev-list", "HEAD", "--branches", "--not", "--remotes"
+        )
+        if not stranded.strip():
+            moved.add(f" M {path}")
+    return frozenset(moved)
 
 
 async def _quarantine(
