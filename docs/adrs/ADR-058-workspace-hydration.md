@@ -75,6 +75,8 @@ mkdir -p /workspace/repos
 
 The idempotency guard (`[ -d "..." ] || ...`) ensures re-running the setup phase on a partially-hydrated workspace (e.g. after a crash and restart) does not re-clone repos that are already present.
 
+A fresh run clones the default branch's head. A **resume** does not: each repository its parent recorded a commit for is checked out at that commit, between the clone and the submodule init, and a commit that cannot be reached refuses the phase rather than falling back. See the addendum [Resumes Check Out Their Recorded Commits (#1458)](#addendum-resumes-check-out-their-recorded-commits-1458).
+
 ### 2. Inject Both `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`
 
 After the setup script completes, the Python layer injects both `AGENTS.md` and `CLAUDE.md` at the workspace root with **identical content**: direct `@`-imports of each repo's `AGENTS.md` followed by its `CLAUDE.md`.
@@ -350,3 +352,80 @@ byte-for-byte what it rendered before - `test_open_pr_needs_no_working_tree`
 holds a literal golden that fails on any drift - and a phase that does not is
 told what it actually has: git credentials, a `gh` hosts.yml entry, and
 `GH_REPO`, which is the whole of what this ADR provisions for it.
+
+## Addendum: Resumes Check Out Their Recorded Commits (#1458)
+
+**Date:** 2026-10-03
+
+### Problem
+
+#1457 records, on `WorkflowExecutionStarted.source_commits`, the commit each
+repository was at when an execution started, and a resume copies its parent's
+record onto its own start event. Nothing read it. Every phase of every run
+cloned the default branch's head, so a resume started after `main` moved on ran
+its remaining phases on code its inherited phases never saw: a `plan` inherited
+from the parent described one tree and `implement` edited another.
+
+### Decision
+
+**The execution decides, the setup script obeys.** Which commit a repository is
+checked out at is a question about what the execution IS, so it is answered on
+the aggregate, by `StartPins.checkout_commits()`:
+
+| Run | `checkout_commits()` |
+|---|---|
+| Fresh (`resumed_from` is None) | nothing - clone the default branch's head, exactly as before |
+| Resume | every `source_commits` entry with a sha |
+| Resume, entry with `sha: None` | nothing for that repo - nothing resolved it when the parent started, so there is no commit to hold to |
+
+A fresh run records its commits too and is deliberately NOT pinned to them: it
+was started at "now", which is what the default branch's head already is.
+
+`PhaseWorkspace.provision` hands that answer to `WorkspaceProvisionHandler`,
+which keys it by `owner/name` into `SetupPhaseSecrets.pinned_commits`.
+`RepositoryRef` stays pure identity (ADR-063); a commit is not part of which
+repository it is.
+
+**The script.** For a pinned repository, directly after its clone line:
+
+```bash
+if ! git -C <dest> cat-file -e <sha>^{commit} 2>/dev/null \
+   || [ -z "$(git -C <dest> branch -r --contains <sha> 2>/dev/null)" ]; then
+    printf '%s\n' 'ERROR: <owner/name> cannot be provisioned at its recorded commit <sha>: ...' >&2
+    exit 65
+fi
+git -C <dest> -c advice.detachedHead=false checkout --quiet --detach <sha>
+```
+
+- **Before the submodule init.** Submodules then follow the gitlinks of the
+  pinned commit, not the default branch's, so the whole tree is the parent's.
+- **Detached.** No local branch is created or moved; whatever the phase
+  commits, it names its own branch.
+- **Reachable means "some branch of origin contains it".** The clone is full,
+  so every commit on any origin branch is already present and no fetch-by-sha
+  is needed. A commit outside every `origin/*` branch is refused even if a
+  fetch could still retrieve it: a workspace whose HEAD is outside `--remotes`
+  looks like unpushed work to the unpushed-work guard, and a dangling commit
+  is about to be garbage-collected anyway.
+- **Only a full 40- or 64-hex commit id is ever interpolated.** Anything else
+  raises `ValueError` while the script is rendered, so a value from the event
+  store never reaches bash unvalidated.
+
+**Unreachable means refused, never replaced.** A commit that was force-pushed
+away or whose branch was deleted exits the setup script with 65 (sysexits
+`EX_DATAERR`; neither git nor bash uses it), and `WorkspaceProvisionHandler`
+raises `PinnedCommitUnreachableError` - a `NonZeroExitError` - naming the phase,
+the repository and the commit. Like every failure that is not the phase's own
+report, it is classified PLATFORM. Falling back to the default branch would
+quietly do the exact thing this addendum exists to prevent.
+
+### Not Decided Here
+
+- **#1513 - the resumed implement phase continuing the parent's pushed branch.**
+  That is a per-phase choice ("this phase starts from the branch the parent
+  pushed"), and it slots in at the same seam: `checkout_commits()` is the
+  execution's answer and can become per-phase without re-threading anything
+  between the aggregate and the script. Nothing here creates a local branch or
+  forbids one.
+- **Pinning fresh runs.** A fresh run's recorded commits are an audit fact, not
+  a checkout instruction; making them one would change every existing workflow.
