@@ -21,7 +21,14 @@ class TestNormalisation:
         assert TagSet([" Nightly ", "nightly", "B", "a"]).values == ("a", "b", "nightly")
 
     def test_every_allowed_character(self) -> None:
-        assert TagSet(["team/a-b_c.1"]).values == ("team/a-b_c.1",)
+        assert TagSet(["team/a-b_c.1:x"]).values == ("team/a-b_c.1:x",)
+
+    def test_the_issue_967_grouping_keys_are_tags(self) -> None:
+        # The eval examples issue #967 is written around.
+        assert TagSet(["Eval:Planning-2026-08", "variant:sonnet-early"]).values == (
+            "eval:planning-2026-08",
+            "variant:sonnet-early",
+        )
 
     def test_equal_after_normalisation(self) -> None:
         assert TagSet(["X", "y"]) == TagSet(["y", "x"])
@@ -29,16 +36,16 @@ class TestNormalisation:
 
 @pytest.mark.unit
 class TestRejection:
-    @pytest.mark.parametrize("bad", ["", "   ", "has space", "eval:x", "émoji", "a+b"])
+    @pytest.mark.parametrize("bad", ["", "   ", "has space", "émoji", "a+b", "a,b", "a\\b"])
     def test_invalid_tag_is_rejected_not_dropped(self, bad: str) -> None:
         with pytest.raises(InvalidTagsError, match="invalid tag"):
             TagSet(["ok", bad])
 
     def test_error_names_every_bad_tag(self) -> None:
         with pytest.raises(InvalidTagsError) as exc:
-            TagSet(["a b", "c:d"])
+            TagSet(["a b", "c+d"])
         assert "'a b'" in str(exc.value)
-        assert "'c:d'" in str(exc.value)
+        assert "'c+d'" in str(exc.value)
 
     def test_length_limit(self) -> None:
         TagSet(["x" * MAX_TAG_LENGTH])
@@ -73,7 +80,7 @@ class TestSetOperations:
 
     def test_recorded_does_not_revalidate(self) -> None:
         # A rule tightened later must not stop an old event replaying.
-        assert TagSet.recorded(["legacy:tag", "a"]).values == ("a", "legacy:tag")
+        assert TagSet.recorded(["legacy tag", "a"]).values == ("a", "legacy tag")
 
 
 @pytest.mark.unit

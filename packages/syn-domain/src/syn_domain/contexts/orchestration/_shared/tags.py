@@ -14,7 +14,9 @@ The rules:
 - each tag is trimmed and lowercased, then the set is deduped and sorted, so
   ``[" Nightly", "nightly"]`` and ``["nightly"]`` are the same set;
 - at most ``MAX_TAGS`` tags per record and ``MAX_TAG_LENGTH`` characters per
-  tag, from ``[a-z0-9-_./]``;
+  tag, from ``TAG_CHARACTERS``. The colon is allowed so a tag can carry a
+  ``key:value`` grouping such as ``eval:planning-2026-08`` -- a spelling
+  for people to filter by, never one the domain parses;
 - an invalid tag is REJECTED with an error naming it, never dropped. Dropping
   would turn a typo into a run that silently lacks the label it was filtered
   by later.
@@ -38,7 +40,11 @@ if TYPE_CHECKING:
 
 MAX_TAGS = 32
 MAX_TAG_LENGTH = 64
-TAG_PATTERN = re.compile(r"^[a-z0-9._/-]+$")
+# The one statement of which characters a tag may use. The pattern and the
+# error text are both derived from it, so they cannot disagree. "-" stays
+# last: anywhere else inside a character class it would denote a range.
+TAG_CHARACTERS = "[a-z0-9._/:-]"
+TAG_PATTERN = re.compile(f"^{TAG_CHARACTERS}+$")
 
 
 class InvalidTagsError(ValueError):
@@ -55,7 +61,7 @@ def _problem(tag: str) -> str | None:
     if len(tag) > MAX_TAG_LENGTH:
         return f"{tag!r} is longer than {MAX_TAG_LENGTH} characters"
     if not TAG_PATTERN.fullmatch(tag):
-        return f"{tag!r} contains characters outside [a-z0-9-_./]"
+        return f"{tag!r} contains characters outside {TAG_CHARACTERS}"
     return None
 
 

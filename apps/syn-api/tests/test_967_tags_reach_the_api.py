@@ -46,7 +46,7 @@ pytestmark = pytest.mark.unit
 
 WORKFLOW_ID = "wf-967"
 NIGHTLY_ID = "exec-nightly-967"
-"""Launched with `nightly`, then retroactively tagged `eval-a`."""
+"""Launched with `nightly`, then retroactively tagged `eval:planning-2026-08`."""
 PLAIN_ID = "exec-plain-967"
 """Launched with `smoke` only."""
 
@@ -78,7 +78,7 @@ async def _serve(monkeypatch: pytest.MonkeyPatch) -> None:
     detail = WorkflowExecutionDetailProjection(store)
     listing = WorkflowExecutionListProjection(store)
     retro = ExecutionTagsAddedEvent(
-        execution_id=NIGHTLY_ID, workflow_id=WORKFLOW_ID, tags=["eval-a"]
+        execution_id=NIGHTLY_ID, workflow_id=WORKFLOW_ID, tags=["eval:planning-2026-08"]
     )
     for projection in (detail, listing):
         await projection.on_workflow_execution_started(
@@ -123,7 +123,7 @@ class TestTheListCarriesTags:
     async def test_each_row_carries_its_current_tags(self, monkeypatch: pytest.MonkeyPatch) -> None:
         await _serve(monkeypatch)
         assert await _listed(None) == {
-            NIGHTLY_ID: ["eval-a", "nightly"],
+            NIGHTLY_ID: ["eval:planning-2026-08", "nightly"],
             PLAIN_ID: ["smoke"],
         }
 
@@ -139,7 +139,7 @@ class TestTheTagFilter:
     @pytest.mark.asyncio
     async def test_a_retroactive_tag_is_filterable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         await _serve(monkeypatch)
-        assert set(await _listed(["eval-a"])) == {NIGHTLY_ID}
+        assert set(await _listed(["eval:planning-2026-08"])) == {NIGHTLY_ID}
 
     @pytest.mark.asyncio
     async def test_an_unknown_tag_returns_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,7 +149,7 @@ class TestTheTagFilter:
     @pytest.mark.asyncio
     async def test_repeated_tags_are_anded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         await _serve(monkeypatch)
-        assert set(await _listed(["nightly", "eval-a"])) == {NIGHTLY_ID}
+        assert set(await _listed(["nightly", "eval:planning-2026-08"])) == {NIGHTLY_ID}
         assert await _listed(["nightly", "smoke"]) == {}
 
     @pytest.mark.asyncio
@@ -177,7 +177,7 @@ class TestTheDetailCarriesTags:
 
         await _serve(monkeypatch)
         detail = await queries.get_execution_endpoint(NIGHTLY_ID)
-        assert detail.model_dump()["tags"] == ["eval-a", "nightly"]
+        assert detail.model_dump()["tags"] == ["eval:planning-2026-08", "nightly"]
 
 
 # -- The write path: POST /workflows/{id}/execute ------------------------------
@@ -233,6 +233,12 @@ class TestRequestTagsReachTheCommand:
         request = ExecuteWorkflowRequest.model_validate({"tags": [" Nightly", "nightly", "B"]})
         assert list(request.tags) == ["b", "nightly"]
 
+    def test_the_issue_967_eval_keys_are_accepted(self) -> None:
+        request = ExecuteWorkflowRequest.model_validate(
+            {"tags": ["eval:planning-2026-08", "variant:sonnet-early"]}
+        )
+        assert list(request.tags) == ["eval:planning-2026-08", "variant:sonnet-early"]
+
     def test_an_invalid_request_tag_is_a_validation_error(self) -> None:
         with pytest.raises(ValidationError, match="has space"):
             ExecuteWorkflowRequest.model_validate({"tags": ["has space"]})
@@ -261,12 +267,12 @@ class TestRequestTagsReachTheCommand:
         tasks = BackgroundTasks()
         request = ExecuteWorkflowRequest(
             repos=["https://github.com/syntropic137/syntropic137"],
-            tags=TagSet(["eval-a"]),
+            tags=TagSet(["eval:planning-2026-08"]),
         )
         await commands.execute_workflow_endpoint(WORKFLOW_ID, request, tasks)
         await tasks()
 
-        assert execution.tags == [TagSet(["eval-a"])]
+        assert execution.tags == [TagSet(["eval:planning-2026-08"])]
 
     @pytest.mark.asyncio
     async def test_execute_puts_them_on_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -294,6 +300,6 @@ class TestRequestTagsReachTheCommand:
         monkeypatch.setattr(commands, "get_projection_mgr", _Manager)
         monkeypatch.setattr(_wiring, "get_execute_workflow_handler", _handler)
 
-        await commands.execute(WORKFLOW_ID, tags=TagSet(["eval-a"]))
+        await commands.execute(WORKFLOW_ID, tags=TagSet(["eval:planning-2026-08"]))
 
-        assert [list(c.tags) for c in handler.commands] == [["eval-a"]]
+        assert [list(c.tags) for c in handler.commands] == [["eval:planning-2026-08"]]

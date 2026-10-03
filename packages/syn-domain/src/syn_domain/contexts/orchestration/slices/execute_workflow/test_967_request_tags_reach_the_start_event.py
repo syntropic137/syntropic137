@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from event_sourcing import EventStoreRepository
 from event_sourcing.client.memory import MemoryEventStoreClient
+from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from pydantic import ValidationError
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
@@ -58,7 +59,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
-from syn_domain.testing.stored_replay import stored_envelopes
+from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+    WorkflowExecutionListProjection,
+)
+from syn_domain.testing.stored_replay import replay, stored_envelopes
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -182,6 +186,24 @@ async def test_an_untagged_run_of_an_untagged_workflow_records_none() -> None:
     await world.run("exec-1", [])
 
     assert await world.started_tags("exec-1") == []
+
+
+async def test_the_issue_967_eval_keys_tag_a_run_and_filter_it_back() -> None:
+    # The grouping keys issue #967 uses in its own `--tag` examples.
+    world = _World(workflow_tags=[])
+    await world.install()
+
+    await world.run("exec-eval", ["eval:planning-2026-08", "variant:sonnet-early"])
+    await world.run("exec-other", ["eval:planning-2026-09"])
+
+    assert await world.started_tags("exec-eval") == [
+        "eval:planning-2026-08",
+        "variant:sonnet-early",
+    ]
+    listing = WorkflowExecutionListProjection(store=InMemoryProjectionStore())
+    await replay(world.executions_store, MemoryCheckpointStore(), listing)
+    page = await listing.page(tags=TagSet(["eval:planning-2026-08"]))
+    assert [row.workflow_execution_id for row in page.rows] == ["exec-eval"]
 
 
 def test_an_invalid_request_tag_is_refused_not_dropped() -> None:
