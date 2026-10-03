@@ -400,7 +400,19 @@ jobs:
               return 0
             fi
 
-            if grep -qiE 'not found|manifest unknown|name unknown|no such manifest|does not exist' <<<"$out"; then
+            # Match the absent-tag response EXACTLY, as a whole line. buildx
+            # emits precisely "ERROR: <ref>: not found" for a missing tag, a
+            # missing repository and a missing digest alike (measured against
+            # GHCR, 2026-10-03).
+            #
+            # A keyword search would be the wrong shape here. Any failure whose
+            # diagnostic happens to contain "not found" would be classified as
+            # an absent tag and fall through to `latest`, which is exactly the
+            # wrong-pin outcome this step exists to prevent. Matching the whole
+            # line against the ref we actually asked for cannot do that, and if
+            # buildx ever rewords this the step fails loudly instead of
+            # guessing - the safe direction.
+            if grep -Fxq "ERROR: ${ref}: not found" <<<"$out"; then
               DIGEST=""
               return 0
             fi
