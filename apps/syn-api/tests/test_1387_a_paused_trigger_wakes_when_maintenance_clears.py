@@ -163,6 +163,10 @@ class _LiveEventStore:
                 metadata=base.model_copy(update={"global_nonce": self._next_nonce}),
             )
         )
+        # A ProcessManager drains on its own task, off the dispatch path
+        # (ESP #334, #1528), as it does in production. Wait for it to settle so
+        # this fake's "delivered" still means "and its side effects ran".
+        await self._coordinator.wait_for_process_managers()
 
 
 class _RecordingHandler:
@@ -688,6 +692,8 @@ class TestTheRestartWakeRacesTheCoordinator:
         try:
             await self._once_the_announcement_was_handled(api)
             async with asyncio.timeout(_PATIENCE):
+                # The processor side runs on its own drain task (#1528).
+                await api.service.wait_for_process_managers()
                 while api.dispatcher._tasks:
                     await asyncio.gather(*api.dispatcher._tasks, return_exceptions=True)
                     await asyncio.sleep(0)
