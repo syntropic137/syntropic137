@@ -35,6 +35,7 @@ _EXCLUDED = {
     "lib/agentic-workspace",
     "lib/event-sourcing-platform",
     "lib/syntropic137-claude-plugin",
+    "lib/syntropic137-skills",
     # KNOWN GAPS, each with an issue. Listed rather than silently uncovered:
     # an exclusion someone has to read is not the same as a directory nobody
     # knows about.
