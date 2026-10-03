@@ -302,6 +302,16 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       # -----------------------------------------------------------------------
+      # Docker Buildx
+      # -----------------------------------------------------------------------
+      # This job resolves the event-store index digest with `buildx imagetools
+      # inspect`. The GitHub runner image happens to ship the buildx plugin, but
+      # "happens to" is not a guarantee we want a release to rest on, so the
+      # plugin is set up explicitly here rather than inherited from the runner.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      # -----------------------------------------------------------------------
       # Download image digests from build job
       # -----------------------------------------------------------------------
       - name: Download all digest artifacts
@@ -361,20 +371,65 @@ jobs:
           # `buildx imagetools inspect --format '{{.Manifest.Digest}}'` returns
           # the digest of the thing the tag actually points at, which is the
           # index for a multi-arch image.
+          if ! docker buildx version >/dev/null 2>&1; then
+            echo "::error::docker buildx is unavailable, so the event-store index digest cannot be resolved."
+            echo "::error::Refusing to release: the fallback path would pin a child manifest (#1519)."
+            exit 1
+          fi
+
+          # Sets DIGEST. Writes to a global instead of echoing, because a
+          # hard failure must be able to `exit` the step - inside $(...) it
+          # would only exit the subshell and the caller would read it as
+          # "tag absent".
+          #
+          # An absent tag and a failed lookup are NOT the same thing. The old
+          # code collapsed them with `|| true`, so an auth failure, a registry
+          # outage or a missing plugin all read as "version not found" and fell
+          # through to `latest`, pinning a version nobody asked for. Only a
+          # genuine "this tag does not exist" may fall through.
+          DIGEST=""
           resolve() {
-            docker buildx imagetools inspect "$1" \
-              --format '{{.Manifest.Digest}}' 2>/dev/null || true
+            local ref="$1" out rc
+            set +e
+            out="$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>&1)"
+            rc=$?
+            set -e
+
+            if [[ $rc -eq 0 ]]; then
+              DIGEST="$out"
+              return 0
+            fi
+
+            if grep -qiE 'not found|manifest unknown|name unknown|no such manifest|does not exist' <<<"$out"; then
+              DIGEST=""
+              return 0
+            fi
+
+            echo "::error::Looking up ${ref} failed, and NOT because the tag is missing."
+            echo "::error::Refusing to fall back to 'latest' - that would pin an unintended version."
+            echo "${out}"
+            exit 1
           }
 
-          DIGEST="$(resolve "${IMAGE}:${VERSION}")"
+          resolve "${IMAGE}:${VERSION}"
 
           if [[ -z "$DIGEST" ]]; then
-            echo "::warning::event-store:${VERSION} not found in GHCR, trying 'latest'"
-            DIGEST="$(resolve "${IMAGE}:latest")"
+            # Expected today: ESP tags this image on its own scheme, so the
+            # exact-version lookup can never match (#1515). The fallback is
+            # deliberate until that is fixed, and #1515 owns tightening it.
+            echo "::warning::event-store:${VERSION} not present in GHCR, falling back to 'latest' (#1515)"
+            resolve "${IMAGE}:latest"
           fi
 
           if [[ -z "$DIGEST" ]]; then
             echo "::error::Could not resolve event-store digest from GHCR - refusing to release without supply chain pinning"
+            exit 1
+          fi
+
+          # A malformed digest would be pinned verbatim into the compose asset
+          # and fail at `docker compose up` in a user's terminal, not here.
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Resolved event-store digest is not a well-formed sha256 reference: '${DIGEST}'"
             exit 1
           fi
 
