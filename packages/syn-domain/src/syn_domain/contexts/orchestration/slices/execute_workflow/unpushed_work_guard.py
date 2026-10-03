@@ -628,7 +628,11 @@ async def _unsaved_work(
     # A gitlink git moved is not a change anybody made (#1499), and the
     # porcelain line cannot say so: see `_moved_gitlinks`.
     moved = await _moved_gitlinks(workspace, repo) if files else frozenset[str]()
-    authored = tuple(line for line in files if line not in moved)
+    # Compared as decoded paths, never as lines: v1 quotes a path with a space
+    # in it and v2 does not, so two spellings of one path never match (#1499).
+    authored = tuple(
+        line for line in files if not (line[:3] == " M " and _unquote(line[3:]) in moved)
+    )
     # THE ONE LINE THE EXEMPTION DECIDES (#1308). An uncommitted change is
     # evidence of work unless the phase both disclaimed it and was unable to
     # write it, in which case the same line is a build tool that dirtied a
@@ -676,7 +680,7 @@ async def _unsaved_work(
 
 
 async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
-    """The ``status --porcelain`` lines that are a submodule git moved, not work (#1499).
+    """The paths of submodules git moved, not anybody wrote in (#1499).
 
     ``git checkout <sha>`` without ``--recurse-submodules`` moves the gitlink
     the superproject records and leaves the submodule where it was, and
@@ -690,14 +694,16 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
       checked-out commit differs from the recorded one, and the submodule has
       neither tracked changes nor untracked files. Any ``m`` or ``u`` is a
       file somebody wrote in there, and stays work.
-    - no commit in the submodule - its HEAD or any branch - is missing from
-      every one of its remotes. A commit the phase made in the submodule is
-      authored work whose objects nothing here quarantines, so it must keep
-      failing the phase.
+    - no commit in the submodule - its HEAD or anything any ref of its own
+      reaches, branch, tag or stash alike - is missing from every one of its
+      remotes. A commit the phase made in the submodule is authored work whose
+      objects nothing here quarantines, so it must keep failing the phase,
+      whatever kind of ref it was left on.
 
-    Everything else - a staged gitlink, a rename, a quoted path this does not
-    unquote - is left as the work it looks like. The verdict only ever WEAKENS
-    the gate, so every doubt resolves to keeping the line.
+    Paths come back DECODED (`_unquote`), because v1 and v2 do not quote the
+    same paths the same way. Everything else - a staged gitlink, a rename - is
+    left as the work it looks like. The verdict only ever WEAKENS the gate, so
+    every doubt resolves to keeping the line.
     """
     status = await git(workspace, repo, "status", "--porcelain=v2")
     moved: set[str] = set()
@@ -705,15 +711,64 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
         # `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`: the path is the
         # ninth field and the only one that may itself contain spaces.
         fields = entry.split(" ", 8)
-        if len(fields) != 9 or fields[:3] != ["1", ".M", "SC.."] or fields[8].startswith('"'):
+        if len(fields) != 9 or fields[:3] != ["1", ".M", "SC.."]:
             continue
-        path = fields[8]
+        path = _unquote(fields[8])
+        # --all, not --branches: a tag or a stash keeps a commit alive in the
+        # submodule exactly as a branch does, and no remote has it either.
         stranded = await git(
-            workspace, f"{repo}/{path}", "rev-list", "HEAD", "--branches", "--not", "--remotes"
+            workspace, f"{repo}/{path}", "rev-list", "HEAD", "--all", "--not", "--remotes"
         )
         if not stranded.strip():
-            moved.add(f" M {path}")
+            moved.add(path)
     return frozenset(moved)
+
+
+#: The escapes git's C-style path quoting writes besides octal bytes.
+_C_ESCAPES: Final = {
+    "a": 0x07,
+    "b": 0x08,
+    "t": 0x09,
+    "n": 0x0A,
+    "v": 0x0B,
+    "f": 0x0C,
+    "r": 0x0D,
+    '"': 0x22,
+    "\\": 0x5C,
+}
+
+
+def _unquote(path: str) -> str:
+    """A porcelain path as the filesystem spells it.
+
+    Git wraps a path in double quotes, with C escapes and octal-escaped bytes,
+    when it holds a character it will not print bare - and v1 and v2 disagree
+    on which characters those are (a space quotes in v1, not in v2). A path not
+    in quotes is already literal. Bytes that do not decode as UTF-8 survive as
+    surrogates, so such a path matches nothing and stays work.
+    """
+    if len(path) < 2 or not (path.startswith('"') and path.endswith('"')):
+        return path
+    body = path[1:-1]
+    out = bytearray()
+    i = 0
+    while i < len(body):
+        char = body[i]
+        if char != "\\" or i + 1 == len(body):
+            out += char.encode("utf-8", "surrogateescape")
+            i += 1
+        elif body[i + 1] in _C_ESCAPES:
+            out.append(_C_ESCAPES[body[i + 1]])
+            i += 2
+        else:
+            octal = body[i + 1 : i + 4]
+            if len(octal) != 3 or not all(c in "01234567" for c in octal):
+                # Not a spelling git writes: leave it undecoded, so it matches
+                # nothing and the line stays work.
+                return path
+            out.append(int(octal, 8) & 0xFF)
+            i += 4
+    return out.decode("utf-8", "surrogateescape")
 
 
 async def _quarantine(
