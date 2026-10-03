@@ -6,11 +6,14 @@
 # binary. APSS publishes no binary assets, so `aps` has to be compiled here, and
 # the workspace image ships rustup with no toolchain installed.
 #
-# Two outcomes only. Either fitness ran, and its exit code is ours. Or a line
-# starting `FITNESS NOT RUN:` says why, and we exit 69 (EX_UNAVAILABLE). A
+# Either fitness ran, and its exit code is ours. Or a line starting
+# `FITNESS NOT RUN:` says why, and we exit non-zero: 69 (EX_UNAVAILABLE) when
+# the binary cannot be had, the prerequisite's own code otherwise. A
 # silent skip is how verify phases certified PRs that CI then failed on fitness
 # (#1525, #1527, #1529). SYN_ALLOW_FITNESS_NOT_RUN=1 turns that 69 into 0; the
-# line is printed either way, and it never skips a run that CAN happen.
+# line is printed either way, and it never skips a run that CAN happen. A
+# prerequisite of fitness-check failing also prints the line, but keeps its
+# exit code whatever the opt-out says, since it may be a ratchet violation.
 #
 # Caching is the existing stores', not a new one: the toolchain lives in
 # RUSTUP_HOME and the binary in the APSS target dir. Cargo decides freshness,
@@ -52,5 +55,20 @@ if ! just aps-build; then
     not_run "aps-build failed, so there is no aps binary to check with (its error is above)"
 fi
 
-# From here a failure is fitness's own verdict, not a reason it did not run.
-exec just fitness-check
+# fitness-check has its own prerequisites (untyped-dicts and test-marker
+# ratchets, topology-analyze) that run before the thresholds, so its exit code
+# alone cannot say whether fitness ran. The recipe touches this marker right
+# before `architecture-fitness validate`; no marker means it never got there.
+marker_dir="$(mktemp -d)"
+trap 'rm -rf "$marker_dir"' EXIT
+export SYN_FITNESS_STARTED_FILE="$marker_dir/started"
+
+status=0
+just fitness-check || status=$?
+if [[ "$status" != 0 && ! -e "$SYN_FITNESS_STARTED_FILE" ]]; then
+    # Not via not_run: a failed ratchet is a real violation, and the opt-out
+    # must never turn one green. Loud line, original exit code, either way.
+    echo "FITNESS NOT RUN: a fitness-check prerequisite failed (exit $status) before the thresholds were checked (its error is above)" >&2
+    echo "  This is a failure to fix, not to waive: SYN_ALLOW_FITNESS_NOT_RUN does not apply." >&2
+fi
+exit "$status"

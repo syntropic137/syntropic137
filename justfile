@@ -1001,6 +1001,10 @@ fitness-check: aps-build check-untyped-dicts check-test-markers
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."
+    # Every prerequisite is behind us. agent-fitness.sh reads this marker to tell
+    # "fitness never ran" from "fitness ran and failed" (#1498). Keep it directly
+    # above the validate line: a failure before it is reported as not run.
+    @if [ -n "${SYN_FITNESS_STARTED_FILE:-}" ]; then : > "$SYN_FITNESS_STARTED_FILE"; fi
     {{_aps_bin}} run architecture-fitness validate . --report .topology/fitness-report.json
     # A waiver whose debt was already paid off still grants its headroom, and the
     # tool reports those but exits 0 - so they ride along in green runs (#1084).
@@ -1010,7 +1014,9 @@ fitness-check: aps-build check-untyped-dicts check-test-markers
 # `fitness-check` in a workspace that may have no Rust toolchain: installs
 # stable if needed, then runs the recipe above unchanged, or prints
 # `FITNESS NOT RUN: <reason>` and fails (exit 69) unless
-# SYN_ALLOW_FITNESS_NOT_RUN=1. Part of `preflight-agent` (#1498).
+# SYN_ALLOW_FITNESS_NOT_RUN=1. A prerequisite of fitness-check that fails also
+# prints the line, but keeps its own exit code: it may be a ratchet violation,
+# which no opt-out may hide. Part of `preflight-agent` (#1498).
 fitness-agent:
     @bash scripts/agent-fitness.sh
 
