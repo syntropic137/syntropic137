@@ -83,8 +83,9 @@ class StartResumeHandler:
             return None
 
         # The repositories the PARENT ran against, as it recorded them - not
-        # the template's list, which may have changed. #1458 clones them at
-        # the recorded sha; until then the workspace clones the default branch.
+        # the template's list, which may have changed. Which commit each is
+        # checked out at is the child's own start pins' answer, read where the
+        # workspace is provisioned (`StartPins.checkout_commits`, #1458).
         repos = [RepositoryRef.from_slug(c.repository) for c in command.source_commits]
         try:
             return await self._processor.run_resume(command, repos=repos, admitted=admitted)

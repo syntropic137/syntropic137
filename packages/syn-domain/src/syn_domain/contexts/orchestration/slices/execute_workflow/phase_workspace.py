@@ -240,6 +240,10 @@ class PhaseWorkspace:
             completed_phase_ids=completed_phase_ids,
             phase_outputs=phase_outputs,
             inputs=self._inputs,
+            # The execution decides which commit its repositories are checked
+            # out at - a resume's parent's, or none (#1458) - so it is read
+            # off the aggregate, never threaded beside `repos` from the start.
+            pinned_commits=aggregate.start_pins.checkout_commits(),
         )
 
     async def keep_unfinished_output(

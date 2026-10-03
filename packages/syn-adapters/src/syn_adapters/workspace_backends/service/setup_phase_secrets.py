@@ -15,6 +15,7 @@ ensure git picks the right token for each clone.
 from __future__ import annotations
 
 import logging
+import re
 import shlex
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Protocol
@@ -22,7 +23,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Collection, Mapping, Sequence
     from datetime import datetime
 
     from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
@@ -107,6 +108,62 @@ def _append_secret_file(lines: list[str], *, dest: str, contents: list[str]) -> 
     # the window in which a temporary file exists and no later command
     # inherits a cleanup for a variable pointing at something already renamed.
     lines.append("trap - EXIT")
+
+
+#: The setup script's exit status when a repository cannot be checked out at
+#: the commit it was pinned to (#1458). sysexits' EX_DATAERR - the input named
+#: something that is not there - and a status neither git (1, 128, 129) nor
+#: bash (126, 127, 128+n) uses, so the provisioning handler can tell this
+#: refusal from every other way setup fails without reading its output.
+PINNED_COMMIT_UNREACHABLE_EXIT_CODE: Final = 65
+
+#: A full commit id, SHA-1 or SHA-256. Checked before it is written into the
+#: script: the value names a revision on a git command line, and a value that
+#: began with `-` would be read there as an option.
+_COMMIT_ID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _append_pinned_checkout(lines: list[str], *, repository: str, dest: str, sha: str) -> None:
+    """Check ``dest`` out at ``sha``, or end the setup script refusing to (#1458).
+
+    THE COMMIT MUST STILL BE ON ONE OF ORIGIN'S BRANCHES, not merely exist.
+    The clone above is a full one, so any commit a branch still reaches is
+    already local and no fetch by id is needed. A commit that no branch
+    reaches was force-pushed away or its branch deleted, and fetching it by
+    id instead - GitHub often still serves it - would leave HEAD on a commit
+    `--remotes` does not contain, which the unpushed-work guard then reads,
+    correctly, as work this phase did and never pushed.
+
+    NEVER A FALLBACK TO THE DEFAULT BRANCH. A resume runs the rest of its
+    parent's work, and the rest of it on different code is not the same work;
+    a run that quietly did that would look like a resume and be a new run.
+    The refusal names the repository and the commit, and exits with
+    `PINNED_COMMIT_UNREACHABLE_EXIT_CODE` so it is told apart without parsing.
+
+    Detached, because the commit is a point in history and not a branch: the
+    phase branches from it as it would have branched from the default branch.
+    Runs BEFORE the submodule step, so submodules follow this commit's
+    gitlinks rather than the default branch's.
+
+    Raises:
+        ValueError: ``sha`` is not a full commit id.
+    """
+    if not _COMMIT_ID_RE.fullmatch(sha):
+        msg = f"The recorded commit of {repository} is not a full commit id: {sha!r}"
+        raise ValueError(msg)
+    repo = shlex.quote(dest)
+    refusal = (
+        f"ERROR: {repository} cannot be provisioned at its recorded commit {sha}:"
+        " no branch of origin contains it (force-pushed away, or its branch deleted)."
+        " Refusing to run this phase on different code (#1458)."
+    )
+    lines.append(
+        f"if ! git -C {repo} cat-file -e {sha}^{{commit}} 2>/dev/null"
+        f' || [ -z "$(git -C {repo} branch -r --contains {sha} 2>/dev/null)" ]; then'
+        f" printf '%s\\n' {shlex.quote(refusal)} >&2;"
+        f" exit {PINNED_COMMIT_UNREACHABLE_EXIT_CODE}; fi"
+    )
+    lines.append(f"git -C {repo} -c advice.detachedHead=false checkout --quiet --detach {sha}")
 
 
 class RepoNameCollisionError(Exception):
@@ -524,6 +581,15 @@ class SetupPhaseSecrets:
     False therefore still resolves the installation, mints the token, writes
     the per-repo credential entries and configures gh. It skips ``git clone``
     and nothing else."""
+    pinned_commits: dict[str, str] = field(default_factory=dict)
+    """The commit to check a repository out at, by ``owner/name`` (#1458).
+
+    A repository absent from it is checked out at its default branch's head,
+    which is every repository of a run that is not a resume. Keyed like
+    ``repo_tokens``, by the repository rather than by position, so the two
+    lists can never fall out of step. Whether a run pins anything is the
+    execution's decision (`StartPins.checkout_commits`); this only carries it
+    out, and refuses the phase rather than run it anywhere else."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -548,6 +614,7 @@ class SetupPhaseSecrets:
         *,
         repositories: list[str] | None = None,
         clone_repos: bool = True,
+        pinned_commits: Mapping[str, str] | None = None,
         require_github: bool = True,
         include_codex_auth: bool = False,
         ledger: IssuanceLedger,
@@ -565,6 +632,8 @@ class SetupPhaseSecrets:
             clone_repos: If False, the repos are credentialed but not checked
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
+            pinned_commits: ``owner/name`` -> the commit to check that
+                repository out at (#1458). Empty for a run that is not a resume.
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -597,6 +666,7 @@ class SetupPhaseSecrets:
             gh_token=github.gh_token,
             issued=github.issued,
             clone_repos=clone_repos,
+            pinned_commits=dict(pinned_commits or {}),
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             codex_auth_json=codex_auth_json,
@@ -617,6 +687,7 @@ class SetupPhaseSecrets:
         repo_tokens: dict[str, str] | None = None,
         gh_token: str | None = None,
         clone_repos: bool = True,
+        pinned_commits: Mapping[str, str] | None = None,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -632,6 +703,7 @@ class SetupPhaseSecrets:
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
             gh_token: gh's credential; defaults to the one `create` would route to
             clone_repos: False to credential the repos without checking them out (#1187)
+            pinned_commits: ``owner/name`` -> the commit to check it out at (#1458)
         """
         import os
 
@@ -647,6 +719,7 @@ class SetupPhaseSecrets:
             repositories=repositories or [],
             gh_token=gh_token,
             clone_repos=clone_repos,
+            pinned_commits=dict(pinned_commits or {}),
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
@@ -663,6 +736,7 @@ class SetupPhaseSecrets:
         - Writes per-repo credential entries to ~/.git-credentials (not one blanket
           github.com entry) so git picks the correct token for each clone
         - Appends git clone commands with idempotency guards (safe to re-run)
+        - Checks a repository out at its pinned commit, if it has one (#1458)
         Whenever gh has a credential (repo-less workflows included), it is
         written to ~/.config/gh/hosts.yml - gh's only credential (#725).
 
@@ -674,6 +748,7 @@ class SetupPhaseSecrets:
                 into the same directory (#1223). Raised here, during
                 provisioning, so the execution is refused before any agent runs
                 rather than one repo being silently skipped.
+            ValueError: A pinned commit is not a full commit id (#1458).
         """
         lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
         self._append_codex_auth(lines)
@@ -861,6 +936,9 @@ class SetupPhaseSecrets:
             lines.append(
                 f"[ -d {shlex.quote(dest)} ] || git clone {shlex.quote(url)} {shlex.quote(dest)}"
             )
+            sha = self.pinned_commits.get(_repo_full_name(url))
+            if sha is not None:
+                _append_pinned_checkout(lines, repository=_repo_full_name(url), dest=dest, sha=sha)
             # Outside the guard above: a repo cloned by an earlier setup phase may
             # still have uninitialized submodules. `submodule update --init` is
             # idempotent, so re-running it on a complete checkout is a no-op.

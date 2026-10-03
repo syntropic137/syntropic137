@@ -45,6 +45,7 @@ See ADR-021, ADR-023, ADR-024 for architectural decisions.
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     DEFAULT_SETUP_SCRIPT,
+    PINNED_COMMIT_UNREACHABLE_EXIT_CODE,
     GitHubAppNotConfiguredError,
     RepoNameCollisionError,
     SetupPhaseSecrets,
@@ -57,6 +58,7 @@ from syn_adapters.workspace_backends.service.workspace_service import (
 
 __all__ = [
     "DEFAULT_SETUP_SCRIPT",
+    "PINNED_COMMIT_UNREACHABLE_EXIT_CODE",
     "GitHubAppNotConfiguredError",
     "ManagedWorkspace",
     "RepoNameCollisionError",

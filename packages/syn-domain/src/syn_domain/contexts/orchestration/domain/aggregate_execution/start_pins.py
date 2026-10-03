@@ -78,6 +78,28 @@ class StartPins(BaseModel):
     #: Set on a resume only: the parent this run was resumed from.
     resumed_from: ResumeOrigin | None = None
 
+    def checkout_commits(self) -> list[SourceCommit]:
+        """The commits this run's phases check their repositories out at (#1458).
+
+        A resume's, and only a resume's. It runs the rest of its parent's work,
+        and the rest of it is only the same work against the code the parent
+        ran against - so every phase it provisions is checked out at the
+        commits the parent recorded, however far the default branch has moved.
+
+        A fresh run pins nothing and each phase clones the default branch's
+        head, as it always has: its own `source_commits` record where it
+        began, and #1458 deliberately does not turn that record into an
+        instruction for runs that are not resumes.
+
+        A repository whose commit nobody could resolve (`sha` None) pins
+        nothing either. There is no commit to hold it to, and refusing it
+        would make a resume impossible for every parent started without
+        GitHub access.
+        """
+        if self.resumed_from is None:
+            return []
+        return [c for c in self.source_commits if c.sha is not None]
+
 
 class AdmittedResume(BaseModel):
     """The resume a parent admitted, as its `ExecutionResumed` fixed it.

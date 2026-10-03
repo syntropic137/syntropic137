@@ -19,12 +19,14 @@ from typing import TYPE_CHECKING, Final
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
+    SourceCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
+    PinnedCommitUnreachableError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
     require_codex_sandbox,
@@ -361,6 +363,7 @@ class WorkspaceProvisionHandler:
         completed_phase_ids: list[str] | None = None,
         phase_outputs: PhaseOutputCache | None = None,
         inputs: dict[str, object] | None = None,
+        pinned_commits: Sequence[SourceCommit] = (),
     ) -> ProvisionResult:
         """Provision workspace for a phase.
 
@@ -376,6 +379,9 @@ class WorkspaceProvisionHandler:
                 deliverable for prompt substitution, and every file it wrote so
                 the previous phases' output TREES can be rebuilt (#988).
             inputs: Workflow execution inputs dict.
+            pinned_commits: The commits to check ``repos`` out at instead of
+                their default branches' heads - a resume's, and empty for any
+                other run (`StartPins.checkout_commits`, #1458).
         """
         assert todo.phase_id is not None
 
@@ -402,6 +408,7 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 phase_name=phase.name,
                 clone_repos=phase.clone_repos,
+                pinned_commits=pinned_commits,
                 include_codex_auth=include_codex_auth,
             )
             await self._materialize_claude_plugins(workspace, phase)
@@ -434,6 +441,7 @@ class WorkspaceProvisionHandler:
         *,
         phase_name: str,
         clone_repos: bool,
+        pinned_commits: Sequence[SourceCommit],
         include_codex_auth: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -451,11 +459,15 @@ class WorkspaceProvisionHandler:
         workspace ends up CONTAINING is the one thing that changes, which is
         why the synthetic context below is derived from it too.
         """
-        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
+        from syn_adapters.workspace_backends.service import (
+            PINNED_COMMIT_UNREACHABLE_EXIT_CODE,
+            SetupPhaseSecrets,
+        )
 
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             clone_repos=clone_repos,
+            pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
             ledger=workspace.issuance_ledger,
@@ -470,6 +482,10 @@ class WorkspaceProvisionHandler:
             )
             if setup_result.signal_death is not None:
                 detail = f"{detail}\n{setup_result.signal_death.describe()}"
+            if setup_result.exit_code == PINNED_COMMIT_UNREACHABLE_EXIT_CODE:
+                raise PinnedCommitUnreachableError(
+                    phase_name=phase_name, detail=detail, exit_code=setup_result.exit_code
+                )
             raise NonZeroExitError(detail, exit_code=setup_result.exit_code)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
