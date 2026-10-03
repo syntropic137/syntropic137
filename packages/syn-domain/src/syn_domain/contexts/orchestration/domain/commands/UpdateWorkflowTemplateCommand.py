@@ -17,6 +17,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (  # noq
 from syn_domain.contexts.orchestration._shared.skill_ref import (  # noqa: TC001
     SkillRef,
 )
+from syn_domain.contexts.orchestration._shared.tags import TagSet  # noqa: TC001
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -67,6 +68,10 @@ class UpdateWorkflowTemplateCommand(BaseModel):
     # Workflow-scope refs (issues #726, #772)
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
     skills: list[SkillRef] = Field(default_factory=list)
+
+    # Ordinary labels (#967). An install replaces the workflow's tags with
+    # the package's, the same as every other definition field.
+    tags: TagSet = Field(default_factory=TagSet)
 
     # Provenance (issue #822)
     version: str | None = None

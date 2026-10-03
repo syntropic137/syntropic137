@@ -17,6 +17,8 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
@@ -28,11 +30,17 @@ if TYPE_CHECKING:
         InputDeclaration,
         PhaseDefinition,
     )
+    from syn_domain.contexts.orchestration.domain.commands.AddWorkflowTagsCommand import (
+        AddWorkflowTagsCommand,
+    )
     from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
         ArchiveWorkflowTemplateCommand,
     )
     from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
         CreateWorkflowTemplateCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.RemoveWorkflowTagsCommand import (
+        RemoveWorkflowTagsCommand,
     )
     from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
         UpdatePhasePromptCommand,
@@ -48,6 +56,12 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
+        WorkflowTagsAddedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
+        WorkflowTagsRemovedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
         WorkflowTemplateUpdatedEvent,
@@ -85,6 +99,11 @@ def _normalize_event_data(event: DomainEvent) -> dict[str, Any]:
             [] if field in ("phases", "input_declarations", "claude_plugins", "skills") else None,
         )
     return data
+
+
+def _event_tags(event: DomainEvent) -> list[str]:
+    """The ``tags`` of a typed event or a GenericDomainEvent from the store."""
+    return [str(t) for t in (_normalize_event_data(event).get("tags") or [])]
 
 
 def _parse_enum(value: str | StrEnum, enum_type: type[StrEnum]) -> StrEnum:
@@ -204,6 +223,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # version whose content changed underneath the same version string.
         self._package_version: str | None = None
         self._source_digest: str | None = None
+        # WHY (issue #967): copied onto each execution at launch. Part of the
+        # definition, so a reinstall replaces it like every other field.
+        self._tags: TagSet = TagSet()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -261,6 +283,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         applies to every phase via the skill resolution service union.
         """
         return list(self._skills)
+
+    @property
+    def tags(self) -> TagSet:
+        """Tags every execution launched from this workflow starts with."""
+        return self._tags
 
     @property
     def package_version(self) -> str | None:
@@ -325,6 +352,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             requires_repos=command.requires_repos,
             claude_plugins=command.claude_plugins,
             skills=command.skills,
+            tags=list(command.tags),
             version=command.version,
             source_digest=command.source_digest,
         )
@@ -381,6 +409,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             self._repos,
             self._claude_plugins,
             self._skills,
+            self._tags,
             self._package_version,
             self._source_digest,
         )
@@ -402,6 +431,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             [str(r) for r in command.repos],
             list(command.claude_plugins),
             list(command.skills),
+            command.tags,
             command.version,
             command.source_digest,
         )
@@ -507,6 +537,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             requires_repos=command.requires_repos,
             claude_plugins=command.claude_plugins,
             skills=command.skills,
+            tags=list(command.tags),
             version=command.version,
             source_digest=command.source_digest,
         )
@@ -628,6 +659,10 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._package_version = data.get("version")
         self._source_digest = data.get("source_digest")
 
+        # WHY (issue #967): legacy events have no tags; recorded() because the
+        # event already holds validated tags and replay must not re-judge them.
+        self._tags = TagSet.recorded(data.get("tags") or [])
+
         # A full definition event reactivates the template. Applying this in
         # the shared path rather than only on Updated keeps archive semantics
         # consistent across legacy WorkflowCreated, WorkflowTemplateCreated and
@@ -660,6 +695,52 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def on_workflow_archived(self, _event: WorkflowTemplateArchivedEvent) -> None:
         """Apply WorkflowTemplateArchivedEvent to update aggregate state."""
         self._is_archived = True
+
+    @command_handler("AddWorkflowTagsCommand")
+    def add_tags(self, command: AddWorkflowTagsCommand) -> None:
+        """Add tags. Tags already present are not re-added; none new, no event."""
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
+            WorkflowTagsAddedEvent,
+        )
+
+        self._guard_tag_edit(command.tags)
+        # union() enforces MAX_TAGS, so an over-limit add fails before any event.
+        added = self._tags.union(command.tags).difference(self._tags)
+        if not added:
+            return
+        self._apply(WorkflowTagsAddedEvent(workflow_id=str(self.id), tags=list(added)))
+
+    @command_handler("RemoveWorkflowTagsCommand")
+    def remove_tags(self, command: RemoveWorkflowTagsCommand) -> None:
+        """Remove tags. Tags not present are ignored; none present, no event."""
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
+            WorkflowTagsRemovedEvent,
+        )
+
+        self._guard_tag_edit(command.tags)
+        present = command.tags.intersection(self._tags)
+        if not present:
+            return
+        self._apply(WorkflowTagsRemovedEvent(workflow_id=str(self.id), tags=list(present)))
+
+    def _guard_tag_edit(self, tags: TagSet) -> None:
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+        if not tags:
+            msg = "At least one tag is required"
+            raise ValueError(msg)
+
+    @event_sourcing_handler("WorkflowTagsAdded")
+    def on_tags_added(self, event: WorkflowTagsAddedEvent) -> None:
+        """Apply WorkflowTagsAddedEvent."""
+        self._tags = TagSet.recorded([*self._tags, *_event_tags(event)])
+
+    @event_sourcing_handler("WorkflowTagsRemoved")
+    def on_tags_removed(self, event: WorkflowTagsRemovedEvent) -> None:
+        """Apply WorkflowTagsRemovedEvent."""
+        removed = set(_event_tags(event))
+        self._tags = TagSet.recorded(t for t in self._tags if t not in removed)
 
     @event_sourcing_handler("WorkflowCreated")
     def on_workflow_created_legacy(self, event: WorkflowTemplateCreatedEvent) -> None:
