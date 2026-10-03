@@ -159,6 +159,24 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         stated = event_data.get("completed_phases")
         return accumulated if stated is None else int(stated)
 
+    @staticmethod
+    def _repos_from(repos_input: str) -> list[str]:
+        """The repo URLs in a run's `repos` input (ADR-058: a comma-separated string).
+
+        No empty-string special case: "".split(",") is [""], which the filter
+        already drops, so a guard for it would decide nothing.
+        """
+        return [u.strip() for u in repos_input.split(",") if u.strip()]
+
+    @staticmethod
+    def _launch_tags(recorded: list[str] | None) -> TagSet:
+        """The tags a run launched with, as its started event recorded them (#967).
+
+        The event leaves `tags` out of its payload when there are none, so an
+        absent key is a run that launched untagged, not a gap in the record.
+        """
+        return TagSet.recorded(recorded or [])
+
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
 
@@ -175,10 +193,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # what its own task was.
         inputs = {str(k): str(v) for k, v in (event_data.get("inputs") or {}).items()}
 
-        # Extract repos from inputs field (ADR-058: stored as comma-separated string).
-        # No empty-string special case: "".split(",") is [""], which the filter
-        # already drops, so the guard that used to sit here decided nothing.
-        repos = [u.strip() for u in inputs.get("repos", "").split(",") if u.strip()]
+        repos = self._repos_from(inputs.get("repos", ""))
+        launch_tags = self._launch_tags(event_data.get("tags"))
 
         # Each phase's wall-clock budget, keyed by phase id. Stated once, on
         # this event, and not restated by the phase that later consumes it, so
@@ -233,8 +249,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "inputs": inputs,
             # The launch snapshot, twice: `inherited_tags` is never edited and
             # `tags` is what ExecutionTagsAdded/Removed edit from here (#967).
-            "tags": list(TagSet.recorded(event_data.get("tags") or [])),
-            "inherited_tags": list(TagSet.recorded(event_data.get("tags") or [])),
+            "tags": list(launch_tags),
+            "inherited_tags": list(launch_tags),
             # How many phases this run set out to do, and how many it has done.
             # Read off the SAME event the list projection reads them off, so a
             # run cannot report three phases in one view and one in the other
