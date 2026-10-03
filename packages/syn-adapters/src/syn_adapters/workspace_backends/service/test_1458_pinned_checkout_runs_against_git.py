@@ -92,6 +92,21 @@ class _Origin:
     def head(self) -> str:
         return _git("rev-parse", "HEAD", cwd=self.workspace / "repos" / "pinned", env=self.env)
 
+    def tag(self, name: str, sha: str) -> None:
+        _git("tag", name, sha, cwd=self.work, env=self.env)
+        _git("push", "--quiet", "origin", name, cwd=self.work, env=self.env)
+
+    def unpushed(self) -> str:
+        """What the unpushed-work guard would read as this phase's own work."""
+        return _git(
+            "rev-list",
+            "HEAD",
+            "--not",
+            "--remotes",
+            cwd=self.workspace / "repos" / "pinned",
+            env=self.env,
+        )
+
 
 @pytest.fixture
 def origin(tmp_path: Path) -> _Origin:
@@ -118,6 +133,36 @@ class TestAPinnedRepositoryIsCheckedOutAtItsCommit:
 
         assert run.returncode == 0, run.stderr
         assert origin.head() == pinned
+
+    def test_a_commit_only_a_tag_retains_after_a_force_push(self, origin: _Origin) -> None:
+        """Origin still publishes it, so it is checked out, not refused."""
+        base = origin.commit("base")
+        pinned = origin.commit("tagged, then force-pushed off main")
+        origin.tag("retained", pinned)
+        _git("reset", "--quiet", "--hard", base, cwd=origin.work, env=origin.env)
+        origin.commit("rewritten history")
+
+        run = origin.provision({REPO: pinned})
+
+        assert run.returncode == 0, run.stderr
+        assert origin.head() == pinned
+
+    def test_an_inherited_commit_is_never_read_as_unpushed_work(self, origin: _Origin) -> None:
+        """`--not --remotes` covers the pin, whether a branch or only a tag holds it."""
+        origin.commit("base")
+        on_branch = origin.commit("still on main")
+        tagged = origin.commit("only a tag keeps this")
+        origin.tag("retained", tagged)
+        _git("reset", "--quiet", "--hard", on_branch, cwd=origin.work, env=origin.env)
+        _git("push", "--quiet", "--force", "origin", "main", cwd=origin.work, env=origin.env)
+
+        for pinned in (on_branch, tagged):
+            shutil.rmtree(origin.workspace, ignore_errors=True)
+            run = origin.provision({REPO: pinned})
+
+            assert run.returncode == 0, run.stderr
+            assert origin.head() == pinned
+            assert origin.unpushed() == ""
 
     def test_without_a_pin_the_default_branch_head_is_unchanged(self, origin: _Origin) -> None:
         origin.commit("older")

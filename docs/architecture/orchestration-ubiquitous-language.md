@@ -115,7 +115,7 @@ has been edited since.
 
 A resumed Execution's workspaces are checked out at its pinned commits, so it
 also runs on the code the original ran on even if a branch has moved since. A
-pinned commit no branch of origin still contains refuses the Phase; it is never
+pinned commit no branch or tag of origin still reaches refuses the Phase; it is never
 swapped for the branch's head. A fresh Execution records its commits and is not
 checked out at them: it started at "now". (#1458, ADR-058.)
 

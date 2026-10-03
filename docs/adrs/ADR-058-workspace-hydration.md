@@ -389,11 +389,12 @@ repository it is.
 **The script.** For a pinned repository, directly after its clone line:
 
 ```bash
-if ! git -C <dest> cat-file -e <sha>^{commit} 2>/dev/null \
-   || [ -z "$(git -C <dest> branch -r --contains <sha> 2>/dev/null)" ]; then
+if ! git -C <dest> cat-file -e <sha>^{commit} 2>/dev/null; then
     printf '%s\n' 'ERROR: <owner/name> cannot be provisioned at its recorded commit <sha>: ...' >&2
     exit 65
 fi
+[ -n "$(git -C <dest> branch -r --contains <sha> 2>/dev/null)" ] \
+    || git -C <dest> update-ref refs/remotes/pinned/<sha> <sha>
 git -C <dest> -c advice.detachedHead=false checkout --quiet --detach <sha>
 ```
 
@@ -401,18 +402,26 @@ git -C <dest> -c advice.detachedHead=false checkout --quiet --detach <sha>
   pinned commit, not the default branch's, so the whole tree is the parent's.
 - **Detached.** No local branch is created or moved; whatever the phase
   commits, it names its own branch.
-- **Reachable means "some branch of origin contains it".** The clone is full,
-  so every commit on any origin branch is already present and no fetch-by-sha
-  is needed. A commit outside every `origin/*` branch is refused even if a
-  fetch could still retrieve it: a workspace whose HEAD is outside `--remotes`
-  looks like unpushed work to the unpushed-work guard, and a dangling commit
-  is about to be garbage-collected anyway.
+- **Reachable means "some branch or tag of origin reaches it".** The clone is
+  full and fetches every branch and every tag, so a commit present after it is
+  one origin still publishes, and no fetch-by-sha is needed. A commit that is
+  absent was force-pushed away or its branch deleted, and is refused even if a
+  fetch by id could still retrieve it: nothing on origin retains it, so it can
+  be garbage-collected between two phases of the same resume.
+- **A commit only a tag retains is accepted** (a release tag outliving a
+  force-push). `--remotes`, which the unpushed-work guard and branch
+  observation subtract, holds branches only, so a HEAD there would read as
+  unpushed work. For that case alone the pin is recorded as
+  `refs/remotes/pinned/<sha>`: under `refs/remotes` because origin does hold
+  it, under its own remote name so it is never read as one of origin's
+  branches. A commit a branch contains writes no ref. (Found by verification
+  of #1525: the first cut required a containing branch and refused these.)
 - **Only a full 40- or 64-hex commit id is ever interpolated.** Anything else
   raises `ValueError` while the script is rendered, so a value from the event
   store never reaches bash unvalidated.
 
 **Unreachable means refused, never replaced.** A commit that was force-pushed
-away or whose branch was deleted exits the setup script with 65 (sysexits
+away or whose branch was deleted, and that no tag retains, exits the setup script with 65 (sysexits
 `EX_DATAERR`; neither git nor bash uses it), and `WorkspaceProvisionHandler`
 raises `PinnedCommitUnreachableError` - a `NonZeroExitError` - naming the phase,
 the repository and the commit. Like every failure that is not the phase's own

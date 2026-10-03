@@ -407,7 +407,7 @@ class TestAResumeIsProvisionedAtItsParentsCommit:
         script = (await _resumed_child(executions)).scripts["plan"]
 
         (guard,) = [ln for ln in script.splitlines() if ln.startswith("if ! git")]
-        assert f"branch -r --contains {PINNED}" in guard
+        assert f"cat-file -e {PINNED}^{{commit}}" in guard
         assert f"{REPO} cannot be provisioned at its recorded commit {PINNED}" in guard
         assert guard.endswith(f"exit {PINNED_COMMIT_UNREACHABLE_EXIT_CODE}; fi")
 

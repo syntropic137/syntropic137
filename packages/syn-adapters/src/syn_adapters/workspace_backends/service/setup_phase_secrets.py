@@ -122,17 +122,31 @@ PINNED_COMMIT_UNREACHABLE_EXIT_CODE: Final = 65
 #: began with `-` would be read there as an option.
 _COMMIT_ID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
+#: Where a pin no origin BRANCH contains is recorded once it is checked out, so
+#: `--remotes` covers it. A remote of its own rather than `origin/...`, so it
+#: can never be read as one of origin's branches; keyed by the sha, which no
+#: branch is ever named.
+_PIN_REMOTE_REF: Final = "refs/remotes/pinned"
+
 
 def _append_pinned_checkout(lines: list[str], *, repository: str, dest: str, sha: str) -> None:
     """Check ``dest`` out at ``sha``, or end the setup script refusing to (#1458).
 
-    THE COMMIT MUST STILL BE ON ONE OF ORIGIN'S BRANCHES, not merely exist.
-    The clone above is a full one, so any commit a branch still reaches is
-    already local and no fetch by id is needed. A commit that no branch
-    reaches was force-pushed away or its branch deleted, and fetching it by
-    id instead - GitHub often still serves it - would leave HEAD on a commit
-    `--remotes` does not contain, which the unpushed-work guard then reads,
-    correctly, as work this phase did and never pushed.
+    THE COMMIT MUST STILL BE SOMEWHERE ORIGIN PUBLISHES IT - a branch or a
+    tag - not merely exist. The clone above is a full one, which fetches every
+    branch and every tag, so a commit present after it is one origin still
+    retains, and a commit absent from it is one nothing on origin reaches:
+    force-pushed away, or its branch deleted. That absence is the refusal.
+    Fetching it by id instead - GitHub often still serves it - is not tried:
+    nothing retains it, so the next phase of the same resume could find it
+    collected, and two phases of one run would disagree about what it ran on.
+
+    A commit only a TAG retains is accepted (a release tag outliving a
+    force-push is the ordinary case), but `--remotes`, which the unpushed-work
+    guard and branch observation both subtract, holds branches only, so HEAD
+    there would read as work this phase made and never pushed. For that case
+    alone the pin is recorded as `_PIN_REMOTE_REF`, under `refs/remotes`
+    because origin does hold it; a commit some branch contains needs nothing.
 
     NEVER A FALLBACK TO THE DEFAULT BRANCH. A resume runs the rest of its
     parent's work, and the rest of it on different code is not the same work;
@@ -154,14 +168,17 @@ def _append_pinned_checkout(lines: list[str], *, repository: str, dest: str, sha
     repo = shlex.quote(dest)
     refusal = (
         f"ERROR: {repository} cannot be provisioned at its recorded commit {sha}:"
-        " no branch of origin contains it (force-pushed away, or its branch deleted)."
+        " no branch or tag of origin reaches it (force-pushed away, or its branch deleted)."
         " Refusing to run this phase on different code (#1458)."
     )
     lines.append(
-        f"if ! git -C {repo} cat-file -e {sha}^{{commit}} 2>/dev/null"
-        f' || [ -z "$(git -C {repo} branch -r --contains {sha} 2>/dev/null)" ]; then'
+        f"if ! git -C {repo} cat-file -e {sha}^{{commit}} 2>/dev/null; then"
         f" printf '%s\\n' {shlex.quote(refusal)} >&2;"
         f" exit {PINNED_COMMIT_UNREACHABLE_EXIT_CODE}; fi"
+    )
+    lines.append(
+        f'[ -n "$(git -C {repo} branch -r --contains {sha} 2>/dev/null)" ]'
+        f" || git -C {repo} update-ref {_PIN_REMOTE_REF}/{sha} {sha}"
     )
     lines.append(f"git -C {repo} -c advice.detachedHead=false checkout --quiet --detach {sha}")
 
