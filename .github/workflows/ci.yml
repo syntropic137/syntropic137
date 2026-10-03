@@ -535,14 +535,15 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Run OSV Scanner
-        # v1.9.0 restructured the repo — root action.yml lost its `runs:` section.
-        # The actual action now lives in the osv-scanner-action/ subdirectory.
-        # SHA confirmed: gh api repos/google/osv-scanner-action/git/ref/tags/v1.9.0
-        uses: google/osv-scanner-action/osv-scanner-action@19ec1116569a47416e11a45848722b1af31a857b # v1.9.0
+        # v2.3.8, not v1.9.0: v1.9.0 cannot parse uv.lock ("could not determine
+        # extractor", exit 127) and the step still reported success, so no
+        # lockfile was scanned at all. SHA: gh api repos/google/osv-scanner-action/git/ref/tags/v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: |-
             --lockfile=uv.lock
             --lockfile=pnpm-lock.yaml
+            --lockfile=lib/ui-feedback/backend/ui-feedback-api/uv.lock
 
   #############################################################################
   # PIP-AUDIT - Python dependency audit against PyPI advisory database
