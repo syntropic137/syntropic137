@@ -5,8 +5,9 @@ whether or not its commit could be read: the list says which repositories the
 run had, and a None sha says honestly that one of them was not pinned.
 
 What this records is the default-branch HEAD at START. The workspace clones
-later, at provisioning, so a push landing in between is not what the recorded
-sha names; #1458 closes that by cloning at the recorded sha.
+later, at provisioning, so every phase of the run is checked out at the
+recorded sha rather than at whatever the branch has moved to since
+(`StartPins.checkout_commits`, #1458).
 """
 
 from __future__ import annotations

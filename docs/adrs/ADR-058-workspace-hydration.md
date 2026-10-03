@@ -75,6 +75,8 @@ mkdir -p /workspace/repos
 
 The idempotency guard (`[ -d "..." ] || ...`) ensures re-running the setup phase on a partially-hydrated workspace (e.g. after a crash and restart) does not re-clone repos that are already present.
 
+Every repository a run recorded a commit for (`WorkflowExecutionStarted.source_commits`) is then checked out at that commit, between the clone and the submodule init - a resume's record being its parent's - and a commit that cannot be reached refuses the phase rather than falling back. A repository with no recorded commit stays at the default branch's head. See the addendum [Runs Check Out Their Recorded Commits (#1458)](#addendum-runs-check-out-their-recorded-commits-1458).
+
 ### 2. Inject Both `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`
 
 After the setup script completes, the Python layer injects both `AGENTS.md` and `CLAUDE.md` at the workspace root with **identical content**: direct `@`-imports of each repo's `AGENTS.md` followed by its `CLAUDE.md`.
@@ -350,3 +352,99 @@ byte-for-byte what it rendered before - `test_open_pr_needs_no_working_tree`
 holds a literal golden that fails on any drift - and a phase that does not is
 told what it actually has: git credentials, a `gh` hosts.yml entry, and
 `GH_REPO`, which is the whole of what this ADR provisions for it.
+
+## Addendum: Runs Check Out Their Recorded Commits (#1458)
+
+**Date:** 2026-10-03
+
+### Problem
+
+#1457 records, on `WorkflowExecutionStarted.source_commits`, the commit each
+repository was at when an execution started, and a resume copies its parent's
+record onto its own start event. Nothing read it. Every phase of every run
+cloned the default branch's head, so a resume started after `main` moved on ran
+its remaining phases on code its inherited phases never saw: a `plan` inherited
+from the parent described one tree and `implement` edited another.
+
+### Decision
+
+**The execution decides, the setup script obeys.** Which commit a repository is
+checked out at is a question about what the execution IS, so it is answered on
+the aggregate, by `StartPins.checkout_commits()`:
+
+| Run | `checkout_commits()` |
+|---|---|
+| Fresh | every `source_commits` entry with a sha - the commits it recorded at start |
+| Resume | every `source_commits` entry with a sha - its parent's, copied onto its own start |
+| Either, entry with `sha: None` | nothing for that repo - nothing resolved it when the run started, so there is no commit to hold to |
+
+**A fresh run is pinned too.** The first cut pinned resumes only, reasoning that
+a fresh run "started at now". It did not: `source_commits` is read when the run
+starts and each phase clones when it is provisioned, so a push landing in
+between - or between two of its phases - had the parent run a commit nothing
+recorded, while its resume checked out the recorded one. Verification of #1525
+reproduced it against a real git: both runs exited 0 on different HEADs. The
+invariant is that **a run's recorded commit is the code it ran on**, and only
+pinning the run that recorded it makes that true; recording each phase's actual
+clone HEAD instead would give a multi-phase run several commits and a resume no
+single one to hold to.
+
+`PhaseWorkspace.provision` hands that answer to `WorkspaceProvisionHandler`,
+which keys it by `owner/name` into `SetupPhaseSecrets.pinned_commits`.
+`RepositoryRef` stays pure identity (ADR-063); a commit is not part of which
+repository it is.
+
+**The script.** For a pinned repository, directly after its clone line:
+
+```bash
+if ! git -C <dest> cat-file -e <sha>^{commit} 2>/dev/null; then
+    printf '%s\n' 'ERROR: <owner/name> cannot be provisioned at its recorded commit <sha>: ...' >&2
+    exit 65
+fi
+[ -n "$(git -C <dest> branch -r --contains <sha> 2>/dev/null)" ] \
+    || git -C <dest> update-ref refs/remotes/pinned/<sha> <sha>
+git -C <dest> -c advice.detachedHead=false checkout --quiet --detach <sha>
+```
+
+- **Before the submodule init.** Submodules then follow the gitlinks of the
+  pinned commit, not the default branch's, so the whole tree is the parent's.
+- **Detached.** No local branch is created or moved; whatever the phase
+  commits, it names its own branch.
+- **Reachable means "some branch or tag of origin reaches it".** The clone is
+  full and fetches every branch and every tag, so a commit present after it is
+  one origin still publishes, and no fetch-by-sha is needed. A commit that is
+  absent was force-pushed away or its branch deleted, and is refused even if a
+  fetch by id could still retrieve it: nothing on origin retains it, so it can
+  be garbage-collected between two phases of the same resume.
+- **A commit only a tag retains is accepted** (a release tag outliving a
+  force-push). `--remotes`, which the unpushed-work guard and branch
+  observation subtract, holds branches only, so a HEAD there would read as
+  unpushed work. For that case alone the pin is recorded as
+  `refs/remotes/pinned/<sha>`: under `refs/remotes` because origin does hold
+  it, under its own remote name so it is never read as one of origin's
+  branches. A commit a branch contains writes no ref. (Found by verification
+  of #1525: the first cut required a containing branch and refused these.)
+- **Only a full 40- or 64-hex commit id is ever interpolated.** Anything else
+  raises `ValueError` while the script is rendered, so a value from the event
+  store never reaches bash unvalidated.
+
+**Unreachable means refused, never replaced.** A commit that was force-pushed
+away or whose branch was deleted, and that no tag retains, exits the setup script with 65 (sysexits
+`EX_DATAERR`; neither git nor bash uses it), and `WorkspaceProvisionHandler`
+raises `PinnedCommitUnreachableError` - a `NonZeroExitError` - naming the phase,
+the repository and the commit. Like every failure that is not the phase's own
+report, it is classified PLATFORM. Falling back to the default branch would
+quietly do the exact thing this addendum exists to prevent.
+
+### Not Decided Here
+
+- **#1513 - the resumed implement phase continuing the parent's pushed branch.**
+  That is a per-phase choice ("this phase starts from the branch the parent
+  pushed"), and it slots in at the same seam: `checkout_commits()` is the
+  execution's answer and can become per-phase without re-threading anything
+  between the aggregate and the script. Nothing here creates a local branch or
+  forbids one.
+- **Following the default branch within one run.** A run that wants a later
+  phase to see commits merged to `main` while it ran cannot have that and a
+  faithful record at once. None does today; it would be a per-phase choice at
+  the same seam as #1513, recorded as its own commit.

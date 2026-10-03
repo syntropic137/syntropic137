@@ -113,6 +113,13 @@ Phase, and the commit each repository was at.
 A Pin is why a resumed Execution runs what the original ran even if the Workflow
 has been edited since.
 
+An Execution's workspaces are checked out at its pinned commits, so the commit
+it records is the code it ran on, however far a branch moves while it runs. A
+resumed Execution's pinned commits are the original's, so it also runs on the
+code the original ran on. A pinned commit no branch or tag of origin still
+reaches refuses the Phase; it is never swapped for the branch's head.
+(#1458, ADR-058.)
+
 ## Admission
 
 The decision that an operation may proceed, recorded before any work begins.

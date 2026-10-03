@@ -111,6 +111,13 @@ is the only copy of those changes left.
 
 SCOPE is `workspace_git.repositories`': what it finds is what this gate judges,
 and a submodule's own objects are outside it.
+
+A SUBMODULE IS JUDGED, NOT QUARANTINED (#1499). Its objects belong to another
+remote, so the gate cannot save them, but it can still refuse to report a phase
+completed that wrote in one. What it no longer does is read a gitlink that git
+moved on a checkout as writing: `moved_gitlinks` is that one distinction, and
+it asks the submodule rather than the porcelain line, because the line for the
+two cases is identical.
 """
 
 from __future__ import annotations
@@ -131,6 +138,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import (
+    split_moved_gitlinks,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_rehearsal import (
     run_quarantine_rehearsal,
@@ -618,14 +628,27 @@ async def _unsaved_work(
         unpushed = set(reachable.split())
 
     files = tuple(line.rstrip() for line in status.splitlines() if line.strip())
+    # A gitlink git moved is not a change anybody made (#1499), and the
+    # porcelain line cannot say so: see `moved_gitlinks`.
+    split = await split_moved_gitlinks(workspace, repo, files)
+    authored, moved = split.authored, split.moved
     # THE ONE LINE THE EXEMPTION DECIDES (#1308). An uncommitted change is
     # evidence of work unless the phase both disclaimed it and was unable to
     # write it, in which case the same line is a build tool that dirtied a
     # tree somebody else's process owns. Commits are untouched by this and
     # are read as work either way - see the module docstring.
-    unsaved_files = files if uncommitted_is_work else ()
+    unsaved_files = authored if uncommitted_is_work else ()
     if not unpushed and not unsaved_files:
-        if files:
+        if moved:
+            logger.info(
+                "Leaving %d submodule(s) in %s checked out where the phase left them: "
+                "each differs from the recorded gitlink only by its commit, which a "
+                "remote already has, with a clean worktree. Paths: %s",
+                len(moved),
+                repo,
+                ", ".join(sorted(moved)),
+            )
+        if authored:
             # Said out loud rather than dropped: the tree IS about to be
             # destroyed, and an operator reading this phase's logs after a
             # surprising rebuild deserves to see which paths the phase's own
@@ -634,9 +657,9 @@ async def _unsaved_work(
                 "Leaving %d uncommitted path(s) in %s to the workspace: this phase "
                 "declares it delivers no repository changes, and could not have "
                 "written them - the repository is mounted read-only. Paths: %s",
-                len(files),
+                len(authored),
                 repo,
-                ", ".join(files),
+                ", ".join(authored),
             )
         return None
 
