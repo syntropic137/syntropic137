@@ -348,23 +348,63 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           IMAGE="ghcr.io/syntropic137/event-store"
 
-          # Try the exact version tag first, fall back to latest
-          # --verbose is needed to get the digest from manifest inspect
-          DIGEST=$(docker manifest inspect --verbose "${IMAGE}:${VERSION}" 2>/dev/null \
-            | jq -r '.[0].Descriptor.digest // empty') || true
+          # Resolve the INDEX digest, not a child manifest.
+          #
+          # This used to be `docker manifest inspect --verbose | jq .[0]`, which
+          # is the #1519 defect: for a multi-arch image that command returns one
+          # array ENTRY PER PLATFORM, and each entry's .Descriptor.digest is that
+          # platform's CHILD manifest. `.[0]` therefore pinned whichever child
+          # happened to sort first (arm64), and v0.33.0 shipped a compose file
+          # that gave every amd64 self-host `exec format error`. The index digest
+          # is not reachable from `--verbose` output at all.
+          #
+          # `buildx imagetools inspect --format '{{.Manifest.Digest}}'` returns
+          # the digest of the thing the tag actually points at, which is the
+          # index for a multi-arch image.
+          resolve() {
+            docker buildx imagetools inspect "$1" \
+              --format '{{.Manifest.Digest}}' 2>/dev/null || true
+          }
+
+          DIGEST="$(resolve "${IMAGE}:${VERSION}")"
 
           if [[ -z "$DIGEST" ]]; then
-            echo "::warning::event-store:${VERSION} not found in GHCR — trying 'latest'"
-            DIGEST=$(docker manifest inspect --verbose "${IMAGE}:latest" 2>/dev/null \
-              | jq -r '.[0].Descriptor.digest // empty') || true
+            echo "::warning::event-store:${VERSION} not found in GHCR, trying 'latest'"
+            DIGEST="$(resolve "${IMAGE}:latest")"
           fi
 
           if [[ -z "$DIGEST" ]]; then
-            echo "::error::Could not resolve event-store digest from GHCR — refusing to release without supply chain pinning"
+            echo "::error::Could not resolve event-store digest from GHCR - refusing to release without supply chain pinning"
             exit 1
           fi
 
-          echo "Resolved event-store digest: ${DIGEST}"
+          # Fail closed if what we resolved is not a multi-arch index that can
+          # actually run on the platforms we publish for. This is the guard that
+          # makes #1519 unshippable rather than merely fixed: any future change
+          # that reintroduces a single-platform digest dies here instead of in a
+          # user's `docker compose up`.
+          RAW="$(docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --raw)"
+          MEDIA_TYPE="$(jq -r '.mediaType // empty' <<<"$RAW")"
+          case "$MEDIA_TYPE" in
+            application/vnd.oci.image.index.v1+json | \
+            application/vnd.docker.distribution.manifest.list.v2+json) ;;
+            *)
+              echo "::error::event-store ${DIGEST} is '${MEDIA_TYPE}', not a manifest index."
+              echo "::error::A single-platform digest here breaks every self-host on another architecture (#1519)."
+              exit 1
+              ;;
+          esac
+
+          for REQUIRED_ARCH in amd64 arm64; do
+            if ! jq -e --arg a "$REQUIRED_ARCH" \
+                 '[.manifests[]? | select(.platform.os == "linux" and .platform.architecture == $a)] | length > 0' \
+                 <<<"$RAW" >/dev/null; then
+              echo "::error::event-store index ${DIGEST} has no linux/${REQUIRED_ARCH} manifest (#1519)."
+              exit 1
+            fi
+          done
+
+          echo "Resolved event-store index digest: ${DIGEST} (linux/amd64 + linux/arm64 verified)"
           mkdir -p /tmp/digests
           echo "$DIGEST" > /tmp/digests/event-store
 
