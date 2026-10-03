@@ -47,6 +47,9 @@ class WorkflowSummary:
     requires_repos: bool = True
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
+    tags: tuple[str, ...] = ()
+    """The template's tags, normalised and sorted (#967). Future runs inherit them."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowSummary":
         """Create from dictionary data."""
@@ -61,6 +64,7 @@ class WorkflowSummary:
             runs_count=data.get("runs_count", 0),
             is_archived=data.get("is_archived", False),
             requires_repos=data.get("requires_repos", True),
+            tags=tuple(data.get("tags") or ()),
         )
 
     def to_dict(self) -> dict:
@@ -85,4 +89,5 @@ class WorkflowSummary:
             "runs_count": self.runs_count,
             "is_archived": self.is_archived,
             "requires_repos": self.requires_repos,
+            "tags": list(self.tags),
         }

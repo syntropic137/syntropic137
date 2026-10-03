@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
@@ -86,7 +87,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # both bumped 10 -> 11 independently, on separate branches. Taking either
     # literal 11 would leave a deployment that had already rebuilt at the other
     # one's 11 seeing no change here, and so never rebuilding for this field.
-    VERSION = 12
+    VERSION = 13  # v13: tags and inherited_tags (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -224,6 +225,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "error_message": None,
             "repos": repos,
             "inputs": inputs,
+            # The launch snapshot, twice: `inherited_tags` is never edited and
+            # `tags` is what ExecutionTagsAdded/Removed edit from here (#967).
+            "tags": list(TagSet.recorded(event_data.get("tags") or [])),
+            "inherited_tags": list(TagSet.recorded(event_data.get("tags") or [])),
             # How many phases this run set out to do, and how many it has done.
             # Read off the SAME event the list projection reads them off, so a
             # run cannot report three phases in one view and one in the other
@@ -589,6 +594,26 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         )
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_execution_tags_added(self, event_data: dict) -> None:
+        """Handle ExecutionTagsAdded (#967). Edits current tags, never inherited."""
+        await self._edit_tags(event_data, added=True)
+
+    async def on_execution_tags_removed(self, event_data: dict) -> None:
+        """Handle ExecutionTagsRemoved (#967). Edits current tags, never inherited."""
+        await self._edit_tags(event_data, added=False)
+
+    async def _edit_tags(self, event_data: dict, *, added: bool) -> None:
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["tags"] = replay_tag_edit(
+                existing.get("tags") or [], event_data.get("tags") or [], added=added
+            )
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:
         """Get execution detail by ID.

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
@@ -106,7 +107,11 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # NOT bumped again when `can_open_pr` was retired (#1477): that is the first
     # case, a removal. A v9 row that still carries the key stays readable,
     # because `from_dict` no longer looks for it, and the key stops surfacing.
-    VERSION = 9  # v9: surface can_open_pr, clone_repos, delivers_repo_changes, sandbox (#1429)
+    #
+    # v10 is the v9 case again (#967): a row written before tags existed has no
+    # `tags` key, and `from_dict` would report "no tags" for a workflow that
+    # has them -- and the export would then drop them on the way out.
+    VERSION = 10  # v10: tags (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -190,6 +195,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             repository_url=event_data.get("repository_url"),
             repos=tuple(event_data.get("repos", [])),
             requires_repos=event_data.get("requires_repos", True),
+            tags=TagSet.recorded(event_data.get("tags") or []).values,
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 
@@ -227,6 +233,26 @@ class WorkflowDetailProjection(AutoDispatchProjection):
         existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
         if existing:
             existing["runs_count"] = existing.get("runs_count", 0) + 1
+            await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+
+    async def on_workflow_tags_added(self, event_data: dict) -> None:
+        """Handle WorkflowTagsAdded (#967)."""
+        await self._edit_tags(event_data, added=True)
+
+    async def on_workflow_tags_removed(self, event_data: dict) -> None:
+        """Handle WorkflowTagsRemoved (#967)."""
+        await self._edit_tags(event_data, added=False)
+
+    async def _edit_tags(self, event_data: dict, *, added: bool) -> None:
+        workflow_id = event_data.get("workflow_id")
+        if not workflow_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if existing:
+            existing["tags"] = replay_tag_edit(
+                existing.get("tags") or [], event_data.get("tags") or [], added=added
+            )
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
     async def on_workflow_phase_updated(self, event_data: dict) -> None:

@@ -157,3 +157,15 @@ def _within_limit(tags: set[str]) -> tuple[str, ...]:
 def _coerce(tags: Iterable[str]) -> TagSet:
     """An operand for a set operation, validated unless it already is a TagSet."""
     return tags if isinstance(tags, TagSet) else TagSet(tags)
+
+
+def replay_tag_edit(stored: Iterable[str], edit: Iterable[str], *, added: bool) -> list[str]:
+    """Apply a recorded add or remove to a read model's stored tags.
+
+    For projections. Never re-validates or enforces the limit: the aggregate
+    already did when the event was written, and replay must not fail.
+    """
+    current = TagSet.recorded(stored)
+    if added:
+        return list(TagSet.recorded([*current, *edit]))
+    return list(current.difference(TagSet.recorded(edit)))
