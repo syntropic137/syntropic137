@@ -700,6 +700,27 @@
             "description": "Case-insensitive substring match against execution id, workflow id and workflow name"
           },
           {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only executions carrying this tag. Repeat to require several (AND). Normalised like stored tags; an invalid tag is rejected with 422.",
+              "title": "Tag"
+            },
+            "description": "Keep only executions carrying this tag. Repeat to require several (AND). Normalised like stored tags; an invalid tag is rejected with 422."
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -8935,6 +8956,14 @@
             "title": "Repos",
             "description": "GitHub URLs or 'owner/repo' slugs to pre-clone for workspace hydration (ADR-058, ADR-063). Typed channel for repository identity: one execution can touch 0, 1, or N repos. Passing 'repository' or 'repos' in the `inputs` dict is rejected with 422."
           },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "description": "Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422."
+          },
           "provider": {
             "type": "string",
             "title": "Provider",
@@ -9331,6 +9360,13 @@
             },
             "type": "array",
             "title": "Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
           },
           "task": {
             "anyOf": [
@@ -9797,6 +9833,13 @@
             },
             "type": "array",
             "title": "Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
           },
           "repos_display": {
             "anyOf": [

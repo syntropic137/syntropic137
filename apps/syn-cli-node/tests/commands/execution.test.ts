@@ -59,6 +59,20 @@ describe("execution commands", () => {
       expect(out).toContain("3/3");
     });
 
+    it("sends every --tag as a repeated ?tag= query parameter (#967)", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
+      await handler({ positionals: [], values: { tag: ["nightly", "eval-a"] } });
+      const url = new URL((mockFetch.mock.calls[0]![0] as Request).url);
+      expect(url.searchParams.getAll("tag")).toEqual(["nightly", "eval-a"]);
+    });
+
+    it("sends no tag parameter without --tag", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
+      await handler({ positionals: [], values: {} });
+      const url = new URL((mockFetch.mock.calls[0]![0] as Request).url);
+      expect(url.searchParams.has("tag")).toBe(false);
+    });
+
     it("shows empty message when no executions", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
       await handler({ positionals: [], values: {} });
