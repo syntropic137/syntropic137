@@ -931,12 +931,17 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
 
 async def _build_resume_handler() -> StartResumeHandler:
     """The resume start handler, built when a resume is first requested."""
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_domain.contexts.orchestration import StartResumeHandler
 
     return StartResumeHandler(
         await get_execution_processor(),
         get_workflow_execution_repository(),
         maintenance=get_maintenance_port(),
+        # #1513: confirms the branch the parent pushed is still where it was
+        # left, and finds the PR open from it, before the child continues it.
+        remote_branches=GitHubRemoteBranchReader(get_github_client),
     )
 
 

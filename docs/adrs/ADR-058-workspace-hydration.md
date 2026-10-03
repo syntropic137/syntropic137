@@ -75,7 +75,7 @@ mkdir -p /workspace/repos
 
 The idempotency guard (`[ -d "..." ] || ...`) ensures re-running the setup phase on a partially-hydrated workspace (e.g. after a crash and restart) does not re-clone repos that are already present.
 
-Every repository a run recorded a commit for (`WorkflowExecutionStarted.source_commits`) is then checked out at that commit, between the clone and the submodule init - a resume's record being its parent's - and a commit that cannot be reached refuses the phase rather than falling back. A repository with no recorded commit stays at the default branch's head. See the addendum [Runs Check Out Their Recorded Commits (#1458)](#addendum-runs-check-out-their-recorded-commits-1458).
+Every repository a run recorded a commit for (`WorkflowExecutionStarted.source_commits`) is then checked out at that commit, between the clone and the submodule init - a resume's record being its parent's - and a commit that cannot be reached refuses the phase rather than falling back. A repository with no recorded commit stays at the default branch's head. See the addendum [Runs Check Out Their Recorded Commits (#1458)](#addendum-runs-check-out-their-recorded-commits-1458). The one exception is a phase that CONTINUES a branch: it is checked out at that branch's head (see [A Resumed Phase Continues Its Parent's Branch (#1513)](#addendum-a-resumed-phase-continues-its-parents-branch-1513)).
 
 ### 2. Inject Both `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`
 
@@ -448,3 +448,74 @@ quietly do the exact thing this addendum exists to prevent.
   phase to see commits merged to `main` while it ran cannot have that and a
   faithful record at once. None does today; it would be a per-phase choice at
   the same seam as #1513, recorded as its own commit.
+
+## Addendum: A Resumed Phase Continues Its Parent's Branch (#1513)
+
+**Date:** 2026-10-03
+
+### Problem
+
+A v3 implement phase opens a draft PR on its first push. A run that failed in
+implement after that left a pushed branch and an open PR. Its resume checked
+implement out detached at the pinned commit (#1458) and the agent, told
+nothing, cut a second branch and opened a second PR for the same change.
+
+### Decision
+
+**The checkout rule.** A phase that READS code is checked out at the run's
+pinned commit. A phase that CONTINUES a branch is checked out at that branch's
+head. `StartPins.checkout_for(phase_id)` is the one place that says which: only
+the resumed phase continues, and only branches its own earlier attempt left.
+Every other phase, the resumed run's later ones included, reads the pinned
+commit exactly as #1458 decided.
+
+**Where the facts come from, all on the execution (Lane 1):**
+
+| Fact | Recorded on | Source |
+|---|---|---|
+| Branches the failing phase left | the parent's `WorkflowFailed.observed_branches` (#1200) | git, asked while the workspace was alive, so it survives a phase that did not complete |
+| Which of them the resume continues, with the open PR | the child's `WorkflowExecutionStarted.continued_branches` | `RemoteBranchPort`, asked as the child starts |
+| Which it refused, and why | the child's `WorkflowExecutionStarted.abandoned_branches` | the same reading |
+
+A branch counts as LEFT by the phase only when origin holds it and the phase
+owned it: it did not exist on origin when the phase started, or the phase was
+itself continuing it. A branch the phase merely sat on (`main` moving under a
+fetch) is never continued. Both new fields are top-level, not inside
+`resumed_from` (whose model forbids extra keys), and are omitted when unset, so
+a release before #1513 replays the event unchanged.
+
+**Stale is refused, visibly.** The child continues a branch only when the forge
+confirms it is exactly where the parent left it and no closed PR replaced an
+open one. Deleted, force-pushed or moved, PR closed, or a forge nobody could
+ask: the branch is ABANDONED with that reason on the child's start event, a
+warning is logged, the phase is told, and it starts fresh at the pinned commit.
+"Could not ask" is never read as "gone", and never trusted either.
+
+**The script.** For a continued repository the detached checkout is replaced
+by:
+
+```bash
+if ! git -C <dest> merge-base --is-ancestor <head> refs/remotes/origin/<branch> 2>/dev/null; then
+    printf '%s\n' 'ERROR: ...' >&2
+    exit 65
+fi
+git -C <dest> checkout --quiet -B <branch> refs/remotes/origin/<branch>
+git -C <dest> branch --quiet --set-upstream-to=origin/<branch> <branch>
+```
+
+A branch rewritten between the decision and the clone refuses the phase with
+the #1458 exit code, never silently continuing someone else's history.
+
+**The phase is told through the existing handoff.** `record_continuation`
+adds a `resume-continuation` entry to the inherited phase-output cache, which
+the prompt context renders under "Context from Previous Phases". It names the
+branch and PR and says to push to it and not open a second PR. That is the
+input the implement prompt's "If you are reworking an existing PR, use its
+branch" path already keys on, so no prompt is forked.
+
+### Not covered
+
+- An interrupted or cancelled parent records no `observed_branches`, so its
+  resume continues nothing and behaves as before.
+- The PR is resolved from the forge at resume start, not recorded on the
+  parent: nothing in the platform observes a PR being opened.

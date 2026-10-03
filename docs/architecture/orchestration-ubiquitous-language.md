@@ -120,6 +120,22 @@ code the original ran on. A pinned commit no branch or tag of origin still
 reaches refuses the Phase; it is never swapped for the branch's head.
 (#1458, ADR-058.)
 
+## Continued Branch
+
+A branch a Resume Phase picks up rather than starting over: one the original's
+failing attempt at that same Phase pushed to origin, confirmed at the resumed
+Execution's start to be exactly where it was left, together with the PR open
+from it. The Resume Phase is checked out at its head; every other Phase still
+reads the pinned commit. Recorded on the resumed Execution's start. (#1513,
+ADR-058.)
+
+## Abandoned Branch
+
+A branch a Resume Phase could have continued and deliberately did not, because
+it was deleted, force-pushed or moved, its PR was closed, or the forge could not
+be asked. Recorded with that reason on the resumed Execution's start; the Phase
+starts fresh and is told so. Never a silent omission. (#1513.)
+
 ## Admission
 
 The decision that an operation may proceed, recorded before any work begins.
