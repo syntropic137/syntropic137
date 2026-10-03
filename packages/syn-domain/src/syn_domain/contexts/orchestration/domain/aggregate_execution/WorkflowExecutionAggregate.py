@@ -79,7 +79,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration._shared.tags import TagSet
     from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
         AddExecutionTagsCommand,
     )
@@ -689,7 +688,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             ExecutionTagsAddedEvent,
         )
 
-        self._guard_tag_edit(command.tags)
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        if not command.tags:
+            msg = "At least one tag is required"
+            raise ValueError(msg)
         added = self._tags.newly_added(command.tags)
         if added:
             self._apply(
@@ -705,7 +709,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             ExecutionTagsRemovedEvent,
         )
 
-        self._guard_tag_edit(command.tags)
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        if not command.tags:
+            msg = "At least one tag is required"
+            raise ValueError(msg)
         removed = self._tags.actually_removed(command.tags)
         if removed:
             self._apply(
@@ -715,14 +724,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
                     tags=list(removed),
                 )
             )
-
-    def _guard_tag_edit(self, tags: TagSet) -> None:
-        if self.id is None:
-            msg = "Execution does not exist"
-            raise ValueError(msg)
-        if not tags:
-            msg = "At least one tag is required"
-            raise ValueError(msg)
 
     @command_handler("InterruptExecutionCommand")
     def interrupt_execution(self, command: InterruptExecutionCommand) -> None:

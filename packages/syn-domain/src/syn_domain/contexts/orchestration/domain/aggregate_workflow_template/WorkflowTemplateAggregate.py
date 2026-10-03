@@ -703,7 +703,12 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             WorkflowTagsAddedEvent,
         )
 
-        self._guard_tag_edit(command.tags)
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+        if not command.tags:
+            msg = "At least one tag is required"
+            raise ValueError(msg)
         # union() enforces MAX_TAGS, so an over-limit add fails before any event.
         added = self._tags.union(command.tags).difference(self._tags)
         if not added:
@@ -717,19 +722,16 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             WorkflowTagsRemovedEvent,
         )
 
-        self._guard_tag_edit(command.tags)
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+        if not command.tags:
+            msg = "At least one tag is required"
+            raise ValueError(msg)
         present = command.tags.intersection(self._tags)
         if not present:
             return
         self._apply(WorkflowTagsRemovedEvent(workflow_id=str(self.id), tags=list(present)))
-
-    def _guard_tag_edit(self, tags: TagSet) -> None:
-        if self.id is None:
-            msg = "Workflow does not exist"
-            raise ValueError(msg)
-        if not tags:
-            msg = "At least one tag is required"
-            raise ValueError(msg)
 
     @event_sourcing_handler("WorkflowTagsAdded")
     def on_tags_added(self, event: WorkflowTagsAddedEvent) -> None:
