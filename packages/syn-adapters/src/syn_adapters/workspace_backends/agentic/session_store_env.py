@@ -29,11 +29,14 @@ one of them is the write token.
 
 Partition safety
 ----------------
-The capability HARD-FAILS the workspace if the partition is absolute or
-contains ``..``. Identifiers reaching this module come from the orchestration
-domain and are normally opaque ids, but they are sanitised here rather than
-trusted: a workflow-supplied id must never be able to take down provisioning or
-escape its partition prefix.
+The capability refuses a partition that is absolute or contains ``..``. Since
+agentic-workspace #27 that refusal DEGRADES the workspace (it starts with
+capture disabled) rather than failing it, unless AGENTIC_SESSION_STORE_REQUIRED=1
+restores the hard fail. Either way the run loses its capture. Identifiers
+reaching this module come from the orchestration domain and are normally opaque
+ids, but they are sanitised here rather than trusted: a workflow-supplied id
+must never be able to disable capture, take down provisioning, or escape its
+partition prefix.
 
 Tag identity
 ------------

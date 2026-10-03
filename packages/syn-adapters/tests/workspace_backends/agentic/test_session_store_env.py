@@ -280,7 +280,7 @@ class TestTagIdentity:
 
 
 class TestPartitionSafety:
-    """The capability HARD-FAILS the workspace on an unsafe partition."""
+    """The capability refuses an unsafe partition (degrading capture since AW #27)."""
 
     @pytest.mark.parametrize(
         ("raw", "expected"),

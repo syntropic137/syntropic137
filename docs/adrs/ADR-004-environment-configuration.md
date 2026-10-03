@@ -245,8 +245,12 @@ never captures anything itself.
    Never logged, never in an exception message, and never written to a
    container label, since labels are readable via `docker inspect`.
 4. **Identifiers passed through are sanitised, not trusted.** The partition is
-   a relative `<execution_id>/<workspace_id>`; the capability hard-fails an
-   absolute path or `..`.
+   a relative `<execution_id>/<workspace_id>`; the capability refuses an
+   absolute path or `..`. Since agentic-workspace #27 a refused partition, like
+   an unreachable store, DEGRADES the workspace (it starts with capture
+   disabled) instead of failing it; `AGENTIC_SESSION_STORE_REQUIRED=1` restores
+   the hard fail. Either way the run loses its capture, so sanitising still
+   matters.
 
 #### Resolution order, and why the vault "just works"
 
