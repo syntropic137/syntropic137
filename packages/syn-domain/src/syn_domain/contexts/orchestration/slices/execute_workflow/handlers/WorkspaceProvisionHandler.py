@@ -441,7 +441,7 @@ class WorkspaceProvisionHandler:
         *,
         phase_name: str,
         clone_repos: bool,
-        pinned_commits: Sequence[SourceCommit],
+        pinned_commits: Sequence[SourceCommit] = (),
         include_codex_auth: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
