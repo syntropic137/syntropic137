@@ -88,8 +88,12 @@ class _Evidence:
     async def read(
         self, run: RunIdentity, watermark: int, *, after: int = 0, limit: int = 100
     ) -> EvidencePage:
-        items = tuple(self.batches.get(run, [])[after:watermark][:limit])
-        return EvidencePage(watermark=watermark, items=items)
+        window = self.batches.get(run, [])[after:watermark]
+        items = tuple(window[:limit])
+        more = len(window) > limit
+        return EvidencePage(
+            watermark=watermark, items=items, next_after=items[-1].sequence if more else None
+        )
 
     async def pending(self, *, limit: int = 100) -> tuple[PendingEvidence, ...]:
         return tuple(
@@ -111,7 +115,7 @@ class _Inventory:
 
     staged: list[UUID] = field(default_factory=list)
 
-    async def head(self, run: RunIdentity) -> InventorySnapshot | None:  # noqa: ARG002
+    async def head(self, run: RunIdentity) -> InventorySnapshot | None:
         return None
 
     async def stage(self, snapshot: InventorySnapshot) -> None:
@@ -158,7 +162,7 @@ class _Harness:
         self.evidence = _Evidence()
         self.inventory = _Inventory()
         builder = BuildInventorySnapshotHandler(
-            self.evidence, self.inventory, max_evidence_records=1000, max_evidence_batches=1000
+            self.evidence, self.inventory, max_evidence_records=100_000, max_evidence_batches=10_000
         )
         self.work = _CountingWork(
             InventoryWork(
@@ -349,7 +353,11 @@ async def test_process_pending_logs_wall_time_per_stage(caplog: pytest.LogCaptur
     logger = "syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection"
     with caplog.at_level(logging.DEBUG, logger=logger):
         await harness.tick()
-    stages = [getattr(record, "stage", None) for record in caplog.records]
-    assert stages == ["schedule", "execute", "execute"]
-    executed = [getattr(record, "job_id", None) for record in caplog.records[1:]]
-    assert executed == harness.work.executed
+    records = [record for record in caplog.records if record.name == logger]
+    assert [getattr(record, "stage", None) for record in records] == [
+        "schedule",
+        "execute",
+        "execute",
+    ]
+    assert [getattr(record, "job_id", None) for record in records[1:]] == harness.work.executed
+    assert all(getattr(record, "duration_ms", -1.0) >= 0 for record in records)

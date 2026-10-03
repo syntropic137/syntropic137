@@ -52,11 +52,12 @@ class InventoryWorkPort(Protocol):
 def _log_stage(stage: str, started: float, job_id: str | None = None) -> None:
     # Per-stage wall time for #1528: which part of a tick is slow is measured,
     # not guessed. Debug level, so it costs nothing unless enabled.
+    duration_ms = (time.perf_counter() - started) * 1000
     logger.debug(
         "Inventory process_pending stage %s took %.1f ms",
         stage,
-        (time.perf_counter() - started) * 1000,
-        extra={"stage": stage, "job_id": job_id},
+        duration_ms,
+        extra={"stage": stage, "job_id": job_id, "duration_ms": duration_ms},
     )
 
 

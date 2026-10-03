@@ -23,11 +23,11 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.aggregate_inventory_reconciliation.InventoryReconciliationAggregate import (
         InventoryReconciliationAggregate,
     )
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import RunIdentity
     from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
         PendingEvidence,
         SessionEvidenceWritePort,
     )
-    from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import RunIdentity
     from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
         SessionInventoryJobPort,
     )

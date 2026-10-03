@@ -67,30 +67,35 @@ RESOLVER_VERSION = "syn-session-relationships/10"
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
     refs: dict[str, InventoryNodeRef] = {}
     origins: dict[str, list[EvidenceReference]] = defaultdict(list)
-    for claim in (
+
+    def claim(ref: InventoryNodeRef, origin: EvidenceReference | None) -> None:
+        # One key per reference: it hashes a JSON encoding, and the snapshot
+        # build is dominated by this loop on large runs (#1528).
+        key = ref.key
+        refs[key] = ref
+        if origin is not None:
+            origins[key].append(origin)
+
+    for item in (
         *evidence.nodes,
         *evidence.memberships,
         *evidence.captures,
         *evidence.native_transcripts,
         *evidence.invocation_lifecycle,
     ):
-        refs[claim.node.key] = claim.node
-        origins[claim.node.key].append(claim.evidence)
+        claim(item.node, item.evidence)
     for context in evidence.invocation_contexts:
         for ref in (context.controller, context.child):
-            refs[ref.key] = ref
-            origins[ref.key].append(context.evidence)
+            claim(ref, context.evidence)
     for edge in evidence.edges:
         for ref in (edge.parent, edge.child):
-            refs[ref.key] = ref
-            origins[ref.key].append(edge.evidence)
+            claim(ref, edge.evidence)
     for binding in evidence.bindings:
         for ref in (binding.owner, binding.transcript):
-            refs[ref.key] = ref
-            origins[ref.key].append(binding.evidence)
+            claim(ref, binding.evidence)
     if evidence.coverage_contract is not None:
         for ref in evidence.coverage_contract.expected_nodes:
-            refs[ref.key] = ref
+            claim(ref, None)
     # Validate producer identities across nodes as well as within one node.
     references(ref for items in origins.values() for ref in items)
     return tuple(
