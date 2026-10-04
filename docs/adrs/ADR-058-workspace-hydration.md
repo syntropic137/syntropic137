@@ -511,7 +511,7 @@ adds a `resume-continuation` entry to the inherited phase-output cache, which
 the prompt context renders under "Context from Previous Phases". It names the
 branch and PR and says to push to it and not open a second PR. That is the
 input the implement prompt's "If you are reworking an existing PR, use its
-branch" path already keys on, so no prompt is forked.
+branch" path already keys on, so the prompt is unchanged.
 
 ### Not covered
 

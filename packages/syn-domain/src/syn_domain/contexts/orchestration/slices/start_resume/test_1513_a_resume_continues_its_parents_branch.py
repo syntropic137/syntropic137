@@ -24,9 +24,12 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    AbandonedBranch,
+    ContinuedBranch,
     RemoteBranchReading,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -35,6 +38,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ResumeExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.branch_observation import (
     PhaseStartingPoints,
@@ -187,11 +193,26 @@ async def _resumed_child(
     return child
 
 
-def _child_start_payload(executions: _Executions) -> dict[str, object]:
+class _StoredStart(BaseModel):
+    """The child's start event as stored: its branch facts, and which keys it wrote."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    keys: frozenset[str]
+    continued_branches: list[ContinuedBranch] | None = None
+    abandoned_branches: list[AbandonedBranch] | None = None
+
+
+def _child_start(executions: _Executions) -> _StoredStart:
     ((_, payload),) = [
         (m, p) for m, p in executions.written[CHILD] if m.event_type == "WorkflowExecutionStarted"
     ]
-    return json.loads(payload)
+    stored = WorkflowExecutionStartedEvent.model_validate_json(payload)
+    return _StoredStart(
+        keys=frozenset(json.loads(payload)),
+        continued_branches=stored.continued_branches,
+        abandoned_branches=stored.abandoned_branches,
+    )
 
 
 def _branch_checkout(branch: str) -> str:
@@ -259,11 +280,11 @@ class TestAResumeContinuesTheBranchItsParentPushed:
 
         await _resumed_child(executions, forge, _ToldPrompt())
 
-        started = _child_start_payload(executions)
-        assert started["continued_branches"] == [
-            {"repository": REPO, "branch": BRANCH, "head_sha": PUSHED, "pull_request": PR}
+        started = _child_start(executions)
+        assert started.continued_branches == [
+            ContinuedBranch(repository=REPO, branch=BRANCH, head_sha=PUSHED, pull_request=PR)
         ]
-        assert "abandoned_branches" not in started
+        assert "abandoned_branches" not in started.keys
         child = await executions.get_by_id(CHILD)
         assert child is not None
         assert child.start_pins.checkout_for("implement").branches == {REPO: BRANCH}
@@ -281,11 +302,11 @@ class TestABranchThatIsGoneStartsFreshVisibly:
         lines = child.scripts["implement"].splitlines()
         assert _checkout_line(PINNED) in lines
         assert not any("checkout --quiet -B" in ln for ln in lines)
-        started = _child_start_payload(executions)
-        assert "continued_branches" not in started
-        (abandoned,) = started["abandoned_branches"]  # type: ignore[misc]
-        assert abandoned["branch"] == BRANCH
-        assert "deleted" in abandoned["reason"]
+        started = _child_start(executions)
+        assert "continued_branches" not in started.keys
+        (abandoned,) = started.abandoned_branches or []
+        assert abandoned.branch == BRANCH
+        assert "deleted" in abandoned.reason
         handoff = told.outputs[f"{CHILD}/implement"][CONTINUATION_OUTPUT_ID]
         assert f"`{BRANCH}` was NOT continued" in handoff
 
@@ -305,8 +326,8 @@ class TestABranchThatIsGoneStartsFreshVisibly:
         child = await _resumed_child(executions, forge, _ToldPrompt())
 
         assert _checkout_line(PINNED) in child.scripts["implement"].splitlines()
-        (abandoned,) = _child_start_payload(executions)["abandoned_branches"]  # type: ignore[misc]
-        assert "force-pushed or moved" in abandoned["reason"]
+        (abandoned,) = _child_start(executions).abandoned_branches or []
+        assert "force-pushed or moved" in abandoned.reason
 
     async def test_a_forge_nobody_could_ask_is_not_read_as_gone_and_not_trusted(self) -> None:
         executions = _Executions()
@@ -316,5 +337,5 @@ class TestABranchThatIsGoneStartsFreshVisibly:
         child = await _resumed_child(executions, forge, _ToldPrompt())
 
         assert _checkout_line(PINNED) in child.scripts["implement"].splitlines()
-        (abandoned,) = _child_start_payload(executions)["abandoned_branches"]  # type: ignore[misc]
-        assert "could not be asked" in abandoned["reason"]
+        (abandoned,) = _child_start(executions).abandoned_branches or []
+        assert "could not be asked" in abandoned.reason

@@ -11,7 +11,7 @@ It also hands the resumed phase the branch and PR its parent's failed attempt
 pushed (#1513), through the same cache, as the entry `CONTINUATION_OUTPUT_ID`.
 That puts "this is the PR you are reworking, use its branch" in the phase's
 context, which is exactly what the v3 implement prompt's "If you are reworking
-an existing PR, use its branch" path keys on - so no prompt is forked for it.
+an existing PR, use its branch" path keys on - so the prompt itself is unchanged.
 """
 
 from __future__ import annotations

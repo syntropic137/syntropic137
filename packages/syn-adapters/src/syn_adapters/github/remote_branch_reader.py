@@ -16,10 +16,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
-    RemoteBranchReading,
-)
-from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+from syn_domain.contexts.orchestration.ports import RemoteBranchPort, RemoteBranchReading
 
 if TYPE_CHECKING:
     from collections.abc import Callable

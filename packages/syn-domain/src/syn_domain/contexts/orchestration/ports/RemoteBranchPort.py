@@ -10,12 +10,15 @@ an adapter only asks.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
-if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
-        RemoteBranchReading,
-    )
+# Imported at runtime, not under TYPE_CHECKING: the port re-exports the reading
+# it answers with, so an adapter needs nothing deeper than `ports`.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    RemoteBranchReading,
+)
+
+__all__ = ["RemoteBranchPort", "RemoteBranchReading"]
 
 
 class RemoteBranchPort(Protocol):
