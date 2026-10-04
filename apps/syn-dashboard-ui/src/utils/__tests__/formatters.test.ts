@@ -106,6 +106,21 @@ describe('formatTokens', () => {
     expect(formatTokens(1000000)).toBe('1.0M')
     expect(formatTokens(2500000)).toBe('2.5M')
   })
+
+  it('formats B suffix for billions instead of thousands of millions', () => {
+    expect(formatTokens(10_008_606_679)).toBe('10.0B')
+    expect(formatTokens(1_000_000_000)).toBe('1.0B')
+    expect(formatTokens(1_250_000_000)).toBe('1.3B')
+    expect(formatTokens(1_249_999_999)).toBe('1.2B')
+    expect(formatTokens(1_234_000_000_000)).toBe('1234.0B')
+  })
+
+  it('moves up a tier exactly where rounding would print 1000 of the lower one', () => {
+    expect(formatTokens(999_949_999)).toBe('999.9M')
+    expect(formatTokens(999_950_000)).toBe('1.0B')
+    expect(formatTokens(999_949)).toBe('999.9K')
+    expect(formatTokens(999_950)).toBe('1.0M')
+  })
 })
 
 describe('formatTime', () => {
