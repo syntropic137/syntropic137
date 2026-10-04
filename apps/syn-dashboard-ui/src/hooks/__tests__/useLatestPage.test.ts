@@ -312,4 +312,67 @@ describe('useLatestPage', () => {
       consoleError.mockRestore()
     }
   })
+  describe('stale: whether the rows on screen answer the current query', () => {
+    it('is true while a new query is in flight, with the previous rows still held', async () => {
+      const nextPage = deferred<ListPage<{ id: string }>>()
+      const fetchPage = vi.fn((query: ListQuery) =>
+        query.page === 1 ? Promise.resolve(page(['a'], 2)) : nextPage.promise,
+      )
+      const SECOND_PAGE: ListQuery = { page: 2, page_size: LIST_PAGE_SIZE }
+
+      const { result, rerender } = renderHook(({ query }) => useLatestPage(fetchPage, query), {
+        initialProps: { query: FIRST_PAGE },
+      })
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.stale).toBe(false)
+
+      rerender({ query: SECOND_PAGE })
+
+      // The defect: `loading` had settled on mount and nothing said the rows
+      // on screen now answered a query the operator had left.
+      expect(result.current.stale).toBe(true)
+      expect(result.current.loading).toBe(false)
+      expect(result.current.result.rows).toEqual([{ id: 'a' }])
+
+      await act(async () => nextPage.resolve(page(['b'], 2)))
+
+      expect(result.current.stale).toBe(false)
+      expect(result.current.result.rows).toEqual([{ id: 'b' }])
+    })
+
+    it('is true when only the fetcher changes, as a caller-owned filter does', async () => {
+      const narrowed = deferred<ListPage<{ id: string }>>()
+      const everything = vi.fn(async () => page(['a', 'b'], 2))
+      const onlyCode = vi.fn(() => narrowed.promise)
+
+      const { result, rerender } = renderHook(
+        ({ fetchPage }) => useLatestPage(fetchPage, FIRST_PAGE),
+        {
+          initialProps: { fetchPage: everything as typeof onlyCode },
+        },
+      )
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      rerender({ fetchPage: onlyCode })
+      expect(result.current.stale).toBe(true)
+
+      await act(async () => narrowed.resolve(page(['b'], 1)))
+      expect(result.current.stale).toBe(false)
+    })
+
+    it('stays false while the same query is asked again, so polls do not dim the list', async () => {
+      const again = deferred<ListPage<{ id: string }>>()
+      const outcomes = [Promise.resolve(page(['a'], 1)), again.promise]
+      const fetchPage = vi.fn(() => outcomes.shift()!)
+
+      const { result } = renderHook(() => useLatestPage(fetchPage, FIRST_PAGE))
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      act(() => result.current.refetch())
+      await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(2))
+
+      expect(result.current.stale).toBe(false)
+      await act(async () => again.resolve(page(['a'], 1)))
+    })
+  })
 })

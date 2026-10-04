@@ -20,8 +20,16 @@
  * is what makes "one request at a time" true of the list rather than of each
  * trigger separately.
  *
- * Callers see a page of rows, whether one is still on its way, and a way to
- * ask again. They do not see the sequencing, and cannot get it wrong.
+ * Callers see a page of rows, whether those rows answer the query they are
+ * showing, and a way to ask again. They do not see the sequencing, and cannot
+ * get it wrong.
+ *
+ * "Is something on the wire" is deliberately NOT what is reported: SSE and the
+ * poll are always about to ask again, and a list that dimmed on every tick
+ * would be telling the operator nothing. What matters is whether the rows on
+ * screen are the answer to the controls on screen. A filter change makes them
+ * not, until its answer lands - and a page that kept showing them as settled
+ * read as a filter that did nothing.
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
@@ -31,12 +39,29 @@ import type { ListPage, ListQuery } from '../api/listQuery'
 import { ifStillWanted } from './serialRefreshLoop'
 import { useSerialRefresh } from './useSerialRefresh'
 
-const EMPTY_PAGE: ListPage<never> = { rows: [], total: 0, statusCounts: {}, excludedUndated: 0 }
+interface SettledRequest<TRow> {
+  fetchPage: (query: ListQuery, signal?: AbortSignal) => Promise<ListPage<TRow>>
+  query: ListQuery
+}
+
+const EMPTY_PAGE: ListPage<never> = {
+  rows: [],
+  total: 0,
+  statusCounts: {},
+  excludedUndated: 0,
+}
 
 export interface LatestPageState<TRow> {
   /** The newest page received. `EMPTY_PAGE` until the first one lands. */
   result: ListPage<TRow>
+  /** Nothing has settled yet, so there are no rows worth showing. */
   loading: boolean
+  /**
+   * `result` answers a query the caller has since left - a filter, a page or a
+   * scope changed and the new answer is still on its way. The rows are still
+   * worth showing, as the previous answer. Never true while `loading` is.
+   */
+  stale: boolean
   /** Ask again for the same query. Stable for the life of the component. */
   refetch: () => void
 }
@@ -60,7 +85,10 @@ export function useLatestPage<TRow>(
   pollIntervalFor: (rows: TRow[]) => number | null = () => null,
 ): LatestPageState<TRow> {
   const [result, setResult] = useState<ListPage<TRow>>(EMPTY_PAGE)
-  const [loading, setLoading] = useState(true)
+  // Which request the page on screen settled for. Both halves, because a
+  // caller's own narrowing (an artifact type, say) arrives as a new
+  // `fetchPage` rather than a new `query`.
+  const [settledFor, setSettledFor] = useState<SettledRequest<TRow> | null>(null)
 
   const fetchLatest = useCallback(
     (signal: AbortSignal) =>
@@ -70,10 +98,10 @@ export function useLatestPage<TRow>(
         // reporting it as a failure of this list would be a lie about a query
         // nobody asked for any more.
         .catch(ifStillWanted(signal, (error: unknown) => console.error(error)))
-        // Left loading on purpose when overtaken. The replacement is what this
-        // list is waiting for now, and clearing the flag would show the
-        // previous query's rows as though they were settled.
-        .finally(ifStillWanted<void>(signal, () => setLoading(false))),
+        // Left unsettled on purpose when overtaken. The replacement is what
+        // this list is waiting for now, and settling here would show the
+        // previous query's rows as though they answered the current one.
+        .finally(ifStillWanted<void>(signal, () => setSettledFor({ fetchPage, query }))),
     [fetchPage, query],
   )
 
@@ -86,5 +114,9 @@ export function useLatestPage<TRow>(
     refetch()
   }, [refetch, fetchLatest])
 
-  return { result, loading, refetch }
+  const loading = settledFor === null
+  const stale =
+    settledFor !== null && (settledFor.fetchPage !== fetchPage || settledFor.query !== query)
+
+  return { result, loading, stale, refetch }
 }

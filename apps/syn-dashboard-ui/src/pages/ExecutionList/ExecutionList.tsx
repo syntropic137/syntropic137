@@ -18,6 +18,7 @@ import {
   ListPagination,
   ListToolbar,
   ResourceFilterBar,
+  StaleResults,
 } from '../../components'
 import { useExecutionList } from '../../hooks/useExecutionList'
 import { useIsMobile } from '../../hooks/useMediaQuery'
@@ -46,6 +47,7 @@ export function ExecutionList() {
   const {
     executions,
     loading,
+    stale,
     searchQuery,
     setSearchQuery,
     selectedStatuses,
@@ -109,22 +111,24 @@ export function ExecutionList() {
         isDefault={isDefaultView}
       />
 
-      {isMobile ? (
-        <ExecutionCardList
-          rows={executions}
-          loading={loading}
-          emptyState={emptyState}
-          selection={selection.tableProps}
-        />
-      ) : (
-        <ExecutionTable
-          rows={executions}
-          loading={loading}
-          emptyState={emptyState}
-          selection={selection.tableProps}
-          sort={{ state: sort, onToggle: toggleSort }}
-        />
-      )}
+      <StaleResults stale={stale}>
+        {isMobile ? (
+          <ExecutionCardList
+            rows={executions}
+            loading={loading}
+            emptyState={emptyState}
+            selection={selection.tableProps}
+          />
+        ) : (
+          <ExecutionTable
+            rows={executions}
+            loading={loading}
+            emptyState={emptyState}
+            selection={selection.tableProps}
+            sort={{ state: sort, onToggle: toggleSort }}
+          />
+        )}
+      </StaleResults>
 
       <ListPagination
         page={page}
