@@ -245,13 +245,15 @@ def _grant_skill_invocation(
     """Grant the tool that invokes skills to every phase that declares skills.
 
     `--tools` restricts AVAILABILITY (#964), so a phase that declared skills
-    and scoped its tools without naming `Skill` had its skills installed and
-    the only way to invoke them withheld. Every claude phase of
-    `sdlc-implement-v3` was in that shape, and recorded zero `Skill` calls
-    across all of them (#1269). Declaring a skill IS asking for it to be
-    usable, so the grant follows the declaration here, at the execution
-    boundary, rather than relying on each author to remember a second line -
-    and a stored template, which never sees the YAML validator, is covered too.
+    and scoped its tools without naming `Skill` would have its skills
+    installed and the only way to invoke them withheld. The repo's
+    `sdlc-implement-v3` YAML is in that shape (#1269). Declaring a skill IS
+    asking for it to be usable, so the grant follows the declaration here, at
+    the execution boundary, rather than relying on each author to remember a
+    second line - and a stored template, which never sees the YAML validator,
+    is covered too. (This is not why production runs recorded zero `Skill`
+    calls: the deployed definition already granted it, and native transcripts
+    show agents invoke skills only when the task names them.)
 
     An empty tool list is left alone: it means unrestricted, which already
     includes `Skill`. Codex never reaches the append, because a codex phase

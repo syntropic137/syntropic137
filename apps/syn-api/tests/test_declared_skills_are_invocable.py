@@ -1,11 +1,10 @@
 """A phase that declares skills must be able to invoke them (#1269).
 
 `--tools` restricts what the agent can use (#964). A phase that declared
-skills and scoped its tools without naming `Skill` got its skills installed and
-the one tool that invokes them withheld. `sdlc-implement-v3` declares skills on
-every phase and lists `Skill` on none, and its executions recorded zero `Skill`
-calls in every phase: the expected result of a tool that was never offered, not
-a capture gap.
+skills and scoped its tools without naming `Skill` would get its skills
+installed and the one tool that invokes them withheld. The repo's
+`sdlc-implement-v3` YAML declares skills on every phase and lists `Skill` on
+none, so an install from it would be in exactly that shape.
 
 These tests start from the real shipped workflow and check the command the
 agent is launched with, because that is where the grant was lost. A test that
