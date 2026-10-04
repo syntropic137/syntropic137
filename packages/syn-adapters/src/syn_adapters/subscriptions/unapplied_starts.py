@@ -9,29 +9,43 @@ lower global nonce commit after a higher one, so the live subscription's cursor
 passed it (fixed in event-sourcing-platform#337). The lesson is broader: any
 drop below the checkpoint is silent by construction, so it has to be looked for.
 
-WHAT COUNTS. A start is *unapplied* in a projection when the projection's
-checkpoint is at or past the start event's global nonce and
-`has_applied_start(execution_id)` is still False. Below the checkpoint the
-projection has said "done"; above it, a missing row is ordinary lag and is not
-reported here (`read_model_lag` reports that).
+WHAT COUNTS. A start is *unapplied* in a projection when every execution read
+model's checkpoint is at or past the start event's global nonce and that read
+model has no row for the execution with `started_at` set. A row without
+`started_at` is the #598 failure-fallback row, which is exactly what #1545 left
+behind. Above the checkpoints a missing row is ordinary lag (`read_model_lag`).
 
-EVERY CHECK IS A COMPLETE RECONCILIATION. Each check rescans the store from 0
-and asks about every start again; nothing is remembered between checks except
-which drops were already logged. Both shortcuts an incremental scan would take
-are unsound here:
+INCREMENTAL, WITH A SAFETY WINDOW. The detector keeps a high-water mark in
+memory: the store position up to which every start has been judged. Each check
+reads from `mark - safety_window` to the lowest checkpoint, at most
+`max_events_per_check` events, and looks up only starts it has not already
+confirmed, in batches of one query per read model. A check with nothing new
+does no lookups. Unresolved findings are re-asked every check, so a repair
+clears them without a restart. Restarting re-scans the store once, in bounded
+steps.
 
-- A cursor that advances past the highest nonce it has read never revisits a
-  lower nonce that commits later. That late commit IS #1545's mechanism, so an
-  incremental detector misses exactly the drop it exists to report.
-  `global_nonce` also has permanent gaps (rolled-back appends), so there is no
-  gap-free prefix to advance through.
-- Forgetting a start once its row was seen means a row lost LATER (a botched
-  rebuild, a truncation, another handler defect) is never reported.
+- The window covers a start that becomes visible below the mark after the mark
+  passed it, which is the #1545 mechanism. Since event-sourcing-platform#337
+  the store commits in nonce order per tenant, so the window is a margin, not
+  the guarantee.
+- A row lost after its start was confirmed (a botched rebuild, a truncation)
+  is found on the next restart's rescan, not before. Rebuilds go through the
+  coordinator, which replays the whole stream.
 
-COST. One paged read of the store plus one keyed lookup per start per read
-model, on `CHECK_INTERVAL_SECONDS`. It never runs on the /health request path:
-`UnappliedStartWatch` runs it in the background and /health reads the latest
-report.
+NEVER A FINDING FROM A MOVING READ MODEL. A version rebuild clears a
+projection's rows and deletes its checkpoint before replaying. Rows read during
+that window are missing for a healthy reason. So a check judges nothing unless
+the read path is settled (not catching up) and every checkpoint exists, and it
+keeps nothing unless, after the rows were read, the read path is still
+settled and no checkpoint disappeared or moved backwards (a forward move is
+normal live progress). A check that fails those conditions returns None and
+changes no state. A rebuild could still clear rows and replay past the
+captured checkpoint between those two reads, so a start is reported only when
+it is missing on two consecutive settled checks: a rebuild that completes
+restores the row before the second one.
+
+The detector never runs on the /health request path: `UnappliedStartWatch`
+runs it in the background and /health reads the latest report.
 """
 
 from __future__ import annotations
@@ -47,7 +61,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts.orchestration import WorkflowExecutionStartedEvent
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
     from event_sourcing import DomainEvent, EventEnvelope
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
@@ -55,8 +69,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PAGE_SIZE: Final[int] = 500
-
-#: How often the watch reconciles. Bounds both detection latency and cost.
+#: Execution ids per read-model query.
+LOOKUP_BATCH_SIZE: Final[int] = 500
+#: Events re-read below the high-water mark on every check.
+SAFETY_WINDOW: Final[int] = 1_000
+#: Upper bound on events read by one check; a restart's rescan takes several.
+MAX_EVENTS_PER_CHECK: Final[int] = 20_000
+#: How often the watch checks. Bounds detection latency.
 CHECK_INTERVAL_SECONDS: Final[float] = 300.0
 
 
@@ -75,7 +94,9 @@ class AppliesExecutionStarts(Protocol):
 
     def get_name(self) -> str: ...
 
-    async def has_applied_start(self, execution_id: str) -> bool: ...
+    async def applied_starts(self, execution_ids: Sequence[str]) -> set[str]:
+        """The subset of `execution_ids` with a row carrying `started_at`. One query."""
+        ...
 
 
 class UnappliedStart(BaseModel):
@@ -90,101 +111,184 @@ class UnappliedStart(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class UnappliedStartsReport:
-    """What one complete reconciliation found, and how far into the store it read."""
+    """What the detector has found so far, and how far into the store it has judged."""
 
     unapplied: tuple[UnappliedStart, ...]
     scanned_through: int
 
 
+#: A start must be missing on this many consecutive settled checks to be reported.
+CONFIRMING_SIGHTINGS: Final[int] = 2
+
+
+@dataclass(frozen=True, slots=True)
+class _Finding:
+    """A start some read model lacked, and on how many consecutive checks."""
+
+    nonce: int
+    lacking: frozenset[str]
+    sightings: int
+
+    @property
+    def published(self) -> bool:
+        return self.sightings >= CONFIRMING_SIGHTINGS
+
+
+@dataclass(frozen=True, slots=True)
+class _Window:
+    """The starts one check reads, and the position it read through."""
+
+    starts: dict[str, int]
+    read_through: int
+
+
 class UnappliedStartDetector:
-    """Finds WorkflowExecutionStarted events a projection's checkpoint passed without applying."""
+    """Finds WorkflowExecutionStarted events the read models' checkpoints passed without applying."""
 
     def __init__(
         self,
         event_store: _ReadsAllEvents,
         checkpoint_store: ProjectionCheckpointStore,
         projections: Sequence[AppliesExecutionStarts],
+        *,
+        is_settled: Callable[[], Awaitable[bool]],
+        safety_window: int = SAFETY_WINDOW,
+        max_events_per_check: int = MAX_EVENTS_PER_CHECK,
     ) -> None:
         self._event_store = event_store
         self._checkpoint_store = checkpoint_store
         self._projections = tuple(projections)
-        #: Only de-duplicates the error log. Never consulted for the answer.
-        self._logged: set[tuple[str, str]] = set()
+        self._is_settled = is_settled
+        self._safety_window = safety_window
+        self._max_events = max_events_per_check
+        #: Every start at or below this position has been judged.
+        self._mark = 0
+        #: Starts confirmed in every read model, kept only while inside the window.
+        self._confirmed: dict[str, int] = {}
+        #: Unresolved findings by execution_id.
+        self._open: dict[str, _Finding] = {}
         self._lock = asyncio.Lock()
 
-    async def check(self) -> UnappliedStartsReport:
-        """Reconcile every start the projections' checkpoints cover, from nonce 0."""
+    async def check(self) -> UnappliedStartsReport | None:
+        """Judge the starts the read models have passed since the last check.
+
+        None means the read path was moving, so nothing was judged and no state
+        changed. The caller keeps its previous report.
+        """
         async with self._lock:
-            # Checkpoints first: every start at or below one was offered to that
-            # projection before this check began, whatever the scan reads next.
-            covered = {p.get_name(): await self._covered(p) for p in self._projections}
-            starts, scanned_through = await self._starts_through(max(covered.values(), default=0))
-            unapplied: list[UnappliedStart] = []
-            for projection in self._projections:
-                name = projection.get_name()
-                for execution_id, nonce in starts:
-                    if nonce > covered[name]:
-                        continue
-                    if not await projection.has_applied_start(execution_id):
-                        unapplied.append(
-                            UnappliedStart(
-                                projection=name, execution_id=execution_id, global_nonce=nonce
-                            )
-                        )
-            self._log_new(unapplied, covered)
-        return UnappliedStartsReport(
-            unapplied=tuple(sorted(unapplied, key=lambda u: (u.global_nonce, u.projection))),
-            scanned_through=scanned_through,
-        )
+            before = await self._checkpoints_if_settled()
+            if before is None:
+                return None
+            window = await self._read_window(min(before.values()))
+            candidates = {
+                execution_id: nonce
+                for execution_id, nonce in window.starts.items()
+                if execution_id not in self._confirmed
+            }
+            candidates.update({eid: f.nonce for eid, f in self._open.items()})
+            missing = await self._missing(candidates)
+            after = await self._checkpoints_if_settled()
+            if after is None or any(after[name] < before[name] for name in before):
+                return None  # a rebuild or replay interleaved: the rows proved nothing
+            self._commit(candidates, missing, window.read_through)
+            return self._report()
 
-    async def _covered(self, projection: AppliesExecutionStarts) -> int:
-        checkpoint = await self._checkpoint_store.get_checkpoint(projection.get_name())
-        return checkpoint.global_position if checkpoint is not None else 0
+    async def _checkpoints_if_settled(self) -> dict[str, int] | None:
+        if not await self._is_settled():
+            return None
+        positions: dict[str, int] = {}
+        for projection in self._projections:
+            checkpoint = await self._checkpoint_store.get_checkpoint(projection.get_name())
+            if checkpoint is None:
+                return None  # cleared for a rebuild
+            positions[projection.get_name()] = checkpoint.global_position
+        return positions
 
-    async def _starts_through(self, through: int) -> tuple[list[tuple[str, int]], int]:
-        """(execution_id, nonce) of every start at or below `through`, first start wins."""
-        seen: set[str] = set()
-        starts: list[tuple[str, int]] = []
-        scanned_through = 0
-        position = 0
+    async def _read_window(self, through: int) -> _Window:
+        starts: dict[str, int] = {}
+        position = max(1, self._mark - self._safety_window + 1)
+        last_read = self._mark
+        # The budget counts only events past the mark: the window below it is
+        # re-read every check and bounded by its own size, so it can never use
+        # up the budget and stop the mark from advancing.
+        budget = self._max_events
         while position <= through:
+            if budget <= 0:
+                # Out of budget: judged only as far as was read.
+                return _Window(starts=starts, read_through=last_read)
             events, is_end, next_position = await self._event_store.read_all(
-                from_global_nonce=position, max_count=_PAGE_SIZE, forward=True
+                from_global_nonce=position, max_count=min(_PAGE_SIZE, budget), forward=True
             )
             for envelope in events:
                 nonce = envelope.metadata.global_nonce
                 if nonce is None or nonce > through:
                     continue
-                scanned_through = max(scanned_through, nonce)
+                if nonce > self._mark:
+                    budget -= 1
+                last_read = max(last_read, nonce)
                 event = envelope.event
-                if (
-                    isinstance(event, WorkflowExecutionStartedEvent)
-                    and event.execution_id not in seen
-                ):
-                    seen.add(event.execution_id)
-                    starts.append((event.execution_id, nonce))
+                if isinstance(event, WorkflowExecutionStartedEvent):
+                    starts.setdefault(event.execution_id, nonce)
             if is_end or not events or next_position <= position:
                 break
             position = next_position
-        return starts, scanned_through
+        return _Window(starts=starts, read_through=max(last_read, through))
 
-    def _log_new(self, unapplied: list[UnappliedStart], covered: dict[str, int]) -> None:
-        current = {(u.projection, u.execution_id) for u in unapplied}
-        for drop in unapplied:
-            if (drop.projection, drop.execution_id) in self._logged:
+    async def _missing(self, candidates: dict[str, int]) -> dict[str, frozenset[str]]:
+        """execution_id -> read models lacking its start. One query per batch per model."""
+        ids = sorted(candidates)
+        lacking: dict[str, set[str]] = {}
+        for projection in self._projections:
+            for i in range(0, len(ids), LOOKUP_BATCH_SIZE):
+                batch = ids[i : i + LOOKUP_BATCH_SIZE]
+                applied = await projection.applied_starts(batch)
+                for execution_id in batch:
+                    if execution_id not in applied:
+                        lacking.setdefault(execution_id, set()).add(projection.get_name())
+        return {eid: frozenset(names) for eid, names in lacking.items()}
+
+    def _commit(
+        self,
+        candidates: dict[str, int],
+        missing: dict[str, frozenset[str]],
+        read_through: int,
+    ) -> None:
+        for execution_id, nonce in candidates.items():
+            lacking = missing.get(execution_id)
+            if lacking is None:
+                self._open.pop(execution_id, None)
+                self._confirmed[execution_id] = nonce
                 continue
-            logger.error(
-                "Read model %s is checkpointed at %d but never applied "
-                "WorkflowExecutionStarted for %s (global nonce %d). Its API reads "
-                "will 404 or show no start. Repair: rebuild the projection "
-                "(docs/runbooks/repair-dropped-execution-start.md).",
-                drop.projection,
-                covered[drop.projection],
-                drop.execution_id,
-                drop.global_nonce,
-            )
-        # A repaired drop that comes back is logged again.
-        self._logged = current
+            previous = self._open.get(execution_id)
+            sightings = previous.sightings + 1 if previous is not None else 1
+            finding = _Finding(nonce=nonce, lacking=lacking, sightings=sightings)
+            self._open[execution_id] = finding
+            if finding.published and (previous is None or not previous.published):
+                for name in sorted(lacking):
+                    logger.error(
+                        "Read model %s passed WorkflowExecutionStarted for %s (global nonce "
+                        "%d) without applying it. Its API reads will 404 or show no start. "
+                        "Repair: rebuild the projection "
+                        "(docs/runbooks/repair-dropped-execution-start.md).",
+                        name,
+                        execution_id,
+                        nonce,
+                    )
+        self._mark = max(self._mark, read_through)
+        floor = self._mark - self._safety_window
+        self._confirmed = {eid: n for eid, n in self._confirmed.items() if n > floor}
+
+    def _report(self) -> UnappliedStartsReport:
+        unapplied = [
+            UnappliedStart(projection=name, execution_id=execution_id, global_nonce=finding.nonce)
+            for execution_id, finding in self._open.items()
+            if finding.published
+            for name in finding.lacking
+        ]
+        return UnappliedStartsReport(
+            unapplied=tuple(sorted(unapplied, key=lambda u: (u.global_nonce, u.projection))),
+            scanned_through=self._mark,
+        )
 
 
 class UnappliedStartWatch:
@@ -223,7 +327,9 @@ class UnappliedStartWatch:
     async def _run(self) -> None:
         while True:
             try:
-                self.latest = await self._detector.check()
+                report = await self._detector.check()
+                if report is not None:
+                    self.latest = report
             except asyncio.CancelledError:
                 raise
             except Exception:

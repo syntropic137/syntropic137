@@ -20,10 +20,14 @@ The cause was the event store making a lower global nonce visible after a
 higher one, so the live subscription's cursor passed the lower one
 (event-sourcing-platform#337). The detector is in
 `packages/syn-adapters/src/syn_adapters/subscriptions/unapplied_starts.py`. It
-runs in the background every 5 minutes, and each run is a full reconciliation
-from global nonce 0, so a start that commits late or a row lost after a clean
-check is still found. `unapplied_starts` is null until the first run after a
-restart completes.
+runs in the background every 5 minutes. Each run reads only the events past
+its high-water mark plus a 1,000-event safety window, and looks up only starts
+it has not already confirmed. It reports a start only when it is missing on
+two consecutive runs while the read path is settled (not catching up, no
+checkpoint cleared or moved backwards), so a rebuild in progress is never
+reported. After a restart it rescans the store once, in bounded steps, which
+is also what finds a row lost after its start was confirmed.
+`unapplied_starts` is null until the first run after a restart completes.
 
 ## Repair: rebuild the two execution read models
 
@@ -79,7 +83,7 @@ curl -s http://localhost:8137/api/v1/executions/exec-db527ea0d361 \
 ```
 
 `unapplied_starts` clears without another restart, on the detector's next run
-(within 5 minutes of the replay passing the start).
+(within 5 minutes of the replay finishing).
 
 ## If it comes back
 

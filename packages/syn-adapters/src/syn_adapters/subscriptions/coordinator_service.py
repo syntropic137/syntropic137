@@ -288,6 +288,11 @@ class CoordinatorSubscriptionService:
             return None
         return self._unapplied_starts.latest
 
+    async def _read_path_settled(self) -> bool:
+        """Whether the read models are past replay, so a missing row means something (#1545)."""
+        lag = await self.describe_read_model_lag()
+        return lag is not None and not lag.is_catching_up
+
     async def start(self) -> None:
         """Start the coordinator subscription service."""
         if self._running:
@@ -346,6 +351,7 @@ class CoordinatorSubscriptionService:
                 self._event_store,
                 self._checkpoint_store,
                 [p for p in self._projections if isinstance(p, AppliesExecutionStarts)],
+                is_settled=self._read_path_settled,
             )
         )
 

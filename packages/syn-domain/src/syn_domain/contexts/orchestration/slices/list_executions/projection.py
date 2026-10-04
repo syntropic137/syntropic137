@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Mapping
+    from collections.abc import Collection, Mapping, Sequence
     from datetime import datetime
 
     from event_sourcing import ProjectionStore
@@ -291,16 +291,22 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         executions.sort(key=lambda e: e.started_at or "", reverse=True)
         return executions
 
-    async def has_applied_start(self, execution_id: str) -> bool:
-        """Whether this read model applied the execution's WorkflowExecutionStarted.
+    async def applied_starts(self, execution_ids: Sequence[str]) -> set[str]:
+        """Which of ``execution_ids`` this read model applied the start of, in one query.
 
         A row alone does not prove it: the #598 fallback in `on_workflow_failed`
         creates a row for a failure whose start was never seen, with no
         `started_at`. That is the shape a dropped start leaves behind (#1545),
-        so the start is "applied" only when `started_at` is set.
+        so a start counts as applied only when `started_at` is set.
         """
-        data = await self._store.get(self.PROJECTION_NAME, execution_id)
-        return bool(data) and data.get("started_at") is not None
+        if not execution_ids:
+            return set()
+        rows = await self._store.query(
+            self.PROJECTION_NAME, filters={"workflow_execution_id": list(execution_ids)}
+        )
+        return {
+            str(row["workflow_execution_id"]) for row in rows if row.get("started_at") is not None
+        }
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
         """Get a specific execution by ID.
