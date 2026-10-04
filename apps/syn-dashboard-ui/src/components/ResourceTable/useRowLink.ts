@@ -56,30 +56,38 @@ function fromNestedControl(e: React.SyntheticEvent): boolean {
   return control !== null && control !== e.currentTarget && e.currentTarget.contains(control)
 }
 
+type Go = (newTab: boolean) => void
+
+function onRowClick(e: React.MouseEvent, go: Go): void {
+  if (fromNestedControl(e)) return
+  go(e.metaKey || e.ctrlKey)
+}
+
+function onRowAuxClick(e: React.MouseEvent, go: Go): void {
+  if (e.button !== MIDDLE_BUTTON || fromNestedControl(e)) return
+  go(true)
+}
+
+function onRowKeyDown(e: React.KeyboardEvent, go: Go): void {
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  if (fromNestedControl(e)) return
+  e.preventDefault()
+  go(e.metaKey || e.ctrlKey)
+}
+
 export function useRowLink(href: string | undefined): RowLinkProps | undefined {
   const navigate = useNavigate()
   if (href === undefined) return undefined
 
-  const go = (newTab: boolean) => {
+  const go: Go = (newTab) => {
     if (newTab) window.open(href, '_blank', 'noopener')
     else navigate(href)
   }
   return {
     role: 'link',
     tabIndex: 0,
-    onClick: (e) => {
-      if (fromNestedControl(e)) return
-      go(e.metaKey || e.ctrlKey)
-    },
-    onAuxClick: (e) => {
-      if (e.button !== MIDDLE_BUTTON || fromNestedControl(e)) return
-      go(true)
-    },
-    onKeyDown: (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return
-      if (fromNestedControl(e)) return
-      e.preventDefault()
-      go(e.metaKey || e.ctrlKey)
-    },
+    onClick: (e) => onRowClick(e, go),
+    onAuxClick: (e) => onRowAuxClick(e, go),
+    onKeyDown: (e) => onRowKeyDown(e, go),
   }
 }
