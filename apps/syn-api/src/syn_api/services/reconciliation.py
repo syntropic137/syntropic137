@@ -367,16 +367,18 @@ async def cleanup_orphaned_containers() -> CleanupResult:
         logger.warning("Startup container reap did not complete: %s", "; ".join(failures))
         # A container that may still be running may still be writing to its
         # directory; its files stay until a later startup can reap it.
-        reclaimable = []
-    _remove_reclaimed_dirs(reclaimable)
+        reclaimable = None
+    if reclaimable is not None:
+        _remove_reclaimed_dirs(reclaimable)
     return CleanupResult(fully_reaped=not failures, failures=tuple(failures))
 
 
-async def _guard_orphaned_workspaces() -> list[ReclaimableDir]:
+async def _guard_orphaned_workspaces() -> list[ReclaimableDir] | None:
     """Run the unpushed-work guard in every orphaned workspace container (#1560).
 
-    Returns the directories it cleared. Never raises: a guard that cannot run
-    clears nothing, which keeps every directory and costs only disk.
+    Returns the directories it cleared, or None when the orphans could not even
+    be listed - "found none" and "could not look" are different answers. Never
+    raises: either way nothing uncleared is deleted, which costs only disk.
     """
     from syn_adapters.workspace_backends.orphaned import find_orphaned_workspaces
     from syn_domain.contexts.orchestration import guard_orphaned_workspace
@@ -388,7 +390,7 @@ async def _guard_orphaned_workspaces() -> list[ReclaimableDir]:
         logger.warning(
             "Could not list orphaned workspaces to guard; keeping their directories", exc_info=True
         )
-        return []
+        return None
     cleared: list[ReclaimableDir] = []
     for orphan in orphans:
         reclaimable = await guard_orphaned_workspace(orphan)

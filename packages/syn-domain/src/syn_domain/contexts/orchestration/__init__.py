@@ -98,6 +98,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     InputDeclaration,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    ExecutionResult,
     ImageManifest,
     IsolationConfig,
     SecurityPolicy,
@@ -257,6 +258,8 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    # Value objects - workspace
+    "ExecutionResult",
     "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
@@ -265,7 +268,6 @@ __all__ = [
     "GlobalClaudePluginNotFoundError",
     # Aggregates
     "HandlerResult",
-    # Value objects - workspace
     "ImageManifest",
     "InheritanceUnavailableError",
     "InjectTokensCommand",

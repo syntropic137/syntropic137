@@ -17,12 +17,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
-    ExecutionResult,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspace import (
-    OrphanedWorkspace,
-)
+from syn_domain.contexts.orchestration import ExecutionResult, OrphanedWorkspace
 from syn_shared.env_constants import ENV_SYN_WORKSPACE_CONTAINER_DIR
 
 #: Mount point of the workspace directory inside every workspace container.
