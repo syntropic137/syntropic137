@@ -14,9 +14,13 @@ first test times out instead of reading ``starting``.
 from __future__ import annotations
 
 import asyncio
+import signal
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+import yaml
 from httpx import ASGITransport, AsyncClient
 
 import syn_api.services.lifecycle as lifecycle
@@ -36,6 +40,43 @@ pytestmark = pytest.mark.unit
 #: as the test likes.
 _GRACE = 0.05
 
+#: Production seconds -> test seconds. The grace window is scaled by this, and
+#: so is the compose health schedule, so the two keep their real proportions.
+_SCALE = _GRACE / startup_gate.DEFAULT_GRACE_SECONDS
+
+_COMPOSE = Path(__file__).resolve().parents[3] / "docker" / "docker-compose.syntropic137.yaml"
+
+
+def _seconds(value: str) -> float:
+    assert value.endswith("s"), f"unexpected compose duration {value!r}"
+    return float(value[:-1])
+
+
+@dataclass(frozen=True)
+class _HealthSchedule:
+    """The API's compose health check: when Docker probes, and when it gives up."""
+
+    start_period: float
+    interval: float
+    retries: int
+
+    @property
+    def failure_window(self) -> float:
+        """The latest a failing probe stops counting as 'still starting' - the
+        point at which, in the incident, the API was declared unhealthy."""
+        return self.start_period + self.interval * self.retries
+
+
+def _api_health_schedule() -> _HealthSchedule:
+    # Read from the shipped compose file, not restated, so a change to the
+    # health check moves this test with it.
+    check = yaml.safe_load(_COMPOSE.read_text())["services"]["api"]["healthcheck"]
+    return _HealthSchedule(
+        start_period=_seconds(check["start_period"]),
+        interval=_seconds(check["interval"]),
+        retries=int(check["retries"]),
+    )
+
 
 class _SlowBackfill:
     """A startup that blocks until released, as the production backfill did."""
@@ -43,6 +84,7 @@ class _SlowBackfill:
     def __init__(self) -> None:
         self.release = asyncio.Event()
         self.started = asyncio.Event()
+        self.terminated: list[int] = []
 
     async def startup(self, skip_validation: bool = False) -> Ok[dict]:
         self.started.set()
@@ -59,6 +101,9 @@ async def _healthy() -> Ok[HealthResponse]:
 @pytest.fixture
 def slow(monkeypatch: pytest.MonkeyPatch) -> _SlowBackfill:
     fake = _SlowBackfill()
+    # A gate that gives up on a running startup terminates the process; record
+    # that instead of letting it SIGTERM the test runner.
+    monkeypatch.setattr(signal, "raise_signal", fake.terminated.append)
     monkeypatch.setattr(startup_gate, "DEFAULT_GRACE_SECONDS", _GRACE)
     monkeypatch.setattr(lifecycle, "startup", fake.startup)
     monkeypatch.setattr(lifecycle, "health_check", _healthy)
@@ -84,14 +129,30 @@ async def _serving(app: FastAPI) -> AsyncIterator[AsyncClient]:
 async def test_health_answers_starting_while_the_backfill_outlasts_the_window(
     slow: _SlowBackfill,
 ) -> None:
+    """Probe /health on Docker's own schedule, scaled, until past the point
+    where the incident's container was declared unhealthy - with the backfill
+    still running the whole time - and only then let it finish."""
+    schedule = _api_health_schedule()
+    loop = asyncio.get_running_loop()
+    began = loop.time()
     app = create_app()
     async for client in _serving(app):
-        await asyncio.sleep(_GRACE * 4)  # well past the window; backfill still running
-        assert slow.started.is_set() and not slow.release.is_set()
-
-        health = await client.get("/health")
-        assert health.status_code == 200
-        assert health.json()["status"] == "starting"
+        assert slow.started.is_set()
+        # Every probe Docker would make up to one interval past the failure
+        # window: start_period, then each interval through all the retries.
+        probe = schedule.start_period
+        probes = 0
+        while probe <= schedule.failure_window + schedule.interval:
+            await asyncio.sleep(max(0.0, began + probe * _SCALE - loop.time()))
+            health = await client.get("/health")
+            assert health.status_code == 200, f"probe at {probe:.0f}s (scaled)"
+            assert health.json()["status"] == "starting", f"probe at {probe:.0f}s (scaled)"
+            assert app.state.startup_gate.phase == "starting"
+            probe += schedule.interval
+            probes += 1
+        assert probes > schedule.retries
+        assert loop.time() - began > schedule.failure_window * _SCALE
+        assert not slow.release.is_set() and not slow.terminated
 
         # Liveness is not readiness: nothing that reads the store is served.
         refused = await client.get("/workflows")
@@ -108,6 +169,7 @@ async def test_health_answers_starting_while_the_backfill_outlasts_the_window(
         assert health.status_code == 200
         assert health.json()["status"] == "healthy"
         assert (await client.get("/workflows")).status_code != 503
+        assert not slow.terminated
 
 
 async def test_a_startup_inside_the_window_never_shows_starting(slow: _SlowBackfill) -> None:
