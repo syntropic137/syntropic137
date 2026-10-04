@@ -53,7 +53,7 @@ def _page(limit: int, offset: int) -> list[_Summary]:
 async def _call(page: int, page_size: int = PAGE_SIZE):
     """Invoke the endpoint with the projection layer faked out."""
 
-    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived):
+    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived, search):
         return Ok(_page(limit, offset))
 
     mgr = MagicMock()
@@ -74,6 +74,7 @@ async def _call(page: int, page_size: int = PAGE_SIZE):
             page=page,
             page_size=page_size,
             order_by=None,
+            search=None,
         )
 
 
