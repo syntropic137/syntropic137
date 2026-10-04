@@ -87,9 +87,33 @@ async def _find(
     record = await _request_record(store, full_id)
     if claim is not None:
         return full_id, claim.workflow_id, record
+    if record is None:
+        record = await _from_the_request_stream(full_id)
     if record is not None:
         return full_id, record.workflow_id, record
     return None
+
+
+async def _from_the_request_stream(execution_id: str) -> ExecutionRequestStartRecord | None:
+    """The request itself, when the to-do list has not projected it yet.
+
+    After a 200 and a restart, or on another API process, the coordinator may
+    not have delivered `ExecutionRequested` yet. The stream is authoritative and
+    already written, so the start is reported `pending` from it rather than 404
+    (codex review 3 of #1574; never treat a lagging projection as the truth).
+    """
+    if not execution_id.startswith("exec-"):
+        return None
+    from syn_adapters.storage.repositories import get_execution_request_repository
+
+    request = await get_execution_request_repository().get_by_id(execution_id)
+    if request is None or request.workflow_id is None or request.requested_at is None:
+        return None
+    return ExecutionRequestStartRecord(
+        execution_id=execution_id,
+        workflow_id=request.workflow_id,
+        recorded_at=request.requested_at,
+    )
 
 
 async def not_yet_started(

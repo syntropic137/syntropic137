@@ -699,6 +699,26 @@ class TestADirectStartSurvivesARestart:
             assert world.agent.entered.count(execution_id) == 1, "a started run restarted"
         assert world.executions.streams[queued].status.value == "completed"
 
+    async def test_a_request_the_coordinator_has_not_delivered_is_still_found(
+        self, world: _World
+    ) -> None:
+        """Restarted before the to-do list projected the request: the stream answers."""
+        await world.post_execute()
+        await world.post_execute()
+        queued = await world.post_execute()
+        await world.agent.until(lambda: len(world.agent.inside) == LIMIT)
+
+        await world.restart()  # no coordinate(): the record was never projected
+
+        shown = await world.shown(queued)
+        assert shown.status == "queued"
+        assert shown.start_queue is not None
+        assert shown.start_queue.held is False
+
+        assert (await world.coordinate())[1] == 1
+        await _release_everything(world)
+        assert world.agent.entered.count(queued) == 1
+
     async def test_a_request_recorded_before_a_crash_is_started_exactly_once(
         self, world: _World, monkeypatch: pytest.MonkeyPatch
     ) -> None:
