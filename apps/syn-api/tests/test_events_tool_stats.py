@@ -277,15 +277,16 @@ def test_completion_only_row_with_no_tool_use_id_still_counts_as_one_call() -> N
     assert completed_stats["Bash"]["success_count"] == 1
 
 
-def test_git_operation_row_counts_as_one_call() -> None:
-    """Git rows (`row_to_git_operation`) always set `tool_use_id=None` - not
-    a rare production edge case but the standing shape for every git event
-    in every session. Before this fix, every single git operation reported
-    `call_count=0` next to `success_count=1` in `_accumulate_tool_stats`,
-    the identical invariant violation as the completion-only no-id case,
-    reached through the same `tool_use_id`-missing branch. Reproduced via
-    the real `row_to_operation` -> `row_to_git_operation` path, not a
-    hand-built `ToolOperation`.
+def test_git_operation_row_is_not_a_tool_call() -> None:
+    """A git row is activity, not a tool call.
+
+    The `git commit` was a Bash `tool_use` and is counted there, once. Counting
+    the hook's `git_commit` row too put a "commit" tool in the summary that no
+    transcript contains. This used to assert `stats["commit"]["call_count"] == 1`
+    (which fixed the impossible `call_count=0, success_count=1` shape); leaving
+    git rows out of the call count fixes that shape too, without inventing a
+    tool. Reproduced via the real `row_to_operation` -> `row_to_git_operation`
+    path, not a hand-built `ToolOperation`.
     """
     row: _Row = {
         "event_type": GIT_COMMIT,
@@ -298,8 +299,7 @@ def test_git_operation_row_counts_as_one_call() -> None:
 
     stats = _accumulate_tool_stats([op])
 
-    assert stats["commit"]["call_count"] == 1
-    assert stats["commit"]["success_count"] == 1
+    assert stats == {}
 
 
 def test_duplicate_replayed_no_id_completion_row_counts_as_one_call() -> None:

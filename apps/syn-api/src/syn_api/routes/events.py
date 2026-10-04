@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from syn_adapters.projections.session_tools import call_identity
+from syn_adapters.projections.session_tools import call_identity, is_tool_call
 from syn_api._wiring import ensure_connected, get_event_store_instance, get_projection_mgr
 from syn_api.types import (
     Err,
@@ -323,7 +323,11 @@ def _accumulate_tool_stats(
     """
     accumulator = _ToolStatsAccumulator()
     for op in operations:
-        accumulator.add(op)
+        # Calls only: git and lifecycle rows are on the same timeline but are
+        # not tool calls, and counting them is what put "commit" and "unknown"
+        # beside Bash in a summary the transcript cannot reproduce.
+        if is_tool_call(op):
+            accumulator.add(op)
     return accumulator.totals
 
 

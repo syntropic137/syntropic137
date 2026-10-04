@@ -36,8 +36,12 @@ from syn_shared.events import (
     GIT_PUSH,
     GIT_REWRITE,
     SESSION_SUMMARY,
+    SUBAGENT_STARTED,
+    SUBAGENT_STOPPED,
     TOKEN_USAGE,
+    TOOL_BLOCKED,
     TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_FAILED,
     TOOL_EXECUTION_STARTED,
 )
 
@@ -136,6 +140,34 @@ class TimelineRow(Protocol):
 
     @property
     def timestamp(self) -> datetime | None: ...
+
+
+# The rows a tool call can leave behind. Subagent types are here because the
+# converters relabel an Agent/Task call's rows to them; the call is still one
+# `tool_use`. Everything else on the timeline - git operations, session and
+# phase lifecycle - is activity, not a call: a `git commit` was already counted
+# once, as the Bash call that ran it.
+TOOL_CALL_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        TOOL_EXECUTION_STARTED,
+        TOOL_EXECUTION_COMPLETED,
+        TOOL_EXECUTION_FAILED,
+        TOOL_BLOCKED,
+        SUBAGENT_STARTED,
+        SUBAGENT_STOPPED,
+    }
+)
+
+
+def is_tool_call(row: TimelineRow) -> bool:
+    """Whether `row` belongs to a tool call, as the ubiquitous language defines one.
+
+    A tool call is one `tool_use` block in the harness transcript
+    (docs/architecture/agent_sessions-ubiquitous-language.md). Counting any
+    other timeline row reported git operations and lifecycle rows as tools
+    named "commit", "push", "unknown" that no transcript contains.
+    """
+    return row.operation_type in TOOL_CALL_EVENT_TYPES
 
 
 def call_identity(row: TimelineRow) -> str:

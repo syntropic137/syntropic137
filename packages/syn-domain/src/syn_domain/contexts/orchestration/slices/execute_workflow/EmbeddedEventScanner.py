@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 # Any: dict[str, Any] used for JSON data from parse_jsonl_line() (system boundary — external CLI JSONL)
 from agentic_events import enrich_event, parse_jsonl_line
 
-from syn_shared.events import VALID_EVENT_TYPES
+from syn_shared.events import GIT_HOOK_EVENT_TYPES
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
@@ -53,8 +53,12 @@ class EmbeddedEventScanner:
             if not embedded:
                 continue
             et = embedded.get("event_type")
-            if et not in VALID_EVENT_TYPES:
-                logger.debug("Unknown event_type in tool output: %s", et)
+            # Git hook events only. Accepting any known type stored every
+            # `tool_execution_started` line an agent printed (a `cat` of an
+            # events file, a test log) as one more call of its own, which is
+            # how a session's Bash count ran ~47% over its transcript.
+            if et not in GIT_HOOK_EVENT_TYPES:
+                logger.debug("Ignoring non-git event_type in tool output: %s", et)
                 continue
             enriched = enrich_event(
                 embedded,

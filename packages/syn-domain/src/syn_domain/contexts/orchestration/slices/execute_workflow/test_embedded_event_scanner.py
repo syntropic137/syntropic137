@@ -37,13 +37,22 @@ class TestEmbeddedEventScanner:
     async def test_valid_embedded_jsonl_recorded(self) -> None:
         collector = MockCollector()
         scanner = _make_scanner(collector)  # type: ignore[arg-type]
-        # Use a known valid event type from the system
+        content = json.dumps({"event_type": "git_commit", "session_id": "s-1", "timestamp": "t1"})
+        await scanner.scan_and_record(content, "Bash")
+        assert len(collector.embedded_events) == 1
+        assert collector.embedded_events[0][0] == "git_commit"
+
+    @pytest.mark.asyncio
+    async def test_printed_tool_event_is_not_recorded(self) -> None:
+        """A known but non-git type in tool output is text the agent printed,
+        not a call it made - recording it inflated the session's tool count."""
+        collector = MockCollector()
+        scanner = _make_scanner(collector)  # type: ignore[arg-type]
         content = json.dumps(
             {"event_type": "tool_execution_started", "session_id": "s-1", "timestamp": "t1"}
         )
         await scanner.scan_and_record(content, "Bash")
-        assert len(collector.embedded_events) == 1
-        assert collector.embedded_events[0][0] == "tool_execution_started"
+        assert collector.embedded_events == []
 
     @pytest.mark.asyncio
     async def test_invalid_event_type_skipped(self) -> None:
@@ -72,9 +81,7 @@ class TestEmbeddedEventScanner:
     async def test_mixed_content_only_records_valid(self) -> None:
         collector = MockCollector()
         scanner = _make_scanner(collector)  # type: ignore[arg-type]
-        valid = json.dumps(
-            {"event_type": "tool_execution_completed", "session_id": "s-1", "timestamp": "t1"}
-        )
+        valid = json.dumps({"event_type": "git_push", "session_id": "s-1", "timestamp": "t1"})
         content = f"regular output\n{valid}\nmore text\n"
         await scanner.scan_and_record(content, "Bash")
         assert len(collector.embedded_events) == 1

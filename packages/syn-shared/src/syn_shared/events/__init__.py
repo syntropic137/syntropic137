@@ -51,6 +51,22 @@ GIT_MERGE = "git_merge"
 GIT_REWRITE = "git_rewrite"
 GIT_CHECKOUT = "git_checkout"
 
+# What a git hook may print into a tool's output, and so the only types the
+# embedded-event scanner records from it (ADR-043). Any other event_type line
+# in tool output is text the agent printed - a recorded events file, a test
+# run, a log - and is not something that happened in this session.
+GIT_HOOK_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        GIT_COMMIT,
+        GIT_PUSH,
+        GIT_BRANCH_CHANGED,
+        GIT_OPERATION,
+        GIT_MERGE,
+        GIT_REWRITE,
+        GIT_CHECKOUT,
+    }
+)
+
 # Claude Code hook events (from observability plugin, all 14 lifecycle hooks)
 TOOL_EXECUTION_FAILED = "tool_execution_failed"
 TEAMMATE_IDLE = "teammate_idle"
@@ -140,6 +156,7 @@ __all__ = [
     "ERROR",
     "GIT_BRANCH_CHANGED",
     "GIT_CHECKOUT",
+    "GIT_HOOK_EVENT_TYPES",
     "GIT_COMMIT",
     "GIT_CREDENTIAL_LAPSED",
     "GIT_MERGE",
