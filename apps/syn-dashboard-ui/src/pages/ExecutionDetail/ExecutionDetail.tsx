@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   Breadcrumbs,
   Card,
+  DispatchedTask,
   EmptyState,
   MetricCard,
   ModelBreakdown,
@@ -321,6 +322,7 @@ export function ExecutionDetail() {
           reportedFailureReason={execution.reported_failure_reason}
         />
       )}
+      <DispatchedTask task={execution.task} />
       <ReposPanel repos={execution.repos ?? []} />
       <ExecutionMetricsGrid
         execution={execution}
