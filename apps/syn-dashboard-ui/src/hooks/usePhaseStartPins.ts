@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getExecution } from '../api/executions'
-import type { PhaseStartConfig, StartPinsStatus } from '../types'
+import type { ExecutionDetailResponse, PhaseStartConfig, StartPinsStatus } from '../types'
 
 /** How long to wait before asking again while the answer is still unknown. */
 const RETRY_MS = 3000
@@ -10,6 +10,41 @@ const MAX_ATTEMPTS = 20
 export interface PhaseStartPinsAnswer {
   pins: PhaseStartConfig | null
   status: StartPinsStatus
+}
+
+/** The answer for `sessionId`'s phase, or `undefined` if the phase is not listed yet. */
+function answerFor(
+  execution: ExecutionDetailResponse,
+  sessionId: string,
+): PhaseStartPinsAnswer | undefined {
+  const phase = execution.phases.find((p) => p.session_id === sessionId)
+  if (!phase) return undefined
+  return { pins: phase.pinned_at_start ?? null, status: phase.start_pins_status ?? 'unavailable' }
+}
+
+/**
+ * Ask until the server gives an answer (`recorded` or `not_recorded`), the
+ * signal aborts, or MAX_ATTEMPTS is reached. Returns the pending-timer cleanup.
+ */
+function askUntilAnswered(
+  ask: () => Promise<PhaseStartPinsAnswer | undefined>,
+  onAnswer: (answer: PhaseStartPinsAnswer) => void,
+  signal: AbortSignal,
+  retryMs: number,
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let attempts = 0
+  const attempt = async () => {
+    attempts += 1
+    // A failed request is not an answer either: stay unknown and retry.
+    const answer = await ask().catch(() => undefined)
+    if (signal.aborted) return
+    if (answer) onAnswer(answer)
+    const settled = answer !== undefined && answer.status !== 'unavailable'
+    if (!settled && attempts < MAX_ATTEMPTS) timer = setTimeout(() => void attempt(), retryMs)
+  }
+  void attempt()
+  return () => clearTimeout(timer)
 }
 
 /**
@@ -37,32 +72,15 @@ export function usePhaseStartPins(
   useEffect(() => {
     if (!executionId || !sessionId) return
     const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let attempts = 0
-
-    const ask = () => {
-      attempts += 1
-      getExecution(executionId, controller.signal)
-        .then((execution) => {
-          const phase = execution.phases.find((p) => p.session_id === sessionId)
-          // A session whose phase is not on the execution yet is unknown, not "not recorded".
-          if (!phase) return false
-          const status = phase.start_pins_status ?? 'unavailable'
-          setAnswer({ sessionId, pins: phase.pinned_at_start ?? null, status })
-          return status !== 'unavailable'
-        })
-        // Context for the header, never the page's own data: stay unknown and retry.
-        .catch(() => false)
-        .then((resolved) => {
-          if (!resolved && !controller.signal.aborted && attempts < MAX_ATTEMPTS) {
-            timer = setTimeout(ask, retryMs)
-          }
-        })
-    }
-    ask()
+    const stop = askUntilAnswered(
+      () => getExecution(executionId, controller.signal).then((e) => answerFor(e, sessionId)),
+      (found) => setAnswer({ sessionId, ...found }),
+      controller.signal,
+      retryMs,
+    )
     return () => {
       controller.abort()
-      if (timer) clearTimeout(timer)
+      stop()
     }
   }, [executionId, sessionId, retryMs])
 
