@@ -77,6 +77,21 @@ def _status(position: StartPosition | None, record: ExecutionRequestStartRecord 
     return "failed" if record.status == "failed" else "starting"
 
 
+async def _find(
+    store: ProjectionStoreProtocol, execution_id: str
+) -> tuple[str, str, ExecutionRequestStartRecord | None] | None:
+    """The full id, workflow id and durable record of a start, by id or prefix."""
+    matches = get_execution_budget().matching(execution_id)
+    claim = matches[0].claim if len(matches) == 1 else None
+    full_id = claim.execution_id if claim is not None else execution_id
+    record = await _request_record(store, full_id)
+    if claim is not None:
+        return full_id, claim.workflow_id, record
+    if record is not None:
+        return full_id, record.workflow_id, record
+    return None
+
+
 async def not_yet_started(
     mgr: ProjectionManager, execution_id: str
 ) -> ExecutionDetailResponse | None:
@@ -87,16 +102,10 @@ async def not_yet_started(
     request was durable, for ever once the API restarted.
     """
     budget = get_execution_budget()
-    matches = budget.matching(execution_id)
-    claim = matches[0].claim if len(matches) == 1 else None
-    full_id = claim.execution_id if claim is not None else execution_id
-    record = await _request_record(mgr.store, full_id)
-    if claim is not None:
-        workflow_id = claim.workflow_id
-    elif record is not None:
-        workflow_id = record.workflow_id
-    else:
+    found = await _find(mgr.store, execution_id)
+    if found is None:
         return None
+    full_id, workflow_id, record = found
     workflow = await mgr.workflow_detail.get_by_id(workflow_id)
     # Read the position AFTER the awaits: the start may have taken a slot, or
     # finished and released its claim, meanwhile.
@@ -104,6 +113,7 @@ async def not_yet_started(
     if position is None and record is None:
         return None
     failed = position is None and record is not None and record.status == "failed"
+    reason = record.status_reason if record is not None else None
     return ExecutionDetailResponse(
         workflow_execution_id=full_id,
         workflow_id=workflow_id,
@@ -117,7 +127,7 @@ async def not_yet_started(
         total_phases=0,
         completed_phases=0,
         artifact_ids=[],
-        error_message=record.status_reason if failed and record is not None else None,
+        error_message=reason if failed else None,
         failure_classification=FailureClassification.UNCLASSIFIED,
         reported_failure_reason=None,
         repos=[],
