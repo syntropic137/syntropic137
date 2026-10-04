@@ -34,6 +34,7 @@ from event_sourcing import (
     ProjectionStore,
 )
 
+from syn_domain.contexts._shared.disk_space import InsufficientDiskSpaceError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
@@ -376,6 +377,14 @@ class ResumeStartProcessManager(ProcessManager):
         parent = record.parent_execution_id
         if isinstance(exc, MaintenancePausedError):
             logger.info("Start of the resume of %s held: %s", parent, exc.mode.refusal_detail)
+            await self._save(record.model_copy(update={"status": "paused"}), only_over=dispatched)
+            return
+        if isinstance(exc, InsufficientDiskSpaceError):
+            # #1560: held like a deploy, not counted toward the attempt ceiling.
+            # A full volume clears when an operator frees space, and counting it
+            # would fail an admitted resume because the disk stayed full for
+            # MAX_START_ATTEMPTS passes.
+            logger.warning("Start of the resume of %s held: %s", parent, exc)
             await self._save(record.model_copy(update={"status": "paused"}), only_over=dispatched)
             return
         if isinstance(exc, ValueError):

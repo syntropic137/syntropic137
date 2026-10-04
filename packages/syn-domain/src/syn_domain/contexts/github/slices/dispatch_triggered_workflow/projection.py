@@ -32,6 +32,7 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_domain.contexts._shared.disk_space import InsufficientDiskSpaceError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -283,6 +284,15 @@ class WorkflowDispatchProjection(ProcessManager):
                 exc.mode.refusal_detail,
             )
             await self._save_record_status(execution_id, record, _PAUSED, "maintenance_mode")
+            return False
+        except InsufficientDiskSpaceError as exc:
+            # #1560: the same kind of refusal for a different reason. A full
+            # volume is temporary - an operator frees space - so the trigger is
+            # held, not failed, and re-offered on the next pass like a deploy.
+            logger.warning(
+                "Dispatch of workflow %s for trigger %s held: %s", workflow_id, trigger_id, exc
+            )
+            await self._save_record_status(execution_id, record, _PAUSED, "insufficient_disk_space")
             return False
         except Exception:
             logger.exception(
