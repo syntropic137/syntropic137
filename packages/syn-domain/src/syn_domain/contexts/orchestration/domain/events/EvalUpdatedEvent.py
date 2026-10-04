@@ -7,7 +7,7 @@ from datetime import datetime  # noqa: TC003
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
-from syn_domain.contexts.orchestration._shared.repository_baseline import (  # noqa: TC001
+from syn_domain.contexts.orchestration._shared.event_refs.value_objects import (  # noqa: TC001
     RepositoryBaseline,
 )
 
