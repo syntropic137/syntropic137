@@ -64,7 +64,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
 from syn_shared.events import GIT_CHECKOUT
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping, Sequence
+    from collections.abc import AsyncIterator, Sequence
 
 pytestmark = pytest.mark.unit
 
@@ -76,27 +76,38 @@ _SESSION_ID = "session-under-test"
 _FIRST_ROW_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-@dataclass(frozen=True)
-class _Observation:
-    event_type: str
-    payload: Mapping[str, object]
-
-
 @dataclass
-class _CapturingWriter:
-    observations: list[_Observation] = field(default_factory=list)
+class _StoringWriter:
+    """Stands in for the store: normalises each write the way production does.
+
+    `AgentEvent.from_dict` is the hop `store_helpers.record_observation` makes
+    before the insert, so what this keeps is the row as it would be stored.
+    Rows get distinct, increasing timestamps because production rows do.
+    """
+
+    rows: list[AgentEvent] = field(default_factory=list)
 
     async def record_observation(
         self,
         session_id: str,
         observation_type: object,
-        data: Mapping[str, object],
+        data: object,
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,
     ) -> None:
+        assert isinstance(data, dict)
         event_type = getattr(observation_type, "value", observation_type)
-        self.observations.append(_Observation(str(event_type), dict(data)))
+        self.rows.append(
+            AgentEvent.from_dict(
+                {
+                    **data,
+                    "event_type": str(event_type),
+                    "session_id": _SESSION_ID,
+                    "timestamp": _FIRST_ROW_TIME + timedelta(seconds=len(self.rows)),
+                }
+            )
+        )
 
 
 class _NoopWorkspace:
@@ -122,36 +133,26 @@ def _transcript_tool_calls(lines: Sequence[str]) -> Counter[str]:
     return calls
 
 
-def _timeline(observations: Sequence[_Observation]) -> list[ToolOperation]:
+def _timeline(rows: Sequence[AgentEvent]) -> list[ToolOperation]:
     """Every stored row the session timeline returns, as the summary reads it.
 
-    The same hops as production: `AgentEvent.from_dict` normalises the payload
-    before the write, the timeline query drops `TIMELINE_EXCLUDE`, and the
-    projection converts each remaining row. Nothing is pre-filtered to tool
-    events here - deciding what is a call is the code under test.
+    The timeline query drops `TIMELINE_EXCLUDE` and the projection converts
+    each remaining row. Nothing is pre-filtered to tool events here - deciding
+    what is a call is the code under test.
     """
     operations: list[ToolOperation] = []
-    for offset, observation in enumerate(observations):
-        row_time = _FIRST_ROW_TIME + timedelta(seconds=offset)
-        stored = AgentEvent.from_dict(
-            {
-                "event_type": observation.event_type,
-                "session_id": _SESSION_ID,
-                "timestamp": row_time,
-                **observation.payload,
-            }
-        )
+    for stored in rows:
         if stored.event_type in TIMELINE_EXCLUDE:
             continue
-        row = {"event_type": stored.event_type, "time": row_time, "data": stored.data}
+        row = {"event_type": stored.event_type, "time": stored.time, "data": stored.data}
         operation = SessionToolsProjection()._row_to_operation(row)
         if operation is not None:
             operations.append(operation)
     return operations
 
 
-async def _replay(lines: Sequence[str]) -> list[_Observation]:
-    writer = _CapturingWriter()
+async def _replay(lines: Sequence[str]) -> list[AgentEvent]:
+    writer = _StoringWriter()
     processor = EventStreamProcessor(
         tokens=TokenAccumulator(),
         subagents=SubagentTracker(),
@@ -164,7 +165,7 @@ async def _replay(lines: Sequence[str]) -> list[_Observation]:
         agent_model="claude-opus-5-5",
     )
     await processor.process_stream(_stream(lines), _NoopWorkspace())
-    return writer.observations
+    return writer.rows
 
 
 async def test_tool_summary_counts_equal_the_transcript_tool_use_counts() -> None:
@@ -175,8 +176,7 @@ async def test_tool_summary_counts_equal_the_transcript_tool_use_counts() -> Non
     assert '\\"event_type\\": \\"tool_execution_started\\"' in _RECORDING.read_text()
     assert f'\\"event_type\\": \\"{GIT_CHECKOUT}\\"' in _RECORDING.read_text()
 
-    observations = await _replay(lines)
-    stats = _accumulate_tool_stats(_timeline(observations))
+    stats = _accumulate_tool_stats(_timeline(await _replay(lines)))
 
     assert {name: int(s["call_count"]) for name, s in stats.items()} == dict(expected)
 
@@ -189,6 +189,6 @@ async def test_git_hook_events_in_tool_output_are_still_recorded() -> None:
     recorded = [o.event_type for o in observations]
 
     assert GIT_CHECKOUT in recorded
-    assert not any(o.payload.get("tool_use_id") == "toolu_FOREIGN" for o in observations), (
+    assert not any(o.data.get("tool_use_id") == "toolu_FOREIGN" for o in observations), (
         "a tool row printed by the agent was recorded as the agent's own call"
     )
