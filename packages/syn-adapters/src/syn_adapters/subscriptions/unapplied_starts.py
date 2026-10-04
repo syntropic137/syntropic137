@@ -44,9 +44,7 @@ from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
-    WorkflowExecutionStartedEvent,
-)
+from syn_domain.contexts.orchestration import WorkflowExecutionStartedEvent
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
