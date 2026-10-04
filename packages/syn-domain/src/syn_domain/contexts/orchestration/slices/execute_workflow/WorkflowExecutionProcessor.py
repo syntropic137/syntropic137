@@ -73,6 +73,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     # import time, which is why TC001 is silenced here rather than obeyed.
     WorkflowExecutionResult,  # noqa: TC001
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.pull_request_observation import (
+    with_open_pull_requests,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     inherited_outputs,
     inherited_phase_ids,
@@ -106,6 +109,7 @@ if TYPE_CHECKING:
         ResumeOrigin,
         SourceCommit,
     )
+    from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -185,12 +189,16 @@ class WorkflowExecutionProcessor:
         session_store: SessionStorePort | None = None,
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
+        remote_branches: RemoteBranchPort | None = None,
     ) -> None:
         self._session_repo = session_repository
         # How a phase answers a provider that is simply busy (#1303). Injected
         # only so a test can collapse the backoff to zero; production takes the
         # policy's own numbers and no caller chooses them.
         self._retry_policy = retry_policy or UpstreamRetryPolicy()
+        #: Asked, as a phase fails, which PR is open from each branch it left,
+        #: so a resume continues that PR and no other (#1513).
+        self._remote_branches = remote_branches
         self._workspace_service = workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
@@ -660,7 +668,11 @@ class WorkflowExecutionProcessor:
             kept.append(artifact_id)
             if artifact_id not in all_artifact_ids:
                 all_artifact_ids.append(artifact_id)
-        observed = await runtime.observe(failed_phase_id)
+        observed = await with_open_pull_requests(
+            await runtime.observe(failed_phase_id),
+            self._remote_branches,
+            [c.repository for c in aggregate.start_pins.source_commits],
+        )
         failure = failed_phase_outcome(
             error,
             failed_phase_id,

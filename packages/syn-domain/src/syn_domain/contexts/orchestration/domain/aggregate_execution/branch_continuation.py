@@ -15,9 +15,9 @@ pure function of recorded facts:
    when the resumed phase IS that phase.
 3. `decide_continuation` - when the child starts, which candidates are still
    where the parent left them on the forge. A branch deleted, force-pushed or
-   moved since, or whose PR was closed, is ABANDONED with a recorded reason and
-   the phase starts fresh; nothing stale is reused, and nothing is dropped
-   silently.
+   moved since, or whose PR is no longer the one the parent recorded open, is
+   ABANDONED with a recorded reason and the phase starts fresh; nothing stale
+   is reused, and nothing is dropped silently.
 
 THE CHECKOUT RULE (ADR-058, #1458 + #1513). A phase that only READS code is
 checked out at the run's pinned start commit. A phase that CONTINUES a branch
@@ -40,6 +40,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        BranchObservation,
+    )
+
 logger = logging.getLogger(__name__)
 
 #: The only remote a workspace clones from. A branch on any other remote is
@@ -52,9 +56,10 @@ class ContinuedBranch(BaseModel):
 
     As a CANDIDATE (on the resume command) it is what the parent's failing
     phase left: `head_sha` is where origin had the branch when that phase
-    failed, and `pull_request` is not known yet. As a DECISION (on the child's
-    start event) the forge has confirmed the branch is still at `head_sha`, and
-    `pull_request` is the open PR from it, or None when there is none.
+    failed, and `pull_request` the PR the forge had open from it then, as the
+    failure recorded it. As a DECISION (on the child's start event) the forge
+    has confirmed both are still so: the branch at `head_sha`, and that same
+    PR open - never another one opened from the branch since.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -145,37 +150,44 @@ def branches_left_by(
     owned = {(c.repository, c.branch) for c in continued}
     left = {(c.repository, c.branch): c for c in continued}
     for raw in observed or ():
-        reading = _observation(raw)
-        if reading is None:
+        obs = _observation(raw)
+        if obs is None or obs.remote_commit is None:
             continue
-        name, branch, commit, at_start = reading
-        slugs = by_name.get(name, [])
+        slugs = by_name.get(obs.repo, [])
         if len(slugs) != 1:
             continue
-        key = (slugs[0], branch)
-        if at_start is None or key in owned:
-            left[key] = ContinuedBranch(repository=slugs[0], branch=branch, head_sha=commit)
+        key = (slugs[0], obs.branch)
+        if obs.remote_commit_at_phase_start is None or key in owned:
+            # A PR the forge could not be asked about at failure is still the
+            # one the run was continuing, if it was continuing one.
+            earlier = left[key].pull_request if key in left else None
+            left[key] = ContinuedBranch(
+                repository=slugs[0],
+                branch=obs.branch,
+                head_sha=obs.remote_commit,
+                pull_request=obs.pull_request if obs.pull_request is not None else earlier,
+            )
     return list(left.values())
 
 
-def _observation(raw: object) -> tuple[str, str, str, str | None] | None:
-    """(repo dir, branch, origin commit now, origin commit at phase start), or None.
+def _observation(raw: object) -> BranchObservation | None:
+    """The observation, when it is of a branch origin holds; None otherwise.
 
-    None for anything that is not a branch origin holds: another remote, a
-    detached HEAD, a deleted ref, or a payload this reader cannot read.
+    None for anything that is not: another remote, a detached HEAD, a deleted
+    ref, or a payload this reader cannot read.
     """
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        BranchObservation,
+        BranchObservation as Observation,
     )
 
     try:
-        obs = raw if isinstance(raw, BranchObservation) else BranchObservation.model_validate(raw)
+        obs = raw if isinstance(raw, Observation) else Observation.model_validate(raw)
     except ValidationError:
         logger.warning("Unreadable observed branch on a replayed failure; ignoring it")
         return None
     if obs.remote != _ORIGIN or obs.remote_commit is None or obs.branch == "(detached HEAD)":
         return None
-    return obs.repo, obs.branch, obs.remote_commit, obs.remote_commit_at_phase_start
+    return obs
 
 
 def continuation_candidates(left: LeftBranches, resume_phase_id: str) -> list[ContinuedBranch]:
@@ -188,7 +200,7 @@ def continuation_candidates(left: LeftBranches, resume_phase_id: str) -> list[Co
     """
     if left.phase_id is None or left.phase_id != resume_phase_id:
         return []
-    return [c.model_copy(update={"pull_request": None}) for c in left.branches]
+    return list(left.branches)
 
 
 def decide_continuation(
@@ -197,8 +209,9 @@ def decide_continuation(
     """Which candidates the child continues, and which it abandons and why.
 
     Continued only when the forge confirms the branch is exactly where the
-    parent left it and no closed PR replaced an open one. Everything else is
-    abandoned with the reason: the phase starts fresh, visibly.
+    parent left it and the PR open from it is the one the parent recorded.
+    Everything else is abandoned with the reason: the phase starts fresh,
+    visibly.
     """
     by_key = {(r.repository, r.branch): r for r in readings}
     continued: list[ContinuedBranch] = []
@@ -206,10 +219,8 @@ def decide_continuation(
     for candidate in candidates:
         reading = by_key.get((candidate.repository, candidate.branch))
         reason = _abandon_reason(candidate, reading)
-        if reason is None and reading is not None:
-            continued.append(
-                candidate.model_copy(update={"pull_request": reading.open_pull_request})
-            )
+        if reason is None:
+            continued.append(candidate)
         else:
             abandoned.append(
                 AbandonedBranch(
@@ -233,9 +244,24 @@ def _abandon_reason(candidate: ContinuedBranch, reading: RemoteBranchReading | N
             f"origin has the branch at {reading.head_sha}, not {candidate.head_sha} where the "
             "parent left it (force-pushed or moved since)"
         )
-    if reading.open_pull_request is None and reading.closed_pull_request is not None:
-        return f"its pull request #{reading.closed_pull_request} was closed or merged"
-    return None
+    return _pull_request_reason(candidate.pull_request, reading)
+
+
+def _pull_request_reason(recorded: int | None, reading: RemoteBranchReading) -> str | None:
+    """Why the PR open from the branch now is not the one the parent left, or None."""
+    now = reading.open_pull_request
+    if now == recorded:
+        if now is None and reading.closed_pull_request is not None:
+            return f"its pull request #{reading.closed_pull_request} was closed or merged"
+        return None
+    if recorded is None:
+        return f"pull request #{now} is open from it, but the parent recorded no open PR"
+    if now is None:
+        return f"the parent's pull request #{recorded} is no longer open (closed or merged)"
+    return (
+        f"the parent's pull request #{recorded} is no longer open; #{now} is open from "
+        "the branch now, and a PR the parent did not open is not continued"
+    )
 
 
 _CONTINUED: TypeAdapter[list[ContinuedBranch]] = TypeAdapter(list[ContinuedBranch])
