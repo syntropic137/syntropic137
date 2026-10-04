@@ -239,6 +239,7 @@ async def list_workflows(
     limit: int = 100,
     offset: int = 0,
     include_archived: bool = False,
+    search: str | None = None,
 ) -> Result[list[WorkflowSummary], WorkflowError]:
     """List all workflow templates."""
     await ensure_connected()
@@ -247,6 +248,7 @@ async def list_workflows(
         limit=limit,
         offset=offset,
         include_archived=include_archived,
+        search=search,
     )
     return Ok(
         [
@@ -714,6 +716,10 @@ async def list_workflows_endpoint(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     order_by: str | None = Query(None, description="Sort field (- prefix = descending)"),
+    search: str | None = Query(
+        None,
+        description="Case-insensitive substring match on name or id, applied before paging",
+    ),
 ) -> WorkflowListResponse:
     """List all workflow templates."""
     offset = (page - 1) * page_size
@@ -722,6 +728,7 @@ async def list_workflows_endpoint(
         limit=page_size,
         offset=offset,
         include_archived=include_archived,
+        search=search,
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
@@ -764,6 +771,7 @@ async def list_workflows_endpoint(
     total = await get_projection_mgr().workflow_list.count(
         workflow_type_filter=workflow_type,
         include_archived=include_archived,
+        search=search,
     )
     return WorkflowListResponse(
         # No slice here: `list_workflows` already applied limit/offset. Slicing

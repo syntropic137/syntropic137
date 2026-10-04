@@ -3,7 +3,7 @@
  *
  * Sessions and Executions both render a dense table with the same chrome:
  * sticky-headered, sortable columns, optional select-all checkbox, hover row
- * highlight, click-to-detail, and a final per-row actions slot. This component
+ * highlight, link-to-detail (see useRowLink), and a final per-row actions slot. This component
  * owns that chrome; pages provide a typed ColumnDef list.
  *
  * Mobile (below `md:`) is a separate concern: see ResourceCardList.
@@ -22,6 +22,7 @@ import type {
   SelectionProps,
   SortProps,
 } from './types'
+import { useRowLink } from './useRowLink'
 
 interface HeaderState {
   allChecked: boolean
@@ -134,18 +135,8 @@ interface TableRowProps<Row, K extends string> {
   columns: ColumnDef<Row, K>[]
   isSelected: boolean
   onToggleSelection?: (modifiers: { shift: boolean; meta: boolean }) => void
-  onClick?: () => void
+  href?: string
   actions?: ReactNode
-}
-
-function rowKeyHandler(onClick: (() => void) | undefined): (e: React.KeyboardEvent) => void {
-  return (e) => {
-    if (!onClick) return
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onClick()
-    }
-  }
 }
 
 function TableRow<Row, K extends string>({
@@ -154,19 +145,18 @@ function TableRow<Row, K extends string>({
   columns,
   isSelected,
   onToggleSelection,
-  onClick,
+  href,
   actions,
 }: TableRowProps<Row, K>) {
+  const link = useRowLink(href)
   return (
     <tr
-      onClick={onClick}
-      onKeyDown={rowKeyHandler(onClick)}
-      tabIndex={onClick ? 0 : -1}
-      role={onClick ? 'button' : undefined}
+      {...link}
+      tabIndex={link ? 0 : -1}
       title={rowId}
       className={clsx(
         'group border-b border-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-elevated)] focus:bg-[var(--color-surface-elevated)] focus:outline-none',
-        onClick && 'cursor-pointer',
+        link && 'cursor-pointer',
         isSelected && 'bg-[var(--color-accent)]/10',
       )}
     >
@@ -208,7 +198,7 @@ export function ResourceTable<Row, K extends string = string>({
   loading,
   emptyState,
   getRowId,
-  onRowClick,
+  rowHref,
   rowActions,
   selection,
   sort,
@@ -242,7 +232,7 @@ export function ResourceTable<Row, K extends string = string>({
                 onToggleSelection={
                   selection ? (mods) => selection.onToggleRow(id, mods) : undefined
                 }
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                href={rowHref?.(row)}
                 actions={rowActions ? rowActions(row) : undefined}
               />
             )

@@ -85,6 +85,24 @@
               "title": "Order By"
             },
             "description": "Sort field (- prefix = descending)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on name or id, applied before paging",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match on name or id, applied before paging"
           }
         ],
         "responses": {
