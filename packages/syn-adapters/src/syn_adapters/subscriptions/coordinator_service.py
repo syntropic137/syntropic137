@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, cast
 
-import asyncpg
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
@@ -27,6 +26,7 @@ from event_sourcing import (
     SubscriptionCoordinator,
 )
 
+from syn_adapters import postgres_pool
 from syn_adapters.subscriptions.read_model_lag import (
     CheckpointState,
     ReadModelLag,
@@ -40,6 +40,7 @@ from syn_shared.settings import get_settings
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    import asyncpg
     from event_sourcing import DomainEvent, EventEnvelope, EventStoreClient
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
 
@@ -296,8 +297,9 @@ class CoordinatorSubscriptionService:
                     "Set it in your .env file."
                 )
             database_url = str(settings.syn_observability_db_url)
-            self._db_pool = await asyncpg.create_pool(
+            self._db_pool = await postgres_pool.create_pool(
                 database_url,
+                name="subscription_checkpoints",
                 min_size=2,
                 max_size=10,
             )

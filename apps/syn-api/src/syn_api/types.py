@@ -2117,6 +2117,22 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
 
 
+class DbPoolHealth(BaseModel):
+    """One Postgres connection pool in this API process, at the moment of asking (#1583).
+
+    ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+    requests are queueing for a connection rather than for the database itself.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="What the pool serves, e.g. 'projections' or 'agent_events'.")
+    size: int = Field(description="Connections currently open.")
+    max_size: int = Field(description="Most connections the pool will open.")
+    in_use: int = Field(description="Connections checked out right now.")
+    waiting: int = Field(description="Callers blocked waiting for a connection right now.")
+
+
 class HealthResponse(_OmitsAbsentFields):
     """Payload of ``GET /health``.
 
@@ -2159,6 +2175,11 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Human-readable notes that need attention but do not degrade the "
         "instance. Omitted when there are none.",
+    )
+    db_pools: list[DbPoolHealth] | None = Field(
+        default=None,
+        description="Every open Postgres pool in this process, by name. Omitted when none "
+        "is open, e.g. in offline mode.",
     )
 
 
