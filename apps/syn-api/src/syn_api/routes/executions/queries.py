@@ -29,6 +29,7 @@ from syn_api.types import (
 from syn_domain import tool_call_counts
 from syn_domain.contexts.orchestration import (
     MAX_START_ATTEMPTS,
+    FailureClassification,
     InvalidTagsError,
     ResumeStartProcessManager,
     TagSet,
@@ -750,6 +751,21 @@ async def _not_yet_started(
         workflow_id=claim.workflow_id,
         workflow_name=workflow.name if workflow is not None else "",
         status="queued" if position.queued else "starting",
+        # Every read-model field, stated empty on purpose: a queued start has
+        # no read model yet, and this says so rather than defaulting silently.
+        started_at=None,
+        completed_at=None,
+        phases=[],
+        total_phases=0,
+        completed_phases=0,
+        artifact_ids=[],
+        error_message=None,
+        failure_classification=FailureClassification.UNCLASSIFIED,
+        reported_failure_reason=None,
+        repos=[],
+        tags=[],
+        total_duration_seconds=None,
+        inputs={},
         total_input_tokens=0,
         total_output_tokens=0,
         total_cache_creation_tokens=0,
