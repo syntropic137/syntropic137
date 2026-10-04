@@ -28,10 +28,11 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
+from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_eval.errors import (
     DuplicateBaselineRepositoryError,
@@ -79,13 +80,17 @@ if TYPE_CHECKING:
     )
 
 
-def _canonical_baseline(
-    baseline: Iterable[RepositoryBaseline],
-) -> tuple[RepositoryBaseline, ...]:
+class _ForRepository(Protocol):
+    @property
+    def repository(self) -> RepositoryRef: ...
+
+
+def _canonical_baseline[B: _ForRepository](baseline: Iterable[B]) -> tuple[B, ...]:
     """One spelling per baseline: ordered by repository, each repository once.
 
     Ordering makes "the same baseline submitted in another order" equal to the
     recorded one, so re-sending it to a frozen eval is not mistaken for a change.
+    Pinned or not yet pinned, a repository listed twice is refused the same way.
     """
     ordered = tuple(sorted(baseline, key=lambda b: b.repository.slug.lower()))
     counts = Counter(b.repository.slug.lower() for b in ordered)
@@ -95,8 +100,36 @@ def _canonical_baseline(
     return ordered
 
 
-def _requested(baseline: Iterable[RepositoryBaseline]) -> frozenset[tuple[RepositoryRef, str]]:
-    return frozenset((b.repository, b.requested_ref) for b in baseline)
+@dataclass(frozen=True)
+class EvalCreation:
+    """What a CreateEval asked for, before any ref was pinned.
+
+    This is how a retried create is recognised. The eval records it once, from
+    ``EvalCreated``, and never changes it, so a request still matches the eval
+    it made after that eval was renamed, retagged or re-baselined. Baselines
+    compare by repository and REQUESTED ref, never by sha, so matching a retry
+    resolves nothing: it works with the forge down or the branch deleted, and
+    the eval keeps the commit it first pinned.
+    """
+
+    name: str
+    goal: Goal
+    starting_workflow_id: str | None
+    tags: TagSet
+    baseline: tuple[BaselineRequest, ...]
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        name: str,
+        goal: Goal,
+        starting_workflow_id: str | None,
+        tags: TagSet,
+        baseline: Iterable[BaselineRequest],
+    ) -> EvalCreation:
+        """Raises ``DuplicateBaselineRepositoryError`` like a fresh create would."""
+        return cls(name, goal, starting_workflow_id, tags, _canonical_baseline(baseline))
 
 
 @dataclass(frozen=True)
@@ -140,6 +173,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
         self._updated_at: datetime | None = None
         self._frozen_at: datetime | None = None
         self._archived_at: datetime | None = None
+        self._created_as: EvalCreation | None = None
 
     def get_aggregate_type(self) -> str:
         return self._aggregate_type
@@ -196,21 +230,13 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
     def archived_at(self) -> datetime | None:
         return self._archived_at
 
-    def was_created_by(self, command: CreateEvalCommand) -> bool:
-        """Whether ``command`` is a retry of the create that made this eval.
+    def was_created_by(self, request: EvalCreation) -> bool:
+        """Whether ``request`` is a retry of the create that made this eval.
 
-        Baselines compare by repository and REQUESTED ref, not by sha: a retry
-        arriving after its branch moved resolves to a newer commit, but it is
-        still the same request, and the eval keeps the commit it first pinned.
+        Judged against the original create, not the current state: later
+        edits do not turn the retry of the request that made it into a conflict.
         """
-        return (
-            self.id is not None
-            and self._name == command.name
-            and self._goal == command.goal
-            and self._starting_workflow_id == command.starting_workflow_id
-            and self._tags == command.tags
-            and _requested(self._baseline) == _requested(command.baseline_repos)
-        )
+        return self._created_as is not None and self._created_as == request
 
     # =========================================================================
     # COMMAND HANDLERS
@@ -339,6 +365,16 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
         self._tags = TagSet.recorded(event.tags)
         self._created_at = event.created_at
         self._updated_at = event.created_at
+        # Recorded, not re-validated: create already stored the baseline canonical.
+        self._created_as = EvalCreation(
+            name=event.name,
+            goal=self._goal,
+            starting_workflow_id=event.starting_workflow_id,
+            tags=self._tags,
+            baseline=tuple(
+                BaselineRequest(b.repository, b.requested_ref) for b in event.baseline_repos
+            ),
+        )
 
     @event_sourcing_handler("EvalUpdated")
     def on_eval_updated(self, event: EvalUpdatedEvent) -> None:

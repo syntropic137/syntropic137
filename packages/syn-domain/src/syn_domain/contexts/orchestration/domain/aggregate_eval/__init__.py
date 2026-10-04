@@ -10,7 +10,7 @@ from .errors import (
     EvalNotCreatedError,
     EvalRuleError,
 )
-from .EvalAggregate import EvalAggregate
+from .EvalAggregate import EvalAggregate, EvalCreation
 from .value_objects import MAX_GOAL_LENGTH, EvalId, EvalName, Goal
 
 __all__ = [
@@ -19,6 +19,7 @@ __all__ = [
     "EvalAggregate",
     "EvalAlreadyExistsError",
     "EvalArchivedError",
+    "EvalCreation",
     "EvalFrozenError",
     "EvalId",
     "EvalName",
