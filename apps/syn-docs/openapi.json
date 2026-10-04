@@ -9843,6 +9843,44 @@
         ],
         "title": "ExecutionRunSummary"
       },
+      "ExecutionStatusCounts": {
+        "properties": {
+          "not_started": {
+            "type": "integer",
+            "title": "Not Started",
+            "default": 0
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running",
+            "default": 0
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "cancelled": {
+            "type": "integer",
+            "title": "Cancelled",
+            "default": 0
+          },
+          "interrupted": {
+            "type": "integer",
+            "title": "Interrupted",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExecutionStatusCounts",
+        "description": "How many executions are in each status, one field per status.\n\nThe fields are exactly the domain's ``ExecutionStatus`` values (a test pins\nthat), so every execution lands in exactly one field and the fields sum to\nthe number of executions. ``completed_workflows``/``failed_workflows``\nalone left cancelled, interrupted and running runs invisible on the\ndashboard. There is no ``paused``: that word was deleted from orchestration."
+      },
       "ExecutionStatusResponse": {
         "properties": {
           "execution_id": {
@@ -12690,6 +12728,9 @@
             "type": "integer",
             "title": "Failed Workflows",
             "default": 0
+          },
+          "execution_status_counts": {
+            "$ref": "#/components/schemas/ExecutionStatusCounts"
           },
           "total_sessions": {
             "type": "integer",

@@ -3435,6 +3435,48 @@ export interface components {
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
         };
         /**
+         * ExecutionStatusCounts
+         * @description How many executions are in each status, one field per status.
+         *
+         *     The fields are exactly the domain's ``ExecutionStatus`` values (a test pins
+         *     that), so every execution lands in exactly one field and the fields sum to
+         *     the number of executions. ``completed_workflows``/``failed_workflows``
+         *     alone left cancelled, interrupted and running runs invisible on the
+         *     dashboard. There is no ``paused``: that word was deleted from orchestration.
+         */
+        ExecutionStatusCounts: {
+            /**
+             * Not Started
+             * @default 0
+             */
+            not_started: number;
+            /**
+             * Running
+             * @default 0
+             */
+            running: number;
+            /**
+             * Completed
+             * @default 0
+             */
+            completed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Cancelled
+             * @default 0
+             */
+            cancelled: number;
+            /**
+             * Interrupted
+             * @default 0
+             */
+            interrupted: number;
+        };
+        /**
          * ExecutionStatusResponse
          * @description Response for execution status check.
          */
@@ -4712,6 +4754,7 @@ export interface components {
              * @default 0
              */
             failed_workflows: number;
+            execution_status_counts?: components["schemas"]["ExecutionStatusCounts"];
             /**
              * Total Sessions
              * @default 0
