@@ -20,7 +20,9 @@ from typing import TYPE_CHECKING
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
@@ -52,6 +54,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
         self._repos: tuple[RepositoryRef, ...] = ()
         self._tags: TagSet = TagSet()
         self._requested_at: datetime | None = None
+        self._eval_choice: EvalChoice = EvalChoice()
 
     def get_aggregate_type(self) -> str:
         return self._aggregate_type
@@ -80,6 +83,10 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
     def tags(self) -> TagSet:
         return self._tags
 
+    @property
+    def eval_choice(self) -> EvalChoice:
+        return self._eval_choice
+
     @command_handler("RequestExecutionCommand")
     def request(self, command: RequestExecutionCommand) -> None:
         from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
@@ -97,6 +104,12 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
                 task=command.task,
                 repos=[r.slug for r in command.repos],
                 tags=list(command.tags),
+                eval_id=(
+                    str(command.eval_choice.eval_id)
+                    if command.eval_choice.eval_id is not None
+                    else None
+                ),
+                eval_ordinary=command.eval_choice.ordinary,
                 requested_at=datetime.now(UTC),
             )
         )
@@ -109,3 +122,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
         self._repos = tuple(RepositoryRef.from_slug(r) for r in event.repos)
         self._tags = TagSet.recorded(event.tags)
         self._requested_at = event.requested_at
+        self._eval_choice = EvalChoice(
+            eval_id=EvalId.recorded(event.eval_id) if event.eval_id is not None else None,
+            ordinary=event.eval_ordinary,
+        )

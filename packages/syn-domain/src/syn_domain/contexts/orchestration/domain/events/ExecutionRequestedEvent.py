@@ -24,4 +24,8 @@ class ExecutionRequestedEvent(DomainEvent):
     repos: list[str] = Field(default_factory=list)
     """Repository slugs (`owner/name`), as `RepositoryRef.slug` writes them."""
     tags: list[str] = Field(default_factory=list)
+    eval_id: str | None = None
+    """The eval the launch named explicitly (#967), if any."""
+    eval_ordinary: bool = False
+    """The launch asked for an ordinary run, suppressing the workflow's default eval."""
     requested_at: datetime

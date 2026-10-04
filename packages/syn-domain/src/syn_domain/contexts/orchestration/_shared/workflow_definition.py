@@ -38,6 +38,9 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     expand_skill_entry,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import (  # noqa: TC001 - pydantic field type
+    EvalId,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
     PhaseDefinition,
@@ -705,6 +708,11 @@ class WorkflowDefinition(BaseModel):
     # Ordinary labels (#967), copied onto every execution launched from this
     # workflow. Validated by the shared TagSet so YAML, API and CLI agree.
     tags: TagSet = Field(default_factory=TagSet)
+
+    # The eval a run of this workflow joins when its launch names none (evals
+    # plan, #967). Resolved at dispatch, so changing it never reclassifies a
+    # run that already started. Checked against the event store, not here.
+    default_eval_id: EvalId | None = None
 
     @field_validator("skills", mode="before")
     @classmethod

@@ -48,6 +48,7 @@ from syn_api.execution_budget import ExecutionBudget, StartPath
 from syn_api.routes.executions import commands, queries
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
 from syn_domain.contexts._shared import AdmissionGate
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
@@ -344,6 +345,12 @@ class _World:
             return None, dict(request.inputs), []
 
         monkeypatch.setattr(commands, "_validate_execution_request", _validated)
+
+        async def _no_eval(workflow: object, request: ExecuteWorkflowRequest) -> EvalChoice:
+            del workflow, request
+            return EvalChoice()
+
+        monkeypatch.setattr(commands, "_check_eval_choice", _no_eval)
 
     def _start_process(self) -> None:
         self.budget = ExecutionBudget(LIMIT)

@@ -224,6 +224,70 @@ and Evals alike. An archived Eval refuses every edit and refuses to be Frozen.
 It stays readable, and its history and runs stay intact. Archiving an archived Eval
 succeeds and records nothing.
 
+## Default Eval
+
+The Eval a Workflow's runs join when the launch names none: `default_eval_id`
+in workflow YAML, or `PUT /workflows/{id}/default-eval`. Setting one requires
+the Eval to exist and not be Archived; clearing one consults no Eval. A
+reinstall replaces it with the package's, like every other template field.
+Changing it never moves a run that has already started.
+
+## Eval Selection
+
+How a launch chose its Eval, recorded on `WorkflowExecutionStarted` as
+`eval_selection` beside `eval_id`: `explicit` (the launch named one),
+`workflow_default`, `ordinary` (see Ordinary Run), or `none` (no Eval named and
+no Default Eval). Admission loads the Eval aggregate, never a read model, and
+refuses a launch into an Eval that is missing or Archived before the
+Execution starts.
+
+## Ordinary Run
+
+A launch that asks for no Eval (`--no-eval`, `no_eval: true`), even though its
+Workflow has a Default Eval. It cannot also name an Eval.
+
+## Attach
+
+Put an Execution into an Eval after it was launched, in any status, including
+terminal ones. It records `ExecutionAttachedToEval` on the Execution's stream,
+never on the Eval's, and copies nothing from the Eval: the run keeps the state
+it actually started from, and attaching does not Freeze the Eval. An Execution
+belongs to at most one Eval. Attaching it to the Eval it already belongs to
+succeeds and records nothing; attaching it to a different one is refused until
+it is Detached.
+
+Membership is decided before the Eval is consulted. A run already in the Eval
+is a no-op success even after the Eval is Archived, so a repeated attach never
+turns into a refusal. Only an attach that would record an event asks the Eval
+aggregate whether it can take the run.
+
+**Admission point.** An attach reads the Eval aggregate, then writes the
+Execution's stream. The two are separate streams with no shared transaction,
+and Attach deliberately does not write the Eval's (see Eval). So Archive closes
+admission as of the Eval version the attach read: an `EvalArchived` that
+commits after that read and before the Execution write does not refuse the
+attach. The attach is ordered before the archive: it was decided and admitted
+against the open Eval, and the run stays a member of the Archived Eval like any
+run admitted earlier. Nothing marks it, and `attached_at` against `archived_at`
+is not evidence either way, since the two clocks are stamped at decision time,
+not commit time. Detach remedies it, and works on an Archived Eval. Every attach
+that reads the Eval after the archive committed is refused. A launch is admitted
+the same way.
+
+## Detach
+
+Take an Execution out of the Eval it belongs to. The command names that Eval,
+so a stale caller cannot detach a run from an Eval it has since moved to.
+Detaching consults no Eval, so it works on an Archived one. It never erases the
+launch: `launched_eval_id` still records the Eval the run was launched into.
+
+## Association Kind
+
+How an Execution joined the Eval it belongs to now. `launched`: the launch
+chose it. `attached`: it was Attached afterwards. A run Detached and then
+Attached again, even to the same Eval, is `attached`, because the current
+association was made after the fact.
+
 ## Words we do not use
 
 - **Lock** (an Eval). The word is Freeze. "Lock" already means the skill and

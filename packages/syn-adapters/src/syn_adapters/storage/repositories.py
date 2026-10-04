@@ -39,6 +39,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_eval.EvalAggregate import (
+        EvalAggregate,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
@@ -146,6 +149,7 @@ _global_claude_plugin_registry_repository: (
     RepositoryAdapter[GlobalClaudePluginRegistryAggregate] | None
 ) = None
 _skill_registration_repository: RepositoryAdapter[SkillRegistrationAggregate] | None = None
+_eval_repository: RepositoryAdapter[EvalAggregate] | None = None
 
 
 def _get_repository_factory() -> RepositoryFactory:
@@ -211,6 +215,25 @@ def get_execution_request_repository() -> RepositoryAdapter[ExecutionRequestAggr
     )
     _execution_request_repository = RepositoryAdapter(sdk_repo)
     return _execution_request_repository
+
+
+def get_eval_repository() -> RepositoryAdapter[EvalAggregate]:
+    """Get an EvalAggregate repository (#967)."""
+    global _eval_repository
+    if _eval_repository is not None:
+        return _eval_repository
+
+    from syn_domain.contexts.orchestration.domain.aggregate_eval.EvalAggregate import (
+        EvalAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        EvalAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+        aggregate_type="Eval",
+    )
+    _eval_repository = RepositoryAdapter(sdk_repo)
+    return _eval_repository
 
 
 def get_session_repository() -> RepositoryAdapter[AgentSessionAggregate]:
@@ -427,7 +450,8 @@ def reset_repositories() -> None:
         _repo_claim_repository, \
         _claude_plugin_registration_repository, \
         _global_claude_plugin_registry_repository, \
-        _skill_registration_repository
+        _skill_registration_repository, \
+        _eval_repository
     _workflow_repository = None
     _workflow_execution_repository = None
     _execution_request_repository = None
@@ -441,3 +465,4 @@ def reset_repositories() -> None:
     _claude_plugin_registration_repository = None
     _global_claude_plugin_registry_repository = None
     _skill_registration_repository = None
+    _eval_repository = None

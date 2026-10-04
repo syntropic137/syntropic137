@@ -153,6 +153,19 @@ describe('useListQuery', () => {
     expect(result.current.query.page).toBe(1)
   })
 
+  it('returning to a collection seen before lands on its first page, not its old page', () => {
+    // Codex review on #1566: the held page was remembered against the
+    // collection it was set in, so going back to that collection restored it.
+    const { result } = renderHook(() => useListQuery(''), { wrapper: wrapperAt('/') })
+
+    act(() => result.current.setPage(3))
+    act(() => result.current.toggleStatus('failed'))
+    act(() => result.current.toggleStatus('failed'))
+
+    expect(result.current.query.statuses).toBeUndefined()
+    expect(result.current.query.page).toBe(1)
+  })
+
   it('widening the window is also a change of collection', () => {
     const { result } = renderHook(() => useListQuery(''), { wrapper: wrapperAt('/') })
 

@@ -11,4 +11,5 @@ subscribes_to:
   - WorkflowTemplateUpdatedEvent
   - WorkflowTagsAddedEvent
   - WorkflowTagsRemovedEvent
+  - WorkflowDefaultEvalSetEvent
 returns: WorkflowDetail | None

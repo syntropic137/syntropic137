@@ -18,6 +18,9 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (  # noqa: TC001
     SkillRef,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import (  # noqa: TC001
+    EvalId,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -72,6 +75,10 @@ class UpdateWorkflowTemplateCommand(BaseModel):
     # Ordinary labels (#967). An install replaces the workflow's tags with
     # the package's, the same as every other definition field.
     tags: TagSet = Field(default_factory=TagSet)
+
+    # The eval a launch that names none joins (#967). Part of the definition,
+    # so an install replaces it like every other field.
+    default_eval_id: EvalId | None = None
 
     # Provenance (issue #822)
     version: str | None = None

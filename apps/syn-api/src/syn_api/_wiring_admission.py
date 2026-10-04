@@ -425,6 +425,7 @@ class BackgroundWorkflowDispatcher:
             execution_id=execution_id,
             task=request.task,
             tags=request.tags,
+            eval_choice=request.eval_choice,
         )
         if self._maintenance is not None:
             await self._maintenance.refuse_early()

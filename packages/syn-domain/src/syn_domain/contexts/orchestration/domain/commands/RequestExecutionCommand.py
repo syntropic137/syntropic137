@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts._shared.repository_ref import (
     RepositoryRef,  # noqa: TC001 - runtime field type
 )
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 
 
@@ -23,6 +24,9 @@ class RequestExecutionCommand(BaseModel):
     task: str | None = None
     repos: list[RepositoryRef] = Field(default_factory=list)
     tags: TagSet = Field(default_factory=TagSet)
+    eval_choice: EvalChoice = Field(default_factory=EvalChoice)
+    """The launch's eval choice (#967), resolved against the workflow's default
+    only when the start runs, as for any other launch."""
 
     @property
     def aggregate_id(self) -> str:

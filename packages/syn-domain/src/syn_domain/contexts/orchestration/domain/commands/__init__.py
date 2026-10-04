@@ -15,11 +15,17 @@ from syn_domain.contexts.orchestration.domain.commands.AddWorkflowTagsCommand im
 from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
     ArchiveWorkflowTemplateCommand,
 )
+from syn_domain.contexts.orchestration.domain.commands.AttachExecutionToEvalCommand import (
+    AttachExecutionToEvalCommand,
+)
 from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
     CreateWorkflowTemplateCommand,
 )
 from syn_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.DetachExecutionFromEvalCommand import (
+    DetachExecutionFromEvalCommand,
 )
 from syn_domain.contexts.orchestration.domain.commands.ExecuteCommandCommand import (
     ExecuteCommandCommand,
@@ -45,6 +51,9 @@ from syn_domain.contexts.orchestration.domain.commands.RemoveWorkflowTagsCommand
 from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
     RequestExecutionCommand,
 )
+from syn_domain.contexts.orchestration.domain.commands.SetWorkflowDefaultEvalCommand import (
+    SetWorkflowDefaultEvalCommand,
+)
 from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
 )
@@ -60,8 +69,10 @@ __all__ = [
     "AddGlobalClaudePluginCommand",
     "AddWorkflowTagsCommand",
     "ArchiveWorkflowTemplateCommand",
+    "AttachExecutionToEvalCommand",
     "CreateWorkflowTemplateCommand",
     "CreateWorkspaceCommand",
+    "DetachExecutionFromEvalCommand",
     "ExecuteCommandCommand",
     "ExecuteWorkflowCommand",
     "InjectTokensCommand",
@@ -70,6 +81,7 @@ __all__ = [
     "RemoveGlobalClaudePluginCommand",
     "RemoveWorkflowTagsCommand",
     "RequestExecutionCommand",
+    "SetWorkflowDefaultEvalCommand",
     "TerminateWorkspaceCommand",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowTemplateCommand",
