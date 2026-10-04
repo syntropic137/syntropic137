@@ -14,6 +14,7 @@ request made reaches `execute()`. The handler test
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -28,6 +29,10 @@ from syn_domain.contexts.orchestration import EvalChoice, TagSet, WorkflowExecut
 from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId, Goal
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     StartExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.events import (
+    ExecutionAttachedToEvalEvent,
+    ExecutionDetachedFromEvalEvent,
 )
 from syn_domain.contexts.orchestration.slices.archive_eval import ArchiveEvalHandler
 from syn_domain.contexts.orchestration.slices.create_eval import CreateEvalHandler
@@ -117,15 +122,23 @@ async def _create_workflow() -> str:
     return result.value.workflow_id
 
 
-async def _membership_events(stream: str) -> list[dict[str, object]]:
-    """The membership edits persisted on a stream, in order, without timestamps."""
+@dataclass(frozen=True)
+class _Edit:
+    """One membership edit as persisted, without its timestamp."""
+
+    type: str
+    eval_id: str
+
+
+async def _membership_events(stream: str) -> list[_Edit]:
+    """The membership edits persisted on a stream, in order."""
     from syn_adapters.storage.event_store_client import get_event_store_client
 
     envelopes = await get_event_store_client().read_events(stream)
     return [
-        {"type": e.event.event_type, "eval_id": e.event.model_dump()["eval_id"]}
+        _Edit(e.event.event_type, e.event.eval_id)
         for e in envelopes
-        if e.event.event_type in {"ExecutionAttachedToEval", "ExecutionDetachedFromEval"}
+        if isinstance(e.event, ExecutionAttachedToEvalEvent | ExecutionDetachedFromEvalEvent)
     ]
 
 
@@ -148,9 +161,7 @@ class TestAttachAndDetach:
             "launched_eval_id": None,
         }
         assert again.json() == first.json()
-        assert await _membership_events(EXEC_STREAM) == [
-            {"type": "ExecutionAttachedToEval", "eval_id": "eval-a"}
-        ]
+        assert await _membership_events(EXEC_STREAM) == [_Edit("ExecutionAttachedToEval", "eval-a")]
 
     async def test_a_conflicting_attach_is_409_until_detached(self, client: AsyncClient) -> None:
         await _create_eval("eval-a")
@@ -173,8 +184,8 @@ class TestAttachAndDetach:
         assert attached.json()["association_kind"] == "attached"
         assert attached.json()["launched_eval_id"] == "eval-a"
         assert await _membership_events(EXEC_STREAM) == [
-            {"type": "ExecutionDetachedFromEval", "eval_id": "eval-a"},
-            {"type": "ExecutionAttachedToEval", "eval_id": "eval-b"},
+            _Edit("ExecutionDetachedFromEval", "eval-a"),
+            _Edit("ExecutionAttachedToEval", "eval-b"),
         ]
 
     @pytest.mark.parametrize(
@@ -292,9 +303,21 @@ def execution(monkeypatch: pytest.MonkeyPatch) -> _CapturingExecute:
     return captured
 
 
+@dataclass(frozen=True)
+class _Launch:
+    """The eval half of an execute request; a field left unset is not sent."""
+
+    eval_id: str | None = None
+    no_eval: bool | None = None
+
+    def body(self) -> dict[str, str | bool]:
+        sent = {"eval_id": self.eval_id, "no_eval": self.no_eval}
+        return {name: value for name, value in sent.items() if value is not None}
+
+
 class TestTheLaunchChoosesAnEval:
-    async def _run(self, client: AsyncClient, workflow_id: str, body: dict[str, object]) -> int:
-        response = await client.post(f"/workflows/{workflow_id}/execute", json=body)
+    async def _run(self, client: AsyncClient, workflow_id: str, launch: _Launch) -> int:
+        response = await client.post(f"/workflows/{workflow_id}/execute", json=launch.body())
         return response.status_code
 
     async def test_an_explicit_eval_reaches_execute(
@@ -303,7 +326,7 @@ class TestTheLaunchChoosesAnEval:
         await _create_eval("eval-a")
         workflow_id = await _create_workflow()
 
-        assert await self._run(client, workflow_id, {"eval_id": "eval-a"}) == 200
+        assert await self._run(client, workflow_id, _Launch(eval_id="eval-a")) == 200
 
         assert execution.choices == [EvalChoice(eval_id=EvalId("eval-a"))]
 
@@ -314,7 +337,7 @@ class TestTheLaunchChoosesAnEval:
         workflow_id = await _create_workflow()
         await client.put(f"/workflows/{workflow_id}/default-eval", json={"eval_id": "eval-a"})
 
-        assert await self._run(client, workflow_id, {"no_eval": True}) == 200
+        assert await self._run(client, workflow_id, _Launch(no_eval=True)) == 200
 
         assert execution.choices == [EvalChoice(ordinary=True)]
 
@@ -332,7 +355,7 @@ class TestTheLaunchChoosesAnEval:
             await _create_eval("eval-a", archived=archived)
         workflow_id = await _create_workflow()
 
-        assert await self._run(client, workflow_id, {"eval_id": "eval-a"}) == status
+        assert await self._run(client, workflow_id, _Launch(eval_id="eval-a")) == status
 
         assert execution.choices == []
 
@@ -347,8 +370,8 @@ class TestTheLaunchChoosesAnEval:
         archived = await ArchiveEvalHandler(get_eval_repo()).handle(eval_id=EvalId("eval-a"))
         assert archived is not None and archived.success
 
-        refused = await self._run(client, workflow_id, {})
-        ordinary = await self._run(client, workflow_id, {"no_eval": True})
+        refused = await self._run(client, workflow_id, _Launch())
+        ordinary = await self._run(client, workflow_id, _Launch(no_eval=True))
 
         assert refused == 409
         assert ordinary == 200
@@ -359,6 +382,6 @@ class TestTheLaunchChoosesAnEval:
     ) -> None:
         workflow_id = await _create_workflow()
 
-        assert await self._run(client, workflow_id, {"eval_id": "eval-a", "no_eval": True}) == 422
+        assert await self._run(client, workflow_id, _Launch(eval_id="eval-a", no_eval=True)) == 422
 
         assert execution.choices == []

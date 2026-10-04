@@ -20,6 +20,7 @@ import os
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from pathlib import Path
+from typing import Protocol
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -64,6 +65,15 @@ from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand im
 from syn_domain.contexts.orchestration.domain.commands.SetWorkflowDefaultEvalCommand import (
     SetWorkflowDefaultEvalCommand,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
+    ExecutionAttachedToEvalEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
+    ExecutionDetachedFromEvalEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
+)
 from syn_domain.contexts.orchestration.slices.archive_eval import ArchiveEvalHandler
 from syn_domain.contexts.orchestration.slices.attach_execution_to_eval import (
     AttachExecutionToEvalHandler,
@@ -92,6 +102,11 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 _WORKFLOW = (
     Path(__file__).resolve().parents[8] / "workflows" / "sdlc" / "quickfix" / "workflow.yaml"
 )
+
+
+class _ExecutionEvent(Protocol):
+    @property
+    def execution_id(self) -> str: ...
 
 
 def _failing_workspace() -> MagicMock:
@@ -188,16 +203,16 @@ class _World:
             )
         )
 
-    async def stored(self, event_type: str, execution_id: str) -> list[dict[str, object]]:
+    async def stored[E: _ExecutionEvent](self, kind: type[E], execution_id: str) -> list[E]:
+        """Events of ``kind`` on the run, as read back from the store's JSON."""
         return [
-            envelope.event.model_dump()
+            envelope.event
             for envelope in await stored_envelopes(self.executions_store)
-            if envelope.event.event_type == event_type
-            and envelope.event.model_dump()["execution_id"] == execution_id
+            if isinstance(envelope.event, kind) and envelope.event.execution_id == execution_id
         ]
 
-    async def started(self, execution_id: str) -> dict[str, object]:
-        [event] = await self.stored("WorkflowExecutionStarted", execution_id)
+    async def started(self, execution_id: str) -> WorkflowExecutionStartedEvent:
+        [event] = await self.stored(WorkflowExecutionStartedEvent, execution_id)
         return event
 
     async def membership(self, execution_id: str) -> EvalMembership:
@@ -231,7 +246,7 @@ async def test_a_launch_with_no_eval_and_no_default_joins_none() -> None:
     await world.run("exec-1")
 
     started = await world.started("exec-1")
-    assert "eval_id" not in started or started["eval_id"] is None
+    assert started.eval_id is None
     assert await world.membership("exec-1") == EvalMembership()
 
 
@@ -242,8 +257,8 @@ async def test_a_launch_naming_no_eval_joins_the_workflows_default() -> None:
     await world.run("exec-1")
 
     started = await world.started("exec-1")
-    assert started["eval_id"] == "eval-default"
-    assert started["eval_selection"] == "workflow_default"
+    assert started.eval_id == "eval-default"
+    assert started.eval_selection == "workflow_default"
     assert await world.membership("exec-1") == EvalMembership(
         "eval-default", AssociationKind.LAUNCHED, "eval-default"
     )
@@ -256,8 +271,8 @@ async def test_an_explicit_eval_wins_over_the_default() -> None:
     await world.run("exec-1", _explicit("eval-explicit"))
 
     started = await world.started("exec-1")
-    assert started["eval_id"] == "eval-explicit"
-    assert started["eval_selection"] == "explicit"
+    assert started.eval_id == "eval-explicit"
+    assert started.eval_selection == "explicit"
 
 
 async def test_an_ordinary_run_suppresses_the_default() -> None:
@@ -267,8 +282,8 @@ async def test_an_ordinary_run_suppresses_the_default() -> None:
     await world.run("exec-1", EvalChoice(ordinary=True))
 
     started = await world.started("exec-1")
-    assert started.get("eval_id") is None
-    assert started["eval_selection"] == "ordinary"
+    assert started.eval_id is None
+    assert started.eval_selection == "ordinary"
     assert await world.membership("exec-1") == EvalMembership()
 
 
@@ -293,7 +308,7 @@ async def test_a_launch_into_an_archived_eval_is_refused_before_it_starts(
     with pytest.raises(EvalUnavailableError, match="is archived"):
         await world.run("exec-1", None if archived_default else _explicit("eval-1"))
 
-    assert await world.stored("WorkflowExecutionStarted", "exec-1") == []
+    assert await world.stored(WorkflowExecutionStartedEvent, "exec-1") == []
 
 
 async def test_a_launch_into_a_missing_eval_is_refused() -> None:
@@ -302,7 +317,7 @@ async def test_a_launch_into_a_missing_eval_is_refused() -> None:
     with pytest.raises(EvalUnavailableError, match="does not exist"):
         await world.run("exec-1", _explicit("eval-missing"))
 
-    assert await world.stored("WorkflowExecutionStarted", "exec-1") == []
+    assert await world.stored(WorkflowExecutionStartedEvent, "exec-1") == []
 
 
 async def test_changing_the_default_never_reclassifies_a_started_run() -> None:
@@ -354,9 +369,9 @@ async def test_a_terminal_run_attaches_retroactively_without_the_baseline() -> N
     )
 
     assert result is not None and result.success
-    [attached] = await world.stored("ExecutionAttachedToEval", "exec-1")
-    assert set(attached) == {"execution_id", "workflow_id", "eval_id", "attached_at"}
-    assert attached["eval_id"] == "eval-1"
+    [attached] = await world.stored(ExecutionAttachedToEvalEvent, "exec-1")
+    assert set(attached.model_dump()) == {"execution_id", "workflow_id", "eval_id", "attached_at"}
+    assert attached.eval_id == "eval-1"
     # The launch record is not rewritten: the run never started from the eval.
     assert await world.started("exec-1") == started_before
     assert await world.membership("exec-1") == EvalMembership(
@@ -377,7 +392,7 @@ async def test_a_duplicate_attach_succeeds_and_records_nothing() -> None:
 
     assert first is not None and first.success
     assert second is not None and second.success
-    assert await world.stored("ExecutionAttachedToEval", "exec-1") == []
+    assert await world.stored(ExecutionAttachedToEvalEvent, "exec-1") == []
     assert (await world.membership("exec-1")).association_kind is AssociationKind.LAUNCHED
 
 
@@ -391,7 +406,7 @@ async def test_attaching_to_a_second_eval_is_refused_until_detached() -> None:
 
     assert refused is not None and not refused.success
     assert "detach it" in refused.error
-    assert await world.stored("ExecutionAttachedToEval", "exec-1") == []
+    assert await world.stored(ExecutionAttachedToEvalEvent, "exec-1") == []
 
     detached = await world.detach.handle(
         DetachExecutionFromEvalCommand(aggregate_id="exec-1", eval_id=EvalId("eval-a"))
@@ -402,8 +417,8 @@ async def test_attaching_to_a_second_eval_is_refused_until_detached() -> None:
 
     assert detached is not None and detached.success
     assert attached is not None and attached.success
-    [detach_event] = await world.stored("ExecutionDetachedFromEval", "exec-1")
-    assert detach_event["association_kind"] == "launched"
+    [detach_event] = await world.stored(ExecutionDetachedFromEvalEvent, "exec-1")
+    assert detach_event.association_kind == "launched"
     assert await world.membership("exec-1") == EvalMembership(
         "eval-b", AssociationKind.ATTACHED, "eval-a"
     )
@@ -423,7 +438,7 @@ async def test_attach_to_an_archived_eval_is_refused_and_writes_nothing() -> Non
             AttachExecutionToEvalCommand(aggregate_id="exec-1", eval_id=EvalId("eval-nope"))
         )
 
-    assert await world.stored("ExecutionAttachedToEval", "exec-1") == []
+    assert await world.stored(ExecutionAttachedToEvalEvent, "exec-1") == []
 
 
 async def test_detach_keeps_the_launch_record_and_replay_rebuilds_it() -> None:
@@ -437,8 +452,8 @@ async def test_detach_keeps_the_launch_record_and_replay_rebuilds_it() -> None:
 
     assert result is not None and result.success
     started = await world.started("exec-1")
-    assert started["eval_id"] == "eval-1"
-    assert started["eval_selection"] == "workflow_default"
+    assert started.eval_id == "eval-1"
+    assert started.eval_selection == "workflow_default"
     assert await world.membership("exec-1") == EvalMembership(None, None, "eval-1")
 
 
@@ -456,8 +471,8 @@ async def test_detach_from_no_eval_succeeds_and_from_the_wrong_one_is_refused() 
 
     assert none is not None and none.success
     assert wrong is not None and not wrong.success
-    assert await world.stored("ExecutionDetachedFromEval", "exec-none") == []
-    assert await world.stored("ExecutionDetachedFromEval", "exec-a") == []
+    assert await world.stored(ExecutionDetachedFromEvalEvent, "exec-none") == []
+    assert await world.stored(ExecutionDetachedFromEvalEvent, "exec-a") == []
 
 
 async def test_an_unknown_run_is_not_a_result() -> None:
