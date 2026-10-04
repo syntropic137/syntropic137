@@ -32,7 +32,11 @@ from typing import TYPE_CHECKING, Protocol
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
-from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.repository_baseline import (
+    BaselineRequest,
+    RepositoryBaseline,
+)
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_eval.errors import (
     DuplicateBaselineRepositoryError,
@@ -50,10 +54,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects impor
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from syn_domain.contexts._shared.repository_ref import RepositoryRef
-    from syn_domain.contexts.orchestration._shared.repository_baseline import (
-        RepositoryBaseline,
-    )
     from syn_domain.contexts.orchestration.domain.commands.ArchiveEvalCommand import (
         ArchiveEvalCommand,
     )
@@ -98,6 +98,34 @@ def _canonical_baseline[B: _ForRepository](baseline: Iterable[B]) -> tuple[B, ..
     if repeated:
         raise DuplicateBaselineRepositoryError(repeated)
     return ordered
+
+
+class _RecordedRepository(Protocol):
+    @property
+    def owner(self) -> str: ...
+    @property
+    def name(self) -> str: ...
+
+
+class _RecordedBaseline(Protocol):
+    @property
+    def repository(self) -> _RecordedRepository: ...
+    @property
+    def requested_ref(self) -> str: ...
+    @property
+    def commit_sha(self) -> str: ...
+
+
+def _recorded_baseline(recorded: Iterable[_RecordedBaseline]) -> tuple[RepositoryBaseline, ...]:
+    """Rebuild the baseline an event carries as primitives (events import no value objects)."""
+    return tuple(
+        RepositoryBaseline(
+            repository=RepositoryRef(owner=b.repository.owner, name=b.repository.name),
+            requested_ref=b.requested_ref,
+            commit_sha=b.commit_sha,
+        )
+        for b in recorded
+    )
 
 
 @dataclass(frozen=True)
@@ -245,6 +273,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
     @command_handler("CreateEvalCommand")
     def create(self, command: CreateEvalCommand) -> None:
         from syn_domain.contexts.orchestration.domain.events.EvalCreatedEvent import (
+            BaselineRepoPayload,
             EvalCreatedEvent,
         )
 
@@ -259,7 +288,9 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
                 name=command.name,
                 goal=str(command.goal),
                 starting_workflow_id=command.starting_workflow_id,
-                baseline_repos=list(baseline),
+                baseline_repos=[
+                    BaselineRepoPayload.model_validate(b, from_attributes=True) for b in baseline
+                ],
                 tags=list(command.tags),
                 created_at=datetime.now(UTC),
             )
@@ -269,6 +300,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
     def update(self, command: UpdateEvalCommand) -> None:
         """Apply the parts of ``command`` that differ. Nothing differs, no event."""
         from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import (
+            BaselineRepoPayload,
             EvalUpdatedEvent,
         )
 
@@ -284,7 +316,12 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
                 eval_id=str(self.id),
                 name=change.name,
                 goal=None if change.goal is None else str(change.goal),
-                baseline_repos=None if change.baseline is None else list(change.baseline),
+                baseline_repos=None
+                if change.baseline is None
+                else [
+                    BaselineRepoPayload.model_validate(b, from_attributes=True)
+                    for b in change.baseline
+                ],
                 tags_added=list(change.tags_added),
                 tags_removed=list(change.tags_removed),
                 updated_at=datetime.now(UTC),
@@ -361,7 +398,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
         self._name = event.name
         self._goal = Goal.recorded(event.goal)
         self._starting_workflow_id = event.starting_workflow_id
-        self._baseline = tuple(event.baseline_repos)
+        self._baseline = _recorded_baseline(event.baseline_repos)
         self._tags = TagSet.recorded(event.tags)
         self._created_at = event.created_at
         self._updated_at = event.created_at
@@ -371,9 +408,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
             goal=self._goal,
             starting_workflow_id=event.starting_workflow_id,
             tags=self._tags,
-            baseline=tuple(
-                BaselineRequest(b.repository, b.requested_ref) for b in event.baseline_repos
-            ),
+            baseline=tuple(BaselineRequest(b.repository, b.requested_ref) for b in self._baseline),
         )
 
     @event_sourcing_handler("EvalUpdated")
@@ -383,7 +418,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
         if event.goal is not None:
             self._goal = Goal.recorded(event.goal)
         if event.baseline_repos is not None:
-            self._baseline = tuple(event.baseline_repos)
+            self._baseline = _recorded_baseline(event.baseline_repos)
         kept = self._tags.difference(TagSet.recorded(event.tags_removed))
         self._tags = TagSet.recorded([*kept, *event.tags_added])
         self._updated_at = event.updated_at

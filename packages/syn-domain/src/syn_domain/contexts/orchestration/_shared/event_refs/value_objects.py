@@ -5,11 +5,8 @@ Events must be pure data. VSA028 enforces that by rejecting imports from general
 anything an event replay should not depend on. The rule recognises a
 `.value_objects`-shaped path as the declared exception.
 
-``ClaudePluginRef``, ``SkillRef`` and ``RepositoryBaseline`` are genuine value
-objects (frozen models describing a reference), so events may legitimately
-carry them. ``RepositoryBaseline`` is re-exported alone: ``resolve_baseline``,
-``BaselineRequest`` and ``UnresolvedBaselineError`` beside it are the resolution
-step that runs BEFORE an event exists, and no event may reach them. This module is
+``ClaudePluginRef`` and ``SkillRef`` are genuine value objects (frozen models
+describing a reference), so events may legitimately carry them. This module is
 the seam that says so in a way the validator can see, without duplicating the
 definitions into the event layer or moving them away from the code that parses
 them.
@@ -25,12 +22,10 @@ taken in this package by the cost value objects (``CostAmount``, ``TokenCount``,
 from __future__ import annotations
 
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import ClaudePluginRef
-from syn_domain.contexts.orchestration._shared.repository_baseline import RepositoryBaseline
 from syn_domain.contexts.orchestration._shared.skill_ref import SkillManifest, SkillRef
 
 __all__ = [
     "ClaudePluginRef",
-    "RepositoryBaseline",
     "SkillManifest",
     "SkillRef",
 ]
