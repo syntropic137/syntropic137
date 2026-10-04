@@ -36,6 +36,36 @@ state.
 
 The unit the dashboard timeline draws, and the unit `tool_call_count` counts.
 
+## Tool Call
+
+One `tool_use` content block the agent's model emitted in the Session's own
+transcript, identified by the harness's `tool_use_id`. The transcript is the
+ground truth: a Session's tool calls, counted by tool name, are its transcript's
+`tool_use` blocks counted by name, and nothing else.
+
+A Tool Call is recorded as up to two Operations - a start and a completion -
+which fold onto one call by `tool_use_id` (`session_tools.call_identity`). An
+Agent/Task call whose rows are relabelled `subagent_started`/`subagent_stopped`
+is still one Tool Call. `session_tools.is_tool_call` is the rule in code, and
+the `GET /events/sessions/{id}/tools` summary counts by it.
+
+These are Operations but **not** Tool Calls:
+
+- **Git operations** (`git_commit`, `git_push`, `git_checkout`, ...). The
+  `git` command was a Bash Tool Call and is counted there; the hook's row
+  describes what it did. Counting both counted the work twice.
+- **Session and phase lifecycle rows.** They have no tool name and used to
+  surface in the summary as a tool called "unknown".
+- **Event lines the agent printed.** A `tool_execution_started` line inside a
+  tool's output - a recorded events file, a test log - is text, not a call.
+  Only git hook events are read out of tool output (ADR-043,
+  `syn_shared.events.GIT_HOOK_EVENT_TYPES`).
+
+**Unclear:** whether a sub-agent's own `tool_use` blocks (stream lines with a
+`parent_tool_use_id`) are Tool Calls of the parent Session. They are recorded
+on the parent today, while the parent's native transcript does not contain
+them. This is the same open question as Delegation below (#792).
+
 ## Agent Launch
 
 The moment a harness process started for a Session (`AgentLaunched`). Distinct
