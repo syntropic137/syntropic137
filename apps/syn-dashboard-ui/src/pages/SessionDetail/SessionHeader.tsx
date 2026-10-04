@@ -1,7 +1,7 @@
 import { Activity, Bot, Container, FileText } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { AGENT_PROVIDER_LABELS, ObservedModel, StatusBadge } from '../../components'
-import type { SessionResponse } from '../../types'
+import { AGENT_PROVIDER_LABELS, ObservedModel, PhaseStartPins, StatusBadge } from '../../components'
+import type { PhaseStartConfig, SessionResponse } from '../../types'
 import { PROVIDER_ENVIRONMENTS } from './sessionConstants'
 
 function AgentProviderBadge({ provider }: { provider: string | null }) {
@@ -31,9 +31,12 @@ function WorkspaceEnvironmentBadge({ provider }: { provider: string | null }) {
 
 export function SessionHeader({
   session,
+  startPins,
   onViewConversationLog,
 }: {
   session: SessionResponse
+  /** This session's phase at start; `undefined` (unknown) renders nothing. */
+  startPins?: PhaseStartConfig | null
   onViewConversationLog: () => void
 }) {
   const logAvailable = session.status === 'completed' || session.status === 'failed'
@@ -72,6 +75,7 @@ export function SessionHeader({
               />
               <WorkspaceEnvironmentBadge provider={session.agent_provider} />
             </div>
+            {startPins !== undefined && <PhaseStartPins pins={startPins} />}
           </div>
         </div>
 

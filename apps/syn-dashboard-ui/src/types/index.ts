@@ -411,7 +411,16 @@ export interface PhaseExecutionDetail {
   model_display: string
   /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
+  /**
+   * The tools, skills and model this phase had when its execution STARTED,
+   * read from the run's own start event (#1454) - never the current template.
+   * Null or absent means not recorded: a run from before #1454.
+   */
+  pinned_at_start?: PhaseStartConfig | null
 }
+
+/** A phase's start config, aliased to the generated schema rather than restated. */
+export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
 
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
@@ -478,6 +487,11 @@ export interface ExecutionDetailResponse {
   cache_write_rate_display?: string | null
   // Workspace info (ADR-021)
   workspace: WorkspaceInfo | null
+  /**
+   * What this run was asked to do, verbatim (#1307). Null when it was
+   * dispatched with no task; absent from a server that predates the field.
+   */
+  task?: string | null
 }
 
 // =============================================================================
