@@ -78,6 +78,17 @@ on #1120. Do not "fix" a Permission denied here by editing the justfile or
 running the recipes by hand: that hides the one condition this prefix exists to
 compensate for.
 
+**Run the gate once, and wait on its exit status** (#1585). It runs cheapest
+first, stops at the first failure, and prints `[preflight-agent] <step> ok
+<seconds>` per step and a total; a fresh workspace's first run also builds the
+APS binary, so it takes several minutes. Never hand-roll a wait loop
+(`until grep ...; do sleep ...; done`): one phase lost 16 minutes waiting on
+jobs that had already finished. If it must run in the background because it
+exceeds the tool's time cap, start
+`just preflight-agent > /workspace/.tmp/gate.log 2>&1; echo $? > /workspace/.tmp/gate.exit`
+in the background and check for the exit file (or `wait $PID` in the same
+shell). Never start a second gate while one runs.
+
 **`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv`, `node`
 and `rustup` and nothing else, so seven of the gates in `just preflight` cannot
 run here at all: `vsa-validate` (no `vsa`), `codegen-check` (no `pnpm`),

@@ -142,6 +142,33 @@ and the final phase would have nothing to open a PR from.
 pushed. The next phase checks out that SHA by name. If it is missing or wrong,
 verification silently runs against the wrong code.
 
+## Running the gate: iterate fast, gate once, wait on exit status
+
+Gating, not working, is what runs phases out of time (#1585): one phase
+finished its fix five minutes in and spent the remaining 57 waiting on gates.
+
+- **Iterate on targeted tests** (`uv run pytest <the test files you touched> -q`)
+  and on `just preflight-agent-fast`, the static front of the gate (lint,
+  format, untyped-dicts, cross-context imports and the other cheap checks,
+  under a minute). It is not the gate.
+- **Run the full `just preflight-agent` ONCE, at the end**, before the final
+  push. It runs cheapest first, stops at the first failure, and prints
+  `[preflight-agent] <step> ok <seconds>` per step and a total. A first run in
+  a fresh workspace also installs Rust and builds the APS binary, so expect it
+  to take several minutes; a failure prints the step that failed, so fix that
+  and rerun rather than starting over blind.
+- **Never hand-roll a wait loop** (`until grep ...; do sleep ...; done`). They
+  miss completion: one phase lost 16 minutes waiting on jobs that had already
+  finished. If a command must run in the background because it exceeds the
+  tool's time cap, wait on its exit status, not on its output:
+
+  ```
+  just preflight-agent > /workspace/.tmp/gate.log 2>&1; echo $? > /workspace/.tmp/gate.exit
+  ```
+
+  started in the background, then check for `/workspace/.tmp/gate.exit` (or
+  `wait $PID` in the same shell). Never start a second gate while one runs.
+
 ## Write to `artifacts/output/implement.md`
 
 **This phase declares a markdown output artifact, so a run that writes
