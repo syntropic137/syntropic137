@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
     from event_sourcing.core.checkpoint import DispatchContext
 
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
+
 from event_sourcing import (
     DispatchContext,
     DomainEvent,
@@ -34,7 +36,6 @@ from event_sourcing import (
 
 from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
-from syn_domain.contexts._shared.maintenance import AdmissionTicket
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 

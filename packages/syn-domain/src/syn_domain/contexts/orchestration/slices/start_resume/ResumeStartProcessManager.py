@@ -36,7 +36,6 @@ from event_sourcing import (
 
 from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
-from syn_domain.contexts._shared.maintenance import AdmissionTicket
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     ResumedEventShape,
     classify_resumed_payload,
@@ -53,6 +52,8 @@ from syn_domain.contexts.orchestration.slices.start_resume.value_objects import 
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
 
 logger = logging.getLogger(__name__)
 
