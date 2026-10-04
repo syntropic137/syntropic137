@@ -92,6 +92,26 @@ sys.exit(0 if s.get("status") == "healthy" and not s.get("is_catching_up") and n
 PY
 }
 
+# Free space on the data volume, as /health judges it (#1560). REPORTS, never
+# gates: the thresholds and the refusal live in the API, so this only makes the
+# number visible before a stage that loads images onto that disk, and again
+# after the swap. A volume below the floor already refuses new executions.
+disk_space() {
+    api "/health" "$TMP/health.json" 2>/dev/null || { echo "   disk: /health unreachable"; return 0; }
+    python3 - "$TMP/health.json" <<'DISK'
+import json, sys
+d = json.load(open(sys.argv[1])).get("disk")
+if not d:
+    print("   disk: not reported by this API (predates #1560)")
+    sys.exit(0)
+free = "unmeasurable" if d.get("free_percent") is None else f"{d['free_percent']:.1f}% free"
+mark = "" if d.get("state") == "ok" else "  DEGRADED"
+print(f"   disk: {d.get('path')} {free} state={d.get('state')} "
+      f"(degraded below {d.get('degraded_below_percent')}%, "
+      f"admission refused below {d.get('refuse_admission_below_percent')}%){mark}")
+DISK
+}
+
 # A drain is a statement about ONE instant: this returns 0 only when every
 # status key present is terminal. Read from status_counts, which is tallied over
 # the whole collection, never from a page of rows (see the runbook, section 1).
@@ -131,6 +151,9 @@ print(f"   maintenance: active={mode['active']} reason={mode['reason']!r}")
 sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
 GATE
 }
+
+step "precheck: free space on the data volume"
+disk_space
 
 if [ "$MODE" != "swap" ]; then
     step "prepare: worktree at $REF, bump to $VERSION"
@@ -266,6 +289,7 @@ if [ "$DRY" = 0 ]; then
         sleep 10
     done
     [ "$healthy" = 1 ] || die "projections not healthy after the swap"
+    disk_space
     # The image id above proves the right bytes are running; this proves they
     # say so. Under --swap-only this run built nothing, so the commit is only
     # required to be present, not to equal one.
