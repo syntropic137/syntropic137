@@ -31,9 +31,9 @@ run it before. In CI it is owned by the `architectural-fitness` job in
 Consequently there is no skip in this file. A fetch that fails is a FAILED test
 carrying git's own stderr, never a pass - a check that goes quiet exactly when it
 cannot see is the "green gate over nothing" class the issue was filed about. The
-one environment this cannot run in is an agent workspace container, where
-`fitness` is already outside `preflight-agent` for want of a toolchain; nothing
-new is hidden there.
+same holds in an agent workspace, where `preflight-agent` runs this suite too
+through `fitness-invariants-agent`: the public submodules are reachable there,
+so this is not one of the `host_tool` tests that may skip.
 
 Two deliberate deviations from the issue's sketch:
 

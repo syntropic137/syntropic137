@@ -1026,6 +1026,14 @@ fitness-invariants:
     uv run pytest ci/fitness/ -v --tb=short -m architecture
     @echo "✅ Invariant checks passed"
 
+# `fitness-invariants` as an agent workspace runs it: the SAME recipe, so the
+# command, flags and markers are CI's. The one difference is that a test marked
+# `host_tool("<binary>")` whose binary the image lacks skips as `NOT RUN`, and
+# pytest's `-ra` summary lists each one, instead of failing on a missing docker
+# (#1109). Everywhere else those tests still fail. Part of `preflight-agent`.
+fitness-invariants-agent:
+    @SYN_FITNESS_IN_AGENT_WORKSPACE=1 just fitness-invariants
+
 # Every STATIC CI gate, in ONE place.
 #
 # NOT a claim that CI ran entirely: unit tests, the dashboard build, CLI checks,
@@ -1076,6 +1084,8 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 #
 #   preflight-portable                 exit 0
 #   fitness-check                      exit 0    via fitness-agent (re-measured 2026-10-03)
+#   fitness-invariants                 exit 0    via fitness-invariants-agent; the 3
+#                                                docker tests skip as NOT RUN (2026-10-04)
 #   check-submodules                   exit 1    private submodules, no token
 #   vsa-validate                       exit 127  no `vsa` (Rust, built in CI)
 #   codegen-check                      exit 127  no `pnpm`
@@ -1101,6 +1111,12 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 # `preflight` does not include it: it runs `fitness` directly, so the gate is
 # not run twice there.
 #
+# That was only HALF of `fitness`. #1498 wired in the APS thresholds and left
+# out `fitness-invariants`, the `pytest ci/fitness` suite (cross-context deep
+# imports, typed projection handlers), and agent PRs kept going red on CI for
+# it (#1539, #1561, #1562). `fitness-invariants-agent` runs that suite too, and
+# `test_preflight_agent_runs_both_halves_of_fitness` pins both halves here.
+#
 # WHAT THIS DOES NOT GUARANTEE. Composition only helps a gate that someone
 # already added to one of these lists. The mechanical guard meant to catch a
 # gate added to NEITHER - `test_every_declared_check_is_wired_into_preflight` -
@@ -1114,8 +1130,11 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 # a PR having passed this can still be failed by vsa or codegen on GitHub, and
 # that is the correct division of labour - CI has the toolchain, the workspace
 # does not.
-preflight-agent: preflight-portable fitness-agent
+preflight-agent: preflight-portable fitness-agent fitness-invariants-agent
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
+    @echo "   Fitness ran in full: fitness-check AND fitness-invariants. Any"
+    @echo "   ci/fitness test marked NOT RUN in the pytest summary above needs a"
+    @echo "   binary this image lacks (today: test_gateway_bind.py, docker)."
     @echo "   Not run here (no toolchain in the image): vsa-validate,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
     @echo "   check-default-workspace-image, check-pinned-image-channels,"
