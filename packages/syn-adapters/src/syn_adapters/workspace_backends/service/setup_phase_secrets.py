@@ -642,6 +642,7 @@ class SetupPhaseSecrets:
         gh_token: str | None = None,
         clone_repos: bool = True,
         pinned_commits: Mapping[str, str] | None = None,
+        continued_branches: Mapping[str, str] | None = None,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -658,6 +659,7 @@ class SetupPhaseSecrets:
             gh_token: gh's credential; defaults to the one `create` would route to
             clone_repos: False to credential the repos without checking them out (#1187)
             pinned_commits: ``owner/name`` -> the commit to check it out at (#1458)
+            continued_branches: ``owner/name`` -> the branch to continue at its head (#1513)
         """
         import os
 
@@ -674,6 +676,7 @@ class SetupPhaseSecrets:
             gh_token=gh_token,
             clone_repos=clone_repos,
             pinned_commits=dict(pinned_commits or {}),
+            continued_branches=dict(continued_branches or {}),
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
