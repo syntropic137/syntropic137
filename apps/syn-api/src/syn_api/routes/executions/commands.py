@@ -23,7 +23,10 @@ from syn_api._wiring import (
     get_projection_mgr,
     get_workflow_repo,
 )
-from syn_api.routes.executions.direct_start import queue_direct_start
+from syn_api.routes.executions.direct_start import (
+    queue_direct_start,
+    record_execution_request,
+)
 from syn_api.types import (
     Err,
     ExecutionSummary,
@@ -34,6 +37,7 @@ from syn_api.types import (
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
+    RequestExecutionCommand,
     SkillError,
     SkillRef,
     TagSet,
@@ -798,6 +802,19 @@ async def execute_workflow_endpoint(
     # nothing has been queued yet. Leaving this block does NOT release the
     # ticket: the queued task owns the lease from here.
     async with _admit_or_409() as admitted:
+        # #1557: durable BEFORE the 200, so a start waiting for a budget slot
+        # survives a restart; the request ProcessManager starts it from here.
+        await record_execution_request(
+            RequestExecutionCommand(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                inputs=effective_inputs,
+                task=request.task,
+                repos=typed_repos,
+                tags=request.tags,
+            ),
+            admitted,
+        )
         queue_direct_start(
             background_tasks,
             execution_id=execution_id,

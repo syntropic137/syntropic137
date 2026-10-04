@@ -103,6 +103,7 @@ from syn_adapters.storage import (
 )
 from syn_adapters.storage.artifact_storage import get_artifact_storage
 from syn_adapters.storage.repositories import (
+    get_execution_request_repository,
     get_trigger_repository,
     get_workflow_execution_repository,
 )
@@ -959,6 +960,9 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         # #1557: the ONE budget `POST /execute` also claims from, so trigger,
         # resume and direct starts share SYN_EXECUTION_MAX_CONCURRENT.
         budget=get_execution_budget(),
+        # #1557: the durable record of each admitted direct start, which the
+        # execution request ProcessManager starts from after a restart.
+        requests=get_execution_request_repository(),
         maintenance=get_admission_gate(),
         # ADR-014 s7: the child of an admitted resume starts through this same
         # gate and budget, reading everything it runs from its parent.

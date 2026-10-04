@@ -28,17 +28,20 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import StreamAlreadyExistsError
+from event_sourcing import EventStoreRepository, StreamAlreadyExistsError
+from event_sourcing.client.memory import MemoryEventStoreClient
 from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from fastapi import BackgroundTasks, HTTPException
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+import syn_adapters.storage.repositories as repositories
 import syn_api._wiring as wiring
 import syn_api._wiring_admission as admission
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.execution_budget import ExecutionBudget, StartPath
@@ -57,6 +60,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     ResumeExecutionCommand,
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
+    ExecutionRequestAggregate,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
@@ -69,6 +75,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
+from syn_domain.contexts.orchestration.slices.start_execution_request import (
+    ExecutionRequestStartProcessManager,
+)
 from syn_domain.contexts.orchestration.slices.start_resume import (
     ResumeStartProcessManager,
     ResumeStartRecord,
@@ -77,9 +86,12 @@ from syn_domain.contexts.orchestration.slices.start_resume import (
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import DISPATCH_GRACE
 from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
+from syn_domain.testing.stored_replay import stored_envelopes
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from event_sourcing import DomainEvent
 
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration import AgentExecutionResult
@@ -109,13 +121,42 @@ phases:
 _WITHIN = 10.0
 
 
+class _Log:
+    """Every event the stores accepted, in the order they were written.
+
+    What the subscription coordinator reads: the ProcessManagers below are fed
+    from here, never by hand, so a restart can replay it from the start.
+    """
+
+    def __init__(self) -> None:
+        self.envelopes: list[EventEnvelope[DomainEvent]] = []
+
+    def append(self, event: DomainEvent, aggregate_id: str, aggregate_type: str) -> None:
+        nonce = len(self.envelopes) + 1
+        self.envelopes.append(
+            EventEnvelope(
+                event=event,
+                metadata=EventMetadata(
+                    event_type=event.event_type,
+                    aggregate_id=aggregate_id,
+                    aggregate_type=aggregate_type,
+                    aggregate_nonce=nonce,
+                    global_nonce=nonce,
+                ),
+            )
+        )
+
+
 class _Executions:
     """Execution streams, keyed by id; a second NoStream write is refused."""
 
-    def __init__(self) -> None:
+    def __init__(self, log: _Log) -> None:
         self.streams: dict[str, WorkflowExecutionAggregate] = {}
+        self._log = log
 
     async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        for envelope in aggregate.get_uncommitted_events():
+            self._log.append(envelope.event, aggregate.id or "", "WorkflowExecution")
         self.streams[aggregate.id or ""] = aggregate
         aggregate.mark_events_as_committed()
 
@@ -129,6 +170,38 @@ class _Executions:
 
     async def exists(self, aggregate_id: str) -> bool:
         return aggregate_id in self.streams
+
+
+class _Requests:
+    """The REAL execution request repository over an in-memory event store.
+
+    Real, so a request read after a restart is rehydrated from what was stored
+    as JSON, not handed back as the object the route built.
+    """
+
+    def __init__(self, log: _Log) -> None:
+        self.client = MemoryEventStoreClient()
+        self._repo = RepositoryAdapter(
+            EventStoreRepository(
+                self.client,
+                ExecutionRequestAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+                "ExecutionRequest",
+            )
+        )
+        self._log = log
+        self._seen = 0
+
+    async def save_new(self, aggregate: ExecutionRequestAggregate) -> None:
+        await self._repo.save_new(aggregate)
+        stored = await stored_envelopes(self.client)
+        for envelope in stored[self._seen :]:
+            self._log.append(
+                envelope.event, envelope.metadata.aggregate_id or "", "ExecutionRequest"
+            )
+        self._seen = len(stored)
+
+    async def get_by_id(self, aggregate_id: str) -> ExecutionRequestAggregate | None:
+        return await self._repo.get_by_id(aggregate_id)
 
 
 class _Templates:
@@ -236,45 +309,33 @@ class _ProjectionManager:
 
 
 class _World:
-    """One API process: one budget, one gate, one dispatcher, one processor."""
+    """The stores, which survive a restart, and ONE API process over them.
+
+    The process - budget, gate, handlers, dispatcher, ProcessManagers - is
+    rebuilt by `restart()`, as a new API container would build it.
+    """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self.executions = _Executions()
-        self.agent = _HeldAgent()
-        self.budget = ExecutionBudget(LIMIT)
-        self.gate = AdmissionGate(InMemoryMaintenanceAdapter())
-        processor = _processor(self.executions, self.agent)
-
-        definition = WorkflowDefinition.from_yaml(WORKFLOW_YAML)
-        template = WorkflowTemplateAggregate()
-        template.create_workflow(build_command_from_definition(definition))
-        self.handler = ExecuteWorkflowHandler(
-            processor=processor,
-            workflow_repository=_Templates(template),  # type: ignore[arg-type]
-            maintenance=self.gate,  # type: ignore[arg-type]
-        )
-        self.dispatcher = BackgroundWorkflowDispatcher(
-            self.handler,
-            budget=self.budget,
-            maintenance=self.gate,
-            resume_handler=StartResumeHandler(processor, self.executions),  # type: ignore[arg-type]
-        )
-        self.resume_store = InMemoryProjectionStore()
-        self.manager = ResumeStartProcessManager(
-            resume_starter=self.dispatcher,
-            store=self.resume_store,  # type: ignore[arg-type]
-        )
+        self._monkeypatch = monkeypatch
+        self.log = _Log()
+        self.executions = _Executions(self.log)
+        self.requests = _Requests(self.log)
         self.projections = _ProjectionManager()
+        self.resume_store = self.projections.store
+        self.agent = _HeldAgent()
+        definition = WorkflowDefinition.from_yaml(WORKFLOW_YAML)
+        self.template = WorkflowTemplateAggregate()
+        self.template.create_workflow(build_command_from_definition(definition))
         self._direct: list[asyncio.Task[None]] = []
-        self._nonce = 0
+        self._delivered = 0
+        self._checkpoints = MemoryCheckpointStore()
+        self._start_process()
 
-        # The process-wide singletons the route handlers reach for.
-        monkeypatch.setattr(admission, "_execution_budget_singleton", self.budget)
-        monkeypatch.setattr(admission, "_admission_gate_singleton", self.gate)
         monkeypatch.setattr(wiring, "get_projection_mgr", lambda: self.projections)
         monkeypatch.setattr(commands, "get_projection_mgr", lambda: self.projections)
         monkeypatch.setattr(commands, "ensure_connected", _nothing)
         monkeypatch.setattr(wiring, "get_execute_workflow_handler", self._handler)
+        monkeypatch.setattr(repositories, "get_execution_request_repository", lambda: self.requests)
 
         async def _validated(
             workflow_id: str, request: ExecuteWorkflowRequest
@@ -283,6 +344,63 @@ class _World:
             return None, dict(request.inputs), []
 
         monkeypatch.setattr(commands, "_validate_execution_request", _validated)
+
+    def _start_process(self) -> None:
+        self.budget = ExecutionBudget(LIMIT)
+        self.gate = AdmissionGate(InMemoryMaintenanceAdapter())
+        processor = _processor(self.executions, self.agent)
+        self.handler = ExecuteWorkflowHandler(
+            processor=processor,
+            workflow_repository=_Templates(self.template),  # type: ignore[arg-type]
+            maintenance=self.gate,  # type: ignore[arg-type]
+        )
+        self.dispatcher = BackgroundWorkflowDispatcher(
+            self.handler,
+            budget=self.budget,
+            maintenance=self.gate,
+            resume_handler=StartResumeHandler(processor, self.executions),  # type: ignore[arg-type]
+            requests=self.requests,  # type: ignore[arg-type]
+        )
+        self.manager = ResumeStartProcessManager(
+            resume_starter=self.dispatcher,
+            store=self.projections.store,  # type: ignore[arg-type]
+        )
+        self.request_manager = ExecutionRequestStartProcessManager(
+            starter=self.dispatcher,
+            store=self.projections.store,  # type: ignore[arg-type]
+        )
+        # The process-wide singletons the route handlers reach for.
+        self._monkeypatch.setattr(admission, "_execution_budget_singleton", self.budget)
+        self._monkeypatch.setattr(admission, "_admission_gate_singleton", self.gate)
+
+    async def coordinate(self) -> tuple[int, int]:
+        """One coordinator pass: deliver what is new, then process live.
+
+        Returns how many resume and request starts were offered.
+        """
+        for envelope in self.log.envelopes[self._delivered :]:
+            for manager in (self.manager, self.request_manager):
+                if envelope.metadata.event_type in (manager.get_subscribed_event_types() or ()):
+                    await manager.handle_event(envelope, self._checkpoints)
+        self._delivered = len(self.log.envelopes)
+        return await self.manager.process_pending(), await self.request_manager.process_pending()
+
+    async def restart(self) -> None:
+        """The API process dies with whatever it held, and a new one starts.
+
+        Every task it was running or queueing is gone. The new process replays
+        the event log from the start, as a coordinator catching up does.
+        """
+        for task in [*self._direct, *self.dispatcher._tasks]:  # pyright: ignore[reportPrivateUsage]
+            task.cancel()
+        await asyncio.gather(
+            *self._direct,
+            *self.dispatcher._tasks,  # pyright: ignore[reportPrivateUsage]
+            return_exceptions=True,
+        )
+        self._direct = []
+        self._start_process()
+        self._delivered = 0
 
     async def _handler(self) -> ExecuteWorkflowHandler:
         return self.handler
@@ -302,7 +420,7 @@ class _World:
         await self.dispatcher.run_workflow(WORKFLOW_ID, {}, execution_id)
 
     async def a_failed_parent_is_resumed(self, parent_id: str) -> str:
-        """Run a parent that fails, resume it, and put the resume on the to-do list."""
+        """Run a parent that fails and resume it. The next `coordinate()` records it."""
         failing = _HeldAgent(failing=True)
         result = await _processor(self.executions, failing).run(
             workflow_id=WORKFLOW_ID,
@@ -331,26 +449,7 @@ class _World:
                 acknowledge_external_effects=True,
             )
         )
-        (resumed,) = [
-            e.event
-            for e in parent.get_uncommitted_events()
-            if type(e.event).__name__ == "ExecutionResumedEvent"
-        ]
         await self.executions.save(parent)
-        self._nonce += 1
-        await self.manager.handle_event(
-            EventEnvelope(
-                event=resumed,
-                metadata=EventMetadata(
-                    event_type="ExecutionResumed",
-                    aggregate_id=parent_id,
-                    aggregate_type="WorkflowExecution",
-                    aggregate_nonce=self._nonce,
-                    global_nonce=self._nonce,
-                ),
-            ),
-            MemoryCheckpointStore(),
-        )
         return child_id
 
     # -- observing -----------------------------------------------------------
@@ -368,7 +467,8 @@ class _World:
         """Make every `dispatched` record due for re-offer, as an hour's wait would."""
         for parent_id in parents:
             record = await self.resume_record(parent_id)
-            assert record.status == "dispatched"
+            if record.status != "dispatched":  # its child already started
+                continue
             await self.resume_store.save(
                 ResumeStartProcessManager.PROJECTION_NAME,
                 parent_id,
@@ -402,10 +502,13 @@ PARENTS = ("exec-parent-a", "exec-parent-b", "exec-parent-c")
 async def _everything_offered(world: _World) -> tuple[list[str], list[str]]:
     """Three resumes, two direct starts and one trigger start: six against two slots."""
     children = [await world.a_failed_parent_is_resumed(p) for p in PARENTS]
-    assert await world.manager.process_pending() == len(PARENTS)
+    assert await world.coordinate() == (len(PARENTS), 0)
     direct = [await world.post_execute(), await world.post_execute()]
     await world.trigger("exec-trigger-1557")
     await world.agent.until(lambda: len(world.agent.inside) == LIMIT)
+    # The direct starts are durable now, and the route's own tasks hold them:
+    # the request ProcessManager records them and offers neither.
+    assert await world.coordinate() == (0, 0)
     return children, [*direct, "exec-trigger-1557"]
 
 
@@ -505,8 +608,9 @@ class TestAReOfferWhileQueuedStartsNothingTwice:
 
         assert offered == 0
         assert len(world.dispatcher._tasks) == tasks_before  # pyright: ignore[reportPrivateUsage]
-        for parent_id in PARENTS:
-            assert (await world.resume_record(parent_id)).status == "dispatched"
+        statuses = [(await world.resume_record(p)).status for p in PARENTS]
+        assert "dispatched" in statuses, "a queued resume must still be owed its start"
+        assert set(statuses) <= {"dispatched", "started"}
 
         await _release_everything(world)
         assert sorted(world.agent.entered) == sorted(set(world.agent.entered))
@@ -557,3 +661,68 @@ class TestAReOfferWhileQueuedStartsNothingTwice:
 
         for child in children:
             assert world.agent.entered.count(child) == 1
+
+
+class TestADirectStartSurvivesARestart:
+    """Codex pass 2 on #1574: a queued direct start lived only in memory.
+
+    The 200 had already handed out its id, so a restart during the wait lost
+    the run silently - the "200, then the run vanishes" class (#998, #1545).
+    The request is now durable before the 200, and a new process starts it.
+    """
+
+    async def test_a_queued_direct_start_starts_exactly_once_after_a_restart(
+        self, world: _World
+    ) -> None:
+        running = [await world.post_execute(), await world.post_execute()]
+        queued = await world.post_execute()
+        await world.agent.until(lambda: len(world.agent.inside) == LIMIT)
+        assert queued not in world.agent.inside
+        assert await world.coordinate() == (0, 0), "held starts must not be offered"
+
+        await world.restart()
+
+        # Before any process holds it again, the durable record answers.
+        shown = await world.shown(queued)
+        assert shown.status == "queued"
+        assert shown.start_queue is not None
+        assert shown.start_queue.held is False
+
+        # The new process replays the log and starts what is still owed.
+        assert await world.coordinate() == (0, 1)
+        await world.agent.until(lambda: queued in world.agent.inside)
+        await _release_everything(world)
+
+        assert await world.coordinate() == (0, 0), "a settled request was offered again"
+        assert world.agent.entered.count(queued) == 1
+        for execution_id in running:
+            assert world.agent.entered.count(execution_id) == 1, "a started run restarted"
+        assert world.executions.streams[queued].status.value == "completed"
+
+    async def test_a_request_recorded_before_a_crash_is_started_exactly_once(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Durable, then the process died before it could reply or queue."""
+
+        def _crash(*args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RuntimeError("the API died before it replied")
+
+        monkeypatch.setattr(commands, "queue_direct_start", _crash)
+        with pytest.raises(RuntimeError, match="died"):
+            await world.post_execute()
+        (requested,) = [
+            e.metadata.aggregate_id
+            for e in world.log.envelopes
+            if e.metadata.event_type == "ExecutionRequested"
+        ]
+        assert requested is not None
+
+        await world.restart()
+        assert await world.coordinate() == (0, 1)
+        await world.agent.until(lambda: requested in world.agent.inside)
+        await _release_everything(world)
+
+        assert await world.coordinate() == (0, 0)
+        assert world.agent.entered.count(requested) == 1
+        assert world.executions.streams[requested].status.value == "completed"

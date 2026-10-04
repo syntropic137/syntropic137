@@ -29,7 +29,6 @@ from syn_api.types import (
 from syn_domain import tool_call_counts
 from syn_domain.contexts.orchestration import (
     MAX_START_ATTEMPTS,
-    FailureClassification,
     InvalidTagsError,
     ResumeStartProcessManager,
     TagSet,
@@ -47,7 +46,6 @@ from syn_shared.display import (
 from .models import (
     ExecutionDetailResponse,
     ExecutionListResponse,
-    ExecutionStartQueueInfo,
     ExecutionSummaryResponse,
     ResumeStartInfo,
 )
@@ -57,6 +55,7 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
+from .queued_start import not_yet_started, start_queue_info
 from .start_config import load_start_configs
 
 if TYPE_CHECKING:
@@ -65,7 +64,6 @@ if TYPE_CHECKING:
 
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
-    from syn_api.execution_budget import StartPosition
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -716,69 +714,6 @@ def _models_run(phases: list[PhaseExecutionInfo]) -> set[str]:
     return models
 
 
-def _start_queue_info(position: StartPosition | None) -> ExecutionStartQueueInfo | None:
-    """A budget position as the API states it (#1557)."""
-    if position is None:
-        return None
-    return ExecutionStartQueueInfo(
-        path=position.claim.path,
-        position=position.position,
-        running=position.running,
-        waiting=position.waiting,
-        limit=position.limit,
-        queued_at=position.claim.claimed_at,
-    )
-
-
-async def _not_yet_started(
-    mgr: ProjectionManager, execution_id: str
-) -> ExecutionDetailResponse | None:
-    """The detail of an accepted start that has no execution record yet (#1557).
-
-    A start waiting for an execution-budget slot exists only in this process
-    until its stream opens. Answering 404 for it told an operator who had just
-    been handed its id that it did not exist, for as long as the runs ahead of
-    it took. Matched by the same id prefix the projection lookup accepts.
-    """
-    matches = get_execution_budget().matching(execution_id)
-    if len(matches) != 1:
-        return None
-    claim = matches[0].claim
-    workflow = await mgr.workflow_detail.get_by_id(claim.workflow_id)
-    # Read the position AFTER the await, not before: the start may have taken a
-    # slot, or finished and released its claim, while the name was read.
-    position = get_execution_budget().position(claim.execution_id)
-    if position is None or position.claim is not claim:
-        return None
-    return ExecutionDetailResponse(
-        workflow_execution_id=claim.execution_id,
-        workflow_id=claim.workflow_id,
-        workflow_name=workflow.name if workflow is not None else "",
-        status="queued" if position.queued else "starting",
-        # Every read-model field, stated empty on purpose: a queued start has
-        # no read model yet, and this says so rather than defaulting silently.
-        started_at=None,
-        completed_at=None,
-        phases=[],
-        total_phases=0,
-        completed_phases=0,
-        artifact_ids=[],
-        error_message=None,
-        failure_classification=FailureClassification.UNCLASSIFIED,
-        reported_failure_reason=None,
-        repos=[],
-        tags=[],
-        total_duration_seconds=None,
-        inputs={},
-        total_input_tokens=0,
-        total_output_tokens=0,
-        total_cache_creation_tokens=0,
-        total_cache_read_tokens=0,
-        total_tokens=0,
-        start_queue=_start_queue_info(position),
-    )
-
-
 async def _detail_or_queued(
     mgr: ProjectionManager, execution_id: str
 ) -> tuple[ExecutionDetailFull, str] | ExecutionDetailResponse:
@@ -794,14 +729,14 @@ async def _detail_or_queued(
             mgr.store, "workflow_execution_details", execution_id, "Execution"
         )
     except HTTPException as exc:
-        queued = await _not_yet_started(mgr, execution_id) if exc.status_code == 404 else None
+        queued = await not_yet_started(mgr, execution_id) if exc.status_code == 404 else None
         if queued is None:
             raise
         return queued
     result = await get_detail(full_id)
     if isinstance(result, Ok):
         return result.value, full_id
-    queued = await _not_yet_started(mgr, full_id)
+    queued = await not_yet_started(mgr, full_id)
     if queued is None:
         raise HTTPException(status_code=404, detail=f"Execution {full_id} not found")
     return queued
@@ -826,7 +761,7 @@ async def _resume_start_of(
         max_attempts=MAX_START_ATTEMPTS,
         recorded_at=record.recorded_at,
         dispatched_at=record.dispatched_at,
-        start_queue=_start_queue_info(get_execution_budget().resume_of(execution_id)),
+        start_queue=start_queue_info(get_execution_budget().resume_of(execution_id)),
     )
 
 

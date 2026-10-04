@@ -1,4 +1,10 @@
-"""Queue a `POST /execute` start behind its lease and its budget slot (#1387, #1557)."""
+"""A `POST /execute` start: recorded durably, then queued for a budget slot (#1557).
+
+The record is what makes the 200 true across a restart. The queued task is
+only the fast path: while it holds the start's budget claim the request
+ProcessManager leaves the record alone, and if this process dies first the
+ProcessManager starts the request from the record instead.
+"""
 
 from __future__ import annotations
 
@@ -16,8 +22,32 @@ if TYPE_CHECKING:
     from fastapi import BackgroundTasks
 
     from syn_domain.contexts._shared import AdmissionTicket
+    from syn_domain.contexts.orchestration import RequestExecutionCommand
 
 logger = logging.getLogger(__name__)
+
+
+async def record_execution_request(
+    command: RequestExecutionCommand, admitted: AdmissionTicket
+) -> None:
+    """Write the request's `ExecutionRequested`, then end the admission lease.
+
+    Called inside the gate (#1387). Once the request is durable the drain need
+    not wait for its start: a deploy that restarts the API leaves it to the
+    request ProcessManager, which re-admits it through the gate. A write that
+    fails raises - the caller answers 500 and nothing was admitted.
+    """
+    from syn_adapters.storage.repositories import get_execution_request_repository
+    from syn_domain.contexts.orchestration import ExecutionRequestAggregate
+
+    request = ExecutionRequestAggregate()
+    request.request(command)
+    try:
+        await get_execution_request_repository().save_new(request)
+    except BaseException:
+        admitted.abort()
+        raise
+    admitted.mark_visible()
 
 
 def queue_direct_start(
@@ -38,12 +68,8 @@ def queue_direct_start(
     claim = budget.claim(execution_id, workflow_id=workflow_id, path=StartPath.DIRECT)
 
     async def _run() -> None:
-        # #1387: the lease, carried across the hop that used to spend it.
-        # `add_task` only queues this coroutine - Starlette runs it after the
-        # response - so the ticket cannot be released there. It ends inside
-        # `execute()` when the execution's start event is durable, or here if
-        # this task produced no execution at all. It spans the wait for a
-        # budget slot, as on the trigger path: queued work is admitted work.
+        # The lease already ended at the durable request (#1387, #1557);
+        # `carrying` is the backstop for a caller that queues without one.
         with carrying(admitted):
             try:
                 async with budget.held(claim):

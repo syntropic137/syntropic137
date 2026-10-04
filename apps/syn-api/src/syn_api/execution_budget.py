@@ -110,6 +110,16 @@ class ExecutionBudget:
     def limit(self) -> int:
         return self._limit
 
+    @property
+    def running(self) -> int:
+        """Starts holding a slot."""
+        return len(self._running)
+
+    @property
+    def waiting(self) -> int:
+        """Starts queued behind the limit."""
+        return len(self._waiting)
+
     def claim(
         self,
         execution_id: str,

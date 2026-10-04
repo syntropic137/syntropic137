@@ -23,6 +23,7 @@ from syn_domain.contexts.orchestration import (
     ResumeStartStatus,  # Pydantic resolves it at runtime
     SideEffectStatus,
 )
+from syn_domain.contexts.orchestration._shared.start_record import StartStatus  # noqa: TC001
 from syn_shared.display import EM_DASH
 from syn_shared.observed_model import format_observed_model
 
@@ -196,7 +197,17 @@ class ExecutionStartQueueInfo(BaseModel):
     """Which entrance the start came through: ``direct``, ``trigger`` or ``resume``."""
     position: int | None
     """1 is next to start. ``None`` once the start holds a slot and is opening
-    its execution."""
+    its execution, or when no process holds it (see ``held``)."""
+    held: bool = True
+    """Whether this API process holds the start in its budget. ``False`` for a
+    durable direct request no process has picked up yet - after a restart,
+    until the request ProcessManager offers it again."""
+    start_status: StartStatus | None = None
+    """The durable request record's status, for a direct start (#1557):
+    ``pending``, ``paused``, ``retryable`` and ``dispatched`` are still owed a
+    start; ``failed`` is settled, with ``status_reason``."""
+    status_reason: str | None = None
+    """Why the last attempt at a direct start did not start it, if one failed."""
     running: int
     """Starts holding a slot in this process."""
     waiting: int
@@ -209,6 +220,10 @@ class ExecutionStartQueueInfo(BaseModel):
     @computed_field(description="Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.")
     @property
     def position_display(self) -> str:
+        if not self.held:
+            return (
+                f"recorded, {self.start_status or 'pending'} ({self.running}/{self.limit} running)"
+            )
         if self.position is None:
             return f"starting ({self.running}/{self.limit} running)"
         return f"queued {self.position} of {self.waiting} ({self.running}/{self.limit} running)"

@@ -88,6 +88,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
+    ExecutionAlreadyRequestedError,
+    ExecutionRequestAggregate,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
     WorkflowTemplateConflictError,
     WorkflowTemplateDigestMismatchError,
@@ -117,6 +121,12 @@ from syn_domain.contexts.orchestration.domain.commands import (
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
+    RequestExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
+    ExecutionRequestedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
@@ -183,6 +193,11 @@ from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins impor
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
 )
+from syn_domain.contexts.orchestration.slices.start_execution_request import (
+    ExecutionRequestStarter,
+    ExecutionRequestStartProcessManager,
+    ExecutionRequestStartRecord,
+)
 from syn_domain.contexts.orchestration.slices.start_resume import (
     MAX_START_ATTEMPTS,
     ResumeStarter,
@@ -248,8 +263,14 @@ __all__ = [
     "ExecuteCommandCommand",
     "ExecuteWorkflowCommand",
     "ExecuteWorkflowHandler",
+    "ExecutionAlreadyRequestedError",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionRequestAggregate",
+    "ExecutionRequestStartProcessManager",
+    "ExecutionRequestStartRecord",
+    "ExecutionRequestStarter",
+    "ExecutionRequestedEvent",
     "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
@@ -276,6 +297,7 @@ __all__ = [
     "RemoveWorkflowTagsCommand",
     "RemoveWorkflowTagsHandler",
     "ReportedFailureReason",
+    "RequestExecutionCommand",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "ResumeExecutionCommand",

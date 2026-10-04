@@ -488,6 +488,8 @@ def create_coordinator_service(
         TriggerHistoryProjection,
     )
     from syn_domain.contexts.orchestration import (
+        ExecutionRequestStarter,
+        ExecutionRequestStartProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
     )
@@ -534,7 +536,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
     from syn_domain.tool_call_counts import ToolCallCountsProjection
 
-    # Create all checkpointed projections (26 total - bumped for ADR-014 s7)
+    # Create all checkpointed projections (27 total - bumped for #1557)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -556,6 +558,12 @@ def create_coordinator_service(
             # dispatcher as above, through its gated `start_resume`.
             ResumeStartProcessManager(
                 resume_starter=cast("ResumeStarter | None", execution_service),
+                store=projection_store,
+            ),
+            # #1557: starts every admitted direct request from its durable
+            # record - after a restart, or when the route's own task never ran.
+            ExecutionRequestStartProcessManager(
+                starter=cast("ExecutionRequestStarter | None", execution_service),
                 store=projection_store,
             ),
             TriggerQueryProjection(projection_store),

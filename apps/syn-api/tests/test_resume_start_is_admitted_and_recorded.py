@@ -52,9 +52,7 @@ PARENT = "exec-parent-1454"
 
 #: The start to-do list module, where DISPATCH_GRACE is read (#1557).
 #: Imported by path so the module, not a re-exported name, is patched.
-_pm_module = importlib.import_module(
-    "syn_domain.contexts.orchestration._shared.start_todo"
-)
+_pm_module = importlib.import_module("syn_domain.contexts.orchestration._shared.start_todo")
 _PROJECTION = ResumeStartProcessManager.PROJECTION_NAME
 
 

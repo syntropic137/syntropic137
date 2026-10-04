@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 if TYPE_CHECKING:
@@ -32,7 +32,11 @@ if TYPE_CHECKING:
         MaintenancePort,
     )
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
-    from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
+    from syn_domain.contexts.orchestration import (
+        ExecuteWorkflowCommand,
+        ExecuteWorkflowHandler,
+        ExecutionRequestAggregate,
+    )
     from syn_domain.contexts.orchestration.slices.start_resume import (
         ResumeChild,
         StartFailureReporter,
@@ -176,6 +180,12 @@ def get_execution_budget() -> ExecutionBudget:
 ResumeHandlerFactory = Callable[[], Awaitable["StartResumeHandler"]]
 
 
+class ExecutionRequests(Protocol):
+    """Reads the durable record of an admitted direct start (#1557)."""
+
+    async def get_by_id(self, aggregate_id: str) -> ExecutionRequestAggregate | None: ...
+
+
 class BackgroundWorkflowDispatcher:
     """Bridges WorkflowDispatchProjection → ExecuteWorkflowHandler.
 
@@ -192,6 +202,7 @@ class BackgroundWorkflowDispatcher:
         maintenance: AdmissionGate | None = None,
         resume_handler: StartResumeHandler | ResumeHandlerFactory | None = None,
         budget: ExecutionBudget | None = None,
+        requests: ExecutionRequests | None = None,
     ) -> None:
         """``budget`` is the ONE execution budget every start path shares (#1557).
 
@@ -224,6 +235,10 @@ class BackgroundWorkflowDispatcher:
         self._resume_handler_factory: ResumeHandlerFactory | None = (
             resume_handler if callable(resume_handler) else None
         )
+        #: Where admitted direct starts are recorded (#1557). Read when one is
+        #: offered for a start that is not already queued here - after a
+        #: restart, or when the route's own task never ran.
+        self._requests = requests
 
     @property
     def budget(self) -> ExecutionBudget:
@@ -360,11 +375,11 @@ class BackgroundWorkflowDispatcher:
                     # ever, counting no attempt and recording no reason (#1463).
                     # The record decides what the failure means; this only
                     # delivers it.
-                    await self._report_resume_failure(parent_execution_id, on_failure, exc)
+                    await self._report_start_failure(parent_execution_id, on_failure, exc)
 
     @staticmethod
-    async def _report_resume_failure(
-        parent_execution_id: str, on_failure: StartFailureReporter, exc: Exception
+    async def _report_start_failure(
+        start_key: str, on_failure: StartFailureReporter, exc: Exception
     ) -> None:
         """Hand the failure over; a failure to record it is only logged.
 
@@ -374,10 +389,102 @@ class BackgroundWorkflowDispatcher:
         try:
             await on_failure(exc)
         except Exception:
-            logger.exception(
-                "Could not record the failed resume start",
-                extra={"parent_execution_id": parent_execution_id},
-            )
+            logger.exception("Could not record the failed start", extra={"start": start_key})
+
+    def holds_request(self, execution_id: str) -> bool:
+        """Whether this requested execution's start is queued or running here (#1557)."""
+        return self._budget.position(execution_id) is not None
+
+    async def start_requested(
+        self, execution_id: str, *, on_failure: StartFailureReporter
+    ) -> AdmissionTicket | None:
+        """Start an admitted direct request from its durable record (#1557).
+
+        `ExecutionRequestStartProcessManager` -> here, with `start_resume`'s
+        shape: refusals are raised synchronously so the to-do list can record
+        them, the start runs as a task that claims a budget slot, and what fails
+        inside it is handed to ``on_failure``. A start already queued or running
+        here is a no-op; one whose execution already exists is refused by the
+        execution stream's NoStream write and counts as started.
+        """
+        if self.holds_request(execution_id):
+            return None
+        if self._requests is None:
+            msg = "This dispatcher was built without an execution request repository"
+            raise RuntimeError(msg)
+        request = await self._requests.get_by_id(execution_id)
+        if request is None or request.workflow_id is None:
+            msg = f"No execution request {execution_id}"
+            raise ValueError(msg)
+        from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
+
+        command = ExecuteWorkflowCommand(
+            aggregate_id=request.workflow_id,
+            inputs=request.inputs,
+            repos=request.repos,
+            execution_id=execution_id,
+            task=request.task,
+            tags=request.tags,
+        )
+        if self._maintenance is not None:
+            await self._maintenance.refuse_early()
+        await self._handler.validate_stored_declarations(command.aggregate_id)
+        if self._maintenance is None:
+            self._spawn_requested(command, None, on_failure)
+            return None
+        async with self._maintenance.admitting() as ticket:
+            self._spawn_requested(command, ticket, on_failure)
+            return ticket
+
+    def _spawn_requested(
+        self,
+        command: ExecuteWorkflowCommand,
+        ticket: AdmissionTicket | None,
+        on_failure: StartFailureReporter,
+    ) -> None:
+        execution_id = command.execution_id or ""
+        claim = self._claim(
+            execution_id, workflow_id=command.aggregate_id, path=StartPath.DIRECT, ticket=ticket
+        )
+        if claim is None:
+            return
+        asyncio_task = asyncio.create_task(
+            self._start_requested_in_budget(command, claim, ticket, on_failure),
+            name=f"request-start-{execution_id}",
+        )
+        self._track(asyncio_task, claim, ticket)
+
+    async def _start_requested_in_budget(
+        self,
+        command: ExecuteWorkflowCommand,
+        claim: StartClaim,
+        admitted: AdmissionTicket | None,
+        on_failure: StartFailureReporter,
+    ) -> None:
+        from syn_domain.contexts.orchestration import (
+            DuplicateExecutionError,
+            WorkflowNotFoundError,
+        )
+
+        with carrying(admitted):
+            async with self._budget.held(claim):
+                try:
+                    await self._handler.handle(command, admitted=admitted)
+                except DuplicateExecutionError:
+                    # Its stream already exists: started, by this or another
+                    # process. The start event settles the record.
+                    logger.info("Requested execution %s already started", claim.execution_id)
+                except WorkflowNotFoundError as exc:
+                    # A refusal by recorded facts, so terminal: ValueError.
+                    await self._report_start_failure(
+                        claim.execution_id, on_failure, ValueError(str(exc))
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Requested execution start raised exception",
+                        extra={"execution_id": claim.execution_id},
+                    )
+                    await self._report_start_failure(claim.execution_id, on_failure, exc)
 
     async def run_workflow(
         self,

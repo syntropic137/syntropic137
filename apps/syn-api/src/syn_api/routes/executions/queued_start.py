@@ -1,0 +1,133 @@
+"""What GET /executions/{id} answers for an accepted start with no execution yet (#1557).
+
+Two sources, in order. The execution budget knows where a start held in THIS
+process stands - its queue position, or that it holds a slot. The request
+start to-do record is durable: it is there after a restart, before any process
+holds the start again, and it says how the last attempt went. Neither is a
+read model of the execution, which does not exist until its stream opens.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from syn_api._wiring_admission import get_execution_budget
+from syn_api.execution_budget import StartPath
+from syn_domain.contexts.orchestration import (
+    ExecutionRequestStartProcessManager,
+    ExecutionRequestStartRecord,
+    FailureClassification,
+)
+from syn_domain.contexts.orchestration._shared.start_record import read_start_record
+from syn_domain.contexts.orchestration._shared.start_todo import OWED_STATUSES
+
+from .models import ExecutionDetailResponse, ExecutionStartQueueInfo
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_adapters.projections.manager import ProjectionManager
+    from syn_api.execution_budget import StartPosition
+
+
+def start_queue_info(
+    position: StartPosition | None, record: ExecutionRequestStartRecord | None = None
+) -> ExecutionStartQueueInfo | None:
+    """A budget position and/or a durable request record, as the API states them."""
+    budget = get_execution_budget()
+    if position is not None:
+        return ExecutionStartQueueInfo(
+            path=position.claim.path,
+            position=position.position,
+            held=True,
+            running=position.running,
+            waiting=position.waiting,
+            limit=position.limit,
+            queued_at=position.claim.claimed_at,
+            start_status=record.status if record is not None else None,
+            status_reason=record.status_reason if record is not None else None,
+        )
+    if record is None:
+        return None
+    return ExecutionStartQueueInfo(
+        path=StartPath.DIRECT,
+        position=None,
+        held=False,
+        running=budget.running,
+        waiting=budget.waiting,
+        limit=budget.limit,
+        queued_at=record.recorded_at,
+        start_status=record.status,
+        status_reason=record.status_reason,
+    )
+
+
+async def _request_record(
+    store: ProjectionStoreProtocol, execution_id: str
+) -> ExecutionRequestStartRecord | None:
+    row = await store.get(ExecutionRequestStartProcessManager.PROJECTION_NAME, execution_id)
+    return read_start_record(ExecutionRequestStartRecord, row) if row is not None else None
+
+
+def _status(position: StartPosition | None, record: ExecutionRequestStartRecord | None) -> str:
+    if position is not None:
+        return "queued" if position.queued else "starting"
+    assert record is not None
+    if record.status in OWED_STATUSES:
+        return "queued"
+    return "failed" if record.status == "failed" else "starting"
+
+
+async def not_yet_started(
+    mgr: ProjectionManager, execution_id: str
+) -> ExecutionDetailResponse | None:
+    """The detail of an accepted start that has no execution record yet.
+
+    Answering 404 for it told an operator who had just been handed its id that
+    it did not exist, for as long as the runs ahead of it took - and, before the
+    request was durable, for ever once the API restarted.
+    """
+    budget = get_execution_budget()
+    matches = budget.matching(execution_id)
+    claim = matches[0].claim if len(matches) == 1 else None
+    full_id = claim.execution_id if claim is not None else execution_id
+    record = await _request_record(mgr.store, full_id)
+    if claim is not None:
+        workflow_id = claim.workflow_id
+    elif record is not None:
+        workflow_id = record.workflow_id
+    else:
+        return None
+    workflow = await mgr.workflow_detail.get_by_id(workflow_id)
+    # Read the position AFTER the awaits: the start may have taken a slot, or
+    # finished and released its claim, meanwhile.
+    position = budget.position(full_id)
+    if position is None and record is None:
+        return None
+    failed = position is None and record is not None and record.status == "failed"
+    return ExecutionDetailResponse(
+        workflow_execution_id=full_id,
+        workflow_id=workflow_id,
+        workflow_name=workflow.name if workflow is not None else "",
+        status=_status(position, record),
+        # Every read-model field, stated empty on purpose: a queued start has
+        # no read model yet, and this says so rather than defaulting silently.
+        started_at=None,
+        completed_at=None,
+        phases=[],
+        total_phases=0,
+        completed_phases=0,
+        artifact_ids=[],
+        error_message=record.status_reason if failed and record is not None else None,
+        failure_classification=FailureClassification.UNCLASSIFIED,
+        reported_failure_reason=None,
+        repos=[],
+        tags=[],
+        total_duration_seconds=None,
+        inputs={},
+        total_input_tokens=0,
+        total_output_tokens=0,
+        total_cache_creation_tokens=0,
+        total_cache_read_tokens=0,
+        total_tokens=0,
+        start_queue=start_queue_info(position, record),
+    )
