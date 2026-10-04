@@ -1,14 +1,34 @@
-import type { PhaseStartConfig } from '../../types'
+import type { PhaseStartConfig, StartPinsStatus } from '../../types'
 import './provenance.css'
 
 /**
  * What a phase had when its execution started: model, tools, skills (#1454).
  *
- * `null` is "not recorded" - a run from before #1454 - and is never filled in
- * from the workflow as it stands now. An empty tool list is NOT "no tools":
- * the phase declared no restriction and ran with the harness's default set.
+ * Missing pins are never filled in from the workflow as it stands now, and
+ * there are two ways to be missing. Only `status: 'not_recorded'` - the server
+ * read the start event and it predates #1454 - says "not recorded". Anything
+ * else, including a server that does not send a status, is "unavailable": the
+ * start event was not read, so what it recorded is unknown. An empty tool list
+ * is NOT "no tools": the phase declared no restriction and ran with the
+ * harness's default set.
  */
-export function PhaseStartPins({ pins }: { pins: PhaseStartConfig | null | undefined }) {
+export function PhaseStartPins({
+  pins,
+  status,
+}: {
+  pins: PhaseStartConfig | null | undefined
+  status: StartPinsStatus | undefined
+}) {
+  if (pins == null && status !== 'not_recorded') {
+    return (
+      <p
+        className="provenance-pins provenance-muted"
+        title="The execution's start event could not be read just now; this says nothing about what it recorded"
+      >
+        Start config: unavailable
+      </p>
+    )
+  }
   if (pins == null) {
     return (
       <p

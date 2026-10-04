@@ -238,7 +238,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
               <div className="phase-with-inventory">
                 <PhaseCard phase={phase} tone={phaseTone(phase, execution)} now={now} />
                 {/* Outside the card: the card is a link, and this expands in place. */}
-                <PhaseStartPins pins={phase.pinned_at_start} />
+                <PhaseStartPins pins={phase.pinned_at_start} status={phase.start_pins_status} />
                 <Link
                   className="phase-inventory-link"
                   to={sessionInventoryHref(execution.workflow_execution_id, phase.workflow_phase_id)}

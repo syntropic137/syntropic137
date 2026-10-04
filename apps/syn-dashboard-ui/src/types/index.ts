@@ -414,13 +414,18 @@ export interface PhaseExecutionDetail {
   /**
    * The tools, skills and model this phase had when its execution STARTED,
    * read from the run's own start event (#1454) - never the current template.
-   * Null or absent means not recorded: a run from before #1454.
+   * Null says nothing by itself: `start_pins_status` says whether it was
+   * not recorded (a run from before #1454) or could not be read.
    */
   pinned_at_start?: PhaseStartConfig | null
+  /** Absent from a server that predates the field: treat as `unavailable`. */
+  start_pins_status?: StartPinsStatus
 }
 
 /** A phase's start config, aliased to the generated schema rather than restated. */
 export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
+/** Why a phase's start pins are or are not shown; only `not_recorded` reads as "not recorded". */
+export type StartPinsStatus = components['schemas']['PhaseExecutionInfo']['start_pins_status']
 
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
