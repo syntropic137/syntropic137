@@ -107,6 +107,8 @@ class WorkflowResponse(BaseModel):
     requires_repos: bool  # required for the same reason as the summary model
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Future runs only."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -292,6 +294,7 @@ async def get_workflow(
             repos=list(detail.repos),
             requires_repos=detail.requires_repos,
             tags=list(detail.tags),
+            default_eval_id=detail.default_eval_id,
         )
     )
 
@@ -612,6 +615,11 @@ def _build_workflow_yaml(detail: WorkflowDetail) -> str:
         f"type: {detail.workflow_type}",
         f"classification: {detail.classification}",
         *([f"tags: {_yaml_flow_list(detail.tags)}"] if detail.tags else []),
+        *(
+            [f"default_eval_id: {_yaml_quote(detail.default_eval_id)}"]
+            if detail.default_eval_id
+            else []
+        ),
         *_yaml_input_lines(detail),
         "",
         "phases:",
@@ -817,6 +825,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         repos=list(detail.repos),
         requires_repos=detail.requires_repos,
         tags=list(detail.tags),
+        default_eval_id=detail.default_eval_id,
     )
 
 

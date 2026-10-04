@@ -241,6 +241,9 @@ class WorkflowDetail:
     tags: tuple[str, ...] = ()
     """The template's tags, normalised and sorted (#967). Exported as ``tags:``."""
 
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Exported as ``default_eval_id:``."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
@@ -305,6 +308,7 @@ class WorkflowDetail:
             repos=tuple(data.get("repos", [])),
             requires_repos=data.get("requires_repos", True),
             tags=tuple(data.get("tags") or ()),
+            default_eval_id=data.get("default_eval_id"),
         )
 
     @staticmethod
@@ -382,4 +386,5 @@ class WorkflowDetail:
             "repos": list(self.repos),
             "requires_repos": self.requires_repos,
             "tags": list(self.tags),
+            "default_eval_id": self.default_eval_id,
         }

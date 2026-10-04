@@ -557,6 +557,8 @@ class WorkflowDetail(BaseModel):
     requires_repos: bool = True
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Future runs only."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 

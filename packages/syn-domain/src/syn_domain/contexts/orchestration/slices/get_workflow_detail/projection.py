@@ -22,6 +22,9 @@ from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+    WorkflowDefaultEvalSetEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
     WorkflowTagsAddedEvent,
 )
@@ -117,7 +120,10 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # v10 is the v9 case again (#967): a row written before tags existed has no
     # `tags` key, and `from_dict` would report "no tags" for a workflow that
     # has them -- and the export would then drop them on the way out.
-    VERSION = 10  # v10: tags (#967)
+    #
+    # v11 is the same case for `default_eval_id` (#967): a v10 row would report
+    # no default for a workflow that has one, and the export would drop it.
+    VERSION = 11  # v11: default_eval_id (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -202,6 +208,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             repos=tuple(event_data.get("repos", [])),
             requires_repos=event_data.get("requires_repos", True),
             tags=TagSet.recorded(event_data.get("tags") or []).values,
+            default_eval_id=event_data.get("default_eval_id"),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 
@@ -240,6 +247,14 @@ class WorkflowDetailProjection(AutoDispatchProjection):
         if existing:
             existing["runs_count"] = existing.get("runs_count", 0) + 1
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+
+    async def on_workflow_default_eval_set(self, event_data: WorkflowDefaultEvalSetEvent) -> None:
+        """Handle WorkflowDefaultEvalSet (#967)."""
+        event = WorkflowDefaultEvalSetEvent.model_validate(event_data)
+        existing = await self._store.get(self.PROJECTION_NAME, event.workflow_id)
+        if existing:
+            existing["default_eval_id"] = event.eval_id
+            await self._store.save(self.PROJECTION_NAME, event.workflow_id, existing)
 
     async def on_workflow_tags_added(self, event_data: WorkflowTagsAddedEvent) -> None:
         """Handle WorkflowTagsAdded (#967)."""

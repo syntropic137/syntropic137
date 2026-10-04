@@ -40,6 +40,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membershi
     AssociationKind,
     EvalMembership,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutionStatus,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     WorkflowExecutionAggregate,
 )
@@ -60,9 +63,6 @@ from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand im
 )
 from syn_domain.contexts.orchestration.domain.commands.SetWorkflowDefaultEvalCommand import (
     SetWorkflowDefaultEvalCommand,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    ExecutionStatus,
 )
 from syn_domain.contexts.orchestration.slices.archive_eval import ArchiveEvalHandler
 from syn_domain.contexts.orchestration.slices.attach_execution_to_eval import (
