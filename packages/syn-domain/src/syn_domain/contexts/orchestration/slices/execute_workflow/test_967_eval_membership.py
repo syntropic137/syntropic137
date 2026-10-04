@@ -65,6 +65,9 @@ from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand im
 from syn_domain.contexts.orchestration.domain.commands.SetWorkflowDefaultEvalCommand import (
     SetWorkflowDefaultEvalCommand,
 )
+from syn_domain.contexts.orchestration.domain.events.EvalArchivedEvent import (
+    EvalArchivedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
     ExecutionAttachedToEvalEvent,
 )
@@ -439,6 +442,95 @@ async def test_attach_to_an_archived_eval_is_refused_and_writes_nothing() -> Non
         )
 
     assert await world.stored(ExecutionAttachedToEvalEvent, "exec-1") == []
+
+
+async def test_a_repeated_attach_after_archive_is_still_a_no_op() -> None:
+    """Membership is decided before the eval is asked (Codex review, PR #1562)."""
+    world = await _world("eval-1")
+    await world.run("exec-1")
+    command = AttachExecutionToEvalCommand(aggregate_id="exec-1", eval_id=EvalId("eval-1"))
+    first = await world.attach.handle(command)
+    assert first is not None and first.success
+    stream_before = await stored_envelopes(world.executions_store)
+
+    await world.archive_eval("eval-1")
+    again = await world.attach.handle(command)
+
+    assert again is not None and again.success
+    assert again.membership == EvalMembership("eval-1", AssociationKind.ATTACHED, None)
+    assert await stored_envelopes(world.executions_store) == stream_before
+    assert len(await world.stored(ExecutionAttachedToEvalEvent, "exec-1")) == 1
+
+
+class _ArchiveBeforeWrite:
+    """The run's repository, with an archive committed between admission and write.
+
+    Real interleaving, not a stub: the eval is archived through the real
+    handler, on the real eval stream, after the attach has read the eval and
+    before it writes the run's stream.
+    """
+
+    def __init__(self, world: _World, eval_id: str) -> None:
+        self._world = world
+        self._eval_id = eval_id
+        self.saves = 0
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
+        return await self._world.executions.get_by_id(aggregate_id)
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        self.saves += 1
+        await self._world.archive_eval(self._eval_id)
+        await self._world.executions.save(aggregate)
+
+    async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
+        await self._world.executions.save_new(aggregate)
+
+    async def exists(self, aggregate_id: str) -> bool:
+        return await self._world.executions.exists(aggregate_id)
+
+
+async def test_an_archive_between_admission_and_write_does_not_undo_the_attach() -> None:
+    """Pins the documented admission point (Attach, orchestration ubiquitous language).
+
+    Archive closes admission as of the eval version the attach read. One that
+    commits after that read is not seen: the attach lands and is ordered before
+    the archive. Every later attach is refused; detach remedies.
+    """
+    world = await _world("eval-1")
+    await world.run("exec-1")
+    await world.run("exec-2")
+    racing = _ArchiveBeforeWrite(world, "eval-1")
+    attach = AttachExecutionToEvalHandler(racing, world.evals)
+
+    late = await attach.handle(
+        AttachExecutionToEvalCommand(aggregate_id="exec-1", eval_id=EvalId("eval-1"))
+    )
+
+    assert racing.saves == 1
+    assert late is not None and late.success
+    stored_eval = await world.evals.get_by_id("eval-1")
+    assert stored_eval is not None and stored_eval.is_archived
+    assert [
+        envelope.event.eval_id
+        for envelope in await stored_envelopes(world.evals_store)
+        if isinstance(envelope.event, EvalArchivedEvent)
+    ] == ["eval-1"]
+    [attached] = await world.stored(ExecutionAttachedToEvalEvent, "exec-1")
+    assert attached.eval_id == "eval-1"
+    assert await world.membership("exec-1") == EvalMembership(
+        "eval-1", AssociationKind.ATTACHED, None
+    )
+
+    with pytest.raises(EvalUnavailableError, match="is archived"):
+        await world.attach.handle(
+            AttachExecutionToEvalCommand(aggregate_id="exec-2", eval_id=EvalId("eval-1"))
+        )
+    detached = await world.detach.handle(
+        DetachExecutionFromEvalCommand(aggregate_id="exec-1", eval_id=EvalId("eval-1"))
+    )
+    assert detached is not None and detached.success
+    assert await world.membership("exec-1") == EvalMembership(None, None, None)
 
 
 async def test_detach_keeps_the_launch_record_and_replay_rebuilds_it() -> None:

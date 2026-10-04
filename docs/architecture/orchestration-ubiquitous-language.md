@@ -226,6 +226,24 @@ belongs to at most one Eval. Attaching it to the Eval it already belongs to
 succeeds and records nothing; attaching it to a different one is refused until
 it is Detached.
 
+Membership is decided before the Eval is consulted. A run already in the Eval
+is a no-op success even after the Eval is Archived, so a repeated attach never
+turns into a refusal. Only an attach that would record an event asks the Eval
+aggregate whether it can take the run.
+
+**Admission point.** An attach reads the Eval aggregate, then writes the
+Execution's stream. The two are separate streams with no shared transaction,
+and Attach deliberately does not write the Eval's (see Eval). So Archive closes
+admission as of the Eval version the attach read: an `EvalArchived` that
+commits after that read and before the Execution write does not refuse the
+attach. The attach is ordered before the archive: it was decided and admitted
+against the open Eval, and the run stays a member of the Archived Eval like any
+run admitted earlier. Nothing marks it, and `attached_at` against `archived_at`
+is not evidence either way, since the two clocks are stamped at decision time,
+not commit time. Detach remedies it, and works on an Archived Eval. Every attach
+that reads the Eval after the archive committed is refused. A launch is admitted
+the same way.
+
 ## Detach
 
 Take an Execution out of the Eval it belongs to. The command names that Eval,

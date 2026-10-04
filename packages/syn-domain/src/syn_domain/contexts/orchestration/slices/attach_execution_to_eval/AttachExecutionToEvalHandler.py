@@ -45,15 +45,25 @@ class AttachExecutionToEvalHandler:
     async def handle(self, command: AttachExecutionToEvalCommand) -> EvalMembershipResult | None:
         """Return the run's membership after the attach, or None if the run is unknown.
 
-        Raises ``EvalUnavailableError`` if the eval does not exist or is archived,
-        decided by loading the Eval aggregate and never by a read model.
+        Membership is decided first: a run already in the eval is a no-op success
+        even if the eval has been archived since. Only an attach that would write
+        asks the Eval aggregate, never a read model, and raises
+        ``EvalUnavailableError`` if the eval does not exist or is archived.
+
+        The eval is read, then the run's stream is written: two streams, no
+        shared transaction. An archive that commits between the two does not
+        undo the attach (see Attach, orchestration ubiquitous language).
         """
         eval_id = str(command.eval_id)
-        await open_eval(self._eval_repository, eval_id)
+
+        async def admit() -> None:
+            await open_eval(self._eval_repository, eval_id)
+
         return await edit_membership(
             self._repository,
             command.aggregate_id,
             lambda execution: execution.attach_to_eval(command),
             lambda stored: stored.eval_id == eval_id,
             self._event_publisher,
+            admit,
         )

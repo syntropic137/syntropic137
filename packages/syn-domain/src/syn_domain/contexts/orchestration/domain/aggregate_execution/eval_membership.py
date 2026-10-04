@@ -18,7 +18,8 @@ association was made after the fact.
 The rules are decided here, so the aggregate's handlers only check the run
 exists and apply what comes back. Whether the EVAL can take the run (exists, not
 archived) is not decidable from this stream; the attach slice asks the Eval
-aggregate before it gets here.
+aggregate after this decides the attach would record an event, so an attach
+that changes nothing never asks it.
 """
 
 from __future__ import annotations
