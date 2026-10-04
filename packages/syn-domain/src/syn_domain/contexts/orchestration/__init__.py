@@ -104,12 +104,16 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     SidecarConfig,
 )
 from syn_domain.contexts.orchestration.domain.commands import (
+    AddExecutionTagsCommand,
+    AddWorkflowTagsCommand,
     ArchiveWorkflowTemplateCommand,
     CreateWorkflowTemplateCommand,
     CreateWorkspaceCommand,
     ExecuteCommandCommand,
     ExecuteWorkflowCommand,
     InjectTokensCommand,
+    RemoveExecutionTagsCommand,
+    RemoveWorkflowTagsCommand,
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
@@ -188,6 +192,14 @@ from syn_domain.contexts.orchestration.slices.start_resume import (
     StartResumeHandler,
     read_record,
 )
+from syn_domain.contexts.orchestration.slices.tag_execution import (
+    AddExecutionTagsHandler,
+    RemoveExecutionTagsHandler,
+)
+from syn_domain.contexts.orchestration.slices.tag_workflow import (
+    AddWorkflowTagsHandler,
+    RemoveWorkflowTagsHandler,
+)
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
@@ -199,6 +211,11 @@ __all__ = [
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     "RETIRED_PHASE_FIELDS",
+    # Tag edits after creation (#967)
+    "AddExecutionTagsCommand",
+    "AddExecutionTagsHandler",
+    "AddWorkflowTagsCommand",
+    "AddWorkflowTagsHandler",
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
@@ -254,6 +271,10 @@ __all__ = [
     "PhaseExecutionType",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "RemoveExecutionTagsCommand",
+    "RemoveExecutionTagsHandler",
+    "RemoveWorkflowTagsCommand",
+    "RemoveWorkflowTagsHandler",
     "ReportedFailureReason",
     "ResolvedClaudePlugin",
     "ResolvedSkill",

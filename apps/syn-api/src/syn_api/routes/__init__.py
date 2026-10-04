@@ -19,6 +19,7 @@ from syn_api.routes.sessions import router as sessions_router
 from syn_api.routes.skills import router as skills_router
 from syn_api.routes.sse import router as sse_router
 from syn_api.routes.systems import router as systems_router
+from syn_api.routes.tags import router as tags_router
 from syn_api.routes.triggers import router as triggers_router
 from syn_api.routes.webhooks import router as webhooks_router
 from syn_api.routes.workflows import router as workflows_router
@@ -43,6 +44,7 @@ __all__ = [
     "skills_router",
     "sse_router",
     "systems_router",
+    "tags_router",
     "triggers_router",
     "webhooks_router",
     "workflows_router",

@@ -1,0 +1,12 @@
+# Excerpt of the v0.33.1 release asset: every image pinned BY DIGEST.
+services:
+  event-store:
+    image: ghcr.io/syntropic137/event-store@sha256:63df7cc4b5a0d2e1f3c4b5a6d7e8f90123456789abcdef0123456789abcdef01
+  api:
+    container_name: syn137-api
+    image: ghcr.io/syntropic137/syn-api@sha256:bf783882d031e7a19e46df5394a67a91e78419f0bef7cb7ee835253f70e78b84
+  gateway:
+    container_name: syn137-gateway
+    image: ghcr.io/syntropic137/syn-gateway@sha256:6b416d4a25dd8bd5e53f712485eb07db91fd4605101f1f7ce1d284d550d1f7bd
+  token-injector:
+    image: ghcr.io/syntropic137/token-injector@sha256:a8ad87e8b5a0d2e1f3c4b5a6d7e8f90123456789abcdef0123456789abcdef01
