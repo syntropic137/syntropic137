@@ -26,7 +26,9 @@ from httpx import ASGITransport, AsyncClient
 
 from syn_adapters import postgres_pool
 from syn_adapters.postgres_pool import _InstrumentedPool
+from syn_adapters.subscriptions.coordinator_service import SubscriptionServiceStatus
 from syn_api.middleware.request_timing import RequestTimingAggregator, RequestTimingMiddleware
+from syn_api.services import lifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -240,6 +242,53 @@ async def test_health_reports_every_open_pool_with_its_waiters(
     assert json.loads(response.text)["db_pools"] == [
         {"name": "projections", "size": 4, "max_size": 7, "in_use": 3, "waiting": 1}
     ]
+
+
+class _StalledLagSubscription:
+    """A subscription service whose DB-backed lag read never returns, as in a pool stall."""
+
+    def __init__(self) -> None:
+        self.lag_read_started = asyncio.Event()
+
+    def get_status(self) -> SubscriptionServiceStatus:
+        return SubscriptionServiceStatus(running=True, projection_count=1, realtime_enabled=False)
+
+    async def describe_read_model_lag(self) -> None:
+        self.lag_read_started.set()
+        await asyncio.Event().wait()
+
+
+async def test_health_still_reports_a_waiting_pool_while_the_lag_probe_is_stalled(
+    blocking_pool: tuple[_InstrumentedPool, asyncio.Event],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stall the gauges diagnose must not be able to hold /health until it ends."""
+    from syn_api.main import create_app
+
+    pool, gate = blocking_pool
+    stalled = _StalledLagSubscription()
+    monkeypatch.setattr(lifecycle._state, "subscription_service", stalled)
+    monkeypatch.setattr(lifecycle, "_LAG_PROBE_TIMEOUT_S", 0.2)
+    waiter = asyncio.create_task(pool.acquire().__aenter__())
+    await asyncio.sleep(0)
+    assert pool.waiting == 1
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=create_app()), base_url="http://test"
+        ) as client:
+            # Far longer than the probe bound, far shorter than "until it recovers".
+            response = await asyncio.wait_for(client.get("/health"), timeout=3)
+    finally:
+        gate.set()
+        await waiter
+
+    assert stalled.lag_read_started.is_set()
+    assert response.status_code == 200, response.text
+    body = json.loads(response.text)
+    assert body["db_pools"] == [
+        {"name": "projections", "size": 4, "max_size": 7, "in_use": 3, "waiting": 1}
+    ]
+    assert body["subscription"]["status"] == "unknown"
 
 
 async def test_create_app_takes_the_threshold_from_settings(
