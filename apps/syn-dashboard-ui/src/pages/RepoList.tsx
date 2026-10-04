@@ -12,18 +12,20 @@
 import { FolderGit2, Lock } from 'lucide-react'
 
 import { Card, EmptyState, PageLoader } from '../components'
-import { useRepoList, type RepoRow } from '../hooks/useRepoList'
+import { useRepoList, type Attachment, type RepoRow } from '../hooks/useRepoList'
 
-function AttachedBadge({ attached }: { attached: boolean }) {
-  return attached ? (
-    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
-      Attached
-    </span>
-  ) : (
-    <span className="rounded-full bg-[var(--color-surface-elevated)] px-2 py-0.5 text-xs text-[var(--color-text-muted)]">
-      Not attached
-    </span>
-  )
+const MUTED_BADGE =
+  'rounded-full bg-[var(--color-surface-elevated)] px-2 py-0.5 text-xs text-[var(--color-text-muted)]'
+
+function AttachedBadge({ attachment }: { attachment: Attachment }) {
+  if (attachment === 'attached') {
+    return (
+      <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
+        Attached
+      </span>
+    )
+  }
+  return <span className={MUTED_BADGE}>{attachment === 'unknown' ? 'Unknown' : 'Not attached'}</span>
 }
 
 function RepoTable({ repos }: { repos: RepoRow[] }) {
@@ -52,7 +54,7 @@ function RepoTable({ repos }: { repos: RepoRow[] }) {
                 {repo.system ?? <span className="text-[var(--color-text-muted)]">None</span>}
               </td>
               <td className="px-4 py-2">
-                <AttachedBadge attached={repo.attached} />
+                <AttachedBadge attachment={repo.attachment} />
               </td>
             </tr>
           ))}

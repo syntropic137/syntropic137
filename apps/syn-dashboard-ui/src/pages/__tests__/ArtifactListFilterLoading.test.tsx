@@ -51,6 +51,8 @@ function listing(artifacts: ArtifactSummary[]): Response {
 }
 
 let releaseCodeOnly: () => void = () => {}
+/** How many `code` requests answer 500 before one succeeds. */
+let codeFailuresLeft = 0
 
 class SilentEventSource {
   onopen: (() => void) | null = null
@@ -60,6 +62,7 @@ class SilentEventSource {
 }
 
 beforeEach(() => {
+  codeFailuresLeft = 0
   const codeOnly = new Promise<void>((resolve) => {
     releaseCodeOnly = resolve
   })
@@ -71,6 +74,10 @@ beforeEach(() => {
     )
     if (url.pathname !== '/api/v1/artifacts') throw new Error(`No fake endpoint for ${url}`)
     if (url.searchParams.get('artifact_type') === 'code') {
+      if (codeFailuresLeft > 0) {
+        codeFailuresLeft -= 1
+        return new Response('{"detail":"boom"}', { status: 500 })
+      }
       await codeOnly
       return listing(CODE_ONLY)
     }
@@ -105,5 +112,37 @@ describe('Artifacts type filter', () => {
     expect(await screen.findByText('patch.py')).toBeInTheDocument()
     expect(screen.queryByText('Release notes')).not.toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('keeps the previous rows dimmed and offers a retry when the new type fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      codeFailuresLeft = 1
+      render(
+        <MemoryRouter>
+          <ArtifactList />
+        </MemoryRouter>,
+      )
+      await screen.findByText('Release notes')
+
+      fireEvent.change(screen.getByLabelText('Artifact type'), { target: { value: 'code' } })
+
+      // The old rows are not the answer to "code", failure or not.
+      expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't update")
+      expect(screen.getByText('Release notes').closest('.opacity-50')).not.toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+      expect(await screen.findByRole('status')).toHaveTextContent('Updating')
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+      await act(async () => releaseCodeOnly())
+
+      expect(await screen.findByText('patch.py')).toBeInTheDocument()
+      expect(screen.queryByText('Release notes')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })

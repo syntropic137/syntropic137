@@ -62,6 +62,10 @@ export interface UseServerListResult<TRow> {
   loading: boolean
   /** `rows` answer filters the caller has since changed; the new page is on its way. */
   stale: boolean
+  /** The latest request for these filters failed; `rows` do not answer them. */
+  failed: boolean
+  /** Ask again for the current filters. */
+  retry: () => void
   /** Rows matching the filters across every page. */
   total: number
   page: number
@@ -107,7 +111,7 @@ export function useServerList<TRow>({
     (rows: TRow[]) => listPollIntervalMs(rows, isTerminal, connected),
     [isTerminal, connected],
   )
-  const { result, loading, stale, refetch } = useLatestPage(fetchPage, query, pollIntervalFor)
+  const { result, loading, stale, failed, refetch } = useLatestPage(fetchPage, query, pollIntervalFor)
 
   useEffect(() => {
     refetchRef.current = refetch
@@ -118,6 +122,8 @@ export function useServerList<TRow>({
     rows: result.rows,
     loading,
     stale,
+    failed,
+    retry: refetch,
     total: result.total,
     statusCounts: result.statusCounts,
     excludedUndated: result.excludedUndated,

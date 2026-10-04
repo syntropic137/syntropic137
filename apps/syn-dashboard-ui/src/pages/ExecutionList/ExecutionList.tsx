@@ -48,6 +48,8 @@ export function ExecutionList() {
     executions,
     loading,
     stale,
+    failed,
+    retry,
     searchQuery,
     setSearchQuery,
     selectedStatuses,
@@ -111,7 +113,7 @@ export function ExecutionList() {
         isDefault={isDefaultView}
       />
 
-      <StaleResults stale={stale}>
+      <StaleResults stale={stale} failed={failed} onRetry={retry}>
         {isMobile ? (
           <ExecutionCardList
             rows={executions}

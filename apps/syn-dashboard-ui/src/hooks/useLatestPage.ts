@@ -39,7 +39,7 @@ import type { ListPage, ListQuery } from '../api/listQuery'
 import { ifStillWanted } from './serialRefreshLoop'
 import { useSerialRefresh } from './useSerialRefresh'
 
-interface SettledRequest<TRow> {
+interface PageRequest<TRow> {
   fetchPage: (query: ListQuery, signal?: AbortSignal) => Promise<ListPage<TRow>>
   query: ListQuery
 }
@@ -60,8 +60,14 @@ export interface LatestPageState<TRow> {
    * `result` answers a query the caller has since left - a filter, a page or a
    * scope changed and the new answer is still on its way. The rows are still
    * worth showing, as the previous answer. Never true while `loading` is.
+   * A request that failed does not clear it: its rows answer nothing newer.
    */
   stale: boolean
+  /**
+   * The latest attempt at the current query failed. Cleared when the next
+   * attempt starts, so a retry in flight reads as updating again.
+   */
+  failed: boolean
   /** Ask again for the same query. Stable for the life of the component. */
   refetch: () => void
 }
@@ -85,23 +91,37 @@ export function useLatestPage<TRow>(
   pollIntervalFor: (rows: TRow[]) => number | null = () => null,
 ): LatestPageState<TRow> {
   const [result, setResult] = useState<ListPage<TRow>>(EMPTY_PAGE)
-  // Which request the page on screen settled for. Both halves, because a
-  // caller's own narrowing (an artifact type, say) arrives as a new
-  // `fetchPage` rather than a new `query`.
-  const [settledFor, setSettledFor] = useState<SettledRequest<TRow> | null>(null)
+  // Which request the page on screen answers. Both halves, because a caller's
+  // own narrowing (an artifact type, say) arrives as a new `fetchPage` rather
+  // than a new `query`.
+  const [answeredFor, setAnsweredFor] = useState<PageRequest<TRow> | null>(null)
+  // Kept apart from `answeredFor`: a failure settles the request without
+  // answering it, and recording it as answered would show the previous
+  // query's rows as though they were the current one's.
+  const [failedFor, setFailedFor] = useState<PageRequest<TRow> | null>(null)
 
   const fetchLatest = useCallback(
-    (signal: AbortSignal) =>
-      fetchPage(query, signal)
-        .then(ifStillWanted(signal, (next: ListPage<TRow>) => setResult(next)))
-        // The abort itself included: the request was cancelled on purpose, and
-        // reporting it as a failure of this list would be a lie about a query
-        // nobody asked for any more.
-        .catch(ifStillWanted(signal, (error: unknown) => console.error(error)))
-        // Left unsettled on purpose when overtaken. The replacement is what
-        // this list is waiting for now, and settling here would show the
-        // previous query's rows as though they answered the current one.
-        .finally(ifStillWanted<void>(signal, () => setSettledFor({ fetchPage, query }))),
+    (signal: AbortSignal) => {
+      setFailedFor(null)
+      return (
+        fetchPage(query, signal)
+          .then(
+            ifStillWanted(signal, (next: ListPage<TRow>) => {
+              setResult(next)
+              setAnsweredFor({ fetchPage, query })
+            }),
+          )
+          // The abort itself included: the request was cancelled on purpose,
+          // and reporting it as a failure of this list would be a lie about a
+          // query nobody asked for any more.
+          .catch(
+            ifStillWanted(signal, (error: unknown) => {
+              console.error(error)
+              setFailedFor({ fetchPage, query })
+            }),
+          )
+      )
+    },
     [fetchPage, query],
   )
 
@@ -114,9 +134,11 @@ export function useLatestPage<TRow>(
     refetch()
   }, [refetch, fetchLatest])
 
-  const loading = settledFor === null
-  const stale =
-    settledFor !== null && (settledFor.fetchPage !== fetchPage || settledFor.query !== query)
+  const isCurrent = (request: PageRequest<TRow> | null) =>
+    request !== null && request.fetchPage === fetchPage && request.query === query
+  const loading = answeredFor === null && failedFor === null
+  const stale = answeredFor !== null && !isCurrent(answeredFor)
+  const failed = isCurrent(failedFor)
 
-  return { result, loading, stale, refetch }
+  return { result, loading, stale, failed, refetch }
 }

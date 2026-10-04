@@ -52,6 +52,8 @@ export function SessionList() {
     sessions,
     loading,
     stale,
+    failed,
+    retry,
     searchQuery,
     setSearchQuery,
     selectedStatuses,
@@ -115,7 +117,7 @@ export function SessionList() {
         isDefault={isDefaultView}
       />
 
-      <StaleResults stale={stale}>
+      <StaleResults stale={stale} failed={failed} onRetry={retry}>
         {isMobile ? (
           <SessionCardList
             rows={sessions}

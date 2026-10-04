@@ -374,5 +374,51 @@ describe('useLatestPage', () => {
       expect(result.current.stale).toBe(false)
       await act(async () => again.resolve(page(['a'], 1)))
     })
+
+    // A failure settles the request without answering it. Recording it as
+    // settled undimmed the old rows under the new filter, with no sign anything
+    // had gone wrong.
+    it('stays true when the new query fails, until a retry answers it', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const SECOND_PAGE: ListQuery = { page: 2, page_size: LIST_PAGE_SIZE }
+        const failing = deferred<ListPage<{ id: string }>>()
+        const retried = deferred<ListPage<{ id: string }>>()
+        const secondPageOutcomes = [failing.promise, retried.promise]
+        const fetchPage = vi.fn((query: ListQuery) =>
+          query.page === 1 ? Promise.resolve(page(['a'], 2)) : secondPageOutcomes.shift()!,
+        )
+
+        const { result, rerender } = renderHook(({ query }) => useLatestPage(fetchPage, query), {
+          initialProps: { query: FIRST_PAGE },
+        })
+        await waitFor(() => expect(result.current.loading).toBe(false))
+
+        rerender({ query: SECOND_PAGE })
+        expect(result.current.stale).toBe(true)
+        expect(result.current.failed).toBe(false)
+
+        await act(async () => failing.reject(new Error('Network error')))
+
+        expect(result.current.failed).toBe(true)
+        expect(result.current.stale).toBe(true)
+        expect(result.current.loading).toBe(false)
+        expect(result.current.result.rows).toEqual([{ id: 'a' }])
+
+        act(() => result.current.refetch())
+        await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(3))
+        // Asking again reads as updating, not as the failure still standing.
+        expect(result.current.failed).toBe(false)
+        expect(result.current.stale).toBe(true)
+
+        await act(async () => retried.resolve(page(['b'], 2)))
+
+        expect(result.current.failed).toBe(false)
+        expect(result.current.stale).toBe(false)
+        expect(result.current.result.rows).toEqual([{ id: 'b' }])
+      } finally {
+        consoleError.mockRestore()
+      }
+    })
   })
 })

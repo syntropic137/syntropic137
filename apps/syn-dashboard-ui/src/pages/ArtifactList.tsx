@@ -91,6 +91,8 @@ export function ArtifactList() {
     artifacts,
     loading,
     stale,
+    failed,
+    retry,
     searchQuery,
     setSearchQuery,
     typeFilter,
@@ -144,7 +146,7 @@ export function ArtifactList() {
       {loading ? (
         <PageLoader />
       ) : (
-        <StaleResults stale={stale}>
+        <StaleResults stale={stale} failed={failed} onRetry={retry}>
           {artifacts.length === 0 ? (
             <Card>
               <EmptyState
