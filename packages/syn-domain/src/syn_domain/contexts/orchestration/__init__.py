@@ -151,6 +151,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspace import (
+    OrphanedWorkspace,
+    ReclaimableDir,
+    WorkspaceDirRemover,
+    guard_orphaned_workspace,
+    remove_reclaimed_dir,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
 )
@@ -266,11 +273,13 @@ __all__ = [
     "InputDeclaration",
     "InvalidTagsError",
     "IsolationConfig",
+    "OrphanedWorkspace",
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "ReclaimableDir",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
@@ -314,13 +323,16 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "WorkspaceDirRemover",
     "announce_as",
     "build_command_from_definition",
+    "guard_orphaned_workspace",
     "inherited_outputs",
     "is_phase_id",
     "mint_wrapper_name",
     "read_record",
     "refuse_resume_start",
+    "remove_reclaimed_dir",
     "render_workspace_prompt",
     "require_supported_execution_type",
     "retired_field_notices",
