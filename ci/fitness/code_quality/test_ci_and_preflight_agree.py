@@ -12,6 +12,9 @@ CI invokes must be inside `preflight`'s dependency closure.
 from __future__ import annotations
 
 import re
+import shlex
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -132,6 +135,38 @@ def _body(target: str, text: str) -> str:
     return match.group(1) if match else ""
 
 
+def _commands_run_by(target: str) -> dict[tuple[str, ...], set[tuple[str, str]]]:
+    """The argv of every line `just` would execute for ``target``, deps included.
+
+    Read from `just --dry-run`, not from the recipe text, so a line that merely
+    MENTIONS a command (``echo just fitness-invariants``) does not count as
+    running it. Each argv maps to the env assignments prefixed to it.
+    """
+    just = shutil.which("just")
+    if just is None:
+        pytest.fail("`just` is not on PATH; every gate that runs this suite needs it")
+    listing = subprocess.run(
+        [just, "--dry-run", target],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stderr
+    commands: dict[tuple[str, ...], set[tuple[str, str]]] = {}
+    for line in listing.splitlines():
+        try:
+            words = shlex.split(line)
+        except ValueError:
+            continue
+        env: set[tuple[str, str]] = set()
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+            name, _, value = words.pop(0).partition("=")
+            env.add((name, value))
+        if words:
+            commands.setdefault(tuple(words), set()).update(env)
+    return commands
+
+
 def test_preflight_agent_runs_both_halves_of_fitness() -> None:
     """Agents gate on `preflight-agent`; it must run ALL of `fitness`.
 
@@ -156,12 +191,17 @@ def test_preflight_agent_runs_both_halves_of_fitness() -> None:
     assert "fitness-invariants-agent" in agent, (
         "`preflight-agent` no longer runs the `pytest ci/fitness` invariants"
     )
-    assert "just fitness-invariants\n" in _body("fitness-invariants-agent", text), (
-        "`fitness-invariants-agent` must call the `fitness-invariants` recipe itself, "
-        "not a copy of its command that can drift from CI's"
+    assert (AGENT_WORKSPACE_ENV, "1") in _commands_run_by("preflight-agent").get(
+        ("just", "fitness-invariants"), set()
+    ), (
+        "`preflight-agent` must EXECUTE `just fitness-invariants` with "
+        f"{AGENT_WORKSPACE_ENV}=1: the `fitness-invariants` recipe itself, not a "
+        "copy of its command that can drift from CI's"
     )
-    assert "pytest ci/fitness/ " in _body("fitness-invariants", text)
-    assert "-m architecture" in _body("fitness-invariants", text)
+    pytest_argv = ("uv", "run", "pytest", "ci/fitness/", "-v", "--tb=short", "-m", "architecture")
+    assert pytest_argv in _commands_run_by("fitness-invariants"), (
+        "`fitness-invariants` no longer runs the CI pytest command"
+    )
 
     full = _closure("preflight", text)
     assert {"fitness-check", "fitness-invariants"} <= full
@@ -215,4 +255,9 @@ def test_a_missing_host_tool_is_not_skipped_anywhere_else(
 ) -> None:
     """Under `preflight` and CI the test runs, and fails on the missing binary."""
     monkeypatch.delenv(AGENT_WORKSPACE_ENV, raising=False)
-    pytest_runtest_setup(_ItemNeeding(_ABSENT))  # type: ignore[arg-type]
+    try:
+        pytest_runtest_setup(_ItemNeeding(_ABSENT))  # type: ignore[arg-type]
+    except pytest.skip.Exception as skipped:
+        # Letting it escape would mark THIS test skipped, green over the very
+        # regression it exists to catch.
+        pytest.fail(f"a missing host tool skipped outside the agent gate: {skipped}")
