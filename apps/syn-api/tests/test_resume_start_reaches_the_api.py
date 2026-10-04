@@ -58,7 +58,7 @@ _AT = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
 
 #: The process manager's MODULE; the package re-exports the class under its name.
 _pm_module = importlib.import_module(
-    "syn_domain.contexts.orchestration.slices.start_resume.ResumeStartProcessManager"
+    "syn_domain.contexts.orchestration._shared.start_todo"
 )
 
 
