@@ -75,9 +75,21 @@ class TestLookupClassification:
         assert result.error is not None
         assert result.digest is None
 
+    def test_a_stderr_warning_does_not_spoil_a_valid_digest(self) -> None:
+        result = classify_lookup(REF, 0, f"{DIGEST}\n", "WARNING: something advisory\n")
+        assert result == LookupResult(digest=DIGEST)
+
+    def test_the_absent_line_plus_another_error_is_an_error(self) -> None:
+        """Absent only when the absent line is the WHOLE diagnostic."""
+        result = classify_lookup(REF, 1, "", f"ERROR: {REF}: not found\nERROR: 401 Unauthorized\n")
+        assert result.error is not None
+        assert not result.absent
+
     def test_the_exact_absent_line_is_absent(self) -> None:
         """Measured against GHCR: `ERROR: <ref>: not found`."""
-        assert classify_lookup(REF, 1, f"ERROR: {REF}: not found\n") == LookupResult(absent=True)
+        assert classify_lookup(REF, 1, "", f"ERROR: {REF}: not found\n") == LookupResult(
+            absent=True
+        )
 
     @pytest.mark.parametrize(
         "output",

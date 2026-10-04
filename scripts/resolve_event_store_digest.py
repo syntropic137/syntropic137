@@ -133,24 +133,29 @@ def image_tag(version: str) -> str:
     return f"v{version}"
 
 
-def classify_lookup(ref: str, returncode: int, output: str) -> LookupResult:
+def classify_lookup(ref: str, returncode: int, stdout: str, stderr: str = "") -> LookupResult:
     """Classify one `imagetools inspect --format {{.Manifest.Digest}}` run.
 
-    The absent-tag response is matched EXACTLY, as a whole line, against the
-    ref we asked for. buildx emits precisely `ERROR: <ref>: not found` for a
-    missing tag (measured against GHCR). A keyword search would classify any
-    failure that happens to mention "not found" as an absent tag; if buildx
-    rewords this, the lookup fails loudly instead of guessing.
+    On success only stdout is the answer: buildx may write warnings to stderr,
+    and those must not turn a valid digest into a "malformed" one.
+
+    On failure, "absent" requires the WHOLE diagnostic to be exactly
+    `ERROR: <ref>: not found` (what buildx emits for a missing tag, measured
+    against GHCR). A keyword search, or a line match inside a longer
+    diagnostic, would let any failure that also mentions "not found" read as
+    an absent tag. If buildx rewords this, the lookup fails loudly instead of
+    guessing.
     """
     if returncode == 0:
-        digest = output.strip()
+        digest = stdout.strip()
         if not _DIGEST_RE.match(digest):
             return LookupResult(error=f"{ref} resolved to a malformed digest: {digest!r}")
         return LookupResult(digest=digest)
-    if f"ERROR: {ref}: not found" in output.splitlines():
+    diagnostic = (stdout + stderr).strip()
+    if diagnostic == f"ERROR: {ref}: not found":
         return LookupResult(absent=True)
     return LookupResult(
-        error=f"looking up {ref} failed, and NOT because it is missing:\n{output.strip()[:400]}"
+        error=f"looking up {ref} failed, and NOT because it is missing:\n{diagnostic[:400]}"
     )
 
 
@@ -163,7 +168,7 @@ def lookup_index_digest(ref: str) -> LookupResult:
     result = _run(
         ["docker", "buildx", "imagetools", "inspect", ref, "--format", "{{.Manifest.Digest}}"]
     )
-    return classify_lookup(ref, result.returncode, result.stdout + result.stderr)
+    return classify_lookup(ref, result.returncode, result.stdout, result.stderr)
 
 
 def verify_index(digest: str, raw_manifest: str) -> None:
