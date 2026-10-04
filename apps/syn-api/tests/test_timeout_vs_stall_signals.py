@@ -171,6 +171,7 @@ async def _phase_as_an_api_client_sees_it(
     died_at: datetime = PHASE_DIED_AT,
     session_id: str | None = SESSION_ID,
     provisioned: bool = True,
+    provisioned_at: datetime = PROVISIONED_AT,
 ) -> PhaseExecutionInfo:
     """Drive a timed-out phase from its events to the served response model.
 
@@ -189,7 +190,8 @@ async def _phase_as_an_api_client_sees_it(
     moves the kill, so a 124 can be put inside the budget as well as past it.
     `session_id=None` is the phase that never got a session at all, which has
     no timeline to read by construction. `provisioned=False` is the phase
-    whose workspace was never ready, so whose clock never started.
+    whose workspace was never ready, so whose clock never started;
+    `provisioned_at` moves when it was ready.
     """
     store = InMemoryProjectionStore()
     projection = WorkflowExecutionDetailProjection(store)
@@ -233,7 +235,7 @@ async def _phase_as_an_api_client_sees_it(
             phase_id=PHASE_ID,
             workspace_id="ws-1",
             session_id=session_id or "",
-            provisioned_at=PROVISIONED_AT,
+            provisioned_at=provisioned_at,
         ).model_dump(mode="json")
         for projection_name, method in EVENT_HANDLERS["WorkspaceProvisionedForPhase"]:
             if projection_name == "workflow_execution_detail":
@@ -432,6 +434,43 @@ async def test_the_served_deadline_runs_from_when_the_workspace_was_ready() -> N
     activity = (await _phase_as_an_api_client_sees_it(_busy_timeline())).activity
 
     assert activity.deadline == PROVISIONED_AT + timedelta(seconds=BUDGET_SECONDS)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("ready_after", "clock_after"),
+    [
+        # Ready and dispatched inside the same second: the case a served
+        # value with microseconds puts AFTER the agent's whole-second one.
+        (timedelta(milliseconds=900), timedelta(milliseconds=950)),
+        # Dispatched into the next second.
+        (timedelta(milliseconds=900), timedelta(seconds=1, milliseconds=100)),
+        # Both on the second exactly.
+        (timedelta(0), timedelta(0)),
+    ],
+)
+async def test_the_served_deadline_is_never_later_than_the_agents(
+    ready_after: timedelta, clock_after: timedelta
+) -> None:
+    """#1546: an operator reading the API must not be told the phase has longer.
+
+    The agent's clock starts at or after its workspace is recorded ready, and
+    it reads its deadline as an ISO 8601 string in whole seconds. That string
+    is built here as the agent receives it, not from the served value.
+    """
+    ready = PROVISIONED_AT + ready_after
+    clock_started = PROVISIONED_AT + clock_after
+    told_the_agent = datetime.fromisoformat(
+        (clock_started + timedelta(seconds=BUDGET_SECONDS)).isoformat(timespec="seconds")
+    )
+
+    activity = (
+        await _phase_as_an_api_client_sees_it(_busy_timeline(), provisioned_at=ready)
+    ).activity
+
+    assert activity.deadline is not None
+    assert activity.deadline <= told_the_agent
+    assert told_the_agent - activity.deadline <= clock_after - ready_after + timedelta(seconds=1)
 
 
 @pytest.mark.anyio

@@ -68,6 +68,18 @@ def _last_push_at(operations: Sequence[TimelineRow]) -> datetime | None:
     return max(pushes) if pushes else None
 
 
+def _served_deadline(phase: PhaseExecutionDetail) -> datetime | None:
+    """The deadline to serve: never later than the one the agent was told.
+
+    The agent reads ``SYN_PHASE_DEADLINE`` in whole seconds, truncated, and its
+    clock starts at or after the workspace is recorded ready. Truncating the
+    served value the same way keeps it at or before the agent's for every
+    ordering of the two, including both landing in the same second (#1546).
+    """
+    deadline = resolve_deadline(phase.provisioned_at, phase.timeout_seconds)
+    return None if deadline is None else deadline.replace(microsecond=0)
+
+
 def summarize_phase_activity(
     phase: PhaseExecutionDetail,
     operations: Sequence[TimelineRow] | None,
@@ -100,7 +112,7 @@ def summarize_phase_activity(
             telemetry_available=False,
             elapsed_seconds=elapsed_seconds,
             timeout_seconds=phase.timeout_seconds,
-            deadline=resolve_deadline(phase.provisioned_at, phase.timeout_seconds),
+            deadline=_served_deadline(phase),
         )
 
     last_push = _last_push_at(operations)
@@ -124,5 +136,5 @@ def summarize_phase_activity(
         ),
         elapsed_seconds=elapsed_seconds,
         timeout_seconds=phase.timeout_seconds,
-        deadline=resolve_deadline(phase.provisioned_at, phase.timeout_seconds),
+        deadline=_served_deadline(phase),
     )
