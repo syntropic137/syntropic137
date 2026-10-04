@@ -112,6 +112,11 @@
       "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version, name)`` to match the lock\nprojection key (issue #726). A workflow author who installs the same\nplugin under two different display names produces two distinct lock\nentries -- the materializer needs both to write the right files.",
       "title": "ClaudePluginRef"
     },
+    "EvalId": {
+      "description": "The identity of one eval, and the id of its stream.",
+      "title": "EvalId",
+      "type": "string"
+    },
     "InputYamlDefinition": {
       "additionalProperties": false,
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
@@ -548,6 +553,17 @@
       },
       "title": "Tags",
       "type": "array"
+    },
+    "default_eval_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvalId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final
+from functools import partial
+from typing import TYPE_CHECKING, Final, Protocol
 
 from event_sourcing import (
     AggregateRoot,
@@ -35,14 +36,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartPhaseCommand,
     StartResumeCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
+    EvalMembership,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
     ExecutionTags,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
-    ResumedEventShape,
-    classify_resumed_payload,
-    payload_of,
-    shape_of_resumed_payload,
+    resumed_event_applies,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
     completed_event,
@@ -83,8 +84,16 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
+    from event_sourcing import DomainEvent
+
     from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
         AddExecutionTagsCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.AttachExecutionToEvalCommand import (
+        AttachExecutionToEvalCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.DetachExecutionFromEvalCommand import (
+        DetachExecutionFromEvalCommand,
     )
     from syn_domain.contexts.orchestration.domain.commands.RemoveExecutionTagsCommand import (
         RemoveExecutionTagsCommand,
@@ -95,8 +104,14 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
         ArtifactsCollectedForPhaseEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
+        ExecutionAttachedToEvalEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
+        ExecutionDetachedFromEvalEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
@@ -150,6 +165,12 @@ MAX_PHASE_ATTEMPTS: Final[int] = 2
 
 
 logger = logging.getLogger(__name__)
+
+
+class _Edit(Protocol):
+    """A tag or eval edit, decided by its value object once the run's ids are known."""
+
+    def __call__(self, *, execution_id: str, workflow_id: str) -> DomainEvent | None: ...
 
 
 @aggregate("WorkflowExecution")
@@ -249,6 +270,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._left_branches = LeftBranches()
         #: The tags it launched with and the tags it carries now (#967).
         self._tags = ExecutionTags()
+        self._eval = EvalMembership()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -387,6 +409,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def tags(self) -> ExecutionTags:
         """The launch snapshot and the current tags (#967)."""
         return self._tags
+
+    @property
+    def eval_membership(self) -> EvalMembership:
+        """The eval this run belongs to, how it joined, and what it launched into."""
+        return self._eval
 
     @property
     def start_pins(self) -> StartPins:
@@ -691,24 +718,29 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("AddExecutionTagsCommand")
     def add_tags(self, command: AddExecutionTagsCommand) -> None:
         """Add tags to the current set. None new, no event."""
-        if self.id is None:
-            msg = "Execution does not exist"
-            raise ValueError(msg)
-        event = self._tags.add(
-            command.tags, execution_id=str(self.id), workflow_id=self._workflow_id or ""
-        )
-        if event is not None:
-            self._apply(event)
+        self._apply_edit(partial(self._tags.add, command.tags))
 
     @command_handler("RemoveExecutionTagsCommand")
     def remove_tags(self, command: RemoveExecutionTagsCommand) -> None:
         """Remove tags from the current set. None present, no event."""
+        self._apply_edit(partial(self._tags.remove, command.tags))
+
+    @command_handler("AttachExecutionToEvalCommand")
+    def attach_to_eval(self, command: AttachExecutionToEvalCommand) -> None:
+        """Join an eval, in any status. Already a member, no event."""
+        self._apply_edit(partial(self._eval.attach, str(command.eval_id)))
+
+    @command_handler("DetachExecutionFromEvalCommand")
+    def detach_from_eval(self, command: DetachExecutionFromEvalCommand) -> None:
+        """Leave the eval. In none, no event; the launch record is kept."""
+        self._apply_edit(partial(self._eval.detach, str(command.eval_id)))
+
+    def _apply_edit(self, edit: _Edit) -> None:
+        """Apply what a tag or eval edit decided on an existing run; None changed nothing."""
         if self.id is None:
             msg = "Execution does not exist"
             raise ValueError(msg)
-        event = self._tags.remove(
-            command.tags, execution_id=str(self.id), workflow_id=self._workflow_id or ""
-        )
+        event = edit(execution_id=str(self.id), workflow_id=self._workflow_id or "")
         if event is not None:
             self._apply(event)
 
@@ -782,6 +814,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._status = ExecutionStatus.RUNNING
         self._pins = read_start_pins(event)
         self._tags = ExecutionTags.launched_with(evt(event, "tags") or [])
+        self._eval = EvalMembership.launched_into(evt(event, "eval_id"))
         if self._pins.resumed_from is not None:
             self._inherit(self._pins.resumed_from)
 
@@ -942,6 +975,16 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Apply ExecutionTagsRemovedEvent. The launch snapshot is untouched."""
         self._tags = self._tags.with_removed(evt(event, "tags") or [])
 
+    @event_sourcing_handler("ExecutionAttachedToEval")
+    def on_attached_to_eval(self, event: ExecutionAttachedToEvalEvent) -> None:
+        """Apply ExecutionAttachedToEvalEvent."""
+        self._eval = self._eval.with_attached(evt(event, "eval_id"))
+
+    @event_sourcing_handler("ExecutionDetachedFromEval")
+    def on_detached_from_eval(self, _event: ExecutionDetachedFromEvalEvent) -> None:
+        """Apply ExecutionDetachedFromEvalEvent. The launch record stays."""
+        self._eval = self._eval.detached()
+
     @event_sourcing_handler("WorkflowInterrupted")
     def on_execution_interrupted(self, event: WorkflowInterruptedEvent) -> None:
         """Apply WorkflowInterruptedEvent."""
@@ -953,29 +996,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Apply ExecutionResumedEvent - the parent's one resume is spent.
 
         Status is deliberately untouched: the parent stays the terminal run it
-        was, and only this fact about it is new.
-
-        THE SHAPE IS CHECKED HERE, not only in the event's validator. Under
-        ADR-023 the store catches a validation error and falls back to
-        `GenericDomainEvent` with the event type preserved, so a payload the
-        validator refused arrives here anyway and routes on its name. The
-        validator is the early warning; this is the gate.
+        was, and only this fact about it is new. The payload's shape is the
+        gate (`resumed_event_applies`), not only the event's validator.
         """
-        payload = payload_of(event)
-        shape = shape_of_resumed_payload(payload)
-        if shape is ResumedEventShape.PRE_RENAME_UNPAUSE:
-            # Not a resume at all: this recorded un-pausing a paused execution,
-            # which no longer exists. Applying it would spend the parent's one
-            # resume on a child nobody asked for and cannot be undone, so it is
-            # ignored - loudly, because a stream holding one needs migrating.
-            logger.warning(
-                "Ignoring a pre-rename ExecutionResumed (un-pause) on %s: it is not a resume",
-                self.id,
-                extra={"execution_id": self.id},
-            )
+        if not resumed_event_applies(event, self.id):
             return
-        if shape is ResumedEventShape.AMBIGUOUS:
-            classify_resumed_payload(payload)  # raises, with the reason
         self._resumed = True
         self._resume_execution_id = evt(event, "resume_execution_id")
         self._admitted_resume = read_admitted_resume(event)

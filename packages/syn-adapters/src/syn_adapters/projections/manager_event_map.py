@@ -133,6 +133,10 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_list", "on_workflow_tags_removed"),
         ("workflow_detail", "on_workflow_tags_removed"),
     ],
+    # WHY (#967): same reason as the tag edits - the export reads the detail.
+    "WorkflowDefaultEvalSet": [
+        ("workflow_detail", "on_workflow_default_eval_set"),
+    ],
     "WorkflowExecutionStarted": [
         ("workflow_list", "on_workflow_execution_started"),
         ("workflow_detail", "on_workflow_execution_started"),

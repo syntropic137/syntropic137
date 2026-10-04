@@ -18,6 +18,7 @@ from syn_api.routes import (
     claude_plugins_router,
     conversations_router,
     costs_router,
+    evals_router,
     events_router,
     executions_router,
     features_router,
@@ -157,6 +158,7 @@ def create_app() -> FastAPI:
     app.include_router(workflows_router)
     app.include_router(executions_router)
     app.include_router(tags_router)
+    app.include_router(evals_router)
     app.include_router(sessions_router)
     app.include_router(artifacts_router)
     app.include_router(claude_plugins_router)

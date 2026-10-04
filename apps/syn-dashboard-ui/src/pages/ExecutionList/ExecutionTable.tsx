@@ -7,7 +7,6 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { ResourceTable } from '../../components'
 import type {
@@ -34,14 +33,13 @@ export function ExecutionTable({
   selection,
   sort,
 }: ExecutionTableProps) {
-  const navigate = useNavigate()
   const props: ResourceTableProps<ExecutionListItem, ExecutionSortKey> = {
     rows,
     columns: EXECUTION_COLUMNS,
     loading,
     emptyState,
     getRowId: (e) => e.workflow_execution_id,
-    onRowClick: (e) => navigate(`/executions/${e.workflow_execution_id}`),
+    rowHref: (e) => `/executions/${e.workflow_execution_id}`,
     selection,
     sort,
   }
