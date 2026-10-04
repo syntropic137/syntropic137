@@ -115,6 +115,12 @@ ALTER TABLE agent_event_day_rollup
 CREATE INDEX IF NOT EXISTS idx_rollup_session_day
     ON agent_event_day_rollup (session_id, day);
 
+-- Serves syn_domain.agent_event_span's execution lookup (E2): which days an
+-- execution has telemetry on, so its hypertable reads can be time-bounded.
+-- Added after this file first shipped; 008 applies it to an existing install.
+CREATE INDEX IF NOT EXISTS idx_rollup_execution_day
+    ON agent_event_day_rollup (execution_id, day);
+
 -- `day` is derived with the SAME expression the heatmap's read side buckets
 -- with, so the rollup's days are the queries' days by construction.
 CREATE OR REPLACE FUNCTION agent_event_day_rollup_apply() RETURNS TRIGGER AS $$

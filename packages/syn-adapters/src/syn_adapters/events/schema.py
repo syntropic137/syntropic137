@@ -725,6 +725,15 @@ class EventStoreSchema:
                 CREATE INDEX IF NOT EXISTS idx_rollup_session_day
                 ON agent_event_day_rollup (session_id, day)
             """)
+            # The execution-keyed half of syn_domain.agent_event_span (E2):
+            # which days an execution has telemetry on, so its hypertable reads
+            # can be time-bounded. Built once, on the rollup rather than on
+            # agent_events, so the pause it costs ingestion at the first
+            # startup is a small table's index build, not a hypertable scan.
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_rollup_execution_day
+                ON agent_event_day_rollup (execution_id, day)
+            """)
             await conn.execute(ROLLUP_TRIGGER_FUNCTION_SQL)
             await conn.execute("""
                 DROP TRIGGER IF EXISTS agent_events_day_rollup ON agent_events

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     import asyncpg
 
-from syn_domain import tool_call_counts
+from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions import (
     CostCalculator,
     recorded_model_group_by,
@@ -130,6 +130,7 @@ SELECT
 FROM agent_events a
 WHERE a.event_type = $1
   AND a.execution_id = ANY($2::text[])
+  AND a.time >= $3 AND a.time < $4
 GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_cost_usd') IS NULL)
 """
 
@@ -150,6 +151,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
+  AND time >= $3 AND time < $4
 GROUP BY execution_id, {recorded_model_group_by()}
 """
 
@@ -174,6 +176,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
+  AND time >= $3 AND time < $4
 GROUP BY execution_id, phase_id, {recorded_model_group_by()},
     ((data->>'total_cost_usd') IS NULL)
 """
@@ -247,9 +250,17 @@ class ExecutionCostQueryService:
         ids = [pg_safe(eid) for eid in execution_ids]
         if not ids:
             return []
-        async with self._pool.acquire() as conn:
-            summary_rows = await conn.fetch(_BY_IDS_FROM_SUMMARY_QUERY, SESSION_SUMMARY, ids)
-            token_rows = await conn.fetch(_BY_IDS_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE, ids)
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            # Bounded to the days these executions have telemetry on, so the
+            # planner opens those chunks and no others (E2). Same rows: see
+            # agent_event_span.
+            span = await agent_event_span.for_executions(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            summary_rows = await conn.fetch(
+                _BY_IDS_FROM_SUMMARY_QUERY, SESSION_SUMMARY, ids, span.lower, span.upper
+            )
+            token_rows = await conn.fetch(
+                _BY_IDS_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE, ids, span.lower, span.upper
+            )
             # From the tally, not from a COUNT(*) over agent_events. That count
             # decompressed every segment of every execution on the page,
             # because event_type is in neither compress_segmentby nor
@@ -313,8 +324,9 @@ class ExecutionCostQueryService:
         """
         if not execution_ids:
             return {}
+        span = await agent_event_span.for_executions(conn, execution_ids)  # type: ignore[arg-type]  # the caller's asyncpg connection
         rows = await conn.fetch(  # type: ignore[union-attr]
-            _COST_BY_PHASE_QUERY, SESSION_SUMMARY, execution_ids
+            _COST_BY_PHASE_QUERY, SESSION_SUMMARY, execution_ids, span.lower, span.upper
         )
         rows_by_execution: dict[str, list[asyncpg.Record]] = {}
         for row in rows:  # type: ignore[union-attr]

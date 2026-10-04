@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projections.session_tools_dispatch import row_to_operation, rows_to_operations
 from syn_adapters.projections.session_tools_queries import query_session_tools
+from syn_domain import agent_event_span
 from syn_shared.events import (
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
@@ -98,7 +99,11 @@ async def get_session_tools(
     session_id = pg_safe(session_id)
 
     try:
-        async with pool.acquire() as conn:
+        async with pool.acquire() as conn, agent_event_span.custom_plans(conn):
+            # Bounded to the days this session has telemetry on, so the planner
+            # opens those chunks and no others - twice, for the self-join (E2).
+            # Same rows: see syn_domain.agent_event_span.
+            span = await agent_event_span.for_sessions(conn, [session_id])
             # Query with LEFT JOIN to get tool_name from started events
             # for completed events that don't have it (Claude PostToolUse
             # hook doesn't receive tool_name, only tool_use_id)
@@ -113,6 +118,7 @@ async def get_session_tools(
                     WHERE session_id = $1
                       AND event_type = $2
                       AND data->>'tool_name' IS NOT NULL
+                      AND time >= $5 AND time < $6
                 )
                 SELECT
                     e.event_type,
@@ -131,12 +137,15 @@ async def get_session_tools(
                 LEFT JOIN tool_names tn ON tn.tool_use_id = e.data->>'tool_use_id'
                 WHERE e.session_id = $1
                   AND e.event_type != ALL($4)
+                  AND e.time >= $5 AND e.time < $6
                 ORDER BY e.time ASC
                 """,
                 session_id,
                 tool_execution_started,
                 tool_execution_completed,
                 list(timeline_exclude),
+                span.lower,
+                span.upper,
             )
 
             logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
