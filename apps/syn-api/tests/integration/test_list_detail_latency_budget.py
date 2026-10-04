@@ -39,6 +39,7 @@ import asyncpg
 import httpx
 import pytest
 
+from syn_domain.pagination import ProjectionRecord
 from syn_shared.events import SESSION_STARTED, SESSION_SUMMARY, TOKEN_USAGE
 
 if TYPE_CHECKING:
@@ -197,17 +198,18 @@ class _DictStore:
     """
 
     def __init__(self) -> None:
-        self.tables: dict[str, dict[str, dict[str, object]]] = {}
+        self.tables: dict[str, dict[str, ProjectionRecord]] = {}
 
-    async def get(self, projection: str, key: str) -> dict[str, object] | None:
+    async def get(self, projection: str, key: str) -> ProjectionRecord | None:
         record = self.tables.get(projection, {}).get(key)
+        # A fresh copy, as a database read is: handlers mutate what they get.
         return json.loads(json.dumps(record)) if record is not None else None
 
-    async def save(self, projection: str, key: str, data: dict[str, object]) -> None:
+    async def save(self, projection: str, key: str, data: ProjectionRecord) -> None:
         self.tables.setdefault(projection, {})[key] = json.loads(json.dumps(data, default=str))
 
 
-async def projection_documents(now: datetime) -> dict[str, dict[str, dict[str, object]]]:
+async def projection_documents(now: datetime) -> dict[str, dict[str, ProjectionRecord]]:
     """Every Lane 1 document the five endpoints read, built by the real handlers."""
     from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
         SessionListProjection,

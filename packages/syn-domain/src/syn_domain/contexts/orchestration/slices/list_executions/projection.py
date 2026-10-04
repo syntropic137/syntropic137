@@ -33,7 +33,21 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
-from syn_domain.pagination import Page, matches_search, paginate
+from syn_domain.pagination import Page, matches_search
+from syn_domain.projection_scan import paginate_projection
+
+#: Every field ``page``'s predicates read - the filters, the facet, the window
+#: and the search. ``paginate_projection`` scans only these for the whole
+#: collection and reads whole documents for the page alone (E2). A predicate
+#: that reads a field missing here raises rather than matching on None.
+_PAGE_FIELDS = (
+    "workflow_execution_id",
+    "workflow_id",
+    "workflow_name",
+    "status",
+    "started_at",
+    "tags",
+)
 
 
 class WorkflowExecutionListProjection(AutoDispatchProjection):
@@ -345,15 +359,20 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
                 record.get("workflow_name"),
             )
 
-        return paginate(
-            await self._store.get_all(self.PROJECTION_NAME),
+        return await paginate_projection(
+            self._store,
+            self.PROJECTION_NAME,
+            fields=_PAGE_FIELDS,
+            filters=None,
+            order_by=None,
+            full_read=lambda: self._store.get_all(self.PROJECTION_NAME),
             base_predicate=base,
             status_of=lambda r: str(r.get("status") or ""),
             statuses=statuses,
             timestamp_of=lambda r: r.get("started_at"),
             after=started_after,
             before=started_before,
-            to_row=WorkflowExecutionSummary.from_dict,
+            to_row=lambda record: WorkflowExecutionSummary.from_dict(dict(record)),
             offset=offset,
             limit=limit,
         )
