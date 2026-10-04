@@ -39,6 +39,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
 
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
@@ -75,13 +77,15 @@ class MaintenanceMode(BaseModel):
         )
 
 
-class MaintenancePausedError(Exception):
+class MaintenancePausedError(AdmissionRefusedError):
     """Raised instead of admitting an execution while maintenance mode is active.
 
     Carries the mode so the entry point that catches it can translate the
     refusal into its own protocol's answer - a 409 over HTTP, a ``paused``
     dispatch record for a trigger - rather than reporting a generic failure.
     """
+
+    hold_reason = "maintenance_mode"
 
     def __init__(self, mode: MaintenanceMode) -> None:
         super().__init__(mode.refusal_detail)

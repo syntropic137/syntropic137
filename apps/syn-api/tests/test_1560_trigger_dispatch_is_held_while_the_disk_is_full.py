@@ -25,7 +25,12 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
-from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
+from syn_domain.contexts._shared import (
+    AdmissionGate,
+    AdmissionRefusedError,
+    AdmissionTicket,
+    RepositoryRef,
+)
 from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskUsage
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
@@ -141,3 +146,37 @@ class TestATriggerThatFiresBelowTheFreeSpaceFloor:
 
         assert (await fixture.status())[0] == "dispatched"
         assert len(fixture.handler.admitted) == 1
+
+
+class _RoadClosedError(AdmissionRefusedError):
+    """A refusal reason that does not exist yet. The dispatcher has never heard of it."""
+
+    hold_reason = "road_closed"
+
+
+class _RefusingService:
+    async def run_workflow(
+        self,
+        workflow_id: str,
+        inputs: dict[str, str],
+        execution_id: str,
+        task: str | None = None,
+        repos: list[RepositoryRef] | None = None,
+    ) -> AdmissionTicket | None:
+        del workflow_id, inputs, execution_id, task, repos
+        raise _RoadClosedError("the road is closed")
+
+
+class TestTheNextAdmissionRefusalReason:
+    async def test_is_held_under_its_own_name_without_the_dispatcher_naming_it(self) -> None:
+        # The disk refusal was dropped because the dispatcher caught refusals
+        # by name. Holding a reason invented here proves it catches the family.
+        fixture = _Fixture()
+        fixture.projection = WorkflowDispatchProjection(
+            execution_service=_RefusingService(), store=fixture.store
+        )
+        await fixture.a_trigger_fires()
+
+        await fixture.projection.process_pending()
+
+        assert await fixture.status() == ("paused", "road_closed")

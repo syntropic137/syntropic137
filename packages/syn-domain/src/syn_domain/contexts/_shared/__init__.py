@@ -1,5 +1,7 @@
 """Cross-context shared kernel: value objects and integration events."""
 
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
+
 from syn_domain.contexts._shared.disk_space import (
     DiskCheck,
     DiskSpaceGuard,
@@ -28,6 +30,7 @@ __all__ = [
     "AdmissionAnnouncer",
     "AdmissionGate",
     "AdmissionOpenEvent",
+    "AdmissionRefusedError",
     "AdmissionTicket",
     "DiskCheck",
     "DiskSpaceGuard",

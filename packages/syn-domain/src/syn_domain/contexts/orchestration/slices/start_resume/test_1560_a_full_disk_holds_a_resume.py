@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.disk_space import (
     DiskCheck,
     DiskState,
@@ -50,6 +51,12 @@ _FULL = InsufficientDiskSpaceError(
 )
 
 
+class _RoadClosedError(AdmissionRefusedError):
+    """A refusal reason that does not exist yet. The manager has never heard of it."""
+
+    hold_reason = "road_closed"
+
+
 @dataclass
 class _RefusingStarter:
     raising: Exception
@@ -61,9 +68,9 @@ class _RefusingStarter:
         raise self.raising
 
 
-async def _start_once(attempts: int) -> ResumeStartRecord:
+async def _start_once(attempts: int, refusal: Exception = _FULL) -> ResumeStartRecord:
     store = InMemoryProjectionStore()
-    manager = ResumeStartProcessManager(resume_starter=_RefusingStarter(_FULL), store=store)
+    manager = ResumeStartProcessManager(resume_starter=_RefusingStarter(refusal), store=store)
     record = ResumeStartRecord(
         parent_execution_id=PARENT, recorded_at=datetime.now(UTC), attempts=attempts
     )
@@ -84,3 +91,11 @@ async def test_a_full_disk_holds_the_resume_without_spending_an_attempt() -> Non
 async def test_a_full_disk_on_the_last_attempt_still_does_not_fail_it() -> None:
     saved = await _start_once(attempts=MAX_START_ATTEMPTS - 1)
     assert saved.status == "paused"
+
+
+async def test_the_next_refusal_reason_is_held_too_without_the_manager_naming_it() -> None:
+    saved = await _start_once(
+        attempts=MAX_START_ATTEMPTS - 1, refusal=_RoadClosedError("the road is closed")
+    )
+    assert saved.status == "paused"
+    assert saved.attempts == MAX_START_ATTEMPTS - 1

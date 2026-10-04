@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,12 +97,14 @@ class DiskCheck:
         )
 
 
-class InsufficientDiskSpaceError(Exception):
+class InsufficientDiskSpaceError(AdmissionRefusedError):
     """Raised instead of admitting an execution below the free-space floor.
 
     Carries the check so the entry point can answer in its own protocol (507
     over HTTP) and say exactly how much space is left.
     """
+
+    hold_reason = "insufficient_disk_space"
 
     def __init__(self, check: DiskCheck) -> None:
         super().__init__(
