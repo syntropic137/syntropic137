@@ -2,10 +2,12 @@
 
 ``artifact_summaries`` stores each artifact's full body in its document. A list
 page needs a handful of small fields from every artifact - to filter, tally and
-order them - and Postgres cannot read ``data->>'created_at'`` out of a TOASTed
-JSONB value without decompressing the whole value, body included. Measured on
-the E2 gate's seed: 6,000 artifacts, ~190-660ms per ``/artifacts`` request
-spent decompressing bodies the page never renders.
+order them - and Postgres cannot read ``data->>'created_at'`` out of a JSONB
+value stored out of line (TOAST) without fetching and decompressing the whole
+value, body included. On the E2 gate's seed (6,000 artifacts of a few KB, most
+stored inline) the scan over ``data`` took 11.6ms and over ``lean`` 6.1ms; the
+gap grows with body size, and a body past ~2KB compressed is what goes out of
+line, which is the live shape.
 
 So such a table carries a second column, ``lean``: the document minus the
 listed heavy keys, small enough to live inline. ``scan_fields`` reads

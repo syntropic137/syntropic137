@@ -6,7 +6,8 @@ same way: load EVERY document, filter, tally and sort them in Python
 page are a few dozen; the documents loaded to choose them are all of them.
 Measured on the E2 latency gate's seed, ``/artifacts`` read 6,000 artifact
 documents - each carrying its full markdown body - to show twenty titles, and
-spent most of a 600ms request decompressing bodies no row on the page renders.
+spent most of a 470-660ms request shipping and JSON-decoding bodies no row on
+the page renders.
 
 :func:`paginate_projection` keeps ``paginate`` - the one definition of what
 matches, how it is tallied and how it is ordered - and changes only what it is
