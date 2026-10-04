@@ -37,6 +37,7 @@
 allowed_prefixes = [
     "syn_domain.contexts",
     "syn_domain.pagination",
+    "syn_domain.projection_scan",
     "syn_shared",
     "syn_adapters.projection_stores",
     "time",
@@ -50,6 +51,16 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py" = { variable = "_fire_locks", description = "per-(trigger, pr) asyncio.Lock dict for concurrency guard" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/debouncer.py" = { variable = "_pending", description = "pending debounce task dict" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/safety_guards.py" = { variable = "_dispatch_timestamps", description = "dispatch rate limit timestamp list" }
+
+[in_memory_adapters_guarded]
+# Classes that match the in-memory adapter rule but are NOT guarded by
+# InMemoryAdapter / assert_test_only() (ADR-060). See
+# ci/fitness/code_quality/test_in_memory_adapters_are_guarded.py for the rule.
+# A stale entry fails the gate, so this table can only shrink.
+# "<path>::<ClassName>" = { reason = "...", issue = "#NNN" (for real violations) }
+"packages/syn-shared/src/syn_shared/in_memory.py::InMemoryAdapterError" = { reason = "The exception the guard raises, not an adapter. Holds no state." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_adapter.py::MemoryIsolationState" = { reason = "Per-workspace state record, constructed only inside the guarded MemoryIsolationAdapter. Not an adapter and implements no port." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_sidecar.py::MemorySidecarState" = { reason = "Per-sidecar state record, constructed only inside the guarded MemorySidecarAdapter. Not an adapter and implements no port." }
 
 [aggregate_guards]
 # @command_handler methods exempt from the guard requirement.

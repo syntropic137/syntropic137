@@ -20,9 +20,10 @@ if TYPE_CHECKING:
 
     import asyncpg
 
+    from syn_domain.agent_event_span import EventSpan
     from syn_shared.observed_model import RecordedModel
 
-from syn_domain import tool_call_counts
+from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions import (
     CostCalculator,
     recorded_model_from_row,
@@ -65,11 +66,17 @@ from syn_shared.pricing import parse_vendor_cost
 # of ids per round-trip. Neither is a query change, which is why neither is in
 # #1338's first pass.
 #
-# It is NOT currently known to be slow: #1322 measured the tool-count scan at
-# 60,562 buffers / 905ms for one page, and these were never measured. Treat the
-# shape as the warning, and measure before rewriting - with
-# EXPLAIN (ANALYZE, BUFFERS) against compressed chunks at a realistic row
-# count, since a plan on an uncompressed table proves nothing here.
+# MEASURED IN E2, AND THE COST WAS NOT WHERE THIS COMMENT EXPECTED. On the E2
+# latency gate's seed (241 daily chunks, all but one compressed) each of these
+# statements EXECUTED in under 5ms - TimescaleDB 2.2x keeps a bloom filter on
+# execution_id inside compressed chunks, so most segments are skipped - and
+# PLANNED in 30-50ms, because a predicate that names no time cannot exclude a
+# chunk and the planner opened all of them. So every statement here is now
+# bounded to the days the execution has telemetry on, read from
+# agent_event_day_rollup by agent_event_span; that bound returns the same rows
+# and cuts planning to the chunks that hold them. The decompression cost this
+# comment describes is still real, and still scales with the execution's own
+# size rather than with history.
 #
 # Counted and pinned by
 # packages/syn-domain/tests/test_cost_read_paths_scan_agent_events_by_event_type.py.
@@ -109,6 +116,7 @@ SELECT
     COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
+  AND time >= $3 AND time < $4
 GROUP BY {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL)
 """
 
@@ -134,6 +142,7 @@ SELECT
     COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
+  AND time >= $3 AND time < $4
 GROUP BY {recorded_model_group_by()}
 """
 
@@ -148,6 +157,7 @@ _EXECUTION_START_QUERY = """
 SELECT MIN(time) as started_at
 FROM agent_events
 WHERE execution_id = $1
+  AND time >= $2 AND time < $3
 """
 
 # NOTE (#817): `is_complete` on ExecutionCost is still never assigned, and that
@@ -170,6 +180,7 @@ _TURN_COUNT_QUERY = """
 SELECT COUNT(*)
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
+  AND time >= $3 AND time < $4
 """
 
 # Per-phase cost breakdown from session_summary events.
@@ -196,6 +207,7 @@ SELECT
 FROM agent_events
 WHERE execution_id = $1
   AND event_type = $2
+  AND time >= $3 AND time < $4
 GROUP BY phase_id, {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL)
 """
 
@@ -574,16 +586,20 @@ class TimescaleExecutionCostQuery:
         self._cost_calculator = cost_calculator or CostCalculator()
 
     async def _query_session_summaries(
-        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, span: EventSpan
     ) -> list[asyncpg.Record]:
         """Query session_summary events, grouped by model, for authoritative totals."""
-        return await conn.fetch(_SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY)
+        return await conn.fetch(
+            _SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY, span.lower, span.upper
+        )
 
     async def _query_token_usage(
-        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, span: EventSpan
     ) -> list[asyncpg.Record]:
         """Query token_usage events, grouped by model, as fallback for in-progress executions."""
-        return await conn.fetch(_TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE)
+        return await conn.fetch(
+            _TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE, span.lower, span.upper
+        )
 
     def _price_session_summary_groups(self, rows: list[asyncpg.Record]) -> _PricedTokenUsage:
         """Merge model-grouped session_summary rows into one priced aggregate.
@@ -657,22 +673,33 @@ class TimescaleExecutionCostQuery:
         return 0
 
     async def _query_turn_count(
-        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, data: _TokenData
+        self,
+        conn: asyncpg.pool.PoolConnectionProxy,
+        execution_id: str,
+        data: _TokenData,
+        span: EventSpan,
     ) -> int:
         """Get turn count from summary data or token_usage event count."""
         if data.from_summary:
             return data.total_turns
-        return await conn.fetchval(_TURN_COUNT_QUERY, execution_id, TOKEN_USAGE) or 0
+        return (
+            await conn.fetchval(
+                _TURN_COUNT_QUERY, execution_id, TOKEN_USAGE, span.lower, span.upper
+            )
+            or 0
+        )
 
     async def _query_cost_by_phase(
-        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, span: EventSpan
     ) -> PhaseCosts:
         """Query per-phase cost breakdown from session_summary events."""
-        phase_rows = await conn.fetch(_COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY)
+        phase_rows = await conn.fetch(
+            _COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY, span.lower, span.upper
+        )
         return price_phase_rows(phase_rows, self._cost_calculator)
 
     async def _resolve_token_rows(
-        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, span: EventSpan
     ) -> tuple[list[asyncpg.Record], bool]:
         """Get the best available token data rows and whether they're from session_summary.
 
@@ -682,10 +709,10 @@ class TimescaleExecutionCostQuery:
         of the total. The token_usage fallback is grouped the same way (see
         ``_TOKEN_USAGE_FALLBACK_QUERY``).
         """
-        summary_rows = await self._query_session_summaries(conn, execution_id)
+        summary_rows = await self._query_session_summaries(conn, execution_id, span)
         if summary_rows:
             return summary_rows, True
-        return await self._query_token_usage(conn, execution_id), False
+        return await self._query_token_usage(conn, execution_id, span), False
 
     def _build_execution_cost(
         self,
@@ -741,8 +768,12 @@ class TimescaleExecutionCostQuery:
         matches nothing and reports that as "nothing was recorded" (#1241).
         """
         execution_id = pg_safe(execution_id)
-        async with self._pool.acquire() as conn:
-            token_rows, has_summary = await self._resolve_token_rows(conn, execution_id)
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            # Every read below is bounded to the days this execution has
+            # telemetry on, so the planner opens those chunks and no others
+            # (E2). It changes no row any of them returns: see agent_event_span.
+            span = await agent_event_span.for_executions(conn, [execution_id])  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            token_rows, has_summary = await self._resolve_token_rows(conn, execution_id, span)
             if not token_rows:
                 return None
 
@@ -756,18 +787,20 @@ class TimescaleExecutionCostQuery:
                     [execution_id],
                 )
             ).get(execution_id, 0)
-            execution_started_at = await conn.fetchval(_EXECUTION_START_QUERY, execution_id)
+            execution_started_at = await conn.fetchval(
+                _EXECUTION_START_QUERY, execution_id, span.lower, span.upper
+            )
 
             if has_summary:
                 priced = self._price_session_summary_groups(token_rows)
-                phase_costs = await self._query_cost_by_phase(conn, execution_id)
+                phase_costs = await self._query_cost_by_phase(conn, execution_id, span)
             else:
                 priced = self._price_token_usage_groups(token_rows)
                 phase_costs = PhaseCosts(cost_by_phase={}, unpriced_by_phase={})
 
             data = priced.data
             total_cost = priced.total_cost
-            turn_count = await self._query_turn_count(conn, execution_id, data)
+            turn_count = await self._query_turn_count(conn, execution_id, data, span)
             cost_by_model = priced.cost_by_model
             unpriced_observation_count = priced.unpriced_observation_count
 

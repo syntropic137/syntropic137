@@ -5,6 +5,7 @@ from syn_api.routes.capture import router as capture_router
 from syn_api.routes.claude_plugins import router as claude_plugins_router
 from syn_api.routes.conversations import router as conversations_router
 from syn_api.routes.costs import router as costs_router
+from syn_api.routes.evals import router as evals_router
 from syn_api.routes.events import router as events_router
 from syn_api.routes.executions import router as executions_router
 from syn_api.routes.features import router as features_router
@@ -30,6 +31,7 @@ __all__ = [
     "claude_plugins_router",
     "conversations_router",
     "costs_router",
+    "evals_router",
     "events_router",
     "executions_router",
     "features_router",

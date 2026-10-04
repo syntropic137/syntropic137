@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from syn_domain.contexts.orchestration import AttemptClock
+from syn_shared.in_memory import assert_test_only
 
 
 @dataclass
@@ -55,6 +56,9 @@ class FakeClock:
     #: `now`, so a deadline told to the agent can be checked against the one
     #: the attempts are held to (#1546).
     epoch: datetime = datetime(2026, 10, 3, 9, 0, tzinfo=UTC)
+
+    def __post_init__(self) -> None:
+        assert_test_only()
 
     def monotonic(self) -> float:
         reading = self.now

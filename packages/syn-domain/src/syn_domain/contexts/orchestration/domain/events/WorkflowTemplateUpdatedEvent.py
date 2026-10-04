@@ -66,6 +66,9 @@ class WorkflowTemplateUpdatedEvent(DomainEvent):
     # Ordinary labels (#967); optional so older events rehydrate (ADR-007).
     tags: list[str] = Field(default_factory=list)
 
+    # The workflow's default eval (#967); absent on older events (ADR-007).
+    default_eval_id: str | None = None
+
     # Provenance (issue #822)
     version: str | None = None
     """Package version this definition came from."""

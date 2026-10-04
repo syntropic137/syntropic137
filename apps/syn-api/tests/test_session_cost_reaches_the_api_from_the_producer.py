@@ -25,7 +25,7 @@ from __future__ import annotations
 import dataclasses
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -165,7 +165,15 @@ class _StartedAtRow:
     started_at: datetime
 
 
-_EventRow = _SummaryEvent | _TokenEvent | _ToolCountRow | _StartedAtRow
+@dataclass(frozen=True)
+class _SpanRow:
+    """What the E2 span lookup on ``agent_event_day_rollup`` selects."""
+
+    first_day: date | None
+    last_day: date | None
+
+
+_EventRow = _SummaryEvent | _TokenEvent | _ToolCountRow | _StartedAtRow | _SpanRow
 
 
 @dataclass(frozen=True)
@@ -206,13 +214,48 @@ class _ProjectingConnection:
     def __init__(self, rows_by_query: Mapping[str, Sequence[_EventRow]]) -> None:
         self._rows_by_query = rows_by_query
 
-    async def fetch(self, query: str, *_args: object) -> list[_ProjectedRow]:
-        aliases = frozenset(_selected_aliases(query))
-        key = _TALLY if tool_call_counts.TABLE in query else query
-        return [
-            _ProjectedRow(source=row, columns=aliases & _columns_of(row))
-            for row in self._rows_by_query.get(key, [])
+    def transaction(self) -> _Transaction:
+        """``agent_event_span.custom_plans`` wraps the page's reads in one."""
+        return _Transaction()
+
+    async def execute(self, query: str, *_args: object) -> str:
+        # custom_plans: the read-only snapshot, then the plan setting.
+        assert "REPEATABLE READ, READ ONLY" in query or "plan_cache_mode" in query, query
+        return "SET"
+
+    def _span(self, ids: object) -> _SpanRow:
+        """The E2 span lookup, answered as the day rollup would.
+
+        The UTC days of every timestamp the fixture holds for the bound ids;
+        none is the rollup never having seen them, which reads unbounded.
+        """
+        assert isinstance(ids, list)
+        days = [
+            value.astimezone(UTC).date()
+            for rows in self._rows_by_query.values()
+            for row in rows
+            if getattr(row, "session_id", None) in ids
+            for value in (getattr(row, f.name) for f in dataclasses.fields(row))
+            if isinstance(value, datetime)
         ]
+        return _SpanRow(first_day=min(days, default=None), last_day=max(days, default=None))
+
+    async def fetch(self, query: str, *args: object) -> list[_ProjectedRow]:
+        aliases = frozenset(_selected_aliases(query))
+        if "agent_event_day_rollup" in query:
+            rows: Sequence[_EventRow] = [self._span(args[0])]
+        else:
+            key = _TALLY if tool_call_counts.TABLE in query else query
+            rows = self._rows_by_query.get(key, [])
+        return [_ProjectedRow(source=row, columns=aliases & _columns_of(row)) for row in rows]
+
+
+class _Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
 
 
 class _Acquire:
