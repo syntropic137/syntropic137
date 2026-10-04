@@ -47,10 +47,12 @@ import pytest
 
 from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
+    ROLLUP_EXECUTION_INDEX_SQL,
+    ROLLUP_EXECUTION_INDEX_VALID_SQL,
     EventStoreSchema,
 )
 
-from .test_day_rollup_backfill_runs_once import CatalogueConnection
+from .test_day_rollup_backfill_runs_once import EXECUTION_INDEX, CatalogueConnection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -81,10 +83,12 @@ class _OrderedConnection(CatalogueConnection):
 
     async def __aenter__(self) -> _OrderedConnection:
         self.calls.append(self.BEGIN)
+        self.transaction_depth += 1
         return self
 
     async def __aexit__(self, *_: object) -> bool:
         self.calls.append(self.COMMIT)
+        self.transaction_depth -= 1
         return False
 
 
@@ -258,3 +262,68 @@ class TestTheDecisionIsMadeUnderALock:
 
         assert begin < lock < commit
         assert "pg_advisory_lock" not in "".join(conn.calls)
+
+
+def _index_statements(conn: CatalogueConnection) -> list[str]:
+    """The DDL issued for the execution index, in order."""
+    return [
+        sql
+        for sql in conn.calls
+        if EXECUTION_INDEX in sql and sql.lstrip().startswith(("CREATE", "DROP"))
+    ]
+
+
+class TestTheExecutionIndexIsBuiltOutsideTheLock:
+    """E2's ``idx_rollup_execution_day``: startup DDL that must never pause ingestion.
+
+    The rollup transaction holds the agent_events trigger lock, which conflicts
+    with INSERT. An index build inside it would hold every insert for the
+    length of the build; built CONCURRENTLY outside any transaction, it holds
+    none. (The fake rejects CONCURRENTLY inside a transaction, as PostgreSQL
+    does, so every test here also proves that.)
+    """
+
+    async def test_it_is_built_after_the_trigger_lock_transaction_commits(self) -> None:
+        conn = _OrderedConnection()
+
+        await _startup(conn, EventStoreSchema())
+
+        trigger = next(i for i, sql in enumerate(conn.calls) if f"CREATE TRIGGER {TRIGGER}" in sql)
+        commit = conn.calls.index(_OrderedConnection.COMMIT, trigger)
+        build = conn.calls.index(ROLLUP_EXECUTION_INDEX_SQL)
+
+        assert commit < build, (
+            "the execution index is built before the transaction holding the "
+            "agent_events trigger lock commits, so ingestion waits for the build"
+        )
+        opened = conn.calls[:build].count(_OrderedConnection.BEGIN)
+        closed = conn.calls[:build].count(_OrderedConnection.COMMIT)
+        assert opened == closed, "the execution index is built inside a transaction"
+
+    async def test_a_valid_index_is_not_rebuilt(self) -> None:
+        """The healthy restart asks, and issues no DDL."""
+        conn = _OrderedConnection()
+        schema = EventStoreSchema()
+
+        await _startup(conn, schema)
+        conn.calls.clear()
+        await _startup(conn, schema)
+
+        assert ROLLUP_EXECUTION_INDEX_VALID_SQL in conn.calls
+        assert _index_statements(conn) == []
+
+    async def test_an_invalid_leftover_is_dropped_and_rebuilt(self) -> None:
+        """A dead CONCURRENTLY build leaves an index IF NOT EXISTS would skip forever."""
+        conn = _OrderedConnection()
+        schema = EventStoreSchema()
+
+        await _startup(conn, schema)
+        conn.invalidate_index(EXECUTION_INDEX)
+        conn.calls.clear()
+        await _startup(conn, schema)
+
+        statements = _index_statements(conn)
+        assert len(statements) == 2
+        assert statements[0].startswith("DROP INDEX CONCURRENTLY")
+        assert statements[1] == ROLLUP_EXECUTION_INDEX_SQL
+        assert await conn.fetchval(ROLLUP_EXECUTION_INDEX_VALID_SQL) is True

@@ -4,6 +4,7 @@ This implementation persists projection data to PostgreSQL,
 using per-projection tables for isolation and testability.
 """
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +13,8 @@ from pydantic import BaseModel
 
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.record_match import holds
+from syn_domain.pagination import ProjectionRecord
+from syn_domain.projection_scan import JsonValue
 from syn_shared.settings import get_settings
 
 
@@ -36,6 +39,8 @@ class PostgresProjectionStore:
         """
         self._pool = pool
         self._initialized_tables: set[str] = set()
+        # Tables whose lean column (lean_documents) is ready for list scans.
+        self._lean_tables: set[str] = set()
 
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create the connection pool."""
@@ -60,7 +65,13 @@ class PostgresProjectionStore:
 
         pool = await self._get_pool()
         table_name = self._table_name(projection)
+        if projection in self._initialized_tables:
+            return
         await ensure_projection_table(pool, projection, table_name, self._initialized_tables)
+        from syn_adapters.projection_stores.lean_documents import ensure_lean_column
+
+        if await ensure_lean_column(pool, projection, table_name):
+            self._lean_tables.add(projection)
 
     async def _ensure_state_table(self) -> None:
         """Ensure the projection_states table exists."""
@@ -183,6 +194,34 @@ class PostgresProjectionStore:
         pool = await self._get_pool()
         table_name = self._table_name(projection)
         return await fetch_get_all(pool, table_name, self._deserialize)
+
+    async def scan_fields(
+        self,
+        projection: str,
+        fields: Sequence[str],
+        *,
+        filters: Mapping[str, str] | None = None,
+        order_by: str | None = None,
+    ) -> list[tuple[str, Mapping[str, JsonValue]]]:
+        """Selected fields of every matching document (syn_domain.projection_scan)."""
+        from syn_adapters.projection_stores.postgres_scan import scan_fields
+
+        await self._ensure_table(projection)
+        return await scan_fields(
+            await self._get_pool(),
+            self._table_name(projection),
+            fields,
+            filters,
+            order_by,
+            lean_ready=projection in self._lean_tables,
+        )
+
+    async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
+        """The whole documents stored under ``keys``, by key."""
+        from syn_adapters.projection_stores.postgres_scan import get_many
+
+        await self._ensure_table(projection)
+        return await get_many(await self._get_pool(), self._table_name(projection), keys)
 
     async def count(self, projection: str, filters: dict[str, str] | None = None) -> int:
         """Count records with the same filter semantics `query` uses."""
