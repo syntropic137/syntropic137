@@ -5,13 +5,19 @@
  * Served over `fetch` rather than by mocking the hook: the owning system
  * arrives as an id on the repo and as a name on another endpoint, and the join
  * between them is half of what is being asserted.
+ *
+ * `/github/repos` bodies for a GitHub failure are not written here: they are
+ * recorded from the real route by apps/syn-api/tests/test_github_repos_lookup.py,
+ * so these tests see what the API actually says when GitHub fails.
  */
 
 import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import githubReposRecorded from '../../../../syn-api/tests/fixtures/github_repos_lookup.json'
 import type { RepoSummary, SystemSummary } from '../../api/repos'
+import type { components } from '../../generated/api-types'
 import { RepoList } from '../RepoList'
 
 function repo(overrides: Partial<RepoSummary> & Pick<RepoSummary, 'repo_id'>): RepoSummary {
@@ -41,15 +47,28 @@ function appRepo(fullName: string) {
   }
 }
 
-/** `appAccess` null makes the App lookup fail, as it does with no App configured. */
-function serve(repos: RepoSummary[], appAccess: string[] | null = []) {
+type GitHubRepoList = components['schemas']['GitHubRepoListResponse']
+
+const recorded = githubReposRecorded as Record<keyof typeof githubReposRecorded, GitHubRepoList>
+
+/**
+ * `appAccess` names the repos a complete lookup found. null makes the request
+ * itself fail, as it does with no App configured; a recorded body is served as is.
+ */
+function serve(repos: RepoSummary[], appAccess: string[] | GitHubRepoList | null = []) {
   vi.stubGlobal('fetch', async (input: RequestInfo | URL): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     if (url.endsWith('/api/v1/repos')) return json({ repos, total: repos.length })
     if (url.endsWith('/api/v1/systems')) return json({ systems: SYSTEMS, total: SYSTEMS.length })
     if (url.endsWith('/api/v1/github/repos')) {
       if (appAccess === null) return new Response('{"detail":"no app"}', { status: 502 })
-      return json({ repos: appAccess.map(appRepo), total: appAccess.length })
+      if (!Array.isArray(appAccess)) return json(appAccess)
+      return json({
+        repos: appAccess.map(appRepo),
+        total: appAccess.length,
+        installation_id: null,
+        lookup: 'complete',
+      })
     }
     throw new Error(`No fake endpoint for ${url}`)
   })
@@ -134,6 +153,43 @@ describe('Repos page', () => {
     const row = within(await rowFor('acme/web'))
     expect(row.getByText('Unknown')).toBeInTheDocument()
     expect(row.queryByText('Not attached')).not.toBeInTheDocument()
+  })
+
+  // The API answers 200 here; only its `lookup` says GitHub failed.
+  it('says unknown when GitHub failed the installation lookup, not detached', async () => {
+    serve(
+      [repo({ repo_id: 'r7', full_name: 'acme/payments', installation_id: '' })],
+      recorded.installation_lookup_failed,
+    )
+    renderPage()
+
+    const row = within(await rowFor('acme/payments'))
+    expect(row.getByText('Unknown')).toBeInTheDocument()
+    expect(row.queryByText('Not attached')).not.toBeInTheDocument()
+  })
+
+  it('says not attached when GitHub confirmed the App reaches nothing', async () => {
+    serve(
+      [repo({ repo_id: 'r7', full_name: 'acme/payments', installation_id: '' })],
+      recorded.confirmed_empty,
+    )
+    renderPage()
+
+    expect(within(await rowFor('acme/payments')).getByText('Not attached')).toBeInTheDocument()
+  })
+
+  it('keeps what a partial lookup found and leaves the rest unknown', async () => {
+    serve(
+      [
+        repo({ repo_id: 'r7', full_name: 'acme/payments', installation_id: '' }),
+        repo({ repo_id: 'r8', full_name: 'acme/web', installation_id: '' }),
+      ],
+      recorded.one_installation_failed,
+    )
+    renderPage()
+
+    expect(within(await rowFor('acme/payments')).getByText('Attached')).toBeInTheDocument()
+    expect(within(await rowFor('acme/web')).getByText('Unknown')).toBeInTheDocument()
   })
 
   it('falls back to the system id when the system is not listed', async () => {

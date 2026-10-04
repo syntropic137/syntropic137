@@ -7,14 +7,15 @@
  * systems request failed) falls back to its id rather than hiding the repo.
  *
  * Attachment is whether the GitHub App can reach the repo right now, which
- * only `/github/repos` knows. When that lookup fails the answer is unknown,
- * not "not attached".
+ * only `/github/repos` knows. A repo it lists is attached; a repo it omits is
+ * "not attached" only when GitHub answered for every installation, and
+ * unknown otherwise.
  */
 
 import { useEffect, useState } from 'react'
 import {
-  listAppAccessibleRepoNames,
   listRepos,
+  lookUpAppAccess,
   listSystems,
   type RepoSummary,
   type SystemSummary,
@@ -35,13 +36,18 @@ export interface RepoRow {
 export type RepoListState =
   { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; repos: RepoRow[] }
 
-/** `null` when App access could not be looked up. */
-type AccessibleNames = ReadonlySet<string> | null
+interface AccessibleNames {
+  /** Lower-cased: GitHub treats owner/name case-insensitively. */
+  names: ReadonlySet<string>
+  /** Whether a name's absence means the App cannot reach that repo. */
+  complete: boolean
+}
+
+const UNKNOWN_ACCESS: AccessibleNames = { names: new Set(), complete: false }
 
 function attachmentOf(fullName: string, accessible: AccessibleNames): Attachment {
-  if (accessible === null) return 'unknown'
-  // GitHub treats owner/name case-insensitively.
-  return accessible.has(fullName.toLowerCase()) ? 'attached' : 'not-attached'
+  if (accessible.names.has(fullName.toLowerCase())) return 'attached'
+  return accessible.complete ? 'not-attached' : 'unknown'
 }
 
 function toRow(
@@ -67,11 +73,14 @@ async function loadRepoRows(): Promise<RepoRow[]> {
       console.error(error)
       return []
     }),
-    listAppAccessibleRepoNames().then(
-      (names): AccessibleNames => new Set(names.map((name) => name.toLowerCase())),
+    lookUpAppAccess().then(
+      ({ names, complete }): AccessibleNames => ({
+        names: new Set(names.map((name) => name.toLowerCase())),
+        complete,
+      }),
       (error: unknown): AccessibleNames => {
         console.error(error)
-        return null
+        return UNKNOWN_ACCESS
       },
     ),
   ])

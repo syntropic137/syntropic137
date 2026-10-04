@@ -18,13 +18,24 @@ export async function listSystems(): Promise<SystemSummary[]> {
 }
 
 /**
- * Full names of every repo some GitHub App installation can reach. This, not a
+ * The repos some GitHub App installation can reach, by full name. This, not a
  * repo's own `installation_id`, is what tracks App access: CLI registration
  * leaves that field empty, and installation webhooks never update it.
+ *
+ * `complete` is false when GitHub failed for some installation, so a repo
+ * missing from `names` may still be reachable.
  */
-export async function listAppAccessibleRepoNames(): Promise<string[]> {
+export interface AppAccess {
+  names: string[]
+  complete: boolean
+}
+
+export async function lookUpAppAccess(): Promise<AppAccess> {
   const response = await fetchJSON<components['schemas']['GitHubRepoListResponse']>(
     `${API_BASE}/github/repos`,
   )
-  return (response.repos ?? []).map((repo) => repo.full_name)
+  return {
+    names: (response.repos ?? []).map((repo) => repo.full_name),
+    complete: response.lookup === 'complete',
+  }
 }
