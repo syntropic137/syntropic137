@@ -99,6 +99,11 @@ def _app(
         await asyncio.sleep(_SLOW_S)
         return {"execution_id": execution_id}
 
+    @app.get("/executions/{execution_id}/fails")
+    async def slow_then_raises(execution_id: str) -> dict[str, str]:
+        await asyncio.sleep(_SLOW_S)
+        raise RuntimeError(f"handler failed for {execution_id}")
+
     @app.get("/fast")
     async def fast() -> dict[str, str]:
         return {}
@@ -120,7 +125,10 @@ def _app(
 
 
 async def _get(app: FastAPI, url: str, **kwargs: object) -> int:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    # raise_app_exceptions=False: the client sees the 500 a real server sends,
+    # rather than the transport re-raising the handler's exception.
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(url, **kwargs)  # type: ignore[arg-type]  # test passthrough
     return response.status_code
 
@@ -153,6 +161,23 @@ async def test_a_slow_request_is_logged_by_template_with_status_and_duration(
     assert _field(line, "pool_wait_ms") == "0"
     # The raw path, the query string and the headers never reach the log.
     assert _EXECUTION_ID not in caplog.text
+    assert _SECRET not in caplog.text
+
+
+async def test_a_slow_request_that_raises_is_logged_with_the_500_the_client_got(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The exception crosses this middleware before the outer handler answers 500."""
+    caplog.set_level(logging.WARNING, logger=_LOGGER)
+
+    status = await _get(_app(), f"/executions/{_EXECUTION_ID}/fails?token={_SECRET}")
+
+    assert status == 500
+    [line] = _slow_lines(caplog)
+    assert _field(line, "route") == "/executions/{execution_id}/fails"
+    assert _field(line, "status") == "500"
+    assert int(_field(line, "duration_ms")) >= _SLOW_S * 1000
+    assert _EXECUTION_ID not in "\n".join(_slow_lines(caplog))
     assert _SECRET not in caplog.text
 
 

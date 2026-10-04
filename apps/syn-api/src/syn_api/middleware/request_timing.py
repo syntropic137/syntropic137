@@ -161,6 +161,13 @@ class RequestTimingMiddleware:
         with tally_pool_wait() as pool_wait:
             try:
                 await self.app(scope, receive, send_noting_response_start)
+            except Exception:
+                # An unhandled exception propagates past this middleware to
+                # Starlette's ServerErrorMiddleware, which answers 500. Record
+                # the status the client will see; the exception still raises.
+                if status is None:
+                    status = 500
+                raise
             finally:
                 end = time.perf_counter()
                 self._aggregator.record(_route_template(scope), (end - start) * 1000)
