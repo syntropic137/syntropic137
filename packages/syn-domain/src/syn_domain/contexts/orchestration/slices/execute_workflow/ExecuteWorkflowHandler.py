@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -39,7 +40,7 @@ from syn_shared.agents import (
     require_executable_provider,
     require_runnable_sandbox,
 )
-from syn_shared.tools import require_supported_tools
+from syn_shared.tools import ToolName, require_supported_tools
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePort
@@ -236,6 +237,29 @@ def _phase_declares_anything(
     with authority it explicitly declined.
     """
     return bool(model or provider or allow_delegation or allowed_tools or sandbox is not None)
+
+
+def _grant_skill_invocation(
+    config: AgentConfiguration, skills: Sequence[ResolvedSkill]
+) -> AgentConfiguration:
+    """Grant the tool that invokes skills to every phase that declares skills.
+
+    `--tools` restricts AVAILABILITY (#964), so a phase that declared skills
+    and scoped its tools without naming `Skill` had its skills installed and
+    the only way to invoke them withheld. Every claude phase of
+    `sdlc-implement-v3` was in that shape, and recorded zero `Skill` calls
+    across all of them (#1269). Declaring a skill IS asking for it to be
+    usable, so the grant follows the declaration here, at the execution
+    boundary, rather than relying on each author to remember a second line -
+    and a stored template, which never sees the YAML validator, is covered too.
+
+    An empty tool list is left alone: it means unrestricted, which already
+    includes `Skill`. Codex never reaches the append, because a codex phase
+    declaring tools is refused before this runs (ADR-069 section 3).
+    """
+    if not skills or not config.allowed_tools or ToolName.SKILL in config.allowed_tools:
+        return config
+    return replace(config, allowed_tools=(*config.allowed_tools, ToolName.SKILL))
 
 
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
@@ -540,6 +564,7 @@ class ExecuteWorkflowHandler:
                 workflow_refs=workflow_skill_refs,
                 phase_refs=list(phase.skills),
             )
+            agent_config = _grant_skill_invocation(agent_config, resolved_skills)
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,
