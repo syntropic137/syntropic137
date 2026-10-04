@@ -29,22 +29,24 @@ does NOT run on PRs into main: that tiering is deliberate and is the job's
 `if:`, not something this file can change.
 
 THE DATASET is shaped like the live install, scaled down so it seeds in
-seconds: 2,000 executions in 100 workflows, each with a session carrying 40
-turns, a summary on 4 in 5, and 120 tool observations, spread over ninety
-days - 322k observability rows. Turns and tool observations are the rows the
-old reads scaled with.
+about half a minute: 2,000 executions in 100 workflows, each with a session
+carrying 300 turns, a summary on 4 in 5, and 120 tool observations, spread over
+ninety days - 844k observability rows, 600k of them turns. Turns are the rows
+the old reads scaled with, so their count is what makes origin/main slow here
+the way it is slow live (1.9-4s on a larger history).
 
-THE BUDGET is set from measurement on the CI image (timescale 2.29.2-pg16),
-on an Apple M-series laptop with Docker Desktop:
+THE BUDGETS are set from measurement: TimescaleDB 2.29.2-pg16 (the CI service
+image), Apple M-series laptop, Docker Desktop, 20 runs after 2 warmups.
 
-    endpoint                         origin/main p95   this branch p95
-    /metrics                         see PR #1558 for the pasted tables
-    /metrics?workflow_id=
-    /insights/contribution-heatmap
+    endpoint                         origin/main p95  this branch p95  budget
+    /metrics                               580 ms           14 ms      100 ms
+    /metrics?workflow_id=                  449 ms           70 ms      300 ms
+    /insights/contribution-heatmap         937 ms           31 ms      150 ms
 
-The E1 target is 300ms p95. The branch sits well under it, so 300ms leaves
-headroom for a slower CI runner, while main is over it by a margin no runner
-variance explains: a regression back to a whole-history scan fails here.
+Each budget is at or under the E1 target of 300ms, 4-7x the branch's p95 so a
+slower CI runner stays green, and 1.5-6x under what origin/main takes on the
+same data, so a regression back to a whole-history read fails. The branch's
+reads do not grow with history; origin/main's grow linearly with it.
 """
 
 from __future__ import annotations
@@ -54,6 +56,7 @@ import math
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
@@ -73,7 +76,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 EXECUTIONS = 2_000
 EXECUTIONS_PER_WORKFLOW = 20
-TURNS_PER_SESSION = 40
+TURNS_PER_SESSION = 300
 TOOL_EVENTS_PER_SESSION = 120
 DAYS = 90
 RUNS = 20
@@ -81,14 +84,36 @@ WARMUP = 2
 
 GATED_WORKFLOW = "wf-0"
 
-# p95 per endpoint, in milliseconds. The E1 target; see the module docstring
-# for the measurements it was checked against.
-BUDGET_MS = 300.0
 
-ENDPOINTS: tuple[tuple[str, str, dict[str, str]], ...] = (
-    ("/metrics", "/metrics", {}),
-    ("/metrics?workflow_id=", "/metrics", {"workflow_id": GATED_WORKFLOW}),
-    ("/insights/contribution-heatmap", "/insights/contribution-heatmap", {"metric": "sessions"}),
+@dataclass(frozen=True)
+class Endpoint:
+    """One gated request and the p95 it must stay under."""
+
+    name: str
+    path: str
+    params: dict[str, str]
+    budget_ms: float
+
+
+# p95 budget per endpoint, in milliseconds, each at or under the E1 target of
+# 300ms. Set from measurement (module docstring): roughly 4-9x the branch's
+# p95 on a laptop, so a CI runner several times slower stays green, and still
+# well under what the whole-history reads on origin/main take on this dataset,
+# so a regression back to them fails.
+ENDPOINTS: tuple[Endpoint, ...] = (
+    Endpoint("/metrics", "/metrics", {}, budget_ms=100.0),
+    Endpoint(
+        "/metrics?workflow_id=",
+        "/metrics",
+        {"workflow_id": GATED_WORKFLOW},
+        budget_ms=300.0,
+    ),
+    Endpoint(
+        "/insights/contribution-heatmap",
+        "/insights/contribution-heatmap",
+        {"metric": "sessions"},
+        budget_ms=150.0,
+    ),
 )
 
 _COLUMNS = ("time", "event_type", "session_id", "execution_id", "phase_id", "data")
@@ -250,9 +275,12 @@ async def test_dashboard_endpoints_stay_inside_their_p95_budget(
     heatmap = await client.get("/insights/contribution-heatmap", params={"metric": "sessions"})
     assert heatmap.json()["total"] == EXECUTIONS, heatmap.text
 
-    measured = {name: await _p95_ms(client, path, params) for name, path, params in ENDPOINTS}
+    measured = {e.name: await _p95_ms(client, e.path, e.params) for e in ENDPOINTS}
 
-    table = "\n".join(f"  {name:<32} p95 {ms:7.1f} ms" for name, ms in measured.items())
-    print(f"\nlatency gate (budget {BUDGET_MS:.0f}ms p95, {RUNS} runs):\n{table}")
-    over = {name: ms for name, ms in measured.items() if ms > BUDGET_MS}
-    assert not over, f"p95 over the {BUDGET_MS:.0f}ms budget:\n{table}"
+    table = "\n".join(
+        f"  {e.name:<32} p95 {measured[e.name]:7.1f} ms   budget {e.budget_ms:5.0f} ms"
+        for e in ENDPOINTS
+    )
+    print(f"\nlatency gate ({RUNS} runs per endpoint):\n{table}")
+    over = [e.name for e in ENDPOINTS if measured[e.name] > e.budget_ms]
+    assert not over, f"p95 over budget for {over}:\n{table}"
