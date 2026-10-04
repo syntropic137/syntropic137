@@ -167,6 +167,30 @@ def _commands_run_by(target: str) -> dict[tuple[str, ...], set[tuple[str, str]]]
     return commands
 
 
+_GATE_RUNNER = "scripts/run-gate-steps.sh"
+
+
+def _gate_steps(target: str) -> list[str]:
+    """The recipes ``target`` hands to the step runner, in the order it runs them.
+
+    `preflight-agent` runs its checks through scripts/run-gate-steps.sh (#1585)
+    so it can time each one and stop at the first failure. That makes them
+    arguments rather than dependencies, invisible to ``_closure``, so they are
+    read from what `just --dry-run` would execute.
+    """
+    for argv in _commands_run_by(target):
+        if len(argv) >= 3 and argv[:2] == ("bash", _GATE_RUNNER):
+            return list(argv[3:])
+    return []
+
+
+def _gate_closure(target: str, text: str) -> set[str]:
+    covered = _closure(target, text)
+    for step in _gate_steps(target):
+        covered |= _closure(step, text)
+    return covered
+
+
 def test_preflight_agent_runs_both_halves_of_fitness() -> None:
     """Agents gate on `preflight-agent`; it must run ALL of `fitness`.
 
@@ -181,7 +205,7 @@ def test_preflight_agent_runs_both_halves_of_fitness() -> None:
     wrappers, or CI would run each half twice.
     """
     text = _JUSTFILE.read_text()
-    agent = _closure("preflight-agent", text)
+    agent = _gate_closure("preflight-agent", text)
 
     assert "fitness-agent" in agent, "`preflight-agent` no longer runs fitness-check"
     assert "scripts/agent-fitness.sh" in _body("fitness-agent", text), (
@@ -191,10 +215,10 @@ def test_preflight_agent_runs_both_halves_of_fitness() -> None:
     assert "fitness-invariants-agent" in agent, (
         "`preflight-agent` no longer runs the `pytest ci/fitness` invariants"
     )
-    assert (AGENT_WORKSPACE_ENV, "1") in _commands_run_by("preflight-agent").get(
+    assert (AGENT_WORKSPACE_ENV, "1") in _commands_run_by("fitness-invariants-agent").get(
         ("just", "fitness-invariants"), set()
     ), (
-        "`preflight-agent` must EXECUTE `just fitness-invariants` with "
+        "`fitness-invariants-agent` must EXECUTE `just fitness-invariants` with "
         f"{AGENT_WORKSPACE_ENV}=1: the `fitness-invariants` recipe itself, not a "
         "copy of its command that can drift from CI's"
     )
@@ -208,6 +232,46 @@ def test_preflight_agent_runs_both_halves_of_fitness() -> None:
     assert not {"fitness-agent", "fitness-invariants-agent"} & full, (
         "`preflight` would run a fitness half twice"
     )
+
+
+def test_reordering_preflight_agent_dropped_no_check() -> None:
+    """Making the gate fail fast must not make it check less (#1585).
+
+    Before #1585 `preflight-agent` was `preflight-portable fitness-agent
+    fitness-invariants-agent`. It now lists its steps itself, cheapest first,
+    so a gate can go missing from that list without anything else noticing:
+    the cheapest way to make a slow gate fast is to stop running part of it.
+    `preflight-portable` stays the definition of the portable half.
+    """
+    text = _JUSTFILE.read_text()
+    required = (_closure("preflight-portable", text) - {"preflight-portable"}) | {
+        "fitness-agent",
+        "fitness-invariants-agent",
+    }
+    missing = sorted(required - _gate_closure("preflight-agent", text))
+    assert not missing, (
+        f"`preflight-agent` no longer runs {missing}, which CI's jobs run. Add each "
+        "to _preflight_agent_fast_steps or _preflight_agent_slow_steps in the justfile."
+    )
+
+
+def test_preflight_agent_fast_is_the_cheap_front_of_the_full_gate() -> None:
+    """The fast loop runs exactly what the full gate runs FIRST.
+
+    So a fast run that passes means the full gate gets past those steps too,
+    and the full gate fails on them before it reaches anything slow. And the
+    fast loop never starts the Rust build, which is what it exists to avoid.
+    """
+    fast = _gate_steps("preflight-agent-fast")
+    full = _gate_steps("preflight-agent")
+    assert fast, "`preflight-agent-fast` must run its steps through the gate runner"
+    assert full[: len(fast)] == fast, (
+        "`preflight-agent` must start with exactly the `preflight-agent-fast` steps, in order"
+    )
+    text = _JUSTFILE.read_text()
+    slow = {"fitness-agent", "aps-build", "fitness-check", "fitness-invariants-agent"}
+    assert not slow & _gate_closure("preflight-agent-fast", text)
+    assert full[-1] == "fitness-agent", "the Rust build must be the full gate's last step"
 
 
 def test_only_the_agent_gate_lets_a_missing_host_tool_skip() -> None:
