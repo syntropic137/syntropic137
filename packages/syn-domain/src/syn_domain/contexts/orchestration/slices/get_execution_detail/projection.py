@@ -322,6 +322,26 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         status = SideEffectStatus.from_stored(event_data.get("reported_side_effects"))
         phase["reported_side_effects"] = None if status is None else status.value
 
+    async def on_workspace_provisioned_for_phase(self, event_data: dict) -> None:
+        """Handle WorkspaceProvisionedForPhase: the phase's clock starts here (#1546).
+
+        Overwrites, because a retried phase is provisioned again and runs on a
+        fresh clock.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if not existing:
+            return
+        phases = existing.get("phases", [])
+        found = self._find_phase(phases, event_data.get("phase_id") or "")
+        if found is None:
+            return
+        _, phase = found
+        phase["provisioned_at"] = event_data.get("provisioned_at")
+        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
     @staticmethod
     def _track_artifact(existing: dict[str, Any], artifact_id: str | None) -> None:
         """Add an artifact ID to the execution detail if not already tracked."""
