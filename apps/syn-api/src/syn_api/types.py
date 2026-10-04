@@ -2136,7 +2136,11 @@ class HealthResponse(_OmitsAbsentFields):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    status: str = Field(description="'healthy' while the process is alive and accepting writes.")
+    status: str = Field(
+        description="'healthy' while the process is alive and accepting writes; 'starting' "
+        "while it is alive but startup (a long migration, say) has not finished, when every "
+        "route but /health and /version answers 503; 'unhealthy' when the probe failed.",
+    )
     mode: str = Field(description="'full', or 'degraded' when some subsystem is impaired.")
     build: BuildInfo = Field(description="Which build is answering (#1380).")
     degraded_reasons: list[DegradedReason] | None = Field(
