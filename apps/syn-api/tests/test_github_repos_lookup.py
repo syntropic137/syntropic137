@@ -58,8 +58,13 @@ def _get(
     cached: list[MagicMock],
     repos_by_installation: list[list[JsonValue] | Exception],
     installations_sync: list[JsonValue] | Exception | None = None,
+    upserted: list[MagicMock | Exception] | None = None,
 ) -> JsonValue:
-    """Serve one `/github/repos` request against a scripted GitHub client."""
+    """Serve one `/github/repos` request against a scripted GitHub client.
+
+    ``upserted`` scripts persisting each synced installation, in order; by
+    default every upsert succeeds.
+    """
     client = MagicMock()
     client.list_accessible_repos = AsyncMock(side_effect=repos_by_installation)
     if isinstance(installations_sync, Exception):
@@ -68,7 +73,10 @@ def _get(
         client.list_installations = AsyncMock(return_value=installations_sync or [])
     projection = MagicMock()
     projection.get_all_active = AsyncMock(return_value=cached)
-    projection.upsert_from_github_api = AsyncMock(side_effect=lambda _raw: cached[0])
+    if upserted is None:
+        projection.upsert_from_github_api = AsyncMock(side_effect=lambda _raw: cached[0])
+    else:
+        projection.upsert_from_github_api = AsyncMock(side_effect=upserted)
 
     app = FastAPI()
     app.include_router(router)
@@ -94,6 +102,7 @@ class _Fixture(BaseModel):
     confirmed_empty: JsonValue
     installation_lookup_failed: JsonValue
     one_installation_failed: JsonValue
+    installation_not_persisted: JsonValue
 
 
 def _generate() -> _Fixture:
@@ -112,6 +121,14 @@ def _generate() -> _Fixture:
                 [_raw_repo(1, "acme/payments")],
                 RuntimeError("GitHub 502"),
             ],
+        ),
+        # GitHub listed the only installation, but saving it failed, so its
+        # repos were never asked for.
+        installation_not_persisted=_get(
+            cached=[],
+            repos_by_installation=[],
+            installations_sync=[{"id": 1}],
+            upserted=[OSError("projection store unavailable")],
         ),
     )
 
@@ -174,3 +191,19 @@ def test_every_installation_failing_is_unavailable(installations: int) -> None:
         repos_by_installation=[RuntimeError("GitHub 502")] * installations,
     )
     assert _lookup(body).lookup == GitHubRepoLookup.UNAVAILABLE
+
+
+def test_an_installation_that_failed_to_persist_is_not_a_confirmed_absence() -> None:
+    assert _lookup(_generate().installation_not_persisted).lookup == GitHubRepoLookup.UNAVAILABLE
+
+
+def test_one_installation_failing_to_persist_makes_the_lookup_partial() -> None:
+    body = _get(
+        cached=[],
+        repos_by_installation=[[_raw_repo(1, "acme/payments")]],
+        installations_sync=[{"id": 1}, {"id": 2}],
+        upserted=[_installation("inst-1"), OSError("projection store unavailable")],
+    )
+    listing = _lookup(body)
+    assert [r.full_name for r in listing.repos] == ["acme/payments"]
+    assert listing.lookup == GitHubRepoLookup.PARTIAL

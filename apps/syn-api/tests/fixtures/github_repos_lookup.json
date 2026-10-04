@@ -11,6 +11,12 @@
   "repos": [],
   "total": 0
  },
+ "installation_not_persisted": {
+  "installation_id": null,
+  "lookup": "unavailable",
+  "repos": [],
+  "total": 0
+ },
  "one_installation_failed": {
   "installation_id": null,
   "lookup": "partial",

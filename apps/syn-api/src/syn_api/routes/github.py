@@ -150,12 +150,14 @@ def _is_stale(installations: list) -> bool:
 async def _sync_installations(
     client: _RepoLister,
     projection: InstallationProjection,
-) -> list | None:
+) -> tuple[list, bool] | None:
     """Fetch all installations from GitHub API and upsert into the projection.
 
-    Returns the refreshed installation list on success (may be empty if no
-    installations exist), or None if the GitHub API call itself failed so the
-    caller can distinguish a successful empty result from a network failure.
+    Returns the refreshed installation list (may be empty if no installations
+    exist) and whether it holds every installation GitHub returned; one that
+    failed to persist is missing from it. Returns None if the GitHub API call
+    itself failed so the caller can distinguish a successful empty result from
+    a network failure.
     """
     try:
         raw = await client.list_installations()
@@ -168,8 +170,8 @@ async def _sync_installations(
             result.append(await projection.upsert_from_github_api(item))
         except Exception:
             logger.warning("Failed to upsert installation %s", item.get("id"), exc_info=True)
-    logger.info("Synced %d installation(s) from GitHub API", len(result))
-    return result
+    logger.info("Synced %d of %d installation(s) from GitHub API", len(result), len(raw))
+    return result, len(result) == len(raw)
 
 
 async def _repos_for_installation(
@@ -234,7 +236,8 @@ async def _known_installations(
 
     Refreshes the installation cache from GitHub if it is empty or older than
     the TTL, so the endpoint works without a webhook configured. If the refresh
-    fails the stale list is kept, but it may be missing an installation.
+    fails the stale list is kept, but it may be missing an installation; so may
+    a refreshed list when an installation failed to persist.
     """
     installations = await projection.get_all_active()
     if not _is_stale(installations):
@@ -242,7 +245,7 @@ async def _known_installations(
     refreshed = await _sync_installations(client, projection)
     if refreshed is None:
         return installations, False
-    return refreshed, True
+    return refreshed
 
 
 def _lookup_of(asked: int, answered: int, installations_current: bool) -> GitHubRepoLookup:

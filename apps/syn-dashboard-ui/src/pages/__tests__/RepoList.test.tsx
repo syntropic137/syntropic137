@@ -172,6 +172,19 @@ describe('Repos page', () => {
     expect(row.queryByText('Not attached')).not.toBeInTheDocument()
   })
 
+  // GitHub listed the installation but saving it failed, so it was never asked.
+  it('says unknown when an installation could not be saved, not detached', async () => {
+    serve(
+      [repo({ repo_id: 'r7', full_name: 'acme/payments', installation_id: '' })],
+      recorded.installation_not_persisted,
+    )
+    renderPage()
+
+    const row = within(await rowFor('acme/payments'))
+    expect(row.getByText('Unknown')).toBeInTheDocument()
+    expect(row.queryByText('Not attached')).not.toBeInTheDocument()
+  })
+
   it('says not attached when GitHub confirmed the App reaches nothing', async () => {
     serve(
       [repo({ repo_id: 'r7', full_name: 'acme/payments', installation_id: '' })],
