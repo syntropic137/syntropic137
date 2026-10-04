@@ -226,7 +226,9 @@ class ExecutionCostQueryService:
         Args:
             limit: Maximum number of results (pushed down to SQL).
         """
-        async with self._pool.acquire() as conn:
+        # One snapshot for the per-phase read's span lookup and the read it
+        # bounds (agent_event_span.custom_plans).
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
             # From the tally, not from a COUNT(*) over agent_events (#1322).

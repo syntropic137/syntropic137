@@ -41,11 +41,13 @@ same trap E1 found in the heatmap. Bounded reads therefore run inside
 :func:`custom_plans`, which pins ``plan_cache_mode = force_custom_plan`` for
 one transaction.
 
-A RACE THAT CHANGES NOTHING. The span is read, then the bounded query runs. An
-event committed between the two on a NEW day falls outside the span; that is
-the same answer the read would have given a moment earlier, which is all two
-separate statements ever promised. Events on a day already in the span are
-inside it.
+ONE SNAPSHOT, SO NO RACE. The span is read, then the bounded query runs. Under
+READ COMMITTED an event committed between the two on a NEW day would fall
+outside the span and be missed. :func:`custom_plans` therefore runs the block
+as one REPEATABLE READ, READ ONLY transaction: the span and every bounded read
+see the same snapshot, and since an event and its rollup row commit together,
+every event in that snapshot is inside the span it read. The answer is the one
+the old reads gave at the instant the snapshot was taken.
 """
 
 from __future__ import annotations
@@ -155,15 +157,17 @@ async def _span(conn: SpanConnection, sql: str, ids: Sequence[str]) -> EventSpan
 
 @asynccontextmanager
 async def custom_plans(conn: PlanningConnection) -> AsyncIterator[None]:
-    """Plan every statement in the block for its own parameters.
+    """One read-only snapshot, every statement planned for its own parameters.
 
-    One transaction with ``SET LOCAL plan_cache_mode = force_custom_plan``, so
-    a bounded read is always planned with its bounds as constants and the
-    planner excludes the chunks outside them. ``SET LOCAL`` ends with the
-    transaction, so a pooled connection goes back as it came. Reads only: each
-    statement still takes its own snapshot under READ COMMITTED, exactly as it
-    did outside a transaction.
+    ``REPEATABLE READ, READ ONLY`` so the span lookup and the reads it bounds
+    agree (see the module docstring), and ``SET LOCAL plan_cache_mode =
+    force_custom_plan`` so a bounded read is always planned with its bounds as
+    constants and the planner excludes the chunks outside them. Both end with
+    the transaction, so a pooled connection goes back as it came. Must be the
+    connection's outermost transaction: the isolation level is set by the
+    first statement after BEGIN.
     """
     async with conn.transaction():
+        await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         await conn.execute("SET LOCAL plan_cache_mode = force_custom_plan")
         yield
