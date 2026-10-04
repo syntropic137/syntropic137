@@ -104,6 +104,21 @@ class ToolOperation:
     git_repo: str | None = None
     # Full structured git payload from v2 events (see agentic_events.payloads)
     git_data: dict[str, object] | None = None
+    call_name: str | None = None
+    """The tool's name exactly as the harness emitted it in the `tool_use` block.
+
+    `tool_name` is what the timeline DISPLAYS, and for an Agent/Task call the
+    subagent converter replaces it with the task's description. A count by
+    name has to use the name the transcript has, so it is kept here
+    separately. None for rows that are not a tool call.
+    """
+    parent_tool_use_id: str | None = None
+    """The Agent/Task call whose subagent made this call, or None for the session's own.
+
+    A subagent's calls are in its own transcript, not the session's, so a
+    non-None value here means the row does not count toward this session's
+    tool calls (docs/architecture/agent_sessions-ubiquitous-language.md).
+    """
 
     @property
     def is_started(self) -> bool:
@@ -159,15 +174,16 @@ TOOL_CALL_EVENT_TYPES: frozenset[str] = frozenset(
 )
 
 
-def is_tool_call(row: TimelineRow) -> bool:
-    """Whether `row` belongs to a tool call, as the ubiquitous language defines one.
+def is_tool_call(row: ToolOperation) -> bool:
+    """Whether `row` belongs to one of this session's own tool calls.
 
-    A tool call is one `tool_use` block in the harness transcript
+    A tool call is one `tool_use` block in the session's OWN harness transcript
     (docs/architecture/agent_sessions-ubiquitous-language.md). Counting any
     other timeline row reported git operations and lifecycle rows as tools
-    named "commit", "push", "unknown" that no transcript contains.
+    named "commit", "push", "unknown" that no transcript contains, and
+    counting a subagent's calls put its Bash calls on the parent.
     """
-    return row.operation_type in TOOL_CALL_EVENT_TYPES
+    return row.operation_type in TOOL_CALL_EVENT_TYPES and row.parent_tool_use_id is None
 
 
 def call_identity(row: TimelineRow) -> str:

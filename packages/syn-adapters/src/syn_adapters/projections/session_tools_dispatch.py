@@ -95,6 +95,8 @@ def build_standard_operation(
         input_preview=data.get("input_preview"),
         output_preview=data.get("output_preview") if is_completed else None,
         duration_ms=data.get("duration_ms") if is_completed else None,
+        call_name=data.get("tool_name") or None,
+        parent_tool_use_id=data.get("parent_tool_use_id") or None,
     )
 
 

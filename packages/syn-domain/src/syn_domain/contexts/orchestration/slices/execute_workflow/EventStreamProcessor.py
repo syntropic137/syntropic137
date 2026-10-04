@@ -335,6 +335,19 @@ class StreamResult:
     announced_model: str | None = None
 
 
+def _owning_call(cli_event: Mapping[str, Any]) -> str | None:
+    """The Agent/Task call whose subagent wrote this line, or None for the leader.
+
+    Claude puts a subagent's turns on the parent's stream and marks each one
+    with the ``tool_use`` id of the call that spawned it. Those calls are in
+    the subagent's transcript, not the session's, so they are recorded with
+    that id and the session's tool count leaves them out
+    (docs/architecture/agent_sessions-ubiquitous-language.md, "Tool Call").
+    """
+    owner = cli_event.get("parent_tool_use_id")
+    return owner if isinstance(owner, str) and owner else None
+
+
 def _model_under_message(message: object) -> object:
     """``model`` as an assistant line carries it, under ``message``."""
     return message.get("model") if isinstance(message, Mapping) else None
@@ -718,6 +731,7 @@ class EventStreamProcessor:
 
         await self._record_turn_usage_once(message)
 
+        owner = _owning_call(cli_event)
         content = message.get("content") or []
         if content:
             # ANY content, before a single block is looked at. The loop below
@@ -734,7 +748,7 @@ class EventStreamProcessor:
             if not isinstance(item, dict):
                 continue
             if item.get("type") == "tool_use":
-                await self._handle_tool_use(item)
+                await self._handle_tool_use(item, owner)
             elif item.get("type") == "text":
                 # Remembered as the stream goes rather than only at the end: a
                 # phase whose harness never emits a terminal `result` line -
@@ -788,8 +802,12 @@ class EventStreamProcessor:
         if msg_id:
             self._seen_message_ids.add(msg_id)
 
-    async def _handle_tool_use(self, item: dict[str, Any]) -> None:
-        """Handle a tool_use content block from an assistant message."""
+    async def _handle_tool_use(self, item: dict[str, Any], owner: str | None = None) -> None:
+        """Handle a tool_use content block from an assistant message.
+
+        `owner` is the Agent/Task call whose subagent emitted the block, or None
+        when the session's own agent did; see `_owning_call`.
+        """
         tool_name = item.get("name", "unknown")
         tool_use_id = item.get("id", "unknown")
         tool_input = item.get("input", {})
@@ -808,6 +826,7 @@ class EventStreamProcessor:
             tool_name=tool_name,
             tool_use_id=tool_use_id,
             input_preview=json.dumps(tool_input)[:500],
+            parent_tool_use_id=owner,
         )
         logger.debug("Tool started: %s", tool_name)
 
@@ -837,12 +856,13 @@ class EventStreamProcessor:
         """Handle user event — process tool results."""
         message = cli_event.get("message", {})
         content = message.get("content", [])
+        owner = _owning_call(cli_event)
 
         for item in content:
             if isinstance(item, dict) and item.get("type") == "tool_result":
-                await self._handle_tool_result(item)
+                await self._handle_tool_result(item, owner)
 
-    async def _handle_tool_result(self, item: dict[str, Any]) -> None:
+    async def _handle_tool_result(self, item: dict[str, Any], owner: str | None = None) -> None:
         """Handle a tool_result content block from a user message."""
         tool_use_id = item.get("tool_use_id", "unknown")
         is_error = item.get("is_error", False)
@@ -874,6 +894,7 @@ class EventStreamProcessor:
             tool_use_id=tool_use_id,
             success=not is_error,
             output_preview=output_preview,
+            parent_tool_use_id=owner,
         )
         logger.debug("Tool completed: %s (%s) success=%s", tool_use_id, tool_name, not is_error)
 

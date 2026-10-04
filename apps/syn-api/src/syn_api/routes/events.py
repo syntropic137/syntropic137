@@ -207,7 +207,9 @@ class _ToolStatsAccumulator:
         activity summary counts by (#1262); `_accumulate_tool_stats` below
         explains why it is that rule and not another.
         """
-        name = op.tool_name or "unknown"
+        # `call_name`, not `tool_name`: an Agent/Task row's `tool_name` is the
+        # task's description, which no transcript names a tool.
+        name = op.call_name or op.tool_name or "unknown"
         identity = call_identity(op)
 
         call = self._calls.get(identity)

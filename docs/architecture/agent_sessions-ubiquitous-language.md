@@ -60,11 +60,16 @@ These are Operations but **not** Tool Calls:
   tool's output - a recorded events file, a test log - is text, not a call.
   Only git hook events are read out of tool output (ADR-043,
   `syn_shared.events.GIT_HOOK_EVENT_TYPES`).
+- **A subagent's calls.** Claude puts a subagent's turns on the parent's
+  stream, each line marked with the `parent_tool_use_id` of the Agent/Task
+  call that spawned it. Those `tool_use` blocks are in the subagent's
+  transcript, not the Session's, so they are recorded with that owner and left
+  out of the Session's count. The Agent/Task call itself is the Session's, and
+  it is counted under the name the transcript has (`Task` or `Agent`), never under the task
+  description the timeline shows for it (`ToolOperation.call_name`).
 
-**Unclear:** whether a sub-agent's own `tool_use` blocks (stream lines with a
-`parent_tool_use_id`) are Tool Calls of the parent Session. They are recorded
-on the parent today, while the parent's native transcript does not contain
-them. This is the same open question as Delegation below (#792).
+Whether a subagent should become a Session of its own, with its calls counted
+there, is a separate question, the same one Delegation below leaves open (#792).
 
 ## Agent Launch
 

@@ -246,8 +246,14 @@ class ObservabilityCollector:
         tool_name: str,
         tool_use_id: str,
         input_preview: str,
+        parent_tool_use_id: str | None = None,
     ) -> None:
-        """Record tool execution started."""
+        """Record tool execution started.
+
+        `parent_tool_use_id` names the Agent/Task call whose subagent made this
+        call; it is written only when set, so the session's own calls keep the
+        payload they always had.
+        """
         # Recorded when the tool is ANNOUNCED, not when it returns, so this can
         # only run ahead of the side effect and never behind it. Running ahead
         # costs a retry that would have been safe; running behind would repeat
@@ -256,14 +262,17 @@ class ObservabilityCollector:
         if self._writer is None:
             return
 
+        data = {
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "input_preview": input_preview,
+        }
+        if parent_tool_use_id is not None:
+            data["parent_tool_use_id"] = parent_tool_use_id
         await self._writer.record_observation(
             session_id=self._session_id,
             observation_type=ObservationType.TOOL_EXECUTION_STARTED,
-            data={
-                "tool_name": tool_name,
-                "tool_use_id": tool_use_id,
-                "input_preview": input_preview,
-            },
+            data=data,
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,
@@ -275,8 +284,9 @@ class ObservabilityCollector:
         tool_use_id: str,
         success: bool,
         output_preview: str | None,
+        parent_tool_use_id: str | None = None,
     ) -> None:
-        """Record tool execution completed."""
+        """Record tool execution completed. `parent_tool_use_id` as for `record_tool_started`."""
         # A completion can arrive with no start before it: some codex versions
         # announce a `file_change` only once it has happened (#1064). That is a
         # workspace mutation, so it counts, and counting only starts would miss
@@ -285,15 +295,18 @@ class ObservabilityCollector:
         if self._writer is None:
             return
 
+        data = {
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "success": success,
+            "output_preview": output_preview,
+        }
+        if parent_tool_use_id is not None:
+            data["parent_tool_use_id"] = parent_tool_use_id
         await self._writer.record_observation(
             session_id=self._session_id,
             observation_type=ObservationType.TOOL_EXECUTION_COMPLETED,
-            data={
-                "tool_name": tool_name,
-                "tool_use_id": tool_use_id,
-                "success": success,
-                "output_preview": output_preview,
-            },
+            data=data,
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,

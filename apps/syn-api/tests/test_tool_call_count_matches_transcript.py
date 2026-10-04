@@ -32,6 +32,20 @@ workspace is not logged in. The tool outputs are real: one carries the
 `git_checkout` JSONL the workspace's git hook printed, another carries
 `tool_execution_started`/`completed` lines the agent printed while
 investigating - the exact shape of the defect.
+
+Subagents. A tool call belongs to the transcript that holds its `tool_use`
+block, so a subagent's calls are not its parent's; and the summary counts by
+the name in that block, so an Agent/Task call is counted as `Task`, not under
+the description the timeline shows for it. The replay for that uses
+`v2.0.76_claude-haiku-4-5_subagent-concurrent.jsonl` from agentic-workspace,
+a `--output-format stream-json` capture whose `_recording` header says CLI
+2.0.76: two parent `Task` calls whose subagents each ran one Bash call on the
+parent's stream, marked with `parent_tool_use_id`. No current-CLI recording
+of a subagent exists, and one could not be taken from this workspace (the
+nested CLI is not logged in). What the current CLI was checked for instead:
+every line of the 2.1.281 fixture still carries `parent_tool_use_id`, and a
+2.1.281 `system/init` line, captured 2026-10-04 while trying, still names the
+subagent tool `Task`.
 """
 
 from __future__ import annotations
@@ -71,6 +85,11 @@ pytestmark = pytest.mark.unit
 _RECORDING = (
     Path(__file__).resolve().parents[3]
     / "packages/syn-domain/tests/fixtures/claude/v2.1.281_session_transcript_tool_calls.jsonl"
+)
+_SUBAGENT_RECORDING = (
+    Path(__file__).resolve().parents[3]
+    / "lib/agentic-workspace/implementations/docker/images/claude-cli/fixtures"
+    / "recordings/v2.0.76_claude-haiku-4-5_subagent-concurrent.jsonl"
 )
 _SESSION_ID = "session-under-test"
 _FIRST_ROW_TIME = datetime(2026, 1, 1, tzinfo=UTC)
@@ -123,10 +142,16 @@ async def _stream(lines: Sequence[str]) -> AsyncIterator[str]:
 
 
 def _transcript_tool_calls(lines: Sequence[str]) -> Counter[str]:
-    """Count `tool_use` blocks by tool name - the definition, read directly."""
+    """Count the session's own `tool_use` blocks by tool name - the definition, read directly.
+
+    A line with a `parent_tool_use_id` is a subagent's, from its transcript.
+    """
     calls: Counter[str] = Counter()
     for line in lines:
-        message = json.loads(line).get("message") or {}
+        parsed = json.loads(line)
+        if parsed.get("parent_tool_use_id") is not None:
+            continue
+        message = parsed.get("message") or {}
         for block in message.get("content") or []:
             if block.get("type") == "tool_use":
                 calls[block["name"]] += 1
@@ -192,3 +217,69 @@ async def test_git_hook_events_in_tool_output_are_still_recorded() -> None:
     assert not any(o.data.get("tool_use_id") == "toolu_FOREIGN" for o in observations), (
         "a tool row printed by the agent was recorded as the agent's own call"
     )
+
+
+def _counts(operations: Sequence[ToolOperation]) -> dict[str, int]:
+    return {
+        name: int(s["call_count"]) for name, s in _accumulate_tool_stats(list(operations)).items()
+    }
+
+
+async def test_subagent_calls_count_as_the_tool_and_only_for_the_session_that_made_them() -> None:
+    lines = _SUBAGENT_RECORDING.read_text().splitlines()
+    assert json.loads(lines[0])["_recording"]["cli_version"] == "2.0.76"
+    expected = _transcript_tool_calls(lines)
+    # The recording must contain both shapes, or this proves nothing: the
+    # parent's own Task calls, and Bash calls its subagents made.
+    assert dict(expected) == {"Task": 2}
+    sidechain_tools = [
+        block["name"]
+        for line in lines
+        if json.loads(line).get("parent_tool_use_id") is not None
+        for block in (json.loads(line).get("message") or {}).get("content") or []
+        if block.get("type") == "tool_use"
+    ]
+    assert sidechain_tools == ["Bash", "Bash"]
+
+    assert _counts(_timeline(await _replay(lines))) == dict(expected)
+
+
+async def test_subagent_calls_are_kept_and_marked_with_the_call_that_owns_them() -> None:
+    """Left out of the count, not out of the record: the child's rows are
+    stored, each naming the Task call whose subagent made it."""
+    lines = _SUBAGENT_RECORDING.read_text().splitlines()
+    rows = await _replay(lines)
+
+    owners = {
+        o.data["tool_use_id"]: o.data.get("parent_tool_use_id")
+        for o in rows
+        if o.data.get("tool_name") == "Bash"
+    }
+    assert owners == {
+        "toolu_01JVibmgm7vRjetNx3wF6Rzs": "toolu_018ExH4zCuqg5JaQGY16zHui",
+        "toolu_01CqP274WBWwPGpTKKyGDyrX": "toolu_01XxMwNeHP7xCrM8bj5UickN",
+    }
+
+
+@pytest.mark.parametrize(
+    "delivery",
+    ["duplicated", "starts_only", "completions_only"],
+)
+async def test_subagent_counts_hold_under_redelivery_and_partial_delivery(delivery: str) -> None:
+    """At-least-once storage and a cut-off stream change no count."""
+    lines = _SUBAGENT_RECORDING.read_text().splitlines()
+    rows = await _replay(lines)
+    if delivery == "duplicated":
+        rows = rows + rows
+    elif delivery == "starts_only":
+        rows = [r for r in rows if r.event_type != "tool_execution_completed"]
+    else:
+        rows = [r for r in rows if r.event_type != "tool_execution_started"]
+
+    assert _counts(_timeline(rows)) == dict(_transcript_tool_calls(lines))
+
+
+def test_the_current_cli_still_marks_every_line_with_its_owner() -> None:
+    """The field ownership is read from is still in the 2.1.281 format."""
+    for line in _RECORDING.read_text().splitlines():
+        assert "parent_tool_use_id" in json.loads(line)

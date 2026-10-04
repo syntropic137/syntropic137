@@ -68,6 +68,10 @@ def to_subagent_operation(when: datetime, data: dict[str, Any], event_type: str)
         input_preview=data.get("input_preview") or json.dumps(data),
         output_preview=data.get("output_preview") if not is_started else None,
         duration_ms=data.get("duration_ms") if not is_started else None,
+        # The label above is for the timeline; a count by name needs the name
+        # the transcript has, which is the tool's, not the task's.
+        call_name=data.get("tool_name") or None,
+        parent_tool_use_id=data.get("parent_tool_use_id") or None,
     )
 
 
