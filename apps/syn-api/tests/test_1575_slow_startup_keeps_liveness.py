@@ -23,8 +23,7 @@ import syn_api.services.lifecycle as lifecycle
 import syn_api.startup_gate as startup_gate
 from syn_api.main import create_app
 from syn_api.startup_gate import StartupGate
-from syn_api.types import HealthResponse
-from syn_api.types import Err, LifecycleError, Ok
+from syn_api.types import Err, HealthResponse, LifecycleError, Ok
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -45,7 +44,7 @@ class _SlowBackfill:
         self.release = asyncio.Event()
         self.started = asyncio.Event()
 
-    async def startup(self, skip_validation: bool = False) -> Ok[dict]:  # noqa: ARG002
+    async def startup(self, skip_validation: bool = False) -> Ok[dict]:
         self.started.set()
         await self.release.wait()
         return Ok({"mode": "full"})
@@ -122,7 +121,7 @@ async def test_a_startup_inside_the_window_never_shows_starting(slow: _SlowBackf
 async def test_a_failure_inside_the_window_still_refuses_to_serve(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def failing(skip_validation: bool = False) -> Err[LifecycleError]:  # noqa: ARG001
+    async def failing(skip_validation: bool = False) -> Err[LifecycleError]:
         return Err(LifecycleError.CONNECTION_FAILED, message="event store unreachable")
 
     monkeypatch.setattr(lifecycle, "startup", failing)
