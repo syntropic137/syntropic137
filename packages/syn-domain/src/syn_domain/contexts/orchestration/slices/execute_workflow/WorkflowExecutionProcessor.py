@@ -73,9 +73,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     # import time, which is why TC001 is silenced here rather than obeyed.
     WorkflowExecutionResult,  # noqa: TC001
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.pull_request_observation import (
+    with_open_pull_requests,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     inherited_outputs,
     inherited_phase_ids,
+    record_continuation,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
@@ -105,6 +109,8 @@ if TYPE_CHECKING:
         ResumeOrigin,
         SourceCommit,
     )
+    from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -184,12 +190,16 @@ class WorkflowExecutionProcessor:
         session_store: SessionStorePort | None = None,
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
+        remote_branches: RemoteBranchPort | None = None,
     ) -> None:
         self._session_repo = session_repository
         # How a phase answers a provider that is simply busy (#1303). Injected
         # only so a test can collapse the backoff to zero; production takes the
         # policy's own numbers and no caller chooses them.
         self._retry_policy = retry_policy or UpstreamRetryPolicy()
+        #: Asked, as a phase fails, which PR is open from each branch it left,
+        #: so a resume continues that PR and no other (#1513).
+        self._remote_branches = remote_branches
         self._workspace_service = workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
@@ -353,6 +363,7 @@ class WorkflowExecutionProcessor:
         # Before the stream opens: a resume whose inheritance cannot be read
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
+        record_continuation(phase_outputs, aggregate.start_pins)
         await self._journal.open(aggregate)
 
         # #1387: durable, therefore visible. From here the drain counts this
@@ -578,6 +589,15 @@ class WorkflowExecutionProcessor:
         await self._journal.append(aggregate)
         return completion.execution_result(workflow_id, execution_id, started_at=started_at)
 
+    async def _observe_branches(
+        self, observed: ObservedBranches | None, aggregate: WorkflowExecutionAggregate
+    ) -> ObservedBranches | None:
+        """The failing phase's branches, with the PR open from each when a forge is wired (#1513)."""
+        if self._remote_branches is None:
+            return observed
+        repositories = [c.repository for c in aggregate.start_pins.source_commits]
+        return await with_open_pull_requests(observed, self._remote_branches, repositories)
+
     async def _fail_execution(
         self,
         error: Exception,
@@ -658,7 +678,7 @@ class WorkflowExecutionProcessor:
             kept.append(artifact_id)
             if artifact_id not in all_artifact_ids:
                 all_artifact_ids.append(artifact_id)
-        observed = await runtime.observe(failed_phase_id)
+        observed = await self._observe_branches(await runtime.observe(failed_phase_id), aggregate)
         failure = failed_phase_outcome(
             error,
             failed_phase_id,

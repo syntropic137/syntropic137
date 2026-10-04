@@ -9,7 +9,13 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
@@ -650,6 +656,22 @@ class BranchObservation(BaseModel):
     tell "this phase left nothing anywhere" from "this phase is holding work
     that is not on any remote" without reading prose."""
 
+    pull_request: int | None = None
+    """The PR open from this branch on the forge as the phase failed (#1513).
+
+    Read from the forge, not inferred, so a resume continues THIS PR and
+    never another one opened from the same branch since. ``None`` when none
+    was open or nobody could ask. Written only when set: every reader before
+    #1513 forbids extra fields, so an observation without a PR stays exactly
+    what a rollback can replay."""
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_pull_request(self, handler: SerializerFunctionWrapHandler) -> object:
+        payload = handler(self)
+        if isinstance(payload, dict) and payload.get("pull_request") is None:
+            payload.pop("pull_request", None)
+        return payload
+
     @property
     def remote_moved(self) -> bool:
         """Whether ``<remote>/<branch>`` is at a different commit than at start.
@@ -1009,3 +1031,13 @@ class ResumeOrigin(BaseModel):
     def owners(self) -> dict[str, str]:
         """Every inherited phase's owner, by phase id."""
         return {p.phase_id: self.owner_of(p) for p in self.inherited_phases}
+
+
+# Re-exported for `WorkflowExecutionStarted` (#1513): a domain event imports its
+# value objects from this module, and this one is past the file-size limit.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (  # noqa: E402
+    AbandonedBranch as AbandonedBranch,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (  # noqa: E402
+    ContinuedBranch as ContinuedBranch,
+)

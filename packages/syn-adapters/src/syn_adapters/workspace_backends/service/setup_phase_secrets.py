@@ -534,6 +534,12 @@ class SetupPhaseSecrets:
     lists can never fall out of step. Whether a run pins anything is the
     execution's decision (`StartPins.checkout_commits`); this only carries it
     out, and refuses the phase rather than run it anywhere else."""
+    continued_branches: dict[str, str] = field(default_factory=dict)
+    """The branch to check a pinned repository out ON, by ``owner/name`` (#1513).
+
+    Set for the phase a resume continues: that repository's pin is the
+    branch's head, checked out on the branch instead of detached
+    (`StartPins.checkout_for`)."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -559,6 +565,7 @@ class SetupPhaseSecrets:
         repositories: list[str] | None = None,
         clone_repos: bool = True,
         pinned_commits: Mapping[str, str] | None = None,
+        continued_branches: Mapping[str, str] | None = None,
         require_github: bool = True,
         include_codex_auth: bool = False,
         ledger: IssuanceLedger,
@@ -578,6 +585,8 @@ class SetupPhaseSecrets:
                 the clone also drops the token routing they key.
             pinned_commits: ``owner/name`` -> the commit to check that
                 repository out at (#1458). Empty when no commit was recorded.
+            continued_branches: ``owner/name`` -> the branch a continuing
+                phase checks that pinned repository out on (#1513).
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -611,6 +620,7 @@ class SetupPhaseSecrets:
             issued=github.issued,
             clone_repos=clone_repos,
             pinned_commits=dict(pinned_commits or {}),
+            continued_branches=dict(continued_branches or {}),
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             codex_auth_json=codex_auth_json,
@@ -632,6 +642,7 @@ class SetupPhaseSecrets:
         gh_token: str | None = None,
         clone_repos: bool = True,
         pinned_commits: Mapping[str, str] | None = None,
+        continued_branches: Mapping[str, str] | None = None,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -648,6 +659,7 @@ class SetupPhaseSecrets:
             gh_token: gh's credential; defaults to the one `create` would route to
             clone_repos: False to credential the repos without checking them out (#1187)
             pinned_commits: ``owner/name`` -> the commit to check it out at (#1458)
+            continued_branches: ``owner/name`` -> the branch to continue at its head (#1513)
         """
         import os
 
@@ -664,6 +676,7 @@ class SetupPhaseSecrets:
             gh_token=gh_token,
             clone_repos=clone_repos,
             pinned_commits=dict(pinned_commits or {}),
+            continued_branches=dict(continued_branches or {}),
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
@@ -882,7 +895,13 @@ class SetupPhaseSecrets:
             )
             sha = self.pinned_commits.get(_repo_full_name(url))
             if sha is not None:
-                append_pinned_checkout(lines, repository=_repo_full_name(url), dest=dest, sha=sha)
+                append_pinned_checkout(
+                    lines,
+                    repository=_repo_full_name(url),
+                    dest=dest,
+                    sha=sha,
+                    branch=self.continued_branches.get(_repo_full_name(url)),
+                )
             # Outside the guard above: a repo cloned by an earlier setup phase may
             # still have uninitialized submodules. `submodule update --init` is
             # idempotent, so re-running it on a complete checkout is a no-op.

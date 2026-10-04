@@ -7,6 +7,11 @@ that verify origin still publishes that commit, check it out detached, or end
 the script with `PINNED_COMMIT_UNREACHABLE_EXIT_CODE` refusing to run on
 anything else.
 
+A phase that CONTINUES a branch (#1513) - a resume's resumed phase picking up
+the branch its parent's attempt pushed - is checked out ON that branch at its
+head instead of detached, so its next push lands on the parent's PR. Its pin
+is the head the resume recorded; the branch must still contain it.
+
 `SetupPhaseSecrets` decides WHICH repositories are pinned and where they are
 cloned; everything about HOW a pin is honoured, or refused, lives here.
 """
@@ -35,8 +40,15 @@ _COMMIT_ID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 #: branch is ever named.
 _PIN_REMOTE_REF: Final = "refs/remotes/pinned"
 
+#: A branch name safe to write on a git command line: no leading `-`, nothing
+#: a shell or a refspec would read as syntax. Quoted as well; this is the
+#: refusal for a name no push could have created in the first place.
+_BRANCH_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._/-]*")
 
-def append_pinned_checkout(lines: list[str], *, repository: str, dest: str, sha: str) -> None:
+
+def append_pinned_checkout(
+    lines: list[str], *, repository: str, dest: str, sha: str, branch: str | None = None
+) -> None:
     """Check ``dest`` out at ``sha``, or end the setup script refusing to (#1458).
 
     THE COMMIT MUST STILL BE SOMEWHERE ORIGIN PUBLISHES IT - a branch or a
@@ -66,8 +78,15 @@ def append_pinned_checkout(lines: list[str], *, repository: str, dest: str, sha:
     Runs BEFORE the submodule step, so submodules follow this commit's
     gitlinks rather than the default branch's.
 
+    ON A BRANCH when ``branch`` is given (#1513): the phase continues that
+    branch, so it is checked out at ``origin/<branch>``'s head, tracking it.
+    The head must still contain ``sha`` - the head the resume confirmed - or
+    the branch was force-pushed since and the phase is refused exactly as an
+    unreachable commit is, never run on a rewritten branch.
+
     Raises:
-        ValueError: ``sha`` is not a full commit id.
+        ValueError: ``sha`` is not a full commit id, or ``branch`` is not a
+            plain branch name.
     """
     if not _COMMIT_ID_RE.fullmatch(sha):
         msg = f"The recorded commit of {repository} is not a full commit id: {sha!r}"
@@ -83,8 +102,34 @@ def append_pinned_checkout(lines: list[str], *, repository: str, dest: str, sha:
         f" printf '%s\\n' {shlex.quote(refusal)} >&2;"
         f" exit {PINNED_COMMIT_UNREACHABLE_EXIT_CODE}; fi"
     )
+    if branch is not None:
+        _append_branch_checkout(lines, repository=repository, repo=repo, sha=sha, branch=branch)
+        return
     lines.append(
         f'[ -n "$(git -C {repo} branch -r --contains {sha} 2>/dev/null)" ]'
         f" || git -C {repo} update-ref {_PIN_REMOTE_REF}/{sha} {sha}"
     )
     lines.append(f"git -C {repo} -c advice.detachedHead=false checkout --quiet --detach {sha}")
+
+
+def _append_branch_checkout(
+    lines: list[str], *, repository: str, repo: str, sha: str, branch: str
+) -> None:
+    """Check ``repo`` out on ``branch`` at origin's head of it, which must contain ``sha``."""
+    if not _BRANCH_RE.fullmatch(branch) or ".." in branch:
+        msg = f"The continued branch of {repository} is not a plain branch name: {branch!r}"
+        raise ValueError(msg)
+    remote = shlex.quote(f"refs/remotes/origin/{branch}")
+    name = shlex.quote(branch)
+    refusal = (
+        f"ERROR: {repository} cannot continue branch {branch}: origin no longer has it at"
+        f" or after {sha} (deleted or force-pushed since the resume started)."
+        " Refusing to run this phase on a rewritten branch (#1513)."
+    )
+    lines.append(
+        f"if ! git -C {repo} merge-base --is-ancestor {sha} {remote} 2>/dev/null; then"
+        f" printf '%s\\n' {shlex.quote(refusal)} >&2;"
+        f" exit {PINNED_COMMIT_UNREACHABLE_EXIT_CODE}; fi"
+    )
+    lines.append(f"git -C {repo} checkout --quiet -B {name} {remote}")
+    lines.append(f"git -C {repo} branch --quiet --set-upstream-to=origin/{branch} {name}")

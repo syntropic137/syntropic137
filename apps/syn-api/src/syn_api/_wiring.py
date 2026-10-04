@@ -237,6 +237,8 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     manager = get_projection_manager()
     artifact_query = ArtifactQueryService(manager.artifact_list)
 
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
@@ -311,6 +313,9 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         session_capture=session_capture,
         session_store=_build_session_store(_settings),
         import_ledger=_create_import_ledger(),
+        # #1513: records which PR is open from each branch a failing phase
+        # left, so a resume continues that PR and never one opened since.
+        remote_branches=GitHubRemoteBranchReader(get_github_client),
     )
 
 
@@ -931,12 +936,17 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
 
 async def _build_resume_handler() -> StartResumeHandler:
     """The resume start handler, built when a resume is first requested."""
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_domain.contexts.orchestration import StartResumeHandler
 
     return StartResumeHandler(
         await get_execution_processor(),
         get_workflow_execution_repository(),
         maintenance=get_maintenance_port(),
+        # #1513: confirms the branch the parent pushed is still where it was
+        # left, and finds the PR open from it, before the child continues it.
+        remote_branches=GitHubRemoteBranchReader(get_github_client),
     )
 
 
