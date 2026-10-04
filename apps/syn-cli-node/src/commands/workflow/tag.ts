@@ -10,18 +10,32 @@ import { resolveWorkflow } from "./resolver.js";
 
 type WorkflowTagsResponse = components["schemas"]["WorkflowTagsResponse"];
 
-async function send(edit: TagEdit, workflowId: string): Promise<WorkflowTagsResponse> {
+type TagEditResult = Awaited<ReturnType<typeof request>>;
+
+function request(edit: TagEdit, workflowId: string) {
   const path = { workflow_id: workflowId };
-  if (edit.action === "add") {
-    return unwrap<WorkflowTagsResponse>(
-      await api.POST("/workflows/{workflow_id}/tags", { params: { path }, body: { tags: edit.tags } }),
-      "Add workflow tags",
-    );
-  }
-  return unwrap<WorkflowTagsResponse>(
-    await api.DELETE("/workflows/{workflow_id}/tags", { params: { path, query: { tag: edit.tags } } }),
-    "Remove workflow tags",
-  );
+  return edit.action === "add"
+    ? api.POST("/workflows/{workflow_id}/tags", { params: { path }, body: { tags: edit.tags } })
+    : api.DELETE("/workflows/{workflow_id}/tags", { params: { path, query: { tag: edit.tags } } });
+}
+
+function unwrapEdit(edit: TagEdit, result: TagEditResult): WorkflowTagsResponse {
+  return unwrap<WorkflowTagsResponse>(result, edit.action === "add" ? "Add workflow tags" : "Remove workflow tags");
+}
+
+/**
+ * Send the id as typed first. The route resolves prefixes itself and asks the
+ * aggregate, so a workflow whose read model has not caught up yet is still
+ * editable. Only after the authoritative 404 do we fall back to the
+ * read-model resolver, for its "no match" guidance and for any match it finds
+ * that the route did not.
+ */
+async function send(edit: TagEdit): Promise<WorkflowTagsResponse> {
+  const first = await request(edit, edit.id);
+  if (first.response.status !== 404) return unwrapEdit(edit, first);
+  const wf = await resolveWorkflow(edit.id);
+  if (wf.id === edit.id) return unwrapEdit(edit, first);
+  return unwrapEdit(edit, await request(edit, wf.id));
 }
 
 export const tagCommand: CommandDef = {
@@ -34,9 +48,7 @@ export const tagCommand: CommandDef = {
   ],
   handler: async (parsed: ParsedArgs) => {
     const edit = parseTagEdit(parsed, "workflow");
-    // Same id resolution as `workflow show`: an exact id, a prefix, or a name.
-    const wf = await resolveWorkflow(edit.id);
-    const data = await send(edit, wf.id);
+    const data = await send(edit);
     print(style(`Tags of ${data.workflow_id}`, GREEN));
     printTags("tags: ", data.tags);
     printDim("Existing executions keep the tags they launched with.");
