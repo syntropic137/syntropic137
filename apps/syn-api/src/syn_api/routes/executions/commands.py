@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
     ensure_connected,
+    get_eval_repo,
     get_projection_mgr,
     get_workflow_repo,
 )
@@ -34,12 +35,18 @@ from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
+    EvalChoice,
+    EvalUnavailableError,
     SkillError,
     SkillRef,
     TagSet,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
     validate_phase_declarations,
+)
+from syn_domain.contexts.orchestration._shared.eval_admission import open_eval
+from syn_domain.contexts.orchestration.domain.aggregate_eval import (
+    EvalId,  # noqa: TC001 — Pydantic field type
 )
 from syn_shared.agents import (
     AgentProvider,
@@ -307,6 +314,20 @@ class ExecuteWorkflowRequest(BaseModel):
             "Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422."
         ),
     )
+    eval_id: EvalId | None = Field(
+        default=None,
+        description=(
+            "The eval this run joins, overriding the workflow's default eval (#967). "
+            "404 if it does not exist, 409 if it is archived."
+        ),
+    )
+    no_eval: bool = Field(
+        default=False,
+        description=(
+            "Launch an ordinary run: join no eval, even if the workflow has a default "
+            "eval (#967). Cannot be combined with `eval_id` (422)."
+        ),
+    )
     provider: str = Field(
         default="claude",
         description=(
@@ -379,6 +400,7 @@ async def execute(
     repos: list[RepositoryRef] | None = None,
     admitted: AdmissionTicket | None = None,
     tags: TagSet | None = None,
+    eval_choice: EvalChoice | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -390,6 +412,8 @@ async def execute(
         tenant_id: Optional tenant ID for multi-tenant deployments.
         repos: Typed repository refs (ADR-063 anti-corruption layer).
         tags: Tags for this run, united with the workflow's at launch (#967).
+        eval_choice: The eval this run joins, or an ordinary run. Omitted, the
+            run joins the workflow's default eval, if any (#967).
         admitted: The ticket the admission gate issued for this execution
             (#1387). Omitting it is not a way to skip the gate - the handler
             checks the flag itself when no ticket arrives. It is how a caller
@@ -425,6 +449,7 @@ async def execute(
             execution_id=execution_id,
             task=task,
             tags=tags or TagSet(),
+            eval_choice=eval_choice or EvalChoice(),
         )
         result = await handler.handle(cmd, admitted=admitted)
     except WorkflowNotFoundError:
@@ -673,6 +698,28 @@ async def _admit_or_409() -> AsyncIterator[AdmissionTicket]:
         raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
 
 
+async def _check_eval_choice(
+    workflow: WorkflowTemplateAggregate, request: ExecuteWorkflowRequest
+) -> EvalChoice:
+    """The launch's eval choice, refused here if the eval it resolves to cannot take runs.
+
+    The handler admits the run again in the background task; this is what makes
+    a missing (404) or archived (409) eval an answer to the request rather than
+    a 200 followed by an execution that never starts (#967).
+    """
+    if request.no_eval and request.eval_id is not None:
+        raise HTTPException(status_code=422, detail="Pass either eval_id or no_eval, not both")
+    choice = EvalChoice(eval_id=request.eval_id, ordinary=request.no_eval)
+    eval_id = choice.resolve(workflow.default_eval_id).eval_id
+    if eval_id is not None:
+        try:
+            await open_eval(get_eval_repo(), eval_id)
+        except EvalUnavailableError as exc:
+            status = 404 if exc.missing else 409
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return choice
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -762,7 +809,10 @@ async def execute_workflow_endpoint(
     # validation too, so a caller during a deploy is told the gate is shut
     # rather than being told its workflow does not exist.
     await _refuse_while_paused()
-    _, effective_inputs, typed_repos = await _validate_execution_request(workflow_id, request)
+    workflow, effective_inputs, typed_repos = await _validate_execution_request(
+        workflow_id, request
+    )
+    eval_choice = await _check_eval_choice(workflow, request)
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     # Bound by the `async with` below, and closed over like every other value
@@ -787,6 +837,7 @@ async def execute_workflow_endpoint(
                     repos=typed_repos,
                     admitted=admitted,
                     tags=request.tags,
+                    eval_choice=eval_choice,
                 )
                 if isinstance(result, Err):
                     logger.error(
