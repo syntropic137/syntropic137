@@ -132,10 +132,6 @@ sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
 GATE
 }
 
-pinned_tag() {  # the tag the compose FILE pins syn-api to (not the running container)
-    remote "grep -oE 'syn-api:v[0-9][^[:space:]\"]*' $COMPOSE_DIR/$COMPOSE | head -1 | cut -d: -f2"
-}
-
 if [ "$MODE" != "swap" ]; then
     step "prepare: worktree at $REF, bump to $VERSION"
     WT="$WT_BASE/pit-stop-$VERSION"
@@ -182,18 +178,30 @@ if [ "$MODE" != "swap" ]; then
         || die "expected TWO images tagged $TAG on the host; the deploy would be half old"
 
     step "stage: back up the deployed compose and repoint both pins"
-    OLD="$(pinned_tag)"; [ -n "$OLD" ] || die "could not read the syn-api pin in the deployed compose file"
-    echo "   compose pins: $OLD -> new: $TAG"
-    if [ "$OLD" != "$TAG" ]; then
-        run remote "cd $COMPOSE_DIR && cp $COMPOSE $COMPOSE.bak-$OLD && sed -i 's#syn-api:$OLD#syn-api:$TAG#; s#syn-gateway:$OLD#syn-gateway:$TAG#' $COMPOSE"
-        # Two counts, not one: 0 old alone is also what a typo'd new tag gives;
-        # 2 new alone is also what a no-op sed on an already-current file gives.
+    # Read here, repointed locally, written back whole: a release-installed host
+    # pins each image by its own digest and a hotfixed one by its own tag, so no
+    # single substitution covers both services (scripts/pit_stop_repoint.py).
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
+    BAK="$(python3 "$(dirname "$0")/pit_stop_repoint.py" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged")" \
+        || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
+    if [ -n "$BAK" ]; then
+        # Written beside the file, checked against the staged checksum, and only
+        # then renamed over it. `cat` exits 0 on a short read, so without the
+        # check a dropped transfer would install half a compose file.
+        SUM="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.staged")"
+        run remote "cd $COMPOSE_DIR && cat > $COMPOSE.pit-stop && echo '$SUM  $COMPOSE.pit-stop' | sha256sum -c --status - && cp $COMPOSE $COMPOSE.bak-$BAK && mv $COMPOSE.pit-stop $COMPOSE || { rm -f $COMPOSE.pit-stop; exit 1; }" < "$TMP/compose.staged" \
+            || die "the staged compose did not arrive intact on $HOST; the deployed file is unchanged"
         if [ "$DRY" = 0 ]; then
-            old_n="$(remote "grep -c 'syn-\(api\|gateway\):$OLD' $COMPOSE_DIR/$COMPOSE" || true)"
-            new_n="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
-            echo "   pins: old=$old_n (want 0) new=$new_n (want 2)"
-            [ "$old_n" = 0 ] && [ "$new_n" = 2 ] || die "repoint did not change exactly the two pins"
+            remote "cat $COMPOSE_DIR/$COMPOSE" | cmp -s - "$TMP/compose.staged" || die "the compose on $HOST is not the one staged; the backup is $COMPOSE.bak-$BAK"
+            echo "   backed up to $COMPOSE.bak-$BAK"
         fi
+    else
+        echo "   both pins are already $TAG"
+    fi
+    # The same count --swap-only prechecks, so a stage it would refuse fails here.
+    if [ "$DRY" = 0 ]; then
+        new_n="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
+        [ "$new_n" = 2 ] || die "the deployed compose pins $new_n/2 services to $TAG after the repoint"
     fi
     if [ "$MODE" = "stage" ]; then
         step "staged $TAG; run with --swap-only once drained"
