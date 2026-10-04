@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
     ensure_connected,
@@ -26,6 +26,7 @@ from syn_api.types import (
     Ok,
     Result,
 )
+from syn_domain.pagination import Page
 from syn_shared.pricing import canonical_cost_usd
 
 if TYPE_CHECKING:
@@ -82,12 +83,35 @@ class PhaseMetrics(BaseModel):
     artifact_count: int = 0
 
 
+class ExecutionStatusCounts(BaseModel):
+    """How many executions are in each status, one field per status.
+
+    The fields are exactly the domain's ``ExecutionStatus`` values (a test pins
+    that), so every execution lands in exactly one field and the fields sum to
+    the number of executions. ``completed_workflows``/``failed_workflows``
+    alone left cancelled, interrupted and running runs invisible on the
+    dashboard. There is no ``paused``: that word was deleted from orchestration.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    not_started: int = 0
+    running: int = 0
+    completed: int = 0
+    failed: int = 0
+    cancelled: int = 0
+    interrupted: int = 0
+
+
 class MetricsResponse(BaseModel):
     """Aggregated metrics response."""
 
     total_workflows: int = 0
     completed_workflows: int = 0
     failed_workflows: int = 0
+    execution_status_counts: ExecutionStatusCounts = Field(default_factory=ExecutionStatusCounts)
+    """Executions tallied by status, from the same read model the execution list
+    counts its ``status_counts`` facet over, narrowed to ``workflow_id`` when given."""
     total_sessions: int = 0
     total_input_tokens: int
     total_output_tokens: int
@@ -268,6 +292,29 @@ async def _workflow_execution_ids(workflow_id: str) -> set[str]:
     return {s.workflow_execution_id for s in summaries}
 
 
+async def _execution_status_counts(workflow_id: str | None) -> ExecutionStatusCounts:
+    """Executions by status, tallied exactly as the execution list tallies its facets.
+
+    Raises:
+        MetricsUnavailableError: the execution list could not be read, or it
+            holds a status the domain does not define. Dropping such a row
+            would make the slices stop summing to the executions that exist.
+    """
+    try:
+        projection = get_projection_mgr().workflow_execution_list
+        if workflow_id:
+            rows = await projection.get_by_workflow_id(workflow_id)
+            counts = Page.unpaged(rows, status_of=lambda s: s.status).status_counts
+        else:
+            counts = (await projection.page(limit=0)).status_counts
+        return ExecutionStatusCounts.model_validate(counts)
+    except Exception as exc:
+        logger.warning("Failed to count executions by status", exc_info=True)
+        raise MetricsUnavailableError(
+            "execution status counts are unavailable: the execution list could not be read"
+        ) from exc
+
+
 async def _canonical_totals(execution_ids: set[str] | None) -> CanonicalTotals:
     """Canonical token/cost totals, narrowed to a set of executions when given.
 
@@ -309,6 +356,7 @@ async def get_metrics_endpoint(
     # reality. Workflow/artifact counts stay on the projection: those are
     # domain lifecycle facts, not observed telemetry.
     try:
+        status_counts = await _execution_status_counts(workflow_id)
         if workflow_id:
             execution_ids = await _workflow_execution_ids(workflow_id)
             totals = await _canonical_totals(execution_ids)
@@ -323,6 +371,7 @@ async def get_metrics_endpoint(
         total_workflows=m.total_workflows,
         completed_workflows=m.completed_workflows,
         failed_workflows=m.failed_workflows,
+        execution_status_counts=status_counts,
         # Sessions come from the canonical source too. Counting them in the
         # projection instead meant the card saw every FAILED session but no
         # DELEGATE session, while the heatmap saw every delegate and no

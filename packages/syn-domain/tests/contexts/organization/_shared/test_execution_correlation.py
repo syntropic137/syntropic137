@@ -103,6 +103,11 @@ class TestHeatmapHandlerReadsFiltered:
     async def test_system_filter_never_loads_the_whole_correlation(self) -> None:
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[])
+        conn.transaction = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=None), __aexit__=AsyncMock(return_value=None)
+            )
+        )
         pool = MagicMock()
         pool.acquire = MagicMock(
             return_value=AsyncMock(

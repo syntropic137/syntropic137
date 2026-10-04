@@ -85,6 +85,13 @@ def _make_mock_pool(day_rows: list[_FakeRow], model_rows: list[_FakeRow]) -> Mag
 
     conn = AsyncMock()
     conn.fetch = AsyncMock(side_effect=_fetch)
+    conn.execute = AsyncMock()
+    # The query plans each statement inside one transaction (SET LOCAL).
+    conn.transaction = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=None), __aexit__=AsyncMock(return_value=False)
+        )
+    )
 
     pool = MagicMock()
     pool.acquire = MagicMock(

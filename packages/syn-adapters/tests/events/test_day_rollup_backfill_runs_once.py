@@ -34,6 +34,10 @@ import pytest
 
 from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
+    USAGE_ROLLUP_BACKFILL_SESSIONS_SQL,
+    USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL,
+    USAGE_ROLLUP_MARK_COMPLETE_SQL,
+    USAGE_ROLLUP_MARK_INCOMPLETE_SQL,
     EventStoreSchema,
 )
 
@@ -160,10 +164,17 @@ class CatalogueConnection:
         #: a "disabled" flag, is what lets the SQL's own predicate be run
         #: against it instead of merely recognised.
         self._triggers: dict[str, str] = {}
+        #: Whether the usage rollup's completion row exists, answered from the
+        #: mark statements actually executed, for the same reason as above.
+        self._usage_rollup_marked = False
 
     async def execute(self, sql: str, *_args: object) -> None:
         self.executed.append(sql)
         self.calls.append(sql)
+        if sql == USAGE_ROLLUP_MARK_COMPLETE_SQL:
+            self._usage_rollup_marked = True
+        elif sql == USAGE_ROLLUP_MARK_INCOMPLETE_SQL:
+            self._usage_rollup_marked = False
         created = re.search(r"CREATE TABLE IF NOT EXISTS (\w+)", sql)
         if created:
             self._relations.add(created.group(1))
@@ -195,10 +206,14 @@ class CatalogueConnection:
             if tgenabled is None:
                 return False
             return _tgenabled_predicate_holds(sql, tgenabled)
+        if sql == USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL:
+            return self._usage_rollup_marked
         msg = f"unexpected fetchval in ensure_schema(): {sql!r}"
         raise AssertionError(msg)
 
-    async def fetch(self, _sql: str, *_args: object) -> list[dict[str, str]]:
+    async def fetch(self, sql: str, *_args: object) -> list[dict[str, str]]:
+        if sql == USAGE_ROLLUP_BACKFILL_SESSIONS_SQL:
+            return []  # an empty history: the usage backfill has no batch to run
         return _VALID_AGENT_EVENTS_SCHEMA
 
     def transaction(self) -> _NoOpTransaction:

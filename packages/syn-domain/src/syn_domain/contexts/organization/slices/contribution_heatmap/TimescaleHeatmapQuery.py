@@ -11,12 +11,11 @@ if TYPE_CHECKING:
     import asyncpg
 
 from syn_domain.contexts.agent_sessions import (
-    CANONICAL_SESSION_USAGE_CTE,
-    CANONICAL_USAGE_EVENT_FILTER,
     HAS_REQUESTED_MODEL_COLUMN,
     REQUESTED_MODEL_COLUMN,
     CostCalculator,
     recorded_model_from_row,
+    rollup_usage_sources,
 )
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     HeatmapDayBucket,
@@ -215,32 +214,26 @@ ORDER BY day
 # by START day because that is where the session's single authoritative
 # record belongs (see canonical_usage).
 #
-# `scoped_events` deliberately carries a member session's usage rows WHATEVER
-# their timestamps, including ones after the window ends. Narrowing them by
-# time would hand the canonical CTE a FRAGMENT of a session: a run beginning
-# inside the window whose summary arrives after it would be priced from its
-# placeholder turn rows, reporting 5 output tokens for a session that produced
-# 13,300. That is the bug this whole module exists to prevent, reappearing at
-# the window edge.
+# A member session's usage is read WHATEVER its timestamps, including rows
+# after the window ends. Narrowing them by time would hand the canonical
+# decision a FRAGMENT of a session: a run beginning inside the window whose
+# summary arrives after it would be priced from its placeholder turn rows,
+# reporting 5 output tokens for a session that produced 13,300.
 #
-# It is narrowed by EVENT TYPE, which is a different thing and safe: those are
-# the only rows canonical usage reads, and the start day it is bucketed by
-# comes from `session_start` above, which saw every event type.
+# It is read from the usage rollup, not agent_events (E1). The join back to
+# agent_events was the last thing on this path that grew with telemetry: one
+# decompressed JSONB row per turn of every member session, 2.0-4.1s live. The
+# rollup holds one row per (session, model) of turns and one per summary, so
+# this now costs what the heatmap returns.
+#
+# The execution filter is applied AGAIN here, not just when choosing sessions.
+# Joining back on session_id alone assumes session ids are globally unique,
+# and no constraint enforces that: a retried or resumed session id reused
+# across executions would drag an unselected execution's rows into a filtered
+# heatmap.
 _USAGE_QUERY = f"""
 WITH {_WINDOW_STARTS},
-scoped_events AS (
-    -- The execution filter is applied AGAIN here, not just when choosing
-    -- sessions. Joining back on session_id alone assumes session ids are
-    -- globally unique, and no constraint enforces that: a retried or resumed
-    -- session id reused across executions would drag an unselected
-    -- execution's rows into a filtered heatmap.
-    SELECT a.session_id, a.event_type, a.data, a.time
-    FROM agent_events a
-    JOIN session_start w ON w.session_id = a.session_id
-    WHERE {CANONICAL_USAGE_EVENT_FILTER}
-      {{execution_filter}}
-),
-{CANONICAL_SESSION_USAGE_CTE}
+{rollup_usage_sources("session_id IN (SELECT session_id FROM session_start) {execution_filter}")}
 SELECT
     {_utc_day("s.started_at")} AS day,
     u.model AS model,
@@ -432,7 +425,16 @@ class TimescaleHeatmapQuery:
         Returns:
             List of HeatmapDayBucket, one per day (zero-filled).
         """
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
+            # Plan every statement for THESE dates (E1). asyncpg prepares and
+            # caches each query, and after five runs PostgreSQL may switch to
+            # a generic plan that cannot see the window: it estimated ~10
+            # rollup rows for a year that held 2,000 sessions, picked a nested
+            # loop over session_start x canonical_usage, and turned a 35ms
+            # read into 640ms on every dashboard load from the sixth on.
+            # SET LOCAL ends with this transaction, so the pooled connection
+            # goes back as it came.
+            await conn.execute("SET LOCAL plan_cache_mode = force_custom_plan")
             execution_rows = await self._fetch(conn, _EXECUTIONS_QUERY, start, end, execution_ids)
             commit_rows = await self._fetch(conn, _COMMITS_QUERY, start, end, execution_ids)
             session_rows = await self._fetch(conn, _SESSIONS_QUERY, start, end, execution_ids)

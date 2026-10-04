@@ -5,7 +5,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, PageLoader, SubagentList } from '../../components'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import type { SessionResponse } from '../../types'
-import { useSessionData } from '../../hooks'
+import { usePhaseStartPins, useSessionData } from '../../hooks'
 import { sessionInventoryHref } from '../../utils/sessionInventoryLinks'
 import { ConversationLogViewer } from './ConversationLogViewer'
 import { OperationTimeline } from './OperationTimeline'
@@ -82,6 +82,7 @@ export function SessionDetail() {
   const { session, loading, error, now, showConversationLog, setShowConversationLog } =
     useSessionData(sessionId)
   const timelineRef = useScrollAnchor(session?.operations?.length)
+  const startPins = usePhaseStartPins(session?.execution_id, sessionId)
 
   if (loading) return <PageLoader />
 
@@ -104,7 +105,7 @@ export function SessionDetail() {
       )}
 
       <Breadcrumbs items={buildSessionBreadcrumbs(session)} />
-      <SessionHeader session={session} onViewConversationLog={() => setShowConversationLog(true)} />
+      <SessionHeader session={session} startPins={startPins} onViewConversationLog={() => setShowConversationLog(true)} />
       {session.execution_id && (
         <Link
           className="session-inventory-link"

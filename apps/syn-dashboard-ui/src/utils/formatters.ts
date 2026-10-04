@@ -74,15 +74,30 @@ export function formatDuration(ms: number): string {
   return `${hours.toFixed(1)}h`
 }
 
+const TOKEN_TIERS = [
+  { suffix: 'K', size: 1_000 },
+  { suffix: 'M', size: 1_000_000 },
+  { suffix: 'B', size: 1_000_000_000 },
+] as const
+
 /**
- * Format a token count with K/M suffixes for large values.
+ * Format a token count with K/M/B suffixes for large values.
+ *
+ * Each tier rounds to whole tenths first and hands the count up when that
+ * rounds to 1000 of itself, so 999,950,000 prints "1.0B" rather than
+ * "1000.0M" and 999,949,999 stays "999.9M". Without a B tier, ten billion
+ * printed as "10008.6M".
  */
 export function formatTokens(count: number): string {
-  if (count >= 1000000) {
-    return `${(count / 1000000).toFixed(1)}M`
+  if (count < 1000) {
+    return String(count)
   }
-  if (count >= 1000) {
-    return `${(count / 1000).toFixed(1)}K`
+  const last = TOKEN_TIERS.length - 1
+  for (const [i, { suffix, size }] of TOKEN_TIERS.entries()) {
+    const tenths = Math.round(count / (size / 10))
+    if (tenths < 10_000 || i === last) {
+      return `${(tenths / 10).toFixed(1)}${suffix}`
+    }
   }
   return String(count)
 }
