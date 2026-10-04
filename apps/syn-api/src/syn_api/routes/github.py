@@ -204,36 +204,14 @@ async def _aggregate_all_installations(
     client: _RepoLister,
     include_private: bool,
 ) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
-    """Query all active installations and return deduplicated repos.
-
-    Refreshes the installation cache from GitHub if it is empty or older than
-    the TTL, so the endpoint works without a webhook configured.
-
-    The lookup is complete only when the installation list is current and every
-    installation answered. A stale list kept after a failed refresh may be
-    missing an installation, so at best it yields a partial lookup.
-    """
+    """Query all active installations and return deduplicated repos."""
     from syn_domain.contexts.github.slices.get_installation.projection import (
         get_installation_projection,
     )
 
-    projection = get_installation_projection()
-    installations = await projection.get_all_active()
-
-    installations_current = True
-    if _is_stale(installations):
-        refreshed = await _sync_installations(client, projection)
-        if refreshed is not None:
-            # Success (even if empty): replace cache. None = API failure: keep stale.
-            installations = refreshed
-        else:
-            installations_current = False
-
-    if not installations:
-        lookup = (
-            GitHubRepoLookup.COMPLETE if installations_current else GitHubRepoLookup.UNAVAILABLE
-        )
-        return [], lookup
+    installations, installations_current = await _known_installations(
+        client, get_installation_projection()
+    )
 
     seen_ids: set[int] = set()
     repos: list[GitHubRepoResponse] = []
@@ -245,12 +223,39 @@ async def _aggregate_all_installations(
         if found is not None:
             answered += 1
             repos.extend(found)
+    return repos, _lookup_of(len(installations), answered, installations_current)
 
+
+async def _known_installations(
+    client: _RepoLister,
+    projection: InstallationProjection,
+) -> tuple[list, bool]:
+    """Return the installations to query and whether that list is current.
+
+    Refreshes the installation cache from GitHub if it is empty or older than
+    the TTL, so the endpoint works without a webhook configured. If the refresh
+    fails the stale list is kept, but it may be missing an installation.
+    """
+    installations = await projection.get_all_active()
+    if not _is_stale(installations):
+        return installations, True
+    refreshed = await _sync_installations(client, projection)
+    if refreshed is None:
+        return installations, False
+    return refreshed, True
+
+
+def _lookup_of(asked: int, answered: int, installations_current: bool) -> GitHubRepoLookup:
+    """How much of the App's access a listing covers.
+
+    Complete only when the installation list is current and every installation
+    answered; nothing answered and nothing confirmed is unavailable.
+    """
+    if answered == asked and installations_current:
+        return GitHubRepoLookup.COMPLETE
     if answered == 0:
-        return repos, GitHubRepoLookup.UNAVAILABLE
-    if answered < len(installations) or not installations_current:
-        return repos, GitHubRepoLookup.PARTIAL
-    return repos, GitHubRepoLookup.COMPLETE
+        return GitHubRepoLookup.UNAVAILABLE
+    return GitHubRepoLookup.PARTIAL
 
 
 def _build_repo_list(

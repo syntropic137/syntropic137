@@ -53,6 +53,17 @@ type GitHubRepoList = components['schemas']['GitHubRepoListResponse']
 // fails if it no longer matches what the route returns.
 const recorded = githubReposRecorded as Record<keyof typeof githubReposRecorded, GitHubRepoList>
 
+function githubRepos(appAccess: string[] | GitHubRepoList | null): Response {
+  if (appAccess === null) return new Response('{"detail":"no app"}', { status: 502 })
+  if (!Array.isArray(appAccess)) return json(appAccess)
+  return json({
+    repos: appAccess.map(appRepo),
+    total: appAccess.length,
+    installation_id: null,
+    lookup: 'complete',
+  })
+}
+
 /**
  * `appAccess` names the repos a complete lookup found. null makes the request
  * itself fail, as it does with no App configured; a recorded body is served as is.
@@ -62,16 +73,7 @@ function serve(repos: RepoSummary[], appAccess: string[] | GitHubRepoList | null
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     if (url.endsWith('/api/v1/repos')) return json({ repos, total: repos.length })
     if (url.endsWith('/api/v1/systems')) return json({ systems: SYSTEMS, total: SYSTEMS.length })
-    if (url.endsWith('/api/v1/github/repos')) {
-      if (appAccess === null) return new Response('{"detail":"no app"}', { status: 502 })
-      if (!Array.isArray(appAccess)) return json(appAccess)
-      return json({
-        repos: appAccess.map(appRepo),
-        total: appAccess.length,
-        installation_id: null,
-        lookup: 'complete',
-      })
-    }
+    if (url.endsWith('/api/v1/github/repos')) return githubRepos(appAccess)
     throw new Error(`No fake endpoint for ${url}`)
   })
 }
