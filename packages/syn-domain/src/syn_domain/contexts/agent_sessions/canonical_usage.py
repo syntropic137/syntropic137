@@ -65,26 +65,46 @@ _MODEL_COLUMNS = f"{REQUESTED_MODEL_COLUMN}, {HAS_REQUESTED_MODEL_COLUMN}"
 CANONICAL_MODEL_COLUMNS = f"model, {_MODEL_COLUMNS}"
 """The CTE's three model columns, for a consumer's SELECT and GROUP BY lists."""
 
-CANONICAL_SESSION_USAGE_CTE = f"""
-summary_rows AS (
-    -- One row per summary observation, NOT aggregated. Aggregating first was
-    -- the bug: "the summary supersedes the turn rows" means CHOOSE one, and
-    -- SUM() over a session carrying two summaries added them, doubling its
-    -- tokens and its cost. Grouping by model or cost-nullness made the
-    -- duplicates into separate rows, which hid the doubling rather than
-    -- preventing it.
-    SELECT
-        session_id,
-        time,
-        {recorded_model_select()},
-        (data->>'total_cost_usd')::numeric AS vendor_cost_usd,
-        COALESCE((data->>'total_input_tokens')::bigint, 0) AS input_tokens,
-        COALESCE((data->>'total_output_tokens')::bigint, 0) AS output_tokens,
-        COALESCE((data->>'cache_creation_tokens')::bigint, 0) AS cache_creation_tokens,
-        COALESCE((data->>'cache_read_tokens')::bigint, 0) AS cache_read_tokens
-    FROM scoped_events
-    WHERE event_type = '{SESSION_SUMMARY}'
-),
+
+def summary_usage_columns(data: str = "data") -> str:
+    """The columns ONE ``session_summary`` observation contributes, over ``data``.
+
+    Shared by the CTE below and by the trigger that maintains
+    ``agent_summary_usage`` (``EventStoreSchema._create_usage_rollup``), so the
+    rollup stores exactly what the raw read would have extracted.
+    """
+    return f"""
+        {recorded_model_select(data)},
+        ({data}->>'total_cost_usd')::numeric AS vendor_cost_usd,
+        COALESCE(({data}->>'total_input_tokens')::bigint, 0) AS input_tokens,
+        COALESCE(({data}->>'total_output_tokens')::bigint, 0) AS output_tokens,
+        COALESCE(({data}->>'cache_creation_tokens')::bigint, 0) AS cache_creation_tokens,
+        COALESCE(({data}->>'cache_read_tokens')::bigint, 0) AS cache_read_tokens"""
+
+
+def turn_usage_columns(data: str = "data") -> str:
+    """The token columns ONE ``token_usage`` observation contributes, over ``data``.
+
+    Summed per (session, model) by the CTE below, and per (session, execution,
+    model) by the trigger that maintains ``agent_turn_usage_rollup``.
+    """
+    return f"""
+        COALESCE(({data}->>'input_tokens')::bigint, 0) AS input_tokens,
+        COALESCE(({data}->>'output_tokens')::bigint, 0) AS output_tokens,
+        COALESCE(({data}->>'cache_creation_tokens')::bigint, 0) AS cache_creation_tokens,
+        COALESCE(({data}->>'cache_read_tokens')::bigint, 0) AS cache_read_tokens"""
+
+
+# THE RULE, AS SQL. Reads two inputs and decides between them:
+#   summary_rows - one row per summary observation, NOT aggregated, carrying
+#                  session_id, time, the three model columns, vendor_cost_usd
+#                  and the four token columns.
+#   turn_usage   - per-turn tokens summed per (session, model), with a NULL
+#                  vendor_cost_usd, in canonical_usage's column order.
+# Where those come from is the caller's business: raw agent_events
+# (CANONICAL_SESSION_USAGE_CTE) or the trigger-maintained usage rollup
+# (rollup_usage_sources). Either way the decision is made HERE, once.
+CANONICAL_USAGE_DECISION_CTE = f"""
 ranked_summary AS (
     -- Prefer a summary that carries usage, then the most recent. A summary of
     -- all zeroes is an ABSENCE of measurement, not a measurement of none: a
@@ -121,6 +141,34 @@ priced_summary AS (
       AND input_tokens + output_tokens
           + cache_creation_tokens + cache_read_tokens > 0
 ),
+canonical_usage AS (
+    -- The summary SUPERSEDES the per-turn rows for a session; it never adds
+    -- to them. Unioning both would report the authoritative output plus the
+    -- placeholders it replaces.
+    SELECT * FROM priced_summary
+    UNION ALL
+    SELECT * FROM turn_usage
+    WHERE session_id NOT IN (SELECT session_id FROM priced_summary)
+)
+"""
+
+# The raw-event form: extracts summary_rows and turn_usage from an enclosing
+# ``scoped_events`` CTE, then applies the decision above.
+CANONICAL_SESSION_USAGE_CTE = f"""
+summary_rows AS (
+    -- One row per summary observation, NOT aggregated. Aggregating first was
+    -- the bug: "the summary supersedes the turn rows" means CHOOSE one, and
+    -- SUM() over a session carrying two summaries added them, doubling its
+    -- tokens and its cost. Grouping by model or cost-nullness made the
+    -- duplicates into separate rows, which hid the doubling rather than
+    -- preventing it.
+    SELECT
+        session_id,
+        time,
+        {summary_usage_columns()}
+    FROM scoped_events
+    WHERE event_type = '{SESSION_SUMMARY}'
+),
 turn_usage AS (
     -- No vendor cost exists mid-flight: a session reports its own cost only
     -- in the summary, so these rows are always priced from tokens.
@@ -136,16 +184,7 @@ turn_usage AS (
     WHERE event_type = '{TOKEN_USAGE}'
     GROUP BY session_id, {recorded_model_group_by()}
 ),
-canonical_usage AS (
-    -- The summary SUPERSEDES the per-turn rows for a session; it never adds
-    -- to them. Unioning both would report the authoritative output plus the
-    -- placeholders it replaces.
-    SELECT * FROM priced_summary
-    UNION ALL
-    SELECT * FROM turn_usage
-    WHERE session_id NOT IN (SELECT session_id FROM priced_summary)
-)
-"""
+{CANONICAL_USAGE_DECISION_CTE}"""
 """Per-(session, model) canonical usage.
 
 Expects an enclosing CTE named ``scoped_events`` holding the ``agent_events``
@@ -162,6 +201,57 @@ a consumer that groups the CTE must group on all three. ``vendor_cost_usd`` is t
 harness's OWN reported cost and is NULL whenever it did not report one -
 codex never does, and a claude session that ended abnormally may not either.
 """
+
+
+# THE USAGE ROLLUP (E1, "pages load fast"). Two ordinary tables kept current
+# by a trigger on agent_events (EventStoreSchema._create_usage_rollup), so a
+# usage read never decompresses the hypertable or parses a JSONB blob:
+#
+#   agent_summary_usage      one row per session_summary observation, holding
+#                            summary_usage_columns() exactly - summaries are
+#                            NOT pre-chosen, because the choice is the
+#                            decision above and belongs to it alone.
+#   agent_turn_usage_rollup  token_usage summed per (session_id, execution_id,
+#                            model columns); one row per session and model,
+#                            however many turns the session took.
+#
+# Like agent_event_day_rollup, neither is a projection: neither reads the
+# event store, so neither replays from position zero or stalls the
+# coordinator (#1318).
+SUMMARY_USAGE_TABLE = "agent_summary_usage"
+TURN_USAGE_ROLLUP_TABLE = "agent_turn_usage_rollup"
+# One row once the usage rollup's backfill has completed with its trigger live.
+USAGE_ROLLUP_STATE_TABLE = "agent_usage_rollup_state"
+
+
+def rollup_usage_sources(where: str) -> str:
+    """``summary_rows`` and ``turn_usage`` read from the usage rollup.
+
+    Prepend to ``CANONICAL_USAGE_DECISION_CTE`` in place of the raw-event
+    extraction. ``where`` narrows both tables identically - an execution
+    filter, a session membership test, or ``TRUE`` - over their shared
+    ``session_id`` and ``execution_id`` columns.
+    """
+    return f"""
+summary_rows AS (
+    SELECT session_id, time, model, {_MODEL_COLUMNS}, vendor_cost_usd,
+        input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens
+    FROM {SUMMARY_USAGE_TABLE}
+    WHERE {where}
+),
+turn_usage AS (
+    -- Re-summed: the rollup's grain carries execution_id, canonical usage's
+    -- does not.
+    SELECT session_id, model, {_MODEL_COLUMNS}, NULL::numeric AS vendor_cost_usd,
+        SUM(input_tokens)::bigint AS input_tokens,
+        SUM(output_tokens)::bigint AS output_tokens,
+        SUM(cache_creation_tokens)::bigint AS cache_creation_tokens,
+        SUM(cache_read_tokens)::bigint AS cache_read_tokens
+    FROM {TURN_USAGE_ROLLUP_TABLE}
+    WHERE {where}
+    GROUP BY session_id, model, {_MODEL_COLUMNS}
+),
+{CANONICAL_USAGE_DECISION_CTE}"""
 
 
 class Pricing(Protocol):
