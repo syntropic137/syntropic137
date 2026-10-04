@@ -7,9 +7,11 @@ needed a VERSION bump - a full replay of every execution - before any existing
 run could show them. The start event already holds them, so reading it costs
 one stream load per detail request and nothing at deploy time.
 
-``None`` for a phase means "not recorded": the execution predates #1454, or
-its stream could not be read. It is never filled in from the workflow template,
-which may have been edited since the run started.
+Two different absences, kept apart: a read stream whose start event carries no
+pins for a phase is "not recorded" (the execution predates #1454); a stream
+that could not be read is "unavailable" and says nothing about what was
+recorded. Neither is ever filled in from the workflow template, which may have
+been edited since the run started.
 """
 
 from __future__ import annotations
@@ -44,11 +46,13 @@ def _start_config(phase: ExecutablePhase) -> PhaseStartConfig:
     )
 
 
-async def load_start_configs(execution_id: str) -> dict[str, PhaseStartConfig]:
+async def load_start_configs(execution_id: str) -> dict[str, PhaseStartConfig] | None:
     """Each phase's pinned start config, by phase id. Missing key = not recorded.
 
-    Fails soft: the pins are context for a reader, and an unreadable stream
-    must not fail the detail read it decorates. It is logged, not hidden.
+    ``None`` = unavailable: the stream could not be read, so whether anything
+    was recorded is unknown. Fails soft - the pins are context for a reader,
+    and an unreadable stream must not fail the detail read it decorates - but
+    never as ``{}``, which would claim the start event was read and was empty.
     """
     from syn_api._wiring import get_workflow_execution_repository
 
@@ -56,7 +60,10 @@ async def load_start_configs(execution_id: str) -> dict[str, PhaseStartConfig]:
         aggregate = await get_workflow_execution_repository().get_by_id(execution_id)
     except Exception:
         logger.exception("Could not load execution %s to read its start pins", execution_id)
-        return {}
+        return None
     if aggregate is None:
-        return {}
+        # The detail projection has this execution, so its stream exists; not
+        # finding it here is a failed read, not an answer.
+        logger.warning("Execution %s has no stream to read its start pins from", execution_id)
+        return None
     return {p.phase_id: _start_config(p) for p in aggregate.start_pins.pinned_phases}

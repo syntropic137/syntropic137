@@ -13574,6 +13574,16 @@
               }
             ]
           },
+          "start_pins_status": {
+            "type": "string",
+            "enum": [
+              "recorded",
+              "not_recorded",
+              "unavailable"
+            ],
+            "title": "Start Pins Status",
+            "default": "unavailable"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/PhaseOperationInfo"

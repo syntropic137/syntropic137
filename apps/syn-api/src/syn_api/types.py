@@ -1064,6 +1064,15 @@ class PinnedSkillInfo(BaseModel):
     source_url: str
 
 
+StartPinsStatus = Literal["recorded", "not_recorded", "unavailable"]
+"""Whether a phase's `pinned_at_start` could be answered (#1454).
+
+``recorded``: the start event carried this phase's pins. ``not_recorded``: the
+start event was read and carries none - an execution from before #1454.
+``unavailable``: the start event could not be read on this request, so nothing
+is known either way. Only ``not_recorded`` may be shown as "not recorded"."""
+
+
 class PhaseStartConfig(BaseModel):
     """What a phase was configured with when its execution STARTED.
 
@@ -1354,9 +1363,12 @@ class PhaseExecution(BaseModel):
     pinned_at_start: PhaseStartConfig | None = None
     """What this phase had at start: tools, skills and model (#1454).
 
-    Null means the execution did not record it - every execution started
-    before #1454 - and is never filled in from the current template.
+    Null is never filled in from the current template; `start_pins_status`
+    says why it is null.
     """
+    start_pins_status: StartPinsStatus = "unavailable"
+    """Why `pinned_at_start` is or is not set. Defaults to ``unavailable``: a
+    constructor that never read the start event must not claim it was empty."""
     operations: list[ToolOperation] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, summarised from `operations`

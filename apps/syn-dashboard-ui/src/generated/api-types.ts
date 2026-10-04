@@ -5025,6 +5025,12 @@ export interface components {
             /** Observed Branches */
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
             pinned_at_start?: components["schemas"]["PhaseStartConfig"] | null;
+            /**
+             * Start Pins Status
+             * @default unavailable
+             * @enum {string}
+             */
+            start_pins_status: "recorded" | "not_recorded" | "unavailable";
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
