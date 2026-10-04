@@ -121,6 +121,18 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "WorkflowTemplateArchived": [
         ("workflow_list", "on_workflow_template_archived"),
     ],
+    # WHY (#967): tag edits after creation. The coordinator dispatches these by
+    # method name; this map is what the in-process sync path reads, so without
+    # them an edit is persisted and never reaches the read models in test or
+    # offline mode -- `?tag=` would keep filtering on the launch tags.
+    "WorkflowTagsAdded": [
+        ("workflow_list", "on_workflow_tags_added"),
+        ("workflow_detail", "on_workflow_tags_added"),
+    ],
+    "WorkflowTagsRemoved": [
+        ("workflow_list", "on_workflow_tags_removed"),
+        ("workflow_detail", "on_workflow_tags_removed"),
+    ],
     "WorkflowExecutionStarted": [
         ("workflow_list", "on_workflow_execution_started"),
         ("workflow_detail", "on_workflow_execution_started"),
@@ -170,6 +182,14 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_execution_list", "on_execution_cancelled"),
         ("workflow_execution_detail", "on_execution_cancelled"),
         ("execution_todo", "on_execution_cancelled"),
+    ],
+    "ExecutionTagsAdded": [
+        ("workflow_execution_list", "on_execution_tags_added"),
+        ("workflow_execution_detail", "on_execution_tags_added"),
+    ],
+    "ExecutionTagsRemoved": [
+        ("workflow_execution_list", "on_execution_tags_removed"),
+        ("workflow_execution_detail", "on_execution_tags_removed"),
     ],
     "SessionStarted": [
         ("session_list", "on_session_started"),

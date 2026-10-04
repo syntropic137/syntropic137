@@ -1864,6 +1864,218 @@
         }
       }
     },
+    "/executions/{execution_id}/tags": {
+      "post": {
+        "tags": [
+          "tags"
+        ],
+        "summary": "Add Execution Tags Endpoint",
+        "description": "Add tags to an execution, retroactively. Its inherited tags are never changed.",
+        "operationId": "add_execution_tags_endpoint_executions__execution_id__tags_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTagsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionTagsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution or workflow has this id"
+          },
+          "409": {
+            "description": "The id prefix matches more than one record"
+          },
+          "422": {
+            "description": "A tag is invalid, none was given, or the limit would be exceeded"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tags"
+        ],
+        "summary": "Remove Execution Tags Endpoint",
+        "description": "Remove tags from an execution. Removing an inherited tag leaves `inherited_tags` alone.",
+        "operationId": "remove_execution_tags_endpoint_executions__execution_id__tags_delete",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422.",
+              "title": "Tag"
+            },
+            "description": "A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionTagsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution or workflow has this id"
+          },
+          "409": {
+            "description": "The id prefix matches more than one record"
+          },
+          "422": {
+            "description": "A tag is invalid, none was given, or the limit would be exceeded"
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/tags": {
+      "post": {
+        "tags": [
+          "tags"
+        ],
+        "summary": "Add Workflow Tags Endpoint",
+        "description": "Add tags to a workflow. Future runs inherit them; existing runs keep their own.",
+        "operationId": "add_workflow_tags_endpoint_workflows__workflow_id__tags_post",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTagsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTagsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution or workflow has this id"
+          },
+          "409": {
+            "description": "The id prefix matches more than one record"
+          },
+          "422": {
+            "description": "A tag is invalid, none was given, or the limit would be exceeded"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tags"
+        ],
+        "summary": "Remove Workflow Tags Endpoint",
+        "description": "Remove tags from a workflow. Existing runs keep the tags they launched with.",
+        "operationId": "remove_workflow_tags_endpoint_workflows__workflow_id__tags_delete",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422.",
+              "title": "Tag"
+            },
+            "description": "A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTagsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution or workflow has this id"
+          },
+          "409": {
+            "description": "The id prefix matches more than one record"
+          },
+          "422": {
+            "description": "A tag is invalid, none was given, or the limit would be exceeded"
+          }
+        }
+      }
+    },
     "/sessions": {
       "get": {
         "tags": [
@@ -6970,6 +7182,25 @@
         "title": "AddGlobalClaudePluginRequest",
         "description": "Request body for ``POST /claude-plugins/global`` (Phase A redesign).\n\nTakes the display name plus version of an already-registered plugin. The\nhandler looks the entry up in the lock projection and refuses to add\nanything that has not been registered first via\n``POST /claude-plugins/registrations``."
       },
+      "AddTagsRequest": {
+        "properties": {
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "description": "Tags to add. Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422 and nothing is written. Tags already present are a no-op."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tags"
+        ],
+        "title": "AddTagsRequest",
+        "description": "Tags to add to an execution or a workflow. Adds only: never replaces the set."
+      },
       "AliasResolutionBasis": {
         "type": "string",
         "enum": [
@@ -9867,6 +10098,36 @@
         ],
         "title": "ExecutionSummaryResponse",
         "description": "Summary of a workflow execution.\n\nDisplay fields (``*_display``) are produced server-side so all clients\n(dashboard, CLI, future UIs) share identical human-readable output. Raw\nfields remain for programmatic consumers; both are always present.\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
+      },
+      "ExecutionTagsResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "inherited_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Inherited Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "tags",
+          "inherited_tags"
+        ],
+        "title": "ExecutionTagsResponse",
+        "description": "An execution's tags after an edit, read from the aggregate, not a projection."
       },
       "ExportManifestResponse": {
         "properties": {
@@ -18552,6 +18813,28 @@
         ],
         "title": "WorkflowSummaryResponse"
       },
+      "WorkflowTagsResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "tags"
+        ],
+        "title": "WorkflowTagsResponse",
+        "description": "A workflow's tags after an edit, read from the aggregate, not a projection."
+      },
       "syn_api__routes__costs__CostSummaryResponse": {
         "properties": {
           "total_cost_usd": {
@@ -18752,6 +19035,10 @@
     },
     {
       "name": "systems",
+      "description": ""
+    },
+    {
+      "name": "tags",
       "description": ""
     },
     {

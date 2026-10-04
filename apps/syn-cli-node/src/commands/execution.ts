@@ -12,6 +12,7 @@ import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCostWithCoverage, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
 import { executionSessionsCommand } from "./execution-sessions.js";
 import { executionTranscriptCommand } from "./execution-transcript.js";
+import { executionTagCommand } from "./execution-tags.js";
 import { Table } from "../output/table.js";
 
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
@@ -274,5 +275,6 @@ executionGroup
   .command(listCommand)
   .command(showCommand)
   .command(resumeCommand)
+  .command(executionTagCommand)
   .command(executionSessionsCommand)
   .command(executionTranscriptCommand);

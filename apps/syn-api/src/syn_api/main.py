@@ -32,6 +32,7 @@ from syn_api.routes import (
     skills_router,
     sse_router,
     systems_router,
+    tags_router,
     triggers_router,
     webhooks_router,
     workflows_router,
@@ -155,6 +156,7 @@ def create_app() -> FastAPI:
     # So /api/v1/workflows → strips to /workflows → matches these routes.
     app.include_router(workflows_router)
     app.include_router(executions_router)
+    app.include_router(tags_router)
     app.include_router(sessions_router)
     app.include_router(artifacts_router)
     app.include_router(claude_plugins_router)

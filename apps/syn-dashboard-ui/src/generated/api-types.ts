@@ -559,6 +559,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{execution_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Execution Tags Endpoint
+         * @description Add tags to an execution, retroactively. Its inherited tags are never changed.
+         */
+        post: operations["add_execution_tags_endpoint_executions__execution_id__tags_post"];
+        /**
+         * Remove Execution Tags Endpoint
+         * @description Remove tags from an execution. Removing an inherited tag leaves `inherited_tags` alone.
+         */
+        delete: operations["remove_execution_tags_endpoint_executions__execution_id__tags_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Workflow Tags Endpoint
+         * @description Add tags to a workflow. Future runs inherit them; existing runs keep their own.
+         */
+        post: operations["add_workflow_tags_endpoint_workflows__workflow_id__tags_post"];
+        /**
+         * Remove Workflow Tags Endpoint
+         * @description Remove tags from a workflow. Existing runs keep the tags they launched with.
+         */
+        delete: operations["remove_workflow_tags_endpoint_workflows__workflow_id__tags_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions": {
         parameters: {
             query?: never;
@@ -2201,6 +2249,17 @@ export interface components {
             version: string;
         };
         /**
+         * AddTagsRequest
+         * @description Tags to add to an execution or a workflow. Adds only: never replaces the set.
+         */
+        AddTagsRequest: {
+            /**
+             * Tags
+             * @description Tags to add. Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422 and nothing is written. Tags already present are a no-op.
+             */
+            tags: string[];
+        };
+        /**
          * AliasResolutionBasis
          * @description How confident an alias -> model id resolution is.
          * @enum {string}
@@ -3491,6 +3550,18 @@ export interface components {
             tags?: string[];
             /** Repos Display */
             repos_display?: string | null;
+        };
+        /**
+         * ExecutionTagsResponse
+         * @description An execution's tags after an edit, read from the aggregate, not a projection.
+         */
+        ExecutionTagsResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Tags */
+            tags: string[];
+            /** Inherited Tags */
+            inherited_tags: string[];
         };
         /**
          * ExportManifestResponse
@@ -7797,6 +7868,16 @@ export interface components {
             tags?: string[];
         };
         /**
+         * WorkflowTagsResponse
+         * @description A workflow's tags after an edit, read from the aggregate, not a projection.
+         */
+        WorkflowTagsResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Tags */
+            tags: string[];
+        };
+        /**
          * CostSummaryResponse
          * @description Summary of all costs across sessions/executions.
          */
@@ -8893,6 +8974,192 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    add_execution_tags_endpoint_executions__execution_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_execution_tags_endpoint_executions__execution_id__tags_delete: {
+        parameters: {
+            query: {
+                /** @description A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag: string[];
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_workflow_tags_endpoint_workflows__workflow_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_workflow_tags_endpoint_workflows__workflow_id__tags_delete: {
+        parameters: {
+            query: {
+                /** @description A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag: string[];
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
