@@ -136,6 +136,7 @@ class TestSchemaConsistency:
         rollup could disagree with the one the API would have built.
         """
         from syn_adapters.events.schema import (
+            AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL,
             USAGE_ROLLUP_BACKFILL_ALL_SQL,
             USAGE_ROLLUP_MARK_COMPLETE_SQL,
             USAGE_ROLLUP_MARK_INCOMPLETE_SQL,
@@ -156,6 +157,7 @@ class TestSchemaConsistency:
             )
         )
         statements = [
+            AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL,
             *USAGE_ROLLUP_TABLES_SQL,
             USAGE_ROLLUP_TRIGGER_FUNCTION_SQL,
             f"DROP TRIGGER IF EXISTS {USAGE_ROLLUP_TRIGGER} ON agent_events",
@@ -177,6 +179,8 @@ class TestSchemaConsistency:
         assert documented.startswith("BEGIN;") and documented.endswith("COMMIT;")
         first, second = documented.split("COMMIT;")[:2]
         assert "CREATE TRIGGER" in first and "INSERT INTO" not in first.split("$$")[-1]
+        # The table lock comes before any trigger DDL: lock order (see schema.py).
+        assert first.index(flat(AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL)) < first.index("DROP TRIGGER")
         assert "CREATE TRIGGER" not in second
         assert all(flat(s) in second for s in USAGE_ROLLUP_BACKFILL_ALL_SQL)
         assert flat(USAGE_ROLLUP_MARK_COMPLETE_SQL) in second

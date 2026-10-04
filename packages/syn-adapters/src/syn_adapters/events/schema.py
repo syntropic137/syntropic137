@@ -213,6 +213,19 @@ ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
 )[0]
 
 
+# TAKE agent_events FIRST. Re-attaching a rollup trigger means DROP TRIGGER
+# (ACCESS EXCLUSIVE) and CREATE TRIGGER (SHARE ROW EXCLUSIVE) on a hypertable,
+# and TimescaleDB applies both to every chunk as well as to the parent. It
+# locks the chunks BEFORE the parent, while a concurrent COPY holds the parent
+# and then asks for the chunk it writes to: a lock-order deadlock, measured on
+# timescaledb 2.29.2 with a writer running through startup (#1558 review r2).
+# PostgreSQL aborts one side - either an ingest write or this startup.
+# Locking the parent explicitly first, which LOCK TABLE does before it
+# recurses into the chunks, puts both sides in the same order. It costs
+# nothing new: DROP TRIGGER takes this lock anyway, for the same milliseconds.
+AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL = "LOCK TABLE agent_events IN ACCESS EXCLUSIVE MODE"
+
+
 # THE USAGE ROLLUP (E1, "pages load fast and stay fast").
 #
 # /metrics and the heatmap's usage totals read canonical usage, and canonical
@@ -693,6 +706,7 @@ class EventStoreSchema:
             # racing: the loser wakes up after the winner has committed and
             # sees a finished rollup.
             await conn.execute("SELECT pg_advisory_xact_lock($1)", ROLLUP_SCHEMA_LOCK_KEY)
+            await conn.execute(AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL)
             # Read inside the transaction, so it is the same snapshot the DDL
             # below writes into - and before the DROP TRIGGER further down,
             # which would otherwise make every startup look like a broken one.
@@ -727,9 +741,10 @@ class EventStoreSchema:
         """Create the usage rollup that bounds /metrics and the heatmap (E1).
 
         TWO PHASES, AND ONLY THE FIRST LOCKS INGEST (#1558 review r2). The
-        first transaction creates the tables and (re)creates the trigger. Its
-        CREATE TRIGGER takes SHARE ROW EXCLUSIVE on agent_events, so inserts
-        wait for it, but it does no scan: milliseconds. If the rollup is not
+        first transaction creates the tables and (re)creates the trigger,
+        holding agent_events (AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL, taken first
+        to keep the lock order deadlock-free), so inserts wait for it - but
+        it does no scan: milliseconds. If the rollup is not
         known complete it also clears the completion mark in that same
         transaction, so no later reader can mistake a half-done backfill for
         a finished one.
@@ -745,6 +760,7 @@ class EventStoreSchema:
         """
         async with conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
+            await conn.execute(AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL)
             tables_exist = [
                 (await conn.fetchval(f"SELECT to_regclass('{table}') IS NOT NULL")) is True
                 for table in (
@@ -776,7 +792,7 @@ class EventStoreSchema:
 
     @staticmethod
     async def backfill_usage_rollup(
-        conn: asyncpg.Connection, *, batch_sessions: int = USAGE_ROLLUP_BACKFILL_BATCH_SESSIONS
+        conn: asyncpg.Connection, *, batch_sessions: int | None = None
     ) -> None:
         """Fill the usage rollup with every event its trigger did not see.
 
@@ -784,11 +800,12 @@ class EventStoreSchema:
         agent_events; idempotent, so safe to re-run or to run from two
         replicas at once (the batches serialise on the schema lock).
         """
+        size = batch_sessions or USAGE_ROLLUP_BACKFILL_BATCH_SESSIONS
         sessions = [
             str(r["session_id"]) for r in await conn.fetch(USAGE_ROLLUP_BACKFILL_SESSIONS_SQL)
         ]
-        for start in range(0, len(sessions), batch_sessions):
-            batch = sessions[start : start + batch_sessions]
+        for start in range(0, len(sessions), size):
+            batch = sessions[start : start + size]
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
                 for statement in USAGE_ROLLUP_BACKFILL_SQL:

@@ -20,10 +20,12 @@
 
 -- INGEST IS NOT PAUSED FOR THE BACKFILL (#1558 review r2). Two transactions:
 --
---   1. Tables and trigger. CREATE TRIGGER takes SHARE ROW EXCLUSIVE on
---      agent_events, so inserts wait for this one - but it scans nothing, so
---      the wait is milliseconds. From its COMMIT on, every new event is
---      counted by the trigger, into rows marked backfilled = FALSE.
+--   1. Tables and trigger. This holds agent_events (ACCESS EXCLUSIVE, which
+--      DROP TRIGGER takes anyway, taken up front so the lock order cannot
+--      deadlock with a concurrent insert), so inserts wait for it - but it
+--      scans nothing, so the wait is milliseconds. From its COMMIT on, every
+--      new event is counted by the trigger, into rows marked
+--      backfilled = FALSE.
 --   2. The backfill. Each INSERT writes (events) MINUS (the trigger's rows),
 --      read in one statement and so one snapshot; an event and its trigger
 --      row commit together, so whatever the trigger has counted is subtracted
@@ -39,6 +41,10 @@ BEGIN;
 -- USAGE_ROLLUP_SCHEMA_LOCK_KEY, the key _create_usage_rollup() takes, so a
 -- by-hand run and an API startup queue rather than interleave.
 SELECT pg_advisory_xact_lock(6319179922565843063);
+
+-- agent_events before its chunks, so a concurrent insert cannot deadlock
+-- with the trigger DDL below (AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL).
+LOCK TABLE agent_events IN ACCESS EXCLUSIVE MODE;
 
 CREATE TABLE IF NOT EXISTS agent_summary_usage (
     session_id            TEXT        NOT NULL,
