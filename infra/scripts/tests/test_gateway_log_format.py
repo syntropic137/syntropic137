@@ -36,9 +36,14 @@ _TIMING_VARIABLES = (
 )
 
 #: Every file nginx reads as config, plus the entrypoint that generates more.
-_CONFIG_FILES = sorted(
-    p for p in _GATEWAY_IMAGE.iterdir() if p.suffix == ".conf" or p.name.startswith("nginx.conf")
-) + [_GATEWAY_IMAGE / "docker-entrypoint.sh"]
+_CONFIG_FILES = [
+    *sorted(
+        p
+        for p in _GATEWAY_IMAGE.iterdir()
+        if p.suffix == ".conf" or p.name.startswith("nginx.conf")
+    ),
+    _GATEWAY_IMAGE / "docker-entrypoint.sh",
+]
 
 
 def _log_format_definitions() -> list[tuple[Path, str]]:

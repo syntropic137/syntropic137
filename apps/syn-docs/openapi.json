@@ -9146,6 +9146,46 @@
         ],
         "title": "CreateWorkflowResponse"
       },
+      "DbPoolHealth": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "What the pool serves, e.g. 'projections' or 'agent_events'."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Connections currently open."
+          },
+          "max_size": {
+            "type": "integer",
+            "title": "Max Size",
+            "description": "Most connections the pool will open."
+          },
+          "in_use": {
+            "type": "integer",
+            "title": "In Use",
+            "description": "Connections checked out right now."
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting",
+            "description": "Callers blocked waiting for a connection right now."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "max_size",
+          "in_use",
+          "waiting"
+        ],
+        "title": "DbPoolHealth",
+        "description": "One Postgres connection pool in this API process, at the moment of asking (#1583).\n\n``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means\nrequests are queueing for a connection rather than for the database itself."
+      },
       "DegradedReason": {
         "type": "string",
         "enum": [
@@ -12069,6 +12109,21 @@
             ],
             "title": "Warnings",
             "description": "Human-readable notes that need attention but do not degrade the instance. Omitted when there are none."
+          },
+          "db_pools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DbPoolHealth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Pools",
+            "description": "Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode."
           }
         },
         "additionalProperties": false,

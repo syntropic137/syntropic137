@@ -134,15 +134,12 @@ class RequestTimingMiddleware:
     def __init__(
         self,
         app: ASGIApp,
+        *,
+        slow_request_ms: int,
         aggregator: RequestTimingAggregator | None = None,
-        slow_request_ms: int | None = None,
     ) -> None:
         self.app = app
         self._aggregator = aggregator if aggregator is not None else request_timing_aggregator
-        if slow_request_ms is None:
-            from syn_shared.settings import get_settings
-
-            slow_request_ms = get_settings().slow_request_log_threshold_ms
         self._slow_request_ms = slow_request_ms
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -172,8 +169,7 @@ class RequestTimingMiddleware:
                 duration_ms = ((responded_at or end) - start) * 1000
                 if duration_ms >= self._slow_request_ms:
                     logger.warning(
-                        "slow request method=%s route=%s status=%s duration_ms=%d "
-                        "pool_wait_ms=%d",
+                        "slow request method=%s route=%s status=%s duration_ms=%d pool_wait_ms=%d",
                         scope["method"],
                         _logged_route(scope),
                         status if status is not None else "-",
