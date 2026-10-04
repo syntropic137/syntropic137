@@ -82,6 +82,10 @@ def _make_mock_pool() -> MagicMock:
         # (#1322); this test is about pricing, so it has no tool calls to serve.
         if tool_call_counts.TABLE in query:
             return []
+        # The E2 span lookup (agent_event_span): these rows carry no times, so
+        # the rollup has nothing to narrow by and the reads run unbounded.
+        if "agent_event_day_rollup" in query:
+            return [_FakeRow({"first_day": None, "last_day": None})]
         event_type = args[1]
         if event_type == SESSION_SUMMARY:
             return []  # no session_summary rows yet
@@ -91,6 +95,13 @@ def _make_mock_pool() -> MagicMock:
     conn = AsyncMock()
     conn.fetch = AsyncMock(side_effect=fetch_side_effect)
     conn.fetchval = AsyncMock(return_value=0)
+    # agent_event_span.custom_plans: one transaction around the bounded reads.
+    conn.execute = AsyncMock(return_value="SET")
+    conn.transaction = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=None), __aexit__=AsyncMock(return_value=None)
+        )
+    )
     # In-progress: sessions have token_usage but no session_summary yet, so
     # is_complete must be False (see _ALL_SESSIONS_SUMMARISED_QUERY).
     conn.fetchrow = AsyncMock(return_value={"summarised": 0, "observed": 2})

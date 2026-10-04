@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     import asyncpg
 
     from syn_shared.observed_model import RecordedModel
-from syn_domain import tool_call_counts
+from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_shared.events import (
     SESSION_STARTED,
@@ -104,6 +104,7 @@ SELECT DISTINCT ON (session_id)
     phase_id
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
+  AND time >= $3 AND time < $4
 ORDER BY session_id, time DESC
 """
 
@@ -138,6 +139,7 @@ SELECT
     phase_id
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
+  AND time >= $3 AND time < $4
 GROUP BY session_id, execution_id, phase_id, {recorded_model_group_by()}
 """
 
@@ -145,6 +147,7 @@ _MIN_TIME_BATCH_QUERY = """
 SELECT session_id, MIN(time) as started_at
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
+  AND time >= $3 AND time < $4
 GROUP BY session_id
 """
 
@@ -552,8 +555,14 @@ class TimescaleSessionCostQuery:
 
     async def _fetch_page(self, ids: list[str]) -> _PageRows:
         """The three ``agent_events`` queries, once, plus the tool-call tally."""
-        async with self._pool.acquire() as conn:
-            summary_rows = await conn.fetch(_SESSION_SUMMARY_BATCH_QUERY, ids, SESSION_SUMMARY)
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            # Bounded to the days these sessions have telemetry on, so the
+            # planner opens those chunks and no others (E2). Same rows: see
+            # agent_event_span.
+            span = await agent_event_span.for_sessions(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            summary_rows = await conn.fetch(
+                _SESSION_SUMMARY_BATCH_QUERY, ids, SESSION_SUMMARY, span.lower, span.upper
+            )
             summaries = {row["session_id"]: row for row in summary_rows}
 
             # A summary row with a NULL total_input is not usable, so those
@@ -565,7 +574,11 @@ class TimescaleSessionCostQuery:
             fallback: dict[str, list[asyncpg.Record]] = {}
             if fallback_ids:
                 for row in await conn.fetch(
-                    _TOKEN_USAGE_FALLBACK_BATCH_QUERY, fallback_ids, TOKEN_USAGE
+                    _TOKEN_USAGE_FALLBACK_BATCH_QUERY,
+                    fallback_ids,
+                    TOKEN_USAGE,
+                    span.lower,
+                    span.upper,
                 ):
                     fallback.setdefault(row["session_id"], []).append(row)
 
@@ -577,7 +590,9 @@ class TimescaleSessionCostQuery:
             tool_counts = await tool_call_counts.by_session(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             started = {
                 row["session_id"]: row["started_at"]
-                for row in await conn.fetch(_MIN_TIME_BATCH_QUERY, ids, SESSION_STARTED)
+                for row in await conn.fetch(
+                    _MIN_TIME_BATCH_QUERY, ids, SESSION_STARTED, span.lower, span.upper
+                )
             }
         return _PageRows(summaries, fallback, tool_counts, started)
 
