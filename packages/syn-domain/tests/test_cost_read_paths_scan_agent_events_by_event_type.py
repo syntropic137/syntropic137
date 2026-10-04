@@ -642,11 +642,14 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
     **_declared(
         f"{_ADAPTERS}/events/schema.py",
         {
-            "USAGE_ROLLUP_BACKFILL_SQL": _full_scan(
-                "Rebuilds the usage rollup from the two usage event types. Runs at startup "
-                "only, and only when the rollup is not known complete (first deploy, or a "
-                "trigger found dropped or disabled), inside the schema transaction. Never on "
-                "an API read path: that is the point of the rollup it fills.",
+            "usage_rollup_backfill_sql": _full_scan(
+                "Fills the usage rollup with the events its trigger did not see (events "
+                "minus trigger rows, one snapshot per INSERT). Runs at startup only, and "
+                "only when the rollup is not known complete (first deploy, an interrupted "
+                "backfill, or a trigger found dropped or disabled). At startup each batch "
+                "pins session_id = ANY($1), a segment discard; the hand-applied 007 renders "
+                "it with TRUE, a full scan, which is the bound declared here. It holds no "
+                "lock an insert waits on (#1558 r2). Never on an API read path.",
                 statements=2,
             ),
         },

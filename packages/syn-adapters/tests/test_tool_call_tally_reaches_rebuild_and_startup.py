@@ -140,6 +140,9 @@ class _Conn:
             return self.tables_exist
         if "to_regclass" in query:
             return True
+        # ...and the usage rollup's backfill has completed.
+        if "agent_usage_rollup_state" in query:
+            return True
         # "what definition version were these rows recounted to?" -> none, the
         # state migration 004 leaves and the one a startup must not accept.
         # Asked before the tally's own name, which this table's contains.

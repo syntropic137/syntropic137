@@ -220,6 +220,8 @@ codex never does, and a claude session that ended abnormally may not either.
 # coordinator (#1318).
 SUMMARY_USAGE_TABLE = "agent_summary_usage"
 TURN_USAGE_ROLLUP_TABLE = "agent_turn_usage_rollup"
+# One row once the usage rollup's backfill has completed with its trigger live.
+USAGE_ROLLUP_STATE_TABLE = "agent_usage_rollup_state"
 
 
 def rollup_usage_sources(where: str) -> str:

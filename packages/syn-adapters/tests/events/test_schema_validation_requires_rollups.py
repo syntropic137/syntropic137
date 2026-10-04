@@ -21,6 +21,8 @@ from syn_adapters.events.models import EXPECTED_COLUMNS
 from syn_adapters.events.schema import (
     SUMMARY_USAGE_TABLE,
     TURN_USAGE_ROLLUP_TABLE,
+    USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL,
+    USAGE_ROLLUP_STATE_TABLE,
     USAGE_ROLLUP_TRIGGER,
     EventStoreSchema,
     SchemaValidationError,
@@ -34,8 +36,9 @@ _DAY_ROLLUP_TRIGGER = "agent_events_day_rollup"
 class _Conn:
     """agent_events is correct; the named rollup objects are absent."""
 
-    def __init__(self, *, absent: frozenset[str] = frozenset()) -> None:
+    def __init__(self, *, absent: frozenset[str] = frozenset(), backfilled: bool = True) -> None:
         self.absent = absent
+        self.backfilled = backfilled
         self.statements: list[str] = []
 
     async def execute(self, query: str, *_args: object) -> str:
@@ -49,6 +52,8 @@ class _Conn:
         ]
 
     async def fetchval(self, query: str, *_args: object) -> object:
+        if query == USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL:
+            return self.backfilled
         if "pg_trigger" in query:
             return not any(f"tgname = '{name}'" in query for name in self.absent)
         return not any(f"to_regclass('{name}')" in query for name in self.absent)
@@ -63,6 +68,7 @@ async def test_a_database_holding_every_rollup_validates() -> None:
     [
         (SUMMARY_USAGE_TABLE, "007_agent_usage_rollup.sql"),
         (TURN_USAGE_ROLLUP_TABLE, "007_agent_usage_rollup.sql"),
+        (USAGE_ROLLUP_STATE_TABLE, "007_agent_usage_rollup.sql"),
         (USAGE_ROLLUP_TRIGGER, "007_agent_usage_rollup.sql"),
         ("agent_event_day_rollup", "005_agent_event_day_rollup.sql"),
         (_DAY_ROLLUP_TRIGGER, "005_agent_event_day_rollup.sql"),
@@ -78,6 +84,17 @@ async def test_a_missing_rollup_object_fails_startup_and_names_its_migration(
     message = str(raised.value)
     assert absent in message
     assert migration in message
+
+
+async def test_tables_and_a_live_trigger_without_a_finished_backfill_fail_startup() -> None:
+    """The rollup would hold only what arrived after its trigger, served as all history."""
+    with pytest.raises(SchemaValidationError) as raised:
+        await EventStoreSchema(skip_auto_create=True).validate(
+            _Conn(backfilled=False)  # type: ignore[arg-type]
+        )
+    message = str(raised.value)
+    assert "backfill not complete" in message
+    assert "007_agent_usage_rollup.sql" in message
 
 
 async def test_skip_auto_create_startup_runs_no_ddl_and_still_checks_the_rollups() -> None:

@@ -12,6 +12,7 @@ from syn_adapters.events.models import EXPECTED_COLUMNS
 from syn_domain.contexts.agent_sessions import (
     SUMMARY_USAGE_TABLE,
     TURN_USAGE_ROLLUP_TABLE,
+    USAGE_ROLLUP_STATE_TABLE,
     recorded_model_group_by,
     recorded_model_select,
     summary_usage_columns,
@@ -233,6 +234,32 @@ ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
 # The turn key is NULLS NOT DISTINCT for the reason ROLLUP_KEY_SQL's is: a
 # NULL execution_id or model must group with NULL, or the rollup grows a row
 # per turn and loses the bound it exists for.
+#
+# WHO WROTE A ROW, AND WHY IT MATTERS: THE NON-BLOCKING BACKFILL (#1558 r2).
+#
+# Every row says whether the TRIGGER wrote it (`backfilled = FALSE`) or the
+# BACKFILL did (`backfilled = TRUE`), and the two never touch each other's
+# rows. That separation is what lets the backfill run without holding
+# agent_events against inserts:
+#
+#   * The trigger writes a row in the same transaction as the event that
+#     fired it. So in ANY snapshot, a post-trigger event and its trigger
+#     contribution are either both visible or both invisible.
+#   * The backfill therefore writes, per key, (every event in its snapshot)
+#     MINUS (every trigger contribution in that same snapshot), as ONE
+#     statement, so one snapshot. What is left is exactly the events the
+#     trigger never saw: those committed before it existed, or while it was
+#     disabled. Events committed during the backfill are the trigger's alone.
+#   * It REPLACES its own rows (delete, then insert the difference), so a
+#     re-run, a resume after a crash, or a second replica converges on the
+#     same numbers instead of adding to them.
+#
+# Summaries have no natural key, so "minus" is the multiset EXCEPT ALL over
+# every stored column. Turns are summed, so the turn row carries
+# `observations`, the number of token_usage events it sums, and the backfill
+# keeps a key only where the events outnumber the trigger's observations -
+# a key with no pre-trigger turns gets no backfilled row, as it would have
+# had no row in a raw read either.
 USAGE_ROLLUP_TABLES_SQL = (
     f"""
     CREATE TABLE IF NOT EXISTS {SUMMARY_USAGE_TABLE} (
@@ -246,7 +273,8 @@ USAGE_ROLLUP_TABLES_SQL = (
         input_tokens          BIGINT      NOT NULL,
         output_tokens         BIGINT      NOT NULL,
         cache_creation_tokens BIGINT      NOT NULL,
-        cache_read_tokens     BIGINT      NOT NULL
+        cache_read_tokens     BIGINT      NOT NULL,
+        backfilled            BOOLEAN     NOT NULL DEFAULT FALSE
     )
     """,
     f"""
@@ -268,8 +296,10 @@ USAGE_ROLLUP_TABLES_SQL = (
         output_tokens         BIGINT  NOT NULL,
         cache_creation_tokens BIGINT  NOT NULL,
         cache_read_tokens     BIGINT  NOT NULL,
+        observations          BIGINT  NOT NULL,
+        backfilled            BOOLEAN NOT NULL DEFAULT FALSE,
         CONSTRAINT {TURN_USAGE_ROLLUP_TABLE}_key UNIQUE NULLS NOT DISTINCT
-            (session_id, execution_id, model, requested_model, has_requested_model)
+            (session_id, execution_id, model, requested_model, has_requested_model, backfilled)
     )
     """,
     f"""
@@ -283,15 +313,24 @@ USAGE_ROLLUP_TABLES_SQL = (
     CREATE INDEX IF NOT EXISTS idx_{TURN_USAGE_ROLLUP_TABLE}_session
     ON {TURN_USAGE_ROLLUP_TABLE} (session_id)
     """,
+    # One row once a backfill has finished with the trigger live. Absent means
+    # "not known complete": startup backfills, and validate() refuses to serve.
+    f"""
+    CREATE TABLE IF NOT EXISTS {USAGE_ROLLUP_STATE_TABLE} (
+        singleton     BOOLEAN     PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+        backfilled_at TIMESTAMPTZ NOT NULL
+    )
+    """,
 )
 
 _SUMMARY_COLUMNS = (
     "session_id, execution_id, time, model, requested_model, has_requested_model, "
     "vendor_cost_usd, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens"
 )
+_TURN_KEY_COLUMNS = "session_id, execution_id, model, requested_model, has_requested_model"
 _TURN_COLUMNS = (
-    "session_id, execution_id, model, requested_model, has_requested_model, "
-    "input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens"
+    f"{_TURN_KEY_COLUMNS}, "
+    "input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, observations"
 )
 
 USAGE_ROLLUP_TRIGGER_FUNCTION_SQL = f"""
@@ -305,46 +344,107 @@ BEGIN
         INSERT INTO {TURN_USAGE_ROLLUP_TABLE} ({_TURN_COLUMNS})
         SELECT NEW.session_id, NEW.execution_id,
             {recorded_model_select("NEW.data")},
-            {turn_usage_columns("NEW.data")}
+            {turn_usage_columns("NEW.data")},
+            1 AS observations
         ON CONFLICT ON CONSTRAINT {TURN_USAGE_ROLLUP_TABLE}_key DO UPDATE
         SET input_tokens = {TURN_USAGE_ROLLUP_TABLE}.input_tokens + EXCLUDED.input_tokens,
             output_tokens = {TURN_USAGE_ROLLUP_TABLE}.output_tokens + EXCLUDED.output_tokens,
             cache_creation_tokens =
                 {TURN_USAGE_ROLLUP_TABLE}.cache_creation_tokens + EXCLUDED.cache_creation_tokens,
             cache_read_tokens =
-                {TURN_USAGE_ROLLUP_TABLE}.cache_read_tokens + EXCLUDED.cache_read_tokens;
+                {TURN_USAGE_ROLLUP_TABLE}.cache_read_tokens + EXCLUDED.cache_read_tokens,
+            observations = {TURN_USAGE_ROLLUP_TABLE}.observations + 1;
     END IF;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
 """
 
-# Recompute both tables from the raw events. Delete-then-insert rather than
-# an upsert: summaries have no natural key to reconcile on, and the statement
-# runs inside the transaction that holds agent_events against inserts (the
-# CREATE TRIGGER lock), so nothing can arrive between the two halves.
-USAGE_ROLLUP_BACKFILL_SQL = (
-    f"DELETE FROM {SUMMARY_USAGE_TABLE}",
-    f"DELETE FROM {TURN_USAGE_ROLLUP_TABLE}",
-    f"""
-    INSERT INTO {SUMMARY_USAGE_TABLE} ({_SUMMARY_COLUMNS})
-    SELECT session_id, execution_id, time, {summary_usage_columns()}
-    FROM agent_events
-    WHERE event_type = '{SESSION_SUMMARY}'
-    """,
-    f"""
-    INSERT INTO {TURN_USAGE_ROLLUP_TABLE} ({_TURN_COLUMNS})
-    SELECT session_id, execution_id, {recorded_model_select()},
-        SUM(input_tokens), SUM(output_tokens),
-        SUM(cache_creation_tokens), SUM(cache_read_tokens)
+# The sessions the backfill visits, in batches. Read from the day rollup,
+# which has a row for every session that emitted ANY event and is reconciled
+# by _create_day_rollup() immediately before this runs (005 is a prerequisite
+# of 007 by hand, and validate() requires both), so it lists every session
+# that could hold a usage event the trigger missed, without a scan of
+# agent_events. A session first seen after this read has no event the trigger
+# missed, so it needs no visit.
+USAGE_ROLLUP_BACKFILL_SESSIONS_SQL = """
+SELECT DISTINCT session_id
+FROM agent_event_day_rollup
+ORDER BY session_id
+"""
+
+
+def usage_rollup_backfill_sql(sessions: str) -> tuple[str, ...]:
+    """Replace the backfilled rows for ``sessions`` with what the trigger missed.
+
+    ``sessions`` narrows agent_events and the rollup identically: a
+    ``session_id = ANY($1)`` batch at startup, or ``TRUE`` in the hand-applied
+    migration. Each INSERT reads the events and the trigger's rows in ONE
+    statement, so one snapshot - the guarantee the subtraction rests on (see
+    the comment above USAGE_ROLLUP_TABLES_SQL).
+    """
+    return (
+        f"DELETE FROM {SUMMARY_USAGE_TABLE} WHERE backfilled AND {sessions}",
+        f"DELETE FROM {TURN_USAGE_ROLLUP_TABLE} WHERE backfilled AND {sessions}",
+        f"""
+    INSERT INTO {SUMMARY_USAGE_TABLE} ({_SUMMARY_COLUMNS}, backfilled)
+    SELECT {_SUMMARY_COLUMNS}, TRUE
     FROM (
-        SELECT session_id, execution_id, data, {turn_usage_columns()}
+        SELECT session_id, execution_id, time, {summary_usage_columns()}
         FROM agent_events
-        WHERE event_type = '{TOKEN_USAGE}'
-    ) turns
-    GROUP BY session_id, execution_id, {recorded_model_group_by()}
+        WHERE event_type = '{SESSION_SUMMARY}' AND {sessions}
+        EXCEPT ALL
+        SELECT {_SUMMARY_COLUMNS}
+        FROM {SUMMARY_USAGE_TABLE}
+        WHERE NOT backfilled AND {sessions}
+    ) missed
     """,
-)
+        f"""
+    INSERT INTO {TURN_USAGE_ROLLUP_TABLE} ({_TURN_COLUMNS}, backfilled)
+    SELECT e.session_id, e.execution_id, e.model, e.requested_model, e.has_requested_model,
+        e.input_tokens - COALESCE(t.input_tokens, 0),
+        e.output_tokens - COALESCE(t.output_tokens, 0),
+        e.cache_creation_tokens - COALESCE(t.cache_creation_tokens, 0),
+        e.cache_read_tokens - COALESCE(t.cache_read_tokens, 0),
+        e.observations - COALESCE(t.observations, 0),
+        TRUE
+    FROM (
+        SELECT session_id, execution_id, {recorded_model_select()},
+            SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+            SUM(cache_creation_tokens) AS cache_creation_tokens,
+            SUM(cache_read_tokens) AS cache_read_tokens,
+            COUNT(*) AS observations
+        FROM (
+            SELECT session_id, execution_id, data, {turn_usage_columns()}
+            FROM agent_events
+            WHERE event_type = '{TOKEN_USAGE}' AND {sessions}
+        ) turns
+        GROUP BY session_id, execution_id, {recorded_model_group_by()}
+    ) e
+    LEFT JOIN {TURN_USAGE_ROLLUP_TABLE} t
+      ON NOT t.backfilled
+     AND t.session_id = e.session_id
+     AND t.execution_id IS NOT DISTINCT FROM e.execution_id
+     AND t.model IS NOT DISTINCT FROM e.model
+     AND t.requested_model IS NOT DISTINCT FROM e.requested_model
+     AND t.has_requested_model = e.has_requested_model
+    WHERE e.observations > COALESCE(t.observations, 0)
+    """,
+    )
+
+
+# Startup: one batch of sessions per transaction, bound as $1.
+USAGE_ROLLUP_BACKFILL_SQL = usage_rollup_backfill_sql("session_id = ANY($1::text[])")
+# The hand-applied migration: every session, still one snapshot per INSERT.
+USAGE_ROLLUP_BACKFILL_ALL_SQL = usage_rollup_backfill_sql("TRUE")
+USAGE_ROLLUP_BACKFILL_BATCH_SESSIONS = 500
+
+USAGE_ROLLUP_MARK_COMPLETE_SQL = f"""
+INSERT INTO {USAGE_ROLLUP_STATE_TABLE} (singleton, backfilled_at) VALUES (TRUE, now())
+ON CONFLICT (singleton) DO UPDATE SET backfilled_at = EXCLUDED.backfilled_at
+"""
+USAGE_ROLLUP_MARK_INCOMPLETE_SQL = f"DELETE FROM {USAGE_ROLLUP_STATE_TABLE}"
+USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL = f"SELECT EXISTS (SELECT 1 FROM {USAGE_ROLLUP_STATE_TABLE})"
 
 USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
     ">q", hashlib.blake2b(b"agent_usage_rollup:schema", digest_size=8).digest()
@@ -362,6 +462,7 @@ _ROLLUP_TABLES: tuple[tuple[str, str], ...] = (
     ("agent_event_day_rollup", _DAY_ROLLUP_MIGRATION),
     (SUMMARY_USAGE_TABLE, _USAGE_ROLLUP_MIGRATION),
     (TURN_USAGE_ROLLUP_TABLE, _USAGE_ROLLUP_MIGRATION),
+    (USAGE_ROLLUP_STATE_TABLE, _USAGE_ROLLUP_MIGRATION),
 )
 _ROLLUP_TRIGGERS: tuple[tuple[str, str], ...] = (
     ("agent_events_day_rollup", _DAY_ROLLUP_MIGRATION),
@@ -625,23 +726,39 @@ class EventStoreSchema:
     async def _create_usage_rollup(self, conn: asyncpg.Connection) -> None:
         """Create the usage rollup that bounds /metrics and the heatmap (E1).
 
-        The same install as `_create_day_rollup`, for the same reasons and
-        with the same single-transaction guarantee: if this commits, the
-        tables, the trigger and any backfill committed together; if it
-        aborts, none did. The backfill runs only when the rollup is not
-        known complete - tables present AND the trigger live - so a restart
-        pays catalogue lookups, and a trigger that was dropped or disabled
-        earns a full reconcile rather than a silent gap.
+        TWO PHASES, AND ONLY THE FIRST LOCKS INGEST (#1558 review r2). The
+        first transaction creates the tables and (re)creates the trigger. Its
+        CREATE TRIGGER takes SHARE ROW EXCLUSIVE on agent_events, so inserts
+        wait for it, but it does no scan: milliseconds. If the rollup is not
+        known complete it also clears the completion mark in that same
+        transaction, so no later reader can mistake a half-done backfill for
+        a finished one.
+
+        The backfill then runs in batches of sessions, one short transaction
+        each, holding no lock an insert waits on: see the comment above
+        USAGE_ROLLUP_TABLES_SQL for why the trigger's rows and the backfill's
+        rows add up to every event exactly once while ingest carries on. It
+        runs only when the rollup is not known complete - tables present, the
+        trigger live, AND the mark present - so a restart pays catalogue
+        lookups, a backfill interrupted by a crash resumes on the next start,
+        and a trigger found dropped or disabled earns a full reconcile.
         """
         async with conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
             tables_exist = [
                 (await conn.fetchval(f"SELECT to_regclass('{table}') IS NOT NULL")) is True
-                for table in (SUMMARY_USAGE_TABLE, TURN_USAGE_ROLLUP_TABLE)
+                for table in (
+                    SUMMARY_USAGE_TABLE,
+                    TURN_USAGE_ROLLUP_TABLE,
+                    USAGE_ROLLUP_STATE_TABLE,
+                )
             ]
             trigger_is_live: bool = (
                 await conn.fetchval(trigger_live_sql(USAGE_ROLLUP_TRIGGER))
             ) is True
+            marked_complete = all(tables_exist) and (
+                (await conn.fetchval(USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL)) is True
+            )
             for ddl in USAGE_ROLLUP_TABLES_SQL:
                 await conn.execute(ddl)
             await conn.execute(USAGE_ROLLUP_TRIGGER_FUNCTION_SQL)
@@ -651,9 +768,34 @@ class EventStoreSchema:
                 AFTER INSERT ON agent_events
                 FOR EACH ROW EXECUTE FUNCTION agent_usage_rollup_apply()
             """)
-            if not (all(tables_exist) and trigger_is_live):
+            needs_backfill = not (trigger_is_live and marked_complete)
+            if needs_backfill:
+                await conn.execute(USAGE_ROLLUP_MARK_INCOMPLETE_SQL)
+        if needs_backfill:
+            await self.backfill_usage_rollup(conn)
+
+    @staticmethod
+    async def backfill_usage_rollup(
+        conn: asyncpg.Connection, *, batch_sessions: int = USAGE_ROLLUP_BACKFILL_BATCH_SESSIONS
+    ) -> None:
+        """Fill the usage rollup with every event its trigger did not see.
+
+        Requires the trigger to exist already. Never blocks an insert into
+        agent_events; idempotent, so safe to re-run or to run from two
+        replicas at once (the batches serialise on the schema lock).
+        """
+        sessions = [
+            str(r["session_id"]) for r in await conn.fetch(USAGE_ROLLUP_BACKFILL_SESSIONS_SQL)
+        ]
+        for start in range(0, len(sessions), batch_sessions):
+            batch = sessions[start : start + batch_sessions]
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
                 for statement in USAGE_ROLLUP_BACKFILL_SQL:
-                    await conn.execute(statement)
+                    await conn.execute(statement, batch)
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
+            await conn.execute(USAGE_ROLLUP_MARK_COMPLETE_SQL)
 
     async def _rollup_is_complete(self, conn: asyncpg.Connection) -> bool:
         """Whether the rollup can be trusted to already hold every event.
@@ -755,4 +897,15 @@ class EventStoreSchema:
         for trigger, migration in _ROLLUP_TRIGGERS:
             if (await conn.fetchval(trigger_live_sql(trigger))) is not True:
                 missing.append(f"Missing or disabled trigger: {trigger} (apply {migration})")
+        # Tables and a live trigger are not enough: until the backfill has
+        # finished the rollup holds only what arrived after the trigger, and
+        # would serve that as the whole history.
+        if (
+            not any(USAGE_ROLLUP_STATE_TABLE in m for m in missing)
+            and (await conn.fetchval(USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL)) is not True
+        ):
+            missing.append(
+                f"Usage rollup backfill not complete: {USAGE_ROLLUP_STATE_TABLE} is empty "
+                f"(apply {_USAGE_ROLLUP_MIGRATION})"
+            )
         return missing

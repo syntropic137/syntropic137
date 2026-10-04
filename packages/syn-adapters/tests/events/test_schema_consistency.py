@@ -136,7 +136,9 @@ class TestSchemaConsistency:
         rollup could disagree with the one the API would have built.
         """
         from syn_adapters.events.schema import (
-            USAGE_ROLLUP_BACKFILL_SQL,
+            USAGE_ROLLUP_BACKFILL_ALL_SQL,
+            USAGE_ROLLUP_MARK_COMPLETE_SQL,
+            USAGE_ROLLUP_MARK_INCOMPLETE_SQL,
             USAGE_ROLLUP_SCHEMA_LOCK_KEY,
             USAGE_ROLLUP_TABLES_SQL,
             USAGE_ROLLUP_TRIGGER,
@@ -159,7 +161,9 @@ class TestSchemaConsistency:
             f"DROP TRIGGER IF EXISTS {USAGE_ROLLUP_TRIGGER} ON agent_events",
             f"CREATE TRIGGER {USAGE_ROLLUP_TRIGGER} AFTER INSERT ON agent_events"
             " FOR EACH ROW EXECUTE FUNCTION agent_usage_rollup_apply()",
-            *USAGE_ROLLUP_BACKFILL_SQL,
+            USAGE_ROLLUP_MARK_INCOMPLETE_SQL,
+            *USAGE_ROLLUP_BACKFILL_ALL_SQL,
+            USAGE_ROLLUP_MARK_COMPLETE_SQL,
             f"SELECT pg_advisory_xact_lock({USAGE_ROLLUP_SCHEMA_LOCK_KEY})",
         ]
         missing = [s for s in statements if flat(s) not in documented]
@@ -167,8 +171,15 @@ class TestSchemaConsistency:
             "007_agent_usage_rollup.sql no longer matches schema.py; re-render it. "
             f"Missing: {[flat(s)[:80] for s in missing]}"
         )
-        # The trigger and the backfill must share one transaction, see 007.
+        # Two transactions, trigger first (#1558 r2): the backfill must not
+        # run inside the one whose CREATE TRIGGER holds inserts off, and it
+        # must start only once the trigger is committed and counting.
         assert documented.startswith("BEGIN;") and documented.endswith("COMMIT;")
+        first, second = documented.split("COMMIT;")[:2]
+        assert "CREATE TRIGGER" in first and "INSERT INTO" not in first.split("$$")[-1]
+        assert "CREATE TRIGGER" not in second
+        assert all(flat(s) in second for s in USAGE_ROLLUP_BACKFILL_ALL_SQL)
+        assert flat(USAGE_ROLLUP_MARK_COMPLETE_SQL) in second
 
     def test_session_conversations_in_init_db(self, init_db_path: Path) -> None:
         """Docker init-db must include session_conversations table."""
