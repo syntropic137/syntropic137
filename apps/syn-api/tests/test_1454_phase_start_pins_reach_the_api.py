@@ -163,7 +163,7 @@ async def test_a_phase_reports_the_tools_skills_and_model_it_started_with(
     pins = phase.pinned_at_start
     assert pins is not None, "a phase pinned at start was served as 'not recorded'"
     assert pins.allowed_tools == list(TOOLS)
-    assert pins.model == MODEL
+    assert pins.requested_model == MODEL
     assert [(s.name, s.version, s.resolved_sha) for s in pins.skills] == [
         ("architecture", "v2.3.1", "9f1c0de4")
     ]

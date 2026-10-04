@@ -24,13 +24,13 @@ export function PhaseStartPins({ pins }: { pins: PhaseStartConfig | null | undef
   return (
     <details className="provenance-pins">
       <summary>
-        At start: {pins.model ?? `${pins.provider} default model`} &middot;{' '}
+        At start: {pins.requested_model ?? `${pins.provider} default model`} &middot;{' '}
         {tools.length === 0 ? 'default tools' : `${tools.length} tools`} &middot; {skills.length}{' '}
         {skills.length === 1 ? 'skill' : 'skills'}
       </summary>
       <dl className="provenance-pins__list">
-        <dt>Model</dt>
-        <dd>{pins.model ?? `none named (${pins.provider} default)`}</dd>
+        <dt>Requested model</dt>
+        <dd>{pins.requested_model ?? `none named (${pins.provider} default)`}</dd>
         <dt>Tools</dt>
         <dd>
           {tools.length === 0 ? (

@@ -46,7 +46,7 @@ describe('DispatchedTask', () => {
 
 const PINS: PhaseStartConfig = {
   provider: 'claude',
-  model: 'claude-opus-5-5',
+  requested_model: 'claude-opus-5-5',
   allowed_tools: ['Read', 'Bash(git log:*)'],
   skills: [
     {

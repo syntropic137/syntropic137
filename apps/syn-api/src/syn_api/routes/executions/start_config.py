@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 def _start_config(phase: ExecutablePhase) -> PhaseStartConfig:
     return PhaseStartConfig(
         provider=str(phase.agent_config.provider),
-        model=phase.agent_config.model,
+        requested_model=phase.agent_config.model,
         allowed_tools=list(phase.agent_config.allowed_tools),
         skills=[
             PinnedSkillInfo(

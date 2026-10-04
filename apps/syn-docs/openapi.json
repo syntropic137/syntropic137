@@ -13806,7 +13806,7 @@
             "type": "string",
             "title": "Provider"
           },
-          "model": {
+          "requested_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -13815,7 +13815,7 @@
                 "type": "null"
               }
             ],
-            "title": "Model"
+            "title": "Requested Model"
           },
           "allowed_tools": {
             "items": {

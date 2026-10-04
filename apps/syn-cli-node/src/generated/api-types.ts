@@ -5164,8 +5164,8 @@ export interface components {
         PhaseStartConfig: {
             /** Provider */
             provider: string;
-            /** Model */
-            model?: string | null;
+            /** Requested Model */
+            requested_model?: string | null;
             /** Allowed Tools */
             allowed_tools?: string[];
             /** Skills */

@@ -1073,8 +1073,10 @@ class PhaseStartConfig(BaseModel):
     """
 
     provider: str
-    model: str | None = None
-    """The model as resolved at start, or None when the phase named none."""
+    requested_model: str | None = None
+    """The model the phase ASKED for at start, possibly an alias such as
+    ``opus`` (ADR-067 D9: a request, not the harness-reported id). None when
+    the phase named none."""
     allowed_tools: list[str] = Field(default_factory=list)
     """Empty means the phase declared no restriction, so the harness ran with
     its own default tool set - not that the agent had no tools."""
