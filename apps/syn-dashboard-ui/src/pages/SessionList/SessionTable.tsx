@@ -8,7 +8,6 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { useNavigate } from 'react-router-dom'
 import { Copy } from 'lucide-react'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
@@ -56,14 +55,13 @@ function CopyIdButton({ id }: { id: string }) {
 }
 
 export function SessionTable({ rows, loading, emptyState, selection, sort }: SessionTableProps) {
-  const navigate = useNavigate()
   const props: ResourceTableProps<SessionSummary, SortKey> = {
     rows,
     columns: SESSION_COLUMNS,
     loading,
     emptyState,
     getRowId: (s) => s.id,
-    onRowClick: (s) => navigate(`/sessions/${s.id}`),
+    rowHref: (s) => `/sessions/${s.id}`,
     rowActions: (s) => <CopyIdButton id={s.id} />,
     selection,
     sort,

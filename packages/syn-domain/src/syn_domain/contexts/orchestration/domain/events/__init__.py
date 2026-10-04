@@ -21,8 +21,14 @@ from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import
 from syn_domain.contexts.orchestration.domain.events.CommandFailedEvent import (
     CommandFailedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
+    ExecutionAttachedToEvalEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
     ExecutionCancelledEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
+    ExecutionDetachedFromEvalEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
@@ -59,6 +65,9 @@ from syn_domain.contexts.orchestration.domain.events.TokensInjectedEvent import 
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
     WorkflowCompletedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+    WorkflowDefaultEvalSetEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
@@ -112,7 +121,9 @@ __all__ = [
     "ClaudePluginRegisteredEvent",
     "CommandExecutedEvent",
     "CommandFailedEvent",
+    "ExecutionAttachedToEvalEvent",
     "ExecutionCancelledEvent",
+    "ExecutionDetachedFromEvalEvent",
     "ExecutionResumedEvent",
     "ExecutionTagsAddedEvent",
     "ExecutionTagsRemovedEvent",
@@ -125,6 +136,7 @@ __all__ = [
     "PhaseStartedEvent",
     "TokensInjectedEvent",
     "WorkflowCompletedEvent",
+    "WorkflowDefaultEvalSetEvent",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
     "WorkflowInterruptedEvent",

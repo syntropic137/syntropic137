@@ -83,6 +83,7 @@ from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRe
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    EvalId,
     FailureClassification,
     ReportedFailureReason,
     SideEffectStatus,
@@ -558,6 +559,8 @@ class WorkflowDetail(BaseModel):
     requires_repos: bool = True
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Future runs only."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -830,6 +833,51 @@ class WorkflowTagsResponse(BaseModel):
     workflow_id: str
     tags: list[str]
     """The workflow's tags, normalised and sorted. Future runs inherit them."""
+
+
+class AttachEvalRequest(BaseModel):
+    """The eval to attach an execution to (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    eval_id: EvalId = Field(
+        description=(
+            "The eval to attach to. It must exist and not be archived. Attaching to the "
+            "eval the run already belongs to is a no-op; another eval needs a detach first."
+        ),
+    )
+
+
+class ExecutionEvalResponse(BaseModel):
+    """An execution's eval membership after an edit, read from the aggregate (#967)."""
+
+    execution_id: str
+    eval_id: str | None
+    """The eval the run belongs to now, or null if it belongs to none."""
+    association_kind: Literal["launched", "attached"] | None
+    """How it joined: chosen at launch, or attached afterwards. Null with no eval."""
+    launched_eval_id: str | None
+    """The eval the launch chose. A record of the launch: a detach never clears it."""
+
+
+class SetDefaultEvalRequest(BaseModel):
+    """The eval a workflow's runs join when the launch names none (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    eval_id: EvalId | None = Field(
+        description=(
+            "The default eval, which must exist and not be archived. Null clears it. "
+            "Runs already started keep the eval they launched into."
+        ),
+    )
+
+
+class WorkflowDefaultEvalResponse(BaseModel):
+    """A workflow's default eval after an edit, read from the aggregate (#967)."""
+
+    workflow_id: str
+    default_eval_id: str | None
 
 
 # ---------------------------------------------------------------------------
