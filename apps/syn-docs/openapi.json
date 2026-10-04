@@ -9626,6 +9626,16 @@
                 "type": "null"
               }
             ]
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -9842,6 +9852,59 @@
           "status"
         ],
         "title": "ExecutionRunSummary"
+      },
+      "ExecutionStartQueueInfo": {
+        "properties": {
+          "path": {
+            "$ref": "#/components/schemas/StartPath"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running"
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          },
+          "position_display": {
+            "type": "string",
+            "title": "Position Display",
+            "description": "Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "position",
+          "running",
+          "waiting",
+          "limit",
+          "queued_at",
+          "position_display"
+        ],
+        "title": "ExecutionStartQueueInfo",
+        "description": "Where a start stands in the execution budget, before its execution exists (#1557).\n\nEvery start path - direct, trigger and resume - claims one of\n``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits\nhere, first come first served, and has no execution record yet; this is\nwhat it shows instead of a 404."
       },
       "ExecutionStatusCounts": {
         "properties": {
@@ -14938,6 +15001,16 @@
               }
             ],
             "title": "Dispatched At"
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -16788,6 +16861,16 @@
         "type": "object",
         "title": "SkillStorageStatsResponse",
         "description": "Size of the content-addressed skill store.\n\nSkill storage grows monotonically: registration is keyed by content hash\nand nothing removes old trees (skills-distribution spec D6, eviction is\ndeliberately not implemented). This endpoint exists so that decision stays\na measured one rather than an assumption."
+      },
+      "StartPath": {
+        "type": "string",
+        "enum": [
+          "direct",
+          "trigger",
+          "resume"
+        ],
+        "title": "StartPath",
+        "description": "Which entrance an execution start came through."
       },
       "StateResponse": {
         "properties": {

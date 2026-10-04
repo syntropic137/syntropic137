@@ -19,6 +19,7 @@ type ExecutionList = components["schemas"]["ExecutionListResponse"];
 type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
 type InventorySummary = components["schemas"]["SessionInventorySummary"];
 type ResumeStart = components["schemas"]["ResumeStartInfo"];
+type StartQueue = components["schemas"]["ExecutionStartQueueInfo"];
 type SideEffectStatus = components["schemas"]["SideEffectStatus"];
 
 const listCommand: CommandDef = {
@@ -110,6 +111,9 @@ const showCommand: CommandDef = {
     print(`${style("Execution:", BOLD)} ${ex.workflow_execution_id}`);
     print(`  Workflow:     ${ex.workflow_name}`);
     print(`  Status:       ${formatStatus(ex.status)}`);
+    // Accepted but waiting for a slot in the execution budget (#1557): there is
+    // no execution record yet, so this is the only place its wait shows.
+    if (ex.start_queue) print(`  Queue:        ${formatStartQueue(ex.start_queue)}`);
     if ((ex.tags ?? []).length > 0) print(`  Tags:         ${(ex.tags ?? []).join(", ")}`);
     print(`  Started:      ${formatTimestamp(ex.started_at)}`);
     if (ex.completed_at) print(`  Completed:    ${formatTimestamp(ex.completed_at)}`);
@@ -185,6 +189,12 @@ function printResumeStart(resume: ResumeStart): void {
   print(`${style("Resume start:", BOLD)} ${formatStatus(resume.status)}`);
   print(`  Attempts:   ${resume.attempts}/${resume.max_attempts}`);
   if (resume.status_reason) print(`  ${style("Reason:", RED)}    ${resume.status_reason}`);
+  if (resume.start_queue) print(`  Queue:      ${formatStartQueue(resume.start_queue)}`);
+}
+
+/** Where a start stands in the execution budget, e.g. "queued 2 of 3 (4/4 running) via resume". */
+function formatStartQueue(queue: StartQueue): string {
+  return `${queue.position_display} via ${queue.path}`;
 }
 
 /**

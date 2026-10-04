@@ -173,17 +173,21 @@ This second layer protects against implementation mistakes where historical even
 
 **Location:** `packages/syn-domain/.../event_pipeline/normalized_event.py` and `pipeline.py`
 
-### 8. Configurable dispatch concurrency
+### 8. One execution concurrency budget (#1557)
 
-`BackgroundWorkflowDispatcher.MAX_CONCURRENT` was hardcoded at 10. On a Docker host with limited memory (e.g., 8GB), 10 simultaneous 4GB containers cause OOM kills.
+`BackgroundWorkflowDispatcher.MAX_CONCURRENT` was hardcoded at 10. On a Docker host with limited memory (e.g., 8GB), 10 simultaneous 4GB containers cause OOM kills. It then became `SYN_POLLING_MAX_CONCURRENT_DISPATCHES`, default 1 (#865, #866).
 
-Now configurable via `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` (default 1). This is distinct from `WorkspaceSettings.max_concurrent` (workspace pool capacity) -- dispatch concurrency is a safety limit on how many workflows fire simultaneously from triggers.
+**Updated 2026-10-04 (#1557): one budget, every start path.** `SYN_EXECUTION_MAX_CONCURRENT` (`ExecutionSettings.max_concurrent`, default 4) is the one limit on how many executions an API process runs at once. `POST /workflows/{id}/execute`, trigger dispatch and resume starts all claim a slot from the same process-wide `ExecutionBudget` (`get_execution_budget()`). The old name is ignored, with a startup warning. Three defects drove the change:
 
-**The default is 1 TEMPORARILY, and for correctness rather than memory.** Concurrent executions are not isolated from each other (#865): the processor keeps per-execution state on an instance they share, so one execution can read another's inputs and finish successfully against the wrong target, and one execution's cancellation tears down the others' containers. Restore a higher default once #865 lands.
+1. **The name hid the scope.** The polling limit also serialised resume starts, and never bounded `POST /execute`. After an OOM, five resumes waited an hour each behind one running resumed child while direct runs went past unbounded.
+2. **A waiting start was invisible.** It showed only as `dispatched`, and `GET /executions/{child}` 404'd for the whole wait. Now a start without a slot reports `status: queued` with its `start_queue` position, on the execution and, for a resume, on the parent's `resume_start`.
+3. **Re-offers queued duplicates.** `ResumeStartProcessManager` re-offers `dispatched` records after `DISPATCH_GRACE`, which added a second start task behind the first. The processor now asks the starter (`ResumeStarter.holds_start`) and skips a start queued or running in this process; the dispatcher also refuses a second claim for the same execution, and `StartResumeHandler.handle` still returns early once the child stream exists, which covers a re-offer from a restarted process.
 
-**Scope is narrower than the name suggests.** It bounds the background TRIGGER dispatcher only. Manual executions started through the API build their own processor and do not pass through this semaphore, and the limit is per-process rather than per-cluster, so it is not a global cap across API replicas. Raising it above 1 logs a startup warning naming #865.
+**What is unsafe about high concurrency, and how the default answers it.** Isolation was the original hazard: concurrent executions shared per-run processor state (#865), so the default was 1. #1311 gave each execution its own `PhaseRuntime`, so isolation no longer limits concurrency. Capacity does. Each running execution holds a workspace container (`SYN_SECURITY_MAX_MEMORY`, `SYN_SECURITY_MAX_CPU`) and about 96MiB of API memory for stream parsing and artifact collection, and the API hosts every execution: in #1552, 8 concurrent runs reached ~443MB against the 512m `API_MEMORY_LIMIT` default, the kernel killed the API and all 8 runs died. The default of 4 is `(512 - 128) / 96`, sized against that default limit. Size it as `(API_MEMORY_LIMIT_MiB - 128) / 96` (20 for 2g) and check host RAM covers that many workspaces. At startup the API reads its cgroup memory limit and warns if the budget exceeds what it fits.
 
-**Location:** `packages/syn-shared/src/syn_shared/settings/polling.py`, `apps/syn-api/src/syn_api/_wiring.py`
+**Scope.** Per process, not per cluster. Not durable by design: a restart loses queued starts along with their tasks, and each path's own to-do list (resume starts, trigger dispatch records) re-offers them. The admission lease (#1387) spans the wait for a slot, so a maintenance drain waits for queued work too.
+
+**Location:** `packages/syn-shared/src/syn_shared/settings/execution.py`, `apps/syn-api/src/syn_api/execution_budget.py`, `apps/syn-api/src/syn_api/_wiring_admission.py`
 
 ## Consequences
 

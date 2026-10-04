@@ -3340,6 +3340,7 @@ export interface components {
                 [key: string]: string;
             };
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -3433,6 +3434,36 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+        };
+        /**
+         * ExecutionStartQueueInfo
+         * @description Where a start stands in the execution budget, before its execution exists (#1557).
+         *
+         *     Every start path - direct, trigger and resume - claims one of
+         *     ``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits
+         *     here, first come first served, and has no execution record yet; this is
+         *     what it shows instead of a 404.
+         */
+        ExecutionStartQueueInfo: {
+            path: components["schemas"]["StartPath"];
+            /** Position */
+            position: number | null;
+            /** Running */
+            running: number;
+            /** Waiting */
+            waiting: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
+            /**
+             * Position Display
+             * @description Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.
+             */
+            readonly position_display: string;
         };
         /**
          * ExecutionStatusCounts
@@ -5922,6 +5953,7 @@ export interface components {
             recorded_at: string;
             /** Dispatched At */
             dispatched_at?: string | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /**
          * RootResponse
@@ -6813,6 +6845,12 @@ export interface components {
              */
             truncated: boolean;
         };
+        /**
+         * StartPath
+         * @description Which entrance an execution start came through.
+         * @enum {string}
+         */
+        StartPath: "direct" | "trigger" | "resume";
         /**
          * StateResponse
          * @description Response with execution state.

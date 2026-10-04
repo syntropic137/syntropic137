@@ -216,6 +216,45 @@ describe("execution commands", () => {
       expect(out).toContain("artifact art-1 not found");
     });
 
+    it("prints a queued execution with its place in the budget (#1557)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        status: "queued",
+        start_queue: {
+          path: "direct", position: 2, running: 4, waiting: 3, limit: 4,
+          queued_at: "2026-01-01T00:00:00Z", position_display: "queued 2 of 3 (4/4 running)",
+        },
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      const out = stdout();
+      expect(out).toContain("queued");
+      expect(out).toContain("Queue:");
+      expect(out).toContain("queued 2 of 3 (4/4 running) via direct");
+    });
+
+    it("prints a resume start waiting for a slot, not just dispatched (#1557)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        resume_start: {
+          status: "dispatched", status_reason: null, attempts: 0, max_attempts: 3,
+          recorded_at: "2026-01-01T00:00:00Z", dispatched_at: "2026-01-01T00:00:01Z",
+          start_queue: {
+            path: "resume", position: 1, running: 1, waiting: 5, limit: 1,
+            queued_at: "2026-01-01T00:00:01Z", position_display: "queued 1 of 5 (1/1 running)",
+          },
+        },
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      expect(stdout()).toContain("queued 1 of 5 (1/1 running) via resume");
+    });
+
+    it("prints no queue line for an execution that exists", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ...detail, start_queue: null }))
+        .mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      expect(stdout()).not.toContain("Queue:");
+    });
+
     it("prints no resume start for an execution that was never resumed", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ ...detail, resume_start: null }))
         .mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
