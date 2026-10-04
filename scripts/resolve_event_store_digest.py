@@ -76,10 +76,10 @@ class LookupResult:
     error: str | None = None
 
 
-def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+def _run(cmd: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=_TIMEOUT_SECONDS
+            cmd, capture_output=True, text=True, check=False, timeout=_TIMEOUT_SECONDS, env=env
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         # A missing binary or a hung registry is a failed lookup, never "absent".
@@ -115,9 +115,23 @@ def parse_esp_version(package_json: str) -> str:
     return version
 
 
+def submodule_git_env() -> dict[str, str]:
+    """The environment with git's repository-local variables removed.
+
+    Git hooks export GIT_DIR (and friends) for the SUPERPROJECT. Inherited by
+    `git -C <submodule>`, they override `-C`, so the pre-push hook read
+    `package.json` from the superproject's object store and failed with "exists
+    on disk, but not in <gitlink>". Found by the hook itself on first push.
+    """
+    local = _run(["git", "rev-parse", "--local-env-vars"])
+    names = set(local.stdout.split()) if local.returncode == 0 else set()
+    names |= {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX"}
+    return {k: v for k, v in os.environ.items() if k not in names}
+
+
 def esp_version_at(gitlink: str, path: str = SUBMODULE_PATH) -> str:
     """ESP's version at exactly `gitlink`, read from the submodule's objects."""
-    result = _run(["git", "-C", path, "show", f"{gitlink}:{VERSION_FILE}"])
+    result = _run(["git", "-C", path, "show", f"{gitlink}:{VERSION_FILE}"], env=submodule_git_env())
     if result.returncode != 0:
         msg = (
             f"could not read {VERSION_FILE} at {gitlink} in {path}. "

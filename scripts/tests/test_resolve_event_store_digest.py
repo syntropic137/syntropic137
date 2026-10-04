@@ -20,6 +20,7 @@ from scripts.resolve_event_store_digest import (
     image_tag,
     parse_esp_version,
     resolve,
+    submodule_git_env,
     verify_index,
 )
 
@@ -64,6 +65,21 @@ class TestVersionAtTheGitlink:
     def test_tag_is_the_v_prefixed_release_tag(self) -> None:
         """ESP's release-container.yml tags with the GitHub release tag name."""
         assert image_tag("0.15.1") == "v0.15.1"
+
+
+class TestSubmoduleGitEnv:
+    def test_hook_exported_repository_vars_are_stripped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pre-push hook exports GIT_DIR for the superproject; inherited, it
+        overrides `git -C <submodule>` and reads the wrong object store."""
+        monkeypatch.setenv("GIT_DIR", "/superproject/.git")
+        monkeypatch.setenv("GIT_INDEX_FILE", "/superproject/.git/index")
+        monkeypatch.setenv("KEEP_ME_1515", "yes")
+        env = submodule_git_env()
+        assert "GIT_DIR" not in env
+        assert "GIT_INDEX_FILE" not in env
+        assert env["KEEP_ME_1515"] == "yes"
 
 
 class TestLookupClassification:
