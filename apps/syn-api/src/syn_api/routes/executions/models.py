@@ -22,8 +22,8 @@ from syn_domain.contexts.orchestration import (
     ReportedFailureReason,
     ResumeStartStatus,  # Pydantic resolves it at runtime
     SideEffectStatus,
+    StartStatus,
 )
-from syn_domain.contexts.orchestration._shared.start_record import StartStatus  # noqa: TC001
 from syn_shared.display import EM_DASH
 from syn_shared.observed_model import format_observed_model
 

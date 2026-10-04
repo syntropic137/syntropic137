@@ -205,6 +205,13 @@ class ResumeStartProcessManager(StartToDoProcessManager[ResumeStartRecord]):
         )
         await self._store.save_if(self.PROJECTION_NAME, parent_execution_id, record, expected=None)
 
+    async def process_pending(self) -> int:
+        """PROCESSOR SIDE: offer each owed start. Live-only, idempotent.
+
+        The rules are the shared start to-do list's (`_shared/start_todo.py`).
+        """
+        return await super().process_pending()
+
     # -- the start to-do list's hooks -------------------------------------------
 
     def _record_type(self) -> type[ResumeStartRecord]:
