@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.agent_sessions import AgentSessionAggregate
+from syn_shared.in_memory import assert_test_only
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
@@ -26,6 +27,7 @@ class FakeSessionRepository:
     """In-memory ``Repository[AgentSessionAggregate]`` - one stream per session."""
 
     def __init__(self) -> None:
+        assert_test_only()
         self.streams: dict[str, list[EventEnvelope[DomainEvent]]] = {}
 
     async def get_by_id(self, aggregate_id: str) -> AgentSessionAggregate | None:
