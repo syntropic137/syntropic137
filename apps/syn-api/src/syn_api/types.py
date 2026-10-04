@@ -1054,6 +1054,45 @@ class ToolOperation(BaseModel):
     git_repo: str | None = None
 
 
+class PinnedSkillInfo(BaseModel):
+    """One skill a phase was given at start, at the version it was resolved to (#1454)."""
+
+    name: str
+    version: str
+    """The version as declared - a tag, branch or sha."""
+    resolved_sha: str
+    """Content hash of the skill tree the workspace was actually given."""
+    source_url: str
+
+
+StartPinsStatus = Literal["recorded", "not_recorded", "unavailable"]
+"""Whether a phase's `pinned_at_start` could be answered (#1454).
+
+``recorded``: the start event carried this phase's pins. ``not_recorded``: the
+start event was read and carries none - an execution from before #1454.
+``unavailable``: the start event could not be read on this request, so nothing
+is known either way. Only ``not_recorded`` may be shown as "not recorded"."""
+
+
+class PhaseStartConfig(BaseModel):
+    """What a phase was configured with when its execution STARTED.
+
+    Read from the execution's own start event (`StartPins`, #1454), never from
+    the workflow template, which may have been edited since. That is the whole
+    point: this answers "what did the agent have", not "what would it get now".
+    """
+
+    provider: str
+    requested_model: str | None = None
+    """The model the phase ASKED for at start, possibly an alias such as
+    ``opus`` (ADR-067 D9: a request, not the harness-reported id). None when
+    the phase named none."""
+    allowed_tools: list[str] = Field(default_factory=list)
+    """Empty means the phase declared no restriction, so the harness ran with
+    its own default tool set - not that the agent had no tools."""
+    skills: list[PinnedSkillInfo] = Field(default_factory=list)
+
+
 class BranchObservationInfo(BaseModel):
     """One branch of a failed phase's workspace, as git had it (#1200).
 
@@ -1322,6 +1361,15 @@ class PhaseExecution(BaseModel):
     `[]` here, or anywhere below, would tell an API client that a workspace was
     verifiably unchanged when in truth nothing looked.
     """
+    pinned_at_start: PhaseStartConfig | None = None
+    """What this phase had at start: tools, skills and model (#1454).
+
+    Null is never filled in from the current template; `start_pins_status`
+    says why it is null.
+    """
+    start_pins_status: StartPinsStatus = "unavailable"
+    """Why `pinned_at_start` is or is not set. Defaults to ``unavailable``: a
+    constructor that never read the start event must not claim it was empty."""
     operations: list[ToolOperation] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, summarised from `operations`

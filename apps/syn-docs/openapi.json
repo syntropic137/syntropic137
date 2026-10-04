@@ -13578,6 +13578,26 @@
             ],
             "title": "Observed Branches"
           },
+          "pinned_at_start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhaseStartConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_pins_status": {
+            "type": "string",
+            "enum": [
+              "recorded",
+              "not_recorded",
+              "unavailable"
+            ],
+            "title": "Start Pins Status",
+            "default": "unavailable"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/PhaseOperationInfo"
@@ -13803,6 +13823,74 @@
         "type": "object",
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
+      },
+      "PhaseStartConfig": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Tools"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/PinnedSkillInfo"
+            },
+            "type": "array",
+            "title": "Skills"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "title": "PhaseStartConfig",
+        "description": "What a phase was configured with when its execution STARTED.\n\nRead from the execution's own start event (`StartPins`, #1454), never from\nthe workflow template, which may have been edited since. That is the whole\npoint: this answers \"what did the agent have\", not \"what would it get now\"."
+      },
+      "PinnedSkillInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "resolved_sha": {
+            "type": "string",
+            "title": "Resolved Sha"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "resolved_sha",
+          "source_url"
+        ],
+        "title": "PinnedSkillInfo",
+        "description": "One skill a phase was given at start, at the version it was resolved to (#1454)."
       },
       "Priority": {
         "type": "string",
