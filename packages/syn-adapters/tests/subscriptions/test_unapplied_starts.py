@@ -523,7 +523,7 @@ class _KeyedStoreSpy(InMemoryProjectionStore):
                 found[key] = document
         return found
 
-    async def query(self, *args: object, **kwargs: object) -> list[dict[str, object]]:  # type: ignore[override]  # spy
+    async def query(self, *args: object, **kwargs: object) -> list[ProjectionRecord]:  # type: ignore[override]  # spy
         self.query_calls += 1
         return await super().query(*args, **kwargs)  # type: ignore[arg-type]  # spy pass-through
 
