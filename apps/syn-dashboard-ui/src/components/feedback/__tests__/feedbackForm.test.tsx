@@ -42,6 +42,7 @@ function stubApi(): Posted[] {
       let body: unknown = { items: [], total: 0 }
       if (url.includes('/feedback/stats')) body = STATS
       if (init?.method === 'POST' && url.endsWith('/feedback')) {
+        // The widget serialises this body itself; only the fields asserted below are read.
         posted.push(JSON.parse(String(init.body)) as Posted)
         body = { id: 'fb-1' }
       }
@@ -235,9 +236,9 @@ describe('ticket list filter bar', () => {
     const user = userEvent.setup()
     await user.keyboard('{Control>}{Shift>}t{/Shift}{/Control}')
     const all = await screen.findByRole('button', { name: 'All (7)' })
-    const bar = all.parentElement as HTMLElement
+    const bar = all.closest('.ui-feedback-stats-bar')
+    if (!bar) throw new Error('filter button is not inside .ui-feedback-stats-bar')
 
-    expect(bar).toHaveClass('ui-feedback-stats-bar')
     expect(declared(bar, 'flex-wrap')).toEqual(['wrap'])
     expect(declared(bar, 'flex-shrink')).toEqual(['0'])
     expect(declared(bar, 'overflow-x')).toEqual([])

@@ -31,7 +31,7 @@ const STEP: Partial<Record<string, number>> = { ArrowDown: 1, ArrowUp: -1 };
 
 function moveFocus(list: HTMLElement, step: number): void {
   const items = Array.from(list.querySelectorAll<HTMLButtonElement>('[role="option"]'));
-  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+  const current = items.findIndex((item) => item === document.activeElement);
   items[(current + step + items.length) % items.length]?.focus();
 }
 
