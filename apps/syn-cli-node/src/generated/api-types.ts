@@ -2235,6 +2235,10 @@ export interface paths {
         /**
          * Health
          * @description Health check endpoint with detailed subscription status.
+         *
+         *     This is the container's LIVENESS check (#1575): while startup is still
+         *     running it answers 200 "starting" without probing anything startup has
+         *     not built yet. "healthy" is what readiness waits for.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -4402,7 +4406,7 @@ export interface components {
         HealthResponse: {
             /**
              * Status
-             * @description 'healthy' while the process is alive and accepting writes.
+             * @description 'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'unhealthy' when the probe failed.
              */
             status: string;
             /**

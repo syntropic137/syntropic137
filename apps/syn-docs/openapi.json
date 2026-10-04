@@ -7295,7 +7295,7 @@
     "/health": {
       "get": {
         "summary": "Health",
-        "description": "Health check endpoint with detailed subscription status.",
+        "description": "Health check endpoint with detailed subscription status.\n\nThis is the container's LIVENESS check (#1575): while startup is still\nrunning it answers 200 \"starting\" without probing anything startup has\nnot built yet. \"healthy\" is what readiness waits for.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -12007,7 +12007,7 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "'healthy' while the process is alive and accepting writes."
+            "description": "'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'unhealthy' when the probe failed."
           },
           "mode": {
             "type": "string",
