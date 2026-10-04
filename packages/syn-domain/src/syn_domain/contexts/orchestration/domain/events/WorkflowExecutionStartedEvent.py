@@ -119,8 +119,7 @@ class WorkflowExecutionStartedEvent(DomainEvent):
         payload = {
             k: v
             for k, v in handler(self).items()
-            if not (k in _WRITTEN_ONLY_WHEN_SET and v is None)
-            and not (k == "tags" and not v)
+            if not (k in _WRITTEN_ONLY_WHEN_SET and v is None) and not (k == "tags" and not v)
         }
         origin = self.resumed_from
         owners = (
