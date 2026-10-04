@@ -85,6 +85,7 @@ from syn_domain.contexts.orchestration import (
     FailureClassification,
     ReportedFailureReason,
     SideEffectStatus,
+    TagSet,
 )
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
@@ -792,6 +793,42 @@ class ArtifactSummary(BaseModel):
     #: configured".
     agent_provider: str | None = None
     agent_model: ObservedModelId | None = None
+
+
+# ---------------------------------------------------------------------------
+# Tag edit models (#967)
+# ---------------------------------------------------------------------------
+
+
+class AddTagsRequest(BaseModel):
+    """Tags to add to an execution or a workflow. Adds only: never replaces the set."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tags: TagSet = Field(
+        description=(
+            "Tags to add. Normalised (trimmed, lowercased, deduped); an invalid tag is "
+            "rejected with 422 and nothing is written. Tags already present are a no-op."
+        ),
+    )
+
+
+class ExecutionTagsResponse(BaseModel):
+    """An execution's tags after an edit, read from the aggregate, not a projection."""
+
+    execution_id: str
+    tags: list[str]
+    """The execution's current tags, normalised and sorted. What `?tag=` filters on."""
+    inherited_tags: list[str]
+    """The tags it launched with. A record of the launch: no edit ever changes it."""
+
+
+class WorkflowTagsResponse(BaseModel):
+    """A workflow's tags after an edit, read from the aggregate, not a projection."""
+
+    workflow_id: str
+    tags: list[str]
+    """The workflow's tags, normalised and sorted. Future runs inherit them."""
 
 
 # ---------------------------------------------------------------------------
