@@ -42,7 +42,7 @@ _ORIGIN = "origin"
 
 async def with_open_pull_requests(
     observed: ObservedBranches | None,
-    forge: RemoteBranchPort | None,
+    forge: RemoteBranchPort,
     repositories: Sequence[str],
 ) -> ObservedBranches | None:
     """``observed`` with the PR the forge has open from each origin branch in it.
@@ -50,8 +50,8 @@ async def with_open_pull_requests(
     ``repositories`` are the run's `owner/name` slugs; an observation's
     directory name that two of them share maps to neither and is left as is.
     """
-    if observed is None or forge is None:
-        return observed
+    if observed is None:
+        return None
     slugs = repository_slugs_by_name(repositories)
     branches = [await _with_pull_request(b, forge, slugs) for b in observed.branches]
     return ObservedBranches(branches=tuple(branches), unreadable=observed.unreadable)

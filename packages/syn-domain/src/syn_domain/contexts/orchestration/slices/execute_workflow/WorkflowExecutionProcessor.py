@@ -110,6 +110,7 @@ if TYPE_CHECKING:
         SourceCommit,
     )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -588,6 +589,15 @@ class WorkflowExecutionProcessor:
         await self._journal.append(aggregate)
         return completion.execution_result(workflow_id, execution_id, started_at=started_at)
 
+    async def _observe_branches(
+        self, observed: ObservedBranches | None, aggregate: WorkflowExecutionAggregate
+    ) -> ObservedBranches | None:
+        """The failing phase's branches, with the PR open from each when a forge is wired (#1513)."""
+        if self._remote_branches is None:
+            return observed
+        repositories = [c.repository for c in aggregate.start_pins.source_commits]
+        return await with_open_pull_requests(observed, self._remote_branches, repositories)
+
     async def _fail_execution(
         self,
         error: Exception,
@@ -668,11 +678,7 @@ class WorkflowExecutionProcessor:
             kept.append(artifact_id)
             if artifact_id not in all_artifact_ids:
                 all_artifact_ids.append(artifact_id)
-        observed = await with_open_pull_requests(
-            await runtime.observe(failed_phase_id),
-            self._remote_branches,
-            [c.repository for c in aggregate.start_pins.source_commits],
-        )
+        observed = await self._observe_branches(await runtime.observe(failed_phase_id), aggregate)
         failure = failed_phase_outcome(
             error,
             failed_phase_id,
