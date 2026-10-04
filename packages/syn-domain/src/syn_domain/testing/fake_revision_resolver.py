@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from syn_shared.in_memory import assert_test_only
+
 from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
     ResolvedRevision,
     RevisionResolution,
@@ -30,6 +32,9 @@ class FakeRevisionResolver:
     unavailable: set[str] = field(default_factory=set)
     #: Every ``(slug, ref)`` asked for, in order.
     asked: list[tuple[str, str]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        assert_test_only()
 
     async def resolve(self, repository: RepositoryRef, requested_ref: str, /) -> RevisionResolution:
         self.asked.append((repository.slug, requested_ref))

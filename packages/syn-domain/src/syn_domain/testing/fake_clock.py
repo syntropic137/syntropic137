@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from syn_shared.in_memory import assert_test_only
+
 from syn_domain.contexts.orchestration import AttemptClock
 
 
@@ -50,6 +52,9 @@ class FakeClock:
     #: path read the clock, and which reading does the handler get" an
     #: assertable property rather than a code-reading exercise.
     drifts_per_reading: float = 0.0
+
+    def __post_init__(self) -> None:
+        assert_test_only()
 
     def monotonic(self) -> float:
         reading = self.now
