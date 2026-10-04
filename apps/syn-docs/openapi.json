@@ -7295,7 +7295,7 @@
     "/health": {
       "get": {
         "summary": "Health",
-        "description": "Health check endpoint with detailed subscription status.\n\nThis is the container's LIVENESS check (#1575): while startup is still\nrunning it answers 200 \"starting\" without probing anything startup has\nnot built yet. \"healthy\" is what readiness waits for.",
+        "description": "Health check endpoint with detailed subscription status.\n\nThis is the container's LIVENESS check (#1575): while the gate withholds\nthe API it answers 200 with the gate's phase - \"starting\", or \"failed\"\nin the moment between a late startup failure and the process exiting -\nwithout probing anything startup has not built. \"healthy\" is what\nreadiness waits for, so it is only ever said once the gate is ready.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -12007,7 +12007,7 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'unhealthy' when the probe failed."
+            "description": "'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed."
           },
           "mode": {
             "type": "string",

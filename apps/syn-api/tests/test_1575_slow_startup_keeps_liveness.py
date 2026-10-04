@@ -216,3 +216,33 @@ async def test_before_any_lifespan_the_gate_is_not_in_the_way() -> None:
     gate = StartupGate()
     assert gate.phase == "not_started"
     assert not gate.refuses("/workflows")
+
+
+async def test_after_a_late_failure_health_says_failed_never_healthy(
+    slow: _SlowBackfill, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Between a late failure and the SIGTERM landing, /health is still served.
+    It must not answer "healthy" - the readiness word the pit stop waits on -
+    for a process whose every other route is refused."""
+
+    async def startup_that_fails_late(skip_validation: bool = False) -> Err[LifecycleError]:
+        await slow.startup(skip_validation)
+        return Err(LifecycleError.CONNECTION_FAILED, message="backfill failed")
+
+    monkeypatch.setattr(lifecycle, "startup", startup_that_fails_late)
+    app = create_app()
+    async for client in _serving(app):
+        assert (await client.get("/health")).json()["status"] == "starting"
+        slow.release.set()
+        for _ in range(100):
+            if slow.terminated:
+                break
+            await asyncio.sleep(0.01)
+        assert slow.terminated, "a late failure must terminate the process"
+        assert app.state.startup_gate.phase == "failed"
+        # The SIGTERM was recorded, not delivered, so the process is still
+        # answering: exactly the window a readiness poll can land in.
+        health = await client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["status"] == "failed"
+        assert (await client.get("/workflows")).status_code == 503

@@ -80,9 +80,16 @@ class StartupGate:
     def phase(self) -> StartupPhase:
         return self._phase
 
+    @property
+    def holding(self) -> bool:
+        """Whether the API is withheld: startup is running, or it failed and
+        the process is on its way out. ``/health`` must not call such a
+        process healthy - that is the word readiness waits on."""
+        return self._phase in ("starting", "failed")
+
     def refuses(self, path: str) -> bool:
         """Whether a request for ``path`` must be turned away right now."""
-        return self._phase in ("starting", "failed") and path not in ALWAYS_SERVED
+        return self.holding and path not in ALWAYS_SERVED
 
     async def open(self, start: Callable[[], Awaitable[None]]) -> None:
         """Run ``start``, which raises on failure.

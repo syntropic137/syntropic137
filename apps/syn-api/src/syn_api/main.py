@@ -243,14 +243,16 @@ def create_app() -> FastAPI:
     async def health() -> HealthResponse:
         """Health check endpoint with detailed subscription status.
 
-        This is the container's LIVENESS check (#1575): while startup is still
-        running it answers 200 "starting" without probing anything startup has
-        not built yet. "healthy" is what readiness waits for.
+        This is the container's LIVENESS check (#1575): while the gate withholds
+        the API it answers 200 with the gate's phase - "starting", or "failed"
+        in the moment between a late startup failure and the process exiting -
+        without probing anything startup has not built. "healthy" is what
+        readiness waits for, so it is only ever said once the gate is ready.
         """
         import syn_api.services.lifecycle as lifecycle
 
-        if gate.phase == "starting":
-            return HealthResponse(status="starting", mode="degraded", build=get_build_info())
+        if gate.holding:
+            return HealthResponse(status=gate.phase, mode="degraded", build=get_build_info())
 
         result = await lifecycle.health_check()
         if isinstance(result, Ok):
