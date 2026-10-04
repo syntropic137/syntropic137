@@ -623,13 +623,18 @@ async def _describe_subscription_health() -> SubscriptionHealthResult:
     try:
         sub_status = _state.subscription_service.get_status()
         lag = await _state.subscription_service.describe_read_model_lag()
-        verdict = _judge_read_path(running=sub_status.running, lag=lag)
+        drops = await _state.subscription_service.describe_unapplied_starts()
+        unapplied = list(drops.unapplied) if drops is not None else None
+        verdict = _judge_read_path(
+            running=sub_status.running, lag=lag, dropped_events=bool(unapplied)
+        )
 
         health = SubscriptionHealth(
             status=verdict.status,
             running=sub_status.running,
             projection_count=sub_status.projection_count,
             realtime_enabled=sub_status.realtime_enabled,
+            unapplied_starts=unapplied,
             **(lag.model_dump() if lag is not None else {}),
         )
         return health, verdict.degraded_reasons

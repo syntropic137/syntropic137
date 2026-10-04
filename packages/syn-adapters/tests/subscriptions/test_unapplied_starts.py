@@ -149,8 +149,10 @@ async def test_a_start_skipped_below_the_checkpoint_is_reported_for_both_read_mo
     report = await detector.check()
 
     assert report.unapplied == (
-        UnappliedStart("workflow_execution_details", DROPPED, 39_502),
-        UnappliedStart("workflow_executions", DROPPED, 39_502),
+        UnappliedStart(
+            projection="workflow_execution_details", execution_id=DROPPED, global_nonce=39_502
+        ),
+        UnappliedStart(projection="workflow_executions", execution_id=DROPPED, global_nonce=39_502),
     )
     assert report.scanned_through == 41_000
 

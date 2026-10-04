@@ -35,6 +35,11 @@ from syn_adapters.subscriptions.read_model_lag import (
 from syn_adapters.subscriptions.realtime_adapter import (
     RealTimeProjectionAdapter as RealTimeProjectionAdapter,
 )
+from syn_adapters.subscriptions.unapplied_starts import (
+    AppliesExecutionStarts,
+    UnappliedStartDetector,
+    UnappliedStartsReport,
+)
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
@@ -186,6 +191,7 @@ class CoordinatorSubscriptionService:
         self._db_pool: asyncpg.Pool | None = None
         self._checkpoint_store: ProjectionCheckpointStore | None = None
         self._coordinator: SubscriptionCoordinator | None = None
+        self._unapplied_starts: UnappliedStartDetector | None = None
         self._coordinator_started_at: datetime | None = None
         self._subscription_task: asyncio.Task[None] | None = None
         self._running = False
@@ -269,6 +275,17 @@ class CoordinatorSubscriptionService:
             now=datetime.now(UTC),
         )
 
+    async def describe_unapplied_starts(self) -> UnappliedStartsReport | None:
+        """Executions whose start a read model's checkpoint passed without applying (#1545).
+
+        ``None`` before ``start()``, for the same reason as
+        ``describe_read_model_lag``. Each call scans a bounded slice of new
+        events; see ``unapplied_starts`` for what counts and what it costs.
+        """
+        if self._unapplied_starts is None:
+            return None
+        return await self._unapplied_starts.check()
+
     async def start(self) -> None:
         """Start the coordinator subscription service."""
         if self._running:
@@ -321,6 +338,11 @@ class CoordinatorSubscriptionService:
             event_store=_SignalsWhenSubscribed(self._event_store, self._subscribed),
             checkpoint_store=self._checkpoint_store,
             projections=all_projections,
+        )
+        self._unapplied_starts = UnappliedStartDetector(
+            self._event_store,
+            self._checkpoint_store,
+            [p for p in self._projections if isinstance(p, AppliesExecutionStarts)],
         )
 
         # Start coordinator in background task

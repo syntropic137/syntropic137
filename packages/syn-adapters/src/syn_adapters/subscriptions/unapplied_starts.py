@@ -28,9 +28,12 @@ the projections, so a restart costs a re-scan, never a wrong answer.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
@@ -48,6 +51,7 @@ _DEFAULT_MAX_EVENTS_PER_CHECK = 5_000
 _PAGE_SIZE = 500
 
 
+@runtime_checkable
 class AppliesExecutionStarts(Protocol):
     """A read model that must hold every started execution."""
 
@@ -56,13 +60,14 @@ class AppliesExecutionStarts(Protocol):
     async def has_applied_start(self, execution_id: str) -> bool: ...
 
 
-@dataclass(frozen=True, slots=True)
-class UnappliedStart:
-    """One execution whose start a projection skipped past."""
+class UnappliedStart(BaseModel):
+    """One execution whose start a projection skipped past. Published on /health as is."""
 
-    projection: str
-    execution_id: str
-    global_nonce: int
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    projection: str = Field(description="Read model that skipped the start.")
+    execution_id: str = Field(description="Execution whose WorkflowExecutionStarted it skipped.")
+    global_nonce: int = Field(description="Store position of that start event.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,13 +98,16 @@ class UnappliedStartDetector:
         #: Per projection: execution_id -> nonce of a start not yet confirmed applied.
         self._unconfirmed: dict[str, dict[str, int]] = {p.get_name(): {} for p in self._projections}
         self._reported: set[tuple[str, str]] = set()
+        #: Concurrent /health probes share one cursor; one check at a time.
+        self._lock = asyncio.Lock()
 
     async def check(self) -> UnappliedStartsReport:
         """Scan forward, then ask each projection about the starts its checkpoint covers."""
-        await self._scan()
-        unapplied: list[UnappliedStart] = []
-        for projection in self._projections:
-            unapplied.extend(await self._unapplied_in(projection))
+        async with self._lock:
+            await self._scan()
+            unapplied: list[UnappliedStart] = []
+            for projection in self._projections:
+                unapplied.extend(await self._unapplied_in(projection))
         return UnappliedStartsReport(
             unapplied=tuple(sorted(unapplied, key=lambda u: (u.global_nonce, u.projection))),
             scanned_through=self._scanned_through,
@@ -140,7 +148,9 @@ class UnappliedStartDetector:
                 del pending[execution_id]
                 self._reported.discard((name, execution_id))
                 continue
-            found.append(UnappliedStart(name, execution_id, nonce))
+            found.append(
+                UnappliedStart(projection=name, execution_id=execution_id, global_nonce=nonce)
+            )
             if (name, execution_id) not in self._reported:
                 self._reported.add((name, execution_id))
                 logger.error(
