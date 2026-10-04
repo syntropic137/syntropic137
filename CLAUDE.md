@@ -588,14 +588,11 @@ just preflight       # The static half only (~1m). Faster inner loop; what the
 
 just preflight-agent # The subset of preflight that runs INSIDE an agent
                      # workspace container. Use this one only there: the image
-                     # ships just, uv, node and rustup and nothing else, so
-                     # vsa, pnpm, docker and registry credentials are absent
-                     # and seven gates cannot run at all (#1109). It DOES run
-                     # fitness (#1498): it installs stable Rust if needed and
-                     # builds aps once per workspace (~6m cold), or prints
-                     # `FITNESS NOT RUN: <reason>` and fails unless
-                     # SYN_ALLOW_FITNESS_NOT_RUN=1. On a dev machine run the
-                     # full `just preflight` instead.
+                     # ships just, uv and node and nothing else, so vsa,
+                     # cargo, pnpm, docker and registry credentials are all
+                     # absent and seven gates cannot run at all (#1109).
+                     # Fitness DOES run: see scripts/agent-fitness.sh (#1498).
+                     # On a dev machine run the full `just preflight` instead.
 ```
 
 `scripts/check_ci_parity.py` (inside `preflight`) discovers every workflow that
