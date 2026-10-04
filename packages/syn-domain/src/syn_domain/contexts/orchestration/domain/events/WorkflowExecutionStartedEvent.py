@@ -31,7 +31,9 @@ TASK_INPUT_KEY = "task"
 
 
 #: Fields a release before #1513 does not know: omitted when None.
-_WRITTEN_ONLY_WHEN_SET = frozenset({"continued_branches", "abandoned_branches"})
+_WRITTEN_ONLY_WHEN_SET = frozenset(
+    {"continued_branches", "abandoned_branches", "eval_id", "eval_selection"}
+)
 
 
 @event("WorkflowExecutionStarted", "v1")
@@ -78,6 +80,18 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: events written before the field existed (ADR-007, no upcaster), and
     #: not written at all when empty -- see the serializer below.
     tags: list[str] = Field(default_factory=list)
+
+    #: The eval this run was launched into (evals plan, #967), decided at
+    #: dispatch: ``association_kind=launched``. A launch record, never
+    #: rewritten - a later detach is its own event. None for a run launched
+    #: into no eval, and on events written before the field existed.
+    eval_id: str | None = None
+
+    #: How the launch chose: ``explicit``, ``workflow_default`` or
+    #: ``ordinary`` (the default was suppressed). None when there was no
+    #: choice to make. Both fields are written only when set, like the
+    #: #1513 fields below, so an ordinary start reads as it always did.
+    eval_selection: str | None = None
 
     #: Set only on a resume: the parent, what it inherited and where it resumes
     #: (ADR-014 s7). The child's own record of "what was this a resume of".

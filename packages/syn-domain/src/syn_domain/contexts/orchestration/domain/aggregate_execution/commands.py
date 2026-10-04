@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts.orchestration._shared.eval_admission import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 
 # Runtime import: FailExecutionCommand defaults an absent usage to zeros rather
@@ -49,6 +50,7 @@ class StartExecutionCommand:
         pinned_phases: list[ExecutablePhase] | None = None,
         source_commits: list[SourceCommit] | None = None,
         tags: TagSet | None = None,
+        launch_eval: LaunchEval | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -61,6 +63,8 @@ class StartExecutionCommand:
         self.source_commits = source_commits
         # The launch snapshot (#967): workflow tags united with request tags.
         self.tags = tags or TagSet()
+        # The eval this launch joins, resolved at dispatch (#967).
+        self.launch_eval = launch_eval or LaunchEval(None, EvalSelection.NONE)
 
 
 class StartResumeCommand:

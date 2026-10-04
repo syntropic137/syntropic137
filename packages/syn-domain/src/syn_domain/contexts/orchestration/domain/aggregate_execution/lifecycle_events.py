@@ -11,6 +11,8 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration._shared.eval_admission import EvalSelection
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         CompleteExecutionCommand,
@@ -48,6 +50,12 @@ def started_event(command: StartExecutionCommand) -> WorkflowExecutionStartedEve
         pinned_phases=command.pinned_phases,
         source_commits=command.source_commits,
         tags=list(command.tags),
+        eval_id=command.launch_eval.eval_id,
+        eval_selection=(
+            None
+            if command.launch_eval.selection is EvalSelection.NONE
+            else command.launch_eval.selection.value
+        ),
     )
 
 

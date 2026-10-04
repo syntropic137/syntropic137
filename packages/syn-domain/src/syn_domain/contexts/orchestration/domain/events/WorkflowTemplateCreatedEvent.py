@@ -75,6 +75,9 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
     # so events written before tags existed rehydrate cleanly (ADR-007).
     tags: list[str] = Field(default_factory=list)
 
+    # The workflow's default eval (#967); absent on older events (ADR-007).
+    default_eval_id: str | None = None
+
     # Provenance (issue #822). Optional so events written before this field
     # existed rehydrate cleanly.
     version: str | None = None

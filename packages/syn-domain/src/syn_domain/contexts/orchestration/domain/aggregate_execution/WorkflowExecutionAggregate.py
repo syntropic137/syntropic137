@@ -35,6 +35,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartPhaseCommand,
     StartResumeCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
+    EvalMembership,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
     ExecutionTags,
 )
@@ -86,6 +89,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
         AddExecutionTagsCommand,
     )
+    from syn_domain.contexts.orchestration.domain.commands.AttachExecutionToEvalCommand import (
+        AttachExecutionToEvalCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.DetachExecutionFromEvalCommand import (
+        DetachExecutionFromEvalCommand,
+    )
     from syn_domain.contexts.orchestration.domain.commands.RemoveExecutionTagsCommand import (
         RemoveExecutionTagsCommand,
     )
@@ -94,6 +103,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
         ArtifactsCollectedForPhaseEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
+        ExecutionAttachedToEvalEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
@@ -249,6 +261,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._left_branches = LeftBranches()
         #: The tags it launched with and the tags it carries now (#967).
         self._tags = ExecutionTags()
+        self._eval = EvalMembership()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -387,6 +400,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def tags(self) -> ExecutionTags:
         """The launch snapshot and the current tags (#967)."""
         return self._tags
+
+    @property
+    def eval_membership(self) -> EvalMembership:
+        """The eval this run belongs to, how it joined, and what it launched into."""
+        return self._eval
 
     @property
     def start_pins(self) -> StartPins:
@@ -712,6 +730,34 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if event is not None:
             self._apply(event)
 
+    @command_handler("AttachExecutionToEvalCommand")
+    def attach_to_eval(self, command: AttachExecutionToEvalCommand) -> None:
+        """Join an eval, in any status. Already a member, no event."""
+        event = self._eval.attach(
+            str(command.eval_id),
+            execution_id=self._started_id(),
+            workflow_id=self._workflow_id or "",
+        )
+        if event is not None:
+            self._apply(event)
+
+    @command_handler("DetachExecutionFromEvalCommand")
+    def detach_from_eval(self, command: DetachExecutionFromEvalCommand) -> None:
+        """Leave the eval. In none, no event; the launch record is kept."""
+        event = self._eval.detach(
+            str(command.eval_id),
+            execution_id=self._started_id(),
+            workflow_id=self._workflow_id or "",
+        )
+        if event is not None:
+            self._apply(event)
+
+    def _started_id(self) -> str:
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        return str(self.id)
+
     @command_handler("InterruptExecutionCommand")
     def interrupt_execution(self, command: InterruptExecutionCommand) -> None:
         """Handle InterruptExecutionCommand."""
@@ -782,6 +828,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._status = ExecutionStatus.RUNNING
         self._pins = read_start_pins(event)
         self._tags = ExecutionTags.launched_with(evt(event, "tags") or [])
+        self._eval = EvalMembership.launched_into(evt(event, "eval_id"))
         if self._pins.resumed_from is not None:
             self._inherit(self._pins.resumed_from)
 
@@ -941,6 +988,16 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def on_execution_tags_removed(self, event: ExecutionTagsRemovedEvent) -> None:
         """Apply ExecutionTagsRemovedEvent. The launch snapshot is untouched."""
         self._tags = self._tags.with_removed(evt(event, "tags") or [])
+
+    @event_sourcing_handler("ExecutionAttachedToEval")
+    def on_attached_to_eval(self, event: ExecutionAttachedToEvalEvent) -> None:
+        """Apply ExecutionAttachedToEvalEvent."""
+        self._eval = self._eval.with_attached(evt(event, "eval_id"))
+
+    @event_sourcing_handler("ExecutionDetachedFromEval")
+    def on_detached_from_eval(self, _event: object) -> None:
+        """Apply ExecutionDetachedFromEvalEvent. The launch record stays."""
+        self._eval = self._eval.detached()
 
     @event_sourcing_handler("WorkflowInterrupted")
     def on_execution_interrupted(self, event: WorkflowInterruptedEvent) -> None:
