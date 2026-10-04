@@ -8008,6 +8008,8 @@ export interface operations {
                 page_size?: number;
                 /** @description Sort field (- prefix = descending) */
                 order_by?: string | null;
+                /** @description Case-insensitive substring match on name or id, applied before paging */
+                search?: string | null;
             };
             header?: never;
             path?: never;
