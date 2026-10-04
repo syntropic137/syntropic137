@@ -117,10 +117,7 @@ class _EvalChange:
 
     def __bool__(self) -> bool:
         return bool(
-            self.name is not None
-            or self.frozen_fields
-            or self.tags_added
-            or self.tags_removed
+            self.name is not None or self.frozen_fields or self.tags_added or self.tags_removed
         )
 
 

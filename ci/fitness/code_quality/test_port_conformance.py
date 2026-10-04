@@ -49,6 +49,11 @@ _UNIMPLEMENTED: dict[str, str] = {
         "and no call site asks for it. Kept here rather than deleted because "
         "removing a published port is a separate decision from #1305."
     ),
+    "RevisionResolverPort": (
+        "The GitHub resolver is a later evals run (#967); no slice is wired to "
+        "a route yet. Consumers are tested against "
+        "packages/syn-domain/src/syn_domain/testing/fake_revision_resolver.py."
+    ),
 }
 
 

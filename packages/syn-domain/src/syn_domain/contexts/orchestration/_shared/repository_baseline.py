@@ -7,18 +7,29 @@ resolved to, which is what every run actually checks out. A branch moving
 later changes nothing here, which is the whole point of a baseline.
 
 The sha is resolved BEFORE a baseline is built, through
-``RevisionResolverPort``. Nothing in this module talks to git; it only refuses
-a value that cannot be a full commit id, so an abbreviated sha or a branch name
-mistaken for one never reaches an event.
+``RevisionResolverPort`` (``resolve_baseline`` below). Nothing in this module
+talks to git; it only refuses a value that cannot be a full commit id, so an
+abbreviated sha or a branch name mistaken for one never reaches an event.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef  # noqa: TC001
+from syn_domain.contexts.orchestration.ports.RevisionResolverPort import ResolvedRevision
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
+        RevisionResolverPort,
+        UnresolvedRevision,
+    )
 
 #: A full object id: 40 hex characters (SHA-1) or 64 (SHA-256 repositories).
 #: Lowercase only, so one commit has exactly one spelling.
@@ -55,3 +66,53 @@ class RepositoryBaseline(BaseModel):
             )
             raise ValueError(msg)
         return value
+
+
+@dataclass(frozen=True)
+class BaselineRequest:
+    """A repository and the ref a person asked for, before it is pinned."""
+
+    repository: RepositoryRef
+    requested_ref: str
+
+
+class UnresolvedBaselineError(ValueError):
+    """At least one requested ref could not be pinned; nothing was recorded."""
+
+    def __init__(self, failures: list[tuple[BaselineRequest, UnresolvedRevision]]) -> None:
+        parts = [
+            f"{req.repository.slug}@{req.requested_ref} ({failure.reason.value}"
+            + (f": {failure.detail})" if failure.detail else ")")
+            for req, failure in failures
+        ]
+        super().__init__("could not resolve baseline ref(s): " + ", ".join(parts))
+        self.failures = failures
+
+
+async def resolve_baseline(
+    resolver: RevisionResolverPort,
+    requests: Iterable[BaselineRequest],
+) -> tuple[RepositoryBaseline, ...]:
+    """Pin every request to a commit, or refuse all of them.
+
+    All or nothing: a baseline with one repository missing is a different
+    experiment, so a single unresolved ref raises ``UnresolvedBaselineError``
+    naming every failure, rather than recording the ones that worked.
+    """
+    pinned: list[RepositoryBaseline] = []
+    failures: list[tuple[BaselineRequest, UnresolvedRevision]] = []
+    for req in requests:
+        answer = await resolver.resolve(req.repository, req.requested_ref)
+        if isinstance(answer, ResolvedRevision):
+            pinned.append(
+                RepositoryBaseline(
+                    repository=req.repository,
+                    requested_ref=req.requested_ref,
+                    commit_sha=answer.commit_sha,
+                )
+            )
+        else:
+            failures.append((req, answer))
+    if failures:
+        raise UnresolvedBaselineError(failures)
+    return tuple(pinned)
