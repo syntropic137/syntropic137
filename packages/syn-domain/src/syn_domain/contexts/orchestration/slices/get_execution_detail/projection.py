@@ -636,6 +636,17 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             existing["tags"] = replay_tag_edit(existing.get("tags") or [], tags, added=added)
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
+    async def has_applied_start(self, execution_id: str) -> bool:
+        """Whether this read model applied the execution's WorkflowExecutionStarted.
+
+        A row alone does not prove it: the #598 fallback in `on_workflow_failed`
+        creates a row for a failure whose start was never seen, with no
+        `started_at`. That is the shape a dropped start leaves behind (#1545),
+        so the start is "applied" only when `started_at` is set.
+        """
+        data = await self._store.get(self.PROJECTION_NAME, execution_id)
+        return bool(data) and data.get("started_at") is not None
+
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:
         """Get execution detail by ID.
 

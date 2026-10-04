@@ -291,6 +291,17 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         executions.sort(key=lambda e: e.started_at or "", reverse=True)
         return executions
 
+    async def has_applied_start(self, execution_id: str) -> bool:
+        """Whether this read model applied the execution's WorkflowExecutionStarted.
+
+        A row alone does not prove it: the #598 fallback in `on_workflow_failed`
+        creates a row for a failure whose start was never seen, with no
+        `started_at`. That is the shape a dropped start leaves behind (#1545),
+        so the start is "applied" only when `started_at` is set.
+        """
+        data = await self._store.get(self.PROJECTION_NAME, execution_id)
+        return bool(data) and data.get("started_at") is not None
+
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
         """Get a specific execution by ID.
 
