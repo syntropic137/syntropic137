@@ -22,13 +22,20 @@ _PRODUCTION_DIRS = ["apps/*/src", "packages/*/src"]
 _EXCLUDED_NAMES = {"conftest.py", "__init__.py"}
 
 
-def production_files(root: Path | None = None) -> list[Path]:
-    """Yield all production .py files under apps/*/src and packages/*/src."""
+def production_files(
+    root: Path | None = None, *, include_package_inits: bool = False
+) -> list[Path]:
+    """Yield all production .py files under apps/*/src and packages/*/src.
+
+    ``__init__.py`` is skipped unless ``include_package_inits``: most gates
+    measure modules, but a class can be declared in a package initializer too.
+    """
     root = root or repo_root()
+    excluded = _EXCLUDED_NAMES - {"__init__.py"} if include_package_inits else _EXCLUDED_NAMES
     files: list[Path] = []
     for pattern in _PRODUCTION_DIRS:
         for py_file in root.glob(f"{pattern}/**/*.py"):
-            if py_file.name in _EXCLUDED_NAMES:
+            if py_file.name in excluded:
                 continue
             if py_file.name.startswith("test_"):
                 continue
