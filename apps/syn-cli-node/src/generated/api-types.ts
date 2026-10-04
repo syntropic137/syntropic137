@@ -2478,8 +2478,8 @@ export interface components {
          *     twenty releases behind the installed package.
          *
          *     The release and its status come from ``_NamesTheRunningRelease``. What this
-         *     model adds is the two build-time stamps, which only an image can supply and
-         *     only ``/health`` reports.
+         *     model adds is the two build-time stamps, which only an image can supply, and
+         *     the moment this process started serving, which only the process knows.
          */
         BuildInfo: {
             /**
@@ -2498,11 +2498,22 @@ export interface components {
              */
             commit?: string | null;
             /**
+             * Started At
+             * Format: date-time
+             * @description When this API process started serving, i.e. when the running deployment went live. UTC; clients format for their locale. Captured once at process start, so it changes exactly when a new deployment replaces this one.
+             */
+            started_at: string;
+            /**
              * Version Status
              * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
              * @enum {string}
              */
             readonly version_status: "installed" | "unavailable";
+            /**
+             * Started At Display
+             * @description started_at for humans, in UTC (e.g. '2026-10-04 08:51 UTC'). Clients that can format for the reader's locale may use started_at instead.
+             */
+            readonly started_at_display: string;
         };
         /**
          * CancelRequest

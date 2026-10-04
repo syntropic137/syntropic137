@@ -49,6 +49,13 @@ read back here. They are absent by default and reported as ``null`` rather
 than as a placeholder string, so a caller can tell a build that did not stamp
 itself from one that did.
 
+THE START TIME IS A PROCESS FACT, captured once when this module is first
+imported (``main.py`` imports it while building the app, so before the first
+request is served) and never re-read. It answers "when did this deployment go
+live?": a new deploy is a new process, so a new ``started_at`` is exactly a new
+rollout. It is the one value here that IS cached, because re-reading the clock
+per request would report "now" — the opposite of what the field means.
+
 Deliberately NOT ``pydantic-settings`` despite ADR-004. These are not
 configuration: nobody should be choosing them per deployment, and putting them
 in the generated ``.env.example`` would advertise them as operator-settable —
@@ -60,6 +67,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import UTC, datetime
 from importlib.metadata import version
 
 from syn_api.types import BuildInfo
@@ -79,18 +87,23 @@ ENV_COMMIT = "SYN_BUILD_COMMIT"
 #: than quietly accept it as a release that was never built.
 UNKNOWN_VERSION = "unknown"
 
+#: When this process started serving; see module docstring.
+STARTED_AT = datetime.now(UTC)
+
 
 def get_build_info() -> BuildInfo:
     """Identify the running build.
 
     Cheap enough to call per request (one metadata read), and uncached on
     purpose: a cached answer would survive a change to the environment it read,
-    and this is the one value that must never be stale.
+    and this is the one value that must never be stale. ``started_at`` is the
+    exception by definition: it is the moment the process began, read once.
     """
     return BuildInfo(
         version=_installed_release(),
         image_tag=_stamped(ENV_IMAGE_TAG),
         commit=_stamped(ENV_COMMIT),
+        started_at=STARTED_AT,
     )
 
 

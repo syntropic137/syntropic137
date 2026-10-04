@@ -7730,6 +7730,12 @@
             "title": "Commit",
             "description": "Git commit the image was built from, stamped at image build time. Null when the build did not stamp one."
           },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At",
+            "description": "When this API process started serving, i.e. when the running deployment went live. UTC; clients format for their locale. Captured once at process start, so it changes exactly when a new deployment replaces this one."
+          },
           "version_status": {
             "type": "string",
             "enum": [
@@ -7739,16 +7745,24 @@
             "title": "Version Status",
             "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.",
             "readOnly": true
+          },
+          "started_at_display": {
+            "type": "string",
+            "title": "Started At Display",
+            "description": "started_at for humans, in UTC (e.g. '2026-10-04 08:51 UTC'). Clients that can format for the reader's locale may use started_at instead.",
+            "readOnly": true
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "version",
-          "version_status"
+          "started_at",
+          "version_status",
+          "started_at_display"
         ],
         "title": "BuildInfo",
-        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply and\nonly ``/health`` reports."
+        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply, and\nthe moment this process started serving, which only the process knows."
       },
       "CancelRequest": {
         "properties": {

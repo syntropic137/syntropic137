@@ -7,7 +7,7 @@ plus Pydantic response models used across all v1 modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
+from datetime import UTC, datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
@@ -1876,8 +1876,8 @@ class BuildInfo(_NamesTheRunningRelease):
     twenty releases behind the installed package.
 
     The release and its status come from ``_NamesTheRunningRelease``. What this
-    model adds is the two build-time stamps, which only an image can supply and
-    only ``/health`` reports.
+    model adds is the two build-time stamps, which only an image can supply, and
+    the moment this process started serving, which only the process knows.
     """
 
     image_tag: str | None = Field(
@@ -1891,6 +1891,20 @@ class BuildInfo(_NamesTheRunningRelease):
         description="Git commit the image was built from, stamped at image build time. "
         "Null when the build did not stamp one.",
     )
+    started_at: datetime = Field(
+        description="When this API process started serving, i.e. when the running "
+        "deployment went live. UTC; clients format for their locale. Captured once at "
+        "process start, so it changes exactly when a new deployment replaces this one.",
+    )
+
+    @computed_field(
+        description="started_at for humans, in UTC (e.g. '2026-10-04 08:51 UTC'). "
+        "Clients that can format for the reader's locale may use started_at instead.",
+    )
+    @property
+    def started_at_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``started_at``."""
+        return self.started_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
 class RootResponse(_NamesTheRunningRelease):
