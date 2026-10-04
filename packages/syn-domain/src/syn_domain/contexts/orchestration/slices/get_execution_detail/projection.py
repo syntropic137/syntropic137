@@ -19,10 +19,17 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
     SideEffectStatus,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
+    ExecutionTagsAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
+    ExecutionTagsRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
@@ -86,7 +93,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # both bumped 10 -> 11 independently, on separate branches. Taking either
     # literal 11 would leave a deployment that had already rebuilt at the other
     # one's 11 seeing no change here, and so never rebuilding for this field.
-    VERSION = 12
+    VERSION = 13  # v13: tags and inherited_tags (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -152,6 +159,24 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         stated = event_data.get("completed_phases")
         return accumulated if stated is None else int(stated)
 
+    @staticmethod
+    def _repos_from(repos_input: str) -> list[str]:
+        """The repo URLs in a run's `repos` input (ADR-058: a comma-separated string).
+
+        No empty-string special case: "".split(",") is [""], which the filter
+        already drops, so a guard for it would decide nothing.
+        """
+        return [u.strip() for u in repos_input.split(",") if u.strip()]
+
+    @staticmethod
+    def _launch_tags(recorded: list[str] | None) -> TagSet:
+        """The tags a run launched with, as its started event recorded them (#967).
+
+        The event leaves `tags` out of its payload when there are none, so an
+        absent key is a run that launched untagged, not a gap in the record.
+        """
+        return TagSet.recorded(recorded or [])
+
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
 
@@ -168,10 +193,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # what its own task was.
         inputs = {str(k): str(v) for k, v in (event_data.get("inputs") or {}).items()}
 
-        # Extract repos from inputs field (ADR-058: stored as comma-separated string).
-        # No empty-string special case: "".split(",") is [""], which the filter
-        # already drops, so the guard that used to sit here decided nothing.
-        repos = [u.strip() for u in inputs.get("repos", "").split(",") if u.strip()]
+        repos = self._repos_from(inputs.get("repos", ""))
+        launch_tags = self._launch_tags(event_data.get("tags"))
 
         # Each phase's wall-clock budget, keyed by phase id. Stated once, on
         # this event, and not restated by the phase that later consumes it, so
@@ -224,6 +247,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "error_message": None,
             "repos": repos,
             "inputs": inputs,
+            # The launch snapshot, twice: `inherited_tags` is never edited and
+            # `tags` is what ExecutionTagsAdded/Removed edit from here (#967).
+            "tags": list(launch_tags),
+            "inherited_tags": list(launch_tags),
             # How many phases this run set out to do, and how many it has done.
             # Read off the SAME event the list projection reads them off, so a
             # run cannot report three phases in one view and one in the other
@@ -589,6 +616,25 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         )
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_execution_tags_added(self, event_data: ExecutionTagsAddedEvent) -> None:
+        """Handle ExecutionTagsAdded (#967). Edits current tags, never inherited."""
+        event = ExecutionTagsAddedEvent.model_validate(event_data)
+        await self._edit_tags(event.execution_id, event.tags, added=True)
+
+    async def on_execution_tags_removed(self, event_data: ExecutionTagsRemovedEvent) -> None:
+        """Handle ExecutionTagsRemoved (#967). Edits current tags, never inherited."""
+        event = ExecutionTagsRemovedEvent.model_validate(event_data)
+        await self._edit_tags(event.execution_id, event.tags, added=False)
+
+    async def _edit_tags(self, execution_id: str, tags: list[str], *, added: bool) -> None:
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["tags"] = replay_tag_edit(existing.get("tags") or [], tags, added=added)
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:
         """Get execution detail by ID.

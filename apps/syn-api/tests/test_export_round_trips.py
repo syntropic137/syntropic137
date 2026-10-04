@@ -325,6 +325,30 @@ class TestTheLoaderAcceptsWhatWeEmit:
         assert frontmatter["allowed-tools"] == ",".join(_valid_phase().allowed_tools)
         assert frontmatter["model"] == _valid_phase().model
 
+    def test_tags_survive_export_and_reinstall(self) -> None:
+        """An exported workflow re-installs with its tags, not without them (#967)."""
+        import tempfile
+
+        from syn_api.routes.workflows.queries import _build_package_files
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        detail = _valid_workflow_detail().model_copy(update={"tags": ["eval-a", "nightly"]})
+        files: dict[str, str] = {}
+        _build_package_files(detail, files)
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            for rel, content in files.items():
+                target = root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+
+            loaded = WorkflowDefinition.from_file(root / "workflow.yaml")
+
+        assert list(loaded.tags) == ["eval-a", "nightly"]
+
     def test_a_bare_phase_validates(self) -> None:
         assert self._validate(PhaseDefinitionResponse(phase_id="p", name="P", order=1)) is not None
 

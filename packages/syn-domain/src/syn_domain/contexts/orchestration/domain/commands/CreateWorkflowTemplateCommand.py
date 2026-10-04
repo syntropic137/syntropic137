@@ -14,6 +14,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (  # noq
 from syn_domain.contexts.orchestration._shared.skill_ref import (  # noqa: TC001
     SkillRef,
 )
+from syn_domain.contexts.orchestration._shared.tags import TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -74,6 +75,10 @@ class CreateWorkflowTemplateCommand(BaseModel):
     # ``PhaseDefinition.skills``. A follow-up task wires this through the
     # aggregate the same way claude_plugins is wired.
     skills: list[SkillRef] = Field(default_factory=list)
+
+    # Ordinary labels (#967). Validated here so every create path, not only
+    # the YAML one, applies the shared rules.
+    tags: TagSet = Field(default_factory=TagSet)
 
     # Provenance (issue #822). Recorded at install time so an execution can be
     # traced back to the package version and source commit that produced it.

@@ -98,6 +98,13 @@ class WorkflowExecutionSummary:
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
+    tags: tuple[str, ...] = ()
+    """The execution's current tags (#967): its launch snapshot, as edited since."""
+
+    inherited_tags: tuple[str, ...] = ()
+    """The tags it launched with (#967), never edited: workflow tags united with
+    the request's at launch."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionSummary":
         """Create from dictionary data.
@@ -136,6 +143,8 @@ class WorkflowExecutionSummary:
                 data.get("reported_failure_reason")
             ),
             repos=tuple(data.get("repos", [])),
+            tags=tuple(data.get("tags") or ()),
+            inherited_tags=tuple(data.get("inherited_tags") or ()),
         )
 
     @staticmethod
@@ -171,4 +180,6 @@ class WorkflowExecutionSummary:
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
             "repos": list(self.repos),
+            "tags": list(self.tags),
+            "inherited_tags": list(self.inherited_tags),
         }

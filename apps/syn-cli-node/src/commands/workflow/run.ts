@@ -123,6 +123,7 @@ export const runCommand: CommandDef = {
     input: { type: "string", short: "i", description: "Input variables as key=value", multiple: true },
     task: { type: "string", short: "t", description: "Primary task description ($ARGUMENTS)" },
     repo: { type: "string", short: "R", description: "Repository to pre-clone (repeatable). Accepts owner/repo, full GitHub URL, or syn repo-* ID.", multiple: true },
+    tag: { type: "string", description: "Tag for this run (repeatable), added to the workflow's own tags", multiple: true },
     "dry-run": { type: "boolean", short: "n", description: "Validate without executing", default: false },
     quiet: { type: "boolean", short: "q", description: "Minimal output", default: false },
   },
@@ -139,6 +140,8 @@ export const runCommand: CommandDef = {
     const task = parsed.values["task"] as string | undefined;
     const repoValues = parsed.values["repo"];
     const rawRepos: string[] = Array.isArray(repoValues) ? repoValues as string[] : repoValues ? [repoValues as string] : [];
+    const tagValues = parsed.values["tag"];
+    const tags: string[] = Array.isArray(tagValues) ? tagValues as string[] : tagValues ? [tagValues as string] : [];
     const dryRun = parsed.values["dry-run"] === true;
     const quiet = parsed.values["quiet"] === true;
 
@@ -266,6 +269,7 @@ export const runCommand: CommandDef = {
           ),
           task: task ?? null,
           ...(repos.length > 0 ? { repos } : {}),
+          ...(tags.length > 0 ? { tags } : {}),
           provider: "claude",
         },
       }),

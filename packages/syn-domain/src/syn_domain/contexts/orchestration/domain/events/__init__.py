@@ -27,6 +27,12 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent imp
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
+    ExecutionTagsAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
+    ExecutionTagsRemovedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.GlobalClaudePluginAddedEvent import (
     GlobalClaudePluginAddedEvent,
 )
@@ -66,6 +72,12 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowInterruptedEvent im
 from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
     WorkflowPhaseUpdatedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
+    WorkflowTagsAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
+    WorkflowTagsRemovedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
     WorkflowTemplateCreatedEvent,
 )
@@ -102,6 +114,8 @@ __all__ = [
     "CommandFailedEvent",
     "ExecutionCancelledEvent",
     "ExecutionResumedEvent",
+    "ExecutionTagsAddedEvent",
+    "ExecutionTagsRemovedEvent",
     "GlobalClaudePluginAddedEvent",
     "GlobalClaudePluginRemovedEvent",
     "IsolationStartedEvent",
@@ -115,6 +129,8 @@ __all__ = [
     "WorkflowFailedEvent",
     "WorkflowInterruptedEvent",
     "WorkflowPhaseUpdatedEvent",
+    "WorkflowTagsAddedEvent",
+    "WorkflowTagsRemovedEvent",
     "WorkflowTemplateCreatedEvent",
     "WorkspaceCommandExecutedEvent",
     "WorkspaceCreatedEvent",

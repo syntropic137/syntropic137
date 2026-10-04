@@ -57,6 +57,8 @@ class WorkflowSummaryResponse(BaseModel):
     # workflow while the stored rows said otherwise. An outward response model
     # must not manufacture domain truth - make omission a construction error.
     requires_repos: bool
+    tags: list[str] = Field(default_factory=list)
+    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
 
 
 class InputDeclarationModel(BaseModel):
@@ -103,6 +105,8 @@ class WorkflowResponse(BaseModel):
     repos: list[str] = Field(default_factory=list)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
     requires_repos: bool  # required for the same reason as the summary model
+    tags: list[str] = Field(default_factory=list)
+    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -257,6 +261,7 @@ async def list_workflows(
                 runs_count=s.runs_count,
                 is_archived=s.is_archived,
                 requires_repos=s.requires_repos,
+                tags=list(s.tags),
             )
             for s in domain_summaries
         ]
@@ -286,6 +291,7 @@ async def get_workflow(
             repository_url=detail.repository_url,
             repos=list(detail.repos),
             requires_repos=detail.requires_repos,
+            tags=list(detail.tags),
         )
     )
 
@@ -605,6 +611,7 @@ def _build_workflow_yaml(detail: WorkflowDetail) -> str:
         f"description: {_yaml_quote(detail.description or '')}",
         f"type: {detail.workflow_type}",
         f"classification: {detail.classification}",
+        *([f"tags: {_yaml_flow_list(detail.tags)}"] if detail.tags else []),
         *_yaml_input_lines(detail),
         "",
         "phases:",
@@ -735,6 +742,7 @@ async def list_workflows_endpoint(
             # with detail. An agent that lists workflows, sees True, and passes
             # -R is then told repos are supported when they are not.
             requires_repos=s.requires_repos,
+            tags=list(s.tags),
         )
         for s in result.value
     ]
@@ -808,6 +816,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         repository_url=detail.repository_url,
         repos=list(detail.repos),
         requires_repos=detail.requires_repos,
+        tags=list(detail.tags),
     )
 
 

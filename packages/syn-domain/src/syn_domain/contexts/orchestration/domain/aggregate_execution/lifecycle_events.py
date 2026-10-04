@@ -47,6 +47,7 @@ def started_event(command: StartExecutionCommand) -> WorkflowExecutionStartedEve
         ),
         pinned_phases=command.pinned_phases,
         source_commits=command.source_commits,
+        tags=list(command.tags),
     )
 
 

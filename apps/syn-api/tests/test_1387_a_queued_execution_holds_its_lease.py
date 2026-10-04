@@ -46,7 +46,7 @@ from syn_api.routes.executions import commands
 from syn_api.routes.maintenance import set_maintenance_mode
 from syn_api.types import SetMaintenanceModeRequest
 from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
-from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
+from syn_domain.contexts.orchestration import TagSet, WorkflowTemplateAggregate
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
@@ -322,6 +322,7 @@ class _Request:
         default_factory=lambda: ["https://github.com/syntropic137/syntropic137"]
     )
     task: str | None = None
+    tags: TagSet = field(default_factory=TagSet)
     provider: str = "claude"
 
 
@@ -357,8 +358,9 @@ class _DelayedExecution:
         task: str | None,
         repos: list[object],
         admitted: AdmissionTicket | None = None,
+        tags: TagSet | None = None,
     ) -> None:
-        del workflow_id, inputs, task, repos
+        del workflow_id, inputs, task, repos, tags
         self.reached.set()
         await self.may_open_the_stream.wait()
         self.opened.append(execution_id)

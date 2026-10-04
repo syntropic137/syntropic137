@@ -71,6 +71,10 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
     # field rehydrate cleanly.
     skills: list[SkillRef] = Field(default_factory=list)
 
+    # Ordinary labels (#967), already normalised by TagSet. Defaults to empty
+    # so events written before tags existed rehydrate cleanly (ADR-007).
+    tags: list[str] = Field(default_factory=list)
+
     # Provenance (issue #822). Optional so events written before this field
     # existed rehydrate cleanly.
     version: str | None = None

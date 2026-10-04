@@ -3060,6 +3060,11 @@ export interface components {
              */
             repos?: string[];
             /**
+             * Tags
+             * @description Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422.
+             */
+            tags?: string[];
+            /**
              * Provider
              * @deprecated
              * @description Agent provider to use. Currently ignored by execute(); sending this field has no effect.
@@ -3267,6 +3272,8 @@ export interface components {
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Repos */
             repos?: string[];
+            /** Tags */
+            tags?: string[];
             /** Task */
             task?: string | null;
             /** Inputs */
@@ -3480,6 +3487,8 @@ export interface components {
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Repos */
             repos?: string[];
+            /** Tags */
+            tags?: string[];
             /** Repos Display */
             repos_display?: string | null;
         };
@@ -7785,6 +7794,8 @@ export interface components {
             repos?: string[];
             /** Requires Repos */
             requires_repos: boolean;
+            /** Tags */
+            tags?: string[];
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -7810,6 +7821,8 @@ export interface components {
             is_archived: boolean;
             /** Requires Repos */
             requires_repos: boolean;
+            /** Tags */
+            tags?: string[];
         };
         /**
          * CostSummaryResponse
@@ -8252,6 +8265,8 @@ export interface operations {
                 started_before?: string | null;
                 /** @description Case-insensitive substring match against execution id, workflow id and workflow name */
                 q?: string | null;
+                /** @description Keep only executions carrying this tag. Repeat to require several (AND). Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag?: string[] | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */

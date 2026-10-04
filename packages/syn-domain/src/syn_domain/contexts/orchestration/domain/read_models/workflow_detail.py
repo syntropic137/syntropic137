@@ -238,6 +238,9 @@ class WorkflowDetail:
     requires_repos: bool = True
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
+    tags: tuple[str, ...] = ()
+    """The template's tags, normalised and sorted (#967). Exported as ``tags:``."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
@@ -301,6 +304,7 @@ class WorkflowDetail:
             repository_url=data.get("repository_url"),
             repos=tuple(data.get("repos", [])),
             requires_repos=data.get("requires_repos", True),
+            tags=tuple(data.get("tags") or ()),
         )
 
     @staticmethod
@@ -377,4 +381,5 @@ class WorkflowDetail:
             "repository_url": self.repository_url,
             "repos": list(self.repos),
             "requires_repos": self.requires_repos,
+            "tags": list(self.tags),
         }

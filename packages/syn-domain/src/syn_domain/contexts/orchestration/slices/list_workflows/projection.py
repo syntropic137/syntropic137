@@ -17,6 +17,13 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
+    WorkflowTagsAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
+    WorkflowTagsRemovedEvent,
+)
 from syn_domain.contexts.orchestration.domain.read_models import WorkflowSummary
 
 
@@ -31,7 +38,7 @@ class WorkflowListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_summaries"
-    VERSION = 4  # Bumped: added requires_repos field (ADR-058 #666)
+    VERSION = 5  # v5: tags (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -67,6 +74,7 @@ class WorkflowListProjection(AutoDispatchProjection):
             runs_count=0,
             is_archived=False,
             requires_repos=event_data.get("requires_repos", True),
+            tags=TagSet.recorded(event_data.get("tags") or []).values,
         )
         await self._store.save(
             self.PROJECTION_NAME,
@@ -97,6 +105,8 @@ class WorkflowListProjection(AutoDispatchProjection):
             runs_count=(existing or {}).get("runs_count", 0),
             is_archived=False,
             requires_repos=event_data.get("requires_repos", True),
+            # A reinstall replaces the template's tags wholesale, as the aggregate does.
+            tags=TagSet.recorded(event_data.get("tags") or []).values,
         )
         await self._store.save(self.PROJECTION_NAME, summary.id, summary.to_dict())
 
@@ -112,6 +122,25 @@ class WorkflowListProjection(AutoDispatchProjection):
         existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
         if existing:
             existing["is_archived"] = True
+            await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+
+    async def on_workflow_tags_added(self, event_data: WorkflowTagsAddedEvent) -> None:
+        """Handle WorkflowTagsAdded (#967)."""
+        event = WorkflowTagsAddedEvent.model_validate(event_data)
+        await self._edit_tags(event.workflow_id, event.tags, added=True)
+
+    async def on_workflow_tags_removed(self, event_data: WorkflowTagsRemovedEvent) -> None:
+        """Handle WorkflowTagsRemoved (#967)."""
+        event = WorkflowTagsRemovedEvent.model_validate(event_data)
+        await self._edit_tags(event.workflow_id, event.tags, added=False)
+
+    async def _edit_tags(self, workflow_id: str, tags: list[str], *, added: bool) -> None:
+        if not workflow_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if existing:
+            existing["tags"] = replay_tag_edit(existing.get("tags") or [], tags, added=added)
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:

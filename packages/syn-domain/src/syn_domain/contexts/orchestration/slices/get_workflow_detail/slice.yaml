@@ -8,4 +8,7 @@ subscribes_to:
   - PhaseCompletedEvent
   - WorkflowCompletedEvent
   - WorkflowFailedEvent
+  - WorkflowTemplateUpdatedEvent
+  - WorkflowTagsAddedEvent
+  - WorkflowTagsRemovedEvent
 returns: WorkflowDetail | None

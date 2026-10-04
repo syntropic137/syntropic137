@@ -3,8 +3,14 @@
 All commands for workflow execution and workspace management.
 """
 
+from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
+    AddExecutionTagsCommand,
+)
 from syn_domain.contexts.orchestration.domain.commands.AddGlobalClaudePluginCommand import (
     AddGlobalClaudePluginCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.AddWorkflowTagsCommand import (
+    AddWorkflowTagsCommand,
 )
 from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
     ArchiveWorkflowTemplateCommand,
@@ -27,8 +33,14 @@ from syn_domain.contexts.orchestration.domain.commands.InjectTokensCommand impor
 from syn_domain.contexts.orchestration.domain.commands.RegisterClaudePluginCommand import (
     RegisterClaudePluginCommand,
 )
+from syn_domain.contexts.orchestration.domain.commands.RemoveExecutionTagsCommand import (
+    RemoveExecutionTagsCommand,
+)
 from syn_domain.contexts.orchestration.domain.commands.RemoveGlobalClaudePluginCommand import (
     RemoveGlobalClaudePluginCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.RemoveWorkflowTagsCommand import (
+    RemoveWorkflowTagsCommand,
 )
 from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
@@ -41,7 +53,9 @@ from syn_domain.contexts.orchestration.domain.commands.UpdateWorkflowTemplateCom
 )
 
 __all__ = [
+    "AddExecutionTagsCommand",
     "AddGlobalClaudePluginCommand",
+    "AddWorkflowTagsCommand",
     "ArchiveWorkflowTemplateCommand",
     "CreateWorkflowTemplateCommand",
     "CreateWorkspaceCommand",
@@ -49,7 +63,9 @@ __all__ = [
     "ExecuteWorkflowCommand",
     "InjectTokensCommand",
     "RegisterClaudePluginCommand",
+    "RemoveExecutionTagsCommand",
     "RemoveGlobalClaudePluginCommand",
+    "RemoveWorkflowTagsCommand",
     "TerminateWorkspaceCommand",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowTemplateCommand",

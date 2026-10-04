@@ -541,6 +541,13 @@
       },
       "title": "Skills",
       "type": "array"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
     }
   },
   "required": [

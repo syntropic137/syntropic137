@@ -6,7 +6,7 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from typing import Any
 
 from event_sourcing import DomainEvent, event
-from pydantic import SerializerFunctionWrapHandler, model_serializer, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
@@ -65,6 +65,14 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: A resume copies its parent's, so the two record the same code.
     source_commits: list[SourceCommit] | None = None
 
+    #: The tags this execution launched with (#967): its workflow's tags at
+    #: that moment united with the tags the request carried. A launch
+    #: snapshot, never rewritten: later edits to the workflow affect future
+    #: runs only, and later edits to this run are their own events. Empty on
+    #: events written before the field existed (ADR-007, no upcaster), and
+    #: not written at all when empty -- see the serializer below.
+    tags: list[str] = Field(default_factory=list)
+
     #: Set only on a resume: the parent, what it inherited and where it resumes
     #: (ADR-014 s7). The child's own record of "what was this a resume of".
     resumed_from: ResumeOrigin | None = None
@@ -83,8 +91,14 @@ class WorkflowExecutionStartedEvent(DomainEvent):
         without them, and could not replay it with them nested. Only phases the
         parent did not run itself are written, so neither a fresh start nor a
         first resume writes the key at all.
+
+        `tags` is left out when empty for the same reason (#967): every model
+        before it forbids extra fields, so an untagged start stays exactly what
+        a rollback can read typed, and only a tagged one carries the new key.
         """
         payload = handler(self)
+        if not self.tags and isinstance(payload, dict):
+            payload = {k: v for k, v in payload.items() if k != "tags"}
         origin = self.resumed_from
         owners = (
             {}

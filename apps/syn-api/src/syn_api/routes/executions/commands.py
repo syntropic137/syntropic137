@@ -36,6 +36,7 @@ from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
     SkillError,
     SkillRef,
+    TagSet,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
     validate_phase_declarations,
@@ -299,6 +300,13 @@ class ExecuteWorkflowRequest(BaseModel):
             "dict is rejected with 422."
         ),
     )
+    tags: TagSet = Field(
+        default_factory=TagSet,
+        description=(
+            "Tags for this run, united with the workflow's own tags at launch (#967). "
+            "Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422."
+        ),
+    )
     provider: str = Field(
         default="claude",
         description=(
@@ -370,6 +378,7 @@ async def execute(
     tenant_id: str | None = None,  # noqa: ARG001
     repos: list[RepositoryRef] | None = None,
     admitted: AdmissionTicket | None = None,
+    tags: TagSet | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -380,6 +389,7 @@ async def execute(
         task: Optional primary task description.
         tenant_id: Optional tenant ID for multi-tenant deployments.
         repos: Typed repository refs (ADR-063 anti-corruption layer).
+        tags: Tags for this run, united with the workflow's at launch (#967).
         admitted: The ticket the admission gate issued for this execution
             (#1387). Omitting it is not a way to skip the gate - the handler
             checks the flag itself when no ticket arrives. It is how a caller
@@ -414,6 +424,7 @@ async def execute(
             repos=repos or [],
             execution_id=execution_id,
             task=task,
+            tags=tags or TagSet(),
         )
         result = await handler.handle(cmd, admitted=admitted)
     except WorkflowNotFoundError:
@@ -775,6 +786,7 @@ async def execute_workflow_endpoint(
                     task=request.task,
                     repos=typed_repos,
                     admitted=admitted,
+                    tags=request.tags,
                 )
                 if isinstance(result, Err):
                     logger.error(

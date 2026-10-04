@@ -302,6 +302,13 @@ class WorkflowExecutionDetail:
     exists to end. Empty for a run whose start event this projection never saw.
     """
 
+    tags: tuple[str, ...] = ()
+    """The execution's current tags (#967): its launch snapshot, as edited since."""
+
+    inherited_tags: tuple[str, ...] = ()
+    """The tags it launched with (#967), never edited: workflow tags united with
+    the request's at launch."""
+
     @property
     def task(self) -> str | None:
         """What this run was asked to do, or ``None`` if it was asked nothing.
@@ -375,6 +382,8 @@ class WorkflowExecutionDetail:
             ),
             repos=tuple(data.get("repos", [])),
             inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
+            tags=tuple(data.get("tags") or ()),
+            inherited_tags=tuple(data.get("inherited_tags") or ()),
         )
 
     @staticmethod
@@ -411,6 +420,8 @@ class WorkflowExecutionDetail:
             ),
             "repos": list(self.repos),
             "inputs": dict(self.inputs),
+            "tags": list(self.tags),
+            "inherited_tags": list(self.inherited_tags),
         }
 
 
