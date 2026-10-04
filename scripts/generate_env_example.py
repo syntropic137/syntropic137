@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 
 from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
+from syn_shared.settings.execution import ExecutionSettings  # noqa: E402
 from syn_shared.settings.git_identity import OperatorSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
 from syn_shared.settings.image_verification import (  # noqa: E402
@@ -420,6 +421,18 @@ def generate_env_example() -> str:
             "WORKSPACE ISOLATION (ADR-021)",
             prefix="SYN_WORKSPACE_",
             description="All workspaces are isolated by default. These settings control HOW.",
+        )
+    )
+
+    # Execution concurrency budget (SYN_EXECUTION_* prefix, #1557). One limit
+    # for every start path - direct, trigger and resume - sized against the
+    # API's memory limit, so an operator raising API_MEMORY_LIMIT finds it.
+    lines.extend(
+        generate_settings_section(
+            ExecutionSettings,
+            "EXECUTION CONCURRENCY (#1557)",
+            prefix="SYN_EXECUTION_",
+            description="How many workflow executions run at once; the rest queue, visibly.",
         )
     )
 

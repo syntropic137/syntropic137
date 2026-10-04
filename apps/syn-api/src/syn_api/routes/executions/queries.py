@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.model_identity import cost_by_observed_model
@@ -45,6 +46,7 @@ from syn_shared.display import (
 from .models import (
     ExecutionDetailResponse,
     ExecutionListResponse,
+    ExecutionStartQueueInfo,
     ExecutionSummaryResponse,
     ResumeStartInfo,
 )
@@ -62,6 +64,7 @@ if TYPE_CHECKING:
 
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_api.execution_budget import StartPosition
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -712,6 +715,50 @@ def _models_run(phases: list[PhaseExecutionInfo]) -> set[str]:
     return models
 
 
+def _start_queue_info(position: StartPosition | None) -> ExecutionStartQueueInfo | None:
+    """A budget position as the API states it (#1557)."""
+    if position is None:
+        return None
+    return ExecutionStartQueueInfo(
+        path=position.claim.path,
+        position=position.position,
+        running=position.running,
+        waiting=position.waiting,
+        limit=position.limit,
+        queued_at=position.claim.claimed_at,
+    )
+
+
+async def _not_yet_started(
+    mgr: ProjectionManager, execution_id: str
+) -> ExecutionDetailResponse | None:
+    """The detail of an accepted start that has no execution record yet (#1557).
+
+    A start waiting for an execution-budget slot exists only in this process
+    until its stream opens. Answering 404 for it told an operator who had just
+    been handed its id that it did not exist, for as long as the runs ahead of
+    it took. Matched by the same id prefix the projection lookup accepts.
+    """
+    matches = get_execution_budget().matching(execution_id)
+    if len(matches) != 1:
+        return None
+    (position,) = matches
+    claim = position.claim
+    workflow = await mgr.workflow_detail.get_by_id(claim.workflow_id)
+    return ExecutionDetailResponse(
+        workflow_execution_id=claim.execution_id,
+        workflow_id=claim.workflow_id,
+        workflow_name=workflow.name if workflow is not None else "",
+        status="queued" if position.queued else "starting",
+        total_input_tokens=0,
+        total_output_tokens=0,
+        total_cache_creation_tokens=0,
+        total_cache_read_tokens=0,
+        total_tokens=0,
+        start_queue=_start_queue_info(position),
+    )
+
+
 async def _resume_start_of(
     store: ProjectionStoreProtocol, execution_id: str
 ) -> ResumeStartInfo | None:
@@ -731,6 +778,7 @@ async def _resume_start_of(
         max_attempts=MAX_START_ATTEMPTS,
         recorded_at=record.recorded_at,
         dispatched_at=record.dispatched_at,
+        start_queue=_start_queue_info(get_execution_budget().resume_of(execution_id)),
     )
 
 
@@ -741,11 +789,20 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    execution_id = await resolve_or_raise(
-        mgr.store, "workflow_execution_details", execution_id, "Execution"
-    )
+    try:
+        execution_id = await resolve_or_raise(
+            mgr.store, "workflow_execution_details", execution_id, "Execution"
+        )
+    except HTTPException as exc:
+        queued = await _not_yet_started(mgr, execution_id) if exc.status_code == 404 else None
+        if queued is None:
+            raise
+        return queued
     result = await get_detail(execution_id)
     if isinstance(result, Err):
+        queued = await _not_yet_started(mgr, execution_id)
+        if queued is not None:
+            return queued
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
     detail = result.value
     phases = [_map_phase_to_response(p) for p in detail.phases or []]

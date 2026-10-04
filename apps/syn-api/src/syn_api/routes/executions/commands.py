@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import weakref
 from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
@@ -23,6 +24,8 @@ from syn_api._wiring import (
     get_projection_mgr,
     get_workflow_repo,
 )
+from syn_api._wiring_admission import get_execution_budget
+from syn_api.execution_budget import StartPath
 from syn_api.types import (
     Err,
     ExecutionSummary,
@@ -52,6 +55,7 @@ from syn_shared.tools import UnsupportedToolNameError
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from syn_api.execution_budget import StartClaim
     from syn_domain.contexts._shared import AdmissionTicket
     from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 
@@ -771,32 +775,23 @@ async def execute_workflow_endpoint(
     # lines down, in this function, and the task is queued under it.
     admitted: AdmissionTicket
 
+    # #1557: the slot in the ONE execution budget trigger and resume starts
+    # also claim from. Claimed below, beside `add_task`, so the execution is
+    # findable as `queued` from the moment the 200 says it started.
+    claim: StartClaim
+    budget = get_execution_budget()
+
     async def _run() -> None:
         # #1387: the lease, carried across the hop that used to spend it.
         # `add_task` below only queues this coroutine - Starlette runs it after
         # the response - so the ticket cannot be released there. It ends inside
         # `execute()` when the execution's start event is durable, or here if
-        # this task produced no execution at all.
+        # this task produced no execution at all. It spans the wait for a
+        # budget slot, as on the trigger path: queued work is admitted work.
         with carrying(admitted):
             try:
-                result = await execute(
-                    workflow_id=workflow_id,
-                    inputs=effective_inputs,
-                    execution_id=execution_id,
-                    task=request.task,
-                    repos=typed_repos,
-                    admitted=admitted,
-                    tags=request.tags,
-                )
-                if isinstance(result, Err):
-                    logger.error(
-                        "Workflow execution failed",
-                        extra={
-                            "execution_id": execution_id,
-                            "workflow_id": workflow_id,
-                            "error": result.message,
-                        },
-                    )
+                async with budget.held(claim):
+                    await _execute_and_log()
             except Exception:
                 logger.exception(
                     "Workflow execution raised exception",
@@ -805,6 +800,26 @@ async def execute_workflow_endpoint(
                         "workflow_id": workflow_id,
                     },
                 )
+
+    async def _execute_and_log() -> None:
+        result = await execute(
+            workflow_id=workflow_id,
+            inputs=effective_inputs,
+            execution_id=execution_id,
+            task=request.task,
+            repos=typed_repos,
+            admitted=admitted,
+            tags=request.tags,
+        )
+        if isinstance(result, Err):
+            logger.error(
+                "Workflow execution failed",
+                extra={
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "error": result.message,
+                },
+            )
 
     # #1387: the decisive step. Queueing the task IS admitting the work - the
     # response below says 200 either way - so it happens inside the gate, where
@@ -815,7 +830,11 @@ async def execute_workflow_endpoint(
     # Leaving this block does NOT release the ticket. It is queued work, not
     # started work, and `_run` above owns the lease from here.
     async with _admit_or_409() as admitted:
+        claim = budget.claim(execution_id, workflow_id=workflow_id, path=StartPath.DIRECT)
         background_tasks.add_task(_run)
+        # The claim is ended by `_run` leaving `held`; this is its backstop for
+        # a `_run` Starlette never calls, exactly as for the lease below.
+        weakref.finalize(_run, budget.release, claim)
         # Starlette runs queued tasks after the response is sent, and promises
         # nothing about a response that is never sent - a client that goes away
         # mid-send, a middleware that replaces the response. `_run` would then

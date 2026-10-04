@@ -110,6 +110,7 @@ from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_api._wiring_admission import (
     BackgroundWorkflowDispatcher,
     get_admission_gate,
+    get_execution_budget,
     get_maintenance_port,
 )
 from syn_domain.contexts.artifacts import ArtifactQueryService
@@ -953,15 +954,14 @@ async def _build_resume_handler() -> StartResumeHandler:
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
     handler = await get_execute_workflow_handler()
-    from syn_shared.settings import get_settings
-
-    max_concurrent = get_settings().polling.max_concurrent_dispatches
     return BackgroundWorkflowDispatcher(
         handler,
-        max_concurrent=max_concurrent,
+        # #1557: the ONE budget `POST /execute` also claims from, so trigger,
+        # resume and direct starts share SYN_EXECUTION_MAX_CONCURRENT.
+        budget=get_execution_budget(),
         maintenance=get_admission_gate(),
         # ADR-014 s7: the child of an admitted resume starts through this same
-        # gate and semaphore, reading everything it runs from its parent.
+        # gate and budget, reading everything it runs from its parent.
         #
         # Passed as a FACTORY, not a handler. Building it here would need the
         # execution processor and repository - and so the observability event

@@ -31,9 +31,9 @@ OWED_STATUSES: tuple[ResumeStartStatus, ...] = ("pending", "paused", "retryable"
 #: The window between handing a start to a task and the child's own
 #: `WorkflowExecutionStarted` arriving. Re-offering inside it is not harmful in
 #: the aggregate - the child's id is fixed and the handler returns early - but it
-#: is not free either: each re-offer takes an admission ticket and a task that
-#: waits for a semaphore slot before discovering the child exists (codex review
-#: of #1459). So it waits.
+#: is not free either: each re-offer takes an admission ticket (codex review of
+#: #1459). So it waits. A start still queued for an execution-budget slot is
+#: never re-offered at all: the starter reports it held (#1557).
 DISPATCH_GRACE = timedelta(minutes=5)
 
 #: How many times a start may be attempted before `retryable` becomes `failed`.
@@ -68,6 +68,20 @@ class ResumeStartRecord(BaseModel):
     #: reason worth retrying: a `paused` hold is not an attempt, because the
     #: gate refused before anything was tried.
     attempts: int = 0
+
+
+class ResumeChild(BaseModel):
+    """The execution a resume start will create, named before it exists (#1557).
+
+    Returned by `StartResumeHandler.validate` so the dispatcher can queue the
+    start under the child's own id: that is what `syn execution show <child>`
+    looks up, and it answers `queued` instead of 404 while the start waits.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    workflow_id: str
 
 
 def read_record(row: object) -> ResumeStartRecord | None:

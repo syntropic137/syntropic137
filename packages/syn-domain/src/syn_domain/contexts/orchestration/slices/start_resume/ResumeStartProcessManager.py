@@ -150,6 +150,18 @@ class ResumeStarter(Protocol):
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
     ) -> AdmissionTicket | None: ...
 
+    def holds_start(self, parent_execution_id: str) -> bool:
+        """Whether a start for this parent's child is queued or running HERE.
+
+        A `dispatched` record is re-offered after `DISPATCH_GRACE` because a
+        process may have died with its start. But a start can also just be
+        waiting for a slot in the execution budget for as long as the runs ahead
+        of it take, and re-offering that one queued a duplicate task behind the
+        first (#1557). The starter is the only thing that knows which case it
+        is, so the processor asks before offering.
+        """
+        ...
+
 
 class ConditionalProjectionStore(ProjectionStore, Protocol):
     """A projection store that can write a record only over the one it expects.
@@ -298,12 +310,17 @@ class ResumeStartProcessManager(ProcessManager):
 
     async def _owed_records(self) -> list[ResumeStartRecord]:
         assert self._store is not None
+        assert self._starter is not None
         records: list[ResumeStartRecord] = []
         now = datetime.now(UTC)
         for status in OWED_STATUSES:
             for row in await self._store.query(self.PROJECTION_NAME, filters={"status": status}):
                 record = read_record(row)
                 if record is None or not self._is_due(record, now):
+                    continue
+                # Owed on paper, already in hand here: its start is queued for a
+                # slot or running. Offering it again is the #1557 duplicate.
+                if self._starter.holds_start(record.parent_execution_id):
                     continue
                 records.append(record)
         return records

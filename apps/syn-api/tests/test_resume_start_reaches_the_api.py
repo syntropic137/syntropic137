@@ -27,6 +27,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
+from syn_domain.contexts.orchestration.slices.start_resume import ResumeChild
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     InheritedPhase,
@@ -69,8 +70,8 @@ class _ResumeHandler:
     def __init__(self) -> None:
         self.attempted = 0
 
-    async def validate(self, parent_execution_id: str) -> None:
-        del parent_execution_id
+    async def validate(self, parent_execution_id: str) -> ResumeChild:
+        return ResumeChild(execution_id=f"{parent_execution_id}-child", workflow_id="wf")
 
     async def handle(
         self, parent_execution_id: str, *, admitted: AdmissionTicket | None = None
