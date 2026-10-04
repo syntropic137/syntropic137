@@ -2076,6 +2076,161 @@
         }
       }
     },
+    "/executions/{execution_id}/eval": {
+      "post": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Attach Execution To Eval Endpoint",
+        "description": "Attach an execution to an eval, in any status. Never copies the eval's baseline.",
+        "operationId": "attach_execution_to_eval_endpoint_executions__execution_id__eval_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachEvalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Detach Execution From Eval Endpoint",
+        "description": "Detach an execution from its eval. The launch record (`launched_eval_id`) is kept.",
+        "operationId": "detach_execution_from_eval_endpoint_executions__execution_id__eval_delete",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "eval_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The eval to detach from. Must be the eval the run belongs to, or none.",
+              "title": "Eval Id"
+            },
+            "description": "The eval to detach from. Must be the eval the run belongs to, or none."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/default-eval": {
+      "put": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Set Workflow Default Eval Endpoint",
+        "description": "Set or clear the eval a workflow's runs join when the launch names none.",
+        "operationId": "set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultEvalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDefaultEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workflow has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, or the id prefix matches more than one workflow"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
     "/sessions": {
       "get": {
         "tags": [
@@ -7589,6 +7744,21 @@
         "title": "AssignRepoToSystemRequest",
         "description": "Request body for assigning a repo to a system."
       },
+      "AttachEvalRequest": {
+        "properties": {
+          "eval_id": {
+            "$ref": "#/components/schemas/EvalId",
+            "description": "The eval to attach to. It must exist and not be archived. Attaching to the eval the run already belongs to is a no-op; another eval needs a detach first."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eval_id"
+        ],
+        "title": "AttachEvalRequest",
+        "description": "The eval to attach an execution to (#967)."
+      },
       "BodyAvailability": {
         "type": "string",
         "enum": [
@@ -8995,6 +9165,11 @@
         ],
         "title": "DeleteWorkflowResponse"
       },
+      "EvalId": {
+        "type": "string",
+        "title": "EvalId",
+        "description": "The identity of one eval, and the id of its stream."
+      },
       "EventListResponse": {
         "properties": {
           "events": {
@@ -9194,6 +9369,23 @@
             "type": "array",
             "title": "Tags",
             "description": "Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422."
+          },
+          "eval_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The eval this run joins, overriding the workflow's default eval (#967). 404 if it does not exist, 409 if it is archived."
+          },
+          "no_eval": {
+            "type": "boolean",
+            "title": "No Eval",
+            "description": "Launch an ordinary run: join no eval, even if the workflow has a default eval (#967). Cannot be combined with `eval_id` (422).",
+            "default": false
           },
           "provider": {
             "type": "string",
@@ -9641,6 +9833,60 @@
           "total_tokens"
         ],
         "title": "ExecutionDetailResponse"
+      },
+      "ExecutionEvalResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Id"
+          },
+          "association_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "launched",
+                  "attached"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Association Kind"
+          },
+          "launched_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launched Eval Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "eval_id",
+          "association_kind",
+          "launched_eval_id"
+        ],
+        "title": "ExecutionEvalResponse",
+        "description": "An execution's eval membership after an edit, read from the aggregate (#967)."
       },
       "ExecutionHistoryResponse": {
         "properties": {
@@ -16413,6 +16659,28 @@
         "title": "SessionTokenMetrics",
         "description": "Token usage metrics for a session."
       },
+      "SetDefaultEvalRequest": {
+        "properties": {
+          "eval_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The default eval, which must exist and not be archived. Null clears it. Runs already started keep the eval they launched into."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eval_id"
+        ],
+        "title": "SetDefaultEvalRequest",
+        "description": "The eval a workflow's runs join when the launch names none (#967)."
+      },
       "SetMaintenanceModeRequest": {
         "properties": {
           "active": {
@@ -18611,6 +18879,32 @@
         ],
         "title": "ValidationError"
       },
+      "WorkflowDefaultEvalResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "default_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Eval Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "default_eval_id"
+        ],
+        "title": "WorkflowDefaultEvalResponse",
+        "description": "A workflow's default eval after an edit, read from the aggregate (#967)."
+      },
       "WorkflowListResponse": {
         "properties": {
           "workflows": {
@@ -18740,6 +19034,17 @@
             },
             "type": "array",
             "title": "Tags"
+          },
+          "default_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Eval Id"
           }
         },
         "type": "object",
@@ -18960,6 +19265,10 @@
     {
       "name": "costs",
       "description": "Track token costs per session and execution"
+    },
+    {
+      "name": "evals",
+      "description": ""
     },
     {
       "name": "events",
