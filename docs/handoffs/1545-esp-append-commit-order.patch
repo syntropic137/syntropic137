@@ -1,0 +1,269 @@
+From 1629c917f9ea59d1d57da8a3cd8aa719a46d5043 Mon Sep 17 00:00:00 2001
+From: "syntropic137-swe-mini[bot]"
+ <3328855+syntropic137-swe-mini[bot]@users.noreply.github.com>
+Date: Sun, 4 Oct 2026 09:36:23 +0000
+Subject: [PATCH] fix(event-store): appends commit in global_nonce order, so a
+ live subscriber cannot skip one (syntropic137#1545)
+
+global_nonce is a BIGSERIAL: allocated at INSERT, visible at COMMIT. A slow
+append holding nonce N while a faster one committed N+1 let a live subscriber
+yield N+1, advance its cursor past N, and never deliver N. A per-tenant
+transaction advisory lock taken before the first nonce is drawn makes the next
+append wait until this one is visible.
+
+it_commit_order reproduces it against real Postgres: without the lock the
+subscriber delivers only N+1 (nonce 3 never arrives); with it, both in order.
+
+Co-authored-by: Neural Empowerment <129192050+NeuralEmpowerment@users.noreply.github.com>
+---
+ .../eventstore-backend-postgres/Cargo.toml    |   5 +
+ .../src/store_postgres.rs                     |  28 +++
+ .../tests/it_commit_order.rs                  | 177 ++++++++++++++++++
+ 3 files changed, 210 insertions(+)
+ create mode 100644 event-store/eventstore-backend-postgres/tests/it_commit_order.rs
+
+diff --git a/event-store/eventstore-backend-postgres/Cargo.toml b/event-store/eventstore-backend-postgres/Cargo.toml
+index f725d61..c6dfe99 100644
+--- a/event-store/eventstore-backend-postgres/Cargo.toml
++++ b/event-store/eventstore-backend-postgres/Cargo.toml
+@@ -38,3 +38,8 @@ once_cell = "1.19"
+ name = "it_postgres"
+ path = "tests/it_postgres.rs"
+ required-features = ["test-utils"]
++
++[[test]]
++name = "it_commit_order"
++path = "tests/it_commit_order.rs"
++required-features = ["test-utils"]
+diff --git a/event-store/eventstore-backend-postgres/src/store_postgres.rs b/event-store/eventstore-backend-postgres/src/store_postgres.rs
+index f1f8e4b..091e011 100644
+--- a/event-store/eventstore-backend-postgres/src/store_postgres.rs
++++ b/event-store/eventstore-backend-postgres/src/store_postgres.rs
+@@ -18,6 +18,11 @@ const NOTIFY_CHANNEL: &str = "eventstore_events";
+ const NOTIFY_BROADCAST_CAPACITY: usize = 256;
+ const FALLBACK_POLL_SECS: u64 = 5;
+ 
++/// First key of the two-key advisory lock that orders appends per tenant, so
++/// it cannot collide with any other advisory lock in the database. Arbitrary,
++/// fixed: changing it while two versions run side by side breaks the ordering.
++const APPEND_ORDER_LOCK_NAMESPACE: i32 = 0x0E5_1545;
++
+ /// Payload sent via PostgreSQL NOTIFY and the in-process broadcast channel.
+ /// Format: `"{tenant_id}:{last_global_nonce}"`.
+ #[derive(Debug, Clone)]
+@@ -390,6 +395,29 @@ impl EventStoreTrait for PostgresStore {
+             }
+         }
+ 
++        // Commit order must equal global_nonce order (syntropic137#1545).
++        //
++        // global_nonce is a BIGSERIAL: `nextval()` hands it out at INSERT, but
++        // the row only becomes visible at COMMIT. Without this lock a slow
++        // append can hold nonce N while a faster one commits N+1; a subscriber
++        // polling `global_nonce > cursor` then yields N+1, advances past N, and
++        // never sees N even after it commits. Nothing errors: the event is in
++        // the store, behind every cursor. That is how a WorkflowExecutionStarted
++        // at 39502 was skipped by every projection in syntropic137#1545.
++        //
++        // Held from before the first nonce is drawn until commit/rollback, so
++        // the next append for this tenant cannot draw a nonce until this one is
++        // visible. Per tenant because subscriptions are per tenant. Taken last,
++        // after every row lock above, so it cannot join a lock cycle. Cost: one
++        // tenant's inserts-to-commit are serialized - throughput, not
++        // correctness, and the window is the INSERTs plus COMMIT only.
++        sqlx::query("SELECT pg_advisory_xact_lock($1, hashtext($2))")
++            .bind(APPEND_ORDER_LOCK_NAMESPACE)
++            .bind(&tenant_id)
++            .execute(&mut *tx)
++            .await
++            .map_err(map_db_error)?;
++
+         let mut last_global_nonce = current_last_global;
+         let mut assigned_events: Vec<proto::EventData> = Vec::with_capacity(events.len());
+         for mut ev in events.into_iter() {
+diff --git a/event-store/eventstore-backend-postgres/tests/it_commit_order.rs b/event-store/eventstore-backend-postgres/tests/it_commit_order.rs
+new file mode 100644
+index 0000000..08554ba
+--- /dev/null
++++ b/event-store/eventstore-backend-postgres/tests/it_commit_order.rs
+@@ -0,0 +1,177 @@
++//! A live subscriber must see every committed event, whatever order the
++//! appending transactions commit in (syntropic137#1545).
++//!
++//! `global_nonce` comes from a sequence, so it is handed out when an append
++//! INSERTs, not when it commits. If a slow append holds nonce N while a fast
++//! one commits N+1, a subscriber polling `global_nonce > cursor` sees N+1,
++//! advances past N, and never sees N even after it commits. No error is
++//! raised anywhere: the event is in the store, just behind the cursor.
++mod common;
++
++use std::time::Duration;
++
++use eventstore_backend_postgres::PostgresStore;
++use eventstore_core::proto;
++use eventstore_core::EventStore;
++use futures::StreamExt;
++
++const TENANT: &str = "tenant-commit-order";
++const SLOW_PREFIX: &str = "CommitOrderSlow-";
++
++fn event(aggregate_id: &str, event_type: &str) -> proto::EventData {
++    proto::EventData {
++        meta: Some(proto::EventMetadata {
++            event_id: format!("{aggregate_id}-{event_type}"),
++            aggregate_id: aggregate_id.into(),
++            aggregate_type: "CommitOrder".into(),
++            aggregate_nonce: 1,
++            event_type: event_type.into(),
++            event_version: 1,
++            content_type: "application/json".into(),
++            tenant_id: TENANT.into(),
++            ..Default::default()
++        }),
++        payload: b"{}".to_vec(),
++    }
++}
++
++fn append_request(aggregate_id: &str, event_type: &str) -> proto::AppendRequest {
++    proto::AppendRequest {
++        tenant_id: TENANT.into(),
++        aggregate_id: aggregate_id.into(),
++        aggregate_type: "CommitOrder".into(),
++        expected_aggregate_nonce: 0,
++        idempotency_key: String::new(),
++        events: vec![event(aggregate_id, event_type)],
++    }
++}
++
++/// Holds any append to a `CommitOrderSlow-*` aggregate open for 600ms AFTER
++/// its row (and so its global_nonce) exists, standing in for a slow commit.
++async fn install_slow_commit_trigger(store: &PostgresStore) {
++    sqlx::query(
++        r#"
++        CREATE OR REPLACE FUNCTION commit_order_test_slow_commit() RETURNS trigger AS $$
++        BEGIN
++            IF NEW.aggregate_id LIKE 'CommitOrderSlow-%' THEN
++                PERFORM pg_sleep(0.6);
++            END IF;
++            RETURN NEW;
++        END
++        $$ LANGUAGE plpgsql
++        "#,
++    )
++    .execute(store.pool())
++    .await
++    .expect("create slow-commit function");
++    sqlx::query("DROP TRIGGER IF EXISTS trg_commit_order_test_slow ON events")
++        .execute(store.pool())
++        .await
++        .expect("drop slow-commit trigger");
++    sqlx::query(
++        "CREATE TRIGGER trg_commit_order_test_slow AFTER INSERT ON events \
++         FOR EACH ROW EXECUTE FUNCTION commit_order_test_slow_commit()",
++    )
++    .execute(store.pool())
++    .await
++    .expect("create slow-commit trigger");
++}
++
++#[tokio::test]
++async fn live_subscriber_receives_an_event_whose_append_commits_after_a_later_nonce() {
++    let url = common::get_test_database_url().await;
++    let store = PostgresStore::connect_for_tests(&url)
++        .await
++        .expect("connect");
++    install_slow_commit_trigger(&store).await;
++
++    let run = std::time::SystemTime::now()
++        .duration_since(std::time::UNIX_EPOCH)
++        .unwrap()
++        .as_nanos();
++    let slow_id = format!("{SLOW_PREFIX}{run}");
++    let fast_id = format!("CommitOrderFast-{run}");
++
++    // Subscribe from the current head so only this test's events arrive.
++    let head = store
++        .read_all(proto::ReadAllRequest {
++            tenant_id: TENANT.into(),
++            from_global_nonce: u64::MAX >> 1,
++            max_count: 1,
++            forward: false,
++        })
++        .await
++        .expect("read head")
++        .events
++        .first()
++        .and_then(|e| e.meta.as_ref().map(|m| m.global_nonce))
++        .unwrap_or(0);
++    let mut stream = store.subscribe(proto::SubscribeRequest {
++        tenant_id: TENANT.into(),
++        aggregate_id_prefix: String::new(),
++        from_global_nonce: head + 1,
++    });
++
++    // Drain replay until the caught-up marker, so the subscriber is live.
++    loop {
++        match tokio::time::timeout(Duration::from_secs(2), stream.next()).await {
++            Ok(Some(Ok(resp))) if resp.event.is_none() => break,
++            Ok(Some(Ok(_))) => continue,
++            other => panic!("subscriber did not reach live: {other:?}"),
++        }
++    }
++
++    // Slow append takes nonce N and holds its transaction open.
++    let slow_store = store.clone();
++    let slow_req = append_request(&slow_id, "Started");
++    let slow = tokio::spawn(async move { slow_store.append(slow_req).await });
++    tokio::time::sleep(Duration::from_millis(150)).await;
++
++    // Fast append for another aggregate: nonce N+1, committed while N is not.
++    let fast = store
++        .append(append_request(&fast_id, "Other"))
++        .await
++        .expect("fast append");
++
++    // Read the subscription WHILE the slow append is still open - this is a
++    // live subscriber, it polls when woken, not when the test is ready.
++    let mut seen: Vec<(String, u64)> = Vec::new();
++    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
++    while seen.len() < 2 {
++        let Ok(next) = tokio::time::timeout_at(deadline, stream.next()).await else {
++            break;
++        };
++        match next {
++            Some(Ok(resp)) => {
++                if let Some(ev) = resp.event {
++                    let meta = ev.meta.expect("meta");
++                    seen.push((meta.aggregate_id, meta.global_nonce));
++                }
++            }
++            Some(Err(e)) => panic!("subscribe error: {e:?}"),
++            None => break,
++        }
++    }
++
++    let slow = slow.await.expect("join").expect("slow append");
++    assert!(
++        slow.last_global_nonce < fast.last_global_nonce,
++        "precondition: the slow append must have taken the lower nonce \
++         (slow={}, fast={})",
++        slow.last_global_nonce,
++        fast.last_global_nonce
++    );
++
++    let ids: Vec<&str> = seen.iter().map(|(id, _)| id.as_str()).collect();
++    assert!(
++        ids.contains(&slow_id.as_str()),
++        "the subscriber never delivered the event at global nonce {} although it is \
++         committed; it saw only {seen:?} (syntropic137#1545)",
++        slow.last_global_nonce
++    );
++    let nonces: Vec<u64> = seen.iter().map(|(_, n)| *n).collect();
++    assert!(
++        nonces.windows(2).all(|w| w[0] < w[1]),
++        "events must arrive in global_nonce order, got {seen:?}"
++    );
++}
+-- 
+2.39.5
+
