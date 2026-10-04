@@ -110,6 +110,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
+        ExecutionDetachedFromEvalEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
     )
@@ -978,7 +981,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._eval = self._eval.with_attached(evt(event, "eval_id"))
 
     @event_sourcing_handler("ExecutionDetachedFromEval")
-    def on_detached_from_eval(self, _event: object) -> None:
+    def on_detached_from_eval(self, _event: ExecutionDetachedFromEvalEvent) -> None:
         """Apply ExecutionDetachedFromEvalEvent. The launch record stays."""
         self._eval = self._eval.detached()
 

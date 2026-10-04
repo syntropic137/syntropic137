@@ -82,13 +82,11 @@ from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRe
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    EvalId,
     FailureClassification,
     ReportedFailureReason,
     SideEffectStatus,
     TagSet,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_eval import (
-    EvalId,  # noqa: TC001 — Pydantic field type
 )
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default

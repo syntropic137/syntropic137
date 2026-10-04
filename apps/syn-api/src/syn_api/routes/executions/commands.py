@@ -40,17 +40,15 @@ from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
     EvalChoice,
+    EvalId,
     EvalUnavailableError,
     SkillError,
     SkillRef,
     TagSet,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
+    open_eval,
     validate_phase_declarations,
-)
-from syn_domain.contexts.orchestration._shared.eval_admission import open_eval
-from syn_domain.contexts.orchestration.domain.aggregate_eval import (
-    EvalId,  # noqa: TC001 — Pydantic field type
 )
 from syn_shared.agents import (
     AgentProvider,

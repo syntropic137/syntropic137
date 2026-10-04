@@ -24,7 +24,10 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,
 )
-from syn_domain.contexts.orchestration._shared.eval_admission import EvalUnavailableError
+from syn_domain.contexts.orchestration._shared.eval_admission import (
+    EvalUnavailableError,
+    open_eval,
+)
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
 from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
     EvalMembershipResult,
@@ -75,6 +78,7 @@ from syn_domain.contexts.orchestration.domain import (
     WorkflowTemplateAggregate,
     WorkspaceAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
     ResumeExecutionCommand,
@@ -265,6 +269,7 @@ __all__ = [
     # Errors
     "DuplicateExecutionError",
     "EvalChoice",
+    "EvalId",
     "EvalMembershipResult",
     "EvalUnavailableError",
     # Value objects - execution
@@ -345,6 +350,7 @@ __all__ = [
     "inherited_outputs",
     "is_phase_id",
     "mint_wrapper_name",
+    "open_eval",
     "read_record",
     "refuse_resume_start",
     "render_workspace_prompt",

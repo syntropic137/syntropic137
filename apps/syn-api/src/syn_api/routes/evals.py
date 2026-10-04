@@ -41,11 +41,11 @@ from syn_domain.contexts.orchestration import (
     AttachExecutionToEvalHandler,
     DetachExecutionFromEvalCommand,
     DetachExecutionFromEvalHandler,
+    EvalId,
     EvalUnavailableError,
     SetWorkflowDefaultEvalCommand,
     SetWorkflowDefaultEvalHandler,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import EvalMembershipResult
