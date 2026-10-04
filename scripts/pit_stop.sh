@@ -305,10 +305,17 @@ if [ "$DRY" = 0 ]; then
     # container was created from, and a tag is mutable: a container built from
     # the PREVIOUS bytes behind this same tag prints exactly what a correct
     # deploy prints. The id is the thing that actually changed.
+    #
+    # Every read guarded with `|| die`: under `set -e` a failed assignment exits
+    # on the spot, skipping die() and the RECOVERY it prints while admission is
+    # paused. An unreachable host is exactly when the operator needs it (#1575).
     for svc in api gateway; do
-        want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")"
-        got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")"
-        up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")"
+        want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")" \
+            || die "could not read the id of image syn-$svc:$TAG on $HOST"
+        got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")" \
+            || die "could not inspect syn137-$svc on $HOST"
+        up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")" \
+            || die "could not inspect syn137-$svc on $HOST"
         printf '   syn137-%s: running=%s image=%s\n' "$svc" "$up" "$got"
         [ "$up" = true ] || die "syn137-$svc is not running after the swap"
         [ "$got" = "$want" ] || die "syn137-$svc is not running the image tagged $TAG (has $got, wanted $want)"
