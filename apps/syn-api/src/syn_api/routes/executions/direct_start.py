@@ -30,12 +30,14 @@ logger = logging.getLogger(__name__)
 async def record_execution_request(
     command: RequestExecutionCommand, admitted: AdmissionTicket
 ) -> None:
-    """Write the request's `ExecutionRequested`, then end the admission lease.
+    """Write the request's `ExecutionRequested` before the caller hears 200.
 
-    Called inside the gate (#1387). Once the request is durable the drain need
-    not wait for its start: a deploy that restarts the API leaves it to the
-    request ProcessManager, which re-admits it through the gate. A write that
-    fails raises - the caller answers 500 and nothing was admitted.
+    Called inside the gate (#1387). The admission lease is NOT ended here: the
+    start still waits for a budget slot, and a planned drain keeps waiting for
+    it exactly as it does for a queued trigger start. What the record adds is
+    the crash case: a process that dies anyway leaves a request the request
+    ProcessManager starts. A write that fails ends the lease and raises - the
+    caller answers 500 and nothing was admitted.
     """
     from syn_adapters.storage.repositories import get_execution_request_repository
     from syn_domain.contexts.orchestration import ExecutionRequestAggregate
@@ -47,7 +49,6 @@ async def record_execution_request(
     except BaseException:
         admitted.abort()
         raise
-    admitted.mark_visible()
 
 
 def queue_direct_start(
@@ -68,8 +69,10 @@ def queue_direct_start(
     claim = budget.claim(execution_id, workflow_id=workflow_id, path=StartPath.DIRECT)
 
     async def _run() -> None:
-        # The lease already ended at the durable request (#1387, #1557);
-        # `carrying` is the backstop for a caller that queues without one.
+        # #1387: the lease, carried across the hop that used to spend it. It
+        # ends inside `execute()` when the execution's start event is durable,
+        # or here if this task produced no execution at all, and it spans the
+        # wait for a budget slot, as on the trigger path.
         with carrying(admitted):
             try:
                 async with budget.held(claim):
