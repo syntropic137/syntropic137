@@ -12,7 +12,7 @@ export interface PhaseStartPinsAnswer {
   status: StartPinsStatus
 }
 
-/** The answer for `sessionId`'s phase, or `undefined` if the phase is not listed yet. */
+/** The answer for the given session's phase, or `undefined` if the phase is not listed yet. */
 function answerFor(
   execution: ExecutionDetailResponse,
   sessionId: string,
@@ -48,7 +48,7 @@ function askUntilAnswered(
 }
 
 /**
- * What the phase that ran `sessionId` had at start (#1454), for a session page.
+ * What the phase that ran the given session had at start (#1454), for a session page.
  *
  * The pins are fixed when the execution starts, so once the server has
  * answered `recorded` or `not_recorded` nothing is asked again. Until then it
