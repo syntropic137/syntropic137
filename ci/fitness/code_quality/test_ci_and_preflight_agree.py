@@ -188,7 +188,9 @@ def test_only_the_agent_gate_lets_a_missing_host_tool_skip() -> None:
 
 
 class _ItemNeeding:
-    """The one thing the skip hook reads from a pytest item: its markers."""
+    """What the skip hook reads from a pytest item: its id and markers."""
+
+    nodeid = "ci/fitness/test_example.py::test_needs_a_tool"
 
     def __init__(self, tool: str) -> None:
         self._mark = pytest.mark.host_tool(tool).mark
@@ -204,7 +206,7 @@ def test_a_missing_host_tool_skips_as_not_run_in_the_agent_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(AGENT_WORKSPACE_ENV, "1")
-    with pytest.raises(pytest.skip.Exception, match=f"NOT RUN.*`{_ABSENT}`"):
+    with pytest.raises(pytest.skip.Exception, match=f"NOT RUN.*{_ItemNeeding.nodeid}.*`{_ABSENT}`"):
         pytest_runtest_setup(_ItemNeeding(_ABSENT))  # type: ignore[arg-type]
 
 

@@ -80,6 +80,6 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         tool = str(mark.args[0])
         if shutil.which(tool) is None:
             pytest.skip(
-                f"NOT RUN in agent workspace: no `{tool}` on PATH (#1109). "
-                "CI's Architectural Fitness job runs it."
+                f"NOT RUN in agent workspace: {item.nodeid} needs `{tool}`, "
+                "which is not on PATH (#1109). CI's Architectural Fitness job runs it."
             )
