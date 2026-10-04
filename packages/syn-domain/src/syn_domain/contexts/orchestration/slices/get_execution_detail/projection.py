@@ -31,9 +31,6 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent imp
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
     ExecutionTagsRemovedEvent,
 )
-from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
-    PhaseDeadlineSetEvent,
-)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -296,23 +293,6 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             phases.append(phase.to_dict())
             existing["phases"] = phases
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
-
-    async def on_phase_deadline_set(self, event_data: PhaseDeadlineSetEvent) -> None:
-        """Handle PhaseDeadlineSet: the deadline the phase's agent was told (#1546).
-
-        Overwrites, because each attempt's clock is a fresh one and the latest
-        is the one the running attempt is held to.
-        """
-        event = PhaseDeadlineSetEvent.model_validate(event_data)
-        existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
-        if not existing:
-            return
-        found = self._find_phase(existing.get("phases", []), event.phase_id)
-        if found is None:
-            return
-        _, phase = found
-        phase["deadline"] = event.deadline.isoformat()
-        await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
 
     @staticmethod
     def _update_phase_metrics(phase: dict[str, Any], event_data: dict) -> None:

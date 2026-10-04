@@ -29,7 +29,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     InterruptExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
-    RecordPhaseDeadlineCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
@@ -113,9 +112,6 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
         PhaseCompletedEvent,
-    )
-    from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
-        PhaseDeadlineSetEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
         PhaseRetryScheduledEvent,
@@ -541,26 +537,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
-    @command_handler("RecordPhaseDeadlineCommand")
-    def record_phase_deadline(self, command: RecordPhaseDeadlineCommand) -> None:
-        """Handle RecordPhaseDeadlineCommand — the running phase's clock started (#1546)."""
-        from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
-            PhaseDeadlineSetEvent,
-        )
-
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot record a phase deadline in status {self._status}"
-            raise ValueError(msg)
-
-        event = PhaseDeadlineSetEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            deadline=command.deadline,
-            timeout_seconds=command.timeout_seconds,
-        )
-        self._apply(event)
-
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
         """Handle CompletePhaseCommand."""
@@ -901,10 +877,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """
         self._running_phase_id = None
         self._phase_artifact_ids.pop(evt(event, "phase_id"), None)
-
-    @event_sourcing_handler("PhaseDeadlineSet")
-    def on_phase_deadline_set(self, event: PhaseDeadlineSetEvent) -> None:
-        """Apply PhaseDeadlineSetEvent — a fact for readers; no decision here reads it."""
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:

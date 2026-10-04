@@ -46,14 +46,12 @@ from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE, ENV_SYN_PHASE_TIMEO
 from .invocation_attempt import invocation_environment, registered_attempt
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-    from datetime import datetime
-
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+        PhaseAttempts,
         UpstreamRetryPolicy,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -73,11 +71,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _phase_deadline_environment(deadline: datetime, timeout_seconds: int) -> dict[str, str]:
+def _phase_deadline_environment(attempts: PhaseAttempts) -> dict[str, str]:
     """What the agent is told about its clock: when it ends, and out of how much."""
     return {
-        ENV_SYN_PHASE_DEADLINE: deadline.isoformat(),
-        ENV_SYN_PHASE_TIMEOUT_SECONDS: str(timeout_seconds),
+        ENV_SYN_PHASE_DEADLINE: attempts.deadline.isoformat(timespec="seconds"),
+        ENV_SYN_PHASE_TIMEOUT_SECONDS: str(int(attempts.timeout_seconds)),
     }
 
 
@@ -152,7 +150,6 @@ async def run_phase_agent(
     session_id: str,
     observability: ObservabilityRecorder | None,
     retry_policy: UpstreamRetryPolicy,
-    record_deadline: Callable[[datetime, int], Awaitable[None]] | None = None,
 ) -> AgentExecutionResult:
     """Run this phase's agent and return the result it ends on.
 
@@ -185,17 +182,7 @@ async def run_phase_agent(
     # The agent is told that deadline, read off the same object that enforces
     # it, because it cannot see a clock and phases died at 124 holding
     # finished, unpushed work (#1546).
-    # Whole seconds, rounded down: that is the precision the agent is told,
-    # and a deadline early by under a second is the safe direction to be wrong.
-    deadline = attempts.deadline.replace(microsecond=0)
-    budget = int(attempts.timeout_seconds)
-    agent_env = {**launch.agent_env, **_phase_deadline_environment(deadline, budget)}
-    # And recorded, as the same value, before anything is dispatched: the
-    # execution detail serves THIS, so an operator and the agent see one
-    # deadline (#1546). `PhaseStarted.started_at` plus the budget is not it -
-    # the phase starts before provisioning, the clock only here.
-    if record_deadline is not None:
-        await record_deadline(deadline, budget)
+    agent_env = {**launch.agent_env, **_phase_deadline_environment(attempts)}
     # NO ATTEMPT IS DISPATCHED ON A TIMEOUT THIS FRAME COMPUTED. Every one runs
     # on the number inside an `AttemptGrant`, which `busy_upstream` produced
     # from the same reading of the clock that approved the attempt. This loop

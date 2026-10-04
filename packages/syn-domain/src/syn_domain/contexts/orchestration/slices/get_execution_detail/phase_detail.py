@@ -65,15 +65,6 @@ class PhaseDetail:
     ``None`` means the run stated no phase definitions, which is every
     execution started without them; it is not a budget of zero.
     """
-    deadline: str | None = None
-    """When this phase's agent is killed on its budget, as recorded by
-    ``PhaseDeadlineSet`` the moment its clock started (#1546), or ``None``
-    while no clock has started.
-
-    NOT ``started_at`` plus ``timeout_seconds``: the phase starts before its
-    workspace is provisioned and the clock only after, so that sum is early by
-    the provisioning time. This is the value the agent is told.
-    """
     error_message: str | None = None
     observed_branches: list[object] | None = None
     """How this phase's branches stood when it died (#1200), as stored.
@@ -194,7 +185,6 @@ class PhaseDetail:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "timeout_seconds": self.timeout_seconds,
-            "deadline": self.deadline,
             "error_message": self.error_message,
             "observed_branches": self.observed_branches,
             "exit_code": self.exit_code,
@@ -220,7 +210,6 @@ class PhaseDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             timeout_seconds=data.get("timeout_seconds"),
-            deadline=data.get("deadline"),
             error_message=data.get("error_message"),
             observed_branches=data.get("observed_branches"),
             exit_code=data.get("exit_code"),

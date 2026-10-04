@@ -100,7 +100,7 @@ def summarize_phase_activity(
             telemetry_available=False,
             elapsed_seconds=elapsed_seconds,
             timeout_seconds=phase.timeout_seconds,
-            deadline=resolve_deadline(phase.deadline),
+            deadline=resolve_deadline(phase.started_at, phase.timeout_seconds),
         )
 
     last_push = _last_push_at(operations)
@@ -124,5 +124,5 @@ def summarize_phase_activity(
         ),
         elapsed_seconds=elapsed_seconds,
         timeout_seconds=phase.timeout_seconds,
-        deadline=resolve_deadline(phase.deadline),
+        deadline=resolve_deadline(phase.started_at, phase.timeout_seconds),
     )

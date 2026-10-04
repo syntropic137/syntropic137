@@ -1278,15 +1278,15 @@ class PhaseActivityInfo(BaseModel):
     """
 
     deadline: datetime | None = None
-    """When this phase's agent is killed on its budget, in UTC (#1546).
+    """``started_at`` plus ``timeout_seconds``: the EARLIEST the phase can be
+    killed on its budget (#1546), in UTC.
 
-    The value the agent itself is told as ``SYN_PHASE_DEADLINE``, recorded
-    when its clock started. Not ``started_at`` plus ``timeout_seconds``: the
-    clock starts after the workspace is provisioned, so that sum is early by
-    the provisioning time - which is why phases run past their nominal limit.
+    Earliest, not exact. The budget's clock starts once the workspace is
+    provisioned, after ``started_at``, so the kill lands later by however long
+    provisioning took - which is why phases run past their nominal limit. The
+    agent itself is told the exact time, as ``SYN_PHASE_DEADLINE``.
 
-    ``None`` while no clock has started, or for a phase recorded before the
-    deadline was.
+    ``None`` when the start or the budget is unknown.
     """
 
 

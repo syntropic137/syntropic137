@@ -41,14 +41,6 @@ A Phase is completed only when the Execution recorded it so. A Phase that
 started and did not complete has no partial credit: there is no mid-phase
 resume.
 
-## Phase Deadline
-
-When a Phase's agent is killed on its timeout, fixed once its clock starts
-(`PhaseDeadlineSet`, #1546). The clock starts after the workspace is
-provisioned, not at `PhaseStarted`, so the deadline is NOT the Phase's start
-plus its timeout. It is the value the agent is told as `SYN_PHASE_DEADLINE`
-and the one the execution detail serves; each attempt records its own.
-
 ## Workflow
 
 The definition a run is made from - its Phases and their configuration.

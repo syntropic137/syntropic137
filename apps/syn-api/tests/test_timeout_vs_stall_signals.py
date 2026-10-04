@@ -32,9 +32,6 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.projections.session_tools import ToolOperation
 from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
-from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
-    PhaseDeadlineSetEvent,
-)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -56,10 +53,6 @@ BUDGET_SECONDS = 3600
 
 PHASE_STARTED_AT = datetime(2026, 9, 17, 10, 0, 0, tzinfo=UTC)
 #: The kill: past the cap by the ~20s of teardown a real timeout overshoots by.
-#: When the agent's clock started: after the workspace was provisioned, two
-#: minutes past the phase's start. The deadline runs from HERE (#1546).
-CLOCK_STARTED_AT = PHASE_STARTED_AT + timedelta(seconds=120)
-TOLD_DEADLINE = CLOCK_STARTED_AT + timedelta(seconds=BUDGET_SECONDS)
 PHASE_DIED_AT = PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS + 21)
 
 #: "Pushed 90 seconds before dying" - the reading that says it was working.
@@ -170,7 +163,6 @@ async def _phase_as_an_api_client_sees_it(
     telemetry_raises: bool = False,
     died_at: datetime = PHASE_DIED_AT,
     session_id: str | None = SESSION_ID,
-    clock_started: bool = True,
 ) -> PhaseExecutionInfo:
     """Drive a timed-out phase from its events to the served response model.
 
@@ -223,16 +215,6 @@ async def _phase_as_an_api_client_sees_it(
             "started_at": PHASE_STARTED_AT.isoformat(),
         }
     )
-    if clock_started and budgeted:
-        await projection.on_phase_deadline_set(
-            PhaseDeadlineSetEvent(
-                workflow_id="wf-1262",
-                execution_id=EXECUTION_ID,
-                phase_id=PHASE_ID,
-                deadline=TOLD_DEADLINE,
-                timeout_seconds=BUDGET_SECONDS,
-            ).model_dump(mode="json")  # pyright: ignore[reportArgumentType]
-        )
     await projection.on_workflow_failed(
         {
             "execution_id": EXECUTION_ID,
@@ -418,27 +400,11 @@ async def test_a_run_that_stated_no_budget_says_so_rather_than_guessing() -> Non
 
 
 @pytest.mark.anyio
-async def test_the_served_deadline_is_the_one_the_agent_was_told() -> None:
-    """#1546: the recorded deadline, not the phase's start plus its budget.
-
-    The phase started two minutes before its clock did, so the derivation
-    would be two minutes early - a deadline the agent was never held to.
-    """
+async def test_the_served_deadline_is_the_start_plus_the_budget() -> None:
+    """#1546: the earliest the phase can be killed, served beside the budget."""
     activity = (await _phase_as_an_api_client_sees_it(_busy_timeline())).activity
 
-    assert activity.deadline == TOLD_DEADLINE
-    assert activity.deadline != PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS)
-
-
-@pytest.mark.anyio
-async def test_no_deadline_is_served_before_the_clock_started() -> None:
-    """A phase still provisioning has a budget and no deadline yet; none is invented."""
-    activity = (
-        await _phase_as_an_api_client_sees_it(_busy_timeline(), clock_started=False)
-    ).activity
-
-    assert activity.timeout_seconds == BUDGET_SECONDS
-    assert activity.deadline is None
+    assert activity.deadline == PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS)
 
 
 @pytest.mark.anyio
@@ -680,7 +646,7 @@ async def test_an_unreadable_timeline_still_says_whether_the_cap_was_reached() -
 
     assert activity.timeout_seconds == BUDGET_SECONDS
     assert activity.elapsed_seconds == float(BUDGET_SECONDS + 21)
-    assert activity.deadline == TOLD_DEADLINE
+    assert activity.deadline == PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS)
 
 
 # -- the cap, and the 124 that is not the cap --------------------------------
