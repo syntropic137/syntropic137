@@ -185,9 +185,12 @@ if [ "$MODE" != "swap" ]; then
     BAK="$(python3 "$(dirname "$0")/pit_stop_repoint.py" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
     if [ -n "$BAK" ]; then
-        # Written beside the file and renamed over it, so a dropped connection
-        # leaves the old compose in place rather than half of the new one.
-        run remote "cd $COMPOSE_DIR && cp $COMPOSE $COMPOSE.bak-$BAK && cat > $COMPOSE.pit-stop && mv $COMPOSE.pit-stop $COMPOSE" < "$TMP/compose.staged"
+        # Written beside the file, checked against the staged checksum, and only
+        # then renamed over it. `cat` exits 0 on a short read, so without the
+        # check a dropped transfer would install half a compose file.
+        SUM="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.staged")"
+        run remote "cd $COMPOSE_DIR && cat > $COMPOSE.pit-stop && echo '$SUM  $COMPOSE.pit-stop' | sha256sum -c --status - && cp $COMPOSE $COMPOSE.bak-$BAK && mv $COMPOSE.pit-stop $COMPOSE || { rm -f $COMPOSE.pit-stop; exit 1; }" < "$TMP/compose.staged" \
+            || die "the staged compose did not arrive intact on $HOST; the deployed file is unchanged"
         if [ "$DRY" = 0 ]; then
             remote "cat $COMPOSE_DIR/$COMPOSE" | cmp -s - "$TMP/compose.staged" || die "the compose on $HOST is not the one staged; the backup is $COMPOSE.bak-$BAK"
             echo "   backed up to $COMPOSE.bak-$BAK"

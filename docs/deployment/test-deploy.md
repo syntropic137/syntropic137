@@ -61,7 +61,11 @@ images are unpushed and have no digest - by `scripts/pit_stop_repoint.py`. The
 old file is kept beside it as `docker-compose.syntropic137.yaml.bak-<pin>`,
 where `<pin>` is the old `syn-api` tag (`bak-v0.33.1`) or the first 12 hex of
 its digest (`bak-sha256-bf783882d031`). Anything else - a variable pin, no pin,
-two `syn-api` lines - aborts `stage` before the host is touched.
+two `syn-api` lines - aborts `stage` before the host is touched. The new file
+is written beside the deployed one and checked against the staged sha256
+before anything else happens. Only then is the backup taken and the new file
+renamed into place, so a transfer cut short leaves the deployed compose as it
+was.
 
 The sections below remain the reference for what each stage does and why.
 
