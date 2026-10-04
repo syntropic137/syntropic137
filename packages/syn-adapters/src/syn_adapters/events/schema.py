@@ -182,13 +182,15 @@ SET first_time = EXCLUDED.first_time,
     commits    = EXCLUDED.commits;
 """
 
-# Is the rollup still being maintained? See _rollup_is_complete().
-ROLLUP_TRIGGER_LIVE_SQL = """
+
+def trigger_live_sql(trigger: str) -> str:
+    """Is the named trigger on agent_events attached AND firing? See _rollup_is_complete()."""
+    return f"""
 SELECT EXISTS (
     SELECT 1
     FROM pg_trigger
     WHERE tgrelid = to_regclass('agent_events')
-      AND tgname = 'agent_events_day_rollup'
+      AND tgname = '{trigger}'
       -- Only 'O' (origin) and 'A' (always) fire for the ordinary, origin-mode
       -- inserts the application makes. 'D' is disabled, and 'R' (ENABLE REPLICA
       -- TRIGGER) fires only under session_replication_role = replica - so both
@@ -196,6 +198,10 @@ SELECT EXISTS (
       AND tgenabled IN ('O', 'A')
 )
 """
+
+
+# Is the rollup still being maintained? See _rollup_is_complete().
+ROLLUP_TRIGGER_LIVE_SQL = trigger_live_sql("agent_events_day_rollup")
 
 # One stable key for the whole rollup schema step (#1371). Derived from a name
 # the way PostgresImportLedger derives its keys, rather than picked as a magic
@@ -344,14 +350,7 @@ USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
     ">q", hashlib.blake2b(b"agent_usage_rollup:schema", digest_size=8).digest()
 )[0]
 
-_TRIGGER_LIVE_SQL = """
-SELECT EXISTS (
-    SELECT 1 FROM pg_trigger
-    WHERE tgrelid = to_regclass('agent_events')
-      AND tgname = $1
-      AND tgenabled IN ('O', 'A')
-)
-"""
+USAGE_ROLLUP_TRIGGER = "agent_events_usage_rollup"
 
 
 class SchemaValidationError(Exception):
@@ -620,26 +619,23 @@ class EventStoreSchema:
         """
         async with conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
-            tables_exist: bool = (
-                await conn.fetchval(
-                    "SELECT to_regclass($1) IS NOT NULL AND to_regclass($2) IS NOT NULL",
-                    SUMMARY_USAGE_TABLE,
-                    TURN_USAGE_ROLLUP_TABLE,
-                )
-            ) is True
+            tables_exist = [
+                (await conn.fetchval(f"SELECT to_regclass('{table}') IS NOT NULL")) is True
+                for table in (SUMMARY_USAGE_TABLE, TURN_USAGE_ROLLUP_TABLE)
+            ]
             trigger_is_live: bool = (
-                await conn.fetchval(_TRIGGER_LIVE_SQL, "agent_events_usage_rollup")
+                await conn.fetchval(trigger_live_sql(USAGE_ROLLUP_TRIGGER))
             ) is True
             for ddl in USAGE_ROLLUP_TABLES_SQL:
                 await conn.execute(ddl)
             await conn.execute(USAGE_ROLLUP_TRIGGER_FUNCTION_SQL)
-            await conn.execute("DROP TRIGGER IF EXISTS agent_events_usage_rollup ON agent_events")
-            await conn.execute("""
-                CREATE TRIGGER agent_events_usage_rollup
+            await conn.execute(f"DROP TRIGGER IF EXISTS {USAGE_ROLLUP_TRIGGER} ON agent_events")
+            await conn.execute(f"""
+                CREATE TRIGGER {USAGE_ROLLUP_TRIGGER}
                 AFTER INSERT ON agent_events
                 FOR EACH ROW EXECUTE FUNCTION agent_usage_rollup_apply()
             """)
-            if not (tables_exist and trigger_is_live):
+            if not (all(tables_exist) and trigger_is_live):
                 for statement in USAGE_ROLLUP_BACKFILL_SQL:
                     await conn.execute(statement)
 
