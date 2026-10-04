@@ -383,6 +383,21 @@ async def seed(pool: asyncpg.Pool, now: datetime) -> None:
         await conn.execute("VACUUM ANALYZE")
 
 
+def use_timescale_timeline(pool: asyncpg.Pool) -> None:
+    """Read phase timelines from the hypertable, as production does.
+
+    Under APP_ENVIRONMENT=test the manager wires the in-memory timeline
+    (manager_registry.create_session_tools_projection), which would leave the
+    detail endpoint's per-phase timeline read out of the timing entirely.
+    """
+    from syn_adapters.projections.session_tools import SessionToolsProjection
+    from syn_api._wiring import get_projection_mgr
+
+    manager = get_projection_mgr()
+    manager._ensure_initialized()  # the registry is built lazily; replace after it is
+    manager._projections["session_tools"] = SessionToolsProjection(pool)
+
+
 @pytest.fixture
 async def app_on_seeded_postgres(
     gate_database: str, monkeypatch: pytest.MonkeyPatch
@@ -401,6 +416,7 @@ async def app_on_seeded_postgres(
     monkeypatch.setattr(store_helpers, "_event_store", store)
     monkeypatch.setattr(projection_stores, "_store_instance", PostgresProjectionStore(pool))
     reset_projection_manager()
+    use_timescale_timeline(pool)
 
     await seed(pool, datetime.now(UTC).replace(microsecond=0))
 
@@ -437,6 +453,7 @@ async def assert_timing_real_work(client: httpx.AsyncClient) -> None:
     ][-1]
     detail = (await client.get(ENDPOINTS[1].path)).json()
     assert len(detail["phases"]) == PHASES, detail
+    assert all(p["operations"] for p in detail["phases"]), detail["phases"]
     assert all(p["agent_session_ids"] for p in detail["phases"]), detail["phases"]
     sessions = (await client.get("/sessions", params={"page_size": "50"})).json()
     assert sessions["total"] == EXECUTIONS * PHASES, sessions["total"]
