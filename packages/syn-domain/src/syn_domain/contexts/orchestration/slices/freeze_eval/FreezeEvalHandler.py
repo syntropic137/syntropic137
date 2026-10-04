@@ -1,6 +1,7 @@
 """FreezeEval command handler (evals plan, #967).
 
-Fix the goal and baseline. Idempotent: launch admission sends it before every run.
+Fix the goal and baseline. Idempotent: launch admission sends it before every run,
+so two freezes racing from the same version both succeed and one is recorded.
 """
 
 from __future__ import annotations
@@ -41,4 +42,5 @@ class FreezeEvalHandler:
             command.aggregate_id,
             lambda aggregate: aggregate.freeze(command),
             self._event_publisher,
+            settled=lambda stored: stored.is_frozen,
         )

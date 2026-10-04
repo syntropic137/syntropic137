@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable, Callable
 
 # WHY: the in-memory event store asserts a non-production environment.
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -14,6 +15,7 @@ from event_sourcing.client.memory import MemoryEventStoreClient
 from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
+from syn_domain.contexts.orchestration.domain import HandlerResult  # noqa: TC001
 from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalAggregate, EvalId, Goal
 from syn_domain.contexts.orchestration.domain.commands.FreezeEvalCommand import (
     FreezeEvalCommand,
@@ -170,4 +172,73 @@ async def test_an_update_racing_a_freeze_loses_on_the_stream_version() -> None:
     assert [e.event.event_type for e in await stored_envelopes(client)] == [
         "EvalCreated",
         "EvalFrozen",
+    ]
+
+
+_Write = Callable[[RepositoryAdapter[EvalAggregate]], Awaitable["HandlerResult | None"]]
+
+
+async def _freeze(repository: RepositoryAdapter[EvalAggregate]) -> HandlerResult | None:
+    return await FreezeEvalHandler(repository).handle(eval_id=_ID)
+
+
+async def _archive(repository: RepositoryAdapter[EvalAggregate]) -> HandlerResult | None:
+    return await ArchiveEvalHandler(repository).handle(eval_id=_ID, archived_by="ops")
+
+
+async def _rename(repository: RepositoryAdapter[EvalAggregate]) -> HandlerResult | None:
+    return await UpdateEvalHandler(repository, _resolver()).handle(eval_id=_ID, name="Renamed")
+
+
+class _RivalWritesFirst(RepositoryAdapter[EvalAggregate]):
+    """Hands out the eval, but first lets ``rival`` write through its own handler.
+
+    Only the first read races: the reload after a conflict sees the truth.
+    """
+
+    def __init__(self, inner: RepositoryAdapter[EvalAggregate], rival: _Write) -> None:
+        super().__init__(inner.sdk_repository)
+        self._inner = inner
+        self._rival: _Write | None = rival
+        self.rival_result: HandlerResult | None = None
+
+    async def get_by_id(self, aggregate_id: str) -> EvalAggregate | None:
+        seen = await super().get_by_id(aggregate_id)
+        if self._rival is not None:
+            rival, self._rival = self._rival, None
+            self.rival_result = await rival(self._inner)
+        return seen
+
+
+@pytest.mark.parametrize(
+    ("write", "recorded"), [(_freeze, "EvalFrozen"), (_archive, "EvalArchived")]
+)
+async def test_duplicates_racing_from_one_version_both_succeed_and_write_once(
+    write: _Write, recorded: str
+) -> None:
+    client, repository = await _store_with_eval()
+    racing = _RivalWritesFirst(repository, rival=write)
+
+    result = await write(racing)
+
+    assert racing.rival_result is not None and racing.rival_result.success
+    assert result is not None and result.success
+    assert [e.event.event_type for e in await stored_envelopes(client)] == [
+        "EvalCreated",
+        recorded,
+    ]
+
+
+@pytest.mark.parametrize("write", [_freeze, _archive])
+async def test_a_switch_racing_a_different_write_still_conflicts(write: _Write) -> None:
+    """Only the SAME end state settles a lost race; a rename does not freeze anything."""
+    client, repository = await _store_with_eval()
+    racing = _RivalWritesFirst(repository, rival=_rename)
+
+    with pytest.raises(ConcurrencyConflictError):
+        await write(racing)
+
+    assert [e.event.event_type for e in await stored_envelopes(client)] == [
+        "EvalCreated",
+        "EvalUpdated",
     ]

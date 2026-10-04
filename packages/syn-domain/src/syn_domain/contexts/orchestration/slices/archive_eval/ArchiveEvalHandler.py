@@ -1,6 +1,6 @@
 """ArchiveEval command handler (evals plan, #967).
 
-Retire the eval. Idempotent; a frozen eval can be archived.
+Retire the eval. Idempotent, racing duplicates included; a frozen eval can be archived.
 """
 
 from __future__ import annotations
@@ -41,4 +41,5 @@ class ArchiveEvalHandler:
             command.aggregate_id,
             lambda aggregate: aggregate.archive(command),
             self._event_publisher,
+            settled=lambda stored: stored.is_archived,
         )
