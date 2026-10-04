@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import pytest
+from ci.fitness.conftest import AGENT_WORKSPACE_ENV, pytest_runtest_setup
 
 pytestmark = pytest.mark.architecture
 
@@ -126,21 +127,90 @@ def test_the_pre_push_hook_delegates_rather_than_listing_its_own_checks() -> Non
     )
 
 
-def test_preflight_agent_runs_fitness_and_preflight_runs_it_once() -> None:
-    """Agents gate on `preflight-agent`; it must run the fitness gate (#1498).
+def _body(target: str, text: str) -> str:
+    match = re.search(rf"^{re.escape(target)}:[^\n]*\n((?:[ \t]+[^\n]*\n)+)", text, re.MULTILINE)
+    return match.group(1) if match else ""
 
-    Without it, agent PRs shipped violations only CI caught. `preflight` runs
-    `fitness` itself, so it must NOT also reach `fitness-agent`, or CI would
-    run the whole topology scan twice.
+
+def test_preflight_agent_runs_both_halves_of_fitness() -> None:
+    """Agents gate on `preflight-agent`; it must run ALL of `fitness`.
+
+    `fitness` is two recipes. #1498 wired in `fitness-check` (the APS
+    thresholds) and believed fitness was covered; `fitness-invariants`, the
+    `pytest ci/fitness` suite, stayed out, and agent PRs went red on CI for
+    deep cross-context imports and untyped projection handlers that their
+    local gate never ran (#1562). So this follows each half from
+    `preflight-agent` down to the command CI's job ends in.
+
+    `preflight` runs `fitness` itself, so it must NOT also reach the agent
+    wrappers, or CI would run each half twice.
     """
     text = _JUSTFILE.read_text()
     agent = _closure("preflight-agent", text)
-    assert "fitness-agent" in agent, "`preflight-agent` no longer runs the fitness gate"
-    body = re.search(r"^fitness-agent:[^\n]*\n((?:[ \t]+[^\n]*\n)+)", text, re.MULTILINE)
-    assert body and "scripts/agent-fitness.sh" in body.group(1), (
+
+    assert "fitness-agent" in agent, "`preflight-agent` no longer runs fitness-check"
+    assert "scripts/agent-fitness.sh" in _body("fitness-agent", text), (
         "`fitness-agent` must run scripts/agent-fitness.sh, which ends in `just fitness-check`"
     )
 
+    assert "fitness-invariants-agent" in agent, (
+        "`preflight-agent` no longer runs the `pytest ci/fitness` invariants"
+    )
+    assert "just fitness-invariants\n" in _body("fitness-invariants-agent", text), (
+        "`fitness-invariants-agent` must call the `fitness-invariants` recipe itself, "
+        "not a copy of its command that can drift from CI's"
+    )
+    assert "pytest ci/fitness/ " in _body("fitness-invariants", text)
+    assert "-m architecture" in _body("fitness-invariants", text)
+
     full = _closure("preflight", text)
-    assert "fitness-check" in full
-    assert "fitness-agent" not in full, "`preflight` would run fitness-check twice"
+    assert {"fitness-check", "fitness-invariants"} <= full
+    assert not {"fitness-agent", "fitness-invariants-agent"} & full, (
+        "`preflight` would run a fitness half twice"
+    )
+
+
+def test_only_the_agent_gate_lets_a_missing_host_tool_skip() -> None:
+    """The skip switch must not reach CI.
+
+    `preflight` and CI promise docker, so there a `host_tool` test with no
+    docker must FAIL. If the variable that turns that into a skip leaked into
+    any recipe `preflight` runs, CI would go green over checks it never ran.
+    """
+    text = _JUSTFILE.read_text()
+    setters = {
+        target
+        for target in re.findall(r"^([a-z][a-z0-9-]*):", text, re.MULTILINE)
+        if AGENT_WORKSPACE_ENV in _body(target, text)
+    }
+    assert setters == {"fitness-invariants-agent"}, setters
+    assert not setters & _closure("preflight", text)
+
+
+class _ItemNeeding:
+    """The one thing the skip hook reads from a pytest item: its markers."""
+
+    def __init__(self, tool: str) -> None:
+        self._mark = pytest.mark.host_tool(tool).mark
+
+    def iter_markers(self, name: str) -> list[pytest.Mark]:
+        return [self._mark] if name == "host_tool" else []
+
+
+_ABSENT = "syn-no-such-binary-1109"
+
+
+def test_a_missing_host_tool_skips_as_not_run_in_the_agent_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(AGENT_WORKSPACE_ENV, "1")
+    with pytest.raises(pytest.skip.Exception, match=f"NOT RUN.*`{_ABSENT}`"):
+        pytest_runtest_setup(_ItemNeeding(_ABSENT))  # type: ignore[arg-type]
+
+
+def test_a_missing_host_tool_is_not_skipped_anywhere_else(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under `preflight` and CI the test runs, and fails on the missing binary."""
+    monkeypatch.delenv(AGENT_WORKSPACE_ENV, raising=False)
+    pytest_runtest_setup(_ItemNeeding(_ABSENT))  # type: ignore[arg-type]
