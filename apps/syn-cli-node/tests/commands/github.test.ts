@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { githubGroup } from "../../src/commands/github.js";
 
+// Recorded from the route by test_github_repos_lookup.py, which fails on drift.
 const fixture = JSON.parse(readFileSync(
   new URL("../../../syn-api/tests/fixtures/github_repos_lookup.json", import.meta.url), "utf8",
 )) as Record<"confirmed_empty" | "installation_lookup_failed" | "one_installation_failed", unknown>;

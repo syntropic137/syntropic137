@@ -49,6 +49,8 @@ function appRepo(fullName: string) {
 
 type GitHubRepoList = components['schemas']['GitHubRepoListResponse']
 
+// Safe: the file is written from GitHubRepoListResponse by the API test, which
+// fails if it no longer matches what the route returns.
 const recorded = githubReposRecorded as Record<keyof typeof githubReposRecorded, GitHubRepoList>
 
 /**
