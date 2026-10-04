@@ -41,6 +41,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityColl
     ObservabilityCollector,
 )
 from syn_shared.agents import runner_for_provider
+from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE, ENV_SYN_PHASE_TIMEOUT_SECONDS
 
 from .invocation_attempt import invocation_environment, registered_attempt
 
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
         ExecutablePhase,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+        PhaseAttempts,
         UpstreamRetryPolicy,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -67,6 +69,14 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _phase_deadline_environment(attempts: PhaseAttempts) -> dict[str, str]:
+    """What the agent is told about its clock: when it ends, and out of how much."""
+    return {
+        ENV_SYN_PHASE_DEADLINE: attempts.deadline.isoformat(timespec="seconds"),
+        ENV_SYN_PHASE_TIMEOUT_SECONDS: str(int(attempts.timeout_seconds)),
+    }
 
 
 def _attempt_is_settled(result: AgentExecutionResult) -> bool:
@@ -168,9 +178,11 @@ async def run_phase_agent(
     # attempt and every backoff is drawn from it, so what a phase is configured
     # to cost in time is what it can cost - a per-attempt timeout made three
     # attempts at a 3600-second phase into three hours and three phases' money.
-    attempts = retry_policy.begin(
-        timeout_seconds=phase.timeout_seconds or phase.agent_config.timeout_seconds
-    )
+    attempts = retry_policy.begin(timeout_seconds=phase.effective_timeout_seconds)
+    # The agent is told that deadline, read off the same object that enforces
+    # it, because it cannot see a clock and phases died at 124 holding
+    # finished, unpushed work (#1546).
+    agent_env = {**launch.agent_env, **_phase_deadline_environment(attempts)}
     # NO ATTEMPT IS DISPATCHED ON A TIMEOUT THIS FRAME COMPUTED. Every one runs
     # on the number inside an `AttemptGrant`, which `busy_upstream` produced
     # from the same reading of the clock that approved the attempt. This loop
@@ -185,7 +197,7 @@ async def run_phase_agent(
             result = await handler.handle(
                 todo=todo,
                 workspace=launch.workspace,
-                agent_env=invocation_environment(launch.agent_env, invocation),
+                agent_env=invocation_environment(agent_env, invocation),
                 claude_cmd=launch.claude_cmd,
                 session_id=session_id,
                 agent_model=phase.agent_config.model,

@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
@@ -153,6 +154,11 @@ class AttemptClock:
 
     monotonic: Callable[[], float] = time.monotonic
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    #: The calendar reading, for the one consumer that cannot use a monotonic
+    #: one: the agent, which is told its deadline as a wall-clock time (#1546).
+    #: Read at the same moment as `monotonic` when the phase begins, so the
+    #: deadline it is told is the deadline it is held to.
+    wall: Callable[[], datetime] = lambda: datetime.now(UTC)
 
 
 class PhaseAttempts:
@@ -176,7 +182,23 @@ class PhaseAttempts:
         self._policy = policy
         self._clock = clock
         self._deadline = clock.monotonic() + timeout_seconds
+        self._wall_deadline = clock.wall() + timedelta(seconds=timeout_seconds)
+        self._timeout_seconds = timeout_seconds
         self._attempt = 1
+
+    @property
+    def deadline(self) -> datetime:
+        """When the phase's last attempt is killed, as a UTC wall-clock time.
+
+        Fixed with the monotonic deadline and never extended, so it holds for
+        every attempt: a retry does not move it.
+        """
+        return self._wall_deadline
+
+    @property
+    def timeout_seconds(self) -> float:
+        """The whole budget the phase began with, not what is left of it."""
+        return self._timeout_seconds
 
     @property
     def seconds_left(self) -> float:

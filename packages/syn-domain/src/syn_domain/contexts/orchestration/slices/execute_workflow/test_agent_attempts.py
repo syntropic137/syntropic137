@@ -23,7 +23,7 @@ the real clock costs 3600 seconds to assert.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 
@@ -55,7 +55,12 @@ from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_domain.testing.fake_clock import FakeClock
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_shared.agents import AgentProvider, AgentRunner
-from syn_shared.env_constants import ENV_AGENTIC_ATTEMPT_ID, ENV_AGENTIC_INVOCATION_ID
+from syn_shared.env_constants import (
+    ENV_AGENTIC_ATTEMPT_ID,
+    ENV_AGENTIC_INVOCATION_ID,
+    ENV_SYN_PHASE_DEADLINE,
+    ENV_SYN_PHASE_TIMEOUT_SECONDS,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -898,7 +903,14 @@ async def test_retry_dispatch_uses_each_durable_invocation_identity(provider: st
             ]
         )
     )
-    await _run(handler, phase=_phase(provider), launch=launch)
+    clock = FakeClock()
+    await _run(
+        handler,
+        phase=_phase(provider),
+        launch=launch,
+        retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+    )
+    deadline = (clock.epoch + timedelta(seconds=ROOMY_SECONDS)).isoformat(timespec="seconds")
     assert manager.session is not None
     registrations = manager.session.invocations
     assert len(registrations) == len(handler.attempts) == 2
@@ -909,6 +921,8 @@ async def test_retry_dispatch_uses_each_durable_invocation_identity(provider: st
             "SYN_PHASE": "verify",
             ENV_AGENTIC_INVOCATION_ID: registration.invocation_id,
             ENV_AGENTIC_ATTEMPT_ID: registration.attempt_id,
+            ENV_SYN_PHASE_DEADLINE: deadline,
+            ENV_SYN_PHASE_TIMEOUT_SECONDS: str(ROOMY_SECONDS),
         }
     assert original_env[ENV_AGENTIC_INVOCATION_ID] == "stale-invocation"
     assert original_env[ENV_AGENTIC_ATTEMPT_ID] == "stale-attempt"
@@ -964,3 +978,77 @@ async def test_failed_registration_prevents_handler_dispatch() -> None:
     with pytest.raises(ConnectionError, match="unavailable"):
         await _run(handler, launch=replace(_launch(), session_manager=manager))
     assert handler.attempts == []
+
+
+class TestTheAgentIsToldItsDeadline:
+    """#1546: phases died at exit 124 holding finished work they never pushed.
+
+    The agent cannot see a clock, so it is told the deadline in its
+    environment. The value that matters is the one the agent RECEIVES, so these
+    read the env each attempt was dispatched with, not the object that built it.
+    """
+
+    async def test_the_deadline_is_phase_start_plus_the_phase_timeout(self) -> None:
+        clock = FakeClock(now=120.0)
+        handler = _RecordingHandler(scripted=FakeAgentExecutionHandler.success())
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=5400),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        (attempt,) = handler.attempts
+        start = clock.epoch + timedelta(seconds=120)
+        assert attempt.agent_env[ENV_SYN_PHASE_DEADLINE] == (
+            (start + timedelta(seconds=5400)).isoformat(timespec="seconds")
+        )
+        assert attempt.agent_env[ENV_SYN_PHASE_TIMEOUT_SECONDS] == "5400"
+        assert attempt.agent_env["SYN_PHASE"] == "verify", "the launch env must survive"
+
+    async def test_a_phase_without_its_own_timeout_is_told_its_agents(self) -> None:
+        """The fallback branch: the deadline is the budget the kill uses, 1800 here."""
+        clock = FakeClock()
+        handler = _RecordingHandler(scripted=FakeAgentExecutionHandler.success())
+        phase = replace(
+            _phase(),
+            timeout_seconds=None,
+            agent_config=AgentConfiguration(timeout_seconds=1800),
+        )
+
+        await _run(
+            handler, phase=phase, retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock())
+        )
+
+        (attempt,) = handler.attempts
+        assert attempt.timeout_seconds == 1800
+        assert attempt.agent_env[ENV_SYN_PHASE_TIMEOUT_SECONDS] == "1800"
+        assert attempt.agent_env[ENV_SYN_PHASE_DEADLINE] == (
+            (clock.epoch + timedelta(seconds=1800)).isoformat(timespec="seconds")
+        )
+
+    async def test_a_retry_is_told_the_same_deadline_not_a_fresh_one(self) -> None:
+        clock = FakeClock()
+        handler = _RecordingHandler(
+            clock=clock,
+            takes_seconds=600.0,
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            ),
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=3600),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        first, second = handler.attempts
+        assert second.timeout_seconds < first.timeout_seconds, "the retry spent budget"
+        assert first.agent_env[ENV_SYN_PHASE_DEADLINE] == second.agent_env[ENV_SYN_PHASE_DEADLINE]
+        assert second.agent_env[ENV_SYN_PHASE_DEADLINE] == (
+            (clock.epoch + timedelta(seconds=3600)).isoformat(timespec="seconds")
+        )
