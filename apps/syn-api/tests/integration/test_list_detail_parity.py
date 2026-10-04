@@ -36,6 +36,7 @@ pytestmark = pytest.mark.integration
 
 MULTI_DAY_EXECUTION = 10
 DETAIL_EXECUTIONS = (0, 1, MULTI_DAY_EXECUTION, 7, gate.DETAIL_EXECUTION, 1999)
+TIED = 30
 
 
 @runtime_checkable
@@ -50,6 +51,8 @@ def _requests(now: datetime) -> list[tuple[str, dict[str, str]]]:
     window_before = (now - timedelta(days=5)).isoformat()
     requests: list[tuple[str, dict[str, str]]] = [
         ("/executions", {"page_size": "50"}),
+        ("/executions", {"page_size": "20"}),
+        ("/executions", {"page": "2", "page_size": "20"}),
         ("/executions", {"page": "3", "page_size": "50"}),
         ("/executions", {"statuses": "running", "page_size": "50"}),
         ("/executions", {"q": "wf-1", "page_size": "50"}),
@@ -59,12 +62,14 @@ def _requests(now: datetime) -> list[tuple[str, dict[str, str]]]:
             {"started_after": window_after, "started_before": window_before, "page_size": "50"},
         ),
         ("/sessions", {"page_size": "20"}),
+        ("/sessions", {"page": "2", "page_size": "20"}),
         ("/sessions", {"page": "2", "page_size": "50"}),
         ("/sessions", {"execution_id": gate.execution_id(MULTI_DAY_EXECUTION)}),
         ("/sessions", {"workflow_id": gate.workflow_id(3), "page_size": "50"}),
         ("/sessions", {"q": "sess-0004", "statuses": "completed,failed"}),
         ("/sessions", {"started_after": window_after, "started_before": window_before}),
         ("/artifacts", {"page_size": "20"}),
+        ("/artifacts", {"page": "2", "page_size": "20"}),
         ("/artifacts", {"page": "4", "page_size": "50"}),
         ("/artifacts", {"execution_id": gate.execution_id(MULTI_DAY_EXECUTION)}),
         ("/artifacts", {"artifact_type": "plan", "page_size": "50"}),
@@ -100,6 +105,51 @@ async def _add_edge_cases(now: datetime) -> None:
     ]
     async with pool.acquire() as conn:
         await conn.copy_records_to_table("agent_events", records=later, columns=gate._COLUMNS)
+    # Ties: more rows sharing one timestamp than a page holds, newest of all,
+    # so the tie straddles the first page boundary and only a total order
+    # decides which of them land on it. None has telemetry, so the page's
+    # span lookup mixes ids the rollup knows with ids it has never seen.
+    tied = (now + timedelta(minutes=5)).isoformat()
+    for n in range(TIED):
+        await store.save(
+            "session_summaries",
+            f"sess-tied-{n:02d}",
+            {
+                "id": f"sess-tied-{n:02d}",
+                "workflow_id": gate.workflow_id(n),
+                "execution_id": gate.execution_id(n),
+                "status": "running",
+                "agent_type": "claude",
+                "started_at": tied,
+            },
+        )
+        await store.save(
+            "artifact_summaries",
+            f"art-tied-{n:02d}",
+            {
+                "id": f"art-tied-{n:02d}",
+                "workflow_id": gate.workflow_id(n),
+                "execution_id": gate.execution_id(n),
+                "phase_id": "p0",
+                "artifact_type": "report",
+                "name": f"Tied {n}",
+                "created_at": tied,
+                "size_bytes": 4,
+                "content": "tied",
+            },
+        )
+        await store.save(
+            "workflow_executions",
+            f"exec-tied-{n:02d}",
+            {
+                "workflow_execution_id": f"exec-tied-{n:02d}",
+                "workflow_id": gate.workflow_id(n),
+                "workflow_name": "Tied",
+                "status": "running",
+                "started_at": tied,
+                "total_phases": 1,
+            },
+        )
     # Undated documents: excluded from a windowed page and counted as such.
     await store.save(
         "artifact_summaries",
@@ -189,3 +239,53 @@ async def test_e2_read_paths_answer_exactly_what_the_old_ones_did(
         if new != old_answer
     ]
     assert not mismatched, f"E2 changed the answer for {mismatched}"
+
+
+async def test_the_span_and_the_reads_it_bounds_share_one_snapshot(e2_database: str) -> None:
+    """An event committed on a NEW day between the span lookup and the read.
+
+    Under READ COMMITTED the bounded read would miss it while an unbounded
+    read saw it. ``custom_plans`` is one REPEATABLE READ snapshot, so both
+    reads answer for the same instant - the instant the snapshot was taken.
+    """
+    from syn_adapters.events import AgentEventStore
+    from syn_domain import agent_event_span
+
+    store = AgentEventStore(e2_database)
+    await store.initialize()
+    pool = store.pool
+    assert pool is not None
+    session = "sess-snapshot"
+    old_day = datetime.now(UTC) - timedelta(days=3)
+    row = (old_day, gate.TOKEN_USAGE, session, "exec-snapshot", "p0", "{}")
+    count_sql = (
+        "SELECT COUNT(*) FROM agent_events WHERE session_id = $1 AND time >= $2 AND time < $3"
+    )
+    try:
+        async with pool.acquire() as conn:
+            await conn.copy_records_to_table("agent_events", records=[row], columns=gate._COLUMNS)
+        async with pool.acquire() as reader, agent_event_span.custom_plans(reader):  # type: ignore[arg-type]  # asyncpg proxy
+            span = await agent_event_span.for_sessions(reader, [session])  # type: ignore[arg-type]
+            async with pool.acquire() as writer:
+                await writer.copy_records_to_table(
+                    "agent_events",
+                    records=[(datetime.now(UTC), *row[1:])],
+                    columns=gate._COLUMNS,
+                )
+            bounded = await reader.fetchval(count_sql, session, span.lower, span.upper)
+            everything = await reader.fetchval(
+                count_sql,
+                session,
+                agent_event_span.UNBOUNDED_LOWER,
+                agent_event_span.UNBOUNDED_UPPER,
+            )
+        assert bounded == everything == 1
+        async with pool.acquire() as conn:
+            assert (
+                await conn.fetchval(
+                    "SELECT COUNT(*) FROM agent_events WHERE session_id = $1", session
+                )
+                == 2
+            )
+    finally:
+        await store.close()
