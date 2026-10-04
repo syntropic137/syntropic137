@@ -43,6 +43,8 @@ if TYPE_CHECKING:
     from event_sourcing import AutoDispatchProjection
     from event_sourcing.core.event import DomainEvent
 
+    from syn_domain.pagination import ProjectionRecord
+
 pytestmark = pytest.mark.unit
 
 _AT = datetime(2026, 10, 3, 22, 17, 24, tzinfo=UTC)
@@ -502,3 +504,43 @@ async def test_a_late_commit_below_the_window_is_out_of_scope_until_a_restart() 
     restarted = rig.detector()
     await restarted.check()
     assert _pairs(await restarted.check()) == {(LIST, DROPPED), (DETAIL, DROPPED)}
+
+
+class _KeyedStoreSpy(InMemoryProjectionStore):
+    """The in-memory store with the Postgres store's `get_many`, counting both read paths."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.get_many_calls = 0
+        self.query_calls = 0
+
+    async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
+        self.get_many_calls += 1
+        found: dict[str, ProjectionRecord] = {}
+        for key in keys:
+            document = await self.get(projection, key)
+            if document is not None:
+                found[key] = document
+        return found
+
+    async def query(self, *args: object, **kwargs: object) -> list[dict[str, object]]:  # type: ignore[override]  # spy
+        self.query_calls += 1
+        return await super().query(*args, **kwargs)  # type: ignore[arg-type]  # spy pass-through
+
+
+@pytest.mark.asyncio
+async def test_applied_starts_reads_by_primary_key_never_by_json_filter() -> None:
+    """The document key is the execution id, so the lookup is `id = ANY(...)` on
+    the primary key. A JSON-field filter has no index and scans the table."""
+    checkpoints = MemoryCheckpointStore()
+    list_store, detail_store = _KeyedStoreSpy(), _KeyedStoreSpy()
+    listing = WorkflowExecutionListProjection(list_store)
+    detail = WorkflowExecutionDetailProjection(detail_store)
+    await _project([listing, detail], checkpoints, drop=39_502)
+
+    for projection in (listing, detail):
+        assert await projection.applied_starts([FINE, DROPPED, "exec-absent"]) == {FINE}
+
+    for store in (list_store, detail_store):
+        assert store.get_many_calls == 1
+        assert store.query_calls == 0

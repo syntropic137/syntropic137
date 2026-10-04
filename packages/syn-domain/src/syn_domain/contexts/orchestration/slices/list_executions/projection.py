@@ -34,7 +34,7 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_sum
     WorkflowExecutionSummary,
 )
 from syn_domain.pagination import Page, matches_search
-from syn_domain.projection_scan import paginate_projection
+from syn_domain.projection_scan import paginate_projection, read_by_keys
 
 #: Every field ``page``'s predicates read - the filters, the facet, the window
 #: and the search. ``paginate_projection`` scans only these for the whole
@@ -311,15 +311,12 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         A row alone does not prove it: the #598 fallback in `on_workflow_failed`
         creates a row for a failure whose start was never seen, with no
         `started_at`. That is the shape a dropped start leaves behind (#1545),
-        so a start counts as applied only when `started_at` is set.
+        so a start counts as applied only when `started_at` is set. The document
+        key is the execution id, so this is a primary-key read, not a JSON filter.
         """
-        if not execution_ids:
-            return set()
-        rows = await self._store.query(
-            self.PROJECTION_NAME, filters={"workflow_execution_id": list(execution_ids)}
-        )
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, execution_ids)
         return {
-            str(row["workflow_execution_id"]) for row in rows if row.get("started_at") is not None
+            key for key, document in documents.items() if document.get("started_at") is not None
         }
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:

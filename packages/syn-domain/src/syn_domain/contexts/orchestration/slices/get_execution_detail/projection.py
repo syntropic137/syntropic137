@@ -41,6 +41,7 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.failed_phase_
 from syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail import (
     PhaseDetail,
 )
+from syn_domain.projection_scan import read_by_keys
 from syn_shared.display import compute_duration_seconds
 
 #: Totals a completion event MAY restate. Accumulated from PhaseCompleted
@@ -643,14 +644,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         A row alone does not prove it: the #598 fallback in `on_workflow_failed`
         creates a row for a failure whose start was never seen, with no
         `started_at`. That is the shape a dropped start leaves behind (#1545),
-        so a start counts as applied only when `started_at` is set.
+        so a start counts as applied only when `started_at` is set. The document
+        key is the execution id, so this is a primary-key read, not a JSON filter.
         """
-        if not execution_ids:
-            return set()
-        rows = await self._store.query(
-            self.PROJECTION_NAME, filters={"execution_id": list(execution_ids)}
-        )
-        return {str(row["execution_id"]) for row in rows if row.get("started_at") is not None}
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, execution_ids)
+        return {
+            key for key, document in documents.items() if document.get("started_at") is not None
+        }
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:
         """Get execution detail by ID.
