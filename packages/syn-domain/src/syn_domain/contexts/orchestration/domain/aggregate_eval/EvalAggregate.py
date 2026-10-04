@@ -272,7 +272,10 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
             EvalFrozenEvent,
         )
 
-        self._require_open("frozen")
+        if self.id is None:
+            raise EvalNotCreatedError
+        if self._is_archived:
+            raise EvalArchivedError(str(self.id), "frozen")
         if self._is_frozen:
             return
         self._apply(EvalFrozenEvent(eval_id=str(self.id), frozen_at=datetime.now(UTC)))
