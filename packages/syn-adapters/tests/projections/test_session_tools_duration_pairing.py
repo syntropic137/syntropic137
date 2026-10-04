@@ -14,7 +14,7 @@ is that neither path can be fixed alone.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -71,11 +71,40 @@ class _Row:
         return self.time
 
 
+class _Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
 class _Connection:
     def __init__(self, rows: Sequence[_Row]) -> None:
         self._rows = rows
 
-    async def fetch(self, *_args: object) -> Sequence[_Row]:
+    def transaction(self) -> _Transaction:
+        """``agent_event_span.custom_plans`` wraps the bounded read in one."""
+        return _Transaction()
+
+    async def execute(self, query: str, *_args: object) -> str:
+        assert "plan_cache_mode" in query, query
+        return "SET"
+
+    async def fetch(
+        self, query: str, *args: object
+    ) -> Sequence[_Row] | list[dict[str, date | None]]:
+        if "agent_event_day_rollup" in query:
+            # The E2 span lookup: the UTC days these rows fall on, as the day
+            # rollup would answer it.
+            days = [row.time.astimezone(UTC).date() for row in self._rows]
+            return [{"first_day": min(days, default=None), "last_day": max(days, default=None)}]
+        if "time >= $" in query:
+            # A bounded read: honour the span it bound, as Postgres would.
+            lower, upper = args[-2], args[-1]
+            assert isinstance(lower, datetime)
+            assert isinstance(upper, datetime)
+            return [row for row in self._rows if lower <= row.time < upper]
         return self._rows
 
 

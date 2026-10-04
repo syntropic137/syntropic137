@@ -20,7 +20,7 @@ the name the writer used", which is the whole content of this bug.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -34,7 +34,7 @@ pytestmark = pytest.mark.unit
 #: One column value as a driver would hand it back. Spelled out rather than
 #: left open: an erased row type is what the untyped-dicts ratchet counts, in
 #: test files too.
-type _Cell = str | int | datetime | dict[str, str] | None
+type _Cell = str | int | date | datetime | dict[str, str] | None
 
 # Written via chr() so no editor or formatter can turn the real codepoint into
 # its harmless six-character spelling - the near-miss that certifies this class
@@ -250,9 +250,41 @@ class _AgentEventsTable:
                 return True
         return False
 
-    async def fetch(self, _query: str, *args: object) -> list[dict[str, _Cell]]:
+    def transaction(self) -> _FakeTransaction:
+        """``agent_event_span.custom_plans`` wraps the bounded read in one."""
+        return _FakeTransaction()
+
+    async def execute(self, query: str, *_args: object) -> str:
+        assert "plan_cache_mode" in query, query
+        return "SET"
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
         self.binds.append(args)
-        return self._rows if self._asked_for_stored_id(args) else []
+        if not self._asked_for_stored_id(args):
+            if "agent_event_day_rollup" in query:
+                return [{"first_day": None, "last_day": None}]
+            return []
+        times = [row["time"] for row in self._rows if isinstance(row["time"], datetime)]
+        if "agent_event_day_rollup" in query:
+            # The span lookup (E2): the UTC days the stored id has rows on, as
+            # the day rollup would answer. Same id-matching as the reads, so a
+            # lookup under the unsanitised id narrows nothing and finds nothing.
+            return [
+                {
+                    "first_day": min(times).astimezone(UTC).date(),
+                    "last_day": max(times).astimezone(UTC).date(),
+                }
+            ]
+        if "time >= $" in query:
+            # A bounded read: honour the span it bound, as Postgres would.
+            lower, upper = args[-2], args[-1]
+            assert isinstance(lower, datetime) and isinstance(upper, datetime)
+            return [
+                row
+                for row in self._rows
+                if isinstance(row["time"], datetime) and lower <= row["time"] < upper
+            ]
+        return self._rows
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, _Cell] | None:
         rows = await self.fetch(query, *args)
