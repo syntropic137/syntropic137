@@ -85,6 +85,9 @@ async def stop_coordinator_service(svc: CoordinatorSubscriptionService) -> None:
     logger.info("Stopping coordinator subscription service...")
     svc._running = False
 
+    if svc._unapplied_starts:
+        await svc._unapplied_starts.stop()
+
     if svc._coordinator:
         await svc._coordinator.stop()
 

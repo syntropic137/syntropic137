@@ -39,6 +39,7 @@ from syn_adapters.subscriptions.unapplied_starts import (
     AppliesExecutionStarts,
     UnappliedStartDetector,
     UnappliedStartsReport,
+    UnappliedStartWatch,
 )
 from syn_shared.settings import get_settings
 
@@ -191,7 +192,7 @@ class CoordinatorSubscriptionService:
         self._db_pool: asyncpg.Pool | None = None
         self._checkpoint_store: ProjectionCheckpointStore | None = None
         self._coordinator: SubscriptionCoordinator | None = None
-        self._unapplied_starts: UnappliedStartDetector | None = None
+        self._unapplied_starts: UnappliedStartWatch | None = None
         self._coordinator_started_at: datetime | None = None
         self._subscription_task: asyncio.Task[None] | None = None
         self._running = False
@@ -278,13 +279,14 @@ class CoordinatorSubscriptionService:
     async def describe_unapplied_starts(self) -> UnappliedStartsReport | None:
         """Executions whose start a read model's checkpoint passed without applying (#1545).
 
-        ``None`` before ``start()``, for the same reason as
-        ``describe_read_model_lag``. Each call scans a bounded slice of new
-        events; see ``unapplied_starts`` for what counts and what it costs.
+        The latest background reconciliation; ``None`` before ``start()`` or
+        before the first check completes, i.e. not measured. Never scans on
+        the caller's path; see ``unapplied_starts`` for what counts and what
+        it costs.
         """
         if self._unapplied_starts is None:
             return None
-        return await self._unapplied_starts.check()
+        return self._unapplied_starts.latest
 
     async def start(self) -> None:
         """Start the coordinator subscription service."""
@@ -339,10 +341,12 @@ class CoordinatorSubscriptionService:
             checkpoint_store=self._checkpoint_store,
             projections=all_projections,
         )
-        self._unapplied_starts = UnappliedStartDetector(
-            self._event_store,
-            self._checkpoint_store,
-            [p for p in self._projections if isinstance(p, AppliesExecutionStarts)],
+        self._unapplied_starts = UnappliedStartWatch(
+            UnappliedStartDetector(
+                self._event_store,
+                self._checkpoint_store,
+                [p for p in self._projections if isinstance(p, AppliesExecutionStarts)],
+            )
         )
 
         # Start coordinator in background task
@@ -356,6 +360,7 @@ class CoordinatorSubscriptionService:
         except BaseException:
             await self._abandon_failed_start()
             raise
+        self._unapplied_starts.start()
 
         logger.info(
             "Coordinator subscription service started",

@@ -1,14 +1,15 @@
 """The #1545 detector, driven through the real execution projections.
 
 The store holds two executions. One projects normally. For the other the
-projections never see WorkflowExecutionStarted (what the commit-order gap in
-ESP ADR-026 did to exec-db527ea0d361) but do see the later WorkflowFailed,
+projections never see WorkflowExecutionStarted (what the commit-order gap
+fixed in event-sourcing-platform#337 did to exec-db527ea0d361) but do see the later WorkflowFailed,
 whose #598 fallback writes a row with no start. Both checkpoints end at the
 head, so lag says nothing is wrong. The detector must name the dropped one.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,7 @@ from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_adapters.subscriptions.unapplied_starts import (
     UnappliedStart,
     UnappliedStartDetector,
+    UnappliedStartWatch,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
@@ -33,8 +35,12 @@ from syn_domain.contexts.orchestration.slices.list_executions.projection import 
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from event_sourcing import AutoDispatchProjection
     from event_sourcing.core.event import DomainEvent
+
+pytestmark = pytest.mark.unit
 
 _AT = datetime(2026, 10, 3, 22, 17, 24, tzinfo=UTC)
 FINE = "exec-62d51fee08b1"
@@ -118,7 +124,7 @@ async def _project(
 
 
 async def _setup(
-    *, drop: int | None, page: int = 5_000
+    *, drop: int | None
 ) -> tuple[
     UnappliedStartDetector,
     WorkflowExecutionListProjection,
@@ -133,7 +139,6 @@ async def _setup(
         _ListStore(STORE),  # type: ignore[arg-type]
         checkpoints,
         [listing, detail],
-        max_events_per_check=page,
     )
     return detector, listing, detail, checkpoints
 
@@ -175,18 +180,6 @@ async def test_a_start_above_the_checkpoint_is_lag_not_a_drop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_bounded_scan_converges_over_several_checks() -> None:
-    detector, _, _, _ = await _setup(drop=39_502, page=1)
-
-    first = await detector.check()
-    assert first.scanned_through == 39_490 and first.unapplied == ()
-    await detector.check()
-    third = await detector.check()
-
-    assert {u.execution_id for u in third.unapplied} == {DROPPED}
-
-
-@pytest.mark.asyncio
 async def test_a_repaired_row_clears_on_the_next_check() -> None:
     detector, listing, detail, checkpoints = await _setup(drop=39_502)
     assert (await detector.check()).unapplied
@@ -197,3 +190,109 @@ async def test_a_repaired_row_clears_on_the_next_check() -> None:
     await _project([listing, detail], checkpoints, drop=None)
 
     assert (await detector.check()).unapplied == ()
+
+
+@pytest.mark.asyncio
+async def test_a_start_that_commits_below_an_earlier_scan_is_still_reported() -> None:
+    """#1545's own mechanism, aimed at the detector: the start becomes visible
+    in the store only after a check has already read past its nonce. A cursor
+    would never look back; a full reconciliation does."""
+    checkpoints = MemoryCheckpointStore()
+    listing = WorkflowExecutionListProjection(InMemoryProjectionStore())
+    await _project([listing], checkpoints, drop=39_502)
+    store = _ListStore((STORE[0], STORE[2]))  # 39_502 not committed yet
+    detector = UnappliedStartDetector(store, checkpoints, [listing])  # type: ignore[arg-type]
+    assert (await detector.check()).unapplied == ()
+
+    store._events = STORE  # the late commit lands below what was already read
+
+    assert {u.execution_id for u in (await detector.check()).unapplied} == {DROPPED}
+
+
+@pytest.mark.asyncio
+async def test_a_row_lost_after_a_clean_check_is_reported() -> None:
+    detector, listing, _, _ = await _setup(drop=None)
+    assert (await detector.check()).unapplied == ()
+
+    await listing.clear_all_data()  # a botched rebuild, a truncation
+
+    lost = (await detector.check()).unapplied
+    assert {(u.projection, u.execution_id) for u in lost} == {
+        ("workflow_executions", FINE),
+        ("workflow_executions", DROPPED),
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_watch_publishes_a_report_and_health_never_waits_for_a_scan() -> None:
+    detector, _, _, _ = await _setup(drop=39_502)
+    watch = UnappliedStartWatch(detector, interval_seconds=3_600)
+    assert watch.latest is None  # not measured yet, which is not "healthy"
+
+    watch.start()
+    try:
+        for _ in range(100):
+            if watch.latest is not None:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        await watch.stop()
+
+    assert watch.latest is not None
+    assert {u.execution_id for u in watch.latest.unapplied} == {DROPPED}
+
+
+class _ParkedListStore(_ListStore):
+    """`_ListStore` that the real coordinator can start against: a backward
+    `read_all` for its head snapshot, and a live stream that never yields."""
+
+    def __init__(self, events: tuple[EventEnvelope[DomainEvent], ...]) -> None:
+        super().__init__(events)
+        self.parked = asyncio.Event()
+
+    async def read_all(
+        self, from_global_nonce: int = 0, max_count: int = 100, forward: bool = True
+    ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]:
+        if not forward:
+            last = self._events[-1]
+            return [last], True, last.metadata.global_nonce or 0
+        return await super().read_all(from_global_nonce, max_count, forward)
+
+    async def subscribe(self, from_global_nonce: int) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        await self.parked.wait()
+        return
+        yield  # pragma: no cover - unreachable, makes this an async generator
+
+
+@pytest.mark.asyncio
+async def test_the_real_coordinator_service_runs_the_watch_and_publishes_the_drop() -> None:
+    """Wiring, not logic: deleting the watch from `start()` must fail a test."""
+    from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
+
+    checkpoints = MemoryCheckpointStore()
+    listing = WorkflowExecutionListProjection(InMemoryProjectionStore())
+    detail = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
+    await _project([listing, detail], checkpoints, drop=39_502)
+    store = _ParkedListStore(STORE)
+    service = CoordinatorSubscriptionService(
+        event_store=store,  # type: ignore[arg-type]  # double, not EventStoreClient
+        projections=[listing, detail],
+        checkpoint_store=checkpoints,
+    )
+    await service.start()
+    try:
+        report = None
+        for _ in range(200):
+            report = await service.describe_unapplied_starts()
+            if report is not None:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        store.parked.set()
+        await service.stop()
+
+    assert report is not None
+    assert {(u.projection, u.execution_id) for u in report.unapplied} == {
+        ("workflow_executions", DROPPED),
+        ("workflow_execution_details", DROPPED),
+    }

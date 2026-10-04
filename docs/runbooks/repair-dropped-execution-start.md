@@ -17,8 +17,13 @@ failed, it may instead return a row with no `started_at` (the #598 fallback).
 The read model is wrong, not slow, so waiting does not help.
 
 The cause was the event store making a lower global nonce visible after a
-higher one (ESP ADR-026). The detector is in
-`packages/syn-adapters/src/syn_adapters/subscriptions/unapplied_starts.py`.
+higher one, so the live subscription's cursor passed the lower one
+(event-sourcing-platform#337). The detector is in
+`packages/syn-adapters/src/syn_adapters/subscriptions/unapplied_starts.py`. It
+runs in the background every 5 minutes, and each run is a full reconciliation
+from global nonce 0, so a start that commits late or a row lost after a clean
+check is still found. `unapplied_starts` is null until the first run after a
+restart completes.
 
 ## Repair: rebuild the two execution read models
 
@@ -73,13 +78,12 @@ curl -s http://localhost:8137/api/v1/executions/exec-db527ea0d361 \
 # Expect: the execution, with a non-null started_at
 ```
 
-`unapplied_starts` clears without another restart: the detector checks each
-listed start again on every probe and drops it once the read model has applied
-it.
+`unapplied_starts` clears without another restart, on the detector's next run
+(within 5 minutes of the replay passing the start).
 
 ## If it comes back
 
 If `dropped_events` comes back after the rebuild, the store is still committing
-nonces out of order. Check that the deployed event-store image includes ESP
-ADR-026 (`pg_advisory_xact_lock` in `PostgresStore::append`) before you rebuild
-again.
+nonces out of order. Check that the deployed event-store image includes
+event-sourcing-platform#337 (`pg_advisory_xact_lock` in `PostgresStore::append`)
+before you rebuild again.

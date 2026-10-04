@@ -4,10 +4,10 @@ WHY THIS EXISTS (#1545). `exec-db527ea0d361`'s WorkflowExecutionStarted was in
 the store at global 39502, every projection checkpoint was at the head, nothing
 was logged, and `GET /executions/{id}` returned 404 for 2h22m. Lag measurement
 cannot see that: a projection whose checkpoint passed an event it never handled
-looks exactly like one that handled it. The cause was a store that could make a
-lower nonce visible after a higher one (ESP ADR-026), but the lesson is broader:
-any drop below the checkpoint is silent by construction, so it has to be looked
-for.
+looks exactly like one that handled it. The cause was the event store letting a
+lower global nonce commit after a higher one, so the live subscription's cursor
+passed it (fixed in event-sourcing-platform#337). The lesson is broader: any
+drop below the checkpoint is silent by construction, so it has to be looked for.
 
 WHAT COUNTS. A start is *unapplied* in a projection when the projection's
 checkpoint is at or past the start event's global nonce and
@@ -15,23 +15,32 @@ checkpoint is at or past the start event's global nonce and
 projection has said "done"; above it, a missing row is ordinary lag and is not
 reported here (`read_model_lag` reports that).
 
-COST. Incremental: each `check()` reads at most `max_events_per_check` new
-events from where the last one stopped, and asks each projection about a start
-once, the first time its checkpoint covers it. A start that was applied is
-forgotten; an unapplied one stays and is re-asked on every check, so a repair
-(rebuild or replay) clears it without a restart. The first checks after a
-restart walk the store in bounded steps; `scanned_through` says how far.
+EVERY CHECK IS A COMPLETE RECONCILIATION. Each check rescans the store from 0
+and asks about every start again; nothing is remembered between checks except
+which drops were already logged. Both shortcuts an incremental scan would take
+are unsound here:
 
-Held in memory on purpose: everything here is re-derivable from the store and
-the projections, so a restart costs a re-scan, never a wrong answer.
+- A cursor that advances past the highest nonce it has read never revisits a
+  lower nonce that commits later. That late commit IS #1545's mechanism, so an
+  incremental detector misses exactly the drop it exists to report.
+  `global_nonce` also has permanent gaps (rolled-back appends), so there is no
+  gap-free prefix to advance through.
+- Forgetting a start once its row was seen means a row lost LATER (a botched
+  rebuild, a truncation, another handler defect) is never reported.
+
+COST. One paged read of the store plus one keyed lookup per start per read
+model, on `CHECK_INTERVAL_SECONDS`. It never runs on the /health request path:
+`UnappliedStartWatch` runs it in the background and /health reads the latest
+report.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,13 +51,24 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEve
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from event_sourcing import EventStoreClient
+    from event_sourcing import DomainEvent, EventEnvelope
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MAX_EVENTS_PER_CHECK = 5_000
-_PAGE_SIZE = 500
+_PAGE_SIZE: Final[int] = 500
+
+#: How often the watch reconciles. Bounds both detection latency and cost.
+CHECK_INTERVAL_SECONDS: Final[float] = 300.0
+
+
+class _ReadsAllEvents(Protocol):
+    async def read_all(
+        self,
+        from_global_nonce: int = 0,
+        max_count: int = 100,
+        forward: bool = True,
+    ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]: ...
 
 
 @runtime_checkable
@@ -72,7 +92,7 @@ class UnappliedStart(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class UnappliedStartsReport:
-    """What one check found, and how much of the store it has seen so far."""
+    """What one complete reconciliation found, and how far into the store it read."""
 
     unapplied: tuple[UnappliedStart, ...]
     scanned_through: int
@@ -83,84 +103,131 @@ class UnappliedStartDetector:
 
     def __init__(
         self,
-        event_store: EventStoreClient,
+        event_store: _ReadsAllEvents,
         checkpoint_store: ProjectionCheckpointStore,
         projections: Sequence[AppliesExecutionStarts],
-        *,
-        max_events_per_check: int = _DEFAULT_MAX_EVENTS_PER_CHECK,
     ) -> None:
         self._event_store = event_store
         self._checkpoint_store = checkpoint_store
         self._projections = tuple(projections)
-        self._max_events_per_check = max_events_per_check
-        self._next_nonce = 0
-        self._scanned_through = 0
-        #: Per projection: execution_id -> nonce of a start not yet confirmed applied.
-        self._unconfirmed: dict[str, dict[str, int]] = {p.get_name(): {} for p in self._projections}
-        self._reported: set[tuple[str, str]] = set()
-        #: Concurrent /health probes share one cursor; one check at a time.
+        #: Only de-duplicates the error log. Never consulted for the answer.
+        self._logged: set[tuple[str, str]] = set()
         self._lock = asyncio.Lock()
 
     async def check(self) -> UnappliedStartsReport:
-        """Scan forward, then ask each projection about the starts its checkpoint covers."""
+        """Reconcile every start the projections' checkpoints cover, from nonce 0."""
         async with self._lock:
-            await self._scan()
+            # Checkpoints first: every start at or below one was offered to that
+            # projection before this check began, whatever the scan reads next.
+            covered = {p.get_name(): await self._covered(p) for p in self._projections}
+            starts, scanned_through = await self._starts_through(max(covered.values(), default=0))
             unapplied: list[UnappliedStart] = []
             for projection in self._projections:
-                unapplied.extend(await self._unapplied_in(projection))
+                name = projection.get_name()
+                for execution_id, nonce in starts:
+                    if nonce > covered[name]:
+                        continue
+                    if not await projection.has_applied_start(execution_id):
+                        unapplied.append(
+                            UnappliedStart(
+                                projection=name, execution_id=execution_id, global_nonce=nonce
+                            )
+                        )
+            self._log_new(unapplied, covered)
         return UnappliedStartsReport(
             unapplied=tuple(sorted(unapplied, key=lambda u: (u.global_nonce, u.projection))),
-            scanned_through=self._scanned_through,
+            scanned_through=scanned_through,
         )
 
-    async def _scan(self) -> None:
-        budget = self._max_events_per_check
-        while budget > 0:
-            events, is_end, next_nonce = await self._event_store.read_all(
-                from_global_nonce=self._next_nonce,
-                max_count=min(_PAGE_SIZE, budget),
-                forward=True,
+    async def _covered(self, projection: AppliesExecutionStarts) -> int:
+        checkpoint = await self._checkpoint_store.get_checkpoint(projection.get_name())
+        return checkpoint.global_position if checkpoint is not None else 0
+
+    async def _starts_through(self, through: int) -> tuple[list[tuple[str, int]], int]:
+        """(execution_id, nonce) of every start at or below `through`, first start wins."""
+        seen: set[str] = set()
+        starts: list[tuple[str, int]] = []
+        scanned_through = 0
+        position = 0
+        while position <= through:
+            events, is_end, next_position = await self._event_store.read_all(
+                from_global_nonce=position, max_count=_PAGE_SIZE, forward=True
             )
             for envelope in events:
                 nonce = envelope.metadata.global_nonce
-                if nonce is None:
+                if nonce is None or nonce > through:
                     continue
-                self._scanned_through = max(self._scanned_through, nonce)
-                if isinstance(envelope.event, WorkflowExecutionStartedEvent):
-                    for pending in self._unconfirmed.values():
-                        pending[envelope.event.execution_id] = nonce
-            budget -= len(events)
-            if events:
-                self._next_nonce = max(next_nonce, self._scanned_through + 1)
-            if is_end or not events:
-                return
+                scanned_through = max(scanned_through, nonce)
+                event = envelope.event
+                if (
+                    isinstance(event, WorkflowExecutionStartedEvent)
+                    and event.execution_id not in seen
+                ):
+                    seen.add(event.execution_id)
+                    starts.append((event.execution_id, nonce))
+            if is_end or not events or next_position <= position:
+                break
+            position = next_position
+        return starts, scanned_through
 
-    async def _unapplied_in(self, projection: AppliesExecutionStarts) -> list[UnappliedStart]:
-        name = projection.get_name()
-        checkpoint = await self._checkpoint_store.get_checkpoint(name)
-        covered = checkpoint.global_position if checkpoint is not None else 0
-        pending = self._unconfirmed[name]
-        found: list[UnappliedStart] = []
-        for execution_id, nonce in list(pending.items()):
-            if nonce > covered:
+    def _log_new(self, unapplied: list[UnappliedStart], covered: dict[str, int]) -> None:
+        current = {(u.projection, u.execution_id) for u in unapplied}
+        for drop in unapplied:
+            if (drop.projection, drop.execution_id) in self._logged:
                 continue
-            if await projection.has_applied_start(execution_id):
-                del pending[execution_id]
-                self._reported.discard((name, execution_id))
-                continue
-            found.append(
-                UnappliedStart(projection=name, execution_id=execution_id, global_nonce=nonce)
+            logger.error(
+                "Read model %s is checkpointed at %d but never applied "
+                "WorkflowExecutionStarted for %s (global nonce %d). Its API reads "
+                "will 404 or show no start. Repair: rebuild the projection "
+                "(docs/runbooks/repair-dropped-execution-start.md).",
+                drop.projection,
+                covered[drop.projection],
+                drop.execution_id,
+                drop.global_nonce,
             )
-            if (name, execution_id) not in self._reported:
-                self._reported.add((name, execution_id))
-                logger.error(
-                    "Read model %s is checkpointed at %d but never applied "
-                    "WorkflowExecutionStarted for %s (global nonce %d). Its API reads "
-                    "will 404 or show no start. Repair: rebuild the projection "
-                    "(docs/runbooks/repair-dropped-execution-start.md).",
-                    name,
-                    covered,
-                    execution_id,
-                    nonce,
-                )
-        return found
+        # A repaired drop that comes back is logged again.
+        self._logged = current
+
+
+class UnappliedStartWatch:
+    """Runs the detector in the background; /health reads `latest`.
+
+    Read-only: it reports, it never repairs. Repair is a projection rebuild,
+    which is an operator decision. A failed check is logged and retried on the
+    next tick, because a watch that dies on the first transient store error is
+    a detector nobody notices is gone.
+    """
+
+    def __init__(
+        self,
+        detector: UnappliedStartDetector,
+        *,
+        interval_seconds: float = CHECK_INTERVAL_SECONDS,
+    ) -> None:
+        self._detector = detector
+        self._interval_seconds = interval_seconds
+        self._task: asyncio.Task[None] | None = None
+        #: None until the first check completes: "not measured", not "healthy".
+        self.latest: UnappliedStartsReport | None = None
+
+    def start(self) -> None:
+        if self._task is None:
+            self._task = asyncio.create_task(self._run(), name="unapplied-start-watch")
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        self._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._task
+        self._task = None
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                self.latest = await self._detector.check()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Unapplied-start check failed (#1545); retrying next interval")
+            await asyncio.sleep(self._interval_seconds)
