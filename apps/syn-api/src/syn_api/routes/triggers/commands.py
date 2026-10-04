@@ -23,7 +23,7 @@ from syn_api.types import (
     TriggerActionResponse,
     TriggerError,
 )
-from syn_domain.contexts.github import TriggerStatus
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
 
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
