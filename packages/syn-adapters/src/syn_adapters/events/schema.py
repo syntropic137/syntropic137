@@ -9,7 +9,15 @@ import struct
 import asyncpg
 
 from syn_adapters.events.models import EXPECTED_COLUMNS
-from syn_shared.events import GIT_COMMIT
+from syn_domain.contexts.agent_sessions import (
+    SUMMARY_USAGE_TABLE,
+    TURN_USAGE_ROLLUP_TABLE,
+    recorded_model_group_by,
+    recorded_model_select,
+    summary_usage_columns,
+    turn_usage_columns,
+)
+from syn_shared.events import GIT_COMMIT, SESSION_SUMMARY, TOKEN_USAGE
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +206,154 @@ ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
 )[0]
 
 
+# THE USAGE ROLLUP (E1, "pages load fast and stay fast").
+#
+# /metrics and the heatmap's usage totals read canonical usage, and canonical
+# usage read raw agent_events: every session_summary and token_usage row, out
+# of compressed chunks segmented by session_id, JSONB parsed per row, on every
+# request. These two tables hold the same rows already extracted - summaries
+# one for one, turns summed per (session, execution, model) - so the reads
+# grow with sessions rather than with turns. The meaning of the columns is
+# canonical_usage's (summary_usage_columns / turn_usage_columns), imported
+# rather than restated, so a change to what a row contributes reaches the
+# rollup and the raw read together.
+#
+# Same shape as agent_event_day_rollup, and for the same reasons: a trigger
+# sees COPY, which insert_batch uses and no application hook does; and it is
+# not a projection, so it never replays the event store (#1318). It is a NEW
+# object rather than a VERSION bump on anything existing, so a deploy pays one
+# backfill over the two usage event types and nothing replays.
+#
+# The turn key is NULLS NOT DISTINCT for the reason ROLLUP_KEY_SQL's is: a
+# NULL execution_id or model must group with NULL, or the rollup grows a row
+# per turn and loses the bound it exists for.
+USAGE_ROLLUP_TABLES_SQL = (
+    f"""
+    CREATE TABLE IF NOT EXISTS {SUMMARY_USAGE_TABLE} (
+        session_id            TEXT        NOT NULL,
+        execution_id          TEXT,
+        time                  TIMESTAMPTZ NOT NULL,
+        model                 TEXT,
+        requested_model       TEXT,
+        has_requested_model   BOOLEAN     NOT NULL,
+        vendor_cost_usd       NUMERIC,
+        input_tokens          BIGINT      NOT NULL,
+        output_tokens         BIGINT      NOT NULL,
+        cache_creation_tokens BIGINT      NOT NULL,
+        cache_read_tokens     BIGINT      NOT NULL
+    )
+    """,
+    f"""
+    CREATE INDEX IF NOT EXISTS idx_{SUMMARY_USAGE_TABLE}_session
+    ON {SUMMARY_USAGE_TABLE} (session_id)
+    """,
+    f"""
+    CREATE INDEX IF NOT EXISTS idx_{SUMMARY_USAGE_TABLE}_execution
+    ON {SUMMARY_USAGE_TABLE} (execution_id)
+    """,
+    f"""
+    CREATE TABLE IF NOT EXISTS {TURN_USAGE_ROLLUP_TABLE} (
+        session_id            TEXT    NOT NULL,
+        execution_id          TEXT,
+        model                 TEXT,
+        requested_model       TEXT,
+        has_requested_model   BOOLEAN NOT NULL,
+        input_tokens          BIGINT  NOT NULL,
+        output_tokens         BIGINT  NOT NULL,
+        cache_creation_tokens BIGINT  NOT NULL,
+        cache_read_tokens     BIGINT  NOT NULL,
+        CONSTRAINT {TURN_USAGE_ROLLUP_TABLE}_key UNIQUE NULLS NOT DISTINCT
+            (session_id, execution_id, model, requested_model, has_requested_model)
+    )
+    """,
+    f"""
+    CREATE INDEX IF NOT EXISTS idx_{TURN_USAGE_ROLLUP_TABLE}_execution
+    ON {TURN_USAGE_ROLLUP_TABLE} (execution_id)
+    """,
+    # The heatmap's member-session read is ANY over many sessions; this one
+    # serves it, since the key's leading column alone is not a usable index
+    # for every planner choice.
+    f"""
+    CREATE INDEX IF NOT EXISTS idx_{TURN_USAGE_ROLLUP_TABLE}_session
+    ON {TURN_USAGE_ROLLUP_TABLE} (session_id)
+    """,
+)
+
+_SUMMARY_COLUMNS = (
+    "session_id, execution_id, time, model, requested_model, has_requested_model, "
+    "vendor_cost_usd, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens"
+)
+_TURN_COLUMNS = (
+    "session_id, execution_id, model, requested_model, has_requested_model, "
+    "input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens"
+)
+
+USAGE_ROLLUP_TRIGGER_FUNCTION_SQL = f"""
+CREATE OR REPLACE FUNCTION agent_usage_rollup_apply() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.event_type = '{SESSION_SUMMARY}' THEN
+        INSERT INTO {SUMMARY_USAGE_TABLE} ({_SUMMARY_COLUMNS})
+        SELECT NEW.session_id, NEW.execution_id, NEW.time,
+            {summary_usage_columns("NEW.data")};
+    ELSIF NEW.event_type = '{TOKEN_USAGE}' THEN
+        INSERT INTO {TURN_USAGE_ROLLUP_TABLE} ({_TURN_COLUMNS})
+        SELECT NEW.session_id, NEW.execution_id,
+            {recorded_model_select("NEW.data")},
+            {turn_usage_columns("NEW.data")}
+        ON CONFLICT ON CONSTRAINT {TURN_USAGE_ROLLUP_TABLE}_key DO UPDATE
+        SET input_tokens = {TURN_USAGE_ROLLUP_TABLE}.input_tokens + EXCLUDED.input_tokens,
+            output_tokens = {TURN_USAGE_ROLLUP_TABLE}.output_tokens + EXCLUDED.output_tokens,
+            cache_creation_tokens =
+                {TURN_USAGE_ROLLUP_TABLE}.cache_creation_tokens + EXCLUDED.cache_creation_tokens,
+            cache_read_tokens =
+                {TURN_USAGE_ROLLUP_TABLE}.cache_read_tokens + EXCLUDED.cache_read_tokens;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+"""
+
+# Recompute both tables from the raw events. Delete-then-insert rather than
+# an upsert: summaries have no natural key to reconcile on, and the statement
+# runs inside the transaction that holds agent_events against inserts (the
+# CREATE TRIGGER lock), so nothing can arrive between the two halves.
+USAGE_ROLLUP_BACKFILL_SQL = (
+    f"DELETE FROM {SUMMARY_USAGE_TABLE}",
+    f"DELETE FROM {TURN_USAGE_ROLLUP_TABLE}",
+    f"""
+    INSERT INTO {SUMMARY_USAGE_TABLE} ({_SUMMARY_COLUMNS})
+    SELECT session_id, execution_id, time, {summary_usage_columns()}
+    FROM agent_events
+    WHERE event_type = '{SESSION_SUMMARY}'
+    """,
+    f"""
+    INSERT INTO {TURN_USAGE_ROLLUP_TABLE} ({_TURN_COLUMNS})
+    SELECT session_id, execution_id, {recorded_model_select()},
+        SUM(input_tokens), SUM(output_tokens),
+        SUM(cache_creation_tokens), SUM(cache_read_tokens)
+    FROM (
+        SELECT session_id, execution_id, data, {turn_usage_columns()}
+        FROM agent_events
+        WHERE event_type = '{TOKEN_USAGE}'
+    ) turns
+    GROUP BY session_id, execution_id, {recorded_model_group_by()}
+    """,
+)
+
+USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
+    ">q", hashlib.blake2b(b"agent_usage_rollup:schema", digest_size=8).digest()
+)[0]
+
+_TRIGGER_LIVE_SQL = """
+SELECT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid = to_regclass('agent_events')
+      AND tgname = $1
+      AND tgenabled IN ('O', 'A')
+)
+"""
+
+
 class SchemaValidationError(Exception):
     """Raised when database schema doesn't match expected schema."""
 
@@ -274,6 +430,7 @@ class EventStoreSchema:
             await self._create_indexes(conn)
             await self._configure_compression(conn)
             await self._create_day_rollup(conn)
+            await self._create_usage_rollup(conn)
 
         await self.validate(conn)
 
@@ -449,6 +606,42 @@ class EventStoreSchema:
             """)
             if not rollup_is_complete:
                 await conn.execute(ROLLUP_BACKFILL_SQL)
+
+    async def _create_usage_rollup(self, conn: asyncpg.Connection) -> None:
+        """Create the usage rollup that bounds /metrics and the heatmap (E1).
+
+        The same install as `_create_day_rollup`, for the same reasons and
+        with the same single-transaction guarantee: if this commits, the
+        tables, the trigger and any backfill committed together; if it
+        aborts, none did. The backfill runs only when the rollup is not
+        known complete - tables present AND the trigger live - so a restart
+        pays catalogue lookups, and a trigger that was dropped or disabled
+        earns a full reconcile rather than a silent gap.
+        """
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
+            tables_exist: bool = (
+                await conn.fetchval(
+                    "SELECT to_regclass($1) IS NOT NULL AND to_regclass($2) IS NOT NULL",
+                    SUMMARY_USAGE_TABLE,
+                    TURN_USAGE_ROLLUP_TABLE,
+                )
+            ) is True
+            trigger_is_live: bool = (
+                await conn.fetchval(_TRIGGER_LIVE_SQL, "agent_events_usage_rollup")
+            ) is True
+            for ddl in USAGE_ROLLUP_TABLES_SQL:
+                await conn.execute(ddl)
+            await conn.execute(USAGE_ROLLUP_TRIGGER_FUNCTION_SQL)
+            await conn.execute("DROP TRIGGER IF EXISTS agent_events_usage_rollup ON agent_events")
+            await conn.execute("""
+                CREATE TRIGGER agent_events_usage_rollup
+                AFTER INSERT ON agent_events
+                FOR EACH ROW EXECUTE FUNCTION agent_usage_rollup_apply()
+            """)
+            if not (tables_exist and trigger_is_live):
+                for statement in USAGE_ROLLUP_BACKFILL_SQL:
+                    await conn.execute(statement)
 
     async def _rollup_is_complete(self, conn: asyncpg.Connection) -> bool:
         """Whether the rollup can be trusted to already hold every event.

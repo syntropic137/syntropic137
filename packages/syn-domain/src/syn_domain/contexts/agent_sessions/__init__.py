@@ -48,8 +48,14 @@ from syn_domain.contexts.agent_sessions._shared import (
 )
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_SESSION_USAGE_CTE,
+    CANONICAL_USAGE_DECISION_CTE,
     CANONICAL_USAGE_EVENT_FILTER,
+    SUMMARY_USAGE_TABLE,
+    TURN_USAGE_ROLLUP_TABLE,
     price_canonical_row,
+    rollup_usage_sources,
+    summary_usage_columns,
+    turn_usage_columns,
 )
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
 from syn_domain.contexts.agent_sessions.delegate_usage import (
@@ -235,9 +241,12 @@ from .domain.read_models.transcript_body_state import (
 
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
+    "CANONICAL_USAGE_DECISION_CTE",
     "CANONICAL_USAGE_EVENT_FILTER",
     "HAS_REQUESTED_MODEL_COLUMN",
     "REQUESTED_MODEL_COLUMN",
+    "SUMMARY_USAGE_TABLE",
+    "TURN_USAGE_ROLLUP_TABLE",
     "AcquisitionGapEvidence",
     "AcquisitionStatusEvidence",
     "AgentLaunch",
@@ -394,7 +403,10 @@ __all__ = [
     "recorded_model_from_row",
     "recorded_model_group_by",
     "recorded_model_select",
+    "rollup_usage_sources",
     "save_reapplying",
+    "summary_usage_columns",
+    "turn_usage_columns",
 ]
 
 from ._shared.concurrent_save import save_reapplying
