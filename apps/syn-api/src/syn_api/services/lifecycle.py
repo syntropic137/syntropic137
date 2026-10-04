@@ -348,25 +348,9 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             subscription=subscription,
             codex_auth=codex_auth,
             warnings=warnings or None,
-            db_pools=_describe_db_pools() or None,
+            db_pools=DbPoolHealth.snapshot() or None,
         )
     )
-
-
-def _describe_db_pools() -> list[DbPoolHealth]:
-    """Size, in-use and waiting for every open Postgres pool (#1583).
-
-    Read from in-process counters only, so it costs nothing and cannot hang on
-    the very database it is describing.
-    """
-    from syn_adapters.postgres_pool import pool_stats
-
-    return [
-        DbPoolHealth(
-            name=s.name, size=s.size, max_size=s.max_size, in_use=s.in_use, waiting=s.waiting
-        )
-        for s in pool_stats()
-    ]
 
 
 def _describe_codex_auth_health() -> CodexAuthStatus | None:

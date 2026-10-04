@@ -2132,6 +2132,17 @@ class DbPoolHealth(BaseModel):
     in_use: int = Field(description="Connections checked out right now.")
     waiting: int = Field(description="Callers blocked waiting for a connection right now.")
 
+    @classmethod
+    def snapshot(cls) -> list[DbPoolHealth]:
+        """Every open pool, read from in-process counters only.
+
+        Costs nothing and cannot hang on the database it describes, so /health
+        can always report it.
+        """
+        from syn_adapters.postgres_pool import pool_stats
+
+        return [cls.model_validate(stats, from_attributes=True) for stats in pool_stats()]
+
 
 class HealthResponse(_OmitsAbsentFields):
     """Payload of ``GET /health``.
