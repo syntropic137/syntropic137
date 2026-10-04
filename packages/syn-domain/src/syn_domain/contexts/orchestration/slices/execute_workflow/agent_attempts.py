@@ -54,7 +54,6 @@ if TYPE_CHECKING:
         ExecutablePhase,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
-        PhaseAttempts,
         UpstreamRetryPolicy,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
