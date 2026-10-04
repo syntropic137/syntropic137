@@ -11,7 +11,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration._shared.eval_admission import EvalSelection
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (

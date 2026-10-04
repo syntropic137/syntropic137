@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from syn_domain.contexts.orchestration._shared.eval_admission import EvalSelection, LaunchEval
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 
 # Runtime import: FailExecutionCommand defaults an absent usage to zeros rather

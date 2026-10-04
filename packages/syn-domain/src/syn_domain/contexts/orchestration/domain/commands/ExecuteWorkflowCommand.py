@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts._shared.repository_ref import (
     RepositoryRef,  # noqa: TC001 - runtime field type
 )
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 
 
@@ -42,6 +43,13 @@ class ExecuteWorkflowCommand(BaseModel):
     tags: TagSet = Field(
         default_factory=TagSet,
         description="Tags for this run, added to the workflow's tags at launch.",
+    )
+
+    # Which eval this run joins (#967): an explicit eval, an explicit ordinary
+    # run, or (the empty choice) the workflow's default_eval_id at dispatch.
+    eval_choice: EvalChoice = Field(
+        default_factory=EvalChoice,
+        description="Eval to launch into; empty defers to the workflow's default eval.",
     )
 
     # Optional execution context
