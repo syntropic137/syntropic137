@@ -335,7 +335,7 @@ class StreamResult:
     announced_model: str | None = None
 
 
-def _owning_call(cli_event: Mapping[str, Any]) -> str | None:
+def _owning_call(parent_tool_use_id: object) -> str | None:
     """The Agent/Task call whose subagent wrote this line, or None for the leader.
 
     Claude puts a subagent's turns on the parent's stream and marks each one
@@ -344,8 +344,9 @@ def _owning_call(cli_event: Mapping[str, Any]) -> str | None:
     that id and the session's tool count leaves them out
     (docs/architecture/agent_sessions-ubiquitous-language.md, "Tool Call").
     """
-    owner = cli_event.get("parent_tool_use_id")
-    return owner if isinstance(owner, str) and owner else None
+    if isinstance(parent_tool_use_id, str) and parent_tool_use_id:
+        return parent_tool_use_id
+    return None
 
 
 def _model_under_message(message: object) -> object:
@@ -731,7 +732,7 @@ class EventStreamProcessor:
 
         await self._record_turn_usage_once(message)
 
-        owner = _owning_call(cli_event)
+        owner = _owning_call(cli_event.get("parent_tool_use_id"))
         content = message.get("content") or []
         if content:
             # ANY content, before a single block is looked at. The loop below
@@ -856,7 +857,7 @@ class EventStreamProcessor:
         """Handle user event — process tool results."""
         message = cli_event.get("message", {})
         content = message.get("content", [])
-        owner = _owning_call(cli_event)
+        owner = _owning_call(cli_event.get("parent_tool_use_id"))
 
         for item in content:
             if isinstance(item, dict) and item.get("type") == "tool_result":
