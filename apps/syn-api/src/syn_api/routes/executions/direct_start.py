@@ -13,7 +13,7 @@ import weakref
 from typing import TYPE_CHECKING
 
 from syn_api._wiring_admission import get_execution_budget
-from syn_api.execution_budget import StartPath
+from syn_api.execution_budget import StartAlreadyClaimedError, StartPath
 from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 
 if TYPE_CHECKING:
@@ -66,7 +66,14 @@ def queue_direct_start(
     budget trigger and resume starts claim from too.
     """
     budget = get_execution_budget()
-    claim = budget.claim(execution_id, workflow_id=workflow_id, path=StartPath.DIRECT)
+    try:
+        claim = budget.claim(execution_id, workflow_id=workflow_id, path=StartPath.DIRECT)
+    except StartAlreadyClaimedError:
+        # The request ProcessManager saw the durable request first and already
+        # queued its start in this process, under its own lease. Not a second
+        # start, and not a failure: the 200 is still true.
+        admitted.abort()
+        return
 
     async def _run() -> None:
         # #1387: the lease, carried across the hop that used to spend it. It

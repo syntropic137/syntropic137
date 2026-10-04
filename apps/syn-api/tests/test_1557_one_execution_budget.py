@@ -726,3 +726,26 @@ class TestADirectStartSurvivesARestart:
         assert await world.coordinate() == (0, 0)
         assert world.agent.entered.count(requested) == 1
         assert world.executions.streams[requested].status.value == "completed"
+
+
+class TestTheProcessManagerAndTheRouteRaceForOneRequest:
+    async def test_the_route_does_not_fail_when_the_manager_queued_it_first(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The coordinator can deliver the durable request and offer it before
+        the route claims it: the route must still answer 200, start nothing
+        twice, and leave no lease behind."""
+        recorded = commands.record_execution_request
+
+        async def _manager_wins_the_race(*args: object, **kwargs: object) -> None:
+            await recorded(*args, **kwargs)  # type: ignore[arg-type]
+            assert await world.coordinate() == (0, 1)
+
+        monkeypatch.setattr(commands, "record_execution_request", _manager_wins_the_race)
+
+        execution_id = await world.post_execute()
+
+        await world.agent.until(lambda: execution_id in world.agent.inside)
+        await _release_everything(world)
+        assert world.agent.entered.count(execution_id) == 1
+        assert await world.coordinate() == (0, 0)
