@@ -1,0 +1,30 @@
+{
+ "confirmed_empty": {
+  "installation_id": null,
+  "lookup": "complete",
+  "repos": [],
+  "total": 0
+ },
+ "installation_lookup_failed": {
+  "installation_id": null,
+  "lookup": "unavailable",
+  "repos": [],
+  "total": 0
+ },
+ "one_installation_failed": {
+  "installation_id": null,
+  "lookup": "partial",
+  "repos": [
+   {
+    "default_branch": "main",
+    "full_name": "acme/payments",
+    "github_id": 1,
+    "installation_id": "inst-1",
+    "name": "payments",
+    "owner": "acme",
+    "private": false
+   }
+  ],
+  "total": 1
+ }
+}

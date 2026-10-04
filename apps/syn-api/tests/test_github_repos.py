@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_api.routes.github import _is_stale, list_accessible_repos
-from syn_api.types import Err, GitHubError, Ok
+from syn_api.types import Err, GitHubError, GitHubRepoLookup, Ok
 
 
 def _make_repo(idx: int, *, private: bool = False) -> dict:
@@ -49,11 +49,11 @@ async def test_single_installation() -> None:
         mock_ensure.assert_awaited_once()
 
     assert isinstance(result, Ok)
-    assert len(result.value) == 2
-    assert result.value[0].github_id == 1
-    assert result.value[0].full_name == "org/repo-1"
-    assert result.value[0].owner == "org"
-    assert result.value[0].installation_id == "inst-1"
+    assert len(result.value.repos) == 2
+    assert result.value.repos[0].github_id == 1
+    assert result.value.repos[0].full_name == "org/repo-1"
+    assert result.value.repos[0].owner == "org"
+    assert result.value.repos[0].installation_id == "inst-1"
 
 
 @pytest.mark.asyncio
@@ -89,8 +89,8 @@ async def test_all_installations_aggregated() -> None:
 
     assert isinstance(result, Ok)
     # Repo 2 appears in both installations — should be deduplicated
-    assert len(result.value) == 3
-    github_ids = {r.github_id for r in result.value}
+    assert len(result.value.repos) == 3
+    github_ids = {r.github_id for r in result.value.repos}
     assert github_ids == {1, 2, 3}
 
 
@@ -157,8 +157,8 @@ async def test_include_private_false_filters() -> None:
         mock_ensure.assert_awaited_once()
 
     assert isinstance(result, Ok)
-    assert len(result.value) == 2
-    assert all(not r.private for r in result.value)
+    assert len(result.value.repos) == 2
+    assert all(not r.private for r in result.value.repos)
 
 
 # =============================================================================
@@ -238,7 +238,7 @@ async def test_empty_projection_triggers_github_api_sync() -> None:
 
     mock_client.list_installations.assert_awaited_once()
     assert isinstance(result, Ok)
-    assert len(result.value) == 1
+    assert len(result.value.repos) == 1
 
 
 @pytest.mark.asyncio
@@ -304,7 +304,7 @@ async def test_fresh_projection_skips_refresh() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_failure_returns_empty_gracefully() -> None:
-    """If list_installations() raises, the endpoint returns empty without crashing."""
+    """If list_installations() raises, the endpoint returns empty, marked unavailable."""
     mock_client = MagicMock()
     mock_client.list_installations = AsyncMock(side_effect=RuntimeError("network error"))
 
@@ -327,4 +327,6 @@ async def test_sync_failure_returns_empty_gracefully() -> None:
     # test proves the FAILURE path was exercised rather than skipped.
     mock_client.list_installations.assert_awaited_once_with()
     assert isinstance(result, Ok)
-    assert result.value == []
+    assert result.value.repos == []
+    # Empty because GitHub failed, not because the App reaches nothing.
+    assert result.value.lookup == GitHubRepoLookup.UNAVAILABLE
