@@ -120,14 +120,16 @@ Gating, not working, is what runs phases out of time (#1585): one phase
 finished its fix five minutes in and spent the remaining 57 waiting on gates.
 
 - **Iterate on targeted tests** (`uv run pytest <the test files you touched> -q`)
-  and on `just preflight-agent-fast`, the static front of the gate (lint,
-  format, untyped-dicts, cross-context imports and the other cheap checks,
-  under a minute). It is not the gate.
+  and on `just preflight-agent-fast`, the front of the gate: lint, format,
+  untyped-dicts, cross-context imports and the other cheap checks, then the
+  LOC and complexity thresholds (max-loc-file, max-cyclomatic). Its first run
+  in a fresh workspace also builds the APS binary in the background, which
+  takes a few minutes; later runs reuse it. It is not the gate.
 - **Run the full `just preflight-agent` ONCE, at the end**, before the final
   push. It runs cheapest first, stops at the first failure, and prints
-  `[preflight-agent] <step> ok <seconds>` per step and a total. A first run in
-  a fresh workspace also installs Rust and builds the APS binary, so expect it
-  to take several minutes; a failure prints the step that failed, so fix that
+  `[preflight-agent] <step> ok <seconds>` per step and a total. If you never
+  ran the fast loop, its first run also installs Rust and builds the APS
+  binary, so expect several minutes; a failure prints the step that failed, so fix that
   and rerun rather than starting over blind.
 - **Never hand-roll a wait loop** (`until grep ...; do sleep ...; done`). They
   miss completion: one phase lost 16 minutes waiting on jobs that had already

@@ -1132,15 +1132,25 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 # does not.
 # The steps `preflight-agent` runs, in order, cheapest first (#1585). The
 # runner stops at the first failure and prints `[preflight-agent] <step> ok
-# <seconds>` for each, so a file over a ratchet fails in seconds rather than
-# after a Rust build.
+# <seconds>` for each.
 #
-# Fast: static, no Rust, no full pytest run. What `preflight-agent-fast` runs.
-_preflight_agent_fast_steps := "check-agent-docs check-docs-content check-ci-parity lint format-check check-no-public-ports check-compose check-test-debt check-env-example validate-domain-events check-plugin-schemas check-workflows check-openapi-drift check-untyped-dicts fitness-cross-context"
-# Slow: the rest of preflight-portable, then both halves of fitness, the Rust
-# build last. test_ci_and_preflight_agree.py fails if fast + slow ever stops
-# covering preflight-portable, fitness-agent and fitness-invariants-agent.
-_preflight_agent_slow_steps := "typecheck check-test-markers fitness-invariants-agent fitness-agent"
+# Fast: the static checks, then the APS thresholds (max-loc-file,
+# max-cyclomatic, via fitness-agent), the checks agents most often fail. Those
+# need the Rust aps binary, so `aps-prewarm` builds it in the background from
+# the first second and fitness-agent waits on that build's exit status. On a
+# cold workspace the first run pays the build once, overlapped with the static
+# steps; every later run finds the binary fresh. What `preflight-agent-fast` runs.
+_preflight_agent_fast_steps := "check-agent-docs check-docs-content check-ci-parity lint format-check check-no-public-ports check-compose check-test-debt check-env-example validate-domain-events check-plugin-schemas check-workflows check-openapi-drift check-untyped-dicts fitness-cross-context fitness-agent"
+# Slow: the rest of preflight-portable and the full `pytest ci/fitness` suite.
+# test_ci_and_preflight_agree.py fails if fast + slow ever stops covering
+# preflight-portable, fitness-agent and fitness-invariants-agent.
+_preflight_agent_slow_steps := "typecheck check-test-markers fitness-invariants-agent"
+_preflight_agent_prewarm := "--prewarm aps-prewarm:fitness-agent"
+
+# Builds the aps binary (installing stable Rust if needed) and checks nothing:
+# the background half of the gate runner's --prewarm (#1585).
+aps-prewarm:
+    @bash scripts/agent-fitness.sh --build-only
 
 # The cross-context import rules from `fitness-invariants`, alone, with CI's
 # flags: the part of that suite cheap enough for the fast loop. The full gate
@@ -1148,16 +1158,15 @@ _preflight_agent_slow_steps := "typecheck check-test-markers fitness-invariants-
 fitness-cross-context:
     uv run pytest ci/fitness/code_quality/test_cross_context_public_api.py ci/fitness/code_quality/test_typed_cross_context_boundaries.py -v --tb=short -m architecture
 
-# The static subset of `preflight-agent`, for iterating (#1585). NOT a gate:
-# it skips typecheck, the full fitness suite and the APS thresholds
-# (max-loc-file, max-cyclomatic), which need the Rust build. Run the full
-# `preflight-agent` once, before the final push.
+# The static subset of `preflight-agent`, plus the APS thresholds, for
+# iterating (#1585). NOT a gate: it skips typecheck and the full fitness suite.
+# Run the full `preflight-agent` once, before the final push.
 preflight-agent-fast:
-    @bash scripts/run-gate-steps.sh preflight-agent-fast {{_preflight_agent_fast_steps}}
+    @bash scripts/run-gate-steps.sh {{_preflight_agent_prewarm}} preflight-agent-fast {{_preflight_agent_fast_steps}}
     @echo "preflight-agent-fast is the iteration loop, not the gate: run 'just preflight-agent' before the final push."
 
 preflight-agent:
-    @bash scripts/run-gate-steps.sh preflight-agent {{_preflight_agent_fast_steps}} {{_preflight_agent_slow_steps}}
+    @bash scripts/run-gate-steps.sh {{_preflight_agent_prewarm}} preflight-agent {{_preflight_agent_fast_steps}} {{_preflight_agent_slow_steps}}
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
     @echo "   Fitness ran in full: fitness-check AND fitness-invariants. Any"
     @echo "   ci/fitness test marked NOT RUN in the pytest summary above needs a"

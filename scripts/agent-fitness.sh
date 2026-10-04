@@ -18,9 +18,14 @@
 # Caching is the existing stores', not a new one: the toolchain lives in
 # RUSTUP_HOME and the binary in the APSS target dir. Cargo decides freshness,
 # as build-aps.sh requires, so a warm run rebuilds nothing.
+#
+# `--build-only` stops after aps-build: the background prewarm `preflight-agent`
+# starts so the Rust build overlaps its cheap steps (#1585). It checks nothing.
 set -euo pipefail
 
 readonly NOT_RUN_EXIT=69
+build_only=0
+[[ "${1:-}" == --build-only ]] && build_only=1
 
 not_run() {
     echo "FITNESS NOT RUN: $1" >&2
@@ -53,6 +58,9 @@ fi
 
 if ! just aps-build; then
     not_run "aps-build failed, so there is no aps binary to check with (its error is above)"
+fi
+if [[ "$build_only" == 1 ]]; then
+    exit 0
 fi
 
 # fitness-check has its own prerequisites (untyped-dicts and test-marker

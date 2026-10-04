@@ -180,7 +180,10 @@ def _gate_steps(target: str) -> list[str]:
     """
     for argv in _commands_run_by(target):
         if len(argv) >= 3 and argv[:2] == ("bash", _GATE_RUNNER):
-            return list(argv[3:])
+            rest = list(argv[2:])
+            if rest[0] == "--prewarm":
+                rest = rest[2:]
+            return rest[1:]
     return []
 
 
@@ -259,8 +262,8 @@ def test_preflight_agent_fast_is_the_cheap_front_of_the_full_gate() -> None:
     """The fast loop runs exactly what the full gate runs FIRST.
 
     So a fast run that passes means the full gate gets past those steps too,
-    and the full gate fails on them before it reaches anything slow. And the
-    fast loop never starts the Rust build, which is what it exists to avoid.
+    and the full gate fails on them before it reaches anything slow. The full
+    `pytest ci/fitness` suite and typecheck stay out of the fast loop.
     """
     fast = _gate_steps("preflight-agent-fast")
     full = _gate_steps("preflight-agent")
@@ -269,9 +272,35 @@ def test_preflight_agent_fast_is_the_cheap_front_of_the_full_gate() -> None:
         "`preflight-agent` must start with exactly the `preflight-agent-fast` steps, in order"
     )
     text = _JUSTFILE.read_text()
-    slow = {"fitness-agent", "aps-build", "fitness-check", "fitness-invariants-agent"}
-    assert not slow & _gate_closure("preflight-agent-fast", text)
-    assert full[-1] == "fitness-agent", "the Rust build must be the full gate's last step"
+    assert not {"typecheck", "fitness-invariants-agent"} & _gate_closure(
+        "preflight-agent-fast", text
+    )
+
+
+def test_the_loc_and_complexity_thresholds_fail_fast() -> None:
+    """max-loc-file and max-cyclomatic are what agents fail most (#1498, #1585).
+
+    They are APS thresholds, evaluated by `fitness-check` through
+    `fitness-agent`. Scheduled last, behind typecheck and the full fitness
+    suite, a file over the limit failed minutes into the gate, so they must be
+    in the fast loop and ahead of every slow step, with the Rust build started
+    in the background from the gate's first second.
+    """
+    fitness = _ROOT / "fitness.toml"
+    thresholds = fitness.read_text()
+    for rule in ("max-loc-file", "max-cyclomatic"):
+        assert f'id = "{rule}"' in thresholds, f"fitness.toml no longer defines {rule}"
+    fast = _gate_steps("preflight-agent-fast")
+    full = _gate_steps("preflight-agent")
+    assert "fitness-agent" in fast, "the APS thresholds left the fast loop"
+    slow = full[len(fast) :]
+    assert slow and full.index("fitness-agent") < full.index(slow[0])
+    for target in ("preflight-agent", "preflight-agent-fast"):
+        runners = [a for a in _commands_run_by(target) if a[:2] == ("bash", _GATE_RUNNER)]
+        assert any(a[2:4] == ("--prewarm", "aps-prewarm:fitness-agent") for a in runners), (
+            f"`{target}` must prewarm the aps build so fitness-agent does not start it cold"
+        )
+    assert "--build-only" in _body("aps-prewarm", _JUSTFILE.read_text())
 
 
 def test_only_the_agent_gate_lets_a_missing_host_tool_skip() -> None:
