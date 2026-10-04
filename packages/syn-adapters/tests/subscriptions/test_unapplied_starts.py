@@ -242,7 +242,9 @@ async def test_a_start_above_the_lowest_checkpoint_is_lag_not_a_drop() -> None:
 
 @pytest.mark.asyncio
 async def test_a_second_check_with_no_new_events_makes_no_lookups() -> None:
-    rig = await _rig(drop=None)
+    # A window wide enough that both starts are re-read: only the confirmed set
+    # keeps them from being looked up again.
+    rig = await _rig(drop=None, safety_window=5_000)
     detector = rig.detector()
     await detector.check()
     after_first = rig.queries
