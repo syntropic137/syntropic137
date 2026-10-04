@@ -219,20 +219,33 @@ class UnappliedStartDetector:
             events, is_end, next_position = await self._event_store.read_all(
                 from_global_nonce=position, max_count=min(_PAGE_SIZE, budget), forward=True
             )
-            for envelope in events:
-                nonce = envelope.metadata.global_nonce
-                if nonce is None or nonce > through:
-                    continue
-                if nonce > self._mark:
-                    budget -= 1
-                last_read = max(last_read, nonce)
-                event = envelope.event
-                if isinstance(event, WorkflowExecutionStartedEvent):
-                    starts.setdefault(event.execution_id, nonce)
+            page_last, past_mark = self._absorb(events, through, starts)
+            last_read = max(last_read, page_last)
+            budget -= past_mark
             if is_end or not events or next_position <= position:
                 break
             position = next_position
         return _Window(starts=starts, read_through=max(last_read, through))
+
+    def _absorb(
+        self,
+        events: Sequence[EventEnvelope[DomainEvent]],
+        through: int,
+        starts: dict[str, int],
+    ) -> tuple[int, int]:
+        """Record the starts in one page. Returns (last nonce read, events past the mark)."""
+        last_read = 0
+        past_mark = 0
+        for envelope in events:
+            nonce = envelope.metadata.global_nonce
+            if nonce is None or nonce > through:
+                continue
+            last_read = max(last_read, nonce)
+            past_mark += nonce > self._mark
+            event = envelope.event
+            if isinstance(event, WorkflowExecutionStartedEvent):
+                starts.setdefault(event.execution_id, nonce)
+        return last_read, past_mark
 
     async def _missing(self, candidates: dict[str, int]) -> dict[str, frozenset[str]]:
         """execution_id -> read models lacking its start. One query per batch per model."""
