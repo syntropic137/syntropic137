@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _GATEWAY_IMAGE = _REPO_ROOT / "infra" / "docker" / "images" / "gateway"
 _SECURITY_HEADERS = _GATEWAY_IMAGE / "security-headers.conf"
