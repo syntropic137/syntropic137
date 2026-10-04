@@ -425,7 +425,16 @@ class TimescaleHeatmapQuery:
         Returns:
             List of HeatmapDayBucket, one per day (zero-filled).
         """
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
+            # Plan every statement for THESE dates (E1). asyncpg prepares and
+            # caches each query, and after five runs PostgreSQL may switch to
+            # a generic plan that cannot see the window: it estimated ~10
+            # rollup rows for a year that held 2,000 sessions, picked a nested
+            # loop over session_start x canonical_usage, and turned a 35ms
+            # read into 640ms on every dashboard load from the sixth on.
+            # SET LOCAL ends with this transaction, so the pooled connection
+            # goes back as it came.
+            await conn.execute("SET LOCAL plan_cache_mode = force_custom_plan")
             execution_rows = await self._fetch(conn, _EXECUTIONS_QUERY, start, end, execution_ids)
             commit_rows = await self._fetch(conn, _COMMITS_QUERY, start, end, execution_ids)
             session_rows = await self._fetch(conn, _SESSIONS_QUERY, start, end, execution_ids)
