@@ -113,6 +113,31 @@ syn execution sessions <execution-id> --all   # every session of the run (the su
 
 ---
 
+## `syn execution tag`
+
+Add or remove an execution's tags. Idempotent; never replaces the set
+
+```bash
+syn execution tag <action> <execution-id> <tags>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `action` | `text` | Yes | add or remove |
+| `execution-id` | `text` | Yes | The execution to edit |
+| `tags` | `text` | Yes | One or more tags |
+
+**Examples:**
+
+```bash
+syn execution tag add <execution-id> eval:baseline     # filter later with --tag eval:baseline
+syn execution tag remove <execution-id> nightly        # inherited_tags still records it
+```
+
+---
+
 ## `syn execution transcript`
 
 Read an exact local transcript archive revision. Harness, native ID and archived-bytes SHA-256 come from `syn execution sessions <execution-id> --kind capture --all`

@@ -253,6 +253,31 @@ syn workflow status <workflow-id>
 
 ---
 
+## `syn workflow tag`
+
+Add or remove a workflow's tags. Future runs inherit them; existing runs keep their own
+
+```bash
+syn workflow tag <action> <workflow-id> <tags>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `action` | `text` | Yes | add or remove |
+| `workflow-id` | `text` | Yes | The workflow to edit |
+| `tags` | `text` | Yes | One or more tags |
+
+**Examples:**
+
+```bash
+syn workflow tag add <workflow-id> team:evals nightly
+syn workflow tag remove <workflow-id> nightly
+```
+
+---
+
 ## `syn workflow uninstall`
 
 Uninstall a workflow package

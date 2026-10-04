@@ -9,6 +9,7 @@ import { installCommand, packagesCommand, initCommand } from "./install.js";
 import { exportCommand } from "./export.js";
 import { searchCommand, infoCommand } from "./search.js";
 import { updateCommand, uninstallCommand } from "./update.js";
+import { tagCommand } from "./tag.js";
 
 export const workflowGroup = new CommandGroup(
   "workflow",
@@ -21,6 +22,7 @@ workflowGroup
   .command(showCommand)
   .command(validateCommand)
   .command(deleteCommand)
+  .command(tagCommand)
   .command(runCommand)
   .command(statusCommand)
   .command(installCommand)
