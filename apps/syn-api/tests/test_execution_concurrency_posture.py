@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
-from syn_api.services.lifecycle import _log_execution_concurrency_posture
+from syn_api.services.execution_posture import log_execution_concurrency_posture
 from syn_shared.env_constants import (
     ENV_SYN_EXECUTION_MAX_CONCURRENT,
     ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
@@ -33,14 +33,14 @@ class TestConcurrencyPosture:
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         with caplog.at_level(logging.INFO):
-            _log_execution_concurrency_posture(4, memory_limit_mib=512, retired_setting=None)
+            log_execution_concurrency_posture(4, memory_limit_mib=512, retired_setting=None)
 
         assert _warnings(caplog) == []
         assert any(ENV_SYN_EXECUTION_MAX_CONCURRENT in r.getMessage() for r in caplog.records)
 
     def test_no_readable_limit_is_not_a_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING):
-            _log_execution_concurrency_posture(50, memory_limit_mib=None, retired_setting=None)
+            log_execution_concurrency_posture(50, memory_limit_mib=None, retired_setting=None)
 
         assert _warnings(caplog) == []
 
@@ -49,7 +49,7 @@ class TestConcurrencyPosture:
     ) -> None:
         """#1552 exactly: 8 runs against a 512MiB API."""
         with caplog.at_level(logging.WARNING):
-            _log_execution_concurrency_posture(8, memory_limit_mib=512, retired_setting=None)
+            log_execution_concurrency_posture(8, memory_limit_mib=512, retired_setting=None)
 
         (message,) = _warnings(caplog)
         assert ENV_SYN_EXECUTION_MAX_CONCURRENT in message
@@ -60,7 +60,7 @@ class TestConcurrencyPosture:
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         with caplog.at_level(logging.WARNING):
-            _log_execution_concurrency_posture(4, memory_limit_mib=None, retired_setting="1")
+            log_execution_concurrency_posture(4, memory_limit_mib=None, retired_setting="1")
 
         (message,) = _warnings(caplog)
         assert ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES in message

@@ -194,13 +194,14 @@ class _HeldAgent:
                 await self.changed.wait()
 
 
-def _prompt(*args: object, **kwargs: object) -> str:
+async def _build_prompt(*args: object, **kwargs: object) -> str:
     del args, kwargs
     return "prompt"
 
 
-async def _build_prompt(*args: object, **kwargs: object) -> str:
-    return _prompt(*args, **kwargs)
+def _command(phase: ExecutablePhase, prompt: str) -> list[str]:
+    del phase
+    return ["echo", prompt]
 
 
 def _processor(executions: _Executions, agent: _HeldAgent) -> WorkflowExecutionProcessor:
@@ -215,7 +216,7 @@ def _processor(executions: _Executions, agent: _HeldAgent) -> WorkflowExecutionP
         observability_writer=None,
         controller=None,
         prompt_builder=_build_prompt,  # type: ignore[arg-type]
-        command_builder=lambda phase, prompt: ["echo", prompt],  # type: ignore[arg-type]
+        command_builder=_command,
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         agent_handler=agent,  # type: ignore[arg-type]
     )
@@ -423,9 +424,7 @@ class TestOneBudgetForEveryStartPath:
         finished: list[str] = []
         while len(finished) < len(everyone):
             await world.agent.until(
-                lambda: (
-                    len(world.agent.inside) == min(LIMIT, len(everyone) - len(finished))
-                )
+                lambda: len(world.agent.inside) == min(LIMIT, len(everyone) - len(finished))
             )
             running = world.agent.inside[0]
             world.agent.release(running)
@@ -468,9 +467,7 @@ class TestAQueuedStartIsVisible:
 
     async def test_a_queued_resume_shows_on_its_parent(self, world: _World) -> None:
         children, _ = await _everything_offered(world)
-        waiting = [
-            p for p, c in zip(PARENTS, children, strict=True) if c not in world.agent.inside
-        ]
+        waiting = [p for p, c in zip(PARENTS, children, strict=True) if c not in world.agent.inside]
         assert waiting, "with two slots and six starts, some resume must be waiting"
 
         info = await queries._resume_start_of(world.resume_store, waiting[0])  # pyright: ignore[reportPrivateUsage]

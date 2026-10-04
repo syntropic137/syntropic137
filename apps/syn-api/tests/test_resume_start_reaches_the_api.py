@@ -27,7 +27,6 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
-from syn_domain.contexts.orchestration.slices.start_resume import ResumeChild
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     InheritedPhase,
@@ -41,7 +40,10 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEve
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
-from syn_domain.contexts.orchestration.slices.start_resume import ResumeStartProcessManager
+from syn_domain.contexts.orchestration.slices.start_resume import (
+    ResumeChild,
+    ResumeStartProcessManager,
+)
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import MAX_START_ATTEMPTS
 
 if TYPE_CHECKING:

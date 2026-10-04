@@ -759,6 +759,34 @@ async def _not_yet_started(
     )
 
 
+async def _detail_or_queued(
+    mgr: ProjectionManager, execution_id: str
+) -> tuple[ExecutionDetailFull, str] | ExecutionDetailResponse:
+    """The stored detail and its full id, or the queued start it still is (#1557).
+
+    A 404 from either lookup falls back to the execution budget before it is
+    raised: an accepted start waiting for a slot has no record yet.
+    """
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    try:
+        full_id = await resolve_or_raise(
+            mgr.store, "workflow_execution_details", execution_id, "Execution"
+        )
+    except HTTPException as exc:
+        queued = await _not_yet_started(mgr, execution_id) if exc.status_code == 404 else None
+        if queued is None:
+            raise
+        return queued
+    result = await get_detail(full_id)
+    if isinstance(result, Ok):
+        return result.value, full_id
+    queued = await _not_yet_started(mgr, full_id)
+    if queued is None:
+        raise HTTPException(status_code=404, detail=f"Execution {full_id} not found")
+    return queued
+
+
 async def _resume_start_of(
     store: ProjectionStoreProtocol, execution_id: str
 ) -> ResumeStartInfo | None:
@@ -786,25 +814,12 @@ async def _resume_start_of(
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
     from syn_api._wiring import get_projection_mgr
-    from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    try:
-        execution_id = await resolve_or_raise(
-            mgr.store, "workflow_execution_details", execution_id, "Execution"
-        )
-    except HTTPException as exc:
-        queued = await _not_yet_started(mgr, execution_id) if exc.status_code == 404 else None
-        if queued is None:
-            raise
-        return queued
-    result = await get_detail(execution_id)
-    if isinstance(result, Err):
-        queued = await _not_yet_started(mgr, execution_id)
-        if queued is not None:
-            return queued
-        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
-    detail = result.value
+    found = await _detail_or_queued(mgr, execution_id)
+    if isinstance(found, ExecutionDetailResponse):
+        return found
+    detail, execution_id = found
     phases = [_map_phase_to_response(p) for p in detail.phases or []]
     total_input = sum(p.input_tokens for p in detail.phases or [])
     total_output = sum(p.output_tokens for p in detail.phases or [])
