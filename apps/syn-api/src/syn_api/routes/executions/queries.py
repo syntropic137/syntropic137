@@ -54,6 +54,7 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
+from .start_config import load_start_configs
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
@@ -529,8 +530,9 @@ async def get_detail(
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     agent_sessions = await _load_agent_session_ids(execution_id)
     configured_models = await load_configured_models(manager, detail.workflow_id)
+    start_configs = await load_start_configs(execution_id)
     phases = [
-        await _map_phase_detail(p, manager, agent_sessions, configured_models)
+        await _map_phase_detail(p, manager, agent_sessions, configured_models, start_configs)
         for p in detail.phases
     ]
     # Folded from the phases this response already carries, so the header total

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, computed_field
 # Runtime import: Pydantic resolves the field annotations below, and
 # `PhaseActivityInfo` is also called at runtime as a field default.
 from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
-from syn_api.types import BranchObservationInfo, PhaseActivityInfo
+from syn_api.types import BranchObservationInfo, PhaseActivityInfo, PhaseStartConfig
 from syn_domain.contexts.orchestration import (
     FailureClassification,
     ReportedFailureReason,
@@ -144,6 +144,12 @@ class PhaseExecutionInfo(BaseModel):
     branch would hand every failed phase a location and make the two incidents
     identical again. What no record claims is who moved a ref: git does not
     carry that, so this reports the two readings and stops.
+    """
+    pinned_at_start: PhaseStartConfig | None = None
+    """The tools, skills and model this phase had when its execution started.
+
+    Null is "not recorded" (an execution from before #1454), never a guess
+    from the workflow as it stands now.
     """
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)

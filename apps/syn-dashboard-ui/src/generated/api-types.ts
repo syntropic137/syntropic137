@@ -5024,6 +5024,7 @@ export interface components {
             exit_code?: number | null;
             /** Observed Branches */
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
+            pinned_at_start?: components["schemas"]["PhaseStartConfig"] | null;
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
@@ -5123,6 +5124,38 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * PhaseStartConfig
+         * @description What a phase was configured with when its execution STARTED.
+         *
+         *     Read from the execution's own start event (`StartPins`, #1454), never from
+         *     the workflow template, which may have been edited since. That is the whole
+         *     point: this answers "what did the agent have", not "what would it get now".
+         */
+        PhaseStartConfig: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
+            /** Allowed Tools */
+            allowed_tools?: string[];
+            /** Skills */
+            skills?: components["schemas"]["PinnedSkillInfo"][];
+        };
+        /**
+         * PinnedSkillInfo
+         * @description One skill a phase was given at start, at the version it was resolved to (#1454).
+         */
+        PinnedSkillInfo: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Source Url */
+            source_url: string;
         };
         /**
          * Priority

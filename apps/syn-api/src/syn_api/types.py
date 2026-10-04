@@ -1053,6 +1053,34 @@ class ToolOperation(BaseModel):
     git_repo: str | None = None
 
 
+class PinnedSkillInfo(BaseModel):
+    """One skill a phase was given at start, at the version it was resolved to (#1454)."""
+
+    name: str
+    version: str
+    """The version as declared - a tag, branch or sha."""
+    resolved_sha: str
+    """Content hash of the skill tree the workspace was actually given."""
+    source_url: str
+
+
+class PhaseStartConfig(BaseModel):
+    """What a phase was configured with when its execution STARTED.
+
+    Read from the execution's own start event (`StartPins`, #1454), never from
+    the workflow template, which may have been edited since. That is the whole
+    point: this answers "what did the agent have", not "what would it get now".
+    """
+
+    provider: str
+    model: str | None = None
+    """The model as resolved at start, or None when the phase named none."""
+    allowed_tools: list[str] = Field(default_factory=list)
+    """Empty means the phase declared no restriction, so the harness ran with
+    its own default tool set - not that the agent had no tools."""
+    skills: list[PinnedSkillInfo] = Field(default_factory=list)
+
+
 class BranchObservationInfo(BaseModel):
     """One branch of a failed phase's workspace, as git had it (#1200).
 
@@ -1320,6 +1348,12 @@ class PhaseExecution(BaseModel):
     Three-valued exactly as `BranchObservationInfo` describes. Defaulting to
     `[]` here, or anywhere below, would tell an API client that a workspace was
     verifiably unchanged when in truth nothing looked.
+    """
+    pinned_at_start: PhaseStartConfig | None = None
+    """What this phase had at start: tools, skills and model (#1454).
+
+    Null means the execution did not record it - every execution started
+    before #1454 - and is never filled in from the current template.
     """
     operations: list[ToolOperation] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
