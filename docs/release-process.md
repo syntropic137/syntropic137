@@ -100,6 +100,13 @@ Two environments are needed across the two repos:
 - **GHCR authentication** uses the built-in `GITHUB_TOKEN` - no additional setup needed.
 - **Cosign keyless signing** uses Sigstore OIDC - no additional setup needed.
 - **Multi-arch builds** (amd64 + arm64) use QEMU emulation via `docker/setup-qemu-action`.
+- **event-store is not built here.** ESP publishes it. The release pins
+  `event-store:v<ESP version>`, where the version is read from ESP's root
+  `package.json` at the `lib/event-sourcing-platform` gitlink, and fails if that
+  tag is not published. There is no `latest` fallback (#1515), so **ESP must
+  release before syn137 does** whenever the gitlink names a new ESP version.
+  `just check-event-store-pin` (part of `preflight`, so every PR) runs the same
+  check. Logic: `scripts/resolve_event_store_digest.py`.
 
 ## v0.28.0 Rollout Constraints
 
