@@ -591,7 +591,10 @@ just preflight-agent # The subset of preflight that runs INSIDE an agent
                      # ships just, uv and node and nothing else, so vsa,
                      # cargo, pnpm, docker and registry credentials are all
                      # absent and seven gates cannot run at all (#1109).
-                     # Fitness DOES run: see scripts/agent-fitness.sh (#1498).
+                     # All of fitness runs: the APS thresholds via
+                     # scripts/agent-fitness.sh (#1498) AND the pytest
+                     # ci/fitness invariants. Docker-backed fitness tests
+                     # skip there as a listed `NOT RUN`; CI runs them.
                      # On a dev machine run the full `just preflight` instead.
 ```
 
