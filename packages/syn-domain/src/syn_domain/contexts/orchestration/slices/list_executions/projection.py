@@ -19,9 +19,16 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
+    ExecutionTagsAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
+    ExecutionTagsRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
@@ -40,7 +47,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_executions"
-    VERSION = 6  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
+    VERSION = 7  # v7: tags and inherited_tags (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -80,6 +87,8 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             tuple(u.strip() for u in str(repos_raw).split(",") if u.strip()) if repos_raw else ()
         )
 
+        launched_with = TagSet.recorded(event_data.get("tags") or []).values
+
         summary = WorkflowExecutionSummary(
             workflow_execution_id=execution_id,
             workflow_id=event_data.get("workflow_id", ""),
@@ -97,6 +106,8 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             tool_call_count=0,
             expected_completion_at=event_data.get("expected_completion_at"),
             repos=repos,
+            tags=launched_with,
+            inherited_tags=launched_with,
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 
@@ -240,6 +251,25 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             existing["error_message"] = event_data.get("reason") or "Interrupted by user"
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
+    async def on_execution_tags_added(self, event_data: ExecutionTagsAddedEvent) -> None:
+        """Handle ExecutionTagsAdded (#967). Edits current tags, never inherited."""
+        event = ExecutionTagsAddedEvent.model_validate(event_data)
+        await self._edit_tags(event.execution_id, event.tags, added=True)
+
+    async def on_execution_tags_removed(self, event_data: ExecutionTagsRemovedEvent) -> None:
+        """Handle ExecutionTagsRemoved (#967). Edits current tags, never inherited."""
+        event = ExecutionTagsRemovedEvent.model_validate(event_data)
+        await self._edit_tags(event.execution_id, event.tags, added=False)
+
+    async def _edit_tags(self, execution_id: str, tags: list[str], *, added: bool) -> None:
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["tags"] = replay_tag_edit(existing.get("tags") or [], tags, added=added)
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
     async def get_by_workflow_id(self, workflow_id: str) -> list[WorkflowExecutionSummary]:
         """Get all executions for a workflow.
 
@@ -282,6 +312,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         started_after: datetime | None = None,
         started_before: datetime | None = None,
         search: str | None = None,
+        tags: Collection[str] | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> Page[WorkflowExecutionSummary]:
@@ -296,9 +327,17 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
 
         `search` matches case-insensitively against the execution id, the
         workflow id and the workflow name.
+
+        `tags` keeps only executions carrying EVERY tag given (AND), matched
+        against their current tags (#967). Pass them normalised: this compares
+        exactly, so the caller validates through `TagSet` first.
         """
+        required = frozenset(tags or ())
 
         def base(record: Mapping[str, object]) -> bool:
+            stored = record.get("tags")
+            if required and not (isinstance(stored, list) and required.issubset(stored)):
+                return False
             return matches_search(
                 search,
                 record.get("workflow_execution_id"),

@@ -25,11 +25,14 @@ const listCommand: CommandDef = {
   description: "List all workflow executions",
   options: {
     status: { type: "string", short: "s", description: "Filter by status" },
+    tag: { type: "string", description: "Only executions carrying this tag (repeatable; all must match)", multiple: true },
     page: { type: "string", description: "Page number", default: "1" },
     "page-size": { type: "string", description: "Items per page (max 100)", default: "50" },
   },
   handler: async (parsed: ParsedArgs) => {
     const status = parsed.values["status"] as string | undefined;
+    const tagValues = parsed.values["tag"];
+    const tags: string[] = Array.isArray(tagValues) ? tagValues as string[] : tagValues ? [tagValues as string] : [];
     const pageStr = (parsed.values["page"] as string | undefined) ?? "1";
     const pageSizeStr = (parsed.values["page-size"] as string | undefined) ?? "50";
 
@@ -37,6 +40,7 @@ const listCommand: CommandDef = {
       params: {
         query: {
           status: status ?? null,
+          ...(tags.length > 0 ? { tag: tags } : {}),
           page: parseInt(pageStr, 10),
           page_size: parseInt(pageSizeStr, 10),
         },
@@ -105,6 +109,7 @@ const showCommand: CommandDef = {
     print(`${style("Execution:", BOLD)} ${ex.workflow_execution_id}`);
     print(`  Workflow:     ${ex.workflow_name}`);
     print(`  Status:       ${formatStatus(ex.status)}`);
+    if ((ex.tags ?? []).length > 0) print(`  Tags:         ${(ex.tags ?? []).join(", ")}`);
     print(`  Started:      ${formatTimestamp(ex.started_at)}`);
     if (ex.completed_at) print(`  Completed:    ${formatTimestamp(ex.completed_at)}`);
     print(`  Tokens:       ${formatTokens(ex.total_tokens)}`);

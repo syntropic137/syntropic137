@@ -387,6 +387,36 @@ describe("workflow run commands", () => {
       expect(body.repos).toEqual(["acme/widgets"]);
     });
 
+    it("sends every --tag on the execute body (#967)", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [{ id: "wf-tagged-1", name: "W", workflow_type: "custom", phase_count: 1 }],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-tagged-1",
+            name: "W",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-003" }));
+
+      await runCommand.handler({
+        positionals: ["wf-tagged"],
+        values: { tag: ["nightly", "eval-a"] },
+      });
+
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.tags).toEqual(["nightly", "eval-a"]);
+    });
+
     it("resolves mixed -R values: repo-* via lookup, owner/repo passthrough", async () => {
       mockFetch
         // 1) repo-abc lookup

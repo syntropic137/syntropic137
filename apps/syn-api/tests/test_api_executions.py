@@ -31,6 +31,7 @@ _LIST_ARGS: Mapping[str, object] = {
     "started_after": None,
     "started_before": None,
     "q": None,
+    "tag": None,
     "page": 1,
     "page_size": 50,
 }

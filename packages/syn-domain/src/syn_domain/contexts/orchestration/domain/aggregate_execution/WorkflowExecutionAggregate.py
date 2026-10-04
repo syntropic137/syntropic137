@@ -35,6 +35,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartPhaseCommand,
     StartResumeCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
+    ExecutionTags,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     ResumedEventShape,
     classify_resumed_payload,
@@ -80,6 +83,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
+        AddExecutionTagsCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.RemoveExecutionTagsCommand import (
+        RemoveExecutionTagsCommand,
+    )
     from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
         AgentExecutionCompletedEvent,
     )
@@ -91,6 +100,12 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
+        ExecutionTagsAddedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
+        ExecutionTagsRemovedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
         NextPhaseReadyEvent,
@@ -232,6 +247,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._pins = StartPins()
         #: The branches the phase this run failed in left on origin (#1513).
         self._left_branches = LeftBranches()
+        #: The tags it launched with and the tags it carries now (#967).
+        self._tags = ExecutionTags()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -365,6 +382,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def cancel_reason(self) -> str | None:
         """Get the cancellation reason, if the execution was cancelled."""
         return self._cancel_reason
+
+    @property
+    def tags(self) -> ExecutionTags:
+        """The launch snapshot and the current tags (#967)."""
+        return self._tags
 
     @property
     def start_pins(self) -> StartPins:
@@ -666,6 +688,30 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
+    @command_handler("AddExecutionTagsCommand")
+    def add_tags(self, command: AddExecutionTagsCommand) -> None:
+        """Add tags to the current set. None new, no event."""
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        event = self._tags.add(
+            command.tags, execution_id=str(self.id), workflow_id=self._workflow_id or ""
+        )
+        if event is not None:
+            self._apply(event)
+
+    @command_handler("RemoveExecutionTagsCommand")
+    def remove_tags(self, command: RemoveExecutionTagsCommand) -> None:
+        """Remove tags from the current set. None present, no event."""
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        event = self._tags.remove(
+            command.tags, execution_id=str(self.id), workflow_id=self._workflow_id or ""
+        )
+        if event is not None:
+            self._apply(event)
+
     @command_handler("InterruptExecutionCommand")
     def interrupt_execution(self, command: InterruptExecutionCommand) -> None:
         """Handle InterruptExecutionCommand."""
@@ -735,6 +781,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
         self._status = ExecutionStatus.RUNNING
         self._pins = read_start_pins(event)
+        self._tags = ExecutionTags.launched_with(evt(event, "tags") or [])
         if self._pins.resumed_from is not None:
             self._inherit(self._pins.resumed_from)
 
@@ -884,6 +931,16 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_at = evt(event, "cancelled_at")
         self._status = ExecutionStatus.CANCELLED
         self._cancel_reason = event.reason
+
+    @event_sourcing_handler("ExecutionTagsAdded")
+    def on_execution_tags_added(self, event: ExecutionTagsAddedEvent) -> None:
+        """Apply ExecutionTagsAddedEvent. The launch snapshot is untouched."""
+        self._tags = self._tags.with_added(evt(event, "tags") or [])
+
+    @event_sourcing_handler("ExecutionTagsRemoved")
+    def on_execution_tags_removed(self, event: ExecutionTagsRemovedEvent) -> None:
+        """Apply ExecutionTagsRemovedEvent. The launch snapshot is untouched."""
+        self._tags = self._tags.with_removed(evt(event, "tags") or [])
 
     @event_sourcing_handler("WorkflowInterrupted")
     def on_execution_interrupted(self, event: WorkflowInterruptedEvent) -> None:

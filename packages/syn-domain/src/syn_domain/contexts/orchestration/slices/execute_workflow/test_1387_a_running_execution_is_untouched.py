@@ -104,6 +104,7 @@ class _SuspendedProcessor:
         repos: list[RepositoryRef],
         admitted: AdmissionTicket | None = None,
         source_commits: list[SourceCommit] | None = None,
+        tags: object = None,
     ) -> WorkflowExecutionResult:
         del workflow_name, phases, inputs, repos, admitted
         self.running.set()
@@ -133,6 +134,7 @@ class _ImmediateProcessor:
         repos: list[RepositoryRef],
         admitted: AdmissionTicket | None = None,
         source_commits: list[SourceCommit] | None = None,
+        tags: object = None,
     ) -> WorkflowExecutionResult:
         del workflow_name, phases, inputs, repos, admitted
         self.runs += 1

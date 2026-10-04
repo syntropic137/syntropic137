@@ -124,3 +124,23 @@ def test_the_pre_push_hook_delegates_rather_than_listing_its_own_checks() -> Non
     assert "just preflight" in hook.read_text(), (
         "the pre-push hook must call `just preflight` rather than enumerate checks"
     )
+
+
+def test_preflight_agent_runs_fitness_and_preflight_runs_it_once() -> None:
+    """Agents gate on `preflight-agent`; it must run the fitness gate (#1498).
+
+    Without it, agent PRs shipped violations only CI caught. `preflight` runs
+    `fitness` itself, so it must NOT also reach `fitness-agent`, or CI would
+    run the whole topology scan twice.
+    """
+    text = _JUSTFILE.read_text()
+    agent = _closure("preflight-agent", text)
+    assert "fitness-agent" in agent, "`preflight-agent` no longer runs the fitness gate"
+    body = re.search(r"^fitness-agent:[^\n]*\n((?:[ \t]+[^\n]*\n)+)", text, re.MULTILINE)
+    assert body and "scripts/agent-fitness.sh" in body.group(1), (
+        "`fitness-agent` must run scripts/agent-fitness.sh, which ends in `just fitness-check`"
+    )
+
+    full = _closure("preflight", text)
+    assert "fitness-check" in full
+    assert "fitness-agent" not in full, "`preflight` would run fitness-check twice"

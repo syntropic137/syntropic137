@@ -288,6 +288,8 @@ class ExecutionDetailResponse(BaseModel):
     write-back was refused - grant the permission, do not re-run the work.
     """
     repos: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""
@@ -363,6 +365,8 @@ class ExecutionSummaryResponse(BaseModel):
     alone, which is the state #1392 was opened about.
     """
     repos: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     repos_display: str | None = None
 
 

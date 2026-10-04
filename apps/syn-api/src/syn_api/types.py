@@ -464,6 +464,8 @@ class WorkflowSummary(BaseModel):
     runs_count: int = 0
     is_archived: bool = False
     requires_repos: bool = True
+    tags: list[str] = Field(default_factory=list)
+    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -552,6 +554,8 @@ class WorkflowDetail(BaseModel):
     repos: list[str] = Field(default_factory=list)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
     requires_repos: bool = True
+    tags: list[str] = Field(default_factory=list)
+    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -625,6 +629,8 @@ class ExecutionSummary(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -719,6 +725,8 @@ class ExecutionDetail(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""
@@ -1396,6 +1404,8 @@ class ExecutionDetailFull(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""

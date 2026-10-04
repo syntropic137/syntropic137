@@ -63,6 +63,9 @@ class WorkflowTemplateUpdatedEvent(DomainEvent):
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
     skills: list[SkillRef] = Field(default_factory=list)
 
+    # Ordinary labels (#967); optional so older events rehydrate (ADR-007).
+    tags: list[str] = Field(default_factory=list)
+
     # Provenance (issue #822)
     version: str | None = None
     """Package version this definition came from."""

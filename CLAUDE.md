@@ -590,8 +590,9 @@ just preflight-agent # The subset of preflight that runs INSIDE an agent
                      # workspace container. Use this one only there: the image
                      # ships just, uv and node and nothing else, so vsa,
                      # cargo, pnpm, docker and registry credentials are all
-                     # absent and seven gates cannot run at all (#1109). On a
-                     # dev machine run the full `just preflight` instead.
+                     # absent and seven gates cannot run at all (#1109).
+                     # Fitness DOES run: see scripts/agent-fitness.sh (#1498).
+                     # On a dev machine run the full `just preflight` instead.
 ```
 
 `scripts/check_ci_parity.py` (inside `preflight`) discovers every workflow that

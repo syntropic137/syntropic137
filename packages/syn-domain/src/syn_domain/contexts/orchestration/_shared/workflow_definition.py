@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
     expand_skill_entry,
 )
+from syn_domain.contexts.orchestration._shared.tags import TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
     PhaseDefinition,
@@ -201,7 +202,19 @@ class RepositoryConfig(BaseModel):
 #: stopped a workflow DECLARING one, and the dashboard renders declared inputs.
 #: The result was a form field that could never be submitted by any value
 #: (#942). Defined here and imported by the API so the two cannot drift.
-RESERVED_INPUT_NAMES: frozenset[str] = frozenset({"repos", "repository"})
+#:
+#: ``tags`` joined for the same reason (#967): tags travel on the typed
+#: ``tags`` field of the execute request, so a ``tags`` input would be a second,
+#: untyped spelling of the same thing that no filter ever sees.
+RESERVED_REPO_INPUT_NAMES: frozenset[str] = frozenset({"repos", "repository"})
+RESERVED_INPUT_NAMES: frozenset[str] = RESERVED_REPO_INPUT_NAMES | {"tags"}
+
+#: Where each reserved name is passed instead, for the error a caller sees.
+RESERVED_INPUT_HOMES: dict[str, str] = {
+    "repos": "the typed 'repos' array (CLI: -R <owner/repo>)",
+    "repository": "the typed 'repos' array (CLI: -R <owner/repo>)",
+    "tags": "the typed 'tags' array (CLI: --tag <tag>)",
+}
 
 
 class InputYamlDefinition(BaseModel):
@@ -689,6 +702,10 @@ class WorkflowDefinition(BaseModel):
     # identity collision.
     skills: list[SkillRef] = Field(default_factory=list)
 
+    # Ordinary labels (#967), copied onto every execution launched from this
+    # workflow. Validated by the shared TagSet so YAML, API and CLI agree.
+    tags: TagSet = Field(default_factory=TagSet)
+
     @field_validator("skills", mode="before")
     @classmethod
     def _expand_skills(cls, value: object) -> object:
@@ -713,12 +730,11 @@ class WorkflowDefinition(BaseModel):
         """
         offending = sorted({i.name for i in inputs} & RESERVED_INPUT_NAMES)
         if offending:
-            names = ", ".join(repr(n) for n in offending)
+            homes = "; ".join(f"{n!r} goes in {RESERVED_INPUT_HOMES[n]}" for n in offending)
             msg = (
-                f"input name(s) {names} are reserved: repositories are passed in "
-                "the typed 'repos' array (CLI: -R <owner/repo>), never as an "
-                "input. A workflow declaring one renders a form field the API "
-                "always rejects."
+                f"input name(s) are reserved: {homes}, never as an input. A "
+                "workflow declaring one renders a form field the API always "
+                "rejects."
             )
             raise ValueError(msg)
         return inputs

@@ -28,7 +28,9 @@ from syn_api.types import (
 from syn_domain import tool_call_counts
 from syn_domain.contexts.orchestration import (
     MAX_START_ATTEMPTS,
+    InvalidTagsError,
     ResumeStartProcessManager,
+    TagSet,
     read_record,
 )
 from syn_domain.pagination import Page
@@ -208,6 +210,7 @@ def _build_execution_summary_response(
         failure_classification=e.failure_classification,
         reported_failure_reason=e.reported_failure_reason,
         repos=list(e.repos),
+        tags=list(e.tags),
         repos_display=format_repos(e.repos),
     )
 
@@ -317,6 +320,7 @@ async def _load_execution_list_data(
     started_after: datetime | None = None,
     started_before: datetime | None = None,
     search: str | None = None,
+    tags: TagSet | None = None,
 ) -> tuple[Page[WorkflowExecutionSummary], dict[str, int], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
@@ -340,6 +344,7 @@ async def _load_execution_list_data(
             started_after=started_after,
             started_before=started_before,
             search=search,
+            tags=tags,
             offset=offset,
             limit=limit,
         )
@@ -378,6 +383,7 @@ def _to_execution_summary(
         tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
         error_message=s.error_message,
         repos=list(s.repos),
+        tags=list(s.tags),
     )
 
 
@@ -450,6 +456,7 @@ async def get(
             deliverable_produced=detail.deliverable_produced,
             reported_side_effects=detail.reported_side_effects,
             repos=list(detail.repos),
+            tags=list(detail.tags),
             task=detail.task,
             inputs=dict(detail.inputs),
         )
@@ -563,6 +570,7 @@ async def get_detail(
             deliverable_produced=detail.deliverable_produced,
             reported_side_effects=detail.reported_side_effects,
             repos=list(detail.repos),
+            tags=list(detail.tags),
             total_duration_seconds=duration.seconds,
             unknown_duration_phase_count=duration.unknown_phase_count,
             task=detail.task,
@@ -608,6 +616,7 @@ async def list_active(
                 failure_classification=s.failure_classification,
                 reported_failure_reason=s.reported_failure_reason,
                 repos=list(s.repos),
+                tags=list(s.tags),
             )
             for s in active
         ]
@@ -636,10 +645,21 @@ async def list_executions_endpoint(
             "Case-insensitive substring match against execution id, workflow id and workflow name"
         ),
     ),
+    tag: list[str] | None = Query(
+        None,
+        description=(
+            "Keep only executions carrying this tag. Repeat to require several (AND). "
+            "Normalised like stored tags; an invalid tag is rejected with 422."
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
     """List all workflow executions across all workflows."""
+    try:
+        tags = TagSet(tag or ())
+    except InvalidTagsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     offset = (page - 1) * page_size
     await ensure_connected()
     manager = get_projection_mgr()
@@ -652,6 +672,7 @@ async def list_executions_endpoint(
         started_after=started_after,
         started_before=started_before,
         search=q,
+        tags=tags,
     )
     return ExecutionListResponse(
         executions=[
@@ -761,6 +782,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         deliverable_produced=detail.deliverable_produced,
         reported_side_effects=detail.reported_side_effects,
         repos=list(detail.repos),
+        tags=list(detail.tags),
         total_duration_seconds=detail.total_duration_seconds,
         unknown_duration_phase_count=detail.unknown_duration_phase_count,
         task=detail.task,

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet
+
 # Runtime import: FailExecutionCommand defaults an absent usage to zeros rather
 # than carrying None into the aggregate, so the class is constructed here.
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
@@ -46,6 +48,7 @@ class StartExecutionCommand:
         phase_definitions: list[PhaseDefinition] | None = None,
         pinned_phases: list[ExecutablePhase] | None = None,
         source_commits: list[SourceCommit] | None = None,
+        tags: TagSet | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -56,6 +59,8 @@ class StartExecutionCommand:
         self.phase_definitions = phase_definitions
         self.pinned_phases = pinned_phases
         self.source_commits = source_commits
+        # The launch snapshot (#967): workflow tags united with request tags.
+        self.tags = tags or TagSet()
 
 
 class StartResumeCommand:
