@@ -44,8 +44,8 @@ export interface ResourceTableProps<Row, K extends string = string> {
   emptyState: ReactNode
   /** Stable identity per row (used for selection + React keys). */
   getRowId: (row: Row) => string
-  /** Optional click target — typically navigates to detail. */
-  onRowClick?: (row: Row) => void
+  /** Where a row links to, typically its detail page. See useRowLink. */
+  rowHref?: (row: Row) => string
   /** Optional last-cell content (copy id, kebab menu, etc.). */
   rowActions?: (row: Row) => ReactNode
   selection?: SelectionProps
