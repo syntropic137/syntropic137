@@ -6,7 +6,9 @@ started implement fresh opened a second branch and a second PR for one change.
 
 These drive the real chain, faking only the two boundaries: the workspace's
 `execute` (a git simulator, `_World`) and the GitHub HTTP client behind the
-production `GitHubRemoteBranchReader`. The parent's agent pushes B and opens
+production `GitHubRemoteBranchReader`. Prompts and agent commands are built
+by the production `_wiring` builders, so the child decides what to do from
+the argv it was launched with, as an agent would. The parent's agent pushes B and opens
 PR N through that world; `PhaseStartingPoints` records and observes it with
 real git commands, and the failure path asks the real reader which PR is open.
 
@@ -17,6 +19,8 @@ real git commands, and the failure path asks the real reader which PR is open.
       -> `StartResumeHandler` asks the forge -> the child's start event
       -> `StartPins.checkout_for` -> provisioning -> `.setup/setup.sh`
       -> `record_continuation` -> the phase's context
+      -> `_build_workspace_prompt` -> `_build_agent_command` -> the agent's argv
+      -> the child commits and pushes B, advancing PR N's head
 
 Harness shared with #1458, whose pinned-commit chain this extends.
 """
@@ -24,7 +28,7 @@ Harness shared with #1458, whose pinned-commit chain this extends.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -34,6 +38,7 @@ from pydantic import BaseModel, ConfigDict
 from syn_adapters.github.client import GitHubAppError
 from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
 from syn_adapters.workspace_backends.memory.memory_adapter import MemoryIsolationAdapter
+from syn_api._wiring import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     AbandonedBranch,
@@ -50,9 +55,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
-    CONTINUATION_OUTPUT_ID,
 )
 from syn_domain.contexts.orchestration.slices.start_resume import StartResumeHandler
 from syn_domain.contexts.orchestration.slices.start_resume.test_1458_a_resume_is_provisioned_at_its_parents_commits import (
@@ -77,9 +79,6 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration import AgentExecutionResult
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        ExecutablePhase,
-    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
         AgentLaunchObserver,
     )
@@ -104,6 +103,8 @@ PINNED = "5e1f0c3a9b2d47e68f01a2b3c4d5e6f708192a3b"
 BRANCH = "feat/1513-continue-me"
 #: Where the parent's implement attempt left BRANCH on origin.
 PUSHED = "b1513b1513b1513b1513b1513b1513b1513b1513"
+#: The commit the child's implement makes on top of PUSHED.
+CHILD_COMMIT = "c1513c1513c1513c1513c1513c1513c1513c1513"
 PR = 4242
 #: A PR someone else opened from BRANCH after the parent's was closed.
 OTHER_PR = 4343
@@ -141,6 +142,17 @@ class _World:
     def close_and_reopen_as_another_pr(self) -> None:
         self.pulls[BRANCH] = [(PR, "closed"), (OTHER_PR, "open")]
 
+    def _commit(self) -> str:
+        self.local[self.head] = CHILD_COMMIT
+        return ""
+
+    def _push(self, refspec: str) -> str:
+        """`git push origin HEAD:<b>`: origin's b, and every PR from it, move to HEAD."""
+        branch = refspec.removeprefix("HEAD:")
+        self.origin[branch] = self.local[self.head]
+        self.cache[f"origin/{branch}"] = self.local[self.head]
+        return ""
+
     # -- the exec boundary --------------------------------------------------
 
     def run(self, command: list[str]) -> ExecutionResult:
@@ -163,6 +175,10 @@ class _World:
                 return self.local[self.head]
             case ["remote"]:
                 return "origin\n"
+            case ["commit", *_]:
+                return self._commit()
+            case ["push", "origin", refspec]:
+                return self._push(refspec)
             case ["ls-remote", "origin", ref]:
                 name = ref.removeprefix("refs/heads/")
                 return f"{self.origin[name]}\t{ref}\n" if name in self.origin else ""
@@ -199,6 +215,10 @@ class _World:
     def opened_prs(self) -> list[list[str]]:
         return [c for c in self.commands if c[:3] == ["gh", "pr", "create"]]
 
+    def open_prs_from(self, branch: str) -> list[tuple[int, str]]:
+        """Each open PR from ``branch`` and its head: a PR's head is its branch on origin."""
+        return [(n, self.origin[branch]) for n, st in self.pulls.get(branch, []) if st == "open"]
+
 
 def _ok(stdout: str) -> ExecutionResult:
     return ExecutionResult(exit_code=0, success=True, duration_ms=1.0, stdout=stdout, stderr="")
@@ -219,9 +239,10 @@ def world() -> Iterator[_World]:
 
 @dataclass
 class _Acts(_ReadsItsSetup):
-    """Reads its setup, then does something in its workspace, then its scripted result."""
+    """Reads its setup, then acts on the argv it was launched with, then its scripted result."""
 
-    act: Callable[[str, ManagedWorkspace], Awaitable[None]] | None = None
+    act: Callable[[str, str, ManagedWorkspace], Awaitable[None]] | None = None
+    prompts: dict[str, str] = field(default_factory=dict)
 
     async def handle(
         self,
@@ -236,8 +257,11 @@ class _Acts(_ReadsItsSetup):
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
     ) -> AgentExecutionResult:
+        # The prompt is one argv element of the production command.
+        prompt = "\n".join(claude_cmd)
+        self.prompts[todo.phase_id or ""] = prompt
         if self.act is not None:
-            await self.act(todo.phase_id or "", workspace)
+            await self.act(todo.phase_id or "", prompt, workspace)
         return await super().handle(
             todo,
             workspace,
@@ -252,31 +276,13 @@ class _Acts(_ReadsItsSetup):
         )
 
 
-class _ToldPrompt:
-    """Captures the phase outputs each phase's prompt is built with."""
-
-    def __init__(self) -> None:
-        self.outputs: dict[str, dict[str, str]] = {}
-
-    async def __call__(
-        self,
-        phase: ExecutablePhase,
-        execution_id: str,
-        workflow_id: str,
-        repo_url: str | None,
-        phase_outputs: dict[str, str],
-        inputs: object,
-    ) -> str:
-        del workflow_id, repo_url, inputs
-        self.outputs[f"{execution_id}/{phase.phase_id}"] = dict(phase_outputs)
-        return phase.prompt_template
-
-
-def _with_prompt(
-    executions: _Executions, agent: _ReadsItsSetup, told: _ToldPrompt, world: _World
+def _wired(
+    executions: _Executions, agent: _ReadsItsSetup, world: _World
 ) -> WorkflowExecutionProcessor:
     processor = _processor(executions, agent)
-    processor._prompt_builder = told  # pyright: ignore[reportPrivateUsage]
+    # The production prompt and command builders, as `_wiring` passes them.
+    processor._prompt_builder = _build_workspace_prompt  # pyright: ignore[reportPrivateUsage]
+    processor._command_builder = _build_agent_command  # pyright: ignore[reportPrivateUsage]
     # The production reader, as `_wiring` passes it; only its HTTP is faked.
     processor._remote_branches = world.reader()  # pyright: ignore[reportPrivateUsage]
     return processor
@@ -287,7 +293,7 @@ async def _parent_failed_in_implement_after_pushing(
 ) -> None:
     """research completes; implement pushes B, opens PR N, and fails."""
 
-    async def implement_pushes(phase_id: str, _workspace: ManagedWorkspace) -> None:
+    async def implement_pushes(phase_id: str, _prompt: str, _workspace: ManagedWorkspace) -> None:
         if phase_id != "implement":
             return
         world.push_and_open_pr()
@@ -301,7 +307,7 @@ async def _parent_failed_in_implement_after_pushing(
         ),
         act=implement_pushes,
     )
-    result = await _with_prompt(executions, agent, _ToldPrompt(), world).run(
+    result = await _wired(executions, agent, world).run(
         workflow_id=WORKFLOW,
         workflow_name="Continue my branch",
         phases=[_phase(p, i + 1) for i, p in enumerate(PHASE_IDS)],
@@ -313,32 +319,24 @@ async def _parent_failed_in_implement_after_pushing(
     assert result.status == "failed", result
 
 
-def _continue_as_told(
-    told: _ToldPrompt, world: _World
-) -> Callable[[str, ManagedWorkspace], Awaitable[None]]:
-    """The child's implement doing what implement.md says with what it was told.
+async def _continue_as_told(phase_id: str, prompt: str, workspace: ManagedWorkspace) -> None:
+    """The child's implement doing what implement.md says with what its prompt told it.
 
-    Told to continue a branch with an open PR: push to it. Told nothing, or
-    that the branch was not continued: start a branch and open a PR. Run
-    through the workspace, so the world records exactly what was run.
+    Told to continue a branch with an open PR: commit on it and push. Told
+    nothing, or that the branch was not continued: start a branch and open a
+    PR. Run through the workspace, so the world records exactly what was run.
     """
-
-    async def act(phase_id: str, workspace: ManagedWorkspace) -> None:
-        if phase_id != "implement":
-            return
-        handoff = told.outputs.get(f"{CHILD}/implement", {}).get(CONTINUATION_OUTPUT_ID, "")
-        if f"CONTINUE branch `{BRANCH}`" in handoff and "is open from it" in handoff:
-            await workspace.execute(["git", "-C", DEST, "push", "origin", f"HEAD:{BRANCH}"])
-            return
-        await workspace.execute(["git", "-C", DEST, "push", "origin", "HEAD:feat/fresh"])
-        await workspace.execute(["gh", "pr", "create", "--draft", "--head", "feat/fresh"])
-
-    return act
+    if phase_id != "implement":
+        return
+    await workspace.execute(["git", "-C", DEST, "commit", "-m", "continue #1513"])
+    if f"CONTINUE branch `{BRANCH}`" in prompt and "is open from it" in prompt:
+        await workspace.execute(["git", "-C", DEST, "push", "origin", f"HEAD:{BRANCH}"])
+        return
+    await workspace.execute(["git", "-C", DEST, "push", "origin", "HEAD:feat/fresh"])
+    await workspace.execute(["gh", "pr", "create", "--draft", "--head", "feat/fresh"])
 
 
-async def _resumed_child(
-    executions: _Executions, world: _World, told: _ToldPrompt
-) -> _ReadsItsSetup:
+async def _resumed_child(executions: _Executions, world: _World) -> _Acts:
     parent = await executions.get_by_id(PARENT)
     assert parent is not None
     parent.resume_execution(
@@ -349,10 +347,10 @@ async def _resumed_child(
     await executions.save(parent)
     child = _Acts(
         FakeAgentExecutionHandler.success(produces=A_DELIVERABLE),
-        act=_continue_as_told(told, world),
+        act=_continue_as_told,
     )
     handler = StartResumeHandler(
-        _with_prompt(executions, child, told, world), executions, remote_branches=world.reader()
+        _wired(executions, child, world), executions, remote_branches=world.reader()
     )
     await handler.validate(PARENT)
     world.commands.clear()
@@ -445,7 +443,7 @@ class TestAResumeContinuesTheBranchItsParentPushed:
         executions = _Executions()
         await _parent_failed_in_implement_after_pushing(executions, world)
 
-        child = await _resumed_child(executions, world, _ToldPrompt())
+        child = await _resumed_child(executions, world)
 
         lines = child.scripts["implement"].splitlines()
         assert _branch_checkout(BRANCH) in lines
@@ -456,15 +454,26 @@ class TestAResumeContinuesTheBranchItsParentPushed:
     async def test_the_child_pushes_to_b_and_opens_no_second_pr(self, world: _World) -> None:
         executions = _Executions()
         await _parent_failed_in_implement_after_pushing(executions, world)
-        told = _ToldPrompt()
 
-        await _resumed_child(executions, world, told)
+        child = await _resumed_child(executions, world)
 
-        handoff = told.outputs[f"{CHILD}/implement"][CONTINUATION_OUTPUT_ID]
-        assert f"CONTINUE branch `{BRANCH}`" in handoff
-        assert f"PR #{PR} is open from it" in handoff
-        assert "Do NOT open a second PR" in handoff
+        # What the agent was launched with, not what the platform meant to say.
+        prompt = child.prompts["implement"]
+        assert f"CONTINUE branch `{BRANCH}`" in prompt
+        assert f"PR #{PR} is open from it" in prompt
+        assert "Do NOT open a second PR" in prompt
         assert world.pushes() == [["git", "-C", DEST, "push", "origin", f"HEAD:{BRANCH}"]]
+        assert world.opened_prs() == []
+
+    async def test_the_childs_push_advances_the_parents_pr(self, world: _World) -> None:
+        """The parent's PR, still the only one open from B, now heads at the child's commit."""
+        executions = _Executions()
+        await _parent_failed_in_implement_after_pushing(executions, world)
+        assert world.open_prs_from(BRANCH) == [(PR, PUSHED)]
+
+        await _resumed_child(executions, world)
+
+        assert world.open_prs_from(BRANCH) == [(PR, CHILD_COMMIT)]
         assert world.opened_prs() == []
 
     async def test_a_branch_switched_away_from_is_continued_too(self, world: _World) -> None:
@@ -473,7 +482,7 @@ class TestAResumeContinuesTheBranchItsParentPushed:
             executions, world, then_checks_out_main=True
         )
 
-        child = await _resumed_child(executions, world, _ToldPrompt())
+        child = await _resumed_child(executions, world)
 
         assert _branch_checkout(BRANCH) in child.scripts["implement"].splitlines()
         assert world.opened_prs() == []
@@ -482,7 +491,7 @@ class TestAResumeContinuesTheBranchItsParentPushed:
         executions = _Executions()
         await _parent_failed_in_implement_after_pushing(executions, world)
 
-        await _resumed_child(executions, world, _ToldPrompt())
+        await _resumed_child(executions, world)
 
         started = _child_start(executions)
         assert started.continued_branches == [
@@ -499,9 +508,8 @@ class TestABranchOrPrThatIsGoneStartsFreshVisibly:
         executions = _Executions()
         await _parent_failed_in_implement_after_pushing(executions, world)
         del world.origin[BRANCH]
-        told = _ToldPrompt()
 
-        child = await _resumed_child(executions, world, told)
+        child = await _resumed_child(executions, world)
 
         _pinned_and_fresh(child, world)
         started = _child_start(executions)
@@ -509,15 +517,14 @@ class TestABranchOrPrThatIsGoneStartsFreshVisibly:
         (abandoned,) = started.abandoned_branches or []
         assert abandoned.branch == BRANCH
         assert "deleted" in abandoned.reason
-        handoff = told.outputs[f"{CHILD}/implement"][CONTINUATION_OUTPUT_ID]
-        assert f"`{BRANCH}` was NOT continued" in handoff
+        assert f"`{BRANCH}` was NOT continued" in child.prompts["implement"]
 
     async def test_a_force_pushed_branch_is_not_reused(self, world: _World) -> None:
         executions = _Executions()
         await _parent_failed_in_implement_after_pushing(executions, world)
         world.origin[BRANCH] = "f" * 40
 
-        child = await _resumed_child(executions, world, _ToldPrompt())
+        child = await _resumed_child(executions, world)
 
         _pinned_and_fresh(child, world)
         (abandoned,) = _child_start(executions).abandoned_branches or []
@@ -530,9 +537,8 @@ class TestABranchOrPrThatIsGoneStartsFreshVisibly:
         executions = _Executions()
         await _parent_failed_in_implement_after_pushing(executions, world)
         world.close_and_reopen_as_another_pr()
-        told = _ToldPrompt()
 
-        child = await _resumed_child(executions, world, told)
+        child = await _resumed_child(executions, world)
 
         _pinned_and_fresh(child, world)
         started = _child_start(executions)
@@ -540,10 +546,7 @@ class TestABranchOrPrThatIsGoneStartsFreshVisibly:
         (abandoned,) = started.abandoned_branches or []
         assert f"#{PR} is no longer open" in abandoned.reason
         assert f"#{OTHER_PR} is open" in abandoned.reason
-        assert (
-            f"`{BRANCH}` was NOT continued"
-            in told.outputs[f"{CHILD}/implement"][CONTINUATION_OUTPUT_ID]
-        )
+        assert f"`{BRANCH}` was NOT continued" in child.prompts["implement"]
 
     async def test_a_forge_nobody_could_ask_is_not_read_as_gone_and_not_trusted(
         self, world: _World
@@ -552,7 +555,7 @@ class TestABranchOrPrThatIsGoneStartsFreshVisibly:
         await _parent_failed_in_implement_after_pushing(executions, world)
         world.readable = False
 
-        child = await _resumed_child(executions, world, _ToldPrompt())
+        child = await _resumed_child(executions, world)
 
         _pinned_and_fresh(child, world)
         (abandoned,) = _child_start(executions).abandoned_branches or []
