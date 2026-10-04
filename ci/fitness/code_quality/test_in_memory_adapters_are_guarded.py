@@ -47,11 +47,13 @@ import ast
 import re
 import textwrap
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-
 from ci.fitness.conftest import load_exceptions, production_files, rel_path, repo_root
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _ADAPTER_NAME = re.compile(r"^(InMemory|Memory|Fake|Stub)[A-Z]")
 _ADAPTER_MODULE_WORDS = ("memory", "fake")
@@ -169,10 +171,8 @@ def _class_info(path: Path, node: ast.ClassDef, ports: set[str], root: Path) -> 
     if own_guard is None and _calls(post_init, _GUARD_CALL):
         own_guard = _POST_INIT
 
-    if init is not None:
-        init_drops_super = not _calls_super(init, _INIT)
-    else:
-        init_drops_super = _is_dataclass(node)
+    # A @dataclass with no explicit __init__ gets one that never calls super().
+    init_drops_super = not _calls_super(init, _INIT) if init is not None else _is_dataclass(node)
 
     return _ClassInfo(
         key=f"{rel_path(path, root)}::{node.name}",

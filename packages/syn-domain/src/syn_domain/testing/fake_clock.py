@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from syn_shared.in_memory import assert_test_only
-
 from syn_domain.contexts.orchestration import AttemptClock
+from syn_shared.in_memory import assert_test_only
 
 
 @dataclass

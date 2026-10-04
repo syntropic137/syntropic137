@@ -9,14 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from syn_shared.in_memory import assert_test_only
-
 from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
     ResolvedRevision,
     RevisionResolution,
     UnresolvedReason,
     UnresolvedRevision,
 )
+from syn_shared.in_memory import assert_test_only
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
