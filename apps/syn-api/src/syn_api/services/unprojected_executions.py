@@ -17,8 +17,22 @@ degraded row #1545 left behind, which a plain "row exists" check would pass
 once the terminal handler had upserted it (#598's fallback).
 
 Positions not yet passed are not judged: that is lag, and lag already has its
-own probe. The scan is incremental - each call reads only the events appended
-since the last one - so it can run on a timer against a store of any size.
+own probe.
+
+EVERY CHECK IS A COMPLETE RECONCILIATION. Each call rescans the store from the
+start and re-looks-up every start it finds; nothing is remembered between
+calls. Both shortcuts an incremental scan would take are unsound here:
+
+- A cursor that advances past the highest nonce it has seen never revisits a
+  lower nonce that commits later - and that late commit is #1545's mechanism,
+  so an incremental detector would miss exactly the drop it exists to report.
+  `global_nonce` is a sequence with permanent gaps (rolled-back appends), so
+  there is no "gap-free prefix" to advance through either.
+- Forgetting a start once its row was seen means a row lost LATER (a botched
+  rebuild, a truncation, another handler defect) is never reported.
+
+The cost is one paged read of the store and two keyed lookups per execution,
+on an interval measured in minutes.
 """
 
 from __future__ import annotations
@@ -59,6 +73,10 @@ class _ReadsAllEvents(Protocol):
     ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]: ...
 
 
+class _DescribesLag(Protocol):
+    async def describe_read_model_lag(self) -> ReadModelLag | None: ...
+
+
 class _HasStartedAt(Protocol):
     @property
     def started_at(self) -> object: ...
@@ -94,10 +112,8 @@ class UnprojectedExecutions:
 class UnprojectedExecutionDetector:
     """Finds started executions the execution read models do not reflect.
 
-    Holds a cursor into the store and the set of starts it has seen but not yet
-    confirmed, so each `check` costs the events appended since the previous one
-    plus one lookup per unconfirmed start. A start that is confirmed is never
-    looked up again; one that is missing stays listed until it is repaired.
+    Stateless between checks on purpose - see the module docstring for why
+    neither a cursor nor a "confirmed" set is safe.
     """
 
     def __init__(
@@ -107,9 +123,6 @@ class UnprojectedExecutionDetector:
     ) -> None:
         self._event_store = event_store
         self._lookups = lookups
-        self._next_position = 0
-        # execution_id -> global nonce of its start event
-        self._unconfirmed: dict[str, int] = {}
 
     async def check(self, settled_through: int) -> UnprojectedExecutions:
         """Report starts at or below `settled_through` that some read model lacks.
@@ -117,40 +130,42 @@ class UnprojectedExecutionDetector:
         `settled_through` is the lowest checkpoint among the execution
         projections: every event at or below it has been offered to them.
         """
-        await self._read_new_starts()
+        starts = await self._starts_through(settled_through)
         missing: list[str] = []
-        for execution_id, position in sorted(self._unconfirmed.items(), key=lambda kv: kv[1]):
-            if position > settled_through:
-                continue
-            if await self._is_projected(execution_id):
-                del self._unconfirmed[execution_id]
-            else:
+        for execution_id, _position in sorted(starts.items(), key=lambda kv: kv[1]):
+            if not await self._is_projected(execution_id):
                 missing.append(execution_id)
         return UnprojectedExecutions(execution_ids=tuple(missing), checked_through=settled_through)
 
-    async def _read_new_starts(self) -> None:
-        while True:
+    async def _starts_through(self, settled_through: int) -> dict[str, int]:
+        """execution_id -> global nonce of its start, for every start visible now."""
+        starts: dict[str, int] = {}
+        position = 0
+        while position <= settled_through:
             events, is_end, next_position = await self._event_store.read_all(
-                from_global_nonce=self._next_position,
+                from_global_nonce=position,
                 max_count=_PAGE_SIZE,
                 forward=True,
             )
             for envelope in events:
-                self._record(envelope)
-            if is_end or not events:
-                return
-            self._next_position = max(self._next_position, next_position)
+                self._record(envelope, settled_through, starts)
+            if is_end or not events or next_position <= position:
+                break
+            position = next_position
+        return starts
 
-    def _record(self, envelope: EventEnvelope[DomainEvent]) -> None:
+    @staticmethod
+    def _record(
+        envelope: EventEnvelope[DomainEvent], settled_through: int, starts: dict[str, int]
+    ) -> None:
         position = envelope.metadata.global_nonce
-        if position is None:
+        if position is None or position > settled_through:
             return
-        self._next_position = max(self._next_position, position + 1)
         if envelope.metadata.event_type != STARTED_EVENT_TYPE:
             return
         execution_id = getattr(envelope.event, "execution_id", None)
         if isinstance(execution_id, str) and execution_id:
-            self._unconfirmed.setdefault(execution_id, position)
+            starts.setdefault(execution_id, position)
 
     async def _is_projected(self, execution_id: str) -> bool:
         for lookup in self._lookups:
@@ -167,9 +182,9 @@ EXECUTION_PROJECTIONS: Final[tuple[str, ...]] = (
     WorkflowExecutionDetailProjection.PROJECTION_NAME,
 )
 
-#: How often the watcher re-checks. Each check reads only what was appended
-#: since the previous one, so this bounds detection latency, not cost.
-CHECK_INTERVAL_SECONDS: Final[float] = 300.0
+#: How often the watcher reconciles. Each check rescans the whole store, so
+#: this bounds both detection latency and cost.
+CHECK_INTERVAL_SECONDS: Final[float] = 900.0
 
 
 def settled_position(lag: ReadModelLag) -> int:
@@ -181,8 +196,24 @@ def settled_position(lag: ReadModelLag) -> int:
     return min(behind.get(name, lag.head_position) for name in EXECUTION_PROJECTIONS)
 
 
+async def check_once(
+    subscription_service: _DescribesLag,
+    detector: UnprojectedExecutionDetector,
+    publish: Callable[[UnprojectedExecutions], None],
+) -> None:
+    """One reconciliation: judge everything the execution projections have passed."""
+    lag = await subscription_service.describe_read_model_lag()
+    if lag is None:
+        return
+    result = await detector.check(settled_position(lag))
+    publish(result)
+    warning = result.describe()
+    if warning is not None:
+        logger.error("Read model drift (#1545): %s", warning)
+
+
 async def watch_unprojected_executions(
-    subscription_service: CoordinatorSubscriptionService,
+    subscription_service: _DescribesLag,
     detector: UnprojectedExecutionDetector,
     publish: Callable[[UnprojectedExecutions], None],
     interval_seconds: float = CHECK_INTERVAL_SECONDS,
@@ -196,13 +227,7 @@ async def watch_unprojected_executions(
     """
     while True:
         try:
-            lag = await subscription_service.describe_read_model_lag()
-            if lag is not None:
-                result = await detector.check(settled_position(lag))
-                publish(result)
-                warning = result.describe()
-                if warning is not None:
-                    logger.error("Read model drift (#1545): %s", warning)
+            await check_once(subscription_service, detector, publish)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -243,7 +268,7 @@ class UnprojectedExecutionWatch:
             ),
         )
         self._task = asyncio.create_task(
-            watch_unprojected_executions(subscription_service, detector, self._publish),
+            watch_unprojected_executions(subscription_service, detector, self.publish),
             name="unprojected-execution-watch",
         )
 
@@ -260,7 +285,7 @@ class UnprojectedExecutionWatch:
         warning = self.latest.describe() if self.latest is not None else None
         return [warning] if warning is not None else []
 
-    def _publish(self, result: UnprojectedExecutions) -> None:
+    def publish(self, result: UnprojectedExecutions) -> None:
         self.latest = result
 
 

@@ -18,16 +18,27 @@ absent rows if they did not assert on the degraded row too.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 from event_sourcing import EventEnvelope, EventMetadata
+from httpx import ASGITransport, AsyncClient
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
+from syn_adapters.subscriptions.coordinator_service import SubscriptionServiceStatus
+from syn_adapters.subscriptions.read_model_lag import (
+    CheckpointState,
+    ReadModelLag,
+    measure_read_model_lag,
+)
+from syn_api.services import lifecycle, unprojected_executions
 from syn_api.services.unprojected_executions import (
+    EXECUTION_PROJECTIONS,
     UnprojectedExecutionDetector,
     UnprojectedExecutions,
-    UnprojectedExecutionWatch,
+    check_once,
 )
 from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import PhaseStartedEvent
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
@@ -40,6 +51,9 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
 from syn_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
 pytestmark = pytest.mark.unit
 
@@ -95,9 +109,14 @@ _DROPPED_NONCE = 39502
 
 
 class _Store:
-    """The store as the detector sees it: a paged forward read of everything."""
+    """The store as the detector sees it: a paged forward read of what is committed.
 
-    def __init__(self) -> None:
+    `uncommitted` holds nonces that were allocated but whose append has not
+    committed yet, so a read cannot see them - #1545's late commit.
+    """
+
+    def __init__(self, *, uncommitted: frozenset[int] = frozenset()) -> None:
+        self.uncommitted = set(uncommitted)
         self._envelopes = [
             EventEnvelope(
                 event=event,
@@ -116,7 +135,12 @@ class _Store:
         self, from_global_nonce: int = 0, max_count: int = 100, forward: bool = True
     ) -> tuple[list[EventEnvelope], bool, int]:
         assert forward
-        page = [e for e in self._envelopes if (e.metadata.global_nonce or 0) >= from_global_nonce]
+        page = [
+            e
+            for e in self._envelopes
+            if (e.metadata.global_nonce or 0) >= from_global_nonce
+            and e.metadata.global_nonce not in self.uncommitted
+        ]
         page = page[:max_count]
         nxt = (page[-1].metadata.global_nonce or 0) + 1 if page else from_global_nonce
         is_end = nxt > _HEAD
@@ -140,9 +164,13 @@ async def _project(
 
 
 def _detector(
-    listing: WorkflowExecutionListProjection, detail: WorkflowExecutionDetailProjection
+    listing: WorkflowExecutionListProjection,
+    detail: WorkflowExecutionDetailProjection,
+    store: _Store | None = None,
 ) -> UnprojectedExecutionDetector:
-    return UnprojectedExecutionDetector(_Store(), lookups=(listing.get_by_id, detail.get_by_id))
+    return UnprojectedExecutionDetector(
+        store or _Store(), lookups=(listing.get_by_id, detail.get_by_id)
+    )
 
 
 class TestADroppedStartIsReported:
@@ -192,18 +220,93 @@ class TestADroppedStartIsReported:
         assert (await detector.check(settled_through=_HEAD)).execution_ids == ()
 
 
+class TestEveryCheckIsAFullReconciliation:
+    """Transitions an incremental scan gets wrong (verification of #1559)."""
+
+    @pytest.mark.asyncio
+    async def test_a_start_that_commits_after_a_higher_nonce_is_still_found(self) -> None:
+        """#1545's own mechanism: 39502 becomes visible after 40800 was read.
+
+        A cursor that advanced to 40801 on the first check would never read
+        39502, so the drop it exists to report would stay invisible for good.
+        """
+        listing, detail = await _project(drop_nonce=_DROPPED_NONCE)
+        store = _Store(uncommitted=frozenset({_DROPPED_NONCE}))
+        detector = _detector(listing, detail, store)
+        assert (await detector.check(settled_through=_HEAD)).execution_ids == ()
+
+        store.uncommitted.clear()  # the slow append commits
+
+        assert (await detector.check(settled_through=_HEAD)).execution_ids == (DROPPED,)
+
+    @pytest.mark.asyncio
+    async def test_a_row_lost_after_a_clean_check_is_reported(self) -> None:
+        listing, detail = await _project(drop_nonce=None)
+        detector = _detector(listing, detail)
+        assert (await detector.check(settled_through=_HEAD)).execution_ids == ()
+
+        await detail.clear_all_data()  # a botched rebuild, a truncation, ...
+
+        assert (await detector.check(settled_through=_HEAD)).execution_ids == (HEALTHY, DROPPED)
+
+
+class _SubscriptionStub:
+    """The two methods /health and the watch call on the coordinator service."""
+
+    def get_status(self) -> SubscriptionServiceStatus:
+        return SubscriptionServiceStatus(running=True, projection_count=2, realtime_enabled=True)
+
+    async def describe_read_model_lag(self) -> ReadModelLag:
+        return measure_read_model_lag(
+            head_position=_HEAD,
+            checkpoints={
+                name: CheckpointState(position=_HEAD, updated_at=_AT)
+                for name in EXECUTION_PROJECTIONS
+            },
+            projection_names=list(EXECUTION_PROJECTIONS),
+            replaying=False,
+            now=_AT,
+        )
+
+
+@pytest.fixture
+async def health_warnings() -> AsyncIterator[Callable[[], Awaitable[list[str]]]]:
+    """Reads `warnings` off the real /health route, with the subscription stubbed."""
+    from syn_api.main import create_app
+
+    original_service = lifecycle._state.subscription_service
+    original_latest = unprojected_executions._watch.latest
+    lifecycle._state.subscription_service = _SubscriptionStub()  # type: ignore[assignment]  # stub
+    unprojected_executions._watch.latest = None
+    app = create_app()
+
+    async def get() -> list[str]:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/health")
+        assert response.status_code == 200
+        return json.loads(response.text).get("warnings") or []
+
+    try:
+        yield get
+    finally:
+        lifecycle._state.subscription_service = original_service
+        unprojected_executions._watch.latest = original_latest
+
+
 class TestTheWatchFeedsHealth:
     @pytest.mark.asyncio
-    async def test_a_drop_becomes_a_health_warning_and_clears_on_repair(self) -> None:
+    async def test_a_drop_appears_on_health_and_clears_on_repair(
+        self, health_warnings: Callable[[], Awaitable[list[str]]]
+    ) -> None:
         listing, detail = await _project(drop_nonce=_DROPPED_NONCE)
         detector = _detector(listing, detail)
-        watch = UnprojectedExecutionWatch()
-        assert watch.warnings() == [], "no result yet must not warn"
+        publish = unprojected_executions._watch.publish
+        assert not any(DROPPED in w for w in await health_warnings())
 
-        watch._publish(await detector.check(settled_through=_HEAD))
-        assert len(watch.warnings()) == 1 and DROPPED in watch.warnings()[0]
+        await check_once(_SubscriptionStub(), detector, publish)
+        assert any(DROPPED in w for w in await health_warnings()), "/health must name the drop"
 
         for projection in (listing, detail):
             await projection.on_workflow_execution_started(_started(DROPPED).model_dump())
-        watch._publish(await detector.check(settled_through=_HEAD))
-        assert watch.warnings() == []
+        await check_once(_SubscriptionStub(), detector, publish)
+        assert not any(DROPPED in w for w in await health_warnings())

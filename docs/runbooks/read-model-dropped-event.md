@@ -50,7 +50,7 @@ touched and keep serving live events while it runs (ADR-055, #1318).
    ```
 
    `started_at` and `workflow_name` must be set. The drift warning clears on the
-   watcher's next pass (every 5 minutes).
+   watcher's next pass (every 15 minutes; each pass is a full reconciliation).
 
 Container names and the port are the self-host defaults; substitute yours.
 While the rebuild runs, the execution list and detail endpoints may 404 recent
