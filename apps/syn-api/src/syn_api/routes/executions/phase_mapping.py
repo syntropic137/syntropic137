@@ -35,6 +35,8 @@ from syn_api.model_identity import cost_by_observed_model, observed_model_of
 from syn_api.types import (
     BranchObservationInfo,
     PhaseExecution,
+    PhaseStartConfig,
+    StartPinsStatus,
     ToolOperation,
 )
 from syn_shared.display import resolve_duration_seconds
@@ -245,12 +247,16 @@ async def _map_phase_detail(
     manager: ProjectionManager,
     agent_sessions: dict[str, list[str] | None] | None,
     configured_models: Mapping[str, str | None] | None = None,
+    start_configs: Mapping[str, PhaseStartConfig] | None = None,
 ) -> PhaseExecution:
     """Map a domain phase to an API PhaseExecution.
 
     ``agent_sessions`` is the execution-wide capture lookup from
     ``_load_agent_session_ids``, passed in rather than fetched here so the
-    query runs once per execution instead of once per phase.
+    query runs once per execution instead of once per phase. ``start_configs``
+    is the same shape of thing from ``load_start_configs``: one stream load per
+    execution. ``None`` means the start event could not be read (unavailable);
+    a phase missing from a read mapping was not recorded.
     """
     # A phase with no session id has no timeline to read, which is "we cannot
     # see", not "it did nothing" - the same statement an unreachable query
@@ -258,6 +264,11 @@ async def _map_phase_detail(
     ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else None
 
     sc = await _phase_cost(manager, phase, configured_models)
+
+    pinned = start_configs.get(phase.workflow_phase_id) if start_configs is not None else None
+    pins_status: StartPinsStatus = (
+        "unavailable" if start_configs is None else "recorded" if pinned else "not_recorded"
+    )
 
     duration_seconds = resolve_duration_seconds(
         phase.status,
@@ -317,6 +328,10 @@ async def _map_phase_detail(
         # below is the one place that says whether this list is short because
         # nothing happened or because nothing could be read, and a second
         # representation of that fact is a second thing to keep in agreement.
+        # Missing is None - never the template's current config - and the
+        # status says whether that is "not recorded" or "could not read".
+        pinned_at_start=pinned,
+        start_pins_status=pins_status,
         operations=ops or [],
         # Summarised here, where `ops` are still the projection dataclasses
         # that know how to identify a call. One hop later they are the API
@@ -386,6 +401,9 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         # #1176). `or []` here would erase the not-reported/confirmed-none
         # distinction the field exists to carry.
         agent_session_ids=phase.agent_session_ids,
+        # Forwarded whole, None included: null is "not recorded" (#1454).
+        pinned_at_start=phase.pinned_at_start,
+        start_pins_status=phase.start_pins_status,
         operations=operations,
         # Same model, forwarded whole rather than rebuilt field by field -
         # this constructor is the hop that has dropped a field twice (#891,

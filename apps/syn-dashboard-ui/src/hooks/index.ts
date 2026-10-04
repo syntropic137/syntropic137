@@ -18,6 +18,7 @@ export type {
 export { useFeatures } from './useFeatures'
 export { subjectFromPath, useFeedbackSubject } from './useFeedbackSubject'
 export { useLiveTimer } from './useLiveTimer'
+export { usePhaseStartPins, type PhaseStartPinsAnswer } from './usePhaseStartPins'
 export { useSessionData, type UseSessionDataResult } from './useSessionData'
 export { useSessionList, type UseSessionListResult } from './useSessionList'
 export { useTriggerActions, type UseTriggerActionsResult } from './useTriggerActions'

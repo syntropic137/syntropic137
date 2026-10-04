@@ -2,7 +2,7 @@ import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Card, CardContent, CardHeader, ObservedModel } from '../../components'
+import { Card, CardContent, CardHeader, ObservedModel, PhaseStartPins } from '../../components'
 import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
@@ -237,6 +237,8 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
             <div key={phase.workflow_phase_id} className="flex items-stretch">
               <div className="phase-with-inventory">
                 <PhaseCard phase={phase} tone={phaseTone(phase, execution)} now={now} />
+                {/* Outside the card: the card is a link, and this expands in place. */}
+                <PhaseStartPins pins={phase.pinned_at_start} status={phase.start_pins_status} />
                 <Link
                   className="phase-inventory-link"
                   to={sessionInventoryHref(execution.workflow_execution_id, phase.workflow_phase_id)}

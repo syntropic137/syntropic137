@@ -3514,6 +3514,48 @@ export interface components {
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
         };
         /**
+         * ExecutionStatusCounts
+         * @description How many executions are in each status, one field per status.
+         *
+         *     The fields are exactly the domain's ``ExecutionStatus`` values (a test pins
+         *     that), so every execution lands in exactly one field and the fields sum to
+         *     the number of executions. ``completed_workflows``/``failed_workflows``
+         *     alone left cancelled, interrupted and running runs invisible on the
+         *     dashboard. There is no ``paused``: that word was deleted from orchestration.
+         */
+        ExecutionStatusCounts: {
+            /**
+             * Not Started
+             * @default 0
+             */
+            not_started: number;
+            /**
+             * Running
+             * @default 0
+             */
+            running: number;
+            /**
+             * Completed
+             * @default 0
+             */
+            completed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Cancelled
+             * @default 0
+             */
+            cancelled: number;
+            /**
+             * Interrupted
+             * @default 0
+             */
+            interrupted: number;
+        };
+        /**
          * ExecutionStatusResponse
          * @description Response for execution status check.
          */
@@ -4791,6 +4833,7 @@ export interface components {
              * @default 0
              */
             failed_workflows: number;
+            execution_status_counts?: components["schemas"]["ExecutionStatusCounts"];
             /**
              * Total Sessions
              * @default 0
@@ -5131,6 +5174,13 @@ export interface components {
             exit_code?: number | null;
             /** Observed Branches */
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
+            pinned_at_start?: components["schemas"]["PhaseStartConfig"] | null;
+            /**
+             * Start Pins Status
+             * @default unavailable
+             * @enum {string}
+             */
+            start_pins_status: "recorded" | "not_recorded" | "unavailable";
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
@@ -5230,6 +5280,38 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * PhaseStartConfig
+         * @description What a phase was configured with when its execution STARTED.
+         *
+         *     Read from the execution's own start event (`StartPins`, #1454), never from
+         *     the workflow template, which may have been edited since. That is the whole
+         *     point: this answers "what did the agent have", not "what would it get now".
+         */
+        PhaseStartConfig: {
+            /** Provider */
+            provider: string;
+            /** Requested Model */
+            requested_model?: string | null;
+            /** Allowed Tools */
+            allowed_tools?: string[];
+            /** Skills */
+            skills?: components["schemas"]["PinnedSkillInfo"][];
+        };
+        /**
+         * PinnedSkillInfo
+         * @description One skill a phase was given at start, at the version it was resolved to (#1454).
+         */
+        PinnedSkillInfo: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Source Url */
+            source_url: string;
         };
         /**
          * Priority

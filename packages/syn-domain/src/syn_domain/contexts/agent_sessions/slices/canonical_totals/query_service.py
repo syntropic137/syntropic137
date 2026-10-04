@@ -21,59 +21,52 @@ if TYPE_CHECKING:
 
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_MODEL_COLUMNS,
-    CANONICAL_SESSION_USAGE_CTE,
-    CANONICAL_USAGE_EVENT_FILTER,
     price_canonical_row,
+    rollup_usage_sources,
 )
 from syn_domain.storable_text import pg_safe
 from syn_shared.pricing import canonical_cost_usd
 
-# Mirrors the heatmap's scoping so both read the same rows for the same
-# filter. Callers that pass no filter get all-time totals, which is what the
-# dashboard metric card wants.
+# All-time totals are read from the usage rollup, never from agent_events.
 #
-# Narrowed to the two event types canonical usage reads (#1253). Three CTEs
-# read `scoped_events`, so PostgreSQL cannot inline it and materialises it
-# into a work table; unnarrowed, that work table was every agent_event ever
-# recorded, JSONB `data` blob included, to total the two types that carry
-# tokens. The session COUNT below is the only thing here that needs the other
-# types, and it reads them directly.
-_SCOPED_EVENTS = f"""
-scoped_events AS (
-    SELECT session_id, event_type, data, time
-    FROM agent_events
-    WHERE {CANONICAL_USAGE_EVENT_FILTER}
-      {{execution_filter}}
-)
-"""
-
-_EXECUTION_FILTER = "AND execution_id = ANY($1)"
+# Read from agent_events they were a scan of every usage row ever recorded:
+# the hypertable is compressed and segmented by session_id, and nothing here
+# names a session, so every compressed chunk was decompressed and every JSONB
+# blob parsed, on every dashboard load (1.9s live, 3.0s with a workflow
+# filter). The rollup holds one row per summary and one per (session, model)
+# of turns, so this grows with sessions, not with telemetry. The decision
+# between summary and turns is still CANONICAL_USAGE_DECISION_CTE's - the one
+# the heatmap applies - so the card and the heatmap agree by construction.
+_EXECUTION_FILTER = "execution_id = ANY($1)"
 
 # Grouped by model AND cost-nullness for the same reason every other canonical
 # query is: a group mixing priced and unpriced rows prices some of its tokens
 # and not others, and reports the shortfall as though it were cheap (#788).
-_TOTALS_QUERY = f"""
-WITH {_SCOPED_EVENTS},
-{CANONICAL_SESSION_USAGE_CTE}
+_TOTALS_QUERY = """
+WITH {sources}
 SELECT
-    {CANONICAL_MODEL_COLUMNS},
+    {model_columns},
     SUM(vendor_cost_usd) AS vendor_cost_usd,
     SUM(input_tokens) AS input_tokens,
     SUM(output_tokens) AS output_tokens,
     SUM(cache_creation_tokens) AS cache_creation_tokens,
     SUM(cache_read_tokens) AS cache_read_tokens
 FROM canonical_usage
-GROUP BY {CANONICAL_MODEL_COLUMNS}, (vendor_cost_usd IS NULL)
+GROUP BY {model_columns}, (vendor_cost_usd IS NULL)
 """
 
 # Counts every session the canonical source knows about, including ones that
 # produced no tokens. `canonical_usage` only carries sessions with usage rows,
 # so a session that failed before the agent ran would be missed by counting
 # there - which is exactly how two different session counts arose.
+#
+# Asked of agent_event_day_rollup, which has a row for every (day, session,
+# execution) that emitted ANY event - the same population a COUNT(DISTINCT)
+# over agent_events saw, at one row per session-day instead of one per event.
 _SESSION_COUNT_QUERY = """
 SELECT COUNT(DISTINCT session_id) AS sessions
-FROM agent_events
-WHERE TRUE {execution_filter}
+FROM agent_event_day_rollup
+WHERE {where}
 """
 
 
@@ -115,15 +108,21 @@ class CanonicalUsageQueryService:
 
     @staticmethod
     def _render(template: str, filtered: bool) -> str:
-        return template.format(execution_filter=_EXECUTION_FILTER if filtered else "")
+        where = _EXECUTION_FILTER if filtered else "TRUE"
+        return template.format(
+            sources=rollup_usage_sources(where),
+            model_columns=CANONICAL_MODEL_COLUMNS,
+            where=where,
+        )
 
     async def totals(self, execution_ids: set[str] | None = None) -> CanonicalTotals:
         """Canonical totals, optionally narrowed to a set of executions.
 
-            # agent_events holds every id in its stored (sanitised) form, because
-        # AgentEvent's validator applies pg_safe on the way in. A read binds text
-        # against those columns, so it has to ask for the same spelling or it
-        # matches nothing and reports that as "nothing was recorded" (#1241).
+        agent_events holds every id in its stored (sanitised) form, because
+        AgentEvent's validator applies pg_safe on the way in. A read binds text
+        against those columns, so it has to ask for the same spelling or it
+        matches nothing and reports that as "nothing was recorded" (#1241).
+        The usage rollup copies its ids from those rows, so the same holds.
         """
         filtered = execution_ids is not None
         totals_sql = self._render(_TOTALS_QUERY, filtered)

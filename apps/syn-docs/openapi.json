@@ -10089,6 +10089,44 @@
         ],
         "title": "ExecutionRunSummary"
       },
+      "ExecutionStatusCounts": {
+        "properties": {
+          "not_started": {
+            "type": "integer",
+            "title": "Not Started",
+            "default": 0
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running",
+            "default": 0
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "cancelled": {
+            "type": "integer",
+            "title": "Cancelled",
+            "default": 0
+          },
+          "interrupted": {
+            "type": "integer",
+            "title": "Interrupted",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExecutionStatusCounts",
+        "description": "How many executions are in each status, one field per status.\n\nThe fields are exactly the domain's ``ExecutionStatus`` values (a test pins\nthat), so every execution lands in exactly one field and the fields sum to\nthe number of executions. ``completed_workflows``/``failed_workflows``\nalone left cancelled, interrupted and running runs invisible on the\ndashboard. There is no ``paused``: that word was deleted from orchestration."
+      },
       "ExecutionStatusResponse": {
         "properties": {
           "execution_id": {
@@ -12937,6 +12975,9 @@
             "title": "Failed Workflows",
             "default": 0
           },
+          "execution_status_counts": {
+            "$ref": "#/components/schemas/ExecutionStatusCounts"
+          },
           "total_sessions": {
             "type": "integer",
             "title": "Total Sessions",
@@ -13810,6 +13851,26 @@
             ],
             "title": "Observed Branches"
           },
+          "pinned_at_start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhaseStartConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_pins_status": {
+            "type": "string",
+            "enum": [
+              "recorded",
+              "not_recorded",
+              "unavailable"
+            ],
+            "title": "Start Pins Status",
+            "default": "unavailable"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/PhaseOperationInfo"
@@ -14035,6 +14096,74 @@
         "type": "object",
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
+      },
+      "PhaseStartConfig": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Tools"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/PinnedSkillInfo"
+            },
+            "type": "array",
+            "title": "Skills"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "title": "PhaseStartConfig",
+        "description": "What a phase was configured with when its execution STARTED.\n\nRead from the execution's own start event (`StartPins`, #1454), never from\nthe workflow template, which may have been edited since. That is the whole\npoint: this answers \"what did the agent have\", not \"what would it get now\"."
+      },
+      "PinnedSkillInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "resolved_sha": {
+            "type": "string",
+            "title": "Resolved Sha"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "resolved_sha",
+          "source_url"
+        ],
+        "title": "PinnedSkillInfo",
+        "description": "One skill a phase was given at start, at the version it was resolved to (#1454)."
       },
       "Priority": {
         "type": "string",
