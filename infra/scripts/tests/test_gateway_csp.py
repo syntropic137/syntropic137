@@ -77,8 +77,33 @@ def test_no_unsafe_eval(path: Path) -> None:
             assert "'unsafe-eval'" not in sources, name
 
 
+def _server_blocks(conf: str) -> list[str]:
+    """The body of every top-level ``server { ... }`` block, comments removed."""
+    text = re.sub(r"#[^\n]*", "", conf)
+    blocks: list[str] = []
+    for start in re.finditer(r"^\s*server\s*\{", text, re.MULTILINE):
+        depth = 0
+        for index in range(start.end() - 1, len(text)):
+            if text[index] == "{":
+                depth += 1
+            elif text[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    blocks.append(text[start.end() : index])
+                    break
+    return blocks
+
+
 def test_security_headers_reach_every_server_block() -> None:
-    """A correct policy in a file nginx never includes protects nothing."""
-    servers = re.findall(r"^\s*server\s*\{", _NGINX_CONF.read_text(), re.MULTILINE)
-    includes = _NGINX_CONF.read_text().count("include /etc/nginx/conf.d/security-headers.conf;")
-    assert includes == len(servers) >= 1
+    """A correct policy in a file nginx never includes protects nothing.
+
+    Checked per block: a global count passes when one server includes the
+    file twice and the other not at all.
+    """
+    blocks = _server_blocks(_NGINX_CONF.read_text())
+    assert len(blocks) >= 2, "expected the host and tunnel server blocks"
+    for block in blocks:
+        listen = re.search(r"listen\s+([^;]+);", block)
+        assert "include /etc/nginx/conf.d/security-headers.conf;" in block, (
+            listen.group(1) if listen else block[:80]
+        )
