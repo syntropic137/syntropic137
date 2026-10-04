@@ -123,6 +123,53 @@ class TestSchemaConsistency:
         for sql in (ROLLUP_KEY_SQL, ROLLUP_TRIGGER_FUNCTION_SQL, ROLLUP_BACKFILL_SQL):
             assert "COALESCE" not in sql.upper()
 
+    def test_usage_rollup_migration_matches_the_code_that_creates_it(
+        self, migrations_dir: Path
+    ) -> None:
+        """007 is what a SYN_SKIP_AUTO_CREATE_TABLES deployment applies by hand.
+
+        Unlike 005 it is not only documentation: validate() refuses to start
+        without the objects it creates, and an operator whose role holds no
+        CREATE privilege has no other source for them. So every statement
+        _create_usage_rollup() runs must appear in it verbatim (modulo
+        whitespace), and so must the advisory-lock key, or a hand-applied
+        rollup could disagree with the one the API would have built.
+        """
+        from syn_adapters.events.schema import (
+            USAGE_ROLLUP_BACKFILL_SQL,
+            USAGE_ROLLUP_SCHEMA_LOCK_KEY,
+            USAGE_ROLLUP_TABLES_SQL,
+            USAGE_ROLLUP_TRIGGER,
+            USAGE_ROLLUP_TRIGGER_FUNCTION_SQL,
+        )
+
+        def flat(sql: str) -> str:
+            return " ".join(sql.split())
+
+        documented = flat(
+            "\n".join(
+                line
+                for line in (migrations_dir / "007_agent_usage_rollup.sql").read_text().splitlines()
+                if not line.lstrip().startswith("--")
+            )
+        )
+        statements = [
+            *USAGE_ROLLUP_TABLES_SQL,
+            USAGE_ROLLUP_TRIGGER_FUNCTION_SQL,
+            f"DROP TRIGGER IF EXISTS {USAGE_ROLLUP_TRIGGER} ON agent_events",
+            f"CREATE TRIGGER {USAGE_ROLLUP_TRIGGER} AFTER INSERT ON agent_events"
+            " FOR EACH ROW EXECUTE FUNCTION agent_usage_rollup_apply()",
+            *USAGE_ROLLUP_BACKFILL_SQL,
+            f"SELECT pg_advisory_xact_lock({USAGE_ROLLUP_SCHEMA_LOCK_KEY})",
+        ]
+        missing = [s for s in statements if flat(s) not in documented]
+        assert not missing, (
+            "007_agent_usage_rollup.sql no longer matches schema.py; re-render it. "
+            f"Missing: {[flat(s)[:80] for s in missing]}"
+        )
+        # The trigger and the backfill must share one transaction, see 007.
+        assert documented.startswith("BEGIN;") and documented.endswith("COMMIT;")
+
     def test_session_conversations_in_init_db(self, init_db_path: Path) -> None:
         """Docker init-db must include session_conversations table."""
         assert init_db_path.exists(), f"Init-db script not found: {init_db_path}"

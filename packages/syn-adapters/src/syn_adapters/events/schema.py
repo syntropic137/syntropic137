@@ -353,6 +353,22 @@ USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
 USAGE_ROLLUP_TRIGGER = "agent_events_usage_rollup"
 
 
+_DAY_ROLLUP_MIGRATION = "projection_stores/migrations/005_agent_event_day_rollup.sql"
+_USAGE_ROLLUP_MIGRATION = "projection_stores/migrations/007_agent_usage_rollup.sql"
+
+# What validate() requires beyond agent_events' columns, and the hand-applied
+# migration that creates each when auto-create is off.
+_ROLLUP_TABLES: tuple[tuple[str, str], ...] = (
+    ("agent_event_day_rollup", _DAY_ROLLUP_MIGRATION),
+    (SUMMARY_USAGE_TABLE, _USAGE_ROLLUP_MIGRATION),
+    (TURN_USAGE_ROLLUP_TABLE, _USAGE_ROLLUP_MIGRATION),
+)
+_ROLLUP_TRIGGERS: tuple[tuple[str, str], ...] = (
+    ("agent_events_day_rollup", _DAY_ROLLUP_MIGRATION),
+    (USAGE_ROLLUP_TRIGGER, _USAGE_ROLLUP_MIGRATION),
+)
+
+
 class SchemaValidationError(Exception):
     """Raised when database schema doesn't match expected schema."""
 
@@ -713,7 +729,30 @@ class EventStoreSchema:
                 # Partial match (e.g., "character varying" matches "character varying(100)")
                 mismatches.append(f"Column {col}: expected '{expected_type}', got '{actual_type}'")
 
+        mismatches.extend(await self._missing_rollup_objects(conn))
+
         if mismatches:
             msg = "Schema validation failed:\n  " + "\n  ".join(mismatches)
             logger.error(msg)
             raise SchemaValidationError(msg)
+
+    async def _missing_rollup_objects(self, conn: asyncpg.Connection) -> list[str]:
+        """The rollups the read paths depend on, and whether each is there.
+
+        /metrics and the contribution heatmap read these relations
+        unconditionally. With auto-create on, ensure_schema() has just made
+        them; with SYN_SKIP_AUTO_CREATE_TABLES=true it made nothing, and they
+        exist only if the migrations were applied by hand. Not checking meant
+        that deployment started cleanly and then answered 503 on every
+        dashboard request. A missing trigger is checked too: the tables would
+        be there and simply stop growing, which nothing else would report.
+        """
+        missing: list[str] = []
+        for table, migration in _ROLLUP_TABLES:
+            exists = await conn.fetchval(f"SELECT to_regclass('{table}') IS NOT NULL")
+            if exists is not True:
+                missing.append(f"Missing table: {table} (apply {migration})")
+        for trigger, migration in _ROLLUP_TRIGGERS:
+            if (await conn.fetchval(trigger_live_sql(trigger))) is not True:
+                missing.append(f"Missing or disabled trigger: {trigger} (apply {migration})")
+        return missing
