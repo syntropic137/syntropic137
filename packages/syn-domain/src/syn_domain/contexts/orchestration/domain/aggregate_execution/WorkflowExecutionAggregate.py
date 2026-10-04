@@ -48,6 +48,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_s
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
     completed_event,
     failed_event,
+    phase_deadline_event,
     started_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
@@ -113,9 +114,6 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
         PhaseCompletedEvent,
-    )
-    from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
-        PhaseDeadlineSetEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
         PhaseRetryScheduledEvent,
@@ -442,21 +440,23 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._initialize(command.aggregate_id)
         self._apply(resume_started_event(command))
 
+    def _require_running(self, action: str) -> None:
+        """Refuse `action` unless the execution is running; the message names both."""
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot {action} in status {self._status}"
+            raise ValueError(msg)
+
     @command_handler("CompleteExecutionCommand")
     def complete_execution(self, command: CompleteExecutionCommand) -> None:
         """Handle CompleteExecutionCommand."""
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot complete execution in status {self._status}"
-            raise ValueError(msg)
+        self._require_running("complete execution")
 
         self._apply(completed_event(command, self._workflow_id or ""))
 
     @command_handler("FailExecutionCommand")
     def fail_execution(self, command: FailExecutionCommand) -> None:
         """Handle FailExecutionCommand."""
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot fail execution in status {self._status}"
-            raise ValueError(msg)
+        self._require_running("fail execution")
 
         self._apply(failed_event(command, self._workflow_id or ""))
 
@@ -485,9 +485,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             PhaseStartedEvent,
         )
 
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot start phase in status {self._status}"
-            raise ValueError(msg)
+        self._require_running("start phase")
         self._refuse_if_completed(command.phase_id, "start")
 
         event = PhaseStartedEvent(
@@ -518,9 +516,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             PhaseRetryScheduledEvent,
         )
 
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot retry phase in status {self._status}"
-            raise ValueError(msg)
+        self._require_running("retry phase")
         if self._running_phase_id != command.phase_id:
             msg = (
                 f"Cannot retry phase {command.phase_id}: the running phase is "
@@ -544,22 +540,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("RecordPhaseDeadlineCommand")
     def record_phase_deadline(self, command: RecordPhaseDeadlineCommand) -> None:
         """Handle RecordPhaseDeadlineCommand — the running phase's clock started (#1546)."""
-        from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
-            PhaseDeadlineSetEvent,
-        )
-
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot record a phase deadline in status {self._status}"
-            raise ValueError(msg)
-
-        event = PhaseDeadlineSetEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            deadline=command.deadline,
-            timeout_seconds=command.timeout_seconds,
-        )
-        self._apply(event)
+        self._require_running("record a phase deadline")
+        self._apply(phase_deadline_event(command, workflow_id=self._workflow_id or ""))
 
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
@@ -568,9 +550,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             PhaseCompletedEvent,
         )
 
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot complete phase in status {self._status}"
-            raise ValueError(msg)
+        self._require_running("complete phase")
         self._refuse_if_completed(command.phase_id, "complete")
 
         event = PhaseCompletedEvent(
@@ -604,9 +584,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             WorkspaceProvisionedForPhaseEvent,
         )
 
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot provision workspace in status {self._status}"
-            raise ValueError(msg)
+        self._require_running("provision workspace")
 
         event = WorkspaceProvisionedForPhaseEvent(
             workflow_id=self._workflow_id or "",
@@ -625,9 +603,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             AgentExecutionCompletedEvent,
         )
 
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot complete agent execution in status {self._status}"
-            raise ValueError(msg)
+        self._require_running("complete agent execution")
 
         event = AgentExecutionCompletedEvent(
             workflow_id=self._workflow_id or "",
@@ -653,9 +629,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             NextPhaseReadyEvent,
         )
 
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot collect artifacts in status {self._status}"
-            raise ValueError(msg)
+        self._require_running("collect artifacts")
         self._refuse_if_completed(command.phase_id, "collect artifacts for")
 
         event = ArtifactsCollectedForPhaseEvent(
@@ -903,7 +877,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._phase_artifact_ids.pop(evt(event, "phase_id"), None)
 
     @event_sourcing_handler("PhaseDeadlineSet")
-    def on_phase_deadline_set(self, event: PhaseDeadlineSetEvent) -> None:
+    def on_phase_deadline_set(self, event: object) -> None:
         """Apply PhaseDeadlineSetEvent — a fact for readers; no decision here reads it."""
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")

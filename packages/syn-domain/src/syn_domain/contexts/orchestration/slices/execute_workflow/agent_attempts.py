@@ -34,6 +34,9 @@ import logging
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.agent_sessions import InvocationStatus
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    RecordPhaseDeadlineCommand,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     observer_for,
 )
@@ -53,11 +56,17 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
         UpstreamRetryPolicy,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+        ExecutionJournal,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
         AgentExecutionResult,
@@ -79,6 +88,27 @@ def _phase_deadline_environment(deadline: datetime, timeout_seconds: int) -> dic
         ENV_SYN_PHASE_DEADLINE: deadline.isoformat(),
         ENV_SYN_PHASE_TIMEOUT_SECONDS: str(timeout_seconds),
     }
+
+
+def deadline_recorder(
+    todo: TodoItem, aggregate: WorkflowExecutionAggregate, journal: ExecutionJournal
+) -> Callable[[datetime, int], Awaitable[None]]:
+    """Record the deadline a phase's clock was set to, as the agent is told it (#1546)."""
+    assert todo.phase_id is not None
+    phase_id = todo.phase_id
+
+    async def record(deadline: datetime, timeout_seconds: int) -> None:
+        aggregate.record_phase_deadline(
+            RecordPhaseDeadlineCommand(
+                execution_id=todo.execution_id,
+                phase_id=phase_id,
+                deadline=deadline,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        await journal.append(aggregate)
+
+    return record
 
 
 def _attempt_is_settled(result: AgentExecutionResult) -> bool:

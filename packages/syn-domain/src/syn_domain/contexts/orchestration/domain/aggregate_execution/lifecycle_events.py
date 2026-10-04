@@ -15,7 +15,11 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         CompleteExecutionCommand,
         FailExecutionCommand,
+        RecordPhaseDeadlineCommand,
         StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
+        PhaseDeadlineSetEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
@@ -126,4 +130,21 @@ def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFai
         # event is where the two stop being one frame's local variables and
         # start being the record every read model is built from.
         reported_failure_reason=command.reported_failure_reason,
+    )
+
+
+def phase_deadline_event(
+    command: RecordPhaseDeadlineCommand, *, workflow_id: str
+) -> PhaseDeadlineSetEvent:
+    """The `PhaseDeadlineSet` a phase records when its clock starts (#1546)."""
+    from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
+        PhaseDeadlineSetEvent,
+    )
+
+    return PhaseDeadlineSetEvent(
+        workflow_id=workflow_id,
+        execution_id=command.aggregate_id,
+        phase_id=command.phase_id,
+        deadline=command.deadline,
+        timeout_seconds=command.timeout_seconds,
     )
