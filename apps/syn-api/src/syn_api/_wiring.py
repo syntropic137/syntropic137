@@ -103,6 +103,7 @@ from syn_adapters.storage import (
 )
 from syn_adapters.storage.artifact_storage import get_artifact_storage
 from syn_adapters.storage.repositories import (
+    get_eval_repository,
     get_trigger_repository,
     get_workflow_execution_repository,
 )
@@ -541,6 +542,11 @@ def get_workflow_repo():
     return get_workflow_repository()
 
 
+def get_eval_repo():
+    """Return the eval repository (#967)."""
+    return get_eval_repository()
+
+
 def get_session_repo():
     """Return the agent session repository."""
     return get_session_repository()
@@ -931,6 +937,8 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
         # #1457: every start records the commit each repository was at, so a
         # resume of it can name the code its parent ran against.
         commit_resolver=GitHubSourceCommitResolver(get_github_client),
+        # #967: a launch into an eval is admitted by loading the Eval aggregate.
+        eval_repository=get_eval_repository(),
     )
 
 

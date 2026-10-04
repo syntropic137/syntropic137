@@ -6,6 +6,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Protocol
 
+from syn_shared.in_memory import InMemoryAdapter
 from syn_tokens.models import SpendBudget
 
 if TYPE_CHECKING:
@@ -37,10 +38,11 @@ class BudgetStore(Protocol):
         ...
 
 
-class InMemoryBudgetStore:
-    """In-memory budget store for testing."""
+class InMemoryBudgetStore(InMemoryAdapter):
+    """In-memory budget store for testing (ADR-060: raises outside test/offline)."""
 
     def __init__(self) -> None:
+        super().__init__()
         self._budgets: dict[str, SpendBudget] = {}
 
     async def store(self, budget: SpendBudget) -> None:

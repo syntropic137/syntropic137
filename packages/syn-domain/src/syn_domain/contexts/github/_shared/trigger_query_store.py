@@ -17,6 +17,8 @@ from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_shared.in_memory import assert_test_only
+
 if TYPE_CHECKING:
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerCondition import (
         TriggerCondition,
@@ -189,12 +191,12 @@ class IndexedTrigger:
 class InMemoryTriggerQueryStore(TriggerQueryStore):
     """In-memory implementation of TriggerQueryStore.
 
-    Suitable for:
-    - Tests (always)
-    - Development (with acknowledgment that data is not persisted)
+    Test/offline only (ADR-060): construction raises InMemoryAdapterError
+    elsewhere. get_trigger_query_store() selects it only when is_test.
     """
 
     def __init__(self) -> None:
+        assert_test_only()
         self._triggers: dict[str, IndexedTrigger] = {}
         self._fire_records: list[_FireRecord] = []
         self._processed_deliveries: set[str] = set()

@@ -192,6 +192,8 @@ syn workflow run <workflow-id> [options]
 | `--task`, `-t` | `text` | --- | Primary task description ($ARGUMENTS) |
 | `--repo`, `-R` | `text` | --- | Repository to pre-clone (repeatable). Accepts owner/repo, full GitHub URL, or syn repo-* ID. |
 | `--tag` | `text` | --- | Tag for this run (repeatable), added to the workflow's own tags |
+| `--eval` | `text` | --- | Eval this run joins, overriding the workflow's default eval |
+| `--no-eval` | `boolean` | `false` | Ordinary run: join no eval, even the workflow's default |
 | `--dry-run`, `-n` | `boolean` | `false` | Validate without executing |
 | `--quiet`, `-q` | `boolean` | `false` | Minimal output |
 

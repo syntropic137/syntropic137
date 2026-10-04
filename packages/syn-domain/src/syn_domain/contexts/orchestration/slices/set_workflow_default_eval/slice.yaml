@@ -1,0 +1,6 @@
+name: set-workflow-default-eval
+type: command
+aggregate: WorkflowTemplate
+emits:
+  - WorkflowDefaultEvalSetEvent
+returns: HandlerResult

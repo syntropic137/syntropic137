@@ -30,6 +30,7 @@ from syn_domain.contexts.orchestration import (
     TokenAccumulator,
 )
 from syn_shared.agents import AgentRunner
+from syn_shared.in_memory import assert_test_only
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -84,6 +85,7 @@ class FakeAgentExecutionHandler:
         uses_tools: Sequence[str] = (),
         attempts: Sequence[FakeAgentExecutionHandler] = (),
     ) -> None:
+        assert_test_only()
         self._interrupt = interrupt
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason

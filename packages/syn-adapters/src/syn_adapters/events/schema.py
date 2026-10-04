@@ -489,6 +489,22 @@ class SchemaValidationError(Exception):
     pass
 
 
+# E2: see EventStoreSchema._create_rollup_execution_index and
+# migrations/008_day_rollup_execution_index.sql, which applies the same index.
+ROLLUP_EXECUTION_INDEX_SQL = """
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_rollup_execution_day
+    ON agent_event_day_rollup (execution_id, day)
+"""
+
+# NULL when the index does not exist, else whether it is usable.
+ROLLUP_EXECUTION_INDEX_VALID_SQL = """
+SELECT i.indisvalid
+FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+WHERE c.relname = 'idx_rollup_execution_day'
+  AND c.relnamespace = current_schema()::regnamespace
+"""
+
+
 class EventStoreSchema:
     """Manages the agent_events table schema.
 
@@ -559,6 +575,7 @@ class EventStoreSchema:
             await self._create_indexes(conn)
             await self._configure_compression(conn)
             await self._create_day_rollup(conn)
+            await self._create_rollup_execution_index(conn)
             await self._create_usage_rollup(conn)
 
         await self.validate(conn)
@@ -736,6 +753,36 @@ class EventStoreSchema:
             """)
             if not rollup_is_complete:
                 await conn.execute(ROLLUP_BACKFILL_SQL)
+
+    async def _create_rollup_execution_index(self, conn: asyncpg.Connection) -> None:
+        """Index the day rollup by execution, without ever pausing ingestion (E2).
+
+        The execution-keyed half of syn_domain.agent_event_span: which days an
+        execution has telemetry on, so its hypertable reads can be bounded.
+
+        CONCURRENTLY and outside any transaction - deliberately NOT inside
+        _create_day_rollup's, which holds the agent_events trigger lock and
+        would make every insert wait for the build. The trigger writes this
+        table on every insert, so a plain CREATE INDEX would block it too.
+
+        A concurrent build that died leaves an INVALID index that IF NOT EXISTS
+        would then skip forever, so an invalid one is dropped and rebuilt. Any
+        failure is logged and swallowed: the index only makes the span lookup
+        fast; without it the lookup scans the rollup and returns the same span.
+        """
+        try:
+            valid = await conn.fetchval(ROLLUP_EXECUTION_INDEX_VALID_SQL)
+            if valid is True:
+                return
+            if valid is False:
+                await conn.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_rollup_execution_day")
+            await conn.execute(ROLLUP_EXECUTION_INDEX_SQL)
+        except asyncpg.PostgresError:
+            logger.warning(
+                "Could not build idx_rollup_execution_day; execution span lookups "
+                "will scan agent_event_day_rollup until the next startup",
+                exc_info=True,
+            )
 
     async def _create_usage_rollup(self, conn: asyncpg.Connection) -> None:
         """Create the usage rollup that bounds /metrics and the heatmap (E1).

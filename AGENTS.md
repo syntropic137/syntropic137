@@ -347,6 +347,8 @@ Goal: manual testing finds zero bugs - everything caught by automated tests.
 
 Test fixtures auto-detect infrastructure: env vars > test-stack (port 15432) > testcontainers.
 
+**In-memory adapters and test doubles in production code:** they must refuse to construct outside test/offline, and a fitness test enforces it for the classes it can see. Mocks inside test files are out of scope. Read [ADR-060 s5](docs/adrs/ADR-060-restart-safe-trigger-deduplication.md#5-inmemoryadapter-base-class-production-guard) before adding one.
+
 ## Event Sourcing Architecture
 
 ### Two-Lane Architecture
