@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import signal
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from syn_shared.agents import PhaseModelResolution, resolve_model_alias
@@ -190,6 +190,20 @@ def compute_duration_seconds(
 
 _IN_FLIGHT_STATUSES = frozenset({"running"})
 """Statuses that mean "still accruing wall-clock time, no completion recorded"."""
+
+
+def resolve_deadline(
+    started_at: datetime | str | None, timeout_seconds: int | None
+) -> datetime | None:
+    """When a run that started at ``started_at`` is out of ``timeout_seconds``.
+
+    ``None`` when either half is unknown: a deadline built from a missing start
+    or a missing budget is not an early or late deadline, it is not one at all.
+    """
+    start = _parse_timestamp(started_at)
+    if start is None or timeout_seconds is None:
+        return None
+    return start + timedelta(seconds=timeout_seconds)
 
 
 def resolve_duration_seconds(

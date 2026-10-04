@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 from syn_adapters.projections.session_tools import call_identity
 from syn_api.types import PhaseActivityInfo
-from syn_shared.display import resolve_duration_seconds
+from syn_shared.display import resolve_deadline, resolve_duration_seconds
 from syn_shared.events import GIT_PUSH
 
 if TYPE_CHECKING:
@@ -100,6 +100,7 @@ def summarize_phase_activity(
             telemetry_available=False,
             elapsed_seconds=elapsed_seconds,
             timeout_seconds=phase.timeout_seconds,
+            deadline=resolve_deadline(phase.started_at, phase.timeout_seconds),
         )
 
     last_push = _last_push_at(operations)
@@ -123,4 +124,5 @@ def summarize_phase_activity(
         ),
         elapsed_seconds=elapsed_seconds,
         timeout_seconds=phase.timeout_seconds,
+        deadline=resolve_deadline(phase.started_at, phase.timeout_seconds),
     )

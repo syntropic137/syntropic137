@@ -395,7 +395,16 @@ async def test_a_run_that_stated_no_budget_says_so_rather_than_guessing() -> Non
     phase = await _phase_as_an_api_client_sees_it(_busy_timeline(), budgeted=False)
 
     assert phase.activity.timeout_seconds is None
+    assert phase.activity.deadline is None, "no budget, so no deadline either"
     assert phase.activity.operations_count == 301, "the other readings are unaffected"
+
+
+@pytest.mark.anyio
+async def test_the_served_deadline_is_the_start_plus_the_budget() -> None:
+    """#1546: the earliest the phase can be killed, served beside the budget."""
+    activity = (await _phase_as_an_api_client_sees_it(_busy_timeline())).activity
+
+    assert activity.deadline == PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS)
 
 
 @pytest.mark.anyio
@@ -637,6 +646,7 @@ async def test_an_unreadable_timeline_still_says_whether_the_cap_was_reached() -
 
     assert activity.timeout_seconds == BUDGET_SECONDS
     assert activity.elapsed_seconds == float(BUDGET_SECONDS + 21)
+    assert activity.deadline == PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS)
 
 
 # -- the cap, and the 124 that is not the cap --------------------------------

@@ -4957,6 +4957,8 @@ export interface components {
             elapsed_seconds?: number | null;
             /** Timeout Seconds */
             timeout_seconds?: number | null;
+            /** Deadline */
+            deadline?: string | null;
         };
         /**
          * PhaseDefinitionResponse
