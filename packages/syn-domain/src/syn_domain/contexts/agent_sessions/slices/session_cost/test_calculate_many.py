@@ -47,6 +47,11 @@ _SPAN = "<event span lookup>"
 #: issues at the top of the page's transaction.
 _PLAN = "<custom plans>"
 
+#: The ``SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`` that
+#: ``custom_plans`` issues first, so the span and the reads it bounds share a
+#: snapshot.
+_SNAPSHOT = "<one read-only snapshot>"
+
 
 def _summary_row(session_id: str, *, total_input: int | None = 1_000) -> _FakeRow:
     return {
@@ -104,8 +109,11 @@ class _CountingConnection:
         return _Transaction()
 
     async def execute(self, query: str, *_args: object) -> str:
-        assert "plan_cache_mode" in query, query
-        self.calls.append(_PLAN)
+        if "REPEATABLE READ, READ ONLY" in query:
+            self.calls.append(_SNAPSHOT)
+        else:
+            assert "plan_cache_mode" in query, query
+            self.calls.append(_PLAN)
         return "SET"
 
     def _span_row(self, ids: list[str]) -> list[dict[str, date | None]]:
@@ -181,7 +189,7 @@ def _query(rows_by_query: dict[str, list[_FakeRow]]) -> tuple[TimescaleSessionCo
 
 @pytest.mark.unit
 @pytest.mark.anyio
-async def test_cost_for_fifty_sessions_takes_five_round_trips() -> None:
+async def test_cost_for_fifty_sessions_takes_six_round_trips() -> None:
     """The whole point: work is bounded by queries, not by page size."""
     ids = [f"sess-{i}" for i in range(50)]
     q, pool = _query(
@@ -198,14 +206,16 @@ async def test_cost_for_fifty_sessions_takes_five_round_trips() -> None:
     results = await q.calculate_many(ids)
 
     assert len(results) == 50
-    # Five statements and one connection for fifty sessions. Three read the
+    # Six statements and one connection for fifty sessions. Three read the
     # page; the token_usage fallback is skipped because every session had a
-    # usable summary. The other two are E2's time bound (agent_event_span):
-    # the plan setting and ONE span lookup for the whole page, which bounds
-    # every read after it - still fixed, not per session. The per-session loop
+    # usable summary. The other three are E2's time bound (agent_event_span):
+    # the read-only snapshot and plan setting, then ONE span lookup for the
+    # whole page, which bounds every read after it - still fixed, not per
+    # session. The per-session loop
     # this replaced would show 150-200 calls and 50 acquisitions, which is
     # what made a page cost seconds.
     assert pool.conn.calls == [
+        _SNAPSHOT,
         _PLAN,
         _SPAN,
         _SESSION_SUMMARY_BATCH_QUERY,

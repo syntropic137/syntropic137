@@ -214,7 +214,11 @@ _EXPECTED_SPAN_LOOKUPS: dict[_Case, tuple[str, ...]] = {
 #: The span every bounded read must bind: the one day ``_cell`` says the rollup holds.
 _SPAN = agent_event_span.EventSpan.of_days(_WHEN.date(), _WHEN.date())
 
-#: The statement ``agent_event_span.custom_plans`` issues; it reads nothing.
+#: The two statements ``agent_event_span.custom_plans`` issues, in this order,
+#: at the top of its transaction; neither reads anything. The first makes the
+#: span lookup and the reads it bounds share one snapshot, and is only
+#: effective as the transaction's first statement.
+_SNAPSHOT_SETTING = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
 _PLAN_SETTING = "SET LOCAL plan_cache_mode"
 
 
@@ -269,10 +273,15 @@ class _RecordingConnection:
         self.branch = branch
         self.statements: list[str] = []
         self.args: list[tuple[object, ...]] = []
+        #: Per statement, the index of the first statement of the transaction
+        #: it ran in, or None outside one.
+        self.transaction_starts: list[int | None] = []
+        self.open_transaction_at: int | None = None
 
     def _record(self, query: str, args: tuple[object, ...]) -> None:
         self.statements.append(query)
         self.args.append(args)
+        self.transaction_starts.append(self.open_transaction_at)
 
     def _has_rows(self, args: tuple[object, ...]) -> bool:
         return self.branch is _Branch.SUMMARISED or SESSION_SUMMARY not in args
@@ -283,7 +292,7 @@ class _RecordingConnection:
 
     def transaction(self) -> _Transaction:
         """What ``agent_event_span.custom_plans`` opens around a bounded read."""
-        return _Transaction()
+        return _Transaction(self)
 
     async def fetch(self, query: str, *args: object) -> list[_AnyRow]:
         self._record(query, args)
@@ -344,7 +353,31 @@ class _RecordingConnection:
             and tool_call_counts.TABLE not in s
             and "agent_event_day_rollup" not in s
             and _PLAN_SETTING not in s
+            and _SNAPSHOT_SETTING not in s
         ]
+
+    def bounded_statements_outside_one_snapshot(self) -> list[str]:
+        """Span lookups and the reads they bound, not run under custom_plans.
+
+        Each must run in a transaction whose first statement set the read-only
+        snapshot and whose second set the plan mode: otherwise the span and the
+        read can see different data, or the read is planned without its bounds.
+        """
+        wrong: list[str] = []
+        seen_span = False
+        for i, statement in enumerate(self.statements):
+            if "agent_event_day_rollup" in statement:
+                seen_span = True
+            elif not (seen_span and "agent_events" in statement):
+                continue
+            start = self.transaction_starts[i]
+            if (
+                start is None
+                or _SNAPSHOT_SETTING not in self.statements[start]
+                or _PLAN_SETTING not in self.statements[start + 1]
+            ):
+                wrong.append(statement)
+        return wrong
 
     def unbounded_scans_after_a_span(self) -> list[str]:
         """``agent_events`` statements issued once a span is known, that do not bind it."""
@@ -367,10 +400,17 @@ class _RecordingConnection:
 
 
 class _Transaction:
+    """Marks which statements ran inside it, and where it began."""
+
+    def __init__(self, conn: _RecordingConnection) -> None:
+        self._conn = conn
+
     async def __aenter__(self) -> None:
-        return None
+        assert self._conn.open_transaction_at is None, "custom_plans must be outermost"
+        self._conn.open_transaction_at = len(self._conn.statements)
 
     async def __aexit__(self, *_exc: object) -> bool:
+        self._conn.open_transaction_at = None
         return False
 
 
@@ -572,3 +612,6 @@ async def test_each_read_path_looks_up_exactly_the_inventoried_spans(
         f"{case} looked up spans {conn.span_lookups}, inventoried as {_EXPECTED_SPAN_LOOKUPS[case]}"
     )
     assert conn.unbounded_scans_after_a_span() == [], f"{case} ignored the span it looked up"
+    assert conn.bounded_statements_outside_one_snapshot() == [], (
+        f"{case} looked up a span or read by it outside one read-only snapshot"
+    )

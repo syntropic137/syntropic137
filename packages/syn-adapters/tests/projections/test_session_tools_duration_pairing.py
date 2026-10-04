@@ -88,7 +88,8 @@ class _Connection:
         return _Transaction()
 
     async def execute(self, query: str, *_args: object) -> str:
-        assert "plan_cache_mode" in query, query
+        # custom_plans: the read-only snapshot, then the plan setting.
+        assert "REPEATABLE READ, READ ONLY" in query or "plan_cache_mode" in query, query
         return "SET"
 
     async def fetch(
