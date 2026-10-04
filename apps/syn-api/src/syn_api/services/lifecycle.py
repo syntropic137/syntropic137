@@ -22,6 +22,7 @@ from syn_api._wiring import (
     disconnect,
     ensure_connected,
     get_event_store_instance,
+    get_projection_mgr,
     get_realtime,
     get_subscription_coordinator,
     get_workflow_dispatcher,
@@ -39,6 +40,11 @@ from syn_api.services.reconciliation import (
     reconcile_orphaned_sessions,
 )
 from syn_api.services.seeding import seed_offline_data
+from syn_api.services.unprojected_executions import (
+    UnprojectedExecutionDetector,
+    UnprojectedExecutions,
+    watch_unprojected_executions,
+)
 from syn_api.types import (
     Err,
     HealthResponse,
@@ -95,7 +101,10 @@ class LifecycleState:
     check_run_poller: CheckRunIngestionService | None = None
     conversation_storage: MinioConversationStorage | None = None
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
+    #: Latest result of the dropped-start check (#1545); None until it has run.
+    unprojected_executions: UnprojectedExecutions | None = None
     _recovery_task: asyncio.Task[None] | None = None
+    _unprojected_watch_task: asyncio.Task[None] | None = None
     _shutting_down: bool = False
 
 
@@ -201,6 +210,8 @@ async def _init_degradable_services(state: LifecycleState) -> None:
             logger.exception("%s initialization failed (degraded mode)", entry.reason)
             state.degraded_reasons.append(entry.reason)
 
+    _start_unprojected_execution_watch(state)
+
     # Spawn a background recovery loop for any recoverable degradations.
     recoverable = [r for r in state.degraded_reasons if _is_recoverable(r)]
     if recoverable:
@@ -298,6 +309,12 @@ async def shutdown() -> Result[None, LifecycleError]:
                 await _state._recovery_task
             _state._recovery_task = None
 
+        if _state._unprojected_watch_task is not None:
+            _state._unprojected_watch_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await _state._unprojected_watch_task
+            _state._unprojected_watch_task = None
+
         # Shutdown services in reverse registration order (ADR-057).
         for entry in reversed(_SERVICE_REGISTRY):
             if entry.shutdown_fn is not None:
@@ -337,6 +354,9 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
     degraded_reasons = [*_state.degraded_reasons, *read_path_reasons]
     codex_auth = _describe_codex_auth_health()
     warnings = [codex_auth.detail] if codex_auth is not None and codex_auth.needs_attention else []
+    drift = _state.unprojected_executions.describe() if _state.unprojected_executions else None
+    if drift is not None:
+        warnings.append(drift)
 
     return Ok(
         HealthResponse(
@@ -584,6 +604,35 @@ async def _init_event_store() -> Result[None, LifecycleError]:
         )
 
     return Ok(None)
+
+
+def _start_unprojected_execution_watch(state: LifecycleState) -> None:
+    """Start the dropped-start detector (#1545) once the read path exists.
+
+    Nothing to watch without a subscription: the detector judges events the
+    execution projections have already passed, and only the subscription can
+    say where that is.
+    """
+    if state.subscription_service is None or state._unprojected_watch_task is not None:
+        return
+    from syn_adapters.storage.event_store_client import get_event_store_client
+
+    projections = get_projection_mgr()
+    detector = UnprojectedExecutionDetector(
+        get_event_store_client(),
+        lookups=(
+            projections.workflow_execution_list.get_by_id,
+            projections.workflow_execution_detail.get_by_id,
+        ),
+    )
+
+    def publish(result: UnprojectedExecutions) -> None:
+        state.unprojected_executions = result
+
+    state._unprojected_watch_task = asyncio.create_task(
+        watch_unprojected_executions(state.subscription_service, detector, publish),
+        name="unprojected-execution-watch",
+    )
 
 
 async def _describe_subscription_health() -> SubscriptionHealthResult:
