@@ -6,7 +6,7 @@ import './provenance.css'
 const COLLAPSE_LINES = 12
 const COLLAPSE_CHARS = 800
 
-export function isLongTask(task: string): boolean {
+function isLongTask(task: string): boolean {
   return task.length > COLLAPSE_CHARS || task.split('\n').length > COLLAPSE_LINES
 }
 

@@ -17,17 +17,18 @@ export function usePhaseStartPins(
   executionId: string | null | undefined,
   sessionId: string | undefined,
 ): PhaseStartConfig | null | undefined {
-  const [pins, setPins] = useState<PhaseStartConfig | null | undefined>(undefined)
+  // Tagged with the session it answers for, so a stale answer reads as unknown
+  // after navigating to another session instead of describing the wrong phase.
+  const [answer, setAnswer] = useState<{ sessionId: string; pins: PhaseStartConfig | null }>()
 
   useEffect(() => {
-    setPins(undefined)
     if (!executionId || !sessionId) return
     const controller = new AbortController()
     getExecution(executionId, controller.signal)
       .then((execution) => {
         const phase = execution.phases.find((p) => p.session_id === sessionId)
         // A session whose phase is not on the execution is unknown, not "not recorded".
-        if (phase) setPins(phase.pinned_at_start ?? null)
+        if (phase) setAnswer({ sessionId, pins: phase.pinned_at_start ?? null })
       })
       .catch(() => {
         // Context for the header, never the page's own data: stay unknown.
@@ -35,5 +36,5 @@ export function usePhaseStartPins(
     return () => controller.abort()
   }, [executionId, sessionId])
 
-  return pins
+  return answer && answer.sessionId === sessionId ? answer.pins : undefined
 }
