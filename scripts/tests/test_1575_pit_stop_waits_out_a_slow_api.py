@@ -22,6 +22,7 @@ import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -242,8 +243,8 @@ def test_losing_the_host_during_verify_still_prints_the_recovery(
 
 
 class _MaintenanceEndpoint(BaseHTTPRequestHandler):
-    bodies: list[bytes] = []
-    auths: list[str] = []
+    bodies: ClassVar[list[bytes]] = []
+    auths: ClassVar[list[str]] = []
 
     def do_PUT(self) -> None:
         self.auths.append(self.headers["Authorization"])
