@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from event_sourcing import DomainEvent, EventEnvelope
+
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_adapters.subscriptions.read_model_lag import ReadModelLag
 

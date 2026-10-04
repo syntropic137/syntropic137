@@ -101,7 +101,7 @@ class _Store:
             EventEnvelope(
                 event=event,
                 metadata=EventMetadata(
-                    aggregate_id=getattr(event, "execution_id"),
+                    aggregate_id=event.execution_id,
                     aggregate_type="WorkflowExecution",
                     aggregate_nonce=1,
                     global_nonce=nonce,
@@ -122,9 +122,9 @@ class _Store:
         return page, is_end, nxt
 
 
-async def _project(*, drop_nonce: int | None) -> tuple[
-    WorkflowExecutionListProjection, WorkflowExecutionDetailProjection
-]:
+async def _project(
+    *, drop_nonce: int | None
+) -> tuple[WorkflowExecutionListProjection, WorkflowExecutionDetailProjection]:
     store = InMemoryProjectionStore()
     listing = WorkflowExecutionListProjection(store)
     detail = WorkflowExecutionDetailProjection(store)
