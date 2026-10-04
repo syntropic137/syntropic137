@@ -9869,6 +9869,41 @@
             ],
             "title": "Position"
           },
+          "held": {
+            "type": "boolean",
+            "title": "Held",
+            "default": true
+          },
+          "start_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "paused",
+                  "retryable",
+                  "dispatched",
+                  "started",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Status"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          },
           "running": {
             "type": "integer",
             "title": "Running"

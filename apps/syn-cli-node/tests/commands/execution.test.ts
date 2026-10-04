@@ -248,6 +248,20 @@ describe("execution commands", () => {
       expect(stdout()).toContain("queued 1 of 5 (1/1 running) via resume");
     });
 
+    it("prints a durable direct start no process holds yet, after a restart (#1557)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        status: "queued",
+        start_queue: {
+          path: "direct", position: null, held: false, running: 0, waiting: 0, limit: 4,
+          start_status: "pending", status_reason: null,
+          queued_at: "2026-01-01T00:00:00Z", position_display: "recorded, pending (0/4 running)",
+        },
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      expect(stdout()).toContain("recorded, pending (0/4 running) via direct");
+    });
+
     it("prints no queue line for an execution that exists", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ ...detail, start_queue: null }))
         .mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));

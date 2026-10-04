@@ -157,14 +157,23 @@ for exceeding its limit takes every Execution it hosts with it. (#1557.)
 ## Queued Start
 
 An admitted start waiting for an Execution Budget slot. It has an id and no
-event stream yet, so it is not an Execution's status: `queued` (and `starting`,
-once it holds a slot and before its stream opens) are reported by the API from
-the budget, with the start's position, in place of a 404. First come, first
-served. Held in memory, per process. A planned restart waits for it (the
-admission lease spans the wait); a crash loses it. A resume or trigger start is
-then offered again by its own to-do list; a direct start has none and is lost
-(#867). A start already queued in a process is never queued twice there, and
-across processes the child's first write is what refuses a second start.
+event stream yet, so `queued` is not one of an Execution's statuses: the API
+reports `queued` (and `starting`, once it holds a slot and before its stream
+opens) from the budget and the start's to-do record, with its position, in
+place of a 404. First come, first served. A start already queued in a process
+is never queued twice there; across processes, the Execution's first write is
+what refuses a second start.
+
+## Execution Request
+
+The durable record that a direct start (`POST /workflows/{id}/execute`) was
+admitted: `ExecutionRequested`, on its own `ExecutionRequest` stream, written
+BEFORE the caller is told 200 and carrying everything the start needs. The
+Execution it names does not exist yet. `ExecutionRequestStartProcessManager`
+starts it from this record whenever no process already holds it - after a
+restart, or when the route's own task never ran - so an accepted start is
+never lost while it queues. Resume starts work the same way, from the
+parent's `ExecutionResumed`; both use one start to-do list (#1557).
 
 ## Eval
 

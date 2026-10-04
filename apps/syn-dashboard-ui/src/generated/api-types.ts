@@ -3448,6 +3448,15 @@ export interface components {
             path: components["schemas"]["StartPath"];
             /** Position */
             position: number | null;
+            /**
+             * Held
+             * @default true
+             */
+            held: boolean;
+            /** Start Status */
+            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed") | null;
+            /** Status Reason */
+            status_reason?: string | null;
             /** Running */
             running: number;
             /** Waiting */
