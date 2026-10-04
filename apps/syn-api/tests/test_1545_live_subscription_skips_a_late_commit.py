@@ -178,7 +178,7 @@ class _SequenceStore:
                 self._delivered_through = max(self._delivered_through, cursor)
                 self._idle = True
                 self._changed.notify_all()
-                await self._changed.wait_for(lambda: any(n > cursor for n in self._visible()))
+                await self._changed.wait_for(lambda c=cursor: any(n > c for n in self._visible()))
                 self._idle = False
 
     async def read_all(
