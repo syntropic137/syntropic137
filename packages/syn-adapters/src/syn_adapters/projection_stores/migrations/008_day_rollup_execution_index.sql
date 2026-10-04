@@ -19,6 +19,16 @@
 -- CONCURRENTLY, so applying it by hand never blocks ingestion: the trigger on
 -- agent_events writes this table on every insert. It cannot run inside a
 -- transaction block; run it with psql in autocommit (the default).
+--
+-- A CONCURRENTLY build that is interrupted leaves an INVALID index behind,
+-- which IF NOT EXISTS would then skip forever. Check first, and if this
+-- returns false, run the DROP below before re-running the CREATE (startup
+-- does the same repair when it owns the DDL):
+--
+--   SELECT i.indisvalid FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+--   WHERE c.relname = 'idx_rollup_execution_day';
+--
+--   DROP INDEX CONCURRENTLY IF EXISTS idx_rollup_execution_day;
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_rollup_execution_day
     ON agent_event_day_rollup (execution_id, day);
