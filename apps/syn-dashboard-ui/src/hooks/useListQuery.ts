@@ -61,6 +61,37 @@ export function useDebounced<T>(value: T, delayMs: number): T {
 }
 
 /**
+ * The page being viewed within one collection, identified by `collectionKey`.
+ *
+ * A page number means nothing except relative to its collection, so any change
+ * of collection IS page 1. Derived in render rather than reset in an effect,
+ * which would fetch the old page of the new collection first. And the held page
+ * is dropped the moment the collection changes, not merely hidden: keeping it
+ * would restore page 3 on returning to a collection seen before (page 3 ->
+ * search -> clear search), which is a change of collection like any other.
+ */
+export interface CollectionPage {
+  page: number
+  /** Move within the current collection. Clamped at page 1. */
+  setPage: (page: number) => void
+}
+
+export function useCollectionPage(collectionKey: string): CollectionPage {
+  const [pageState, setPageState] = useState({ collectionKey, page: 1 })
+  if (pageState.collectionKey !== collectionKey) {
+    // Adjusting state while rendering, as React documents for a changed input:
+    // this render already reads page 1, and the stale page is forgotten.
+    setPageState({ collectionKey, page: 1 })
+  }
+  const page = pageState.collectionKey === collectionKey ? pageState.page : 1
+  const setPage = useCallback(
+    (next: number) => setPageState({ collectionKey, page: Math.max(1, next) }),
+    [collectionKey],
+  )
+  return { page, setPage }
+}
+
+/**
  * @param scopeKey Identity of any narrowing the caller applies that this hook
  *   cannot see, such as Sessions' `workflow_id`. Changing it selects a
  *   different collection, exactly as a shared filter does.
@@ -87,16 +118,9 @@ export function useListQuery(scopeKey: string): ListQueryState {
   // out from under the page offsets while an operator is paging through it.
   const startedAfter = useMemo(() => timeWindowToStartedAfter(timeWindow), [timeWindow])
 
-  // Which collection is being paged. A page number means nothing except
-  // relative to this, so a change to it IS page 1 - derived rather than reset
-  // in an effect, which would fetch the old page first and then correct it.
+  // Which collection is being paged. See useCollectionPage.
   const collectionKey = [scopeKey, statusesKey, startedAfter ?? '', search].join(' ')
-  const [pageState, setPageState] = useState({ collectionKey, page: 1 })
-  const page = pageState.collectionKey === collectionKey ? pageState.page : 1
-  const setPage = useCallback(
-    (next: number) => setPageState({ collectionKey, page: Math.max(1, next) }),
-    [collectionKey],
-  )
+  const { page, setPage } = useCollectionPage(collectionKey)
 
   const query = useMemo<ListQuery>(
     () => ({

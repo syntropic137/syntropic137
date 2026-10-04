@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { listWorkflows } from '../api/workflows'
 import type { WorkflowSummary } from '../types'
-import { SEARCH_DEBOUNCE_MS, useDebounced } from './useListQuery'
+import { SEARCH_DEBOUNCE_MS, useCollectionPage, useDebounced } from './useListQuery'
 
 export interface UseWorkflowListResult {
   workflows: WorkflowSummary[]
@@ -31,15 +31,8 @@ export function useWorkflowList(): UseWorkflowListResult {
   const search = useDebounced(searchQuery.trim(), SEARCH_DEBOUNCE_MS)
 
   // A page number only means something within one filtered collection, so a
-  // new search or type IS page 1 - derived, as in useListQuery, rather than
-  // reset in an effect that would fetch the stale page first.
-  const collectionKey = `${typeFilter} ${search}`
-  const [pageState, setPageState] = useState({ collectionKey, page: 1 })
-  const page = pageState.collectionKey === collectionKey ? pageState.page : 1
-  const setPage = useCallback(
-    (next: number) => setPageState({ collectionKey, page: Math.max(1, next) }),
-    [collectionKey],
-  )
+  // new search or type IS page 1. See useCollectionPage.
+  const { page, setPage } = useCollectionPage(`${typeFilter} ${search}`)
 
   useEffect(() => {
     let cancelled = false

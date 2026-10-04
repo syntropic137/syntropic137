@@ -95,3 +95,41 @@ describe('useWorkflowList search', () => {
     expect(requests.at(-1)?.searchParams.get('page')).toBe('1')
   })
 })
+
+describe('useWorkflowList paging across collections', () => {
+  // Codex review on #1566: the held page was keyed by collection, so going back
+  // to a collection seen before restored its old page instead of page 1.
+  it('page 3, then search, then clear the search lands on page 1', async () => {
+    const { result } = renderHook(() => useWorkflowList())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    act(() => result.current.setPage(3))
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get('page')).toBe('3'))
+
+    act(() => result.current.setSearchQuery('needle'))
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get('search')).toBe('needle'))
+
+    act(() => result.current.setSearchQuery(''))
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get('search')).toBeNull())
+
+    expect(result.current.page).toBe(1)
+    expect(requests.at(-1)?.searchParams.get('page')).toBe('1')
+  })
+
+  it('page 3, then a type, then back to all types lands on page 1', async () => {
+    const { result } = renderHook(() => useWorkflowList())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    act(() => result.current.setPage(3))
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get('page')).toBe('3'))
+
+    act(() => result.current.setTypeFilter('custom'))
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get('workflow_type')).toBe('custom'))
+
+    act(() => result.current.setTypeFilter(''))
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get('workflow_type')).toBeNull())
+
+    expect(result.current.page).toBe(1)
+    expect(requests.at(-1)?.searchParams.get('page')).toBe('1')
+  })
+})
