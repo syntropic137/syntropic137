@@ -474,20 +474,25 @@ commit exactly as #1458 decided.
 | Fact | Recorded on | Source |
 |---|---|---|
 | Branches the failing phase left | the parent's `WorkflowFailed.observed_branches` (#1200) | git, asked while the workspace was alive, so it survives a phase that did not complete |
-| Which of them the resume continues, with the open PR | the child's `WorkflowExecutionStarted.continued_branches` | `RemoteBranchPort`, asked as the child starts |
+| The PR open from each of them | `BranchObservation.pull_request` on that same failure | `RemoteBranchPort`, asked as the parent fails (`with_open_pull_requests`) |
+| Which of them the resume continues, with that PR | the child's `WorkflowExecutionStarted.continued_branches` | `RemoteBranchPort`, asked again as the child starts and compared with the above |
 | Which it refused, and why | the child's `WorkflowExecutionStarted.abandoned_branches` | the same reading |
 
 A branch counts as LEFT by the phase only when origin holds it and the phase
 owned it: it did not exist on origin when the phase started, or the phase was
 itself continuing it. A branch the phase merely sat on (`main` moving under a
-fetch) is never continued. Both new fields are top-level, not inside
+fetch) is never continued. The observer reads the checked-out branch and also
+every LOCAL branch no remote carried at phase start, so a phase that pushed B
+and then checked out another branch before failing still records B.
+`pull_request` is omitted when unset, like the start-event fields below. Both new fields are top-level, not inside
 `resumed_from` (whose model forbids extra keys), and are omitted when unset, so
 a release before #1513 replays the event unchanged.
 
 **Stale is refused, visibly.** The child continues a branch only when the forge
-confirms it is exactly where the parent left it and no closed PR replaced an
-open one. Deleted, force-pushed or moved, PR closed, or a forge nobody could
-ask: the branch is ABANDONED with that reason on the child's start event, a
+confirms it is exactly where the parent left it AND the PR open from it is the
+one the parent recorded. A PR opened from the same branch since (the parent's
+#42 closed, #43 opened) is never adopted. Deleted, force-pushed or moved, the
+parent's PR closed or replaced, or a forge nobody could ask: the branch is ABANDONED with that reason on the child's start event, a
 warning is logged, the phase is told, and it starts fresh at the pinned commit.
 "Could not ask" is never read as "gone", and never trusted either.
 
@@ -517,5 +522,7 @@ branch" path already keys on, so the prompt is unchanged.
 
 - An interrupted or cancelled parent records no `observed_branches`, so its
   resume continues nothing and behaves as before.
-- The PR is resolved from the forge at resume start, not recorded on the
-  parent: nothing in the platform observes a PR being opened.
+- The PR is read from the forge as the parent fails, not observed at the
+  moment `gh pr create` runs: the platform sees no PR being opened. A PR the
+  forge could not be asked about then is recorded as none, so a PR found open
+  at resume is refused rather than trusted.
