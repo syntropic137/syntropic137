@@ -160,8 +160,11 @@ An admitted start waiting for an Execution Budget slot. It has an id and no
 event stream yet, so it is not an Execution's status: `queued` (and `starting`,
 once it holds a slot and before its stream opens) are reported by the API from
 the budget, with the start's position, in place of a 404. First come, first
-served. Held in memory, per process: a restart loses it, and the start's own
-to-do list offers it again. A start already queued is never queued twice.
+served. Held in memory, per process. A planned restart waits for it (the
+admission lease spans the wait); a crash loses it. A resume or trigger start is
+then offered again by its own to-do list; a direct start has none and is lost
+(#867). A start already queued in a process is never queued twice there, and
+across processes the child's first write is what refuses a second start.
 
 ## Eval
 

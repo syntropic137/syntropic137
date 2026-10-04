@@ -743,9 +743,13 @@ async def _not_yet_started(
     matches = get_execution_budget().matching(execution_id)
     if len(matches) != 1:
         return None
-    (position,) = matches
-    claim = position.claim
+    claim = matches[0].claim
     workflow = await mgr.workflow_detail.get_by_id(claim.workflow_id)
+    # Read the position AFTER the await, not before: the start may have taken a
+    # slot, or finished and released its claim, while the name was read.
+    position = get_execution_budget().position(claim.execution_id)
+    if position is None or position.claim is not claim:
+        return None
     return ExecutionDetailResponse(
         workflow_execution_id=claim.execution_id,
         workflow_id=claim.workflow_id,
