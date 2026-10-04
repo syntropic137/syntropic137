@@ -25,7 +25,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent im
     WorkflowTagsRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models import WorkflowSummary
-from syn_domain.pagination import ProjectionRecord, matches_search
+from syn_domain.pagination import matches_search
 
 
 class WorkflowListProjection(AutoDispatchProjection):
@@ -192,8 +192,8 @@ class WorkflowListProjection(AutoDispatchProjection):
         Returns:
             List of matching WorkflowSummary objects
         """
-        rows = await self._matching(workflow_type_filter, include_archived, search, order_by)
-        return [WorkflowSummary.from_dict(d) for d in rows[offset : offset + limit]]
+        matching = await self._matching(workflow_type_filter, include_archived, search, order_by)
+        return matching[offset : offset + limit]
 
     async def count(
         self,
@@ -210,7 +210,7 @@ class WorkflowListProjection(AutoDispatchProjection):
         include_archived: bool,
         search: str | None,
         order_by: str | None = None,
-    ) -> list[ProjectionRecord]:
+    ) -> list[WorkflowSummary]:
         """Every template matching the filters, before pagination.
 
         Shared by ``query`` and ``count`` so the two cannot drift: a total
@@ -238,4 +238,5 @@ class WorkflowListProjection(AutoDispatchProjection):
             limit=None,
             offset=0,
         )
-        return [r for r in rows if matches_search(search, r.get("name"), r.get("id"))]
+        summaries = [WorkflowSummary.from_dict(r) for r in rows]
+        return [s for s in summaries if matches_search(search, s.name, s.id)]
