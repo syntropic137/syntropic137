@@ -93,6 +93,7 @@ from syn_domain.contexts.orchestration import (
 # guard on AliasResolutionBasis both unused and misleading.
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
+from syn_shared.display import format_utc_timestamp
 from syn_shared.observed_model import format_observed_model
 
 # ---------------------------------------------------------------------------
@@ -1876,8 +1877,8 @@ class BuildInfo(_NamesTheRunningRelease):
     twenty releases behind the installed package.
 
     The release and its status come from ``_NamesTheRunningRelease``. What this
-    model adds is the two build-time stamps, which only an image can supply and
-    only ``/health`` reports.
+    model adds is the two build-time stamps, which only an image can supply,
+    and when this process went live, which only the process can.
     """
 
     image_tag: str | None = Field(
@@ -1891,6 +1892,20 @@ class BuildInfo(_NamesTheRunningRelease):
         description="Git commit the image was built from, stamped at image build time. "
         "Null when the build did not stamp one.",
     )
+    started_at: datetime = Field(
+        description="When this API process started (UTC, ISO 8601): the moment the "
+        "running deployment went live. Captured once per process, so it changes only "
+        "when the process is replaced, which is what a redeploy does.",
+    )
+
+    @computed_field(
+        description="started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. "
+        "Relative and local-time renderings are the client's to make from started_at.",
+    )
+    @property
+    def started_at_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``started_at``."""
+        return format_utc_timestamp(self.started_at)
 
 
 class RootResponse(_NamesTheRunningRelease):
