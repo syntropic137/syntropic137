@@ -50,9 +50,24 @@ export function formatCostWithCoverage(
   return `>=${formatCost(n)} (partial)`;
 }
 
+const TOKEN_TIERS = [
+  { suffix: "K", size: 1_000 },
+  { suffix: "M", size: 1_000_000 },
+  { suffix: "B", size: 1_000_000_000 },
+] as const;
+
+/**
+ * Each tier rounds to whole tenths and hands the count up when that rounds to
+ * 1000 of itself: 999,950,000 is "1.0B", never "1000.0M", and ten billion is
+ * "10.0B", never "10008.6M". Same rule as the dashboard's formatTokens.
+ */
 export function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
+  if (tokens < 1_000) return String(tokens);
+  const last = TOKEN_TIERS.length - 1;
+  for (const [i, { suffix, size }] of TOKEN_TIERS.entries()) {
+    const tenths = Math.round(tokens / (size / 10));
+    if (tenths < 10_000 || i === last) return `${(tenths / 10).toFixed(1)}${suffix}`;
+  }
   return String(tokens);
 }
 

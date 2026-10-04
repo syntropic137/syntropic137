@@ -29,6 +29,18 @@ describe("formatCost", () => {
 });
 
 describe("formatTokens", () => {
+  it("formats billions with a B tier", () => {
+    expect(formatTokens(10_008_606_679)).toBe("10.0B");
+    expect(formatTokens(1_000_000_000)).toBe("1.0B");
+    expect(formatTokens(1_250_000_000)).toBe("1.3B");
+  });
+
+  it("moves up a tier exactly where rounding would print 1000 of the lower one", () => {
+    expect(formatTokens(999_949_999)).toBe("999.9M");
+    expect(formatTokens(999_950_000)).toBe("1.0B");
+    expect(formatTokens(999_950)).toBe("1.0M");
+  });
+
   it("formats millions", () => {
     expect(formatTokens(1_200_000)).toBe("1.2M");
     expect(formatTokens(1_000_000)).toBe("1.0M");
