@@ -60,8 +60,6 @@ allowed_prefixes = [
 "packages/syn-shared/src/syn_shared/in_memory.py::InMemoryAdapterError" = { reason = "The exception the guard raises, not an adapter. Holds no state." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_adapter.py::MemoryIsolationState" = { reason = "Per-workspace state record, constructed only inside the guarded MemoryIsolationAdapter. Not an adapter and implements no port." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_sidecar.py::MemorySidecarState" = { reason = "Per-sidecar state record, constructed only inside the guarded MemorySidecarAdapter. Not an adapter and implements no port." }
-"packages/syn-tokens/src/syn_tokens/token_stores.py::InMemoryTokenStore" = { reason = "KNOWN VIOLATION, not a false positive. get_token_vending_service() defaults to it and nothing in production configures Redis, so Docker workspaces vend tokens from it. Guarding it now would make production workspace creation raise.", issue = "#1549" }
-"packages/syn-tokens/src/syn_tokens/budget_stores.py::InMemoryBudgetStore" = { reason = "KNOWN VIOLATION, not a false positive. get_spend_tracker() defaults to it and _wiring._get_budget_checker() calls that in production. Guarding it now would quietly turn dispatch budget checks off.", issue = "#1549" }
 
 [aggregate_guards]
 # @command_handler methods exempt from the guard requirement.
