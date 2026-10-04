@@ -116,7 +116,7 @@ def test_memory_adapter_environment_guard() -> None:
     try:
         with (
             patch(
-                "syn_adapters.in_memory.get_settings",
+                "syn_shared.in_memory.get_settings",
                 return_value=_mock_settings(AppEnvironment.PRODUCTION),
             ),
             pytest.raises(InMemoryAdapterError, match="test/offline only"),
