@@ -133,7 +133,7 @@ class InMemoryAdapter:
 
 **Location:** `packages/syn-shared/src/syn_shared/in_memory.py` (re-exported from `syn_adapters.in_memory`), so packages that cannot depend on syn-adapters can use it too.
 
-**Enforced, not remembered:** `ci/fitness/code_quality/test_in_memory_adapters_are_guarded.py` fails the build when a production class that is an in-memory adapter or double (named `InMemory*`, `Memory*`, `Fake*` or `Stub*`, or a port implementation in a `memory`/`fake` module) can be constructed without running `assert_test_only()`. This is the rule for mocking in this codebase: a double is test-only, and it proves that at construction rather than by convention.
+**Enforced, not remembered:** `ci/fitness/code_quality/test_in_memory_adapters_are_guarded.py` fails the build when a production class it identifies as an in-memory adapter or double can be constructed without running `assert_test_only()`. It identifies them by name (`InMemory*`, `Memory*`, `Fake*`, `Stub*`) or by naming a port as a base inside a `memory`/`fake` module. Limits: test files (`test_*.py`, `conftest.py`) are not scanned, a port implemented structurally without naming it as a base is invisible to it, and listed exceptions bypass it. Those cases still follow the rule by review.
 
 ### 6. Cold-Start Fence (HistoricalPoller)
 
