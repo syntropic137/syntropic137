@@ -16,7 +16,7 @@ tests assert what a client actually receives, because every previous hop
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, TypedDict
 from unittest.mock import AsyncMock, MagicMock
 
@@ -77,8 +77,18 @@ async def _operations_over_http(rows: list[_Row]) -> list[PhaseOperationInfo]:
     """
     from syn_adapters.projections.session_tools import SessionToolsProjection
 
+    async def fetch(query: str, *_args: object) -> list[_Row] | list[dict[str, date | None]]:
+        # The E2 span lookup on the day rollup, answered with the UTC days the
+        # rows fall on; the bounded read it precedes then returns them all.
+        if "agent_event_day_rollup" in query:
+            days = [row["time"].astimezone(UTC).date() for row in rows]
+            return [{"first_day": min(days, default=None), "last_day": max(days, default=None)}]
+        return rows
+
     connection = MagicMock()
-    connection.fetch = AsyncMock(return_value=rows)
+    connection.fetch = AsyncMock(side_effect=fetch)
+    # agent_event_span.custom_plans' plan setting.
+    connection.execute = AsyncMock(return_value="SET")
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=AsyncMock())
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=connection)

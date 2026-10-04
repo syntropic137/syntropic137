@@ -34,6 +34,7 @@ import pytest
 
 from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
+    ROLLUP_EXECUTION_INDEX_VALID_SQL,
     USAGE_ROLLUP_BACKFILL_SESSIONS_SQL,
     USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL,
     USAGE_ROLLUP_MARK_COMPLETE_SQL,
@@ -122,13 +123,26 @@ def _tgenabled_predicate_holds(sql: str, tgenabled: str) -> bool:
     return True
 
 
+#: The rollup's execution index (E2), built CONCURRENTLY outside the lock.
+EXECUTION_INDEX = "idx_rollup_execution_day"
+
+
 class _NoOpTransaction:
-    """asyncpg's `async with conn.transaction():`, with nothing to roll back."""
+    """asyncpg's `async with conn.transaction():`, with nothing to roll back.
+
+    It does tell the connection a transaction is open, because PostgreSQL
+    refuses ``... CONCURRENTLY`` inside one and the fake has to as well.
+    """
+
+    def __init__(self, conn: CatalogueConnection) -> None:
+        self._conn = conn
 
     async def __aenter__(self) -> _NoOpTransaction:
+        self._conn.transaction_depth += 1
         return self
 
     async def __aexit__(self, *_: object) -> bool:
+        self._conn.transaction_depth -= 1
         return False
 
 
@@ -167,6 +181,15 @@ class CatalogueConnection:
         #: Whether the usage rollup's completion row exists, answered from the
         #: mark statements actually executed, for the same reason as above.
         self._usage_rollup_marked = False
+        #: Indexes built CONCURRENTLY, keyed by name, valued by `indisvalid`.
+        #: Answered from the DDL executed, like the rest of the catalogue: an
+        #: absent key is no `pg_index` row, False is a build that died and left
+        #: an INVALID index behind.
+        self._indexes: dict[str, bool] = {}
+        #: Open transactions. PostgreSQL rejects CREATE/DROP INDEX CONCURRENTLY
+        #: inside one, so this fake rejects it too rather than letting a build
+        #: that would fail in production pass here.
+        self.transaction_depth = 0
 
     async def execute(self, sql: str, *_args: object) -> None:
         self.executed.append(sql)
@@ -188,9 +211,21 @@ class CatalogueConnection:
         detached = re.search(r"DROP TRIGGER IF EXISTS (\w+)", sql)
         if detached:
             self._triggers.pop(detached.group(1), None)
+        if "CONCURRENTLY" in sql and self.transaction_depth > 0:
+            msg = f"CONCURRENTLY cannot run inside a transaction block: {sql!r}"
+            raise AssertionError(msg)
+        built = re.search(r"CREATE INDEX CONCURRENTLY IF NOT EXISTS (\w+)", sql)
+        if built:
+            self._indexes.setdefault(built.group(1), True)
+        dropped = re.search(r"DROP INDEX CONCURRENTLY IF EXISTS (\w+)", sql)
+        if dropped:
+            self._indexes.pop(dropped.group(1), None)
 
-    async def fetchval(self, sql: str, *_args: object) -> bool:
+    async def fetchval(self, sql: str, *_args: object) -> bool | None:
         self.calls.append(sql)
+        if sql == ROLLUP_EXECUTION_INDEX_VALID_SQL:
+            # `indisvalid`, or NULL for no such index.
+            return self._indexes.get(EXECUTION_INDEX)
         relation = re.search(r"to_regclass\('(\w+)'\) IS NOT NULL", sql)
         if relation is not None:
             return relation.group(1) in self._relations
@@ -217,7 +252,11 @@ class CatalogueConnection:
         return _VALID_AGENT_EVENTS_SCHEMA
 
     def transaction(self) -> _NoOpTransaction:
-        return _NoOpTransaction()
+        return _NoOpTransaction(self)
+
+    def invalidate_index(self, name: str) -> None:
+        """Leave the index INVALID, as a CONCURRENTLY build that died would."""
+        self._indexes[name] = False
 
     def count_backfills(self) -> int:
         return self.executed.count(ROLLUP_BACKFILL_SQL)
