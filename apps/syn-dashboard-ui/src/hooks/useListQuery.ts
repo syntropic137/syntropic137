@@ -25,7 +25,7 @@ import {
 import { useResetView } from './useResetView'
 
 /** Long enough that typing a word is one request, short enough to feel live. */
-const SEARCH_DEBOUNCE_MS = 300
+export const SEARCH_DEBOUNCE_MS = 300
 
 export const LIST_PAGE_SIZE = 50
 
@@ -51,7 +51,7 @@ export interface ListQueryState {
 }
 
 /** Settle on a value only once it has stopped changing for `delayMs`. */
-function useDebounced<T>(value: T, delayMs: number): T {
+export function useDebounced<T>(value: T, delayMs: number): T {
   const [settled, setSettled] = useState(value)
   useEffect(() => {
     const timer = setTimeout(() => setSettled(value), delayMs)
