@@ -1,0 +1,6 @@
+name: create-eval
+type: command
+aggregate: Eval
+emits:
+  - EvalCreatedEvent
+returns: HandlerResult

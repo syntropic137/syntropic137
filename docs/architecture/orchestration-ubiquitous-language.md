@@ -129,7 +129,60 @@ Execution is then created and started by a background processor.
 An admitted Resume is not a started one. The two are separate facts, and a
 successful API response reports the first.
 
+## Eval
+
+An experiment: a Goal, measured by runs that all start from the same Repository
+Baseline. Recorded as its own event stream, the Eval aggregate, identified by an
+Eval id (`eval-` plus a uuid when the caller supplies none). Its name and tags
+describe it and stay editable for its whole life. Its Goal and Baseline are what
+it measures, and Freezing fixes them.
+
+An Eval does not list its runs. An Execution records which Eval it belongs to,
+so attaching a run is one write to the Execution and the Eval's stream does not
+grow with every run. (Evals plan, #967.)
+
+## Goal
+
+What an Eval sets out to measure, in a sentence or a paragraph. Trimmed, never
+empty. A different Goal is a different experiment, so once the Eval is Frozen
+the answer is a new Eval, not an edit.
+
+## Repository Baseline
+
+One repository, the ref a person asked for (`requested_ref`: a branch, tag or
+sha), and the full commit sha that ref named when it was asked (`commit_sha`).
+Every run of the Eval starts from `commit_sha`; `requested_ref` is kept so a
+person can see what they asked for. A branch moving later changes nothing.
+
+A Baseline is always resolved before it is recorded, through
+`RevisionResolverPort`: one ref that cannot be resolved refuses the whole edit,
+and an abbreviated sha never reaches an event. It wraps `RepositoryRef` and
+never extends it: `RepositoryRef` says which repository, a Baseline says which
+state of it. Each repository appears at most once in an Eval's Baseline.
+
+A Baseline is not a Pin. A Pin is what one Execution records about itself as it
+starts; a Baseline is what an Eval requires of every Execution it admits.
+
+## Freeze
+
+Fix an Eval's Goal and Baseline, permanently. Admission freezes an Eval before
+the first run it admits, as a recorded `EvalFrozen` event, so an edit decided
+against the unfrozen Eval loses on the stream version instead of slipping in
+behind a run. Freezing a frozen Eval succeeds and records nothing. A frozen
+Eval may still be renamed, retagged and archived. There is no unfreeze.
+
+## Archive
+
+Retire something without deleting it: a soft delete, for Workflow templates
+and Evals alike. An archived Eval refuses every edit and refuses to be Frozen.
+It stays readable, and its history and runs stay intact. Archiving an archived Eval
+succeeds and records nothing.
+
 ## Words we do not use
+
+- **Lock** (an Eval). The word is Freeze. "Lock" already means the skill and
+  plugin lock files here, and an Eval is not locked against reading or
+  against renaming.
 
 - **Pause.** Deleted 2026-09-29. It recorded an event that nothing in the
   execution path observed - the processor checks `CANCELLED` and nothing else -
