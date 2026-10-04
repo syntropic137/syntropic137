@@ -70,10 +70,16 @@ if TYPE_CHECKING:
         EvalArchivedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.EvalCreatedEvent import (
+        BaselineRepoPayload as CreatedBaselinePayload,
+    )
+    from syn_domain.contexts.orchestration.domain.events.EvalCreatedEvent import (
         EvalCreatedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.EvalFrozenEvent import (
         EvalFrozenEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import (
+        BaselineRepoPayload as UpdatedBaselinePayload,
     )
     from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import (
         EvalUpdatedEvent,
@@ -100,23 +106,9 @@ def _canonical_baseline[B: _ForRepository](baseline: Iterable[B]) -> tuple[B, ..
     return ordered
 
 
-class _RecordedRepository(Protocol):
-    @property
-    def owner(self) -> str: ...
-    @property
-    def name(self) -> str: ...
-
-
-class _RecordedBaseline(Protocol):
-    @property
-    def repository(self) -> _RecordedRepository: ...
-    @property
-    def requested_ref(self) -> str: ...
-    @property
-    def commit_sha(self) -> str: ...
-
-
-def _recorded_baseline(recorded: Iterable[_RecordedBaseline]) -> tuple[RepositoryBaseline, ...]:
+def _recorded_baseline(
+    recorded: Iterable[CreatedBaselinePayload | UpdatedBaselinePayload],
+) -> tuple[RepositoryBaseline, ...]:
     """Rebuild the baseline an event carries as primitives (events import no value objects)."""
     return tuple(
         RepositoryBaseline(
