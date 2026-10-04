@@ -768,11 +768,11 @@ class TimescaleExecutionCostQuery:
         matches nothing and reports that as "nothing was recorded" (#1241).
         """
         execution_id = pg_safe(execution_id)
-        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             # Every read below is bounded to the days this execution has
             # telemetry on, so the planner opens those chunks and no others
             # (E2). It changes no row any of them returns: see agent_event_span.
-            span = await agent_event_span.for_executions(conn, [execution_id])
+            span = await agent_event_span.for_executions(conn, [execution_id])  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             token_rows, has_summary = await self._resolve_token_rows(conn, execution_id, span)
             if not token_rows:
                 return None

@@ -99,11 +99,11 @@ async def get_session_tools(
     session_id = pg_safe(session_id)
 
     try:
-        async with pool.acquire() as conn, agent_event_span.custom_plans(conn):
+        async with pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             # Bounded to the days this session has telemetry on, so the planner
             # opens those chunks and no others - twice, for the self-join (E2).
             # Same rows: see syn_domain.agent_event_span.
-            span = await agent_event_span.for_sessions(conn, [session_id])
+            span = await agent_event_span.for_sessions(conn, [session_id])  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             # Query with LEFT JOIN to get tool_name from started events
             # for completed events that don't have it (Claude PostToolUse
             # hook doesn't receive tool_name, only tool_use_id)
