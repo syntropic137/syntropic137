@@ -144,30 +144,46 @@ def branches_left_by(
     ``repositories`` maps an observation's directory name back to its slug; a
     name two repositories share maps to neither, rather than to a guess.
     """
-    by_name: dict[str, list[str]] = {}
-    for slug in repositories:
-        by_name.setdefault(slug.rsplit("/", 1)[-1], []).append(slug)
+    slugs = repository_slugs_by_name(repositories)
     owned = {(c.repository, c.branch) for c in continued}
     left = {(c.repository, c.branch): c for c in continued}
     for raw in observed or ():
-        obs = _observation(raw)
-        if obs is None or obs.remote_commit is None:
-            continue
-        slugs = by_name.get(obs.repo, [])
-        if len(slugs) != 1:
-            continue
-        key = (slugs[0], obs.branch)
-        if obs.remote_commit_at_phase_start is None or key in owned:
-            # A PR the forge could not be asked about at failure is still the
-            # one the run was continuing, if it was continuing one.
-            earlier = left[key].pull_request if key in left else None
-            left[key] = ContinuedBranch(
-                repository=slugs[0],
-                branch=obs.branch,
-                head_sha=obs.remote_commit,
-                pull_request=obs.pull_request if obs.pull_request is not None else earlier,
-            )
+        branch = _left_branch(_observation(raw), slugs, owned, left)
+        if branch is not None:
+            left[branch.repository, branch.branch] = branch
     return list(left.values())
+
+
+def repository_slugs_by_name(repositories: Sequence[str]) -> dict[str, str]:
+    """Directory name -> `owner/name`, for the names exactly one repository has."""
+    by_name: dict[str, list[str]] = {}
+    for slug in repositories:
+        by_name.setdefault(slug.rsplit("/", 1)[-1], []).append(slug)
+    return {name: found[0] for name, found in by_name.items() if len(found) == 1}
+
+
+def _left_branch(
+    obs: BranchObservation | None,
+    slugs: dict[str, str],
+    owned: set[tuple[str, str]],
+    left: dict[tuple[str, str], ContinuedBranch],
+) -> ContinuedBranch | None:
+    """The branch ``obs`` says the phase left and owned, or None."""
+    slug = slugs.get(obs.repo) if obs is not None else None
+    if obs is None or obs.remote_commit is None or slug is None:
+        return None
+    key = (slug, obs.branch)
+    if obs.remote_commit_at_phase_start is not None and key not in owned:
+        return None
+    # A PR the forge could not be asked about at failure is still the one the
+    # run was continuing, if it was continuing one.
+    earlier = left[key].pull_request if key in left else None
+    return ContinuedBranch(
+        repository=slug,
+        branch=obs.branch,
+        head_sha=obs.remote_commit,
+        pull_request=obs.pull_request if obs.pull_request is not None else earlier,
+    )
 
 
 def _observation(raw: object) -> BranchObservation | None:

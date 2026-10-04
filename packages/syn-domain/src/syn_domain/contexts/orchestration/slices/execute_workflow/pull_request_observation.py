@@ -22,6 +22,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    repository_slugs_by_name,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
 
 if TYPE_CHECKING:
@@ -49,17 +52,9 @@ async def with_open_pull_requests(
     """
     if observed is None or forge is None:
         return observed
-    slugs = _unique_slugs(repositories)
+    slugs = repository_slugs_by_name(repositories)
     branches = [await _with_pull_request(b, forge, slugs) for b in observed.branches]
     return ObservedBranches(branches=tuple(branches), unreadable=observed.unreadable)
-
-
-def _unique_slugs(repositories: Sequence[str]) -> dict[str, str]:
-    """Directory name -> slug, for the names exactly one repository has."""
-    by_name: dict[str, list[str]] = {}
-    for slug in repositories:
-        by_name.setdefault(slug.rsplit("/", 1)[-1], []).append(slug)
-    return {name: found[0] for name, found in by_name.items() if len(found) == 1}
 
 
 async def _with_pull_request(
