@@ -24,6 +24,7 @@ since the last one - so it can run on a timer against a store of any size.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol
@@ -135,18 +136,21 @@ class UnprojectedExecutionDetector:
                 forward=True,
             )
             for envelope in events:
-                position = envelope.metadata.global_nonce
-                if position is None:
-                    continue
-                self._next_position = max(self._next_position, position + 1)
-                if envelope.metadata.event_type != STARTED_EVENT_TYPE:
-                    continue
-                execution_id = getattr(envelope.event, "execution_id", None)
-                if isinstance(execution_id, str) and execution_id:
-                    self._unconfirmed.setdefault(execution_id, position)
+                self._record(envelope)
             if is_end or not events:
                 return
             self._next_position = max(self._next_position, next_position)
+
+    def _record(self, envelope: EventEnvelope[DomainEvent]) -> None:
+        position = envelope.metadata.global_nonce
+        if position is None:
+            return
+        self._next_position = max(self._next_position, position + 1)
+        if envelope.metadata.event_type != STARTED_EVENT_TYPE:
+            return
+        execution_id = getattr(envelope.event, "execution_id", None)
+        if isinstance(execution_id, str) and execution_id:
+            self._unconfirmed.setdefault(execution_id, position)
 
     async def _is_projected(self, execution_id: str) -> bool:
         for lookup in self._lookups:
@@ -204,3 +208,82 @@ async def watch_unprojected_executions(
         except Exception:
             logger.exception("Unprojected-execution check failed; retrying next interval")
         await asyncio.sleep(interval_seconds)
+
+
+@dataclass(slots=True)
+class UnprojectedExecutionWatch:
+    """Owns the watcher task and its latest result for the API lifecycle.
+
+    The API holds exactly one, behind the module functions below, the same
+    shape as `inventory_lifecycle`: lifecycle.py carries one call per hook
+    (start, stop, warnings) and none of the wiring.
+    """
+
+    latest: UnprojectedExecutions | None = None
+    _task: asyncio.Task[None] | None = None
+
+    def start(self, subscription_service: CoordinatorSubscriptionService | None) -> None:
+        """Start watching; a no-op if already running or there is no read path.
+
+        Nothing to watch without a subscription: the detector judges events
+        the execution projections have already passed, and only the
+        subscription can say where that is.
+        """
+        if self._task is not None or subscription_service is None:
+            return
+        from syn_adapters.storage.event_store_client import get_event_store_client
+        from syn_api._wiring import get_projection_mgr
+
+        projections = get_projection_mgr()
+        detector = UnprojectedExecutionDetector(
+            get_event_store_client(),
+            lookups=(
+                projections.workflow_execution_list.get_by_id,
+                projections.workflow_execution_detail.get_by_id,
+            ),
+        )
+        self._task = asyncio.create_task(
+            watch_unprojected_executions(subscription_service, detector, self._publish),
+            name="unprojected-execution-watch",
+        )
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        self._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._task
+        self._task = None
+
+    def warnings(self) -> list[str]:
+        """The /health warning for the latest result, if it found anything."""
+        warning = self.latest.describe() if self.latest is not None else None
+        return [warning] if warning is not None else []
+
+    def _publish(self, result: UnprojectedExecutions) -> None:
+        self.latest = result
+
+
+_watch = UnprojectedExecutionWatch()
+
+
+def start_watch(subscription_service: CoordinatorSubscriptionService | None) -> None:
+    """Start the API's watch once the subscription coordinator is running.
+
+    Never raises: it is called from the coordinator's own startup, and a
+    detector that could fail that startup would degrade the read path it
+    exists to watch.
+    """
+    try:
+        _watch.start(subscription_service)
+    except Exception:
+        logger.exception("Unprojected-execution watch did not start (#1545); drift goes unreported")
+
+
+async def stop_watch() -> None:
+    await _watch.stop()
+
+
+def health_warnings() -> list[str]:
+    """The /health warnings for the latest check; empty when nothing is missing."""
+    return _watch.warnings()

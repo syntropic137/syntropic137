@@ -27,6 +27,7 @@ from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_api.services.unprojected_executions import (
     UnprojectedExecutionDetector,
     UnprojectedExecutions,
+    UnprojectedExecutionWatch,
 )
 from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import PhaseStartedEvent
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
@@ -189,3 +190,20 @@ class TestADroppedStartIsReported:
             await projection.on_workflow_execution_started(_started(DROPPED).model_dump())
 
         assert (await detector.check(settled_through=_HEAD)).execution_ids == ()
+
+
+class TestTheWatchFeedsHealth:
+    @pytest.mark.asyncio
+    async def test_a_drop_becomes_a_health_warning_and_clears_on_repair(self) -> None:
+        listing, detail = await _project(drop_nonce=_DROPPED_NONCE)
+        detector = _detector(listing, detail)
+        watch = UnprojectedExecutionWatch()
+        assert watch.warnings() == [], "no result yet must not warn"
+
+        watch._publish(await detector.check(settled_through=_HEAD))
+        assert len(watch.warnings()) == 1 and DROPPED in watch.warnings()[0]
+
+        for projection in (listing, detail):
+            await projection.on_workflow_execution_started(_started(DROPPED).model_dump())
+        watch._publish(await detector.check(settled_through=_HEAD))
+        assert watch.warnings() == []
