@@ -2069,6 +2069,23 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
 
 
+class DiskSpaceHealth(BaseModel):
+    """Free space on the workspace volume, as /health reports it (#1560)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(description="Directory whose filesystem was measured.")
+    state: Literal["ok", "unmeasurable", "low", "critical"] = Field(
+        description="'low' degrades /health; 'critical' also refuses new executions."
+    )
+    free_percent: float | None = Field(description="Percent free; null when unmeasurable.")
+    free_bytes: int | None = Field(description="Bytes available; null when unmeasurable.")
+    degraded_below_percent: float = Field(description="SYN_DISK_DEGRADED_BELOW_PERCENT.")
+    refuse_admission_below_percent: float = Field(
+        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+    )
+
+
 class HealthResponse(_OmitsAbsentFields):
     """Payload of ``GET /health``.
 
@@ -2111,6 +2128,11 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Human-readable notes that need attention but do not degrade the "
         "instance. Omitted when there are none.",
+    )
+    disk: DiskSpaceHealth | None = Field(
+        default=None,
+        description="Free space on the workspace volume (#1560). Omitted only when "
+        "the probe itself could not be built.",
     )
 
 

@@ -1,5 +1,13 @@
 """Cross-context shared kernel: value objects and integration events."""
 
+from syn_domain.contexts._shared.disk_space import (
+    DiskCheck,
+    DiskSpaceGuard,
+    DiskSpacePort,
+    DiskState,
+    DiskUsage,
+    InsufficientDiskSpaceError,
+)
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import (
     AdmissionAnnouncementFailedError,
@@ -21,6 +29,12 @@ __all__ = [
     "AdmissionGate",
     "AdmissionOpenEvent",
     "AdmissionTicket",
+    "DiskCheck",
+    "DiskSpaceGuard",
+    "DiskSpacePort",
+    "DiskState",
+    "DiskUsage",
+    "InsufficientDiskSpaceError",
     "MaintenanceMode",
     "MaintenancePausedError",
     "MaintenancePort",

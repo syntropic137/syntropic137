@@ -40,6 +40,7 @@ from syn_api.services.reconciliation import (
 )
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import (
+    DiskSpaceHealth,
     Err,
     HealthResponse,
     LifecycleError,
@@ -334,7 +335,9 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
     # build is this?" must get an answer from a degraded deployment too, since
     # that is precisely when the question gets asked (#1380).
     subscription, read_path_reasons = await _describe_subscription_health()
-    degraded_reasons = [*_state.degraded_reasons, *read_path_reasons]
+    disk = _describe_disk_health()
+    disk_reasons = [DegradedReason.DISK_SPACE] if disk is not None and disk.state != "ok" else []
+    degraded_reasons = [*_state.degraded_reasons, *read_path_reasons, *disk_reasons]
     codex_auth = _describe_codex_auth_health()
     warnings = [codex_auth.detail] if codex_auth is not None and codex_auth.needs_attention else []
 
@@ -347,7 +350,32 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             subscription=subscription,
             codex_auth=codex_auth,
             warnings=warnings or None,
+            disk=disk,
         )
+    )
+
+
+def _describe_disk_health() -> DiskSpaceHealth | None:
+    """Free space on the workspace volume, judged by the admission gate's own guard.
+
+    The SAME guard admission refuses with (#1560), so a refused execution is
+    always explained by a ``critical`` block here. Never raises: a probe that
+    could take /health down is worse than an omitted block.
+    """
+    try:
+        from syn_api._wiring_admission import get_disk_space_guard
+
+        check = get_disk_space_guard().check()
+    except Exception:
+        logger.warning("disk space probe could not be built", exc_info=True)
+        return None
+    return DiskSpaceHealth(
+        path=check.path,
+        state=check.state.value,
+        free_percent=None if check.usage is None else round(check.usage.free_percent, 2),
+        free_bytes=None if check.usage is None else check.usage.free_bytes,
+        degraded_below_percent=check.degraded_below_percent,
+        refuse_admission_below_percent=check.refuse_admission_below_percent,
     )
 
 

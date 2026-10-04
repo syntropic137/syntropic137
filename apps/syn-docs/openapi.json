@@ -8972,7 +8972,8 @@
           "event_poller",
           "check_run_poller",
           "anthropic_api_key",
-          "github_app"
+          "github_app",
+          "disk_space"
         ],
         "title": "DegradedReason",
         "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
@@ -8994,6 +8995,72 @@
           "status"
         ],
         "title": "DeleteWorkflowResponse"
+      },
+      "DiskSpaceHealth": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Directory whose filesystem was measured."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unmeasurable",
+              "low",
+              "critical"
+            ],
+            "title": "State",
+            "description": "'low' degrades /health; 'critical' also refuses new executions."
+          },
+          "free_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Percent",
+            "description": "Percent free; null when unmeasurable."
+          },
+          "free_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Bytes",
+            "description": "Bytes available; null when unmeasurable."
+          },
+          "degraded_below_percent": {
+            "type": "number",
+            "title": "Degraded Below Percent",
+            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT."
+          },
+          "refuse_admission_below_percent": {
+            "type": "number",
+            "title": "Refuse Admission Below Percent",
+            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "state",
+          "free_percent",
+          "free_bytes",
+          "degraded_below_percent",
+          "refuse_admission_below_percent"
+        ],
+        "title": "DiskSpaceHealth",
+        "description": "Free space on the workspace volume, as /health reports it (#1560)."
       },
       "EventListResponse": {
         "properties": {
@@ -11805,6 +11872,17 @@
             ],
             "title": "Warnings",
             "description": "Human-readable notes that need attention but do not degrade the instance. Omitted when there are none."
+          },
+          "disk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskSpaceHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free space on the workspace volume (#1560). Omitted only when the probe itself could not be built."
           }
         },
         "additionalProperties": false,

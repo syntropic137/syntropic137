@@ -42,6 +42,8 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
+    from syn_domain.contexts._shared.disk_space import DiskSpaceGuard
+
 
 class MaintenanceMode(BaseModel):
     """Whether new workflow executions may be admitted, and why not.
@@ -354,9 +356,18 @@ class AdmissionGate:
     is out of scope for #1387.
     """
 
-    def __init__(self, port: MaintenancePort, announcer: AdmissionAnnouncer | None = None) -> None:
+    def __init__(
+        self,
+        port: MaintenancePort,
+        announcer: AdmissionAnnouncer | None = None,
+        disk: DiskSpaceGuard | None = None,
+    ) -> None:
         self._port = port
         self._announcer = announcer
+        # #1560: a nearly-full workspace volume refuses here, before anything
+        # is written, rather than letting the execution reach Postgres and
+        # fail mid-write. None for the fixtures that build a gate without one.
+        self._disk = disk
         self._transition = asyncio.Lock()
         self._outstanding = 0
         self._idle = asyncio.Event()
@@ -385,16 +396,26 @@ class AdmissionGate:
         It decides nothing. Its answer may be stale before it arrives, which is
         the whole defect this class exists to close, so it is never the last
         word: :meth:`admitting` still has to grant the ticket.
+
+        Raises :class:`InsufficientDiskSpaceError` below the free-space floor
+        (#1560), checked first because it needs no round trip.
         """
+        self._refuse_if_disk_full()
         await refuse_if_paused(self._port)
+
+    def _refuse_if_disk_full(self) -> None:
+        if self._disk is not None:
+            self._disk.refuse_if_full()
 
     @asynccontextmanager
     async def admitting(self) -> AsyncIterator[AdmissionTicket]:
         """Hold the gate open for one admission, or refuse.
 
         Raises :class:`MaintenancePausedError` instead of yielding when the
-        gate is shut. The body must be the DECISIVE step and nothing else -
-        creating the task, queueing the background work. Validation, template
+        gate is shut, and :class:`InsufficientDiskSpaceError` when the
+        workspace volume is below its free-space floor (#1560).
+        The body must be the DECISIVE step and nothing else - creating the
+        task, queueing the background work. Validation, template
         reads and preflight belong outside; holding the gate across them would
         let a slow request stall a deploy.
 
@@ -407,6 +428,7 @@ class AdmissionGate:
         entrances guarantee one of the two. A body that RAISES has queued
         nothing, so the lease is ended here.
         """
+        self._refuse_if_disk_full()
         async with self._transition:
             mode = await self._port.current()
             if mode.active:

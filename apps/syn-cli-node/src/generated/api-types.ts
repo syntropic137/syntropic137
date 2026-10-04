@@ -3024,13 +3024,50 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
         /** DeleteWorkflowResponse */
         DeleteWorkflowResponse: {
             /** Workflow Id */
             workflow_id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * DiskSpaceHealth
+         * @description Free space on the workspace volume, as /health reports it (#1560).
+         */
+        DiskSpaceHealth: {
+            /**
+             * Path
+             * @description Directory whose filesystem was measured.
+             */
+            path: string;
+            /**
+             * State
+             * @description 'low' degrades /health; 'critical' also refuses new executions.
+             * @enum {string}
+             */
+            state: "ok" | "unmeasurable" | "low" | "critical";
+            /**
+             * Free Percent
+             * @description Percent free; null when unmeasurable.
+             */
+            free_percent: number | null;
+            /**
+             * Free Bytes
+             * @description Bytes available; null when unmeasurable.
+             */
+            free_bytes: number | null;
+            /**
+             * Degraded Below Percent
+             * @description SYN_DISK_DEGRADED_BELOW_PERCENT.
+             */
+            degraded_below_percent: number;
+            /**
+             * Refuse Admission Below Percent
+             * @description SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT.
+             */
+            refuse_admission_below_percent: number;
         };
         /**
          * EventListResponse
@@ -4347,6 +4384,8 @@ export interface components {
              * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
              */
             warnings?: string[] | null;
+            /** @description Free space on the workspace volume (#1560). Omitted only when the probe itself could not be built. */
+            disk?: components["schemas"]["DiskSpaceHealth"] | null;
         };
         /**
          * HeatmapDayBucketResponse
