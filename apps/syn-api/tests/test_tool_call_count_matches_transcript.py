@@ -189,6 +189,6 @@ async def test_git_hook_events_in_tool_output_are_still_recorded() -> None:
     recorded = [o.event_type for o in observations]
 
     assert GIT_CHECKOUT in recorded
-    assert not any(
-        o.payload.get("tool_use_id") == "toolu_FOREIGN" for o in observations
-    ), "a tool row printed by the agent was recorded as the agent's own call"
+    assert not any(o.payload.get("tool_use_id") == "toolu_FOREIGN" for o in observations), (
+        "a tool row printed by the agent was recorded as the agent's own call"
+    )
