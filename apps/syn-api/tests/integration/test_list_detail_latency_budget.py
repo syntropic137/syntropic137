@@ -31,19 +31,18 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit, urlunsplit
 
-import asyncpg
-import httpx
 import pytest
 
-from syn_domain.pagination import ProjectionRecord
 from syn_shared.events import SESSION_STARTED, SESSION_SUMMARY, TOKEN_USAGE
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    import asyncpg
+    import httpx
+
+    from syn_domain.pagination import ProjectionRecord
 
 pytestmark = pytest.mark.integration
 
@@ -326,31 +325,6 @@ async def projection_documents(now: datetime) -> dict[str, dict[str, ProjectionR
     return store.tables
 
 
-def _with_database(url: str, name: str) -> str:
-    parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, f"/{name}", "", ""))
-
-
-@pytest.fixture
-async def gate_database(test_infrastructure) -> AsyncIterator[str]:
-    """An empty database of its own, dropped afterwards."""
-    admin_url = test_infrastructure.timescaledb_url
-    name = f"latency_gate_e2_{uuid.uuid4().hex[:12]}"
-    admin = await asyncpg.connect(admin_url)
-    try:
-        await admin.execute(f'CREATE DATABASE "{name}"')
-    finally:
-        await admin.close()
-    try:
-        yield _with_database(admin_url, name)
-    finally:
-        admin = await asyncpg.connect(admin_url)
-        try:
-            await admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-        finally:
-            await admin.close()
-
-
 async def seed(pool: asyncpg.Pool, now: datetime) -> None:
     """Both stores, seeded the way production writes them, then compressed."""
     from syn_adapters.projection_stores import get_projection_store
@@ -400,37 +374,6 @@ def use_timescale_timeline(pool: asyncpg.Pool) -> None:
     manager._projections["session_tools"] = SessionToolsProjection(pool)
 
 
-@pytest.fixture
-async def app_on_seeded_postgres(
-    gate_database: str, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[httpx.AsyncClient]:
-    """The real app, wired to a seeded TimescaleDB for both stores it reads."""
-    from syn_adapters import projection_stores
-    from syn_adapters.events import AgentEventStore, store_helpers
-    from syn_adapters.projection_stores import PostgresProjectionStore
-    from syn_adapters.projections.manager import reset_projection_manager
-    from syn_api.main import create_app
-
-    store = AgentEventStore(gate_database)
-    await store.initialize()
-    pool = store.pool
-    assert pool is not None
-    monkeypatch.setattr(store_helpers, "_event_store", store)
-    monkeypatch.setattr(projection_stores, "_store_instance", PostgresProjectionStore(pool))
-    reset_projection_manager()
-    use_timescale_timeline(pool)
-
-    await seed(pool, datetime.now(UTC).replace(microsecond=0))
-
-    try:
-        transport = httpx.ASGITransport(app=create_app())
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            yield client
-    finally:
-        reset_projection_manager()
-        await store.close()
-
-
 async def p95_ms(client: httpx.AsyncClient, path: str, params: dict[str, str]) -> float:
     for _ in range(WARMUP):
         (await client.get(path, params=params)).raise_for_status()
@@ -466,9 +409,9 @@ async def assert_timing_real_work(client: httpx.AsyncClient) -> None:
 
 
 async def test_list_and_detail_endpoints_stay_inside_their_p95_budget(
-    app_on_seeded_postgres: httpx.AsyncClient,
+    e2_seeded_client: httpx.AsyncClient,
 ) -> None:
-    client = app_on_seeded_postgres
+    client = e2_seeded_client
     await assert_timing_real_work(client)
 
     measured = {e.name: await p95_ms(client, e.path, e.params) for e in ENDPOINTS}
