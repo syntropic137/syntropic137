@@ -28,7 +28,11 @@ from syn_api._wiring import (
 )
 from syn_api.build_info import get_build_info
 from syn_api.services import inventory_lifecycle
-from syn_api.services.admission_announcement import announce_admission_if_open
+from syn_api.services.admission_announcement import (
+    announce_admission_if_open,
+    start_disk_recovery_watch,
+    stop_disk_recovery_watch,
+)
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
@@ -721,10 +725,13 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     logger.info("Subscription coordinator started")
 
     await announce_admission_if_open()
+    # #1560: freeing disk space is not an event either, so a clock asks.
+    start_disk_recovery_watch()
 
 
 async def _shutdown_subscriptions(state: LifecycleState) -> None:
     """Stop subscription coordinator and workflow dispatcher."""
+    await stop_disk_recovery_watch()
     await inventory_lifecycle.stop_session_inventory()
     if state.workflow_dispatcher is not None:
         await state.workflow_dispatcher.shutdown()

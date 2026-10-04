@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict
 
 from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
+from syn_domain.contexts._shared.disk_space import InsufficientDiskSpaceError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
@@ -372,6 +373,10 @@ class AdmissionGate:
         # is written, rather than letting the execution reach Postgres and
         # fail mid-write. None for the fixtures that build a gate without one.
         self._disk = disk
+        # Set by a disk refusal, cleared by the announcement that answers it.
+        # Process-local on purpose: a restart announces anyway, and a record
+        # it re-offers onto a still-full disk is refused here and sets it again.
+        self._held_for_disk = False
         self._transition = asyncio.Lock()
         self._outstanding = 0
         self._idle = asyncio.Event()
@@ -408,8 +413,51 @@ class AdmissionGate:
         await refuse_if_paused(self._port)
 
     def _refuse_if_disk_full(self) -> None:
-        if self._disk is not None:
+        if self._disk is None:
+            return
+        try:
             self._disk.refuse_if_full()
+        except InsufficientDiskSpaceError:
+            self._held_for_disk = True
+            raise
+
+    async def announce_if_disk_recovered(self) -> bool:
+        """Announce "admission is open" once a disk that refused has room again.
+
+        The disk half of :meth:`set_mode`'s wake-up (#1560). Work refused for a
+        full disk is parked, and free space coming back is not an event: it
+        wakes no ProcessManager, so without this the parked work waits for an
+        unrelated subscribed event, which on a quiet system is never. Something
+        has to ask periodically; this is the question, the caller owns the
+        clock.
+
+        Announces nothing unless this gate has refused for disk since its last
+        announcement, the volume is now above the floor, and maintenance mode
+        is off - announcing into a shut gate re-parks everything it wakes, and
+        clearing maintenance announces anyway.
+
+        Returns whether it announced.
+
+        Raises:
+            AdmissionAnnouncementFailedError: the announcement failed. The hold
+                is kept, so the next call tries again.
+        """
+        if not self._held_for_disk or self._disk is None:
+            return False
+        if self._disk.check().refuses_admission:
+            return False
+        mode = await self._port.current()
+        if mode.active:
+            return False
+        # Before the append, not after: a refusal racing the announcement must
+        # leave the hold set, and the record it parks is re-offered next time.
+        self._held_for_disk = False
+        try:
+            await self.announce_open(mode)
+        except AdmissionAnnouncementFailedError:
+            self._held_for_disk = True
+            raise
+        return True
 
     @asynccontextmanager
     async def admitting(self) -> AsyncIterator[AdmissionTicket]:
