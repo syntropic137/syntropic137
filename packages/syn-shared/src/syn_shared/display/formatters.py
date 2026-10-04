@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import signal
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from syn_shared.agents import PhaseModelResolution, resolve_model_alias
@@ -192,18 +192,16 @@ _IN_FLIGHT_STATUSES = frozenset({"running"})
 """Statuses that mean "still accruing wall-clock time, no completion recorded"."""
 
 
-def resolve_deadline(
-    started_at: datetime | str | None, timeout_seconds: int | None
-) -> datetime | None:
-    """When a run that started at ``started_at`` is out of ``timeout_seconds``.
+def resolve_deadline(recorded: datetime | str | None) -> datetime | None:
+    """A phase's recorded deadline as a UTC datetime, or ``None`` if none was recorded.
 
-    ``None`` when either half is unknown: a deadline built from a missing start
-    or a missing budget is not an early or late deadline, it is not one at all.
+    Read, never derived (#1546). ``started_at`` plus the budget is the obvious
+    derivation and the wrong one: the phase starts before its workspace is
+    provisioned and its clock only after, so the sum is early by the
+    provisioning time. The only deadline worth serving is the one the agent
+    was told, which ``PhaseDeadlineSet`` records.
     """
-    start = _parse_timestamp(started_at)
-    if start is None or timeout_seconds is None:
-        return None
-    return start + timedelta(seconds=timeout_seconds)
+    return _parse_timestamp(recorded)
 
 
 def resolve_duration_seconds(

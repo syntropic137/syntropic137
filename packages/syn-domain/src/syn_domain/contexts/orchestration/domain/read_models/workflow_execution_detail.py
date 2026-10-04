@@ -86,6 +86,16 @@ class PhaseExecutionDetail:
     one of the three reaches no reader.
     """
 
+    deadline: datetime | str | None = None
+    """When this phase's agent is killed on its budget, as it was told it (#1546).
+
+    Recorded by ``PhaseDeadlineSet`` when the phase's clock started, after
+    provisioning - so it is later than ``started_at`` plus ``timeout_seconds``
+    by the provisioning time, and it is the one a phase is held to. ``None``
+    while no clock has started, and for every phase recorded before the event
+    existed.
+    """
+
     error_message: str | None = None
     """Error message if phase failed."""
 
@@ -156,6 +166,7 @@ class PhaseExecutionDetail:
             "duration_seconds": self.duration_seconds,
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
+            "deadline": self._to_iso_string(self.deadline),
             "timeout_seconds": self.timeout_seconds,
             "error_message": self.error_message,
             "deliverable_recovered": self.deliverable_recovered,
@@ -195,6 +206,7 @@ class PhaseExecutionDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             timeout_seconds=data.get("timeout_seconds"),
+            deadline=data.get("deadline"),
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=SideEffectStatus.from_stored(data.get("reported_side_effects")),

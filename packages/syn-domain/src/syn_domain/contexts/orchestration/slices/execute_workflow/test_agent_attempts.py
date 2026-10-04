@@ -29,11 +29,22 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    RecordPhaseDeadlineCommand,
+    StartExecutionCommand,
+    StartPhaseCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
+    PhaseDefinition,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    WorkflowExecutionAggregate,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import PhaseStartedEvent
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
     run_phase_agent,
 )
@@ -51,6 +62,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
+from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
+    WorkflowExecutionDetailProjection,
+)
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_domain.testing.fake_clock import FakeClock
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
@@ -63,6 +77,8 @@ from syn_shared.env_constants import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration import AgentExecutionResult
     from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
@@ -237,6 +253,7 @@ async def _run(
     phase: ExecutablePhase | None = None,
     launch: PhaseLaunch | None = None,
     retry_policy: UpstreamRetryPolicy = NO_WAITING,
+    record_deadline: Callable[[datetime, int], Awaitable[None]] | None = None,
 ) -> AgentExecutionResult:
     return await run_phase_agent(
         handler=handler,
@@ -251,6 +268,7 @@ async def _run(
         session_id="sess-1",
         observability=None,
         retry_policy=retry_policy,
+        record_deadline=record_deadline,
     )
 
 
@@ -1052,3 +1070,98 @@ class TestTheAgentIsToldItsDeadline:
         assert second.agent_env[ENV_SYN_PHASE_DEADLINE] == (
             (clock.epoch + timedelta(seconds=3600)).isoformat(timespec="seconds")
         )
+
+
+class TestTheRecordedDeadlineIsTheOneTheAgentIsTold:
+    """#1546: the execution detail must serve the deadline the agent was told.
+
+    `PhaseStarted.started_at` is written before the workspace is provisioned
+    and the phase's clock starts after, so a deadline derived from the start
+    is early by the provisioning time. These drive the real transition - the
+    phase starts, provisioning takes time, then the clock starts - and read
+    the deadline back off the projected record.
+    """
+
+    PROVISIONING_SECONDS = 120.0
+
+    async def _run_through_the_record(self) -> tuple[_RecordedAttempt, datetime, datetime | str]:
+        """Phase started, provisioning elapsed, agent run; what was told and stored."""
+        aggregate = WorkflowExecutionAggregate()
+        aggregate._handle_command(  # pyright: ignore[reportPrivateUsage]
+            StartExecutionCommand(
+                execution_id="exec-1",
+                workflow_id="wf-1",
+                workflow_name="W",
+                total_phases=1,
+                inputs={},
+                phase_definitions=[
+                    PhaseDefinition(phase_id="verify", name="verify", order=1, timeout_seconds=3600)
+                ],
+            )
+        )
+        aggregate._handle_command(  # pyright: ignore[reportPrivateUsage]
+            StartPhaseCommand(
+                execution_id="exec-1",
+                workflow_id="wf-1",
+                phase_id="verify",
+                phase_name="verify",
+                phase_order=1,
+            )
+        )
+        phase_started_at = next(
+            e.event.started_at  # pyright: ignore[reportAttributeAccessIssue]
+            for e in aggregate.get_uncommitted_events()
+            if isinstance(e.event, PhaseStartedEvent)
+        )
+        # The wall clock reads the phase's start, and provisioning then takes
+        # two minutes before the agent's clock is started.
+        clock = FakeClock(epoch=phase_started_at.replace(microsecond=0))
+        clock.now = self.PROVISIONING_SECONDS
+        handler = _RecordingHandler(scripted=FakeAgentExecutionHandler.success())
+
+        async def record(deadline: datetime, timeout_seconds: int) -> None:
+            aggregate.record_phase_deadline(
+                RecordPhaseDeadlineCommand(
+                    execution_id="exec-1",
+                    phase_id="verify",
+                    deadline=deadline,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=3600),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            record_deadline=record,
+        )
+
+        projection = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
+        handlers = {
+            "WorkflowExecutionStarted": projection.on_workflow_execution_started,
+            "PhaseStarted": projection.on_phase_started,
+            "PhaseDeadlineSet": projection.on_phase_deadline_set,
+        }
+        for envelope in aggregate.get_uncommitted_events():
+            handle = handlers.get(envelope.event.event_type)
+            if handle is not None:
+                await handle(envelope.event.model_dump(mode="json"))
+        detail = await projection.get_by_id("exec-1")
+        assert detail is not None
+        (attempt,) = handler.attempts
+        stored = detail.phases[0].deadline
+        assert stored is not None, "the clock started, so a deadline must be recorded"
+        return attempt, phase_started_at, stored
+
+    async def test_the_stored_deadline_is_the_one_in_the_agents_env(self) -> None:
+        attempt, _, stored = await self._run_through_the_record()
+
+        assert stored == attempt.agent_env[ENV_SYN_PHASE_DEADLINE]
+
+    async def test_it_is_not_the_phase_start_plus_the_budget(self) -> None:
+        """The derivation that was served before, and is early by provisioning."""
+        _, phase_started_at, stored = await self._run_through_the_record()
+
+        derived = phase_started_at + timedelta(seconds=3600)
+        told = datetime.fromisoformat(str(stored))
+        assert told - derived.replace(microsecond=0) == timedelta(seconds=self.PROVISIONING_SECONDS)

@@ -18,6 +18,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
+    RecordPhaseDeadlineCommand,
     StartExecutionCommand,
     StartResumeCommand,
     WorkflowExecutionAggregate,
@@ -88,6 +89,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
     from syn_adapters.workspace_backends.agentic.session_capture_service import (
@@ -760,6 +763,7 @@ class WorkflowExecutionProcessor:
                 session_id=session_id,
                 observability=self._observability_writer,
                 retry_policy=self._retry_policy,
+                record_deadline=self._deadline_recorder(todo, aggregate),
             )
             said = result.stream_result.last_agent_message
 
@@ -822,6 +826,26 @@ class WorkflowExecutionProcessor:
                     todo, phase, launch, workflow_id, dispatch_ctx, said, UnfinishedPhase.FAILED
                 )
             raise
+
+    def _deadline_recorder(
+        self, todo: TodoItem, aggregate: WorkflowExecutionAggregate
+    ) -> Callable[[datetime, int], Awaitable[None]]:
+        """Record the deadline a phase's clock was set to, as the agent is told it (#1546)."""
+        assert todo.phase_id is not None
+        phase_id = todo.phase_id
+
+        async def record(deadline: datetime, timeout_seconds: int) -> None:
+            aggregate.record_phase_deadline(
+                RecordPhaseDeadlineCommand(
+                    execution_id=todo.execution_id,
+                    phase_id=phase_id,
+                    deadline=deadline,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+            await self._journal.append(aggregate)
+
+        return record
 
     async def _keep(
         self,

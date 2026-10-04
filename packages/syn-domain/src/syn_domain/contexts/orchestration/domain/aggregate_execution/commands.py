@@ -249,6 +249,29 @@ class RetryPhaseCommand:
         self.reason = reason
 
 
+class RecordPhaseDeadlineCommand:
+    """Command to record when the running phase's agent is killed (#1546).
+
+    Reported by the processor at the moment the phase's clock starts, carrying
+    the deadline that clock was set to, so the record and what the agent is
+    told cannot disagree. The aggregate does not decide the time: the clock
+    that enforces it is the processor's, and a second clock here would be a
+    second answer.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        deadline: datetime,
+        timeout_seconds: int,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.deadline = deadline
+        self.timeout_seconds = timeout_seconds
+
+
 class CompletePhaseCommand:
     """Command to mark a phase as completed with metrics.
 

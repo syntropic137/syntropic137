@@ -48,6 +48,9 @@ from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import 
 from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
     PhaseCompletedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseDeadlineSetEvent import (
+    PhaseDeadlineSetEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
     PhaseRetryScheduledEvent,
 )
@@ -121,6 +124,7 @@ __all__ = [
     "IsolationStartedEvent",
     "NextPhaseReadyEvent",
     "PhaseCompletedEvent",
+    "PhaseDeadlineSetEvent",
     "PhaseRetryScheduledEvent",
     "PhaseStartedEvent",
     "TokensInjectedEvent",
