@@ -78,7 +78,7 @@ export function Dashboard() {
       {/* Charts and event feed */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card>
-          <CardHeader title="Token Distribution" subtitle="Input vs Output tokens" />
+          <CardHeader title="Token Distribution" subtitle="Input, output and cache tokens" />
           <CardContent className="h-[200px]">
             <DashboardCharts metrics={metrics} />
           </CardContent>

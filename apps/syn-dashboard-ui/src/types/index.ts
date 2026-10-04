@@ -241,13 +241,27 @@ export interface PhaseMetrics {
   artifact_count: number
 }
 
+/** Executions by status: one field per domain status, summing to every execution. */
+export interface ExecutionStatusCounts {
+  not_started: number
+  running: number
+  completed: number
+  failed: number
+  cancelled: number
+  interrupted: number
+}
+
 export interface MetricsResponse {
   total_workflows: number
   completed_workflows: number
   failed_workflows: number
+  execution_status_counts: ExecutionStatusCounts
   total_sessions: number
   total_input_tokens: number
   total_output_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
+  /** Input + output + cache creation + cache read. */
   total_tokens: number
   total_cost_usd: number
   total_artifacts: number
