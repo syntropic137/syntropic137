@@ -52,7 +52,9 @@ of the image, not of the task, and they are the same on every run:
   materialises scripts or caches needs redirecting:
   `export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv`
 - The image ships `just`, `uv`, `node` and `gh`. It does **not** ship `pnpm`,
-  `cargo`, `vsa`, or a Docker CLI - the last deliberately.
+  `vsa`, or a Docker CLI - the last deliberately - and it ships `rustup` with
+  no toolchain installed, so `cargo` does not run until something installs one
+  (`just preflight-agent` does, for fitness: #1498).
 - Consequently `just preflight-agent` is the gate that runs here, not
   `just qa-ci`.
 
