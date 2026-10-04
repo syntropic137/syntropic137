@@ -33,13 +33,31 @@ const STATS = {
 
 type Posted = { feedback_type: string; priority: string; comment?: string }
 
-function stubApi(): Posted[] {
+/** Ticket rows in the shape the list endpoint returns them. */
+function tickets(count: number) {
+  const statuses = ['open', 'open', 'open', 'in_progress', 'resolved', 'closed', 'wont_fix']
+  return Array.from({ length: count }, (_, i) => ({
+    id: `fb-${i}`,
+    app_name: 'dashboard',
+    url: `https://dash.test/route-${i}`,
+    route: `/route-${i}`,
+    feedback_type: 'bug',
+    priority: 'low',
+    status: statuses[i % statuses.length],
+    comment: `ticket ${i}`,
+    created_at: '2026-10-01T00:00:00Z',
+    updated_at: '2026-10-01T00:00:00Z',
+    media: [],
+  }))
+}
+
+function stubApi(items: unknown[] = []): Posted[] {
   const posted: Posted[] = []
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      let body: unknown = { items: [], total: 0 }
+      let body: unknown = { items, total: items.length }
       if (url.includes('/feedback/stats')) body = STATS
       if (init?.method === 'POST' && url.endsWith('/feedback')) {
         // The widget serialises this body itself; only the fields asserted below are read.
@@ -91,6 +109,47 @@ describe('feedback form defaults', () => {
 
     await waitFor(() => expect(posted).toHaveLength(1))
     expect(posted[0]).toMatchObject({ feedback_type: 'bug', priority: 'low' })
+  })
+
+  // A fresh form is not the only way to reach the defaults: closing and a
+  // successful submit both reset, and each must land back on bug / low.
+  it('returns to bug / low after Cancel, and sends that next', async () => {
+    const posted = stubApi()
+    renderWidget()
+    const user = await openForm()
+
+    await user.keyboard('1{ArrowDown}{Enter}2{ArrowDown}{ArrowDown}{Enter}')
+    expect(badge(/Feature/)).toBeInTheDocument()
+    expect(badge(/High/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByText('Leave Feedback')).not.toBeInTheDocument())
+
+    await openForm()
+    expect(badge(/Bug/)).toHaveAttribute('aria-keyshortcuts', '1')
+    expect(badge(/Low/)).toHaveAttribute('aria-keyshortcuts', '2')
+    await submit(user)
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]).toMatchObject({ feedback_type: 'bug', priority: 'low' })
+  })
+
+  it('returns to bug / low after a successful submit', async () => {
+    const posted = stubApi()
+    renderWidget()
+    const user = await openForm()
+
+    await user.keyboard('1{ArrowDown}{Enter}2{ArrowDown}{ArrowDown}{Enter}')
+    await submit(user)
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]).toMatchObject({ feedback_type: 'feature', priority: 'high' })
+
+    // A successful submit closes the form; the next one starts fresh.
+    await waitFor(() => expect(screen.queryByText('Leave Feedback')).not.toBeInTheDocument())
+    await openForm()
+    expect(badge(/Bug/)).toHaveAttribute('aria-keyshortcuts', '1')
+    expect(badge(/Low/)).toHaveAttribute('aria-keyshortcuts', '2')
+    await submit(user)
+    await waitFor(() => expect(posted).toHaveLength(2))
+    expect(posted[1]).toMatchObject({ feedback_type: 'bug', priority: 'low' })
   })
 })
 
@@ -226,7 +285,9 @@ describe('ticket list filter bar', () => {
   // Each pill keeps its label on one line (white-space: nowrap); it is the bar
   // that wraps, moving whole pills to the next row.
   it.each([375, 1280])('wraps instead of squashing or scrolling at %ipx', async (width) => {
-    stubApi()
+    // The squeeze was reported with tickets listed, so render them: an empty
+    // list leaves the modal short and the bar never contends for height.
+    stubApi(tickets(STATS.total))
     act(() => {
       window.innerWidth = width
       fireEvent(window, new Event('resize'))
@@ -238,6 +299,9 @@ describe('ticket list filter bar', () => {
     const all = await screen.findByRole('button', { name: 'All (7)' })
     const bar = all.closest('.ui-feedback-stats-bar')
     if (!bar) throw new Error('filter button is not inside .ui-feedback-stats-bar')
+    await waitFor(() =>
+      expect(document.querySelectorAll('.ui-feedback-list-item')).toHaveLength(STATS.total),
+    )
 
     expect(declared(bar, 'flex-wrap')).toEqual(['wrap'])
     expect(declared(bar, 'flex-shrink')).toEqual(['0'])
