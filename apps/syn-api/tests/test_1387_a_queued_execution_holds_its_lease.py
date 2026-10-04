@@ -323,6 +323,8 @@ class _Request:
     )
     task: str | None = None
     tags: TagSet = field(default_factory=TagSet)
+    eval_id: None = None
+    no_eval: bool = False
     provider: str = "claude"
 
 
@@ -359,8 +361,9 @@ class _DelayedExecution:
         repos: list[object],
         admitted: AdmissionTicket | None = None,
         tags: TagSet | None = None,
+        eval_choice: object = None,
     ) -> None:
-        del workflow_id, inputs, task, repos, tags
+        del workflow_id, inputs, task, repos, tags, eval_choice
         self.reached.set()
         await self.may_open_the_stream.wait()
         self.opened.append(execution_id)

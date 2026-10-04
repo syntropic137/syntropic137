@@ -607,6 +607,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{execution_id}/eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach Execution To Eval Endpoint
+         * @description Attach an execution to an eval, in any status. Never copies the eval's baseline.
+         */
+        post: operations["attach_execution_to_eval_endpoint_executions__execution_id__eval_post"];
+        /**
+         * Detach Execution From Eval Endpoint
+         * @description Detach an execution from its eval. The launch record (`launched_eval_id`) is kept.
+         */
+        delete: operations["detach_execution_from_eval_endpoint_executions__execution_id__eval_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/default-eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Workflow Default Eval Endpoint
+         * @description Set or clear the eval a workflow's runs join when the launch names none.
+         */
+        put: operations["set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions": {
         parameters: {
             query?: never;
@@ -2414,6 +2458,14 @@ export interface components {
             system_id: string;
         };
         /**
+         * AttachEvalRequest
+         * @description The eval to attach an execution to (#967).
+         */
+        AttachEvalRequest: {
+            /** @description The eval to attach to. It must exist and not be archived. Attaching to the eval the run already belongs to is a no-op; another eval needs a detach first. */
+            eval_id: components["schemas"]["EvalId"];
+        };
+        /**
          * BodyAvailability
          * @enum {string}
          */
@@ -3033,6 +3085,11 @@ export interface components {
             status: string;
         };
         /**
+         * EvalId
+         * @description The identity of one eval, and the id of its stream.
+         */
+        EvalId: string;
+        /**
          * EventListResponse
          * @description List of events response.
          */
@@ -3123,6 +3180,14 @@ export interface components {
              * @description Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422.
              */
             tags?: string[];
+            /** @description The eval this run joins, overriding the workflow's default eval (#967). 404 if it does not exist, 409 if it is archived. */
+            eval_id?: components["schemas"]["EvalId"] | null;
+            /**
+             * No Eval
+             * @description Launch an ordinary run: join no eval, even if the workflow has a default eval (#967). Cannot be combined with `eval_id` (422).
+             * @default false
+             */
+            no_eval: boolean;
             /**
              * Provider
              * @deprecated
@@ -3340,6 +3405,20 @@ export interface components {
                 [key: string]: string;
             };
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
+        };
+        /**
+         * ExecutionEvalResponse
+         * @description An execution's eval membership after an edit, read from the aggregate (#967).
+         */
+        ExecutionEvalResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Eval Id */
+            eval_id: string | null;
+            /** Association Kind */
+            association_kind: ("launched" | "attached") | null;
+            /** Launched Eval Id */
+            launched_eval_id: string | null;
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -6629,6 +6708,14 @@ export interface components {
             cache_read_tokens: number;
         };
         /**
+         * SetDefaultEvalRequest
+         * @description The eval a workflow's runs join when the launch names none (#967).
+         */
+        SetDefaultEvalRequest: {
+            /** @description The default eval, which must exist and not be archived. Null clears it. Runs already started keep the eval they launched into. */
+            eval_id: components["schemas"]["EvalId"] | null;
+        };
+        /**
          * SetMaintenanceModeRequest
          * @description Set or clear maintenance mode (#1387).
          *
@@ -7871,6 +7958,16 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * WorkflowDefaultEvalResponse
+         * @description A workflow's default eval after an edit, read from the aggregate (#967).
+         */
+        WorkflowDefaultEvalResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Default Eval Id */
+            default_eval_id: string | null;
+        };
         /** WorkflowListResponse */
         WorkflowListResponse: {
             /** Workflows */
@@ -7921,6 +8018,8 @@ export interface components {
             requires_repos: boolean;
             /** Tags */
             tags?: string[];
+            /** Default Eval Id */
+            default_eval_id?: string | null;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -9239,6 +9338,146 @@ export interface operations {
                 content?: never;
             };
             /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    attach_execution_to_eval_endpoint_executions__execution_id__eval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionEvalResponse"];
+                };
+            };
+            /** @description No execution has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    detach_execution_from_eval_endpoint_executions__execution_id__eval_delete: {
+        parameters: {
+            query: {
+                /** @description The eval to detach from. Must be the eval the run belongs to, or none. */
+                eval_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionEvalResponse"];
+                };
+            };
+            /** @description No execution has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDefaultEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowDefaultEvalResponse"];
+                };
+            };
+            /** @description No workflow has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, or the id prefix matches more than one workflow */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
             422: {
                 headers: {
                     [name: string]: unknown;

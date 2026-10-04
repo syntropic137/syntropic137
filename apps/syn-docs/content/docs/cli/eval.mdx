@@ -1,0 +1,52 @@
+---
+title: syn eval
+description: "Put executions in evals and take them out"
+---
+
+Put executions in evals and take them out
+
+## `syn eval attach`
+
+Attach an execution to an eval, in any status. Idempotent; never copies the baseline
+
+```bash
+syn eval attach <execution-id> <eval-id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | The execution (partial match supported) |
+| `eval-id` | `text` | Yes | The eval |
+
+**Examples:**
+
+```bash
+syn eval attach <execution-id> eval-planning   # association_kind: attached
+```
+
+---
+
+## `syn eval detach`
+
+Detach an execution from its eval. launched_eval_id still records the launch
+
+```bash
+syn eval detach <execution-id> <eval-id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | The execution (partial match supported) |
+| `eval-id` | `text` | Yes | The eval |
+
+**Examples:**
+
+```bash
+syn eval detach <execution-id> eval-planning
+```
+
+---

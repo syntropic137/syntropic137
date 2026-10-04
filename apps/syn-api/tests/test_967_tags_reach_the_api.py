@@ -207,8 +207,9 @@ class _CapturingExecute:
         repos: list[object],
         admitted: AdmissionTicket | None = None,
         tags: TagSet | None = None,
+        eval_choice: object = None,
     ) -> None:
-        del workflow_id, inputs, execution_id, task, repos
+        del workflow_id, inputs, execution_id, task, repos, eval_choice
         self.tags.append(tags)
         if admitted is not None:
             admitted.mark_visible()

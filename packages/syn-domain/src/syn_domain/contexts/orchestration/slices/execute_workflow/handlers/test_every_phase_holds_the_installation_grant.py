@@ -140,6 +140,7 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
             admitted: AdmissionTicket | None = None,
             source_commits: list[SourceCommit] | None = None,
             tags: object = None,
+            launch_eval: object = None,
         ) -> WorkflowExecutionResult:
             del workflow_name, inputs, repos, admitted
             captured.extend(phases)

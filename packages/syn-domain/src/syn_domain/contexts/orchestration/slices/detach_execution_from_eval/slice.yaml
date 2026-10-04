@@ -1,0 +1,6 @@
+name: detach-execution-from-eval
+type: command
+aggregate: WorkflowExecution
+emits:
+  - ExecutionDetachedFromEvalEvent
+returns: EvalMembershipResult
