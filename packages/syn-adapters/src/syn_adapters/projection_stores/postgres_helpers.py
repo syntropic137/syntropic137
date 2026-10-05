@@ -59,6 +59,8 @@ _FILTERED_FIELDS: dict[str, tuple[str, ...]] = {
     # repo_correlation is read on every insights request, by repo
     # (executions_by_repo) and by execution (repo_health).
     "repo_correlation": ("repo_full_name", "execution_id"),
+    # get_by_workflow_id, twice per /metrics?workflow_id= request (#1558).
+    "workflow_executions": ("workflow_id",),
 }
 
 
