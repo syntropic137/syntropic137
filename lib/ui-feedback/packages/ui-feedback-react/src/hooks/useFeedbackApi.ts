@@ -23,13 +23,13 @@ export interface UseFeedbackApiOptions {
 export interface FeedbackApiResult {
   createFeedback: (data: FeedbackCreate) => Promise<FeedbackItem>;
   getFeedback: (id: string) => Promise<FeedbackItemWithMedia>;
-  listFeedback: (params?: ListFeedbackParams) => Promise<FeedbackList>;
+  listFeedback: (params?: ListFeedbackParams, signal?: AbortSignal) => Promise<FeedbackList>;
   updateFeedback: (id: string, data: FeedbackUpdate) => Promise<FeedbackItem>;
   deleteFeedback: (id: string) => Promise<void>;
   uploadMedia: (feedbackId: string, media: MediaUpload) => Promise<void>;
   getMediaUrl: (feedbackId: string, mediaId: string) => string;
   deleteMedia: (feedbackId: string, mediaId: string) => Promise<void>;
-  getStats: (appName?: string) => Promise<FeedbackStats>;
+  getStats: (appName?: string, signal?: AbortSignal) => Promise<FeedbackStats>;
 }
 
 export interface ListFeedbackParams {
@@ -79,8 +79,8 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
   );
 
   const listFeedback = useCallback(
-    async (params: ListFeedbackParams = {}) => {
-      return request<FeedbackList>(buildListUrl(baseUrl, params));
+    async (params: ListFeedbackParams = {}, signal?: AbortSignal) => {
+      return request<FeedbackList>(buildListUrl(baseUrl, params), { signal });
     },
     [baseUrl],
   );
@@ -125,9 +125,9 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
   );
 
   const getStats = useCallback(
-    async (appName?: string) => {
+    async (appName?: string, signal?: AbortSignal) => {
       const url = appName ? `${baseUrl}/feedback/stats?app=${encodeURIComponent(appName)}` : `${baseUrl}/feedback/stats`;
-      return request<FeedbackStats>(url);
+      return request<FeedbackStats>(url, { signal });
     },
     [baseUrl],
   );

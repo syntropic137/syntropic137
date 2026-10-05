@@ -33,18 +33,24 @@ export function useFeedbackListData(apiUrl: string, appName?: string): UseFeedba
   // status change) would otherwise overwrite newer data or end `loading`
   // for a load that is still running.
   const latestLoad = useRef(0);
+  // A load that a newer one supersedes is cancelled, not left running, so at
+  // most one list and one stats request are ever in flight for this list.
+  const inFlight = useRef<AbortController | null>(null);
   // The spinner is for "nothing to show yet". Once items are on screen a
   // refresh updates them in place instead of blanking the list.
   const hasLoaded = useRef(false);
 
   const loadData = useCallback(async () => {
     const load = ++latestLoad.current;
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
     if (!hasLoaded.current) setLoading(true);
     setError(null);
     try {
       const [feedbackList, feedbackStats] = await Promise.all([
-        api.listFeedback({ app: appName, status: filter === 'all' ? undefined : filter, limit: 50 }),
-        api.getStats(appName),
+        api.listFeedback({ app: appName, status: filter === 'all' ? undefined : filter, limit: 50 }, controller.signal),
+        api.getStats(appName, controller.signal),
       ]);
       if (load !== latestLoad.current) return;
       setItems(feedbackList.items);
@@ -54,11 +60,15 @@ export function useFeedbackListData(apiUrl: string, appName?: string): UseFeedba
       if (load !== latestLoad.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load feedback');
     } finally {
-      if (load === latestLoad.current) setLoading(false);
+      if (load === latestLoad.current) {
+        setLoading(false);
+        inFlight.current = null;
+      }
     }
   }, [api, appName, filter]);
 
   useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => () => inFlight.current?.abort(), []);
 
   const handleStatusChange = useCallback(
     async (id: string, newStatus: Status) => {

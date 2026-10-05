@@ -68,16 +68,23 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
 /**
  * Fetch `url` and parse the response, failing with a NetworkError if the whole
- * exchange, body included, has not finished within `timeoutMs`.
+ * exchange, body included, has not finished within `timeoutMs`. A caller that
+ * passes `options.signal` can cancel the request; it then rejects with that
+ * signal's reason instead of a NetworkError.
  */
 export async function request<T>(url: string, options?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  const callerSignal = options?.signal;
+  callerSignal?.throwIfAborted();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const cancel = () => controller.abort(callerSignal?.reason);
+  callerSignal?.addEventListener('abort', cancel);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     return await handleResponse<T>(response);
   } catch (err) {
     if (err instanceof ApiError) throw err;
+    if (callerSignal?.aborted) throw callerSignal.reason;
     if (controller.signal.aborted) {
       throw new NetworkError(`Feedback API did not respond within ${timeoutMs / 1000}s`, err instanceof Error ? err : undefined);
     }
@@ -85,5 +92,6 @@ export async function request<T>(url: string, options?: RequestInit, timeoutMs =
     throw classifyNetworkError(message, err instanceof Error ? err : undefined);
   } finally {
     clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', cancel);
   }
 }

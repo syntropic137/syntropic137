@@ -51,6 +51,21 @@ function never(init?: RequestInit): Promise<Response> {
   })
 }
 
+/**
+ * A 200 whose headers arrive and whose body never finishes: the gateway logs it
+ * as answered, the browser is still reading it. Like a real fetch, aborting the
+ * request errors the body.
+ */
+function stalledBody(init?: RequestInit): Promise<Response> {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"items":['))
+      init?.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')))
+    },
+  })
+  return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } }))
+}
+
 const isList = (url: string) => url.includes('/feedback?')
 const isStats = (url: string) => url.includes('/feedback/stats')
 
@@ -101,6 +116,56 @@ describe('FeedbackList', () => {
     vi.useRealTimers()
     fireEvent.click(screen.getByText('Retry'))
     await screen.findByText('item 0')
+  })
+
+  it('turns a 200 whose body stalls into an error with Retry', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        isList(String(input)) ? stalledBody(init) : Promise.resolve(json(STATS)),
+      ),
+    )
+
+    renderList()
+    await act(() => vi.advanceTimersByTimeAsync(15_000))
+
+    expect(screen.queryByText('Loading feedback...')).toBeNull()
+    expect(screen.getByText(/did not respond within 15s/)).toBeTruthy()
+    expect(screen.getByText('Retry')).toBeTruthy()
+  })
+
+  it('cancels a superseded load, so one request per endpoint is ever in flight', async () => {
+    const active = { list: 0, stats: 0 }
+    const peak = { list: 0, stats: 0 }
+    let releaseNext: Array<() => void> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const kind = isStats(String(input)) ? 'stats' : 'list'
+        active[kind] += 1
+        peak[kind] = Math.max(peak[kind], active[kind])
+        return new Promise<Response>((resolve, reject) => {
+          const settle = () => { active[kind] -= 1 }
+          init?.signal?.addEventListener('abort', () => { settle(); reject(new DOMException('aborted', 'AbortError')) })
+          releaseNext.push(() => {
+            if (init?.signal?.aborted) return
+            settle()
+            resolve(json(kind === 'stats' ? STATS : listBody('item', 3)))
+          })
+        })
+      }),
+    )
+
+    renderList()
+    fireEvent.click(screen.getByText('Refresh'))
+    fireEvent.click(screen.getByText('Refresh'))
+    expect(peak).toEqual({ list: 1, stats: 1 })
+
+    await act(async () => { releaseNext.forEach((r) => r()); releaseNext = [] })
+    await screen.findByText('item 2')
+    expect(active).toEqual({ list: 0, stats: 0 })
+    expect(peak).toEqual({ list: 1, stats: 1 })
   })
 
   it('keeps the newest load when an older one settles after it', async () => {
