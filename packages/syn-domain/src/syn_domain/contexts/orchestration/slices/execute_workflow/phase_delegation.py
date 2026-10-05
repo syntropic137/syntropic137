@@ -37,9 +37,15 @@ from typing import TYPE_CHECKING, Protocol
 from syn_domain.contexts.agent_sessions.domain.events.DelegationFinishedEvent import (
     DelegationOutcome,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
+    phase_failure,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+        AgentExecutionResult,
+    )
 
 
 @dataclass(frozen=True)
@@ -155,4 +161,23 @@ async def delegation_failure(
         return None
     return DelegationFailedError(
         phase_id=phase_id, reason=DelegationFailureReason.FAILED, attempts=attempts
+    )
+
+
+async def completion_failure(
+    result: AgentExecutionResult,
+    *,
+    phase_id: str,
+    evidence: DelegationEvidencePort | None,
+    workspace: ManagedWorkspace | None,
+    allow_delegation: bool,
+) -> Exception | None:
+    """What ends this phase instead of completing it, or None.
+
+    The run's own outcome first (`phase_failure`); the declared delegate is
+    asked only once the run itself may complete, so it never relabels a
+    failure the run already had.
+    """
+    return phase_failure(result, phase_id=phase_id) or await delegation_failure(
+        evidence, workspace, phase_id=phase_id, allow_delegation=allow_delegation
     )
