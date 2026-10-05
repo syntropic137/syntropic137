@@ -274,7 +274,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._tags = ExecutionTags()
         self._eval = EvalMembership()
         #: The first verified checkout, as the first workspace found it (#967).
-        self._starting_checkout: list[SourceCommit] = []
+        #: None until the first provisioning is applied, so one that recorded
+        #: nothing is still the first and no later phase's checkout replaces it.
+        self._starting_checkout: list[SourceCommit] | None = None
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -422,7 +424,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @property
     def starting_checkout(self) -> list[SourceCommit]:
         """Each pinned repository's verified commit when the run's first workspace began."""
-        return self._starting_checkout
+        return self._starting_checkout or []
 
     @property
     def start_pins(self) -> StartPins:
@@ -925,7 +927,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:
         """Apply WorkspaceProvisionedForPhaseEvent."""
         self._current_phase_workspace_id = evt(event, "workspace_id")
-        if not self._starting_checkout:
+        if self._starting_checkout is None:
             self._starting_checkout = read_source_commits(evt(event, "checked_out_commits"))
 
     @event_sourcing_handler("AgentExecutionCompleted")

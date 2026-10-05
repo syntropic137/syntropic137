@@ -126,12 +126,23 @@ class PinnedCommitUnreachableError(NonZeroExitError):
 
 @dataclass(frozen=True)
 class CheckoutMismatch:
-    """One repository whose working tree is not at the commit it was pinned to (#967)."""
+    """One repository whose working tree is not where it was asked to be (#967)."""
 
     #: `owner/name`, as the run's pin names it.
     repository: str
     pinned_sha: str
     actual_sha: str
+    #: The branch it continues (#1513), which it is held to instead of its pin.
+    branch: str | None = None
+
+    def describe(self) -> str:
+        """The disagreement, in the terms the repository was held to."""
+        if self.branch is None:
+            return f"{self.repository} is at {self.actual_sha}, pinned to {self.pinned_sha}"
+        return (
+            f"{self.repository} is at {self.actual_sha}, not at the head of origin/{self.branch}"
+            f" containing its pin {self.pinned_sha}"
+        )
 
 
 class CheckoutMismatchError(RuntimeError):
@@ -151,9 +162,7 @@ class CheckoutMismatchError(RuntimeError):
     """
 
     def __init__(self, *, phase_name: str, mismatches: tuple[CheckoutMismatch, ...]) -> None:
-        listed = "; ".join(
-            f"{m.repository} is at {m.actual_sha}, pinned to {m.pinned_sha}" for m in mismatches
-        )
+        listed = "; ".join(m.describe() for m in mismatches)
         super().__init__(
             f"Phase '{phase_name}' will not be run: its workspace is not checked out "
             f"at the commits this run is pinned to ({listed})."
