@@ -12,12 +12,8 @@ them fails here.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
 
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -45,7 +41,8 @@ def _reset_storage():
     reset_projection_manager()
 
 
-async def _get_workflow_json(workflow_id: str) -> Mapping[str, Any]:
+async def _get_package_name(workflow_id: str) -> tuple[bool, object]:
+    """(key present, value) for ``package_name`` in the serialized GET body."""
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
 
@@ -56,8 +53,8 @@ async def _get_workflow_json(workflow_id: str) -> Mapping[str, Any]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/workflows/{workflow_id}")
     assert response.status_code == 200, response.text
-    body: Mapping[str, Any] = response.json()
-    return body
+    body = response.json()
+    return "package_name" in body, body.get("package_name")
 
 
 _YAML = """
@@ -77,18 +74,13 @@ async def test_installing_package_is_read_back_on_get() -> None:
     result = await create_workflow_from_yaml(_YAML, version="3.0.0", package_name="implement-v3")
     assert isinstance(result, Ok)
 
-    body = await _get_workflow_json("sdlc-implement-v3")
-
-    assert body["package_name"] == "implement-v3"
+    assert await _get_package_name("sdlc-implement-v3") == (True, "implement-v3")
 
 
 async def test_a_workflow_not_installed_from_a_package_reports_none() -> None:
     assert isinstance(await create_workflow_from_yaml(_YAML), Ok)
 
-    body = await _get_workflow_json("sdlc-implement-v3")
-
-    assert "package_name" in body
-    assert body["package_name"] is None
+    assert await _get_package_name("sdlc-implement-v3") == (True, None)
 
 
 async def test_reinstall_under_another_package_is_a_change_not_a_no_op() -> None:
@@ -104,5 +96,4 @@ async def test_reinstall_under_another_package_is_a_change_not_a_no_op() -> None
     assert isinstance(second, Ok)
     assert second.value.changed is True
 
-    body = await _get_workflow_json("sdlc-implement-v3")
-    assert body["package_name"] == "implement-v3"
+    assert await _get_package_name("sdlc-implement-v3") == (True, "implement-v3")
