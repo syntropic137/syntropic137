@@ -5,12 +5,13 @@ See ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md).
 
 from __future__ import annotations
 
+import os
+import shutil
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 
 def repo_root() -> Path:
@@ -67,3 +68,25 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "architecture: Architectural fitness functions (CI-enforced structural checks)",
     )
+    config.addinivalue_line(
+        "markers",
+        "host_tool(name): needs an executable the agent workspace image does not ship (#1109)",
+    )
+
+
+#: Set by `just fitness-invariants-agent`, and by nothing else. Only there may a
+#: missing host tool skip a test; everywhere else it fails, because `preflight`
+#: and CI promise those tools and a check that skips is a check that cannot fail.
+AGENT_WORKSPACE_ENV = "SYN_FITNESS_IN_AGENT_WORKSPACE"
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if os.environ.get(AGENT_WORKSPACE_ENV) != "1":
+        return
+    for mark in item.iter_markers("host_tool"):
+        tool = str(mark.args[0])
+        if shutil.which(tool) is None:
+            pytest.skip(
+                f"NOT RUN in agent workspace: {item.nodeid} needs `{tool}`, "
+                "which is not on PATH (#1109). CI's Architectural Fitness job runs it."
+            )
