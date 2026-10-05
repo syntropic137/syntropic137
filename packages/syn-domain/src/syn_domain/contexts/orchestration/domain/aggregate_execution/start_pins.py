@@ -91,6 +91,10 @@ class StartPins(BaseModel):
     #: Set on a resume only: branches it could have continued and did not, and why.
     abandoned_branches: list[AbandonedBranch] = Field(default_factory=list)
 
+    def inherited_owners(self) -> dict[str, str]:
+        """Who holds the artifacts of each phase a resume inherited, by phase id."""
+        return {} if self.resumed_from is None else self.resumed_from.owners()
+
     def checkout_for(self, phase_id: str) -> PhaseCheckout:
         """What ``phase_id``'s repositories are checked out at (#1458, #1513).
 

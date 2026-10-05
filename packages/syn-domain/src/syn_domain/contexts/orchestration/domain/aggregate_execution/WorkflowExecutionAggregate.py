@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Final
 
 from event_sourcing import (
     AggregateRoot,
@@ -91,8 +91,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
-    from event_sourcing import DomainEvent
-
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.aggregate_edits import (
+        AggregateEdit,
+    )
     from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
         AddExecutionTagsCommand,
     )
@@ -172,12 +173,6 @@ MAX_PHASE_ATTEMPTS: Final[int] = 2
 
 
 logger = logging.getLogger(__name__)
-
-
-class _Edit(Protocol):
-    """A tag or eval edit, decided by its value object once the run's ids are known."""
-
-    def __call__(self, *, execution_id: str, workflow_id: str) -> DomainEvent | None: ...
 
 
 @aggregate("WorkflowExecution")
@@ -748,7 +743,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Leave the eval. In none, no event; the launch record is kept."""
         self._apply_edit(partial(self._eval.detach, str(command.eval_id)))
 
-    def _apply_edit(self, edit: _Edit) -> None:
+    def _apply_edit(self, edit: AggregateEdit) -> None:
         """Apply what a tag or eval edit decided on an existing run; None changed nothing."""
         if self.id is None:
             msg = "Execution does not exist"
@@ -806,7 +801,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             phase_definitions=self._phase_definitions,
             completed_phase_ids=self._completed_phase_ids,
             phase_artifact_ids=self._phase_artifact_ids,
-            phase_owners=self._inherited_owners(),
+            phase_owners=self._pins.inherited_owners(),
             started_phase_ids=self._phase_attempts,
             command=command,
             repair_point=self._reviews.repair_point(self._phase_definitions),
@@ -844,11 +839,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._completed_phase_ids.add(phase.phase_id)
             self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
         self._completed_phases = len(origin.inherited_phases)
-
-    def _inherited_owners(self) -> dict[str, str]:
-        """Who holds the artifacts of each phase this run inherited, by phase id."""
-        origin = self._pins.resumed_from
-        return {} if origin is None else origin.owners()
 
     @event_sourcing_handler("WorkflowCompleted")
     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:
