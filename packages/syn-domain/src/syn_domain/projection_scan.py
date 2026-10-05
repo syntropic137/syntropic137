@@ -36,9 +36,19 @@ would have given a moment earlier, which is all two statements ever promise.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import IntEnum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from syn_domain.pagination import Page, ProjectionRecord, paginate
+from syn_domain.pagination import (
+    Page,
+    ProjectionRecord,
+    _window_verdict,  # the one definition of a row's place in a window
+    _WindowVerdict,
+    coerce_datetime,
+    matches_search,
+    paginate,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
@@ -167,3 +177,258 @@ async def paginate_projection[T](
         status_counts=keys.status_counts,
         excluded_undated=keys.excluded_undated,
     )
+
+
+@runtime_checkable
+class ProjectionKeyLookup(Protocol):
+    """A projection store that reads many documents by primary key in one query."""
+
+    async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
+        """The full documents stored under ``keys``, by key; absent keys are omitted."""
+        ...
+
+
+@runtime_checkable
+class _ProjectionGet(Protocol):
+    async def get(self, projection: str, key: str) -> ProjectionRecord | None: ...
+
+
+async def read_by_keys(
+    store: object, projection: str, keys: Sequence[str]
+) -> dict[str, ProjectionRecord]:
+    """Documents by primary key: one ``id = ANY(...)`` query where the store has
+    ``get_many`` (Postgres), one keyed ``get`` per key otherwise (in-memory).
+
+    Never a JSON-field filter: those have no index unless one is declared,
+    and scan the whole table per call (#1545 review).
+    """
+    if not keys:
+        return {}
+    if isinstance(store, ProjectionKeyLookup):
+        return await store.get_many(projection, keys)
+    if not isinstance(store, _ProjectionGet):
+        msg = f"{type(store).__name__} can read neither many keys nor one"
+        raise TypeError(msg)
+    found: dict[str, ProjectionRecord] = {}
+    for key in keys:
+        document = await store.get(projection, key)
+        if document is not None:
+            found[key] = document
+    return found
+
+
+# =============================================================================
+# Paging in the store (E2, second pass): one SQL statement per list request.
+# =============================================================================
+#
+# ``paginate_projection`` still reads every candidate row's filter fields into
+# Python to filter, tally and order them. At 6,000 rows that is most of a
+# list request on a CI runner (210-246ms for /sessions and /artifacts against
+# a 200ms budget), and it grows with history. A store that can answer the
+# whole page in SQL does: WHERE, ORDER BY, LIMIT/OFFSET, the total, the facet
+# tally and the undated count, in one snapshot.
+#
+# THE ANSWER MUST BE THE ONE ``paginate`` GIVES, row for row. Postgres and
+# Python disagree on a few things - case folding outside ASCII, which strings
+# are ISO 8601 timestamps, how a non-string JSON value prints - so the store
+# decides in SQL only the rows where the two provably agree, and hands every
+# other row to :class:`ListShape`'s Python predicates (``decide``) and takes
+# their verdict. On real data that set is empty and the request is one
+# statement; it is never wrong, only slower, when it is not.
+
+
+@dataclass(frozen=True)
+class ListShape:
+    """What a list surface filters, tallies, windows and orders by.
+
+    The declarative form of the three callables ``paginate`` takes, so the
+    store can write them as SQL and the domain can still evaluate them in
+    Python (:meth:`base`, :meth:`facet_of`, :meth:`timestamp_of`) from the one
+    definition.
+    """
+
+    timestamp_field: str
+    """Windowed on, and the order: newest first, as ``paginate`` orders."""
+    facet_field: str
+    """``paginate``'s status dimension: tallied, and narrowed by ``statuses``."""
+    search_fields: tuple[str, ...]
+    """Matched case-insensitively against the search term."""
+
+    @property
+    def fields(self) -> tuple[str, ...]:
+        """Every field the three predicates read."""
+        return tuple(dict.fromkeys((*self.search_fields, self.facet_field, self.timestamp_field)))
+
+    def base(self, search: str | None) -> Callable[[ProjectionRecord], bool]:
+        def matches(record: ProjectionRecord) -> bool:
+            return matches_search(search, *(record.get(f) for f in self.search_fields))
+
+        return matches
+
+    def facet_of(self, record: ProjectionRecord) -> str:
+        return str(record.get(self.facet_field) or "")
+
+    def timestamp_of(self, record: ProjectionRecord) -> object:
+        return record.get(self.timestamp_field)
+
+
+class WindowPlacement(IntEnum):
+    """Where one row falls against the window, as the store encodes it."""
+
+    INSIDE = 0
+    OUTSIDE = 1
+    UNDATED = 2
+
+
+@dataclass(frozen=True)
+class SqlPageRequest:
+    """One page, described for a store that pages in SQL."""
+
+    shape: ListShape
+    filters: Mapping[str, str] | None
+    needle: str | None
+    """The search term casefolded, as ``matches_search`` compares it; None: no search."""
+    statuses: frozenset[str] | None
+    after: datetime | None
+    before: datetime | None
+    offset: int
+    limit: int | None
+
+
+@dataclass(frozen=True)
+class RowDecision:
+    """Python's answer for one row the store cannot judge exactly in SQL."""
+
+    key: str
+    matched: bool
+    facet: str
+    placement: WindowPlacement
+    sort_key: str
+    """``str(timestamp or "")``: the key ``paginate`` sorts by."""
+
+
+@dataclass(frozen=True)
+class SqlPage:
+    """The store's answer: whole documents for the page, and the counts."""
+
+    rows: list[ProjectionRecord]
+    total: int
+    status_counts: dict[str, int]
+    excluded_undated: int
+
+
+@dataclass(frozen=True)
+class UnjudgedRow:
+    """A row the store could not judge exactly: its key and the shape's fields."""
+
+    key: str
+    values: Mapping[str, JsonValue]
+    """Every one of the shape's fields, ``None`` where the document lacks it."""
+
+
+type Decide = Callable[[Sequence[UnjudgedRow]], list[RowDecision]]
+
+
+@runtime_checkable
+class ProjectionSqlPage(Protocol):
+    """A projection store that answers a whole list page in SQL."""
+
+    async def page_in_sql(
+        self, projection: str, request: SqlPageRequest, decide: Decide
+    ) -> SqlPage:
+        """The page ``paginate`` would cut, computed in one snapshot.
+
+        ``decide`` is called, inside that snapshot, with each row the store
+        cannot judge exactly; the store must use its decisions verbatim.
+        """
+        ...
+
+
+async def page_projection[T](
+    store: object,
+    projection: str,
+    *,
+    shape: ListShape,
+    filters: Mapping[str, str] | None,
+    search: str | None,
+    statuses: Collection[str] | None,
+    after: datetime | None,
+    before: datetime | None,
+    full_read: Callable[[], Awaitable[Iterable[ProjectionRecord]]],
+    to_row: Callable[[ProjectionRecord], T],
+    offset: int,
+    limit: int | None,
+) -> Page[T]:
+    """``paginate`` over ``projection`` by ``shape``: in SQL where the store can.
+
+    Falls back to :func:`paginate_projection` (the field scan, or the single
+    full read) for a store that cannot page in SQL - the in-memory store and
+    the test doubles - which is the same answer computed in Python.
+    """
+    base = shape.base(search)
+    if isinstance(store, ProjectionSqlPage):
+        declared = frozenset(shape.fields)
+
+        def decide(rows: Sequence[UnjudgedRow]) -> list[RowDecision]:
+            decisions: list[RowDecision] = []
+            for row in rows:
+                record = ScannedRecord(declared, row.values)
+                stamp = shape.timestamp_of(record)
+                decisions.append(
+                    RowDecision(
+                        key=row.key,
+                        matched=base(record),
+                        facet=shape.facet_of(record),
+                        placement=_PLACEMENT[_window_verdict(stamp, after, before)],
+                        sort_key=str(stamp or ""),
+                    )
+                )
+            return decisions
+
+        answer = await store.page_in_sql(
+            projection,
+            SqlPageRequest(
+                shape=shape,
+                filters=filters,
+                needle=search.casefold() if search else None,
+                statuses=frozenset(statuses) if statuses else None,
+                # As ``_window_verdict`` reads them: aware, UTC if naive.
+                after=coerce_datetime(after),
+                before=coerce_datetime(before),
+                offset=offset,
+                limit=limit,
+            ),
+            decide,
+        )
+        return Page(
+            rows=[to_row(record) for record in answer.rows],
+            total=answer.total,
+            status_counts=answer.status_counts,
+            excluded_undated=answer.excluded_undated,
+        )
+    return await paginate_projection(
+        store,
+        projection,
+        fields=shape.fields,
+        filters=filters,
+        order_by=f"-{shape.timestamp_field}",
+        full_read=full_read,
+        base_predicate=base,
+        status_of=shape.facet_of,
+        statuses=statuses,
+        timestamp_of=shape.timestamp_of,
+        after=after,
+        before=before,
+        to_row=to_row,
+        offset=offset,
+        limit=limit,
+    )
+
+
+# ``paginate``'s own verdict, so a row decided here is decided by the function
+# that decides every row of the Python path - not by a second spelling of it.
+_PLACEMENT: dict[_WindowVerdict, WindowPlacement] = {
+    _WindowVerdict.INSIDE: WindowPlacement.INSIDE,
+    _WindowVerdict.OUTSIDE: WindowPlacement.OUTSIDE,
+    _WindowVerdict.UNDATED: WindowPlacement.UNDATED,
+}

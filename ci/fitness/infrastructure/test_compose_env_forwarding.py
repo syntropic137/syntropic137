@@ -30,17 +30,24 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 
+import settings_forwarding
 from settings_forwarding import (
     BASE_COMPOSE,
-    BEGIN_MARKER,
-    END_MARKER,
+    COMPOSE_OWNED,
     ENV_EXAMPLE,
+    FORWARD_WITH_DEFAULT,
+    GENERATED_ENV,
+    HANDWRITTEN_COMPOSE,
     NOT_FORWARDED,
     PUBLISHED_COMPOSE,
     _reaches_process,
     api_environment,
+    base_extends_generated,
     documented_settings,
-    render_base_compose,
+    generated_environment,
+    generated_keys,
+    handlisted,
+    render_generated_env,
     report,
 )
 
@@ -74,19 +81,99 @@ def test_the_reported_switch_reaches_the_container() -> None:
     )
 
 
-def test_the_generated_block_is_not_stale() -> None:
-    """`just gen-compose` and the committed base must agree.
+class TestGeneratedPassthrough:
+    """New settings reach the container without anyone editing a compose file.
 
-    Without this, adding a setting to the Settings classes generates a line in
-    `.env.example` and nothing in compose -- which is exactly how the two lists
-    drifted apart in the first place.
+    The passthrough is generated into docker/generated/api.env.yaml, which the
+    base api service `extends`. Compose files carry privilege and are
+    owner-reviewed; the generated file is derived and is not. These pin the
+    three ways that split could quietly stop holding.
     """
-    committed = BASE_COMPOSE.read_text()
-    assert BEGIN_MARKER in committed and END_MARKER in committed, (
-        "the generated-block markers are gone from docker-compose.yaml; "
-        "nothing regenerates the forwarding list any more"
-    )
-    assert render_base_compose() == committed, "docker-compose.yaml is stale. Run: just gen-compose"
+
+    def test_the_generated_file_is_not_stale(self) -> None:
+        """`just gen-compose` and the committed file must agree.
+
+        Without this, adding a setting to the Settings classes generates a line
+        in `.env.example` and nothing in compose -- which is exactly how the two
+        lists drifted apart in the first place.
+        """
+        assert GENERATED_ENV.is_file(), f"{GENERATED_ENV} is missing. Run: just gen-compose"
+        assert render_generated_env() == GENERATED_ENV.read_text(), (
+            f"{GENERATED_ENV.name} is stale. Run: just gen-compose"
+        )
+
+    def test_the_base_api_service_extends_it(self) -> None:
+        """A generated file nothing references forwards nothing."""
+        assert base_extends_generated(), (
+            f"{BASE_COMPOSE.name}'s api service no longer `extends` "
+            f"{GENERATED_ENV.name}, so no stack forwards the generated settings"
+        )
+
+    @pytest.mark.parametrize("path", HANDWRITTEN_COMPOSE, ids=lambda p: p.name)
+    def test_no_compose_file_hand_lists_a_generated_setting(self, path: Path) -> None:
+        """A second, hand-written source of truth is the drift this replaced."""
+        problems = handlisted(path)
+        assert not problems, "\n".join(problems)
+
+    def test_the_hand_list_check_can_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control: a base that restates a generated setting is caught."""
+        name = generated_keys()[0]
+        bad = tmp_path / "docker-compose.yaml"
+        bad.write_text(
+            BASE_COMPOSE.read_text().replace(
+                "    environment:\n      SYN_API_PORT:",
+                f"    environment:\n      {name}:\n      SYN_API_PORT:",
+                1,
+            )
+        )
+        monkeypatch.setattr(settings_forwarding, "BASE_COMPOSE", bad)
+        assert handlisted(bad), f"restating {name} in the base went unnoticed"
+
+    def test_the_overlay_check_flags_a_verbatim_copy_only(self, tmp_path: Path) -> None:
+        """Overlays may override with their own value; copying ours is noise."""
+        name = next(iter(FORWARD_WITH_DEFAULT))
+        default = FORWARD_WITH_DEFAULT[name]
+        copy = tmp_path / "docker-compose.copy.yaml"
+        copy.write_text(
+            f"services:\n  api:\n    environment:\n      {name}: ${{{name}:-{default}}}\n"
+        )
+        override = tmp_path / "docker-compose.override.yaml"
+        override.write_text(f"services:\n  api:\n    environment:\n      {name}: fixed\n")
+        assert handlisted(copy)
+        assert not handlisted(override)
+
+    def test_a_new_setting_needs_no_compose_edit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The point of the split, as a dry run.
+
+        A setting added to a Settings class reaches .env.example (just gen-env);
+        from there the generated file gains it and nothing else changes. The
+        compose files are read, never rendered, by the generator.
+        """
+        new = "SYN_THROWAWAY_PROBE_SETTING"
+        real = documented_settings()
+        monkeypatch.setattr(settings_forwarding, "documented_settings", lambda: [*real, new])
+        before = {path: path.read_text() for path in HANDWRITTEN_COMPOSE}
+
+        rendered = render_generated_env()
+
+        assert f"      {new}:\n" in rendered
+        assert {path: path.read_text() for path in HANDWRITTEN_COMPOSE} == before
+
+    def test_defaults_and_ownership_name_real_generated_settings(self) -> None:
+        """A stale table entry would promise a form the file no longer has."""
+        keys = set(generated_keys())
+        assert not set(FORWARD_WITH_DEFAULT) - keys, (
+            "FORWARD_WITH_DEFAULT names a non-generated key"
+        )
+        assert not set(COMPOSE_OWNED) & keys, "COMPOSE_OWNED keys must not also be generated"
+        assert not set(COMPOSE_OWNED) - set(documented_settings()), (
+            "COMPOSE_OWNED names an unknown setting"
+        )
+        env = generated_environment()
+        for name, default in FORWARD_WITH_DEFAULT.items():
+            assert env[name] == "${" + name + ":-" + default + "}"
 
 
 class TestRefusalsAreVisibleToOperators:

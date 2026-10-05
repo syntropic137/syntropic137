@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
@@ -43,6 +45,7 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
+from syn_domain.projection_scan import read_by_keys
 
 
 class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection):
@@ -314,17 +317,30 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         Returns:
             List of execution summaries for this workflow.
         """
-        all_data = await self._store.get_all(self.PROJECTION_NAME)
-        executions = []
-
-        # get_all returns a list, not a dict
-        for data in all_data:
-            if data.get("workflow_id") == workflow_id:
-                executions.append(WorkflowExecutionSummary.from_dict(data))
+        # Filtered in the store, not here. Reading every execution and keeping
+        # one workflow's decoded the whole history on each call, and
+        # /metrics?workflow_id= makes two: the E1 latency gate's p95 was
+        # 309-422ms on CI against a 300ms budget for exactly that reason.
+        rows = await self._store.query(self.PROJECTION_NAME, filters={"workflow_id": workflow_id})
+        executions = [WorkflowExecutionSummary.from_dict(data) for data in rows]
 
         # Sort by started_at descending (most recent first)
         executions.sort(key=lambda e: e.started_at or "", reverse=True)
         return executions
+
+    async def applied_starts(self, execution_ids: Sequence[str]) -> set[str]:
+        """Which of ``execution_ids`` this read model applied the start of, in one query.
+
+        A row alone does not prove it: the #598 fallback in `on_workflow_failed`
+        creates a row for a failure whose start was never seen, with no
+        `started_at`. That is the shape a dropped start leaves behind (#1545),
+        so a start counts as applied only when `started_at` is set. The document
+        key is the execution id, so this is a primary-key read, not a JSON filter.
+        """
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, execution_ids)
+        return {
+            key for key, document in documents.items() if document.get("started_at") is not None
+        }
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
         """Get a specific execution by ID.

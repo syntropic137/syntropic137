@@ -3,7 +3,7 @@
 WHAT THE HAZARD IS. Every map on ``PhaseRuntime`` was keyed by phase id alone,
 and one ``PhaseRuntime`` was built per PROCESSOR - which
 ``BackgroundWorkflowDispatcher`` shares across up to
-``SYN_POLLING_MAX_CONCURRENT_DISPATCHES`` executions. A workflow names its own
+``SYN_EXECUTION_MAX_CONCURRENT`` executions. A workflow names its own
 phases, so every run of it names them identically: both runs call their phase
 "implement". So ``_workspaces["implement"]``, ``_envs["implement"]``,
 ``_cmds["implement"]``, ``_session_ids["implement"]`` and

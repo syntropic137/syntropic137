@@ -12,6 +12,9 @@ from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEven
 from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
     ArtifactsCollectedForPhaseEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+    CancelledWorkQuarantinedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ClaudePluginRegisteredEvent import (
     ClaudePluginRegisteredEvent,
 )
@@ -29,6 +32,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent imp
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
     ExecutionDetachedFromEvalEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
+    ExecutionRequestedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
@@ -118,12 +124,14 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceTerminatedEvent im
 __all__ = [
     "AgentExecutionCompletedEvent",
     "ArtifactsCollectedForPhaseEvent",
+    "CancelledWorkQuarantinedEvent",
     "ClaudePluginRegisteredEvent",
     "CommandExecutedEvent",
     "CommandFailedEvent",
     "ExecutionAttachedToEvalEvent",
     "ExecutionCancelledEvent",
     "ExecutionDetachedFromEvalEvent",
+    "ExecutionRequestedEvent",
     "ExecutionResumedEvent",
     "ExecutionTagsAddedEvent",
     "ExecutionTagsRemovedEvent",

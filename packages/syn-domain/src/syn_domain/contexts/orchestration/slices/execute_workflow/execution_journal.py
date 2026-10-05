@@ -107,6 +107,10 @@ class ExecutionJournal:
             ) from err
         await self._project(uncommitted)
 
+    async def reload(self, execution_id: str) -> WorkflowExecutionAggregate | None:
+        """The aggregate as the store now holds it, for a write it rejected to be retried."""
+        return await self._repository.get_by_id(execution_id)
+
     @staticmethod
     def _pending(aggregate: WorkflowExecutionAggregate) -> list[object]:
         """The events the aggregate is about to commit, read before the save clears them."""

@@ -20,13 +20,8 @@ from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
-from syn_domain.pagination import (
-    Page,
-    ProjectionRecord,
-    matches_search,
-    within_window,
-)
-from syn_domain.projection_scan import paginate_projection
+from syn_domain.pagination import Page, within_window
+from syn_domain.projection_scan import ListShape, page_projection
 
 logger = logging.getLogger(__name__)
 
@@ -158,11 +153,14 @@ def _update_subagent_record(
             break
 
 
-#: Every field ``page``'s predicates read - the filters, the facet, the window
-#: and the search. ``paginate_projection`` scans only these for the whole
-#: collection and reads whole documents for the page alone (E2). A predicate
-#: that reads a field missing here raises rather than matching on None.
-_PAGE_FIELDS = ("id", "workflow_id", "status", "started_at")
+#: What ``page`` windows, orders, tallies and searches by. A store that pages
+#: in SQL writes these as one statement; any other store evaluates the same
+#: shape in Python (``syn_domain.projection_scan.page_projection``, E2).
+_PAGE_SHAPE = ListShape(
+    timestamp_field="started_at",
+    facet_field="status",
+    search_fields=("id", "workflow_id"),
+)
 
 
 class SessionListProjection(AutoDispatchProjection):
@@ -407,26 +405,25 @@ class SessionListProjection(AutoDispatchProjection):
         at any parameter setting. Paging needs a total counted over the same
         predicate as the rows, which is what this returns.
 
-        Only the equality filters the store can express are pushed down.
-        ``status`` deliberately is NOT, even though the store could: the facet
-        tally has to see every status the rest of the query matched, and a
-        store-side status filter would leave it able to report only the one
-        already selected.
+        ``status`` is deliberately NOT an equality filter: the facet tally
+        has to see every status the rest of the query matched, and a status
+        filter applied first would leave it able to report only the one
+        already selected. It is ``page_projection``'s facet dimension instead,
+        which on Postgres is still applied in the same SQL statement.
 
         ``search`` matches case-insensitively against the session id and the
         workflow id.
         """
         filters = _build_query_filters(workflow_id, None, None, parent_session_id, execution_id)
-
-        def base(record: ProjectionRecord) -> bool:
-            return matches_search(search, record.get("id"), record.get("workflow_id"))
-
-        return await paginate_projection(
+        return await page_projection(
             self._store,
             self.PROJECTION_NAME,
-            fields=_PAGE_FIELDS,
+            shape=_PAGE_SHAPE,
             filters=filters or None,
-            order_by="-started_at",
+            search=search,
+            statuses=statuses,
+            after=started_after,
+            before=started_before,
             full_read=lambda: self._store.query(
                 self.PROJECTION_NAME,
                 filters=filters if filters else None,
@@ -434,12 +431,6 @@ class SessionListProjection(AutoDispatchProjection):
                 limit=None,
                 offset=0,
             ),
-            base_predicate=base,
-            status_of=lambda r: str(r.get("status") or ""),
-            statuses=statuses,
-            timestamp_of=lambda r: r.get("started_at"),
-            after=started_after,
-            before=started_before,
             to_row=lambda record: SessionSummary.from_dict(dict(record)),
             offset=offset,
             limit=limit,

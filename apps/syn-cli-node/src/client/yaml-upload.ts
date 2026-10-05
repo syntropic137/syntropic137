@@ -44,6 +44,12 @@ export interface PostYamlOptions {
   sourceDigest?: string;
   /** Explicit intent to overwrite an already-installed matching version. */
   force?: boolean;
+  /**
+   * Package installing this definition (issue #1588). The server records it
+   * and returns it on GET, so prune can ask the server which package owns a
+   * workflow instead of trusting local history.
+   */
+  packageName?: string;
 }
 
 export async function postYaml(
@@ -57,6 +63,7 @@ export async function postYaml(
   if (options.version) url.searchParams.set("version", options.version);
   if (options.sourceDigest) url.searchParams.set("source_digest", options.sourceDigest);
   if (options.force) url.searchParams.set("force", "true");
+  if (options.packageName) url.searchParams.set("package_name", options.packageName);
 
   const response = await globalThis.fetch(url.toString(), {
     method: "POST",

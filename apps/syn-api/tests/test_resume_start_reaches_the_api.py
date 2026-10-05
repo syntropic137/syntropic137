@@ -40,7 +40,10 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEve
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
-from syn_domain.contexts.orchestration.slices.start_resume import ResumeStartProcessManager
+from syn_domain.contexts.orchestration.slices.start_resume import (
+    ResumeChild,
+    ResumeStartProcessManager,
+)
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import MAX_START_ATTEMPTS
 
 if TYPE_CHECKING:
@@ -54,9 +57,7 @@ WORKFLOW_ID = "wf-1480"
 _AT = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
 
 #: The process manager's MODULE; the package re-exports the class under its name.
-_pm_module = importlib.import_module(
-    "syn_domain.contexts.orchestration.slices.start_resume.ResumeStartProcessManager"
-)
+_pm_module = importlib.import_module("syn_domain.contexts.orchestration._shared.start_todo")
 
 
 class _VanishedArtifact(RuntimeError):
@@ -69,8 +70,8 @@ class _ResumeHandler:
     def __init__(self) -> None:
         self.attempted = 0
 
-    async def validate(self, parent_execution_id: str) -> None:
-        del parent_execution_id
+    async def validate(self, parent_execution_id: str) -> ResumeChild:
+        return ResumeChild(execution_id=f"{parent_execution_id}-child", workflow_id="wf")
 
     async def handle(
         self, parent_execution_id: str, *, admitted: AdmissionTicket | None = None

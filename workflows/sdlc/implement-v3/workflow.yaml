@@ -10,6 +10,15 @@ type: implementation
 classification: standard
 requires_repos: true
 
+# The task IS the brief: every phase reads it as $ARGUMENTS, and without one the
+# run implements nothing at full cost (PC-66, exec-2dced6933763). Declaring it
+# required is what makes admission refuse a missing, empty or whitespace-only
+# task, at the API and in `syn workflow run`.
+inputs:
+  - name: task
+    description: "The well-specified issue or change to implement"
+    required: true
+
 # WHY THIS EXISTS.
 #
 # The workflow that had been doing this work, `implement-from-plan-v1`, existed

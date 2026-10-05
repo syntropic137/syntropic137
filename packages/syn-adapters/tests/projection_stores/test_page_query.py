@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from syn_adapters.projection_stores.postgres_page import (
+from syn_adapters.projection_stores.postgres_page_keys import (
     _ISO_TIMESTAMP,
     _folds,
     build_page_query,

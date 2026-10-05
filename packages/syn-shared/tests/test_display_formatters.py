@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import signal
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -19,6 +19,7 @@ from syn_shared.display import (
     format_phase,
     format_repos,
     format_tokens,
+    format_utc_timestamp,
     resolve_duration_seconds,
 )
 
@@ -441,3 +442,14 @@ class TestFormatExitCode:
         No real ``returncode`` reaches it, which is exactly why it needs a test.
         """
         assert format_exit_code(-999) == "-999 (unknown signal 999)"
+
+
+@pytest.mark.unit
+class TestFormatUtcTimestamp:
+    def test_aware_instant_is_rendered_in_utc(self) -> None:
+        plus_two = timezone(timedelta(hours=2))
+        moment = datetime(2026, 10, 4, 8, 47, 30, tzinfo=plus_two)
+        assert format_utc_timestamp(moment) == "2026-10-04 06:47 UTC"
+
+    def test_naive_instant_is_taken_as_utc(self) -> None:
+        assert format_utc_timestamp(datetime(2026, 1, 2, 3, 4)) == "2026-01-02 03:04 UTC"
