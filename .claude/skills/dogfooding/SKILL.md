@@ -165,7 +165,7 @@ any `PINNED_DIGESTS` bump; these are properties of an image, not of the platform
 | Docker daemon | **absent** - no root, cannot start `dockerd` |
 | `check-default-workspace-image`, `check-pinned-image-channels` | fail, both need Docker |
 | full e2e container stack | not possible, same reason |
-| Playwright / headless Chromium | possible only after downloading 27 system libs (~40s); the image ships none (#1028) |
+| Playwright / headless Chromium | baked in since toolchain 1.5.0 (AW #33): Playwright 1.63.0 + headless shell, offline, `npx --no-install playwright screenshot`; a repo pinning another Playwright version will not find its browser. Not yet re-measured in a live workspace (#1028) |
 
 Ladders up by letting a task be scoped to what the workspace can finish, instead of
 discovering the limit after paying for the run.
@@ -175,7 +175,7 @@ discovering the limit after paying for the run.
 - #1024 - the `workflows` permission decision and its options.
 - #1023 - executions report `completed` when the agent reported failure.
 - #1030 - executions do not record the prompt they were given.
-- #1028 - the workspace image lacks Playwright's system libraries.
+- #1028 - headless browser QA in the workspace image (shipped in AW #33).
 - `.claude/skills/devops/SKILL.md` - PR, version and release mechanics.
 - `AGENTS.md` - `just qa-ci` and the pre-PR checklist that CI mirrors.
 
