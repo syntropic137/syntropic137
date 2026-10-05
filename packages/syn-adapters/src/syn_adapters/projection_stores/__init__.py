@@ -11,8 +11,6 @@ Usage:
     result = await store.get("workflow_summaries", workflow_id)
 """
 
-from functools import lru_cache
-
 from syn_shared.settings import get_settings
 
 from .memory_store import InMemoryProjectionStore
@@ -30,7 +28,6 @@ __all__ = [
 _store_instance: ProjectionStoreProtocol | None = None
 
 
-@lru_cache
 def get_projection_store() -> ProjectionStoreProtocol:
     """Get the projection store instance.
 
@@ -39,8 +36,11 @@ def get_projection_store() -> ProjectionStoreProtocol:
         PostgresProjectionStore for development/production.
 
     Note:
-        This function is cached, so it returns the same instance
-        on subsequent calls.
+        ``_store_instance`` is the one cache. This used to be ``@lru_cache``
+        as well, which pinned the first instance returned and silently
+        ignored every later assignment to ``_store_instance``: a caller that
+        swapped the store (as the integration fixtures do) kept getting the
+        previous one, pool, initialized-table set and all.
     """
     global _store_instance
 
@@ -61,5 +61,4 @@ def reset_projection_store() -> None:
     Useful for testing to ensure a fresh instance.
     """
     global _store_instance
-    get_projection_store.cache_clear()
     _store_instance = None
