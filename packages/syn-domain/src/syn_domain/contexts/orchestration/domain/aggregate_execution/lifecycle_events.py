@@ -53,7 +53,7 @@ def started_event(command: StartExecutionCommand) -> WorkflowExecutionStartedEve
         pinned_phases=command.pinned_phases,
         source_commits=command.source_commits,
         tags=list(command.tags),
-        eval_id=command.launch_eval.eval_id,
+        eval_id=None if command.launch_eval.eval_id is None else str(command.launch_eval.eval_id),
         eval_selection=(
             None
             if command.launch_eval.selection is EvalSelection.NONE

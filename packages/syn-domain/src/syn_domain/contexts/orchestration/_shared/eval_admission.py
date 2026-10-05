@@ -97,4 +97,4 @@ async def launch_eval_for(
     launch = choice.resolve(workflow_default)
     if launch.eval_id is None:
         return launch
-    return launch.admitted(await admit_launch(repository, launch.eval_id))
+    return launch.admitted(await admit_launch(repository, str(launch.eval_id)))

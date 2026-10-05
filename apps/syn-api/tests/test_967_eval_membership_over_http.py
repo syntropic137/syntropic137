@@ -105,7 +105,7 @@ async def _launch_execution(eval_id: str | None = None) -> None:
             total_phases=1,
             inputs={},
             tags=TagSet(),
-            launch_eval=LaunchEval(eval_id, selection),
+            launch_eval=LaunchEval(EvalId(eval_id) if eval_id else None, selection),
         )
     )
     await get_workflow_execution_repository().save_new(aggregate)
@@ -328,7 +328,7 @@ class TestTheLaunchChoosesAnEval:
 
         assert await self._run(client, workflow_id, _Launch(eval_id="eval-a")) == 200
 
-        assert execution.choices == [LaunchEval("eval-a", EvalSelection.EXPLICIT)]
+        assert execution.choices == [LaunchEval(EvalId("eval-a"), EvalSelection.EXPLICIT)]
 
     async def test_no_eval_reaches_execute_as_an_ordinary_run(
         self, client: AsyncClient, execution: _CapturingExecute

@@ -44,6 +44,7 @@ from syn_domain.contexts.orchestration import (
     EvalId,
     EvalUnavailableError,
     LaunchEval,
+    RepositoryOutsideBaselineError,
     SkillError,
     SkillRef,
     TagSet,
@@ -766,6 +767,12 @@ async def execute_workflow_endpoint(
         workflow_id, request
     )
     launch_eval = await _launch_eval(workflow, request)
+    try:
+        # The handler refuses this too; here it is a 422 rather than a 200
+        # followed by an execution that never starts.
+        launch_eval.refuse_unpinned(typed_repos)
+    except RepositoryOutsideBaselineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     # Bound by the `async with` below, and closed over like every other value

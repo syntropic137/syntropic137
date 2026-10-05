@@ -35,8 +35,16 @@ from syn_domain.contexts.orchestration._shared.eval_admission import (
     EvalUnavailableError,
     launch_eval_for,
 )
-from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
-from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
+from syn_domain.contexts.orchestration._shared.eval_choice import (
+    EvalChoice,
+    EvalSelection,
+    LaunchEval,
+    RepositoryOutsideBaselineError,
+)
+from syn_domain.contexts.orchestration._shared.repository_baseline import (
+    BaselineRequest,
+    RepositoryBaseline,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
@@ -242,6 +250,7 @@ class _World:
         choice: EvalChoice | None = None,
         *,
         admitting_through: RepositoryAdapter[EvalAggregate] | None = None,
+        repos: tuple[str, ...] = ("acme/widgets",),
     ) -> ExecuteWorkflowCommand:
         """The command a dispatcher builds: its eval resolved and admitted once, here."""
         template = await self.templates.get_by_id(self.workflow_id)
@@ -252,7 +261,7 @@ class _World:
         return ExecuteWorkflowCommand(
             aggregate_id=self.workflow_id,
             execution_id=execution_id,
-            repos=[RepositoryRef.from_slug("acme/widgets")],
+            repos=[RepositoryRef.from_slug(slug) for slug in repos],
             inputs={"task": "fix it"},
             launch_eval=launch_eval,
         )
@@ -263,8 +272,11 @@ class _World:
         choice: EvalChoice | None = None,
         *,
         admitting_through: RepositoryAdapter[EvalAggregate] | None = None,
+        repos: tuple[str, ...] = ("acme/widgets",),
     ) -> None:
-        command = await self.dispatch(execution_id, choice, admitting_through=admitting_through)
+        command = await self.dispatch(
+            execution_id, choice, admitting_through=admitting_through, repos=repos
+        )
         await self.execute.handle(command)
 
     async def stored[E: _ExecutionEvent](self, kind: type[E], execution_id: str) -> list[E]:
@@ -306,7 +318,7 @@ async def _world(*evals: str) -> _World:
     world = _World()
     await world.install()
     for eval_id in evals:
-        await world.create_eval(eval_id)
+        await world.create_eval(eval_id, "main")
     return world
 
 
@@ -386,11 +398,30 @@ async def test_the_start_records_the_baseline_its_eval_froze() -> None:
 
 async def test_a_run_into_an_eval_with_no_repositories_records_an_empty_baseline() -> None:
     """Empty, not None: "the eval pins nothing" is not "this run is in no eval"."""
-    world = await _world("eval-1")
+    world = await _world()
+    await world.create_eval("eval-1")
 
-    await world.run("exec-1", _explicit("eval-1"))
+    await world.run("exec-1", _explicit("eval-1"), repos=())
 
     assert (await world.started("exec-1")).eval_baseline == []
+
+
+async def test_a_run_in_an_eval_naming_a_repository_its_baseline_does_not_pin_is_refused() -> None:
+    """No live head for a repository outside the snapshot: the run never starts.
+
+    The ordinary run of the same repository proves it is the eval that refuses,
+    not the repository.
+    """
+    world = await _world()
+    world.resolver.shas[("acme/other", "main")] = _SHA_DEV
+    await world.create_eval("eval-1", "main")
+
+    with pytest.raises(RepositoryOutsideBaselineError, match="acme/other"):
+        await world.run("exec-1", _explicit("eval-1"), repos=("acme/widgets", "acme/other"))
+    await world.run("exec-ordinary", EvalChoice(ordinary=True), repos=("acme/other",))
+
+    assert await world.stored(WorkflowExecutionStartedEvent, "exec-1") == []
+    assert await world.checked_out("exec-ordinary") == {"acme/other": _SHA_DEV}
 
 
 async def test_a_run_in_no_eval_writes_no_baseline_key() -> None:
@@ -833,3 +864,44 @@ async def test_an_eval_start_written_before_the_baseline_field_still_replays() -
     assert old.eval_id == "eval-1"
     assert old.eval_baseline is None
     assert "eval_baseline" not in old.model_dump(mode="json")
+
+
+# -- the command's eval context ----------------------------------------------
+
+
+def test_the_command_refuses_an_eval_id_that_is_not_an_eval_id() -> None:
+    """The resolved eval is typed: a bare string never rides the command."""
+    with pytest.raises(TypeError, match="EvalId"):
+        ExecuteWorkflowCommand(
+            aggregate_id="wf-1",
+            launch_eval=LaunchEval("bad id with spaces", EvalSelection.EXPLICIT),  # type: ignore[arg-type]  # the refusal under test
+        )
+
+
+def test_the_command_round_trips_its_eval_context_and_reads_one_written_without_it() -> None:
+    """A retried command keeps its eval and SHAs; one from before the field is ordinary."""
+    baseline = (
+        RepositoryBaseline(
+            repository=RepositoryRef.from_slug("acme/widgets"),
+            requested_ref="main",
+            commit_sha=_SHA_MAIN,
+        ),
+    )
+    command = ExecuteWorkflowCommand(
+        aggregate_id="wf-1",
+        launch_eval=LaunchEval(EvalId("eval-a"), EvalSelection.WORKFLOW_DEFAULT, baseline),
+    )
+
+    retried = ExecuteWorkflowCommand.model_validate_json(command.model_dump_json())
+    assert retried.launch_eval is not None
+    assert isinstance(retried.launch_eval.eval_id, EvalId)
+    assert retried.launch_eval == command.launch_eval
+
+    before = command.model_dump(mode="json")
+    del before["launch_eval"]
+    assert ExecuteWorkflowCommand.model_validate(before).launch_eval is None
+
+    tampered = command.model_dump(mode="json")
+    tampered["launch_eval"]["eval_id"] = "bad id with spaces"
+    with pytest.raises(ValueError, match="eval id"):
+        ExecuteWorkflowCommand.model_validate(tampered)

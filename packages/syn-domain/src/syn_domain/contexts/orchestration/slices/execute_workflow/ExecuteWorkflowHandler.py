@@ -437,6 +437,9 @@ class ExecuteWorkflowHandler:
         # #967: also a launch snapshot, taken by the dispatcher and carried on
         # the command, so a retry joins the eval it was dispatched into.
         launch_eval = self._launch_eval(command, workflow)
+        # A run in an eval checks out only what the eval froze; a repository
+        # outside that snapshot has no frozen commit, so the run is refused.
+        launch_eval.refuse_unpinned(repos)
 
         execution_id = (
             command.execution_id

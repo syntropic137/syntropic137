@@ -29,7 +29,11 @@ from syn_domain.contexts.orchestration._shared.eval_admission import (
     launch_eval_for,
     open_eval,
 )
-from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, LaunchEval
+from syn_domain.contexts.orchestration._shared.eval_choice import (
+    EvalChoice,
+    LaunchEval,
+    RepositoryOutsideBaselineError,
+)
 from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
     EvalMembershipResult,
 )
@@ -307,6 +311,7 @@ __all__ = [
     "RemoveWorkflowTagsCommand",
     "RemoveWorkflowTagsHandler",
     "ReportedFailureReason",
+    "RepositoryOutsideBaselineError",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "ResumeExecutionCommand",
