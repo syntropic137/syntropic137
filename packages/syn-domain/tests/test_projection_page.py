@@ -14,6 +14,7 @@ import os
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from syn_domain.pagination import Page, ProjectionRecord
+    from syn_domain.projection_count import GroupKey
     from syn_domain.projection_scan import JsonValue
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
@@ -51,21 +53,21 @@ class _PagingStore:
     async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
         return {k: v for k, v in self._docs[projection].items() if k in keys}
 
-    async def scan_fields(
+    async def count_by(
         self,
         projection: str,
         fields: Sequence[str],
         *,
         filters: Mapping[str, object] | None = None,
-        order_by: str | None = None,
-    ) -> list[tuple[str, Mapping[str, JsonValue]]]:
-        self.reads.append(f"scan_fields {projection} {dict(filters or {})}")
+    ) -> list[tuple[GroupKey, int]]:
+        self.reads.append(f"count_by {projection} {tuple(fields)} {dict(filters or {})}")
         wanted = filters or {}
-        return [
-            (k, {f: d.get(f) for f in fields})
-            for k, d in self._docs[projection].items()
+        groups = Counter(
+            tuple(None if d.get(f) is None else str(d.get(f)) for f in fields)
+            for d in self._docs[projection].values()
             if all(_holds(d.get(name), value) for name, value in wanted.items())
-        ]
+        )
+        return list(groups.items())
 
     async def get_all(self, projection: str) -> list[dict[str, JsonValue]]:
         raise AssertionError(f"read every document of {projection}")
@@ -170,7 +172,10 @@ async def test_the_eval_page_is_one_store_query_and_one_tally_read_for_all_its_r
     assert [projection for projection, _ in store.queries] == ["evals"]
     _, query = store.queries[0]
     assert query.status == StatusOf.flag("archived", if_true="archived", if_false="active")
-    assert store.reads == ["scan_fields workflow_executions {'eval_id': ['ev-a', 'ev-b', 'ev-c']}"]
+    # The tallies are grouped by the store: counts leave it, member rows do not.
+    assert store.reads == [
+        "count_by workflow_executions ('eval_id', 'status') {'eval_id': ['ev-a', 'ev-b', 'ev-c']}"
+    ]
     by_id = {row.record.eval_id: row for row in page.rows}
     assert [row.record.eval_id for row in page.rows] == ["ev-b", "ev-a", "ev-c"]
     assert by_id["ev-a"].run_count == 3
