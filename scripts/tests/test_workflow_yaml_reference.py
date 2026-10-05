@@ -15,7 +15,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from workflow_yaml_reference import (  # noqa: E402
+from workflow_yaml_reference import (
     FIXTURE,
     REPO_ROOT,
     Reference,
@@ -23,7 +23,7 @@ from workflow_yaml_reference import (  # noqa: E402
     render,
 )
 
-from syn_domain.contexts.orchestration import (  # noqa: E402
+from syn_domain.contexts.orchestration import (
     WorkflowDefinition,
     build_command_from_definition,
 )
