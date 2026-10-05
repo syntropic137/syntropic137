@@ -22,7 +22,7 @@ import {
   resolveSource,
   installWorkflowsViaApi,
 } from "./install.js";
-import { findInstallation, pruneWorkflows } from "./prune.js";
+import { findInstallation, pruneWorkflows, PRUNE_OPTIONS, pruneFlags } from "./prune.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,6 +66,7 @@ export const updateCommand: CommandDef = {
       description: "Reinstall even if the resolved version is already installed",
       default: false,
     },
+    ...PRUNE_OPTIONS,
   },
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
@@ -168,6 +169,7 @@ export const updateCommand: CommandDef = {
         version: pkgVersion,
         sourceDigest: gitSha,
         force,
+        packageName: pkgName,
       });
 
       if (installedRefs.length === 0) {
@@ -175,49 +177,36 @@ export const updateCommand: CommandDef = {
         throw new CLIError("Update failed", 1);
       }
 
-      // Prune workflows that existed before but are gone from this version.
-      // Runs only after every upsert above succeeded.
+      // Workflows that existed before but are gone from this version. Runs
+      // only after every upsert above succeeded; local history nominates,
+      // the server's provenance decides, --prune archives (issue #1588).
       const installedIds = new Set(installedRefs.map((w) => w.id));
-      const removed = record.workflows.filter((w) => !installedIds.has(w.id));
-      if (removed.length > 0) {
-        print(`\n${style("Removing workflows no longer in the package...", BOLD)}`);
-        const prune = await pruneWorkflows(removed);
-        // WHY this is not swallowed (issue #822): deleteWorkflowsViaApi
-        // catches every DELETE failure and returns normally. Recording only
-        // the new refs after a failed archive leaves that workflow live on
-        // the server and untracked locally, which is how an orphan is made.
-        // Keep the failed refs in the registry so a retry can still see them.
-        if (prune.failed.length > 0) {
-          const stillLive = prune.failed;
-          recordInstallation({
-            packageName: pkgName,
-            packageVersion: pkgVersion,
-            source,
-            sourceRef: resolvedRef,
-            format: fmt,
-            workflows: [...installedRefs, ...stillLive],
-            marketplaceSource: marketplaceSource ?? record.marketplace_source ?? null,
-            gitSha: gitSha ?? record.git_sha ?? null,
-          });
-          printError(
-            `Updated, but ${prune.failed.length} old workflow(s) could not be archived. ` +
-              "They remain active and are still tracked. Re-run with `syn workflow update --force` (a plain re-run can short-circuit as already up to date), or " +
-              "remove them with `syn workflow delete`.",
-          );
-          throw new CLIError("Partial update", 1);
-        }
-      }
+      const prune = await pruneWorkflows(
+        record.workflows.filter((w) => !installedIds.has(w.id)),
+        { packageName: pkgName, ...pruneFlags(parsed) },
+      );
 
+      // WHY retained and failed refs stay in the record (issue #822): a
+      // workflow still live on the server must stay tracked locally.
       recordInstallation({
         packageName: pkgName,
         packageVersion: pkgVersion,
         source,
         sourceRef: resolvedRef,
         format: fmt,
-        workflows: installedRefs,
+        workflows: [...installedRefs, ...prune.retained, ...prune.failed],
         marketplaceSource: marketplaceSource ?? record.marketplace_source ?? null,
         gitSha: gitSha ?? record.git_sha ?? null,
       });
+
+      if (prune.failed.length > 0) {
+        printError(
+          `Updated, but ${prune.failed.length} old workflow(s) could not be archived. ` +
+            "They remain active and are still tracked. Re-run with `syn workflow update --force --prune` (a plain re-run can short-circuit as already up to date), or " +
+            "remove them with `syn workflow delete`.",
+        );
+        throw new CLIError("Partial update", 1);
+      }
 
       printSuccess(`\nUpdated ${pkgName} (${installedRefs.length} workflow(s))`);
     } finally {
@@ -255,16 +244,23 @@ export const uninstallCommand: CommandDef = {
 
     if (parsed.values["keep-workflows"] !== true) {
       print(`Removing workflows from ${style(name, BOLD)}...`);
-      const prune = await pruneWorkflows(record.workflows);
-      print(`  Removed ${prune.gone.length} workflow(s)`);
+      // Uninstall is itself the confirmed request to archive; ownership is
+      // still the server's call (issue #1588).
+      const prune = await pruneWorkflows(record.workflows, {
+        packageName: name,
+        prune: true,
+        yes: true,
+      });
+      print(`  Removed ${prune.archived.length} workflow(s)`);
       // WHY this stops rather than dropping the record (issue #822): removing
       // the registry entry while a workflow is still live on the server
       // orphans it, with no local record naming it any more.
-      if (prune.failed.length > 0) {
+      const stillLive = [...prune.retained, ...prune.failed];
+      if (stillLive.length > 0) {
         printError(
-          `${prune.failed.length} workflow(s) could not be archived and are still active: ` +
-            `${prune.failed.map((w) => w.name).join(", ")}. ` +
-            "The package remains installed. Re-run uninstall once the API is reachable.",
+          `${stillLive.length} workflow(s) were not archived and are still active: ` +
+            `${stillLive.map((w) => w.name).join(", ")}. ` +
+            "The package remains installed. Re-run uninstall once they can be archived.",
         );
         throw new CLIError("Partial uninstall", 1);
       }
