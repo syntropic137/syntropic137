@@ -163,9 +163,20 @@ the outcome:
 - **Failed on this SHA:** it IS a blocker. Put it under BLOCKING with the failing
   job's link and a log excerpt from
   `gh run view --job <job-id> --log-failed | tail -n 80`.
+- **Skipped by design for this PR:** CI deliberately does not run the job for
+  this PR's base or event. Prove it from the job's `if:` condition in
+  `.github/workflows/` (read it, never edit it): for example
+  `Python Integration Tests` runs on `pull_request` only when
+  `github.base_ref == 'release'`, so a PR into `main` never gets it. That check
+  is NOT a blocker, since no CI result is coming to wait for, and NOT a pass,
+  since nothing ran it. List it in the verdict under a heading
+  `Unverified by design`, one line per check: the job name, the check it would
+  have run, and the skip reason quoted from the `if:`. Carry the same lines into
+  the PR body under the same heading, so a reviewer sees what was never run.
 - **No CI evidence for this SHA** (no PR yet, the PR head is a different SHA, or
-  no job ran the test): nothing has answered the question. Report the check as
-  not run, name it, and never claim CI passed it.
+  no job ran the test although its `if:` admits this PR): nothing has answered
+  the question. Report the check as not run, name it, and never claim CI passed
+  it.
 
 ## Attack the tests
 

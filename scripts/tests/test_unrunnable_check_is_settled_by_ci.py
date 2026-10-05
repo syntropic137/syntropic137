@@ -155,3 +155,30 @@ class TestTheRule:
         section = sections[key]
         assert "it IS a blocker. Put it under BLOCKING" in section
         assert "gh run view --job <job-id> --log-failed" in section
+
+    def test_a_job_skipped_by_design_is_neither_blocker_nor_pass(
+        self, sections: dict[tuple[str, str], str], key: tuple[str, str]
+    ) -> None:
+        # PR #1587 review: a PR into main never gets Python Integration Tests,
+        # so "no CI evidence" left a database check blocked with nothing to wait for.
+        section = sections[key]
+        assert "is NOT a blocker, since no CI result is coming to wait for" in section
+        assert "and NOT a pass, since nothing ran it" in section
+        assert "under a heading `Unverified by design`" in section
+        assert "Carry the same lines into the PR body under the same heading" in section
+        assert "the skip reason quoted from the `if:`" in section
+
+
+def test_the_skip_example_is_still_true_of_ci(sections: dict[tuple[str, str], str]) -> None:
+    """The prompt teaches the bucket with a real job; it must still be skipped on PRs into main."""
+    import yaml
+
+    section = sections[_GATING_PHASES[0]]
+    example = re.search(r"`([^`]+)` runs on `pull_request` only when `([^`]+)`", section)
+    assert example, "the skipped-by-design bucket gives no worked example"
+    job_name, clause = example.groups()
+    ci = yaml.safe_load((_WORKFLOWS.parent / ".github/workflows/ci.yml").read_text())
+    (job,) = [j for j in ci["jobs"].values() if j.get("name") == job_name]
+    condition = re.sub(r"\s+", " ", job["if"])
+    assert f"(github.event_name == 'pull_request' && {clause})" in condition, condition
+    assert "base_ref == 'main'" not in condition
