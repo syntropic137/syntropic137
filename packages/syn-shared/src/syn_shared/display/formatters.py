@@ -105,6 +105,20 @@ def format_duration_seconds(seconds: float | int | None) -> str:
     return f"{hours}h {mins}m" if mins else f"{hours}h"
 
 
+def format_utc_timestamp(moment: datetime) -> str:
+    """An instant as an absolute UTC label: ``"2026-10-04 06:47 UTC"``.
+
+    Absolute and in UTC on purpose. A relative phrase ("2h ago") is wrong the
+    moment it is cached, and the reader's local zone is known only to the
+    client, so both of those stay client-side (see the package docstring). This
+    is the label for a client that renders the string as-is. A naive datetime
+    is taken to already be UTC, which is how this codebase records instants.
+    """
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def _parse_timestamp(value: datetime | str | None) -> datetime | None:
     """Parse an ISO 8601 string or pass through an existing datetime.
 
