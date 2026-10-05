@@ -4,11 +4,14 @@ The processor names those refs in `WorkflowExecutionResult.unrecorded_work`;
 they are in process memory and nowhere else, so a restart forgets them and no
 event will ever tell the PR. `execute()` used to copy only the status into an
 `ExecutionSummary`, so the run read as an ordinary cancel and the background
-runner, which logs only an `Err`, said nothing. Both hops are driven here.
+runner, which logs only an `Err`, said nothing. Both hops are driven here, and
+so is the third: `BackgroundWorkflowDispatcher`, the path every trigger runs
+on, which discarded the result outright.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
@@ -47,6 +50,9 @@ class _CancellingHandler:
 
     def __init__(self, unrecorded: tuple[QuarantinedRef, ...]) -> None:
         self._unrecorded = unrecorded
+
+    async def validate_stored_declarations(self, workflow_id: str) -> None:
+        del workflow_id
 
     async def handle(
         self, command: ExecuteWorkflowCommand, *, admitted: AdmissionTicket | None = None
@@ -144,3 +150,26 @@ async def test_the_background_run_logs_the_refs_an_unrecorded_cancel_holds(
 
     logged = [str(getattr(r, "error", "")) for r in caplog.records if r.levelno >= logging.ERROR]
     assert any(_REF.ref in line and _REF.commit in line for line in logged), logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unrecorded", [(_REF,), ()], ids=["unrecorded", "recorded"])
+async def test_a_triggered_run_logs_the_refs_an_unrecorded_cancel_holds(
+    caplog: pytest.LogCaptureFixture, unrecorded: tuple[QuarantinedRef, ...]
+) -> None:
+    """The trigger path reports it too, and reports nothing for a recorded cancel."""
+    import syn_api._wiring_admission as admission
+
+    dispatcher = admission.BackgroundWorkflowDispatcher(
+        _CancellingHandler(unrecorded),  # type: ignore[arg-type]
+    )
+
+    with caplog.at_level(logging.ERROR, logger=admission.logger.name):
+        await dispatcher.run_workflow(WORKFLOW_ID, inputs={}, execution_id=EXECUTION_ID)
+        await asyncio.gather(*list(dispatcher._tasks))
+
+    logged = [str(getattr(r, "error", "")) for r in caplog.records if r.levelno >= logging.ERROR]
+    if unrecorded:
+        assert any(_REF.ref in line and _REF.commit in line for line in logged), logged
+    else:
+        assert logged == []
