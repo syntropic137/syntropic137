@@ -51,6 +51,7 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_api.routes.executions.models import ExecutionDetailResponse
 
 pytestmark = pytest.mark.unit
 
@@ -94,7 +95,7 @@ class _Manager:
 
 async def _served_detail(
     monkeypatch: pytest.MonkeyPatch, execution_id: str, held: tuple[DelegationAttempt, ...]
-) -> dict[str, object]:
+) -> ExecutionDetailResponse:
     error = await delegation_failure(
         _Journal(held), MagicMock(), phase_id=PHASE_ID, allow_delegation=True
     )
@@ -145,14 +146,16 @@ async def _served_detail(
     monkeypatch.setattr(queries, "get_projection_mgr", lambda: manager)
     monkeypatch.setattr(_wiring, "get_projection_mgr", lambda: manager)
     response = await queries.get_execution_endpoint(execution_id)
-    return response.model_dump(mode="json")
+    return response
 
 
 @pytest.mark.asyncio
 async def test_failed_delegates_reach_the_api_with_reason_and_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    body = await _served_detail(monkeypatch, "exec-894-failed", _JOURNAL)
+    response = await _served_detail(monkeypatch, "exec-894-failed", _JOURNAL)
+    # Serialised as the HTTP response is, so the assertion is on the wire shape.
+    body = response.model_dump(mode="json")
 
     assert body["failure_classification"] == FailureClassification.PLATFORM.value
     assert body["delegation_failure"] == {
@@ -166,7 +169,7 @@ async def test_failed_delegates_reach_the_api_with_reason_and_attempts(
 async def test_no_delegate_at_all_reaches_the_api_as_not_attempted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    body = await _served_detail(monkeypatch, "exec-894-none", ())
+    body = (await _served_detail(monkeypatch, "exec-894-none", ())).model_dump(mode="json")
 
     assert body["delegation_failure"] == {
         "reason": DelegationFailureReason.NOT_ATTEMPTED.value,
