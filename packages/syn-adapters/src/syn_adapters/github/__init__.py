@@ -26,6 +26,7 @@ from syn_adapters.github.client import (
     GitHubAppError,
     GitHubAuthError,
     GitHubRateLimitError,
+    GitHubUnavailableError,
     get_github_client,
     reset_github_client,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "GitHubAppError",
     "GitHubAuthError",
     "GitHubRateLimitError",
+    "GitHubUnavailableError",
     "get_github_client",
     "reset_github_client",
 ]

@@ -315,6 +315,10 @@ async def installation_token(
             f"/app/installations/{iid}/access_tokens",
             headers={"Authorization": f"Bearer {jwt_token}"},
             json=body.to_json(),
+            # Retried only when the connection could not be made. A response
+            # lost after GitHub minted would mint a second token, and the
+            # first - live for an hour - could never reach the ledger that
+            # revokes it (#1593).
         )
 
         check_token_response(response, iid)
