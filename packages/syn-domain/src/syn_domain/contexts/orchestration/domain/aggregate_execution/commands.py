@@ -37,6 +37,7 @@ if TYPE_CHECKING:
         ReviewVerdict,
         SideEffectStatus,
     )
+    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 class StartExecutionCommand:
@@ -156,6 +157,7 @@ class FailExecutionCommand:
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
         quarantined: tuple[QuarantinedRef, ...] = (),
+        upstream_failure_kind: UpstreamFailureKind | None = None,
         delegation_failure: DelegationFailure | None = None,
     ) -> None:
         self.aggregate_id = execution_id
@@ -218,6 +220,11 @@ class FailExecutionCommand:
         #: the classification and never folded into it (#1392): an operator
         #: reads the agent's word, and no number is computed from it.
         self.reported_failure_reason = reported_failure_reason
+        #: What kind of upstream fault ended the run, when a service such as
+        #: GitHub raised it (#1593). Beside the classification like the field
+        #: above: `PLATFORM` either way, and this says whether a resume clears
+        #: it or an operator must act.
+        self.upstream_failure_kind = upstream_failure_kind
         #: Which required delegate did not happen, and why (#894). `None` for
         #: every failure that is not a failed delegation - every call site but
         #: the one whose phase declared one.

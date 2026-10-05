@@ -14,6 +14,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     DelegationFailureReason,
     FailureClassification,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UpstreamFailureError,
+)
 from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
@@ -25,6 +28,7 @@ if TYPE_CHECKING:
         AgentVerdict,
     )
     from syn_shared.diagnostics import SignalDeath
+    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 def describe_exception(error: BaseException) -> str:
@@ -99,6 +103,22 @@ class NonZeroExitError(RuntimeError):
     def __init__(self, message: str, *, exit_code: int) -> None:
         super().__init__(message)
         self.exit_code = exit_code
+
+
+class UpstreamExitError(NonZeroExitError, UpstreamFailureError):
+    """An agent run that exited non-zero on an upstream fault its harness named (#1592, #1593).
+
+    Both things at once, because both are true and both are read: the exit
+    status by `exit_code_of`, the kind by `failure_account`. Raised in place of
+    a plain `NonZeroExitError` - including after the phase's capacity retries
+    run out - so a busy provider is RECORDED as one on the WorkflowFailed event,
+    not only described in its message.
+    """
+
+    def __init__(self, message: str, *, exit_code: int, upstream_kind: UpstreamFailureKind) -> None:
+        super().__init__(message, exit_code=exit_code)
+        # `RuntimeError.__init__` does not continue the MRO, so this is set here.
+        self.upstream_kind = upstream_kind
 
 
 class PinnedCommitUnreachableError(NonZeroExitError):
@@ -422,6 +442,11 @@ class FailureAccount(NamedTuple):
     """What the AGENT SAID caused it, `None` when it said nothing this reader
     knows. An operator reads it; nothing counts it."""
 
+    upstream: UpstreamFailureKind | None = None
+    """What kind of upstream fault this was, when an upstream service raised
+    it (#1593): whether resuming is enough or an operator must act. Read off
+    the exception's type, never its text. `None` for every other failure."""
+
     delegation_failure: DelegationFailure | None = None
     """Which required delegate did not happen, and why (#894); `None` for
     every failure that is not a failed delegation."""
@@ -490,10 +515,16 @@ def failure_account(error: BaseException) -> FailureAccount:
     """
     if isinstance(error, PhaseReportedFailureError):
         return FailureAccount(error.failure_classification, error.reported_failure_reason)
+    # Still `PLATFORM` - the work was never judged - but now saying which
+    # platform failure: one a resume clears, or one only an operator can (#1593).
+    if isinstance(error, UpstreamFailureError):
+        return FailureAccount(FailureClassification.PLATFORM, None, upstream=error.upstream_kind)
     if isinstance(error, DelegationFailedError):
         # Still `PLATFORM`: the platform observed it, the agent claimed nothing.
         # What it adds is the typed account of which delegate failed (#894).
-        return FailureAccount(FailureClassification.PLATFORM, None, error.delegation_failure)
+        return FailureAccount(
+            FailureClassification.PLATFORM, None, delegation_failure=error.delegation_failure
+        )
     return FailureAccount(FailureClassification.PLATFORM, None)
 
 

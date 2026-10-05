@@ -14,6 +14,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FailureClassification,
     QuarantinedRef,
     ReportedFailureReason,
+    UpstreamFailureKind,
 )
 
 
@@ -81,6 +82,12 @@ class WorkflowFailedEvent(DomainEvent):
     # #1372, every failure with no agent anywhere near it, and every report
     # whose word this reader does not know.
     reported_failure_reason: ReportedFailureReason | None = None
+
+    # WHAT KIND OF UPSTREAM FAULT ended the run (#1593), when a service such as
+    # GitHub raised it: `unavailable` is transient and the run is resumable,
+    # `auth` waits on an operator. `None` for every other failure and for the
+    # whole store before #1593.
+    upstream_failure_kind: UpstreamFailureKind | None = None
 
     # Which required delegate did not happen, and why (#894). A platform
     # observation, beside the agent's claim above and never folded into it.
