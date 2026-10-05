@@ -1,18 +1,75 @@
-# CODEOWNERS — ISS-259: Supply chain hardening
+# CODEOWNERS: trust boundaries only (ISS-259 supply chain hardening, narrowed 2026-10-05)
 #
-# Changes to sensitive paths require explicit review from the maintainer.
-# This prevents a contributor from merging a compromised workflow, Docker
-# config, or shared package without a human approval gate.
+# A path is owned here when a bad change to it could leak a credential, widen
+# what an agent or the public internet can reach, or change which code or image
+# runs with privileges. Ordinary code is NOT owned: it is gated by the
+# workflow's independent verification, codex review and CI. Owning ordinary
+# code queued safe changes behind a human (8 PRs on 2026-10-04).
+#
+# Adding a path: name the boundary it protects. Own the CODE that enforces a
+# boundary, not only its settings, or the check can be removed around them.
 
-# CI/CD — workflow changes are highest risk (arbitrary code execution in CI)
-/.github/                   @NeuralEmpowerment
+# --- CI/CD and this file: code execution in CI, release credentials, publish
+# rights. Agents cannot push here at all (#1024).
+/.github/                                                                       @NeuralEmpowerment
 
-# Infrastructure and secrets management
-/docker/                    @NeuralEmpowerment
-/infra/                     @NeuralEmpowerment
+# --- Supply chain: submodule sources/branches; local build, push, retag and
+# release-asset recipes in the justfile.
+/.gitmodules                                                                    @NeuralEmpowerment
+/justfile                                                                       @NeuralEmpowerment
 
-# Shared configuration — env constants, settings, credentials
-/packages/syn-shared/       @NeuralEmpowerment
+# --- Which images agents run, and how they are verified (settings AND code).
+/packages/syn-shared/src/syn_shared/settings/workspace_images.py                @NeuralEmpowerment
+/packages/syn-shared/src/syn_shared/settings/workspace_image_migration.py       @NeuralEmpowerment
+/packages/syn-shared/src/syn_shared/settings/image_verification.py              @NeuralEmpowerment
+/packages/syn-adapters/src/syn_adapters/workspace_backends/image_verification.py @NeuralEmpowerment
+/scripts/check_pinned_image_channels.py                                         @NeuralEmpowerment
+/scripts/generate_published_compose.py                                          @NeuralEmpowerment
+/infra/docker/images/syn-api/Dockerfile                                         @NeuralEmpowerment
 
-# Submodule references — pinned commit changes must be intentional
-/.gitmodules                @NeuralEmpowerment
+# --- Workspace sandbox: runtime, network and security policy selection, and
+# the container creation that applies it.
+/packages/syn-shared/src/syn_shared/settings/workspace.py                       @NeuralEmpowerment
+/packages/syn-shared/src/syn_shared/settings/workspace_security.py              @NeuralEmpowerment
+/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py   @NeuralEmpowerment
+/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py   @NeuralEmpowerment
+/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py @NeuralEmpowerment
+/infra/scripts/apparmor-setup.sh                                                @NeuralEmpowerment
+/infra/scripts/selfhost-update-host.sh                                          @NeuralEmpowerment
+# bootstrap.sh runs sudo on the host: it decides what gets root.
+/infra/scripts/bootstrap.sh                                                     @NeuralEmpowerment
+
+# --- Credentials: what an agent is given, how it is scoped and cleared, how
+# secrets are resolved, exported and redacted.
+/packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase.py         @NeuralEmpowerment
+/packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py @NeuralEmpowerment
+/packages/syn-adapters/src/syn_adapters/github/client_token.py                  @NeuralEmpowerment
+/packages/syn-adapters/src/syn_adapters/github/agent_token.py                   @NeuralEmpowerment
+/packages/syn-shared/src/syn_shared/settings/credentials.py                     @NeuralEmpowerment
+/packages/syn-shared/src/syn_shared/settings/op_client.py                       @NeuralEmpowerment
+/packages/syn-shared/src/syn_shared/settings/op_resolver.py                     @NeuralEmpowerment
+/packages/syn-shared/src/syn_shared/logging/redaction.py                        @NeuralEmpowerment
+/scripts/op_env_export.py                                                       @NeuralEmpowerment
+/scripts/resolve_infra_env.py                                                   @NeuralEmpowerment
+/docker/token-injector/                                                         @NeuralEmpowerment
+/docker/sidecar-proxy/Dockerfile                                                @NeuralEmpowerment
+/docker/sidecar-proxy/*.yaml                                                    @NeuralEmpowerment
+/infra/docker/secrets/                                                          @NeuralEmpowerment
+# selfhost-env.sh loads credentials into the selfhost environment.
+/infra/scripts/selfhost-env.sh                                                  @NeuralEmpowerment
+
+# --- Public surface: webhook authentication and what it records.
+/apps/syn-api/src/syn_api/routes/webhooks/signature.py                          @NeuralEmpowerment
+/apps/syn-api/src/syn_api/routes/webhooks/endpoint.py                           @NeuralEmpowerment
+/apps/syn-api/src/syn_api/middleware/webhook_recorder.py                        @NeuralEmpowerment
+
+# --- Deployment exposure: every compose file (socket-proxy permissions, mounts,
+# secret forwarding, published ports), the port/settings checks that guard
+# them, the gateway (auth, CSP, bind) and the tunnel ingress.
+/docker/docker-compose*.yaml                                                    @NeuralEmpowerment
+/docker/selfhost-entrypoint.sh                                                  @NeuralEmpowerment
+/scripts/no_public_ports.py                                                     @NeuralEmpowerment
+/scripts/no_public_ports.sh                                                     @NeuralEmpowerment
+/scripts/settings_forwarding.py                                                 @NeuralEmpowerment
+/infra/docker/images/gateway/                                                   @NeuralEmpowerment
+/infra/cloudflare/tunnel-config.yaml.example                                    @NeuralEmpowerment
