@@ -5152,6 +5152,8 @@ export interface components {
              */
             deliverable_recovered: boolean;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
+            failure_classification?: components["schemas"]["FailureClassification"] | null;
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Model */
             model?: string | null;
             /** Requested Model */

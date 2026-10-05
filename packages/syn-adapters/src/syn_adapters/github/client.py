@@ -65,9 +65,16 @@ TOKEN_REFRESH_THRESHOLD_SECONDS = 10 * 60
 
 
 class GitHubAppError(Exception):
-    """Base exception for GitHub App errors."""
+    """Base exception for GitHub App errors.
 
-    pass
+    ``status_code`` is the HTTP status GitHub answered with, when the error is
+    an answer rather than a failure to ask, so callers can tell "no such
+    thing" (404) from "not allowed" (403) without parsing the message.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class GitHubAuthError(GitHubAppError):

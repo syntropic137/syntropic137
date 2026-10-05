@@ -19,6 +19,9 @@ if TYPE_CHECKING:
         FailExecutionCommand,
         StartExecutionCommand,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        EvalBaselinePin,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
     )
@@ -50,13 +53,33 @@ def started_event(command: StartExecutionCommand) -> WorkflowExecutionStartedEve
         pinned_phases=command.pinned_phases,
         source_commits=command.source_commits,
         tags=list(command.tags),
-        eval_id=command.launch_eval.eval_id,
+        eval_id=None if command.launch_eval.eval_id is None else str(command.launch_eval.eval_id),
         eval_selection=(
             None
             if command.launch_eval.selection is EvalSelection.NONE
             else command.launch_eval.selection.value
         ),
+        eval_baseline=_eval_baseline(command),
     )
+
+
+def _eval_baseline(command: StartExecutionCommand) -> list[EvalBaselinePin] | None:
+    """The admitted eval's frozen baseline, or None for a run in no eval."""
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        EvalBaselinePin,
+    )
+
+    launch = command.launch_eval
+    if launch.eval_id is None:
+        return None
+    return [
+        EvalBaselinePin(
+            repository=pin.repository.slug,
+            requested_ref=pin.requested_ref,
+            commit_sha=pin.commit_sha,
+        )
+        for pin in launch.baseline
+    ]
 
 
 def completed_event(command: CompleteExecutionCommand, workflow_id: str) -> WorkflowCompletedEvent:

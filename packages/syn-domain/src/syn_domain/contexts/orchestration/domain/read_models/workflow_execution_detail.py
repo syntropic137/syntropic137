@@ -130,6 +130,18 @@ class PhaseExecutionDetail:
     them.
     """
 
+    failure_classification: FailureClassification | None = None
+    """Why this phase failed; ``None`` exactly when it did not fail.
+
+    A failed phase always carries a member - `unclassified` when the record
+    predates the field - so "failed" never reaches a reader without the one
+    word that says whether to retry, rewrite the brief or call the operator.
+    """
+
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What this phase's agent said caused its failure, beside the
+    classification and never as it (#1392)."""
+
     @staticmethod
     def _to_iso_string(value: datetime | str | None) -> str | None:
         """Convert datetime or string to ISO string."""
@@ -168,6 +180,12 @@ class PhaseExecutionDetail:
                 else [w.model_dump() for w in self.observed_branches]
             ),
             "exit_code": self.exit_code,
+            "failure_classification": (
+                None if self.failure_classification is None else self.failure_classification.value
+            ),
+            "reported_failure_reason": (
+                None if self.reported_failure_reason is None else self.reported_failure_reason.value
+            ),
         }
 
     @classmethod
@@ -178,11 +196,12 @@ class PhaseExecutionDetail:
         """
         # Support both new and legacy naming for backward compatibility
         phase_id = data.get("workflow_phase_id") or data.get("phase_id", "")
+        status = data.get("status", "pending")
 
         return cls(
             workflow_phase_id=phase_id,
             name=data.get("name", ""),
-            status=data.get("status", "pending"),
+            status=status,
             session_id=data.get("session_id"),
             agent_session_id=data.get("agent_session_id"),
             artifact_id=data.get("artifact_id"),
@@ -200,6 +219,14 @@ class PhaseExecutionDetail:
             reported_side_effects=SideEffectStatus.from_stored(data.get("reported_side_effects")),
             observed_branches=_observed_branches(data.get("observed_branches")),
             exit_code=_exit_code(data.get("exit_code")),
+            failure_classification=(
+                FailureClassification.from_stored(data.get("failure_classification"))
+                if status == "failed"
+                else None
+            ),
+            reported_failure_reason=ReportedFailureReason.from_stored(
+                data.get("reported_failure_reason")
+            ),
         )
 
 

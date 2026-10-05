@@ -42,6 +42,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
     PhaseReportedFailureError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UPSTREAM_FAILURES,
+)
 from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
@@ -124,6 +127,11 @@ def _platform_reason(result: AgentExecutionResult, *, phase_id: str, exit_code: 
         if reason
         else f"Agent execution failed for phase {phase_id} (exit_code={rendered_exit})"
     )
+    # Capacity and auth are both platform failures and ask opposite things of
+    # an operator - wait, or fix the login - so the record says which (#1592).
+    upstream = UPSTREAM_FAILURES.kind_of(reason)
+    if upstream is not None:
+        base = f"{base}\n{upstream.account()}"
     verdict = result.stream_result.verdict
     if not verdict.refuses_completion:
         return base

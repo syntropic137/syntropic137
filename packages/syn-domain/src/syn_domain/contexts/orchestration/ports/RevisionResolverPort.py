@@ -14,12 +14,19 @@ caller chose, and an unknown answer is never recorded - it refuses the edit.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+
+#: What ``resolve`` promises: a full object id, 40 hex characters (SHA-1) or
+#: 64 (SHA-256 repositories). Lowercase only, so one commit has exactly one
+#: spelling. Defined on the port because it IS the port's contract: adapters
+#: check their forge's answer against it, and the baseline refuses anything else.
+FULL_COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 class UnresolvedReason(StrEnum):

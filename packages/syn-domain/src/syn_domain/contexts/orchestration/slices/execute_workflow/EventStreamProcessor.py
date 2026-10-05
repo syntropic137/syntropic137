@@ -122,6 +122,15 @@ def api_error_label(error_type: str, http_code: str = "") -> str:
     return f"{label} (HTTP {http_code})" if http_code else label
 
 
+def api_error_with_message(error_type: str, message: str) -> str:
+    """The label for ``error_type`` followed by the provider's own message.
+
+    Shared with the upstream failure reader, which recognises this shape by
+    the prefix it writes with an empty ``message``.
+    """
+    return f"{api_error_label(error_type)}: {message}"
+
+
 def _http_code_from_prefix(prefix: str) -> str:
     """Return the first 3-digit token from a prefix like 'API Error: 529 '."""
     return next((w for w in prefix.split() if w.isdigit() and len(w) == 3), "")
@@ -136,7 +145,7 @@ def _format_anthropic_error(error_obj: dict[str, object], prefix: str) -> str:
     if http_code:
         return api_error_label(error_type, http_code)
     if message and message.lower() != label.lower():
-        return f"{label}: {message}"
+        return api_error_with_message(error_type, message)
     return label
 
 

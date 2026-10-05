@@ -83,6 +83,8 @@ class MockAggregate:
         self.execution_id = execution_id
         self._completed_phases = 0
         self._total_phases = 1
+        # The real aggregate's mid-flight phase, which the cleaner fails too.
+        self.running_phase_id: str | None = None
         self.commands: list = []
 
         # Import and set status
