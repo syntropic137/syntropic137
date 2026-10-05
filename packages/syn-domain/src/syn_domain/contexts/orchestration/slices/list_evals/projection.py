@@ -35,8 +35,8 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
 from syn_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
 )
-from syn_domain.pagination import Page, ProjectionRecord, matches_search
-from syn_domain.projection_scan import paginate_projection
+from syn_domain.pagination import Page, ProjectionRecord
+from syn_domain.projection_page import PageQuery, StatusOf, page_projection
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
@@ -47,9 +47,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import (
         BaselineRepoPayload as UpdatedBaselineRepoPayload,
     )
-
-#: Every field ``page``'s predicates read; see ``paginate_projection``.
-_PAGE_FIELDS = ("eval_id", "name", "goal", "tags", "archived", "created_at")
 
 
 class EvalListProjection(AutoDispatchProjection):
@@ -149,43 +146,31 @@ class EvalListProjection(AutoDispatchProjection):
         tallies both whatever is selected. ``search`` matches the id, name and
         Goal; ``tags`` keeps Evals carrying every tag given, normalised.
         """
-        required = frozenset(tags or ())
-
-        def base(record: ProjectionRecord) -> bool:
-            stored = record.get("tags")
-            if required and not (isinstance(stored, list) and required.issubset(stored)):
-                return False
-            return matches_search(
-                search, record.get("eval_id"), record.get("name"), record.get("goal")
-            )
-
-        records = await paginate_projection(
-            self._store,
-            self.PROJECTION_NAME,
-            fields=_PAGE_FIELDS,
-            filters=None,
-            order_by=None,
-            full_read=lambda: self._store.get_all(self.PROJECTION_NAME),
-            base_predicate=base,
-            status_of=lambda r: "archived" if r.get("archived") else "active",
-            statuses=statuses,
-            timestamp_of=lambda r: r.get("created_at"),
+        query = PageQuery(
+            status=StatusOf.flag("archived", if_true="archived", if_false="active"),
+            timestamp_field="created_at",
+            contains_all={"tags": frozenset(tags or ())},
+            search=search,
+            search_fields=("eval_id", "name", "goal"),
+            statuses=frozenset(statuses) if statuses else None,
             after=created_after,
             before=created_before,
-            to_row=_from_document,
             offset=offset,
             limit=limit,
         )
-        rows = []
-        for record in records.rows:
-            tally = await self._runs.page(eval_id=record.eval_id, limit=0)
-            rows.append(
-                EvalSummary(
-                    record=record, run_count=tally.total, run_status_counts=tally.status_counts
-                )
-            )
+        records = await page_projection(
+            self._store, self.PROJECTION_NAME, query, to_row=_from_document
+        )
+        tallies = await self._runs.run_tallies([record.eval_id for record in records.rows])
         return Page(
-            rows=rows,
+            rows=[
+                EvalSummary(
+                    record=record,
+                    run_count=sum(tallies[record.eval_id].values()),
+                    run_status_counts=tallies[record.eval_id],
+                )
+                for record in records.rows
+            ],
             total=records.total,
             status_counts=records.status_counts,
             excluded_undated=records.excluded_undated,

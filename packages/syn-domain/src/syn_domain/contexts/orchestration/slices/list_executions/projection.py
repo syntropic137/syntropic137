@@ -12,10 +12,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Mapping
+    from collections.abc import Collection
     from datetime import datetime
 
     from event_sourcing import ProjectionStore
+
+    from syn_domain.pagination import Page
 
 from event_sourcing import AutoDispatchProjection
 
@@ -42,22 +44,8 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
-from syn_domain.pagination import Page, matches_search
-from syn_domain.projection_scan import paginate_projection
-
-#: Every field ``page``'s predicates read - the filters, the facet, the window
-#: and the search. ``paginate_projection`` scans only these for the whole
-#: collection and reads whole documents for the page alone (E2). A predicate
-#: that reads a field missing here raises rather than matching on None.
-_PAGE_FIELDS = (
-    "workflow_execution_id",
-    "workflow_id",
-    "workflow_name",
-    "status",
-    "started_at",
-    "tags",
-    "eval_id",
-)
+from syn_domain.projection_page import PageQuery, StatusOf, page_projection
+from syn_domain.projection_scan import ProjectionFieldScan
 
 
 class WorkflowExecutionListProjection(AutoDispatchProjection):
@@ -385,43 +373,52 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         this the Eval's runs view too. It is handed to the store as a filter,
         so it is applied in the query rather than over every execution.
         """
-        required = frozenset(tags or ())
-        filters = None if eval_id is None else {"eval_id": eval_id}
-
-        def base(record: Mapping[str, object]) -> bool:
-            if eval_id is not None and record.get("eval_id") != eval_id:
-                return False
-            stored = record.get("tags")
-            if required and not (isinstance(stored, list) and required.issubset(stored)):
-                return False
-            return matches_search(
-                search,
-                record.get("workflow_execution_id"),
-                record.get("workflow_id"),
-                record.get("workflow_name"),
-            )
-
-        return await paginate_projection(
-            self._store,
-            self.PROJECTION_NAME,
-            fields=_PAGE_FIELDS,
-            filters=filters,
-            order_by=None,
-            full_read=lambda: (
-                self._store.get_all(self.PROJECTION_NAME)
-                if filters is None
-                else self._store.query(self.PROJECTION_NAME, filters=filters)
-            ),
-            base_predicate=base,
-            status_of=lambda r: str(r.get("status") or ""),
-            statuses=statuses,
-            timestamp_of=lambda r: r.get("started_at"),
+        query = PageQuery(
+            status=StatusOf.text("status"),
+            timestamp_field="started_at",
+            equals={} if eval_id is None else {"eval_id": eval_id},
+            contains_all={"tags": frozenset(tags or ())},
+            search=search,
+            search_fields=("workflow_execution_id", "workflow_id", "workflow_name"),
+            statuses=frozenset(statuses) if statuses else None,
             after=started_after,
             before=started_before,
-            to_row=lambda record: WorkflowExecutionSummary.from_dict(dict(record)),
             offset=offset,
             limit=limit,
         )
+        return await page_projection(
+            self._store,
+            self.PROJECTION_NAME,
+            query,
+            to_row=lambda record: WorkflowExecutionSummary.from_dict(dict(record)),
+        )
+
+    async def run_tallies(self, eval_ids: Collection[str]) -> dict[str, dict[str, int]]:
+        """Each Eval's current member executions tallied by status, in one read.
+
+        Every id given gets an entry, empty when it has no members. Answers
+        what ``page(eval_id=..., limit=0).status_counts`` answers for each id,
+        without a query per Eval.
+        """
+        tallies: dict[str, dict[str, int]] = {eval_id: {} for eval_id in eval_ids}
+        if not tallies:
+            return tallies
+        filters = {"eval_id": sorted(tallies)}
+        if isinstance(self._store, ProjectionFieldScan):
+            members = [
+                values
+                for _, values in await self._store.scan_fields(
+                    self.PROJECTION_NAME, ("eval_id", "status"), filters=filters
+                )
+            ]
+        else:
+            members = await self._store.query(self.PROJECTION_NAME, filters=filters)
+        for member in members:
+            tally = tallies.get(str(member.get("eval_id")))
+            if tally is not None:
+                status = str(member.get("status") or "")
+                tally[status] = tally.get(status, 0) + 1
+        return tallies
 
     async def get_all(
         self,
