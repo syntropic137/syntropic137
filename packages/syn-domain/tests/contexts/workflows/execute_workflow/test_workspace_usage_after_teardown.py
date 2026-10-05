@@ -10,7 +10,8 @@ service does, so a call placed before teardown records nothing and fails here.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -67,16 +68,26 @@ class _WorkspaceCm:
         return False
 
 
+@dataclass(frozen=True)
+class _Row:
+    session_id: str
+    observation_type: ObservationType | str
+    data: object
+    execution_id: str | None
+    phase_id: str | None
+    workspace_id: str | None
+
+
 class _Writer:
     def __init__(self, *, fail: BaseException | None = None) -> None:
-        self.rows: list[dict[str, Any]] = []
+        self.rows: list[_Row] = []
         self._fail = fail
 
     async def record_observation(
         self,
         session_id: str,
         observation_type: ObservationType | str,
-        data: dict[str, Any],
+        data: object,
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,
@@ -84,21 +95,12 @@ class _Writer:
         if self._fail is not None:
             raise self._fail
         self.rows.append(
-            {
-                "session_id": session_id,
-                "observation_type": observation_type,
-                "data": data,
-                "execution_id": execution_id,
-                "phase_id": phase_id,
-                "workspace_id": workspace_id,
-            }
+            _Row(session_id, observation_type, data, execution_id, phase_id, workspace_id)
         )
 
-    def usage_rows(self) -> list[dict[str, Any]]:
+    def usage_rows(self) -> list[_Row]:
         return [
-            r
-            for r in self.rows
-            if r["observation_type"] == ObservationType.WORKSPACE_RESOURCE_USAGE
+            r for r in self.rows if r.observation_type == ObservationType.WORKSPACE_RESOURCE_USAGE
         ]
 
 
@@ -118,18 +120,26 @@ def _runtime(writer: _Writer) -> PhaseRuntime:
 
 
 def _assert_one_row(writer: _Writer) -> None:
-    rows = writer.usage_rows()
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["session_id"] == SESSION
-    assert row["execution_id"] == "e-usage"
-    assert row["phase_id"] == PHASE
-    assert row["workspace_id"] == "w-usage"
-    assert row["data"]["memory_peak_bytes"] == 734_003_200
-    assert row["data"]["oom_kills"] == 1
-    assert row["data"]["cpu_throttled_seconds"] == 0.75
-    assert tuple(row["data"]["delete_failures"]) == ("/ws/.git/objects/pack/locked.pack",)
-    assert row["data"]["net_tx_bytes"] == 65_536
+    assert writer.usage_rows() == [
+        _Row(
+            session_id=SESSION,
+            observation_type=ObservationType.WORKSPACE_RESOURCE_USAGE,
+            data={
+                "cpu_usage_seconds": 12.5,
+                "cpu_throttled_seconds": 0.75,
+                "nr_throttled": 3,
+                "memory_peak_bytes": 734_003_200,
+                "oom_kills": 1,
+                "disk_bytes_at_teardown": 52_428_800,
+                "delete_failures": ("/ws/.git/objects/pack/locked.pack",),
+                "net_rx_bytes": 1_048_576,
+                "net_tx_bytes": 65_536,
+            },
+            execution_id="e-usage",
+            phase_id=PHASE,
+            workspace_id="w-usage",
+        )
+    ]
 
 
 @pytest.mark.asyncio

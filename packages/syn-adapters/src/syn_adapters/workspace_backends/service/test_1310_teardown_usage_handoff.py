@@ -120,6 +120,8 @@ async def test_agentic_adapter_maps_the_provider_report() -> None:
 @pytest.mark.asyncio
 async def test_a_provider_that_reports_nothing_maps_to_none() -> None:
     # The pinned provider today: `destroy` returns None.
-    usage = await _adapter(None).destroy(IsolationHandle(isolation_id="iso-1", isolation_type="docker"))
+    usage = await _adapter(None).destroy(
+        IsolationHandle(isolation_id="iso-1", isolation_type="docker")
+    )
     assert usage is None
     assert usage_from_report(object()) is None
