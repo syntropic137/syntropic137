@@ -7,6 +7,7 @@
  * dashboard, the lists — yields null, which is a legitimate answer.
  */
 
+import { useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 
 import type { FeedbackSubject, SubjectKind } from '@syn137/ui-feedback-react'
@@ -33,6 +34,12 @@ export function subjectFromPath(pathname: string): FeedbackSubject | null {
   return { kind, id }
 }
 
+/**
+ * Memoised on the path: the subject feeds the provider's context value, so a
+ * fresh object on every render would hand every widget consumer a new context
+ * on every render too.
+ */
 export function useFeedbackSubject(): FeedbackSubject | null {
-  return subjectFromPath(useLocation().pathname)
+  const { pathname } = useLocation()
+  return useMemo(() => subjectFromPath(pathname), [pathname])
 }
