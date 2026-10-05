@@ -260,7 +260,7 @@ def test_a_hand_written_node_profile_must_open_the_draft_before_marking_it_ready
         payload["phases"][phase_id]["side_effect"] = side_effect
         payload["phases"][phase_id]["workload"] = {"kind": "none"}
 
-    with pytest.raises(ValidationError, match="exactly one phase opens the draft"):
+    with pytest.raises(ValidationError, match="exactly one phase opens the draft pull request"):
         ScriptedAgentProfile.model_validate(payload)
 
 

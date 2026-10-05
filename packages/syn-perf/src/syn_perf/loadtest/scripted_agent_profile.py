@@ -200,6 +200,12 @@ SideEffect = Annotated[
 _NO_WORKING_TREE: Final = (MarkPullRequestReady, VerifyRemoteBranch)
 _TOUCHES_A_PR: Final = (OpenDraftPullRequest, MarkPullRequestReady)
 
+#: The PR side effects a profile may run, in phase order: none (platform tier),
+#: a draft nobody marks ready, or the real lifecycle.
+_PR_LIFECYCLES: Final = frozenset(
+    {(), ("open_draft_pull_request",), ("open_draft_pull_request", "mark_pull_request_ready")}
+)
+
 
 class ScriptedPhase(_Contract):
     """Everything the stub does in one phase."""
@@ -254,7 +260,6 @@ class ScriptedAgentProfile(_Contract):
         if self.fixture_repo.lower() in _FORBIDDEN_FIXTURE_REPOS:
             msg = f"{self.fixture_repo} cannot be the load-test fixture repository"
             raise ValueError(msg)
-        side_effects = [phase.side_effect for phase in self.phases.values()]
         if self.tier == "platform":
             touching = sorted(
                 phase_id
@@ -267,10 +272,16 @@ class ScriptedAgentProfile(_Contract):
                     "use push_branch and verify_remote_branch"
                 )
                 raise ValueError(msg)
-        opened = [i for i, e in enumerate(side_effects) if isinstance(e, OpenDraftPullRequest)]
-        readied = [i for i, e in enumerate(side_effects) if isinstance(e, MarkPullRequestReady)]
-        if len(opened) > 1 or (readied and not (opened and opened[0] < readied[0])):
-            msg = "exactly one phase opens the draft pull request, before any phase marks it ready"
+        lifecycle = tuple(
+            phase.side_effect.kind
+            for phase in self.phases.values()
+            if isinstance(phase.side_effect, _TOUCHES_A_PR)
+        )
+        if lifecycle not in _PR_LIFECYCLES:
+            msg = (
+                f"pull request side effects run {list(lifecycle)}; exactly one phase "
+                "opens the draft pull request, before the one that marks it ready"
+            )
             raise ValueError(msg)
         return self
 
