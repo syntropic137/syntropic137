@@ -113,8 +113,21 @@ def _assert_usable(secrets: SetupPhaseSecrets) -> None:
         assert token.expires_at > now, f"issued an expired token: {token.expires_at}"
 
 
-_UNSENT = [httpx.ConnectError("refused"), httpx.ConnectTimeout("no route")]
-_AMBIGUOUS = [_DROPPED, httpx.ReadTimeout("slow"), 502, 503, 504]
+_UNSENT = [
+    httpx.ConnectError("refused"),
+    httpx.ConnectTimeout("no route"),
+    httpx.PoolTimeout("no free connection"),
+]
+_AMBIGUOUS = [
+    _DROPPED,
+    httpx.ReadError("connection reset by peer"),
+    httpx.ReadTimeout("slow"),
+    httpx.WriteError("broken pipe"),
+    httpx.WriteTimeout("slow upload"),
+    502,
+    503,
+    504,
+]
 
 
 @pytest.mark.anyio

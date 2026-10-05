@@ -9,13 +9,13 @@ routine rather than rare.
 This sits under every request `GitHubAppClient` sends, so no call site decides
 anything about retrying. What it decides:
 
-- WHAT IS TRANSIENT: a connection that dropped, could not be made or timed
-  out reading, and a 502, 503 or 504. Never a 4xx - those are GitHub's answer
+- WHAT IS TRANSIENT: a connection that dropped, could not be made, or failed
+  or timed out reading or writing, and a 502, 503 or 504. Never a 4xx - those are GitHub's answer
   about the request, and asking again gets the same answer.
 - WHAT MAY BE SENT AGAIN: an idempotent method after any transient failure.
   Any other request only after a failure that proves GitHub never received
-  it - the connection could not be made. A dropped response, a read timeout
-  or a 5xx may come AFTER GitHub acted: a second comment is a second comment,
+  it - the connection could not be made. A dropped response, a read or write
+  error or timeout, or a 5xx may come AFTER GitHub acted: a second comment is a second comment,
   and a second token mint is a second live credential nobody holds and so
   nobody can revoke. No caller can opt out of that.
 - WHAT A CALLER SEES WHEN IT GIVES UP: `GitHubUnavailableError`, whatever the
@@ -42,9 +42,14 @@ logger = logging.getLogger(__name__)
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 _TRANSIENT_STATUSES = frozenset({502, 503, 504})
 #: Failed before a byte of the request reached GitHub: safe to send anything again.
-_UNSENT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
+#: No connection was made, or none was free in the pool to send it on.
+_UNSENT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 #: Failed after the request may have reached GitHub: safe only for idempotent methods.
-_AMBIGUOUS_ERRORS = (httpx.RemoteProtocolError, httpx.ReadTimeout)
+#: Whole httpx families, not a list of members: every read or write error and
+#: timeout, and a peer that broke the protocol, may come after GitHub acted. A
+#: member missing from a hand list (#1611: ReadError) escaped as an auth fault.
+#: `_UNSENT_ERRORS` is checked first, so its members never count as ambiguous.
+_AMBIGUOUS_ERRORS = (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError)
 
 
 @dataclass(frozen=True)
