@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationAttempt,
+    DelegationFailure,
+    DelegationFailureReason,
     FailureClassification,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
@@ -142,6 +145,53 @@ class PinnedCommitUnreachableError(NonZeroExitError):
             exit_code=exit_code,
         )
         self.phase_name = phase_name
+
+
+@dataclass(frozen=True)
+class CheckoutMismatch:
+    """One repository whose working tree is not where it was asked to be (#967)."""
+
+    #: `owner/name`, as the run's pin names it.
+    repository: str
+    pinned_sha: str
+    actual_sha: str
+    #: The branch it continues (#1513), which it is held to instead of its pin.
+    branch: str | None = None
+
+    def describe(self) -> str:
+        """The disagreement, in the terms the repository was held to."""
+        if self.branch is None:
+            return f"{self.repository} is at {self.actual_sha}, pinned to {self.pinned_sha}"
+        return (
+            f"{self.repository} is at {self.actual_sha}, not on {self.branch} at the head of"
+            f" origin/{self.branch} containing its pin {self.pinned_sha}"
+        )
+
+
+class CheckoutMismatchError(RuntimeError):
+    """A provisioned workspace is not at the commits its run pinned (#967).
+
+    THE OTHER HALF OF `PinnedCommitUnreachableError`. That one is the setup
+    script refusing a pin it cannot reach; this one is the workspace, read back
+    after setup said it succeeded, standing somewhere else. Either way the
+    agent is never given the workspace: an eval's runs are comparable only if
+    each started from the baseline it froze, and a run that started anywhere
+    else would be scored as if it had not.
+
+    `mismatches` names every repository that disagreed, not only the first, so
+    one failure tells an operator the whole extent of it. Classified as the
+    platform's failure (`failure_account`): the pin was sound and the
+    provisioning did not honour it.
+    """
+
+    def __init__(self, *, phase_name: str, mismatches: tuple[CheckoutMismatch, ...]) -> None:
+        listed = "; ".join(m.describe() for m in mismatches)
+        super().__init__(
+            f"Phase '{phase_name}' will not be run: its workspace is not checked out "
+            f"at the commits this run is pinned to ({listed})."
+        )
+        self.phase_name = phase_name
+        self.mismatches = mismatches
 
 
 class ExitStatusUnavailableError(RuntimeError):
@@ -397,6 +447,47 @@ class FailureAccount(NamedTuple):
     it (#1593): whether resuming is enough or an operator must act. Read off
     the exception's type, never its text. `None` for every other failure."""
 
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for
+    every failure that is not a failed delegation."""
+
+
+class DelegationFailedError(RuntimeError):
+    """A phase that required a delegate did not delegate successfully (#894)."""
+
+    def __init__(
+        self,
+        *,
+        phase_id: str,
+        required_delegate: str,
+        reason: DelegationFailureReason,
+        attempts: tuple[DelegationAttempt, ...] = (),
+        detail: str | None = None,
+    ) -> None:
+        self.phase_id = phase_id
+        #: The typed account every sink records (`failure_account`); the
+        #: message below is its rendering for `error`, never its source.
+        self.delegation_failure = DelegationFailure(
+            required_delegate=required_delegate, reason=reason, attempts=attempts, detail=detail
+        )
+        lines = [
+            f"Required delegation to {required_delegate} failed for phase {phase_id} "
+            f"({reason.value}): " + _summary(reason, required_delegate, detail)
+        ]
+        lines.extend(f"  - {attempt.describe()}" for attempt in attempts)
+        super().__init__("\n".join(lines))
+
+
+def _summary(reason: DelegationFailureReason, required_delegate: str, detail: str | None) -> str:
+    if reason is DelegationFailureReason.NOT_ATTEMPTED:
+        return (
+            f"the phase declared require_delegation but no delegate to "
+            f"{required_delegate} was launched."
+        )
+    if reason is DelegationFailureReason.FAILED:
+        return f"every delegate to {required_delegate} failed or never finished."
+    return "the delegation record could not be read" + (f": {detail}" if detail else ".")
+
 
 def failure_account(error: BaseException) -> FailureAccount:
     """What kind of failure `error` is, and what its phase said about it (#1357, #1372).
@@ -427,7 +518,13 @@ def failure_account(error: BaseException) -> FailureAccount:
     # Still `PLATFORM` - the work was never judged - but now saying which
     # platform failure: one a resume clears, or one only an operator can (#1593).
     if isinstance(error, UpstreamFailureError):
-        return FailureAccount(FailureClassification.PLATFORM, None, error.upstream_kind)
+        return FailureAccount(FailureClassification.PLATFORM, None, upstream=error.upstream_kind)
+    if isinstance(error, DelegationFailedError):
+        # Still `PLATFORM`: the platform observed it, the agent claimed nothing.
+        # What it adds is the typed account of which delegate failed (#894).
+        return FailureAccount(
+            FailureClassification.PLATFORM, None, delegation_failure=error.delegation_failure
+        )
     return FailureAccount(FailureClassification.PLATFORM, None)
 
 

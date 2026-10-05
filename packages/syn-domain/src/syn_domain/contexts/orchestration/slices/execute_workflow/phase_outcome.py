@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        DelegationFailure,
         PhaseResult,
         ReportedFailureReason,
     )
@@ -140,6 +141,9 @@ class PhaseFailure:
     differs from how the phase found it", and None for "nothing could tell us".
     Straight from `ObservedBranches.recorded`, because deciding it twice is how
     the two would come to disagree."""
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894), `None` for every
+    other failure. From `failure_account`, like the classification fields above."""
     phase_id: str | None = None
     """Which phase this describes, None when the execution died before one
     started. Carried so the command below names the phase this failure is
@@ -204,6 +208,7 @@ class PhaseFailure:
             classification=self.classification,
             reported_failure_reason=self.reported_failure_reason,
             upstream_failure_kind=self.upstream_failure_kind,
+            delegation_failure=self.delegation_failure,
         )
 
     def execution_result(
@@ -322,6 +327,7 @@ def failed_phase_outcome(
         classification=account.classification,
         reported_failure_reason=account.reported_reason,
         upstream_failure_kind=account.upstream,
+        delegation_failure=account.delegation_failure,
         observed_branches=observed.recorded if observed is not None else None,
         phase_id=phase_id,
         exit_code=exit_code,
