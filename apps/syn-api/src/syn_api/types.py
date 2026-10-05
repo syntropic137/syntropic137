@@ -80,11 +80,13 @@ from syn_api.inventory_types import TranscriptDeletionResponse as TranscriptDele
 from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdentityRequest
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
+from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
     DelegationFailure,
     EvalId,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
     SideEffectStatus,
@@ -741,6 +743,12 @@ class ExecutionDetail(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
+    """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
 
@@ -1358,6 +1366,22 @@ class PhaseActivityInfo(BaseModel):
     budget - not that there was none, and not zero.
     """
 
+    deadline: datetime | None = None
+    """When this phase is killed on its budget (#1546), in UTC: the moment its
+    workspace was ready plus ``timeout_seconds``.
+
+    Not ``started_at`` plus ``timeout_seconds``. The phase starts before its
+    workspace is provisioned and its clock only after, so that sum is early by
+    the provisioning time - which is why phases appeared to run past their
+    limit. This is the deadline the agent is told as ``SYN_PHASE_DEADLINE``,
+    to within the moment between the workspace being recorded ready and the
+    agent being dispatched. Like that variable it is in whole seconds,
+    truncated, so it is never later than the agent's.
+
+    ``None`` until the workspace is ready, when the budget is unknown, or for
+    a phase provisioned before this was recorded.
+    """
+
 
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""
@@ -1565,6 +1589,12 @@ class ExecutionDetailFull(BaseModel):
     Distinct from `unknown`, which is the word a phase writes to say it could
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
+    """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
     """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
@@ -2181,6 +2211,33 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
 
 
+class DbPoolHealth(BaseModel):
+    """One Postgres connection pool in this API process, at the moment of asking (#1583).
+
+    ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+    requests are queueing for a connection rather than for the database itself.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="What the pool serves, e.g. 'projections' or 'agent_events'.")
+    size: int = Field(description="Connections currently open.")
+    max_size: int = Field(description="Most connections the pool will open.")
+    in_use: int = Field(description="Connections checked out right now.")
+    waiting: int = Field(description="Callers blocked waiting for a connection right now.")
+
+    @classmethod
+    def snapshot(cls) -> list[DbPoolHealth]:
+        """Every open pool, read from in-process counters only.
+
+        Costs nothing and cannot hang on the database it describes, so /health
+        can always report it.
+        """
+        from syn_adapters.postgres_pool import pool_stats
+
+        return [cls.model_validate(stats, from_attributes=True) for stats in pool_stats()]
+
+
 class HealthResponse(_OmitsAbsentFields):
     """Payload of ``GET /health``.
 
@@ -2228,6 +2285,17 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Human-readable notes that need attention but do not degrade the "
         "instance. Omitted when there are none.",
+    )
+    db_pools: list[DbPoolHealth] | None = Field(
+        default=None,
+        description="Every open Postgres pool in this process, by name. Omitted when none "
+        "is open, e.g. in offline mode.",
+    )
+    cpu_throttling: CpuThrottling | None = Field(
+        default=None,
+        description="How often the API container hit its CPU limit (#1600). Always present "
+        "once the gate is ready, with status 'unknown' when the cgroup does not say; "
+        "omitted only while the gate is withholding the API.",
     )
 
 

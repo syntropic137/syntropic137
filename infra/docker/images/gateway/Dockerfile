@@ -51,6 +51,7 @@ COPY --from=dashboard-builder /workspace/apps/syn-dashboard-ui/dist /usr/share/n
 COPY infra/docker/images/gateway/nginx.conf /etc/nginx/conf.d/default.conf
 COPY infra/docker/images/gateway/security-headers.conf /etc/nginx/conf.d/security-headers.conf
 COPY infra/docker/images/gateway/rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
+COPY infra/docker/images/gateway/log-format.conf /etc/nginx/conf.d/00-log-format.conf
 
 # Install apache2-utils for htpasswd (used by auth entrypoint)
 RUN apk add --no-cache apache2-utils

@@ -11,6 +11,7 @@ from typing import Any
 import asyncpg
 from pydantic import BaseModel
 
+from syn_adapters import postgres_pool
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.record_match import holds
 from syn_domain.pagination import ProjectionRecord
@@ -52,8 +53,9 @@ class PostgresProjectionStore:
                     "SYN_OBSERVABILITY_DB_URL must be configured. Set it in your .env file."
                 )
             database_url = str(settings.syn_observability_db_url)
-            self._pool = await asyncpg.create_pool(
+            self._pool = await postgres_pool.create_pool(
                 database_url,
+                name="projections",
                 min_size=2,
                 max_size=10,
             )

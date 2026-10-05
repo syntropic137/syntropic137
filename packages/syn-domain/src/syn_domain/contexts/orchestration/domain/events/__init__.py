@@ -12,6 +12,9 @@ from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEven
 from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
     ArtifactsCollectedForPhaseEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+    CancelledWorkQuarantinedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ClaudePluginRegisteredEvent import (
     ClaudePluginRegisteredEvent,
 )
@@ -118,6 +121,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceTerminatedEvent im
 __all__ = [
     "AgentExecutionCompletedEvent",
     "ArtifactsCollectedForPhaseEvent",
+    "CancelledWorkQuarantinedEvent",
     "ClaudePluginRegisteredEvent",
     "CommandExecutedEvent",
     "CommandFailedEvent",

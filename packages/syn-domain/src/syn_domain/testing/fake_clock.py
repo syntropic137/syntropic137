@@ -14,6 +14,7 @@ minutes is one call.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from syn_domain.contexts.orchestration import AttemptClock
 from syn_shared.in_memory import assert_test_only
@@ -51,6 +52,10 @@ class FakeClock:
     #: path read the clock, and which reading does the handler get" an
     #: assertable property rather than a code-reading exercise.
     drifts_per_reading: float = 0.0
+    #: What the calendar said when `now` was zero. The wall reading moves with
+    #: `now`, so a deadline told to the agent can be checked against the one
+    #: the attempts are held to (#1546).
+    epoch: datetime = datetime(2026, 10, 3, 9, 0, tzinfo=UTC)
 
     def __post_init__(self) -> None:
         assert_test_only()
@@ -73,4 +78,7 @@ class FakeClock:
 
     def as_attempt_clock(self) -> AttemptClock:
         """This clock, in the shape `UpstreamRetryPolicy` takes."""
-        return AttemptClock(monotonic=self.monotonic, sleep=self.sleep)
+        return AttemptClock(monotonic=self.monotonic, sleep=self.sleep, wall=self.wall)
+
+    def wall(self) -> datetime:
+        return self.epoch + timedelta(seconds=self.now)

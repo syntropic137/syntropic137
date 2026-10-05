@@ -301,6 +301,18 @@ body.ui-feedback-mode-active * {
   transition: all 0.15s ease;
 }
 
+.ui-feedback-badge-hotkey {
+  min-width: 14px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  opacity: 0.85;
+}
+
 .ui-feedback-badge:hover {
   filter: brightness(1.1);
 }
@@ -894,13 +906,17 @@ body.ui-feedback-mode-active * {
    Feedback List / Tickets View
    ===================================================== */
 
+/* Wraps onto more rows rather than scrolling sideways, and never gives up height
+   to a long list below it: the modal is a capped-height flex column, and a
+   shrinkable bar is what squashed these buttons once tickets filled the body. */
 .ui-feedback-stats-bar {
   display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
   gap: 8px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--feedback-border);
   background-color: var(--feedback-background);
-  overflow-x: auto;
 }
 
 .ui-feedback-stat-btn {

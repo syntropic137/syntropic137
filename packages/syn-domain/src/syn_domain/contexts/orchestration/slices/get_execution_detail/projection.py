@@ -33,6 +33,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent imp
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
     ExecutionTagsRemovedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+    WorkspaceProvisionedForPhaseEvent,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -332,6 +335,26 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         status = SideEffectStatus.from_stored(event_data.get("reported_side_effects"))
         phase["reported_side_effects"] = None if status is None else status.value
 
+    async def on_workspace_provisioned_for_phase(
+        self, event_data: WorkspaceProvisionedForPhaseEvent
+    ) -> None:
+        """Handle WorkspaceProvisionedForPhase: the phase's clock starts here (#1546).
+
+        Overwrites, because a retried phase is provisioned again and runs on a
+        fresh clock.
+        """
+        event = WorkspaceProvisionedForPhaseEvent.model_validate(event_data)
+        existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
+        if not existing:
+            return
+        phases = existing.get("phases", [])
+        found = self._find_phase(phases, event.phase_id)
+        if found is None:
+            return
+        _, phase = found
+        phase["provisioned_at"] = event.provisioned_at.isoformat()
+        await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
+
     @staticmethod
     def _track_artifact(existing: dict[str, Any], artifact_id: str | None) -> None:
         """Add an artifact ID to the execution detail if not already tracked."""
@@ -485,6 +508,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 "error_message": event_data.get("error_message"),
                 "failure_classification": classification.value,
                 "reported_failure_reason": reported_value,
+                "quarantined_refs": event_data.get("quarantined_refs") or [],
                 "delegation_failure": delegation_value,
                 "completed_phases": event_data.get("completed_phases", 0),
                 "total_phases": event_data.get("total_phases", 0),
@@ -500,6 +524,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # and stranding the whole read model.
             existing["failure_classification"] = classification.value
             existing["reported_failure_reason"] = reported_value
+            # Where the failed phase's unpushed work landed (#1547). New events
+            # only carry it, so no replay is needed: older rows read as none.
+            existing["quarantined_refs"] = event_data.get("quarantined_refs") or []
             existing["delegation_failure"] = delegation_value
             existing["completed_phases"] = self._completed_phases_after(
                 event_data, existing.get("completed_phases", 0)

@@ -34,6 +34,10 @@ export interface UseFeedbackFormResult {
   handleClose: () => void;
 }
 
+/** What a fresh form starts as, and what it returns to after submit or close. */
+export const DEFAULT_FEEDBACK_TYPE: FeedbackType = 'bug';
+export const DEFAULT_PRIORITY: Priority = 'low';
+
 function resetFormState(
   setComment: (v: string) => void,
   setFeedbackType: (v: FeedbackType) => void,
@@ -41,8 +45,8 @@ function resetFormState(
   setVoiceNoteBlob: (v: Blob | null) => void,
 ): void {
   setComment('');
-  setFeedbackType('bug');
-  setPriority('medium');
+  setFeedbackType(DEFAULT_FEEDBACK_TYPE);
+  setPriority(DEFAULT_PRIORITY);
   setVoiceNoteBlob(null);
 }
 
@@ -50,8 +54,8 @@ export function useFeedbackForm({
   locationContext, addMedia, submitFeedback, closeModal,
 }: UseFeedbackFormOptions): UseFeedbackFormResult {
   const [comment, setComment] = useState('');
-  const [feedbackType, setFeedbackType] = useState<FeedbackType>('bug');
-  const [priority, setPriority] = useState<Priority>('medium');
+  const [feedbackType, setFeedbackType] = useState<FeedbackType>(DEFAULT_FEEDBACK_TYPE);
+  const [priority, setPriority] = useState<Priority>(DEFAULT_PRIORITY);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voiceNoteBlob, setVoiceNoteBlob] = useState<Blob | null>(null);

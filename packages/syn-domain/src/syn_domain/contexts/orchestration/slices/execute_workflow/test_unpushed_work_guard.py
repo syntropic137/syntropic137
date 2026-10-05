@@ -62,6 +62,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks im
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_notice import (
+    quarantined_refs,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
     _read_only_mount,
@@ -73,6 +76,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
     _DispatchContext,
+)
+from syn_domain.contexts.orchestration.slices.notify_quarantine.value_objects import (
+    QuarantineNotice,
 )
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
@@ -580,6 +586,35 @@ async def test_an_unpushed_merge_commit_fails_the_phase_and_survives(clone: _Clo
     assert "1 commit(s) on no remote" in message
     # And nothing anyone reviews moved.
     assert clone.origin_refs()[f"refs/heads/{_BRANCH}"] == branch_head_before
+
+
+async def test_a_merge_of_two_remote_branches_is_summarised_against_its_own_branch(
+    clone: _Clone,
+) -> None:
+    """The diffstat base is the branch the work tracks, not whichever remote tip came first.
+
+    A merge gives the unpushed history two remote ancestors, and `rev-list
+    --boundary` lists them in no order that says which one is the PR's. The
+    summary must include the merged-in work and leave out what the branch
+    already had on its remote.
+    """
+    clone.git("checkout", "-b", "other", "origin/main")
+    clone.commit("other.py", "on another remote branch\n")
+    clone.git("push", "origin", "other")
+    clone.git("checkout", _BRANCH)
+    clone.commit("already_pushed.py", "on the PR branch already\n")
+    clone.git("push", "origin", _BRANCH)
+    clone.git("merge", "--no-ff", "-m", "Merge origin/other", "origin/other")
+    clone.commit("work.py", "the phase wrote this\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    (landed,) = raised.value.quarantined
+    assert landed.diffstat is not None
+    assert "other.py" in landed.diffstat and "work.py" in landed.diffstat
+    assert "already_pushed.py" not in landed.diffstat
+    assert "2 files changed" in landed.diffstat
 
 
 async def test_a_plain_commit_that_was_never_pushed_is_saved_too(clone: _Clone) -> None:
@@ -1212,7 +1247,14 @@ class _PhaseRun:
     told and what teardown ran, never about the guard's return value.
     """
 
-    def __init__(self, workspace: object, *, also_as: str | None = None) -> None:
+    def __init__(
+        self,
+        workspace: object,
+        *,
+        also_as: str | None = None,
+        execution_repository: object | None = None,
+        owed_cancelled_work: object | None = None,
+    ) -> None:
         from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
         from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
             ExecutionTodoProjection,
@@ -1226,7 +1268,7 @@ class _PhaseRun:
         self.phase_results: list[PhaseResult] = []
         self.session = AsyncMock()
         self.processor = WorkflowExecutionProcessor(
-            execution_repository=AsyncMock(),
+            execution_repository=execution_repository or AsyncMock(),  # type: ignore[arg-type]
             session_repository=AsyncMock(),
             workspace_service=MagicMock(),
             artifact_repository=AsyncMock(),
@@ -1238,6 +1280,7 @@ class _PhaseRun:
             prompt_builder=AsyncMock(return_value="prompt"),
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+            owed_cancelled_work=owed_cancelled_work,  # type: ignore[arg-type]
         )
         # `also_as` puts the SAME workspace behind a second phase id, which is
         # what lets one dirty tree be completed twice under two declarations.
@@ -3154,6 +3197,21 @@ _STALE = ExecutionResult(
 )
 
 
+async def test_a_rescued_ref_is_reported_at_the_sha_it_actually_holds(clone: _Clone) -> None:
+    """#1547: the PR is told the SHA to fetch, and after a workflow-safe rescue
+    that is the rescue commit - read back from the origin, through the same
+    converter the failure event is built with, not assumed."""
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    (ref,) = quarantined_refs(raised.value.quarantined, None, ["acme/" + clone.name])
+    assert ref.ref == _QUARANTINE_REF
+    assert ref.commit == clone.origin_refs()[_QUARANTINE_REF]
+
+
 class _RefusesTheSecondPush(_RenewsCredential):
     """The real workspace, except the workflow-safe push is refused as well."""
 
@@ -3483,7 +3541,10 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
     run.processor._artifact_repo = artifacts  # type: ignore[assignment]
     all_artifact_ids: list[str] = []
 
+    run.processor._journal.append = AsyncMock()  # type: ignore[method-assign]
+
     await run.processor._cancel_execution(
+        run.aggregate,  # type: ignore[arg-type]
         _EXECUTION_ID,
         "wf-1",
         run.phase_results,
@@ -3495,6 +3556,159 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
 
     artifact = _the_patch_artifact(artifacts)
     assert artifact.id in all_artifact_ids  # type: ignore[attr-defined]
+    # The landed ref is TOLD to the aggregate, not only written into prose:
+    # that command is what becomes the event the PR notice is posted from.
+    (call,) = run.aggregate.record_cancelled_work.call_args_list
+    (landed,) = call.args[0].quarantined
+    assert call.args[0].phase_id == _PHASE_ID
+    assert landed.ref == _QUARANTINE_REF
+    assert landed.ref in clone.origin_refs()
+    run.processor._journal.append.assert_awaited_with(run.aggregate)
+    # The diffstat is of what LANDED - the workflow-safe rescue commit, so the
+    # refused workflow files are absent - and it reaches the PR's comment.
+    assert landed.diffstat is not None
+    assert "feature.py" in landed.diffstat and "notes.md" in landed.diffstat
+    assert "4 files changed, 16 insertions(+)" in landed.diffstat
+    assert ".github/workflows" not in landed.diffstat
+    body = QuarantineNotice(
+        execution_id=_EXECUTION_ID,
+        phase_id=_PHASE_ID,
+        failed_at=datetime.now(UTC),
+        quarantined=landed,
+    ).body()
+    assert landed.diffstat in body
+
+
+@pytest.mark.parametrize("failure", ["none", "refused", "both_refused", "delete_fails"])
+async def test_a_cancel_through_the_processor_tells_its_pr_once_from_the_stored_event(
+    clone: _Clone, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole cancel path, with nothing supplied that the processor should produce.
+
+    ``refused``: the store refuses every append of what landed, so the
+    processor owes it; it recovers, and the processor's NEXT run - another
+    execution entirely - is what appends it.
+
+    ``both_refused``: the owed store refuses too. The result names the refs
+    as unrecorded instead of reading as a handled cancel, and the next run
+    still appends them once the event store recovers.
+
+    ``delete_fails``: the owed row survives the append that settled it, so a
+    later run settles it again. That must add no second fact.
+
+    A real aggregate is started and cancelled on a real journal; the
+    processor's own save lands the ref on the clone's origin; the processor
+    appends what landed; the coordinator reads that stored event and tells the
+    PR. Remove the processor's append and no event reaches the store, so the
+    post never happens - the failure #1547's re-verification named.
+    """
+    from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
+    from event_sourcing.subscriptions.coordinator import SubscriptionCoordinator
+
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        CancelExecutionCommand,
+        StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        PhaseDefinition,
+        SourceCommit,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+        OWED_CANCELLED_WORK,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_quarantine import (
+        QuarantineNoticeProcessManager,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_quarantine.test_quarantine_notice import (
+        _Commenter,
+        _Forge,
+        _LiveStore,
+        _replay_posts_nothing,
+        _settled,
+        _Stream,
+    )
+
+    _a_phase_that_edited_a_workflow(clone)
+    store = _LiveStore()
+    stream = _Stream(store)
+    owed = InMemoryProjectionStore()
+    run = _PhaseRun(clone.workspace, execution_repository=stream, owed_cancelled_work=owed)
+    run.processor._artifact_repo = _SavesArtifacts()  # type: ignore[assignment]
+    commenter = _Commenter(repository=f"acme/{_REPO}")
+    manager = QuarantineNoticeProcessManager(
+        commenter=commenter, store=InMemoryProjectionStore(), branches=_Forge(open_pr=42)
+    )
+    checkpoints = MemoryCheckpointStore()
+    coordinator = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=checkpoints, projections=[manager]
+    )
+    runner = asyncio.create_task(coordinator.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.start_execution(
+            StartExecutionCommand(
+                execution_id=_EXECUTION_ID,
+                workflow_id="wf-1",
+                workflow_name="Cancelled with work",
+                total_phases=1,
+                inputs={},
+                phase_definitions=[PhaseDefinition(phase_id=_PHASE_ID, name="Make", order=1)],
+                source_commits=[SourceCommit(repository=f"acme/{_REPO}")],
+            )
+        )
+        await run.processor._journal.open(aggregate)
+        aggregate.cancel_execution(
+            CancelExecutionCommand(execution_id=_EXECUTION_ID, phase_id=_PHASE_ID, reason="stop")
+        )
+        await run.processor._journal.append(aggregate)
+        assert stream.recorded("CancelledWorkQuarantined") == 0
+        stream.rejections = 0 if failure == "none" else 99
+        if failure == "both_refused":
+            monkeypatch.setattr(owed, "save", AsyncMock(side_effect=RuntimeError("down")))
+        if failure == "delete_fails":
+            monkeypatch.setattr(owed, "delete", AsyncMock(side_effect=RuntimeError("down")))
+
+        result = await run.processor._cancel_execution(
+            aggregate,
+            _EXECUTION_ID,
+            "wf-1",
+            run.phase_results,
+            [],
+            datetime.now(UTC),
+            cancel_reason="stop",
+            phase_id=_PHASE_ID,
+        )
+
+        assert result.status == "cancelled"
+        assert _QUARANTINE_REF in clone.origin_refs()
+        unrecorded = [ref.ref for ref in result.unrecorded_work]
+        assert unrecorded == ([_QUARANTINE_REF] if failure == "both_refused" else [])
+        if failure != "none":
+            assert stream.recorded("CancelledWorkQuarantined") == 0
+            owed_rows = 0 if failure == "both_refused" else 1
+            assert len(await owed.get_all(OWED_CANCELLED_WORK)) == owed_rows
+            stream.rejections = 0
+            await run.processor.run("wf-2", "Next", [], {}, "exec-next")
+        if failure == "delete_fails":
+            assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
+            monkeypatch.undo()
+            await run.processor.run("wf-3", "Later", [], {}, "exec-later")
+        assert await owed.get_all(OWED_CANCELLED_WORK) == []
+        assert stream.recorded("CancelledWorkQuarantined") == 1
+        await asyncio.wait_for(_settled(coordinator, checkpoints, len(stream.history)), 5)
+        assert commenter.posts == 1
+        (body,) = commenter.comments.values()
+        assert _QUARANTINE_REF in body and f"`{_PHASE_ID}`" in body
+    finally:
+        await coordinator.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+    await _replay_posts_nothing(store, manager, commenter)
 
 
 def test_records_come_from_the_gate_error_or_the_save_and_never_both() -> None:

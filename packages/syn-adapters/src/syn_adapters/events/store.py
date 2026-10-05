@@ -16,10 +16,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import asyncpg
-
+from syn_adapters import postgres_pool
 from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
 from syn_adapters.events.store_helpers import (
     RESERVED_OBSERVATION_KEYS,
@@ -40,6 +39,9 @@ from syn_adapters.events.store_write import (
     insert_one as _insert_one,
 )
 from syn_domain import tool_call_counts
+
+if TYPE_CHECKING:
+    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +105,9 @@ class AgentEventStore:
         if self._initialized:
             return
 
-        self.pool = await asyncpg.create_pool(
+        self.pool = await postgres_pool.create_pool(
             self.conn_string,
+            name="agent_events",
             min_size=5,
             max_size=20,
         )
