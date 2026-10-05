@@ -158,7 +158,7 @@ words apart:
 | `phases[].deliverable_recovered` | `true` when this phase's deliverable was recovered from its last message (see below) |
 | `phases[].reported_side_effects` | What this phase's agent reported, or `null` |
 | `phases[].error_message` | Why this phase failed, in the platform's words, or `null` if it did not fail. For a failed phase it is the same text as the execution's `error_message`. When the agent's harness reported an upstream fault, the text ends with what it asks of you: `capacity` and `rate_limited` are transient and the phase is resumable; `auth` needs an operator to fix the credentials |
-| `phases[].failure_classification` | What the platform concluded about this phase's failure, from the same values as the execution's `failure_classification`. `unclassified` on a phase that did not fail |
+| `phases[].failure_classification` | What the platform concluded about this phase's failure, from the same values as the execution's `failure_classification`. `null` on a phase that did not fail; `unclassified` on a failed phase recorded before the field existed |
 | `phases[].reported_failure_reason` | What this phase's agent wrote as `failure_reason`, or `null`. A quotation, never a classification |
 
 `deliverable_produced` and `status` are independent on purpose. A run can fail

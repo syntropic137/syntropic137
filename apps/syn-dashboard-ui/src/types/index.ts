@@ -439,9 +439,9 @@ export interface PhaseExecutionDetail {
   /**
    * What the platform classified THIS phase's failure as (#1592). A phase
    * carries its own, so a card never borrows the run's for a phase it was not
-   * about. Optional: a server that predates the field sends none.
+   * about. Null on a phase that did not fail; absent from an older server.
    */
-  failure_classification?: FailureClassification
+  failure_classification?: FailureClassification | null
   /** What this phase SAID caused its failure - attribution only, never a colour. */
   reported_failure_reason?: ReportedFailureReason | null
 }

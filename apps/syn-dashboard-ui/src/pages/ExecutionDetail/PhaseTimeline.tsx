@@ -59,7 +59,7 @@ const statusIconColors: Record<string, string> = {
  * another. A phase that did not fail returns its status untouched.
  */
 function phaseTone(phase: Phase): string {
-  return outcomeTone(phase.status, phase.failure_classification)
+  return outcomeTone(phase.status, phase.failure_classification ?? undefined)
 }
 
 /** Why this phase failed: the server's text and what the phase itself said. */
