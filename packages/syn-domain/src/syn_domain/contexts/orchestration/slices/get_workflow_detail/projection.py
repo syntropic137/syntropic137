@@ -209,6 +209,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             requires_repos=event_data.get("requires_repos", True),
             tags=TagSet.recorded(event_data.get("tags") or []).values,
             default_eval_id=event_data.get("default_eval_id"),
+            package_name=event_data.get("package_name"),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 

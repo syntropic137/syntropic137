@@ -89,6 +89,7 @@ _EVENT_FIELDS = [
     "skills",
     "version",
     "source_digest",
+    "package_name",
 ]
 
 
@@ -234,6 +235,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # version whose content changed underneath the same version string.
         self._package_version: str | None = None
         self._source_digest: str | None = None
+        self._package_name: str | None = None
         # WHY (issue #967): copied onto each execution at launch. Part of the
         # definition, so a reinstall replaces it like every other field.
         self._tags: TagSet = TagSet()
@@ -323,6 +325,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         """Resolved source commit SHA of the installed definition (issue #822)."""
         return self._source_digest
 
+    @property
+    def package_name(self) -> str | None:
+        """Package that installed this definition (#1588), or None."""
+        return self._package_name
+
     # =========================================================================
     # COMMAND HANDLERS - Validate business rules, emit events
     # =========================================================================
@@ -374,6 +381,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             default_eval_id=_eval_id_str(command.default_eval_id),
             version=command.version,
             source_digest=command.source_digest,
+            package_name=command.package_name,
         )
 
         self._apply(event)
@@ -432,6 +440,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             self._default_eval_id,
             self._package_version,
             self._source_digest,
+            self._package_name,
         )
 
     @staticmethod
@@ -455,6 +464,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             _eval_id_str(command.default_eval_id),
             command.version,
             command.source_digest,
+            command.package_name,
         )
 
     def is_identical_to(self, command: UpdateWorkflowTemplateCommand) -> bool:
@@ -562,6 +572,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             default_eval_id=_eval_id_str(command.default_eval_id),
             version=command.version,
             source_digest=command.source_digest,
+            package_name=command.package_name,
         )
 
         self._apply(event)
@@ -680,6 +691,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # so an install carrying a version is never mistaken for a reinstall.
         self._package_version = data.get("version")
         self._source_digest = data.get("source_digest")
+        self._package_name = data.get("package_name")
 
         # WHY (issue #967): legacy events have no tags; recorded() because the
         # event already holds validated tags and replay must not re-judge them.

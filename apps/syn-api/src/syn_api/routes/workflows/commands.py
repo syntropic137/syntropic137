@@ -812,6 +812,7 @@ async def create_workflow_from_yaml(
     name_override: str | None = None,
     version: str | None = None,
     source_digest: str | None = None,
+    package_name: str | None = None,
     force: bool = False,
 ) -> Result[_YamlCreateOutcome, WorkflowError]:
     """Create a workflow template from raw YAML content.
@@ -859,6 +860,7 @@ async def create_workflow_from_yaml(
         name_override=name_override,
         version=version,
         source_digest=source_digest,
+        package_name=package_name,
         force=force,
     )
 
@@ -912,6 +914,7 @@ async def create_workflow_from_yaml_endpoint(
     workflow_id: str | None = None,
     version: str | None = None,
     source_digest: str | None = None,
+    package_name: str | None = None,
     force: bool = False,
 ) -> CreateWorkflowResponse:
     """Create a workflow template by uploading raw YAML.
@@ -931,6 +934,10 @@ async def create_workflow_from_yaml_endpoint(
     refused with 409 unless ``force`` is set, and a matching version that
     resolves to a different digest is refused regardless of how it looks,
     because that is the signature of a republished version.
+
+    ``package_name`` records which package installed the definition (#1588).
+    It is read back on ``GET /workflows/{id}`` so ``syn workflow install
+    --prune`` archives only what the server attributes to that package.
     """
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type not in _ACCEPTED_YAML_CONTENT_TYPES:
@@ -968,6 +975,7 @@ async def create_workflow_from_yaml_endpoint(
             name_override=name,
             version=version,
             source_digest=source_digest,
+            package_name=package_name,
             force=force,
         )
     except ClaudePluginError as e:

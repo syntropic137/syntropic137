@@ -180,6 +180,10 @@ export interface paths {
          *     refused with 409 unless ``force`` is set, and a matching version that
          *     resolves to a different digest is refused regardless of how it looks,
          *     because that is the signature of a republished version.
+         *
+         *     ``package_name`` records which package installed the definition (#1588).
+         *     It is read back on ``GET /workflows/{id}`` so ``syn workflow install
+         *     --prune`` archives only what the server attributes to that package.
          */
         post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
         delete?: never;
@@ -8042,6 +8046,8 @@ export interface components {
             tags?: string[];
             /** Default Eval Id */
             default_eval_id?: string | null;
+            /** Package Name */
+            package_name?: string | null;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -8482,6 +8488,7 @@ export interface operations {
                 workflow_id?: string | null;
                 version?: string | null;
                 source_digest?: string | null;
+                package_name?: string | null;
                 force?: boolean;
             };
             header?: never;

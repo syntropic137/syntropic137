@@ -114,6 +114,14 @@ _openapi:
           resolves to a different digest is refused regardless of how it looks,
 
           because that is the signature of a republished version.
+
+
+          ``package_name`` records which package installed the definition
+          (#1588).
+
+          It is read back on ``GET /workflows/{id}`` so ``syn workflow install
+
+          --prune`` archives only what the server attributes to that package.
         heading: create-workflow-from-yaml-endpoint
 ---
 

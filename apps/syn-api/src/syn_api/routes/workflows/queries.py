@@ -109,6 +109,9 @@ class WorkflowResponse(BaseModel):
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     default_eval_id: str | None = None
     """The eval a launch naming none joins (#967). Future runs only."""
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None when it was not
+    installed from a package or predates install provenance."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -297,6 +300,7 @@ async def get_workflow(
             requires_repos=detail.requires_repos,
             tags=list(detail.tags),
             default_eval_id=detail.default_eval_id,
+            package_name=detail.package_name,
         )
     )
 
@@ -834,6 +838,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         requires_repos=detail.requires_repos,
         tags=list(detail.tags),
         default_eval_id=detail.default_eval_id,
+        package_name=detail.package_name,
     )
 
 
