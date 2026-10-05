@@ -208,35 +208,38 @@ phases:
   # written out here instead: two extra fix/reverify pairs, the same prompts
   # under new ids. That makes the bound part of the definition - three rounds
   # in total, never more - and every round a phase on the execution, so the
-  # round count is visible there.
+  # round count is visible there. Each round has its own prompt file because a
+  # prompt may name only phases that have already run; the files differ only in
+  # their "Which round this is" section, and the test below keeps them so.
   #
   # A round whose predecessor CERTIFIED changes nothing and certifies on the
-  # same SHA; both prompts say so and make that path cheap. The phase ids are
-  # load-bearing: the prompts find "the latest verdict" by looking for
-  # `reverify_3/`, `reverify_2/`, `reverify/` in that order, and
-  # `finalize_pr` reads whichever is newest. Adding a round means adding a pair
-  # here AND extending that list in phases/fix.md, phases/reverify.md and
-  # phases/finalize_pr.md; scripts/tests/test_implement_v3_repair_rounds.py
-  # fails if they disagree.
+  # same SHA; the prompts say so and make that path cheap. `finalize_pr` reads
+  # the newest of `reverify_3/`, `reverify_2/`, `reverify/`. Adding a round
+  # means a pair here, two prompt files, and a line in phases/finalize_pr.md;
+  # scripts/tests/test_implement_v3_repair_rounds.py fails if they disagree.
   - <<: *fix_round
     id: fix_2
     name: Address what verification found (round 2)
     order: 6
+    prompt_file: phases/fix_2.md
 
   - <<: *reverify_round
     id: reverify_2
     name: Confirm the fix closed what verification found (round 2)
     order: 7
+    prompt_file: phases/reverify_2.md
 
   - <<: *fix_round
     id: fix_3
     name: Address what verification found (round 3)
     order: 8
+    prompt_file: phases/fix_3.md
 
   - <<: *reverify_round
     id: reverify_3
     name: Confirm the fix closed what verification found (round 3)
     order: 9
+    prompt_file: phases/reverify_3.md
 
   - id: finalize_pr
     name: Open the pull request

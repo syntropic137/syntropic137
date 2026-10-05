@@ -193,19 +193,42 @@ class TestEveryRoundIsVisibleAndWired:
             "finalize_pr",
         ]
 
-    def test_prompts_name_every_round(
+    def test_each_round_reads_the_round_before_it(
         self, installed: tuple[list[PhaseDefinition], dict[str, str]]
     ) -> None:
-        phases, prompts = installed
-        fixes = [p.phase_id for p in phases if p.phase_id.startswith("fix")]
-        reverifies = [p.phase_id for p in phases if p.phase_id.startswith("reverify")]
-        for phase in reverifies:
-            assert f"artifacts/input/{phase}/reverify.md" in prompts["finalize_pr"], phase
-        for phase in fixes:
-            assert f"artifacts/input/{phase}/fix.md" in prompts["reverify"], phase
-        # A fix round reads the verdict of the round before it.
-        for phase in ["verify", *reverifies[:-1]]:
-            assert f"artifacts/input/{phase}/{phase.split('_')[0]}.md" in prompts["fix"], phase
-        # One prompt file per role: every round installs the same text.
-        assert prompts["fix_2"] == prompts["fix_3"] == prompts["fix"]
-        assert prompts["reverify_2"] == prompts["reverify_3"] == prompts["reverify"]
+        _, prompts = installed
+        acts_on = {
+            "fix": "verify/verify.md",
+            "fix_2": "reverify/reverify.md",
+            "fix_3": "reverify_2/reverify.md",
+        }
+        for fix, verdict in acts_on.items():
+            assert f"artifacts/input/{verdict}" in prompts[fix], fix
+            assert f"Round: {fix[-1] if fix != 'fix' else 1} of {_ROUNDS}" in prompts[fix], fix
+        for n, (fix, reverify) in enumerate(
+            [("fix", "reverify"), ("fix_2", "reverify_2"), ("fix_3", "reverify_3")], start=1
+        ):
+            assert f"artifacts/input/{fix}/fix.md" in prompts[reverify], reverify
+            assert f"Round {n} of {_ROUNDS}" in prompts[reverify], reverify
+        for reverify in ("reverify", "reverify_2", "reverify_3"):
+            assert f"artifacts/input/{reverify}/reverify.md" in prompts["finalize_pr"], reverify
+
+
+@pytest.mark.parametrize(
+    ("base", "rounds"), [("fix", ("fix_2", "fix_3")), ("reverify", ("reverify_2", "reverify_3"))]
+)
+def test_round_prompts_differ_only_in_their_round_section(
+    base: str, rounds: tuple[str, ...]
+) -> None:
+    """Each round has its own file because a prompt may only name phases that
+    already ran (`check_workflow_definitions`). Everything else is one prompt,
+    so an edit to `fix.md` that is not made to `fix_2.md` fails here."""
+
+    def body(phase: str) -> str:
+        text = (_WORKFLOW.parent / "phases" / f"{phase}.md").read_text()
+        start = text.index("## Which round this is\n")
+        end = text.index("\n## ", start + 1)
+        return text[:start] + text[end:]
+
+    for phase in rounds:
+        assert body(phase) == body(base), f"{phase}.md has drifted from {base}.md"

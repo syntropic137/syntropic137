@@ -4,11 +4,11 @@ $ARGUMENTS
 
 ## Which round this is
 
-**Round 1 of 3.** This prompt re-verifies after each of up to three fix
-rounds. This round's fix report is **`artifacts/input/fix/fix.md`** (flat
-alias `artifacts/input/fix.md`); the verdict that fix round acted on is
-`artifacts/input/verify/verify.md`. Read the fix report first. It says what the previous phase did about
-the defects still open. Write `Round: 1 of 3` as your report's second line.
+**Round 3 of 3.** **This is the final round**: there is no fourth. This prompt re-verifies after each of up to three fix
+rounds. This round's fix report is **`artifacts/input/fix_3/fix.md`** (flat
+alias `artifacts/input/fix_3.md`); the verdict that fix round acted on is
+`artifacts/input/reverify_2/reverify.md`. Read the fix report first. It says what the previous phase did about
+the defects still open. Write `Round: 3 of 3` as your report's second line.
 
 ## Check out the candidate you will certify
 
