@@ -85,6 +85,9 @@ class RescueAttempt:
     failure: str | None = None
     #: The second push's result; None when it was never made.
     second: ExecutionResult | None = None
+    #: The workflow-safe commit the second push sent, set before it is pushed,
+    #: so a ref the rescue landed is reported at the SHA it holds (#1547).
+    commit: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +133,7 @@ async def push_without_workflows(
         return None
     if commit is None:
         return None
+    attempt.commit = commit
     # The SAME ref, still without force: the refused push never created it.
     return await push(workspace, repo, commit=commit, ref=ref)
 

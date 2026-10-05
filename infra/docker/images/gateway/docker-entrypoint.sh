@@ -138,7 +138,7 @@ location /api/v1/ {
     proxy_read_timeout 300s;
     proxy_connect_timeout 75s;
 
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https://fastapi.tiangolo.com; connect-src 'self' wss: ws:; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'self';" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://fastapi.tiangolo.com; connect-src 'self' wss: ws:; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'self';" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;

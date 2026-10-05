@@ -167,6 +167,17 @@ describe("install provenance (issue #822)", () => {
     expect(url).toContain("source_digest=abc123");
   });
 
+  it("sends the installing package name, which prune reads back (issue #1588)", async () => {
+    mockFetch.mockResolvedValue(created());
+
+    await installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })], {
+      version: "0.3.0",
+      packageName: "implement-v3",
+    });
+
+    expect(lastCall().url).toContain("package_name=implement-v3");
+  });
+
   it("does not send force unless it was asked for", async () => {
     mockFetch.mockResolvedValue(created());
 

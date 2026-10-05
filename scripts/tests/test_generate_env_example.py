@@ -126,3 +126,14 @@ def test_round_trips_through_the_real_dotenv_loader(tmp_path: Path) -> None:
 
     for i, (name, value) in enumerate(_VALUES):
         assert loaded[f"V{i}"] == value, f"{name} did not round-trip through dotenvy"
+
+
+def test_every_infra_setting_reaches_infra_env_example() -> None:
+    """A field outside section_map used to be dropped without a word (#1600)."""
+    from generate_env_example import generate_infra_env_example
+
+    from syn_shared.settings.infra import InfraSettings
+
+    rendered = generate_infra_env_example()
+    for name in InfraSettings.model_fields:
+        assert f"\n{name.upper()}=" in rendered, name

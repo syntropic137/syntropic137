@@ -1,15 +1,15 @@
 """A trigger joins the eval that was the default when it was ACCEPTED (#967).
 
-The dispatcher accepts a trigger, then queues its task behind the semaphore
-for as long as the execution ahead of it runs. A workflow's default eval can
+The dispatcher accepts a trigger, then queues its task for an execution-budget
+slot for as long as the execution ahead of it runs. A workflow's default eval can
 change in that window. The run must still join the eval, at the SHAs, that
 were in force when the trigger was accepted: the dispatch projection has
 already recorded the trigger as dispatched, and a run whose eval depended on
 queue timing would be a different experiment for a reason nobody chose.
 
-The dispatcher and its semaphore are real; only the handler is a double, and
+The dispatcher and its budget are real; only the handler is a double, and
 it records the command it was handed. Determinism comes from ``asyncio.Event``
-and the real semaphore, never from sleeps.
+and the real budget, never from sleeps.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import EvalId, ExecuteWorkflowCommand, LaunchEval
-from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, EvalSelection
 from syn_domain.contexts.orchestration._shared.repository_baseline import RepositoryBaseline
 
 pytestmark = pytest.mark.unit
@@ -41,7 +41,7 @@ class _WorkflowDefault:
         self.eval_id = "eval-a"
         self.sha = _SHA_A
 
-    async def launch_eval_for(self, _workflow_id: str) -> LaunchEval:
+    async def launch_eval_for(self, _workflow_id: str, _choice: EvalChoice) -> LaunchEval:
         return LaunchEval(
             EvalId(self.eval_id),
             EvalSelection.WORKFLOW_DEFAULT,

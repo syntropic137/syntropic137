@@ -17,13 +17,17 @@ from uuid import uuid4
 
 from event_sourcing import ConcurrencyConflictError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_api._wiring import (
     ensure_connected,
     get_eval_repo,
     get_projection_mgr,
     get_workflow_repo,
+)
+from syn_api.routes.executions.direct_start import (
+    queue_direct_start,
+    record_execution_request,
 )
 from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
@@ -36,7 +40,6 @@ from syn_api.types import (
     Result,
     WorkflowError,
 )
-from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
@@ -45,6 +48,7 @@ from syn_domain.contexts.orchestration import (
     EvalUnavailableError,
     LaunchEval,
     RepositoryOutsideBaselineError,
+    RequestExecutionCommand,
     SkillError,
     SkillRef,
     TagSet,
@@ -179,11 +183,19 @@ def _check_missing_declarations(
     workflow: WorkflowTemplateAggregate,
     merged: dict[str, str],
 ) -> None:
-    """Raise 422 if any required InputDeclaration (with no default) is absent."""
+    """Raise 422 if any required InputDeclaration (with no default) is absent or blank.
+
+    The declarations are the workflow's required ones, so a stored definition
+    that predates its ``task`` declaration is still held to it (PC-66).
+
+    Blank counts as absent: ``-t ""`` or ``--input task=" "`` supplies the key
+    and nothing else, and a required input rendered empty runs the workflow on
+    nothing (PC-66).
+    """
     missing = [
         decl.name
-        for decl in workflow.input_declarations
-        if decl.required and decl.default is None and decl.name not in merged
+        for decl in workflow.required_input_declarations
+        if decl.required and decl.default is None and not merged.get(decl.name, "").strip()
     ]
     if not missing:
         return
@@ -245,7 +257,11 @@ class ExecuteWorkflowRequest(BaseModel):
     )
     task: str | None = Field(
         default=None,
-        description="Primary task description -- substituted for $ARGUMENTS in phase prompts.",
+        description=(
+            "Primary task description -- substituted for $ARGUMENTS in phase prompts. "
+            "Omit it to run without a task; an empty or whitespace-only task is rejected "
+            "with 422 (PC-66)."
+        ),
     )
     repos: list[str] = Field(
         default_factory=list,
@@ -293,6 +309,18 @@ class ExecuteWorkflowRequest(BaseModel):
         ),
         deprecated=True,
     )
+
+    @field_validator("task")
+    @classmethod
+    def _task_has_content(cls, task: str | None) -> str | None:
+        """A task that is sent must say something.
+
+        ``""`` is never an instruction: a workflow that takes no task is run by
+        omitting the field, and one that does would run on nothing (PC-66).
+        """
+        if task is not None and not task.strip():
+            raise ValueError("task is empty; describe the work, or omit task to run without one")
+        return task
 
 
 class ExecuteWorkflowResponse(BaseModel):
@@ -407,6 +435,12 @@ async def execute(
     except Exception as e:
         logger.exception("Workflow execution error for %s", workflow_id)
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
+
+    if result.unrecorded_work_error is not None:
+        # #1547: neither store took the cancel's landed refs, so no event will
+        # ever tell the PR and a restart forgets them. That is not a handled
+        # cancel; a summary saying "cancelled" here is how it went unnoticed.
+        return Err(WorkflowError.EXECUTION_FAILED, message=result.unrecorded_work_error)
 
     repo_urls = [r.https_url for r in (repos or [])]
     return Ok(
@@ -620,12 +654,15 @@ async def _refuse_while_paused() -> None:
     :func:`_admit_or_409` is what actually admits.
     """
     from syn_api._wiring_admission import get_admission_gate
-    from syn_domain.contexts._shared import MaintenancePausedError
+    from syn_domain.contexts._shared import InsufficientDiskSpaceError, MaintenancePausedError
 
     try:
         await get_admission_gate().refuse_early()
     except MaintenancePausedError as exc:
         raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
+    except InsufficientDiskSpaceError as exc:
+        # #1560: 507 Insufficient Storage, before anything was written.
+        raise HTTPException(status_code=507, detail=str(exc)) from None
 
 
 @asynccontextmanager
@@ -639,13 +676,16 @@ async def _admit_or_409() -> AsyncIterator[AdmissionTicket]:
     ``PUT /maintenance`` behind a network round trip.
     """
     from syn_api._wiring_admission import get_admission_gate
-    from syn_domain.contexts._shared import MaintenancePausedError
+    from syn_domain.contexts._shared import InsufficientDiskSpaceError, MaintenancePausedError
 
     try:
         async with get_admission_gate().admitting() as ticket:
             yield ticket
     except MaintenancePausedError as exc:
         raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
+    except InsufficientDiskSpaceError as exc:
+        # #1560: 507 Insufficient Storage, before anything was written.
+        raise HTTPException(status_code=507, detail=str(exc)) from None
 
 
 async def _launch_eval(
@@ -777,64 +817,59 @@ async def execute_workflow_endpoint(
 
     # Bound by the `async with` below, and closed over like every other value
     # this task carries. Passing it through `add_task` instead would say the
-    # ticket arrived from somewhere else; it did not - it is granted eight
-    # lines down, in this function, and the task is queued under it.
+    # ticket arrived from somewhere else; it did not - it is granted below, in
+    # this function, and the task is queued under it.
     admitted: AdmissionTicket
 
-    async def _run() -> None:
-        # #1387: the lease, carried across the hop that used to spend it.
-        # `add_task` below only queues this coroutine - Starlette runs it after
-        # the response - so the ticket cannot be released there. It ends inside
-        # `execute()` when the execution's start event is durable, or here if
-        # this task produced no execution at all.
-        with carrying(admitted):
-            try:
-                result = await execute(
-                    workflow_id=workflow_id,
-                    inputs=effective_inputs,
-                    execution_id=execution_id,
-                    task=request.task,
-                    repos=typed_repos,
-                    admitted=admitted,
-                    tags=request.tags,
-                    launch_eval=launch_eval,
-                )
-                if isinstance(result, Err):
-                    logger.error(
-                        "Workflow execution failed",
-                        extra={
-                            "execution_id": execution_id,
-                            "workflow_id": workflow_id,
-                            "error": result.message,
-                        },
-                    )
-            except Exception:
-                logger.exception(
-                    "Workflow execution raised exception",
-                    extra={
-                        "execution_id": execution_id,
-                        "workflow_id": workflow_id,
-                    },
-                )
+    async def _start() -> None:
+        result = await execute(
+            workflow_id=workflow_id,
+            inputs=effective_inputs,
+            execution_id=execution_id,
+            task=request.task,
+            repos=typed_repos,
+            admitted=admitted,
+            tags=request.tags,
+            launch_eval=launch_eval,
+        )
+        if isinstance(result, Err):
+            logger.error(
+                "Workflow execution failed",
+                extra={
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "error": result.message,
+                },
+            )
 
     # #1387: the decisive step. Queueing the task IS admitting the work - the
     # response below says 200 either way - so it happens inside the gate, where
     # no maintenance transition can complete around it. A refusal here is the
     # second and final 409, and it is still reachable by the caller because
-    # nothing has been queued yet.
-    #
-    # Leaving this block does NOT release the ticket. It is queued work, not
-    # started work, and `_run` above owns the lease from here.
+    # nothing has been queued yet. Leaving this block does NOT release the
+    # ticket: the queued task owns the lease from here.
     async with _admit_or_409() as admitted:
-        background_tasks.add_task(_run)
-        # Starlette runs queued tasks after the response is sent, and promises
-        # nothing about a response that is never sent - a client that goes away
-        # mid-send, a middleware that replaces the response. `_run` would then
-        # never be entered, so its `carrying` would never settle and the next
-        # deploy's `PUT /maintenance` would wait on this lease forever. Bind
-        # the lease to the queued callable itself, which outlives this block
-        # for exactly as long as Starlette may still call it (#1387).
-        guarantee_settled(admitted, _run)
+        # #1557: durable BEFORE the 200, so a start waiting for a budget slot
+        # survives a restart; the request ProcessManager starts it from here.
+        await record_execution_request(
+            RequestExecutionCommand(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                inputs=effective_inputs,
+                task=request.task,
+                repos=typed_repos,
+                tags=request.tags,
+                launch_eval=launch_eval,
+            ),
+            admitted,
+        )
+        queue_direct_start(
+            background_tasks,
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            admitted=admitted,
+            start=_start,
+        )
     logger.info(
         "Started workflow execution",
         extra={

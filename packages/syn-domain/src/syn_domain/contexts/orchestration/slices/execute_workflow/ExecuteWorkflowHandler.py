@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.skill_ref import (
         SkillRef,
     )
+    from syn_domain.contexts.orchestration._shared.template_launch import TemplateLaunches
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
@@ -370,6 +371,7 @@ class ExecuteWorkflowHandler:
         phase_skill_resolver: PhaseSkillResolver | None = None,
         maintenance: MaintenancePort | None = None,
         commit_resolver: SourceCommitResolverPort | None = None,
+        launches: TemplateLaunches | None = None,
     ) -> None:
         self._processor = processor
         self._workflow_repo = workflow_repository
@@ -392,6 +394,10 @@ class ExecuteWorkflowHandler:
         # unknown, which is honest and resumes exactly as before. Production
         # passes the GitHub resolver.
         self._commit_resolver = commit_resolver
+        # WHY optional (#1588): as with maintenance, the fixtures that build a
+        # handler directly launch against no archive. Production passes it,
+        # and test_execute_handler_records_launches checks the wiring.
+        self._launches = launches
 
     async def handle(
         self,
@@ -460,6 +466,12 @@ class ExecuteWorkflowHandler:
             if command.execution_id and command.execution_id.startswith("exec-")
             else f"exec-{uuid4().hex[:12]}"
         )
+
+        # #1588: on the template's stream, before this execution's own stream
+        # exists, so an archive racing this launch either sees it or conflicts.
+        # Raises TemplateArchivedError if the archive won.
+        if self._launches is not None:
+            await self._launches.record(command.aggregate_id, execution_id)
 
         try:
             # #1387: the ticket travels all the way to the write. The lease it

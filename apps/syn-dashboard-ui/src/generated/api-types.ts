@@ -45,6 +45,13 @@ export interface paths {
          *
          *     Archived templates are excluded from listing by default but remain
          *     accessible via `GET /workflows/{id}` and with `?include_archived=true`.
+         *
+         *     ``expected_package_name`` makes the archive conditional on the current
+         *     aggregate still attributing the workflow to that package (#1588). A prune
+         *     picks candidates from `GET /workflows/{id}`, a read model that can lag;
+         *     this check is made against the aggregate at the moment of archive, so a
+         *     workflow reinstalled by another package is refused with 409 however stale
+         *     that read was.
          */
         delete: operations["delete_workflow_endpoint_workflows__workflow_id__delete"];
         options?: never;
@@ -180,6 +187,10 @@ export interface paths {
          *     refused with 409 unless ``force`` is set, and a matching version that
          *     resolves to a different digest is refused regardless of how it looks,
          *     because that is the signature of a republished version.
+         *
+         *     ``package_name`` records which package installed the definition (#1588).
+         *     It is read back on ``GET /workflows/{id}`` so ``syn workflow install
+         *     --prune`` archives only what the server attributes to that package.
          */
         post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
         delete?: never;
@@ -2938,6 +2949,33 @@ export interface components {
          * @enum {string}
          */
         CoverageState: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+        /**
+         * CpuThrottling
+         * @description CPU throttling of the process answering /health, since its cgroup was created.
+         */
+        CpuThrottling: {
+            /**
+             * Status
+             * @description 'measured' when cgroup v2 cpu.stat reported throttling counters; 'unknown' on cgroup v1, outside a container, or with no CPU limit set. Unknown is not zero: the counters are null, not 0.
+             * @enum {string}
+             */
+            status: "measured" | "unknown";
+            /**
+             * Nr Periods
+             * @description Scheduling periods in which this cgroup was runnable.
+             */
+            nr_periods?: number | null;
+            /**
+             * Nr Throttled
+             * @description Periods in which the cgroup hit its CPU limit and was held back. nr_throttled / nr_periods is the share of time the control plane was starved.
+             */
+            nr_throttled?: number | null;
+            /**
+             * Throttled Usec
+             * @description Total time spent throttled, in microseconds.
+             */
+            throttled_usec?: number | null;
+        };
         /** CreateArtifactRequest */
         CreateArtifactRequest: {
             /** Workflow Id */
@@ -3090,13 +3128,47 @@ export interface components {
             warnings?: string[];
         };
         /**
+         * DbPoolHealth
+         * @description One Postgres connection pool in this API process, at the moment of asking (#1583).
+         *
+         *     ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+         *     requests are queueing for a connection rather than for the database itself.
+         */
+        DbPoolHealth: {
+            /**
+             * Name
+             * @description What the pool serves, e.g. 'projections' or 'agent_events'.
+             */
+            name: string;
+            /**
+             * Size
+             * @description Connections currently open.
+             */
+            size: number;
+            /**
+             * Max Size
+             * @description Most connections the pool will open.
+             */
+            max_size: number;
+            /**
+             * In Use
+             * @description Connections checked out right now.
+             */
+            in_use: number;
+            /**
+             * Waiting
+             * @description Callers blocked waiting for a connection right now.
+             */
+            waiting: number;
+        };
+        /**
          * DegradedReason
          * @description Reasons the API may enter degraded mode.
          *
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -3153,6 +3225,43 @@ export interface components {
             workflow_id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * DiskSpaceHealth
+         * @description Free space on the workspace volume, as /health reports it (#1560).
+         */
+        DiskSpaceHealth: {
+            /**
+             * Path
+             * @description Directory whose filesystem was measured.
+             */
+            path: string;
+            /**
+             * State
+             * @description 'low' degrades /health; 'critical' also refuses new executions.
+             * @enum {string}
+             */
+            state: "ok" | "unmeasurable" | "low" | "critical";
+            /**
+             * Free Percent
+             * @description Percent free; null when unmeasurable.
+             */
+            free_percent: number | null;
+            /**
+             * Free Bytes
+             * @description Bytes available; null when unmeasurable.
+             */
+            free_bytes: number | null;
+            /**
+             * Degraded Below Percent
+             * @description SYN_DISK_DEGRADED_BELOW_PERCENT.
+             */
+            degraded_below_percent: number;
+            /**
+             * Refuse Admission Below Percent
+             * @description SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT.
+             */
+            refuse_admission_below_percent: number;
         };
         /**
          * EvalId
@@ -3237,7 +3346,7 @@ export interface components {
             };
             /**
              * Task
-             * @description Primary task description -- substituted for $ARGUMENTS in phase prompts.
+             * @description Primary task description -- substituted for $ARGUMENTS in phase prompts. Omit it to run without a task; an empty or whitespace-only task is rejected with 422 (PC-66).
              */
             task?: string | null;
             /**
@@ -3459,6 +3568,8 @@ export interface components {
             failure_classification: components["schemas"]["FailureClassification"];
             delegation_failure?: components["schemas"]["DelegationFailure"] | null;
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /** Quarantined Refs */
+            quarantined_refs?: components["schemas"]["QuarantinedRef"][];
             /**
              * Deliverable Produced
              * @default false
@@ -3477,6 +3588,7 @@ export interface components {
                 [key: string]: string;
             };
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /**
          * ExecutionEvalResponse
@@ -3584,6 +3696,45 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+        };
+        /**
+         * ExecutionStartQueueInfo
+         * @description Where a start stands in the execution budget, before its execution exists (#1557).
+         *
+         *     Every start path - direct, trigger and resume - claims one of
+         *     ``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits
+         *     here, first come first served, and has no execution record yet; this is
+         *     what it shows instead of a 404.
+         */
+        ExecutionStartQueueInfo: {
+            path: components["schemas"]["StartPath"];
+            /** Position */
+            position: number | null;
+            /**
+             * Held
+             * @default true
+             */
+            held: boolean;
+            /** Start Status */
+            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed") | null;
+            /** Status Reason */
+            status_reason?: string | null;
+            /** Running */
+            running: number;
+            /** Waiting */
+            waiting: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
+            /**
+             * Position Display
+             * @description Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.
+             */
+            readonly position_display: string;
         };
         /**
          * ExecutionStatusCounts
@@ -4509,6 +4660,15 @@ export interface components {
              * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
              */
             warnings?: string[] | null;
+            /** @description Free space on the workspace volume (#1560). Omitted only when the probe itself could not be built. */
+            disk?: components["schemas"]["DiskSpaceHealth"] | null;
+            /**
+             * Db Pools
+             * @description Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode.
+             */
+            db_pools?: components["schemas"]["DbPoolHealth"][] | null;
+            /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
+            cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -5091,6 +5251,8 @@ export interface components {
             elapsed_seconds?: number | null;
             /** Timeout Seconds */
             timeout_seconds?: number | null;
+            /** Deadline */
+            deadline?: string | null;
         };
         /**
          * PhaseDefinitionResponse
@@ -5438,6 +5600,32 @@ export interface components {
              * @default false
              */
             stalled: boolean;
+        };
+        /**
+         * QuarantinedRef
+         * @description Where one repository's unpushed work was saved when its phase ended (#1547).
+         *
+         *     The structured half of what `describe_saved_work` writes as prose into
+         *     `error_message`: only work that LANDED, because a ref that does not exist
+         *     is nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the
+         *     PR the run was working on can be told, by a ProcessManager rather than by
+         *     whoever happened to read the error.
+         */
+        QuarantinedRef: {
+            /** Repository */
+            repository: string;
+            /** Branch */
+            branch: string;
+            /** Ref */
+            ref: string;
+            /** Commit */
+            commit: string | null;
+            /** Commit Count */
+            commit_count: number;
+            /** Pull Request */
+            pull_request?: number | null;
+            /** Diffstat */
+            diffstat?: string | null;
         };
         /**
          * RegisterClaudePluginRequest
@@ -6091,6 +6279,7 @@ export interface components {
             recorded_at: string;
             /** Dispatched At */
             dispatched_at?: string | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /**
          * ReviewVerdict
@@ -7016,6 +7205,12 @@ export interface components {
             truncated: boolean;
         };
         /**
+         * StartPath
+         * @description Which entrance an execution start came through.
+         * @enum {string}
+         */
+        StartPath: "direct" | "trigger" | "resume";
+        /**
          * StateResponse
          * @description Response with execution state.
          */
@@ -7096,10 +7291,10 @@ export interface components {
         SubscriptionHealth: {
             /**
              * Status
-             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed.
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed.
              * @enum {string}
              */
-            status: "healthy" | "degraded" | "stalled" | "catching_up" | "unknown";
+            status: "healthy" | "degraded" | "dropped_events" | "stalled" | "catching_up" | "unknown";
             /**
              * Running
              * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
@@ -7145,6 +7340,11 @@ export interface components {
              * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
              */
             lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
+            /**
+             * Unapplied Starts
+             * @description Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured.
+             */
+            unapplied_starts?: components["schemas"]["UnappliedStart"][] | null;
         };
         /**
          * SystemActionResponse
@@ -7938,6 +8138,27 @@ export interface components {
              */
             other: number;
         };
+        /**
+         * UnappliedStart
+         * @description One execution whose start a projection skipped past. Published on /health as is.
+         */
+        UnappliedStart: {
+            /**
+             * Projection
+             * @description Read model that skipped the start.
+             */
+            projection: string;
+            /**
+             * Execution Id
+             * @description Execution whose WorkflowExecutionStarted it skipped.
+             */
+            execution_id: string;
+            /**
+             * Global Nonce
+             * @description Store position of that start event.
+             */
+            global_nonce: number;
+        };
         /** UpdateArtifactRequest */
         UpdateArtifactRequest: {
             /** Title */
@@ -8135,6 +8356,8 @@ export interface components {
             tags?: string[];
             /** Default Eval Id */
             default_eval_id?: string | null;
+            /** Package Name */
+            package_name?: string | null;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -8360,7 +8583,9 @@ export interface operations {
     };
     delete_workflow_endpoint_workflows__workflow_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                expected_package_name?: string | null;
+            };
             header?: never;
             path: {
                 workflow_id: string;
@@ -8385,7 +8610,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Conflict; workflow has active executions or is already archived */
+            /** @description Conflict; workflow has active executions, is already archived, or is not attributed to expected_package_name */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8575,6 +8800,7 @@ export interface operations {
                 workflow_id?: string | null;
                 version?: string | null;
                 source_digest?: string | null;
+                package_name?: string | null;
                 force?: boolean;
             };
             header?: never;

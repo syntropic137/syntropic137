@@ -10,6 +10,7 @@ from syn_domain.contexts.orchestration.slices.start_resume.StartResumeHandler im
 )
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
     MAX_START_ATTEMPTS,
+    ResumeChild,
     ResumeStartRecord,
     ResumeStartStatus,
     read_record,
@@ -17,6 +18,7 @@ from syn_domain.contexts.orchestration.slices.start_resume.value_objects import 
 
 __all__ = [
     "MAX_START_ATTEMPTS",
+    "ResumeChild",
     "ResumeStartProcessManager",
     "ResumeStartRecord",
     "ResumeStartStatus",

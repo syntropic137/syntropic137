@@ -7,7 +7,10 @@ E2 made two changes to the read paths behind /executions, /executions/{id},
    telemetry on (``syn_domain.agent_event_span``).
 2. List pages scan only the fields their predicates read, then load whole
    documents for the page (``syn_domain.projection_scan``), with a lean column
-   on ``artifact_summaries``.
+   on ``artifact_summaries``. /sessions and /artifacts go further and answer
+   the whole page - rows, total, facets, undated - in one SQL statement
+   (``page_projection``; hostile data is held to the same parity in
+   packages/syn-adapters/tests/test_list_page_in_sql.py).
 
 Each is claimed to return exactly what the old read returned. This test holds
 them to it on the gate's seed - compressed chunks, 240 days - plus the edge
@@ -41,7 +44,8 @@ TIED = 30
 
 @runtime_checkable
 class _NeverScans(Protocol):
-    """A protocol no store satisfies, so ``paginate_projection`` takes the old read."""
+    """A protocol no store satisfies, so ``paginate_projection`` and
+    ``page_projection`` take the old read."""
 
     def e2_parity_never_implemented(self) -> None: ...
 
@@ -222,6 +226,7 @@ async def test_e2_read_paths_answer_exactly_what_the_old_ones_did(
         old.setattr(agent_event_span, "for_sessions", unbounded)
         old.setattr(agent_event_span, "for_executions", unbounded)
         old.setattr(projection_scan, "ProjectionFieldScan", _NeverScans)
+        old.setattr(projection_scan, "ProjectionSqlPage", _NeverScans)
         before = await _fetch_all(client, requests)
 
     # The edge cases are really in play, or the comparison proves nothing.

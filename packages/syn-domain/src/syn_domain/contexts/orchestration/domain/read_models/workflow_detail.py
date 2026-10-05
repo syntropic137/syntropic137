@@ -248,6 +248,10 @@ class WorkflowDetail:
     default_eval_id: str | None = None
     """The eval a launch naming none joins (#967). Exported as ``default_eval_id:``."""
 
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None if not installed
+    from a package, or recorded before provenance existed."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
@@ -314,6 +318,7 @@ class WorkflowDetail:
             requires_repos=data.get("requires_repos", True),
             tags=tuple(data.get("tags") or ()),
             default_eval_id=data.get("default_eval_id"),
+            package_name=data.get("package_name"),
         )
 
     @staticmethod
@@ -393,4 +398,5 @@ class WorkflowDetail:
             "requires_repos": self.requires_repos,
             "tags": list(self.tags),
             "default_eval_id": self.default_eval_id,
+            "package_name": self.package_name,
         }
