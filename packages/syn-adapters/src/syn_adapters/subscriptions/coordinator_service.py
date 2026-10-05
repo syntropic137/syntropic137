@@ -461,6 +461,7 @@ def create_coordinator_service(
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.projections.manager_registry import create_session_cost_projection
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
     from syn_adapters.subscriptions.projection_adapters import (
         ExecutionCostAdapter,
         SessionCostAdapter,
@@ -497,6 +498,12 @@ def create_coordinator_service(
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+        CancelledWorkLedger,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+        ExecutionJournal,
     )
     from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
         ExecutionCostProjection,
@@ -568,6 +575,15 @@ def create_coordinator_service(
                 commenter=GitHubPullRequestCommenter(get_github_client),
                 store=projection_store,
                 branches=GitHubRemoteBranchReader(get_github_client),
+                # Settled on every live pass and clock tick, so a cancel's
+                # refused refs reach the stream with no later execution.
+                owed_work=CancelledWorkLedger(
+                    ExecutionJournal(
+                        get_workflow_execution_repository(),
+                        ExecutionTodoProjection(store=projection_store),
+                    ),
+                    projection_store,
+                ),
             ),
             TriggerQueryProjection(projection_store),
             # --- Agent sessions context ---

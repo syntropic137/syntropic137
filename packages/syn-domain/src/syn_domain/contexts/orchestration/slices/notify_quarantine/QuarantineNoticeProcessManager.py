@@ -12,7 +12,10 @@ PROJECTION SIDE (handle_event): writes one notice per (execution, phase,
 PROCESSOR SIDE (process_pending): posts or edits the comment. Called ONLY for
   live events, never during catch-up replay. A notice with no PR yet asks the
   forge on every pass and posts once one is open from the branch; the
-  platform's clock tick guarantees a pass comes.
+  platform's clock tick guarantees a pass comes. Each pass first settles the
+  cancelled work the event store once refused, so an owed fact reaches the
+  stream - and from there this manager - on a quiet system too, with no later
+  execution to carry it.
 
 Zero business logic: what landed where is decided by the failure event, and
 what the comment says by `QuarantineNotice`.
@@ -98,6 +101,17 @@ class PullRequestCommenter(Protocol):
     ) -> int: ...
 
 
+class OwedWorkSettler(Protocol):
+    """Appends the cancelled work the event store refused; the number appended.
+
+    Satisfied by `CancelledWorkLedger`. The appended events come back to this
+    manager through the subscription, like any other, so it posts from them
+    and from nothing this call returns.
+    """
+
+    async def settle(self) -> int: ...
+
+
 class QuarantineNoticeProcessManager(ProcessManager):
     """Tells a PR its run's work is on a quarantine ref."""
 
@@ -109,10 +123,13 @@ class QuarantineNoticeProcessManager(ProcessManager):
         commenter: PullRequestCommenter | None = None,
         store: ProjectionStore | None = None,
         branches: RemoteBranchPort | None = None,
+        owed_work: OwedWorkSettler | None = None,
     ) -> None:
         self._commenter = commenter
         self._store = store
         self._branches = branches
+        #: Drained on every live pass, so owed work needs no later run (#1547).
+        self._owed_work = owed_work
 
     def get_name(self) -> str:
         return self.PROJECTION_NAME
@@ -195,6 +212,7 @@ class QuarantineNoticeProcessManager(ProcessManager):
 
     async def process_pending(self) -> int:
         """PROCESSOR SIDE: post or edit each owed comment. Live-only, idempotent."""
+        await self._settle_owed_work()
         if self._store is None or self._commenter is None:
             return 0
         posted = 0
@@ -206,6 +224,15 @@ class QuarantineNoticeProcessManager(ProcessManager):
                 if await self._post(notice):
                     posted += 1
         return posted
+
+    async def _settle_owed_work(self) -> None:
+        if self._owed_work is None:
+            return
+        try:
+            await self._owed_work.settle()
+        except Exception:
+            # Still owed; the next pass, at worst the next clock tick, tries again.
+            logger.exception("Could not settle the owed work of cancelled executions")
 
     async def _pull_request(self, notice: QuarantineNotice) -> int | None:
         """The PR to tell: the one open at failure, else whatever is open now."""

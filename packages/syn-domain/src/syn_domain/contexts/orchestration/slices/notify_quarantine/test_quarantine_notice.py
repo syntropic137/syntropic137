@@ -49,6 +49,8 @@ from syn_domain.contexts.orchestration.slices.notify_quarantine import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+pytestmark = pytest.mark.unit
+
 REF = "refs/syn/lost/exec-q1/implement"
 SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 
@@ -573,3 +575,55 @@ async def _replay_posts_nothing(
         await replay.stop()
         runner.cancel()
         await asyncio.gather(runner, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_owed_work_on_a_quiet_system_reaches_its_pr_on_the_next_clock_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refused to the limit, a restart, the store recovers - and no execution ever follows.
+
+    Nothing here calls `settle()`. The only wake is the platform's clock tick,
+    which is what production has when the cancelled run was the last one: the
+    notice manager settles owed work on its live pass, the appended event
+    comes back through the coordinator, and the PR hears of it once.
+    """
+    monkeypatch.setattr(cancelled_work_record, "_ATTEMPTS", 2)
+    store = _LiveStore()
+    stream = _Stream(store)
+    owed = InMemoryProjectionStore()
+    aggregate, journal = await _a_cancelled_run(stream)
+    stream.rejections = 2
+    assert await CancelledWorkLedger(journal, owed).record(aggregate, _LANDED)
+    assert stream.rejections == 0, "the retry limit was never reached"
+    assert stream.recorded("CancelledWorkQuarantined") == 0
+    assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
+
+    # The restarted service: the stream and the owed store, and nothing else.
+    restarted = CancelledWorkLedger(ExecutionJournal(stream, object()), owed)  # type: ignore[arg-type]
+    commenter = _Commenter()
+    manager = QuarantineNoticeProcessManager(
+        commenter=commenter, store=InMemoryProjectionStore(), owed_work=restarted
+    )
+    checkpoints = MemoryCheckpointStore()
+    coordinator = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=checkpoints, projections=[manager]
+    )
+    runner = asyncio.create_task(coordinator.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        store.publish(InventoryReconciliationSweepEvent(observed_at=datetime.now(UTC)), _TICK)
+        # The tick is the one event after the stream's; its pass appends one more.
+        await asyncio.wait_for(_settled(coordinator, checkpoints, len(stream.history) + 1), 5)
+        await asyncio.wait_for(_settled(coordinator, checkpoints, len(stream.history) + 1), 5)
+
+        assert stream.recorded("CancelledWorkQuarantined") == 1
+        assert await owed.get_all(OWED_CANCELLED_WORK) == []
+        assert commenter.posts == 1
+        (body,) = commenter.comments.values()
+        assert REF in body and SHA in body
+    finally:
+        await coordinator.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+    await _replay_posts_nothing(store, manager, commenter)
