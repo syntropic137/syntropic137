@@ -240,6 +240,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
 
     from syn_adapters.github.client import get_github_client
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
+    from syn_adapters.session_inventory.phase_delegations import ChildJournalDelegations
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
@@ -317,6 +318,9 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         # #1513: records which PR is open from each branch a failing phase
         # left, so a resume continues that PR and never one opened since.
         remote_branches=GitHubRemoteBranchReader(get_github_client),
+        # #894: a phase that declared delegation completes only when its
+        # workspace's child journal shows a delegate that succeeded.
+        delegation_evidence=ChildJournalDelegations(),
     )
 
 

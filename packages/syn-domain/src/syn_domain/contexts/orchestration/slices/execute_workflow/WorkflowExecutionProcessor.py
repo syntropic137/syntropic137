@@ -28,6 +28,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts im
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
     phase_failure,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
+    DelegationEvidencePort,
+    delegation_failure,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     UnfinishedPhase,
 )
@@ -192,8 +196,12 @@ class WorkflowExecutionProcessor:
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
+        delegation_evidence: DelegationEvidencePort | None = None,
     ) -> None:
         self._session_repo = session_repository
+        #: Read as a phase that declared delegation completes, to show its
+        #: delegate actually ran (#894). See `phase_delegation`.
+        self._delegation_evidence = delegation_evidence
         # How a phase answers a provider that is simply busy (#1303). Injected
         # only so a test can collapse the backoff to zero; production takes the
         # policy's own numbers and no caller chooses them.
@@ -802,6 +810,16 @@ class WorkflowExecutionProcessor:
             # (#1256). WHICH channel ended the run, and what the failure is
             # counted as, are `agent_run_outcome`'s to decide (#1367).
             failure = phase_failure(result, phase_id=todo.phase_id)
+            if failure is None:
+                # A DECLARED DELEGATE IS PART OF THE WORK (#894). Asked only
+                # once the run itself may complete, so it never relabels a
+                # failure the run already had.
+                failure = await delegation_failure(
+                    self._delegation_evidence,
+                    runtime.workspace_for(todo.phase_id),
+                    phase_id=todo.phase_id,
+                    allow_delegation=phase.agent_config.allow_delegation,
+                )
             if failure is not None:
                 logger.error(str(failure))
                 # A retried attempt keeps nothing: the phase is not over, and
