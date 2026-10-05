@@ -32,6 +32,11 @@ from syn_shared.agents import (
     resolve_phase_model,
 )
 
+# Re-exported for the WorkflowFailed event, which may import value objects and
+# nothing else: the kind lives in the shared kernel so the GitHub adapter can
+# raise it without importing orchestration (#1593).
+from syn_shared.upstream_failure import UpstreamFailureKind as UpstreamFailureKind
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 

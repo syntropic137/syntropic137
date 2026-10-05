@@ -102,6 +102,22 @@ class NonZeroExitError(RuntimeError):
         self.exit_code = exit_code
 
 
+class UpstreamExitError(NonZeroExitError, UpstreamFailureError):
+    """An agent run that exited non-zero on an upstream fault its harness named (#1592, #1593).
+
+    Both things at once, because both are true and both are read: the exit
+    status by `exit_code_of`, the kind by `failure_account`. Raised in place of
+    a plain `NonZeroExitError` - including after the phase's capacity retries
+    run out - so a busy provider is RECORDED as one on the WorkflowFailed event,
+    not only described in its message.
+    """
+
+    def __init__(self, message: str, *, exit_code: int, upstream_kind: UpstreamFailureKind) -> None:
+        super().__init__(message, exit_code=exit_code)
+        # `RuntimeError.__init__` does not continue the MRO, so this is set here.
+        self.upstream_kind = upstream_kind
+
+
 class PinnedCommitUnreachableError(NonZeroExitError):
     """A repository cannot be checked out at the commit its run pinned it to (#1458).
 

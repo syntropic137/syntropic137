@@ -12,9 +12,12 @@ anything about retrying. What it decides:
 - WHAT IS TRANSIENT: a connection that dropped, could not be made or timed
   out reading, and a 502, 503 or 504. Never a 4xx - those are GitHub's answer
   about the request, and asking again gets the same answer.
-- WHAT MAY BE SENT AGAIN: idempotent methods, plus any request its caller
-  marked with `RETRY_SAFE`. A POST is not idempotent in general (a second
-  comment is a second comment), so the transport cannot assume it is.
+- WHAT MAY BE SENT AGAIN: an idempotent method after any transient failure.
+  Any other request only after a failure that proves GitHub never received
+  it - the connection could not be made. A dropped response, a read timeout
+  or a 5xx may come AFTER GitHub acted: a second comment is a second comment,
+  and a second token mint is a second live credential nobody holds and so
+  nobody can revoke. No caller can opt out of that.
 - WHAT A CALLER SEES WHEN IT GIVES UP: `GitHubUnavailableError`, whatever the
   transient failure was. Before this, a dropped connection during minting
   surfaced as `GitHubAuthError` - an operator problem - when resuming the run
@@ -36,13 +39,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Request extension a caller sets when a non-idempotent request is still safe
-#: to send twice: `extensions=RETRY_SAFE`.
-RETRY_SAFE = {"syn_retry_safe": True}
-
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 _TRANSIENT_STATUSES = frozenset({502, 503, 504})
-_TRANSIENT_ERRORS = (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadTimeout)
+#: Failed before a byte of the request reached GitHub: safe to send anything again.
+_UNSENT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
+#: Failed after the request may have reached GitHub: safe only for idempotent methods.
+_AMBIGUOUS_ERRORS = (httpx.RemoteProtocolError, httpx.ReadTimeout)
 
 
 @dataclass(frozen=True)
@@ -86,13 +88,12 @@ class RetryingTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         from syn_adapters.github.client import GitHubUnavailableError
 
-        safe = request.method in _IDEMPOTENT_METHODS or bool(
-            request.extensions.pop("syn_retry_safe", False)
-        )
-        attempts = self._policy.attempts if safe else 1
+        idempotent = request.method in _IDEMPOTENT_METHODS
+        attempts = self._policy.attempts
         failure = ""
         last_error: Exception | None = None
         status_code: int | None = None
+        attempt = 0
         for attempt in range(1, attempts + 1):
             if attempt > 1:
                 logger.warning(
@@ -106,19 +107,23 @@ class RetryingTransport(httpx.AsyncBaseTransport):
                 await self._sleep(self._policy.delay_after(attempt - 1))
             try:
                 response = await self._inner.handle_async_request(request)
-            except _TRANSIENT_ERRORS as exc:
+            except (*_UNSENT_ERRORS, *_AMBIGUOUS_ERRORS) as exc:
                 failure = f"{type(exc).__name__}: {exc}"
                 last_error = exc
                 status_code = None
-                continue
-            if response.status_code not in _TRANSIENT_STATUSES:
-                return response
-            await response.aclose()
-            failure = f"HTTP {response.status_code}"
-            last_error = None
-            status_code = response.status_code
+                unsent = isinstance(exc, _UNSENT_ERRORS)
+            else:
+                if response.status_code not in _TRANSIENT_STATUSES:
+                    return response
+                await response.aclose()
+                failure = f"HTTP {response.status_code}"
+                last_error = None
+                status_code = response.status_code
+                unsent = False
+            if not (idempotent or unsent):
+                break
         msg = (
-            f"GitHub unavailable after {attempts} attempt(s) of {request.method} "
+            f"GitHub unavailable after {attempt} attempt(s) of {request.method} "
             f"{request.url.path}: {failure}. Transient; resuming the execution retries it."
         )
         raise GitHubUnavailableError(msg, status_code=status_code) from last_error

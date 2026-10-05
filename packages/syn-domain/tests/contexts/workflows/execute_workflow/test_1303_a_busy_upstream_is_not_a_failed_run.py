@@ -37,14 +37,27 @@ alone, since a correct policy that no caller consults changes nothing.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+    WorkflowFailedEvent,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     UpstreamRetryPolicy,
 )
 from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
+from syn_shared.upstream_failure import UpstreamFailureKind
 
-from .test_processor_smoke import _make_processor, _one_phase_workflow
+from .test_processor_smoke import FakeExecutionRepository, _make_processor, _one_phase_workflow
+
+if TYPE_CHECKING:
+    from event_sourcing import DomainEvent
+
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -65,6 +78,18 @@ SUCCEEDED = 'TASK_RESULT: {"success": true, "comments": "verified"}\nTASK_RESULT
 #: is production's on purpose: a test that also relaxed the bound would prove
 #: nothing about how many attempts a real phase gets.
 NO_WAITING = UpstreamRetryPolicy(base_delay_seconds=0.0)
+
+
+class _RecordingRepository(FakeExecutionRepository):
+    """Keeps every event the processor saved, so the stored record can be read."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: list[DomainEvent] = []
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        self.events.extend(envelope.event for envelope in aggregate.get_uncommitted_events())
+        await super().save(aggregate)
 
 
 class TestABusyUpstreamIsRetried:
@@ -138,7 +163,8 @@ class TestAPermanentFailureStaysPermanent:
         fake = FakeAgentExecutionHandler.scripted(
             FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)
         )
-        processor = _make_processor(fake, retry_policy=NO_WAITING)
+        repository = _RecordingRepository()
+        processor = _make_processor(fake, retry_policy=NO_WAITING, execution_repository=repository)
 
         result = await processor.run(
             workflow_id="wf-1303",
@@ -161,6 +187,13 @@ class TestAPermanentFailureStaysPermanent:
             f"The cause was rewritten on the way out: {result.error_message!r}"
         )
         assert "exit_code=1" in result.error_message
+        # RECORDED as capacity, not only described as it (#1593): the stored
+        # event is what says "resume this" to anything that is not a person.
+        (failed,) = [e for e in repository.events if isinstance(e, WorkflowFailedEvent)]
+        assert failed.upstream_failure_kind is UpstreamFailureKind.CAPACITY
+        assert "Upstream failure: capacity - transient; the phase is resumable." in (
+            result.error_message
+        )
 
     async def test_a_genuine_error_is_not_retried(self) -> None:
         """THE CONTROL. A login that is not valid will not become valid.

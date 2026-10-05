@@ -41,20 +41,26 @@ class _Network:
     """GitHub behind a flaky network: each path fails as scripted, then answers."""
 
     failures: dict[str, list[Exception | int]] = field(default_factory=dict)
+    #: Failures that happen AFTER GitHub acted: the token is minted, then the
+    #: response is lost on its way back.
+    lost_responses: dict[str, list[Exception | int]] = field(default_factory=dict)
     sent: list[str] = field(default_factory=list)
+    #: Every token GitHub issued, whether or not its holder ever heard of it.
+    minted: list[str] = field(default_factory=list)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.sent.append(path)
         scripted = self.failures.get(path)
         if scripted:
-            failure = scripted.pop(0)
-            if isinstance(failure, Exception):
-                raise failure
-            return httpx.Response(failure, json={"message": "scripted"})
+            return self._fail(scripted.pop(0))
         if path == _LOOKUP:
             return httpx.Response(200, json={"id": 7})
         assert path == _MINT
+        self.minted.append("ghs_minted")
+        lost = self.lost_responses.get(path)
+        if lost:
+            return self._fail(lost.pop(0))
         # An hour from now, as GitHub issues them: a fixed timestamp goes stale
         # and lets an already-expired credential pass for a provisioned one.
         expires_at = datetime.now(UTC) + timedelta(hours=1)
@@ -62,6 +68,12 @@ class _Network:
             201,
             json={"token": "ghs_minted", "expires_at": expires_at.isoformat()},
         )
+
+    @staticmethod
+    def _fail(failure: Exception | int) -> httpx.Response:
+        if isinstance(failure, Exception):
+            raise failure
+        return httpx.Response(failure, json={"message": "scripted"})
 
 
 @dataclass(frozen=True)
@@ -101,23 +113,27 @@ def _assert_usable(secrets: SetupPhaseSecrets) -> None:
         assert token.expires_at > now, f"issued an expired token: {token.expires_at}"
 
 
+_UNSENT = [httpx.ConnectError("refused"), httpx.ConnectTimeout("no route")]
+_AMBIGUOUS = [_DROPPED, httpx.ReadTimeout("slow"), 502, 503, 504]
+
+
 @pytest.mark.anyio
-@pytest.mark.parametrize("path", [_LOOKUP, _MINT])
-async def test_one_dropped_connection_still_provisions(network: _Network, path: str) -> None:
-    network.failures[path] = [_DROPPED]
+@pytest.mark.parametrize("failure", _UNSENT + _AMBIGUOUS)
+async def test_a_transient_failure_on_the_lookup_is_retried(
+    network: _Network, failure: Exception | int
+) -> None:
+    network.failures[_LOOKUP] = [failure, failure]
 
     secrets = await _provision()
 
     _assert_usable(secrets)
-    assert network.sent.count(path) == 2
+    assert network.sent.count(_LOOKUP) == 3
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    "failure", [_DROPPED, httpx.ConnectError("refused"), httpx.ReadTimeout("slow"), 502, 503, 504]
-)
-async def test_a_transient_failure_on_the_mint_is_retried(
-    network: _Network, failure: Exception | int
+@pytest.mark.parametrize("failure", _UNSENT)
+async def test_a_mint_that_never_reached_github_is_retried(
+    network: _Network, failure: Exception
 ) -> None:
     network.failures[_MINT] = [failure, failure]
 
@@ -125,15 +141,44 @@ async def test_a_transient_failure_on_the_mint_is_retried(
 
     _assert_usable(secrets)
     assert network.sent.count(_MINT) == 3
+    assert network.minted == ["ghs_minted"]
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("path", [_LOOKUP, _MINT])
-async def test_three_drops_fail_as_transient_not_as_auth(
-    network: _Network, path: str, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("lost", _AMBIGUOUS)
+async def test_github_minted_but_the_response_dropped_mints_no_second_token(
+    network: _Network, lost: Exception | int
+) -> None:
+    """A retry here would mint a token nobody holds, live for an hour, that no ledger revokes.
+
+    The failure is still transient: resuming the execution mints afresh. The
+    token GitHub issued and nobody received cannot be revoked by anyone - but
+    there is exactly one of it, not one per attempt.
+    """
+    network.lost_responses[_MINT] = [lost]
+
+    with pytest.raises(GitHubUnavailableError) as raised:
+        await _provision()
+
+    assert network.minted == ["ghs_minted"]
+    assert network.sent.count(_MINT) == 1
+    assert failure_account(raised.value).upstream is UpstreamFailureKind.UNAVAILABLE
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("path", "failure", "sends"),
+    [(_LOOKUP, _DROPPED, 3), (_MINT, httpx.ConnectError("refused"), 3), (_MINT, _DROPPED, 1)],
+)
+async def test_an_exhausted_retry_fails_as_transient_not_as_auth(
+    network: _Network,
+    path: str,
+    failure: Exception,
+    sends: int,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Before #1593 a dropped mint surfaced as GitHubAuthError: an operator problem."""
-    network.failures[path] = [_DROPPED, _DROPPED, _DROPPED]
+    network.failures[path] = [failure, failure, failure]
 
     with caplog.at_level(logging.WARNING), pytest.raises(GitHubUnavailableError) as raised:
         await _provision()
@@ -143,7 +188,7 @@ async def test_three_drops_fail_as_transient_not_as_auth(
     assert account.upstream is UpstreamFailureKind.UNAVAILABLE
     assert account.upstream.is_transient
     assert not account.upstream.needs_operator
-    assert network.sent.count(path) == 3
+    assert network.sent.count(path) == sends
     # Nothing an operator installs would have helped, so nothing says to.
     assert "settings/installations" not in caplog.text
     assert "not installed" not in caplog.text
@@ -176,8 +221,8 @@ async def test_a_4xx_is_never_retried(network: _Network, status: int) -> None:
 
 
 @pytest.mark.anyio
-async def test_an_unmarked_post_is_sent_once(network: _Network) -> None:
-    """Only a caller can say a POST is safe to repeat; the transport must not assume it."""
+async def test_a_post_whose_response_dropped_is_sent_once(network: _Network) -> None:
+    """GitHub may already have acted on it: a second comment is a second comment."""
     network.failures["/repos/org/repo-a/issues"] = [_DROPPED]
     client = GitHubAppClient(_Settings(), transport=httpx.MockTransport(network.handle))  # type: ignore[arg-type]
 

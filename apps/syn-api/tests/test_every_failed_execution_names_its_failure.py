@@ -472,7 +472,21 @@ async def test_the_failed_phase_carries_the_same_error_and_classification(
 async def test_capacity_and_auth_say_what_they_ask_of_an_operator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both are `platform`; the record still says which wants a wait and which a fix."""
+    """Both are `platform`; the record still says which wants a wait and which a fix.
+
+    The kind is asserted on the stored WorkflowFailed event, not only in the
+    prose: `phase_failure` once named it in the message and the event kept
+    `None`, so nothing reading the field could tell a busy provider from a
+    crash (#1593).
+    """
+    for execution_id, kind in (
+        ("exec-capacity", UpstreamFailureKind.CAPACITY),
+        ("exec-auth", UpstreamFailureKind.AUTH),
+        ("exec-codex-auth", UpstreamFailureKind.AUTH),
+    ):
+        failed = (await _failure_events(execution_id))[-1]
+        assert isinstance(failed, WorkflowFailedEvent)
+        assert failed.upstream_failure_kind is kind, execution_id
     manager = await _projections()
     capacity = await _detail(monkeypatch, manager, "exec-capacity")
     auths = [
