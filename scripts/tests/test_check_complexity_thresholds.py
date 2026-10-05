@@ -7,12 +7,16 @@ tree, and a fixture with one module over 750 LOC and one function over
 cyclomatic 10.
 
 They need the binary `just aps-build` produces, and skip, saying so, without
-it. `just preflight-agent` builds it, so a workspace that ran the gate has it.
+it, which is what the unit job sees. `fitness-check` builds it and runs them
+with SYN_REQUIRE_APS=1, where a missing binary FAILS instead: that is the PR
+gate (CI's `just preflight`, and `preflight-agent` via fitness-agent) that
+proves the early check still agrees with APS.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -28,9 +32,17 @@ from check_complexity_thresholds import find_violations, measure
 _ROOT = Path(__file__).resolve().parents[2]
 _APS = _ROOT / "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-needs_aps = pytest.mark.skipif(
-    not _APS.exists(), reason=f"no aps binary at {_APS}; run `just aps-build`"
-)
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def needs_aps() -> None:
+    if _APS.exists():
+        return
+    reason = f"no aps binary at {_APS}; run `just aps-build`"
+    if os.environ.get("SYN_REQUIRE_APS") == "1":
+        pytest.fail(reason)
+    pytest.skip(reason)
 
 
 def _aps_measurements(root: Path, out: Path) -> Counter[tuple[str, str, int]]:
@@ -69,7 +81,8 @@ def _over_limit_fixture(root: Path) -> None:
 
 
 # Every decision node the Python grammar counts, plus the ones it ignores
-# (finally, raise), the elif/else-if distinction, and nesting.
+# (finally, raise, and `except*` handlers, which are not `except_clause`), the
+# elif/else-if distinction, and nesting.
 _SHAPES = """
 def shapes(a, b=1 if True else 2) -> int:
     if a and b or a:
@@ -108,10 +121,37 @@ def shapes(a, b=1 if True else 2) -> int:
     def inner():
         return a if b else lambda: a and b
     return 0
+
+
+def groups(a) -> int:
+    try:
+        pass
+    except* E0:
+        pass
+    except* E1:
+        pass
+    except* E2:
+        pass
+    except* E3:
+        pass
+    except* E4:
+        pass
+    except* E5:
+        pass
+    except* E6:
+        pass
+    except* E7:
+        pass
+    except* E8:
+        pass
+    except* E9:
+        pass
+    else:
+        pass
+    return 0
 """
 
 
-@needs_aps
 def test_every_python_measurement_matches_aps_on_this_tree(tmp_path: Path) -> None:
     ours, theirs = _ours(_ROOT), _aps_measurements(_ROOT, tmp_path / "topology")
     assert ours - theirs == Counter() and theirs - ours == Counter(), (
@@ -121,7 +161,6 @@ def test_every_python_measurement_matches_aps_on_this_tree(tmp_path: Path) -> No
     assert find_violations(_ROOT) == [], "APS fitness-check passes on main, so this must too"
 
 
-@needs_aps
 def test_the_over_limit_fixture_fails_both_ways(tmp_path: Path) -> None:
     _over_limit_fixture(tmp_path)
     (tmp_path / "apps/fixture/shapes.py").write_text(_SHAPES)

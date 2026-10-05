@@ -148,7 +148,9 @@ def _decisions(node: ast.AST, lines: list[str]) -> int:
     elif isinstance(node, ast.For | ast.AsyncFor | ast.While):
         own = 1 + bool(node.orelse)
     elif isinstance(node, ast.Try | ast.TryStar):
-        own = len(node.handlers) + bool(node.orelse)
+        # except* handlers are `except_group_clause`, which the grammar does
+        # not count; only plain `except_clause` is a decision.
+        own = bool(node.orelse) + (len(node.handlers) if isinstance(node, ast.Try) else 0)
         children = [
             c for c in children if not any(c is f for f in node.finalbody)
         ]  # finally_clause
