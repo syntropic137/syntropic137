@@ -17,7 +17,7 @@ from uuid import uuid4
 
 from event_sourcing import ConcurrencyConflictError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_api._wiring import (
     ensure_connected,
@@ -179,11 +179,16 @@ def _check_missing_declarations(
     workflow: WorkflowTemplateAggregate,
     merged: dict[str, str],
 ) -> None:
-    """Raise 422 if any required InputDeclaration (with no default) is absent."""
+    """Raise 422 if any required InputDeclaration (with no default) is absent or blank.
+
+    Blank counts as absent: ``-t ""`` or ``--input task=" "`` supplies the key
+    and nothing else, and a required input rendered empty runs the workflow on
+    nothing (PC-66).
+    """
     missing = [
         decl.name
         for decl in workflow.input_declarations
-        if decl.required and decl.default is None and decl.name not in merged
+        if decl.required and decl.default is None and not merged.get(decl.name, "").strip()
     ]
     if not missing:
         return
@@ -245,7 +250,11 @@ class ExecuteWorkflowRequest(BaseModel):
     )
     task: str | None = Field(
         default=None,
-        description="Primary task description -- substituted for $ARGUMENTS in phase prompts.",
+        description=(
+            "Primary task description -- substituted for $ARGUMENTS in phase prompts. "
+            "Omit it to run without a task; an empty or whitespace-only task is rejected "
+            "with 422 (PC-66)."
+        ),
     )
     repos: list[str] = Field(
         default_factory=list,
@@ -293,6 +302,19 @@ class ExecuteWorkflowRequest(BaseModel):
         ),
         deprecated=True,
     )
+
+
+    @field_validator("task")
+    @classmethod
+    def _task_has_content(cls, task: str | None) -> str | None:
+        """A task that is sent must say something.
+
+        ``""`` is never an instruction: a workflow that takes no task is run by
+        omitting the field, and one that does would run on nothing (PC-66).
+        """
+        if task is not None and not task.strip():
+            raise ValueError("task is empty; describe the work, or omit task to run without one")
+        return task
 
 
 class ExecuteWorkflowResponse(BaseModel):

@@ -861,6 +861,61 @@ describe("workflow run commands", () => {
       expect(stdout()).toContain("execution started");
     });
 
+    // ---- an empty task is refused before anything is sent (PC-66) ----------
+    //
+    // `syn workflow run sdlc-implement-v3 -t ""` admitted exec-2dced6933763,
+    // which would have run a full implement workflow on nothing.
+
+    it.each([
+      ["empty", ""],
+      ["whitespace-only", "  \t\n "],
+    ])("refuses an %s -t without calling the API (PC-66)", async (_label, task) => {
+      mockResolveThen(taskWorkflow("Your assignment: $ARGUMENTS"));
+
+      await expect(
+        runCommand.handler({ positionals: ["wf-task"], values: { task } }),
+      ).rejects.toThrow("Empty task");
+
+      expect(stderrText()).toContain("empty task");
+      // Not even the workflow lookup: the refusal needs nothing from the server.
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no task at all", {}],
+      ["a whitespace-only -i task=", { input: ["task=   "] }],
+    ])(
+      "refuses %s when the workflow declares `task` required, and never dispatches (PC-66)",
+      async (_label, values) => {
+        mockResolveThen(
+          taskWorkflow("Your assignment: $ARGUMENTS", [
+            { name: "task", description: "what to do", required: true, default: null },
+          ]),
+        );
+
+        await expect(
+          runCommand.handler({ positionals: ["wf-task"], values }),
+        ).rejects.toThrow("Missing required inputs");
+
+        expect(stderrText()).toContain("Missing required inputs");
+        // The hint names the flag a person types for the task.
+        expect(stdout()).toContain('-t "<task>"');
+        // detail probe, workflows list, detail -- never the execute POST.
+        expect(mockFetch).toHaveBeenCalledTimes(3);
+      },
+    );
+
+    it("runs a workflow that takes no task without one (PC-66)", async () => {
+      mockResolveThen(taskWorkflow("Run the QA ladder: pytest, ruff, just preflight."));
+
+      await runCommand.handler({ positionals: ["wf-task"], values: {} });
+
+      expect(stdout()).toContain("execution started");
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.task).toBeNull();
+    });
+
     it("fails loud when API returns status!=started", async () => {
       mockFetch
         // resolveWorkflow probes GET /workflows/{id} first (issue #880);

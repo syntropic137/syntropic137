@@ -163,6 +163,15 @@ export const runCommand: CommandDef = {
     const dryRun = parsed.values["dry-run"] === true;
     const quiet = parsed.values["quiet"] === true;
 
+    // `-t ""` is never an instruction (PC-66): a workflow that takes no task is
+    // run by dropping -t, and one that does would run on nothing. The API
+    // refuses it too; saying so here costs no round trip.
+    if (task !== undefined && task.trim() === "") {
+      printError("-t was given an empty task.");
+      printDim('Describe the work with -t "<task>", or drop -t to run a workflow that takes no task.');
+      throw new CLIError("Empty task", 1);
+    }
+
     if (evalId !== undefined && noEval) {
       printError("--eval and --no-eval cannot be combined.");
       printDim("Pass --eval <id> to choose the eval, or --no-eval for an ordinary run.");
@@ -199,8 +208,13 @@ export const runCommand: CommandDef = {
     // Input names this dispatch supplies a value for. `-t` supplies
     // TASK_INPUT_NAME just as surely as `-i task=...` does, so a workflow that
     // declares `task` as a required input must not be reported as missing it
-    // when the caller typed `-t` (#1280).
-    const supplied = new Set(Object.keys(parsedInputs));
+    // when the caller typed `-t` (#1280). A blank value supplies nothing: a
+    // required input rendered empty runs the workflow on nothing (PC-66).
+    const supplied = new Set(
+      Object.entries(parsedInputs)
+        .filter(([, value]) => String(value).trim() !== "")
+        .map(([name]) => name),
+    );
     if (task !== undefined) {
       supplied.add(TASK_INPUT_NAME);
     }
@@ -212,7 +226,8 @@ export const runCommand: CommandDef = {
       printError("Missing required inputs:");
       for (const d of missingRequired) {
         const desc = d.description ? ` — ${d.description}` : "";
-        print(`  ${style(`--input ${d.name}=<value>`, RED)}${desc}`);
+        const flag = d.name === TASK_INPUT_NAME ? '-t "<task>"' : `--input ${d.name}=<value>`;
+        print(`  ${style(flag, RED)}${desc}`);
       }
       print("");
       printDim("Provide all required inputs to run this workflow.");
