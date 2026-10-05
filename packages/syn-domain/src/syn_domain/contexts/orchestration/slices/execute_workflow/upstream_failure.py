@@ -20,10 +20,12 @@ from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
+    codex_login_fault_reason,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     ApiErrorType,
     api_error_label,
+    api_error_with_message,
 )
 
 if TYPE_CHECKING:
@@ -117,10 +119,27 @@ class StreamReasonUpstreamFailureReader:
         codex_fault_reason(_CODEX_AT_CAPACITY): UpstreamFailureKind.CAPACITY,
     }
 
+    #: Auth faults the parsers report WITH detail appended: a codex login fault
+    #: carries the CLI's log line, a claude error body its own message. Each
+    #: prefix is what its producer writes with empty detail, and it is matched
+    #: only at the start of the reason. Only `AUTH` is matched this way: it is
+    #: never retried, so text that forges a prefix can at worst stop a retry
+    #: `UNKNOWN` would not have made either - never cause one.
+    _AUTH_PREFIXES: ClassVar[tuple[str, ...]] = (
+        *(codex_login_fault_reason(status, "") for status in ("401", "403", "")),
+        api_error_with_message(ApiErrorType.AUTHENTICATION, ""),
+        api_error_with_message(ApiErrorType.PERMISSION, ""),
+    )
+
     def kind_of(self, reason: str | None) -> UpstreamFailureKind | None:
         if reason is None:
             return None
-        return self._KINDS.get(reason, UpstreamFailureKind.UNKNOWN)
+        kind = self._KINDS.get(reason)
+        if kind is not None:
+            return kind
+        if reason.startswith(self._AUTH_PREFIXES):
+            return UpstreamFailureKind.AUTH
+        return UpstreamFailureKind.UNKNOWN
 
 
 #: The reader production uses. Replace this, not its callers, for #1605.

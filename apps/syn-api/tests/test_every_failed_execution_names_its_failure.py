@@ -16,6 +16,7 @@ execution AND on its failed phase. A new failure shape belongs in
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
@@ -45,6 +46,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome
     phase_failure,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    CodexStreamProcessor,
     codex_fault_reason,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
@@ -74,7 +76,7 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from event_sourcing import DomainEvent
 
@@ -130,11 +132,68 @@ def _upstream(reason: str) -> Exception:
     return failure
 
 
+class _SilentRecorder:
+    """A codex observability recorder that records nothing: only the verdict is read."""
+
+    def note_agent_activity(self) -> None:
+        return
+
+    def note_observed_model(self, model: str | None) -> None:
+        return
+
+    async def record_tool_started(self, **_kwargs: object) -> None:
+        return
+
+    async def record_tool_completed(self, **_kwargs: object) -> None:
+        return
+
+    async def record_token_usage(self, *_args: object, **_kwargs: object) -> None:
+        return
+
+    async def record_session_summary(self, **_kwargs: object) -> None:
+        return
+
+
+class _Workspace:
+    last_stream_exit_code = 1
+
+    async def interrupt(self) -> bool:
+        return True
+
+
+def _codex_parsed(*lines: str) -> str:
+    """The `error_reason` the real codex stream processor gives these raw stdout lines."""
+
+    async def stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    processor = CodexStreamProcessor(
+        tokens=TokenAccumulator(),
+        collector=_SilentRecorder(),
+        controller=None,
+        execution_id="exec",
+        phase_id=PHASE_ID,
+        session_id="sess",
+        agent_model="gpt-5.6",
+        rollout=None,
+    )
+    result = asyncio.run(processor.process_stream(stream(), _Workspace()))
+    assert result.error_reason is not None
+    return result.error_reason
+
+
 #: The real codex sentence (#1303) and a claude 401, as the parsers spell them.
 CODEX_AT_CAPACITY = codex_fault_reason(
     "Selected model is at capacity. Please try a different model."
 )
 CLAUDE_UNAUTHORISED = api_error_label(ApiErrorType.AUTHENTICATION, "401")
+#: The codex login fault from the production run behind #1303, as raw stdout:
+#: the parser appends the CLI's own log line to the 401 label.
+CODEX_UNAUTHORISED = _codex_parsed(
+    "ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized "
+    '- {"error": "invalid_grant", "code": "refresh_token_reused"}'
+)
 
 #: Every exception a phase is known to die on in the processor, by execution id.
 _PHASE_FAILURES: dict[str, BaseException] = {
@@ -143,6 +202,7 @@ _PHASE_FAILURES: dict[str, BaseException] = {
     # exec-b633cc744455's shape: the harness reported the model unavailable.
     "exec-capacity": _upstream(CODEX_AT_CAPACITY),
     "exec-auth": _upstream(CLAUDE_UNAUTHORISED),
+    "exec-codex-auth": _upstream(CODEX_UNAUTHORISED),
     "exec-crash": RuntimeError("workspace container exited 137 before the agent reported"),
     "exec-refusal": _reported(
         'TASK_RESULT: {"success": false, "comments": "premise false"}\nTASK_RESULT_END'
@@ -369,14 +429,22 @@ async def test_capacity_and_auth_say_what_they_ask_of_an_operator(
     """Both are `platform`; the record still says which wants a wait and which a fix."""
     manager = await _projections()
     capacity = await _detail(monkeypatch, manager, "exec-capacity")
-    auth = await _detail(monkeypatch, manager, "exec-auth")
+    auths = [
+        await _detail(monkeypatch, manager, "exec-auth"),
+        await _detail(monkeypatch, manager, "exec-codex-auth"),
+    ]
 
-    for detail in (capacity, auth):
+    for detail in (capacity, *auths):
         assert detail.failure_classification is FailureClassification.PLATFORM
     assert capacity.error_message is not None
-    assert auth.error_message is not None
     assert "Upstream failure: capacity - transient; the phase is resumable." in (
         capacity.error_message
     )
-    assert "Upstream failure: auth - an operator must fix the credentials." in auth.error_message
-    assert "resumable" not in auth.error_message
+    for auth in auths:
+        assert auth.error_message is not None
+        assert "Upstream failure: auth - an operator must fix the credentials." in (
+            auth.error_message
+        )
+        assert "resumable" not in auth.error_message
+        (phase,) = auth.phases
+        assert phase.error_message == auth.error_message
