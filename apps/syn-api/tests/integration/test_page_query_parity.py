@@ -10,6 +10,7 @@ search field, mixed case - and compares the two answers whole for every query.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import asyncpg
 import pytest
@@ -17,11 +18,16 @@ import pytest
 from syn_adapters.projection_stores.postgres_store import PostgresProjectionStore
 from syn_domain.projection_page import PageQuery, StatusOf
 
+if TYPE_CHECKING:
+    from syn_domain.pagination import ProjectionRecord
+
 pytestmark = pytest.mark.integration
 
 PROJECTION = "page_query_parity"
 
-DOCS: dict[str, dict[str, object]] = {
+# Raw store documents, malformed on purpose: ``ProjectionRecord`` is what
+# ``PageQuery`` reads, and a model would refuse the shapes under test.
+DOCS: dict[str, ProjectionRecord] = {
     "a": {
         "name": "Alpha",
         "status": "completed",
@@ -121,7 +127,7 @@ async def test_postgres_page_keys_answers_what_page_query_run_answers(
         await pool.close()
 
 
-def _keys_in_read_order(stored: list[dict[str, object]]) -> list[str]:
+def _keys_in_read_order(stored: list[ProjectionRecord]) -> list[str]:
     """``get_all``'s order, which is the order ``paginate``'s stable sort breaks ties by."""
     names = {str(doc.get("name")): key for key, doc in DOCS.items()}
     return [names[str(doc.get("name"))] for doc in stored]
