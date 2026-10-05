@@ -36,11 +36,16 @@ its first line is `CERTIFIED` there is no blocking defect, which is the next
 section's case. Write `Round: 3 of 3` as the first line of your report.
 
 **If this run is a resume of one that ended with unresolved findings,** round 3
-already ran once and was BLOCKED after it. Its findings are not in
-`artifacts/input/`; `finalize_pr` wrote them on the PR as a comment naming the
-blocking finding and the head SHA it applies to. Those findings are your scope
-too, and that head SHA - not the one `reverify_2` verified - is what you build
-on, so the previous attempt's commits are kept.
+already ran once, pushed, and was BLOCKED after it. You can tell: the draft PR
+carries a `finalize_pr` comment saying `3 of 3` repair rounds ran. Round 3's
+findings are not in `artifacts/input/`; that comment names the blocking finding
+and the head SHA it applies to. Those findings are your scope too, and **on a
+resume the verified SHA is the head SHA that comment names**, not the one
+`reverify_2` verified: that older SHA is the head before the previous attempt
+pushed, so checking it out would discard that attempt's commits and the remote
+head can never equal it. Use the comment's SHA wherever the sections below say
+"the verified SHA", including in both `rev-parse` checks, and paste the comment's
+URL into your report beside it.
 
 ## If verification certified the change, stop
 
@@ -62,7 +67,8 @@ Say plainly in your report which it was, because the phase after you reads it.
 
 **You are in a fresh workspace with a fresh clone of the default branch.** The
 branch you are about to repair is not here yet. Read the branch name and the
-full verified SHA from `verify.md`, then run:
+full verified SHA from `verify.md` - or, when the round section above names a
+different SHA as the verified one, that SHA - then run:
 
 ```
 git fetch origin <branch>

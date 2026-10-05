@@ -55,7 +55,8 @@ Say plainly in your report which it was, because the phase after you reads it.
 
 **You are in a fresh workspace with a fresh clone of the default branch.** The
 branch you are about to repair is not here yet. Read the branch name and the
-full verified SHA from `verify.md`, then run:
+full verified SHA from `verify.md` - or, when the round section above names a
+different SHA as the verified one, that SHA - then run:
 
 ```
 git fetch origin <branch>

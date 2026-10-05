@@ -385,6 +385,83 @@ class TestEveryRoundIsVisibleAndWired:
             assert f"Round {n} of {_ROUNDS}" in prompts[reverify], reverify
 
 
+def _section(raw: str, heading: str) -> str:
+    start = raw.index(f"\n## {heading}\n")
+    return raw[start : raw.index("\n## ", start + 1)]
+
+
+def _fix_checkout(
+    phase: str, *, reported: str, remote: str, resume_comment: str | None = None
+) -> str | None:
+    """What a fix phase checks out, or None where its prompt says to stop.
+
+    `reported` is the SHA the round's verdict report names, `remote` the
+    branch's head, and `resume_comment` the head SHA in `finalize_pr`'s BLOCKED
+    comment when the run is a resume. Which SHA counts as verified is read from
+    the prompt; the checkout block is then run against a fake git and judged by
+    the gate the prompt states.
+    """
+    raw = (_WORKFLOW.parent / "phases" / f"{phase}.md").read_text()
+    flat = lambda s: re.sub(r"\s+", " ", s)  # noqa: E731
+    rounds = flat(_section(raw, "Which round this is"))
+    checkout = _section(raw, "Check out exactly what verification reviewed")
+    verified = reported
+    if (
+        resume_comment is not None
+        and "on a resume the verified SHA is the head SHA that comment names" in rounds
+        and "when the round section above names a different SHA as the verified one"
+        in flat(checkout)
+    ):
+        verified = resume_comment
+    block = re.search(r"```\n(.*?)```", checkout, re.S)
+    assert block, f"{phase} no longer gives the checkout commands"
+    head, parsed = "", []
+    for line in block.group(1).splitlines():
+        cmd = line.replace("<branch>", "b").replace("<verified-sha>", verified)
+        if cmd == "git rev-parse origin/b":
+            parsed.append(remote)
+        elif cmd.startswith("git checkout -B b "):
+            head = cmd.rsplit(" ", 1)[1]
+        elif cmd == "git rev-parse HEAD":
+            parsed.append(head)
+    assert "Both `rev-parse` results must equal the verified SHA" in flat(checkout)
+    assert len(parsed) == 2, f"{phase} no longer runs both rev-parse checks"
+    return head if all(sha == verified for sha in parsed) else None
+
+
+class TestAResumedFixBuildsOnThePushedHead:
+    """A resume re-runs `fix_3` after round 3 pushed head B and was BLOCKED.
+
+    `reverify_2.md` is still injected and names A, the head before round 3's
+    push. Taking A as verified makes the remote check fail on B and the resumed
+    round stops before repairing anything; checking out A would drop round 3's
+    commits.
+    """
+
+    A, B = "a" * 40, "b" * 40
+
+    def test_the_resumed_round_checks_out_the_head_the_blocked_comment_names(self) -> None:
+        got = _fix_checkout("fix_3", reported=self.A, remote=self.B, resume_comment=self.B)
+        assert got == self.B
+
+    def test_without_a_resume_a_moved_branch_still_stops_the_round(self) -> None:
+        assert _fix_checkout("fix_3", reported=self.A, remote=self.B) is None
+        assert _fix_checkout("fix_3", reported=self.A, remote=self.A) == self.A
+
+    def test_the_resume_signal_is_what_finalize_pr_writes(self) -> None:
+        # fix_3 recognises a resume by the BLOCKED comment; if finalize_pr
+        # stopped writing its round count or head SHA, nothing would match.
+        rounds = re.sub(
+            r"\s+",
+            " ",
+            _section((_WORKFLOW.parent / "phases" / "fix_3.md").read_text(), "Which round this is"),
+        )
+        blocked = re.sub(r"\s+", " ", _section(_FINALIZE.read_text(), "If BLOCKED"))
+        assert "saying `3 of 3` repair rounds ran" in rounds
+        assert "`3 of 3`" in blocked
+        assert "gives the head SHA it applies to" in blocked
+
+
 @pytest.mark.parametrize(
     ("base", "rounds"), [("fix", ("fix_2", "fix_3")), ("reverify", ("reverify_2", "reverify_3"))]
 )
