@@ -25,6 +25,10 @@ from syn_api._wiring import (
     get_projection_mgr,
     get_workflow_repo,
 )
+from syn_api.routes.executions.direct_start import (
+    queue_direct_start,
+    record_execution_request,
+)
 from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
     _validate_all_repos_access,
@@ -36,7 +40,6 @@ from syn_api.types import (
     Result,
     WorkflowError,
 )
-from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
@@ -45,6 +48,7 @@ from syn_domain.contexts.orchestration import (
     EvalUnavailableError,
     LaunchEval,
     RepositoryOutsideBaselineError,
+    RequestExecutionCommand,
     SkillError,
     SkillRef,
     TagSet,
@@ -813,64 +817,59 @@ async def execute_workflow_endpoint(
 
     # Bound by the `async with` below, and closed over like every other value
     # this task carries. Passing it through `add_task` instead would say the
-    # ticket arrived from somewhere else; it did not - it is granted eight
-    # lines down, in this function, and the task is queued under it.
+    # ticket arrived from somewhere else; it did not - it is granted below, in
+    # this function, and the task is queued under it.
     admitted: AdmissionTicket
 
-    async def _run() -> None:
-        # #1387: the lease, carried across the hop that used to spend it.
-        # `add_task` below only queues this coroutine - Starlette runs it after
-        # the response - so the ticket cannot be released there. It ends inside
-        # `execute()` when the execution's start event is durable, or here if
-        # this task produced no execution at all.
-        with carrying(admitted):
-            try:
-                result = await execute(
-                    workflow_id=workflow_id,
-                    inputs=effective_inputs,
-                    execution_id=execution_id,
-                    task=request.task,
-                    repos=typed_repos,
-                    admitted=admitted,
-                    tags=request.tags,
-                    launch_eval=launch_eval,
-                )
-                if isinstance(result, Err):
-                    logger.error(
-                        "Workflow execution failed",
-                        extra={
-                            "execution_id": execution_id,
-                            "workflow_id": workflow_id,
-                            "error": result.message,
-                        },
-                    )
-            except Exception:
-                logger.exception(
-                    "Workflow execution raised exception",
-                    extra={
-                        "execution_id": execution_id,
-                        "workflow_id": workflow_id,
-                    },
-                )
+    async def _start() -> None:
+        result = await execute(
+            workflow_id=workflow_id,
+            inputs=effective_inputs,
+            execution_id=execution_id,
+            task=request.task,
+            repos=typed_repos,
+            admitted=admitted,
+            tags=request.tags,
+            launch_eval=launch_eval,
+        )
+        if isinstance(result, Err):
+            logger.error(
+                "Workflow execution failed",
+                extra={
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "error": result.message,
+                },
+            )
 
     # #1387: the decisive step. Queueing the task IS admitting the work - the
     # response below says 200 either way - so it happens inside the gate, where
     # no maintenance transition can complete around it. A refusal here is the
     # second and final 409, and it is still reachable by the caller because
-    # nothing has been queued yet.
-    #
-    # Leaving this block does NOT release the ticket. It is queued work, not
-    # started work, and `_run` above owns the lease from here.
+    # nothing has been queued yet. Leaving this block does NOT release the
+    # ticket: the queued task owns the lease from here.
     async with _admit_or_409() as admitted:
-        background_tasks.add_task(_run)
-        # Starlette runs queued tasks after the response is sent, and promises
-        # nothing about a response that is never sent - a client that goes away
-        # mid-send, a middleware that replaces the response. `_run` would then
-        # never be entered, so its `carrying` would never settle and the next
-        # deploy's `PUT /maintenance` would wait on this lease forever. Bind
-        # the lease to the queued callable itself, which outlives this block
-        # for exactly as long as Starlette may still call it (#1387).
-        guarantee_settled(admitted, _run)
+        # #1557: durable BEFORE the 200, so a start waiting for a budget slot
+        # survives a restart; the request ProcessManager starts it from here.
+        await record_execution_request(
+            RequestExecutionCommand(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                inputs=effective_inputs,
+                task=request.task,
+                repos=typed_repos,
+                tags=request.tags,
+                launch_eval=launch_eval,
+            ),
+            admitted,
+        )
+        queue_direct_start(
+            background_tasks,
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            admitted=admitted,
+            start=_start,
+        )
     logger.info(
         "Started workflow execution",
         extra={

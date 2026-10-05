@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, computed_field
 
 # Runtime import: Pydantic resolves the field annotations below, and
 # `PhaseActivityInfo` is also called at runtime as a field default.
+from syn_api.execution_budget import StartPath  # noqa: TC001
 from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
@@ -24,6 +25,7 @@ from syn_domain.contexts.orchestration import (
     ResumeStartStatus,  # Pydantic resolves it at runtime
     ReviewVerdict,
     SideEffectStatus,
+    StartStatus,
 )
 from syn_shared.display import EM_DASH
 from syn_shared.observed_model import format_observed_model
@@ -192,6 +194,51 @@ class PhaseExecutionInfo(BaseModel):
         return format_observed_model(self.model, self.requested_model)
 
 
+class ExecutionStartQueueInfo(BaseModel):
+    """Where a start stands in the execution budget, before its execution exists (#1557).
+
+    Every start path - direct, trigger and resume - claims one of
+    ``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits
+    here, first come first served, and has no execution record yet; this is
+    what it shows instead of a 404.
+    """
+
+    path: StartPath
+    """Which entrance the start came through: ``direct``, ``trigger`` or ``resume``."""
+    position: int | None
+    """1 is next to start. ``None`` once the start holds a slot and is opening
+    its execution, or when no process holds it (see ``held``)."""
+    held: bool = True
+    """Whether this API process holds the start in its budget. ``False`` for a
+    durable direct request no process has picked up yet - after a restart,
+    until the request ProcessManager offers it again."""
+    start_status: StartStatus | None = None
+    """The durable request record's status, for a direct start (#1557):
+    ``pending``, ``paused``, ``retryable`` and ``dispatched`` are still owed a
+    start; ``failed`` is settled, with ``status_reason``."""
+    status_reason: str | None = None
+    """Why the last attempt at a direct start did not start it, if one failed."""
+    running: int
+    """Starts holding a slot in this process."""
+    waiting: int
+    """Starts queued behind the limit in this process."""
+    limit: int
+    """``SYN_EXECUTION_MAX_CONCURRENT``."""
+    queued_at: datetime
+    """When the start was accepted and claimed its place."""
+
+    @computed_field(description="Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.")
+    @property
+    def position_display(self) -> str:
+        if not self.held:
+            return (
+                f"recorded, {self.start_status or 'pending'} ({self.running}/{self.limit} running)"
+            )
+        if self.position is None:
+            return f"starting ({self.running}/{self.limit} running)"
+        return f"queued {self.position} of {self.waiting} ({self.running}/{self.limit} running)"
+
+
 class ResumeStartInfo(BaseModel):
     """How starting the child of this execution's resume is going (#1480).
 
@@ -217,6 +264,10 @@ class ResumeStartInfo(BaseModel):
 
     Set only while ``status`` is ``dispatched``; a failed attempt writes its
     outcome over the record it was dispatched from, which had none."""
+    start_queue: ExecutionStartQueueInfo | None = None
+    """Where the child's start stands in the execution budget, while it waits
+    for a slot or opens its execution in this process (#1557). A ``dispatched``
+    start with this set is queued, not lost, and is not re-offered."""
 
 
 class ExecutionDetailResponse(BaseModel):
@@ -346,6 +397,10 @@ class ExecutionDetailResponse(BaseModel):
     because the record is keyed by the parent and a child that failed to start
     has no execution of its own to show it on (#1480).
     """
+    start_queue: ExecutionStartQueueInfo | None = None
+    """Set, with ``status`` ``queued`` or ``starting``, for an execution that has
+    been accepted but not yet opened, because it is waiting for a slot in the
+    execution budget (#1557). ``None`` for every execution that exists."""
 
 
 class ExecutionSummaryResponse(BaseModel):

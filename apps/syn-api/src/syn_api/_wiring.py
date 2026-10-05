@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.orchestration import LaunchEval
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
@@ -96,13 +95,16 @@ from syn_adapters.storage import (
 from syn_adapters.storage.artifact_storage import get_artifact_storage
 from syn_adapters.storage.repositories import (
     get_eval_repository,
+    get_execution_request_repository,
     get_trigger_repository,
     get_workflow_execution_repository,
 )
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_api._wiring_admission import (
     BackgroundWorkflowDispatcher,
+    admitted_launch_eval,
     get_admission_gate,
+    get_execution_budget,
 )
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_api._wiring_launch import _build_resume_handler, get_execute_workflow_handler
@@ -684,15 +686,17 @@ logger = logging.getLogger(__name__)
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
     handler = await get_execute_workflow_handler()
-    from syn_shared.settings import get_settings
-
-    max_concurrent = get_settings().polling.max_concurrent_dispatches
     return BackgroundWorkflowDispatcher(
         handler,
-        max_concurrent=max_concurrent,
+        # #1557: the ONE budget `POST /execute` also claims from, so trigger,
+        # resume and direct starts share SYN_EXECUTION_MAX_CONCURRENT.
+        budget=get_execution_budget(),
+        # #1557: the durable record of each admitted direct start, which the
+        # execution request ProcessManager starts from after a restart.
+        requests=get_execution_request_repository(),
         maintenance=get_admission_gate(),
         # ADR-014 s7: the child of an admitted resume starts through this same
-        # gate and semaphore, reading everything it runs from its parent.
+        # gate and budget, reading everything it runs from its parent.
         #
         # Passed as a FACTORY, not a handler. Building it here would need the
         # execution processor and repository - and so the observability event
@@ -700,18 +704,8 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         # SYN_OBSERVABILITY_DB_URL break dispatcher construction for every
         # deployment, resuming or not.
         resume_handler=_build_resume_handler,
-        launch_eval_for_workflow=_workflow_default_launch_eval,
+        launch_eval_for_workflow=admitted_launch_eval,
     )
-
-
-async def _workflow_default_launch_eval(workflow_id: str) -> LaunchEval:
-    """The eval a trigger-dispatched run joins: its workflow's default, admitted (#967)."""
-    from syn_domain.contexts.orchestration import EvalChoice, WorkflowNotFoundError, launch_eval_for
-
-    workflow = await get_workflow_repository().get_by_id(workflow_id)
-    if workflow is None:
-        raise WorkflowNotFoundError(workflow_id)
-    return await launch_eval_for(get_eval_repository(), EvalChoice(), workflow.default_eval_id)
 
 
 class _NullSignalQueueAdapter:

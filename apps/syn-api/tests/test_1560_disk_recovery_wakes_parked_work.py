@@ -46,7 +46,10 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
 )
-from syn_domain.contexts.orchestration.slices.start_resume import ResumeStartProcessManager
+from syn_domain.contexts.orchestration.slices.start_resume import (
+    ResumeChild,
+    ResumeStartProcessManager,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -134,8 +137,9 @@ class _ResumeHandler:
     def __init__(self, handlers: _Handlers) -> None:
         self._handlers = handlers
 
-    async def validate(self, _parent_execution_id: str) -> None:
-        return None
+    async def validate(self, _parent_execution_id: str) -> ResumeChild:
+        # #1557: validate names the child, so its start queues under that id.
+        return ResumeChild(execution_id="exec-child-disk-1560", workflow_id="wf")
 
     async def handle(
         self, parent_execution_id: str, *, admitted: AdmissionTicket | None = None

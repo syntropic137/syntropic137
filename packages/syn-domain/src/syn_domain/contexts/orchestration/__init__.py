@@ -55,6 +55,8 @@ from syn_domain.contexts.orchestration._shared.skill_errors import (
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
 )
+from syn_domain.contexts.orchestration._shared.start_record import StartStatus, read_start_record
+from syn_domain.contexts.orchestration._shared.start_todo import OWED_STATUSES
 from syn_domain.contexts.orchestration._shared.tags import (
     InvalidTagsError,
     TagSet,
@@ -110,6 +112,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
+    ExecutionAlreadyRequestedError,
+    ExecutionRequestAggregate,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
     WorkflowTemplateConflictError,
     WorkflowTemplateDigestMismatchError,
@@ -146,6 +152,12 @@ from syn_domain.contexts.orchestration.domain.commands import (
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
+    RequestExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
+    ExecutionRequestedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
@@ -241,6 +253,11 @@ from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
 )
+from syn_domain.contexts.orchestration.slices.start_execution_request import (
+    ExecutionRequestStarter,
+    ExecutionRequestStartProcessManager,
+    ExecutionRequestStartRecord,
+)
 from syn_domain.contexts.orchestration.slices.start_resume import (
     MAX_START_ATTEMPTS,
     ResumeStarter,
@@ -266,6 +283,7 @@ __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
     "MAX_START_ATTEMPTS",
+    "OWED_STATUSES",
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     "RETIRED_PHASE_FIELDS",
@@ -319,9 +337,15 @@ __all__ = [
     "ExecuteCommandCommand",
     "ExecuteWorkflowCommand",
     "ExecuteWorkflowHandler",
+    "ExecutionAlreadyRequestedError",
     # Query services
     "ExecutionCostQueryService",
     "ExecutionJournal",
+    "ExecutionRequestAggregate",
+    "ExecutionRequestStartProcessManager",
+    "ExecutionRequestStartRecord",
+    "ExecutionRequestStarter",
+    "ExecutionRequestedEvent",
     # Value objects - workspace
     "ExecutionResult",
     "ExecutionResumedEvent",
@@ -356,6 +380,7 @@ __all__ = [
     "RemoveWorkflowTagsHandler",
     "ReportedFailureReason",
     "RepositoryOutsideBaselineError",
+    "RequestExecutionCommand",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "ResumeExecutionCommand",
@@ -374,6 +399,7 @@ __all__ = [
     "SkillNotRegistered",
     "SkillRef",
     "StartResumeHandler",
+    "StartStatus",
     "StreamResult",
     "SubagentTracker",
     "TagSet",
@@ -409,6 +435,7 @@ __all__ = [
     "mint_wrapper_name",
     "open_eval",
     "read_record",
+    "read_start_record",
     "refuse_resume_start",
     "remove_reclaimed_dir",
     "render_workspace_prompt",

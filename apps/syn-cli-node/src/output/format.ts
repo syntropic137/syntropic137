@@ -109,6 +109,8 @@ const STATUS_COLORS: Record<string, string> = {
   blocked: YELLOW,
   running: BLUE,
   pending: DIM,
+  queued: YELLOW,
+  starting: BLUE,
 };
 
 export function statusStyle(status: string): string {

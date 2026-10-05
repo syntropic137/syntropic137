@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -35,7 +36,10 @@ from syn_api.services.admission_announcement import (
 )
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
-from syn_api.services.execution_concurrency_posture import log_execution_concurrency_posture
+from syn_api.services.execution_posture import (
+    api_memory_limit_mib,
+    log_execution_concurrency_posture,
+)
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
 from syn_api.services.read_path_health import _judge_read_path
@@ -54,6 +58,7 @@ from syn_api.types import (
     Result,
     SubscriptionHealth,
 )
+from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
     ENV_SYN_SESSION_STORE_DEPLOYMENT,
@@ -262,7 +267,11 @@ async def startup(
         logger.warning("Could not determine session capture posture at startup.")
 
     try:
-        log_execution_concurrency_posture(settings.polling.max_concurrent_dispatches)
+        log_execution_concurrency_posture(
+            settings.execution.max_concurrent,
+            memory_limit_mib=api_memory_limit_mib(),
+            retired_setting=os.environ.get(ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES),
+        )
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 

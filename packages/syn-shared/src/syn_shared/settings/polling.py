@@ -8,8 +8,6 @@ from __future__ import annotations
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
-
 
 class PollingSettings(BaseSettings):
     """Configuration for GitHub Events API polling.
@@ -105,26 +103,6 @@ class PollingSettings(BaseSettings):
         ge=0,
         description=(
             "Maximum workflow dispatches per hour across all triggers. 0 to disable. Default: 50."
-        ),
-    )
-
-    max_concurrent_dispatches: int = Field(
-        default=1,
-        ge=1,
-        validation_alias=ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
-        description=(
-            "How many workflow executions the background TRIGGER dispatcher "
-            "runs at once. Scope is deliberately narrow: it does NOT bound "
-            "manual executions started through the API, which build their own "
-            "processor, and it is per-process rather than per-cluster. "
-            "Default: 1. "
-            "TEMPORARILY 1, not 5, because concurrent executions are not "
-            "isolated from each other: the processor keeps per-execution state "
-            "on an instance they share, so they read each other's inputs, and "
-            "one execution's cancellation tears down the others' containers "
-            "(#865). Raising this above 1 before #865 is fixed risks workflows "
-            "that complete successfully against the wrong inputs. Restore the "
-            "higher default once #865 lands."
         ),
     )
 
