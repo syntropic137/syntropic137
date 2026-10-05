@@ -1,0 +1,30 @@
+
+==> [T] prepare: worktree at origin/main, bump to 0.33.2-beta.9
+   (dry-run) git -C <PARENT>/syntropic137 fetch -q origin
+   (dry-run) git -C <PARENT>/syntropic137 worktree add -b chore/bump-0.33.2-beta.9 <PARENT>/syntropic137_worktrees/pit-stop-0.33.2-beta.9 origin/main
+
+==> [T] build: syn-api + syn-gateway v0.33.2-beta.9 for linux/amd64 (commit <the bump commit on origin/main>)
+   (dry-run) docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 --build-arg SYN_BUILD_IMAGE_TAG=v0.33.2-beta.9 --build-arg SYN_BUILD_COMMIT=<the bump commit on origin/main> -t ghcr.io/syntropic137/syn-api:v0.33.2-beta.9 --load -f <PARENT>/syntropic137_worktrees/pit-stop-0.33.2-beta.9/infra/docker/images/syn-api/Dockerfile <PARENT>/syntropic137_worktrees/pit-stop-0.33.2-beta.9
+   (dry-run) docker buildx build --platform linux/amd64 -t ghcr.io/syntropic137/syn-gateway:v0.33.2-beta.9 --load -f <PARENT>/syntropic137_worktrees/pit-stop-0.33.2-beta.9/infra/docker/images/gateway/Dockerfile <PARENT>/syntropic137_worktrees/pit-stop-0.33.2-beta.9
+
+==> [T] ship: docker save | docker load on root@fake-host
+   (dry-run) docker save ... | ssh root@fake-host docker load
+
+==> [T] stage: back up the deployed compose and repoint both pins
+   (dry-run) remote cd /root/.syntropic137 && cat > docker-compose.syntropic137.yaml.pit-stop && echo 'b4b8e5982dd838d33c987c0468eefaaec285ad6ccca41c22f79b245b2058eb06  docker-compose.syntropic137.yaml.pit-stop' | sha256sum -c --status - && cp docker-compose.syntropic137.yaml docker-compose.syntropic137.yaml.bak-v0.33.1-beta.2 && mv docker-compose.syntropic137.yaml.pit-stop docker-compose.syntropic137.yaml || { rm -f docker-compose.syntropic137.yaml.pit-stop; exit 1; }
+
+==> [T] gate: pausing execution admission for the rest of the pit stop
+   (dry-run) PUT /maintenance active=true
+
+==> [T] drain: waiting for every execution to be terminal (timeout 10800s)
+   status_counts: {'completed': 3}  (drained)
+
+==> [T] swap: recreate api + gateway (no pull: the images are only in the host's daemon)
+   (dry-run) remote cd /root/.syntropic137 && docker compose -f docker-compose.syntropic137.yaml up -d api gateway
+
+==> [T] verify: images, docker CLI, projections, build identity
+
+==> [T] gate: resuming execution admission
+   (dry-run) PUT /maintenance active=false
+
+==> [T] DRY RUN DONE: nothing was built, shipped, staged or swapped. v0.33.2-beta.9 is NOT live.
