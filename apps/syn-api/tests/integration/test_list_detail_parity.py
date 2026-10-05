@@ -194,7 +194,7 @@ async def _fetch_all(
 async def test_e2_read_paths_answer_exactly_what_the_old_ones_did(
     e2_seeded_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from syn_domain import agent_event_span, projection_scan
+    from syn_domain import agent_event_span, projection_page, projection_scan
     from syn_domain.agent_event_span import EventSpan
 
     client = e2_seeded_client
@@ -222,6 +222,8 @@ async def test_e2_read_paths_answer_exactly_what_the_old_ones_did(
         old.setattr(agent_event_span, "for_sessions", unbounded)
         old.setattr(agent_event_span, "for_executions", unbounded)
         old.setattr(projection_scan, "ProjectionFieldScan", _NeverScans)
+        # /executions answers in one SQL statement (#967); the old read is Python.
+        old.setattr(projection_page, "ProjectionPager", _NeverScans)
         before = await _fetch_all(client, requests)
 
     # The edge cases are really in play, or the comparison proves nothing.
