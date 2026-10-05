@@ -3394,6 +3394,8 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /** Quarantined Refs */
+            quarantined_refs?: components["schemas"]["QuarantinedRef"][];
             /**
              * Deliverable Produced
              * @default false
@@ -5382,6 +5384,30 @@ export interface components {
              * @default false
              */
             stalled: boolean;
+        };
+        /**
+         * QuarantinedRef
+         * @description Where one repository's unpushed work was saved when its phase ended (#1547).
+         *
+         *     The structured half of what `describe_saved_work` writes as prose into
+         *     `error_message`: only work that LANDED, because a ref that does not exist
+         *     is nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the
+         *     PR the run was working on can be told, by a ProcessManager rather than by
+         *     whoever happened to read the error.
+         */
+        QuarantinedRef: {
+            /** Repository */
+            repository: string;
+            /** Branch */
+            branch: string;
+            /** Ref */
+            ref: string;
+            /** Commit */
+            commit: string | null;
+            /** Commit Count */
+            commit_count: number;
+            /** Pull Request */
+            pull_request?: number | null;
         };
         /**
          * RegisterClaudePluginRequest

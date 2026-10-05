@@ -91,6 +91,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionStatus,
     FailureClassification,
     PhaseUsage,
+    QuarantinedRef,
     ReportedFailureReason,
     SideEffectStatus,
 )
@@ -306,6 +307,7 @@ __all__ = [
     "PhaseUsage",
     "PullRequestCommenter",
     "QuarantineNoticeProcessManager",
+    "QuarantinedRef",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",

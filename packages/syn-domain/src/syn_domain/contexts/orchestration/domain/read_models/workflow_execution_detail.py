@@ -4,19 +4,25 @@ Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
 at the API boundary from the execution_cost projection.
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from pydantic import ValidationError
+
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
     SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     TASK_INPUT_KEY,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -287,6 +293,13 @@ class WorkflowExecutionDetail:
     it.
     """
 
+    quarantined_refs: tuple[QuarantinedRef, ...] = ()
+    """Where the failed phase's unpushed work landed, one per repository (#1547).
+
+    Empty for a run that quarantined nothing, and for every failure recorded
+    before the field existed: the refs were prose in `error_message` then.
+    """
+
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -380,6 +393,7 @@ class WorkflowExecutionDetail:
             reported_failure_reason=ReportedFailureReason.from_stored(
                 data.get("reported_failure_reason")
             ),
+            quarantined_refs=read_quarantined_refs(data.get("quarantined_refs")),
             repos=tuple(data.get("repos", [])),
             inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
             tags=tuple(data.get("tags") or ()),
@@ -418,6 +432,7 @@ class WorkflowExecutionDetail:
             "reported_failure_reason": (
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
+            "quarantined_refs": [r.model_dump(mode="json") for r in self.quarantined_refs],
             "repos": list(self.repos),
             "inputs": dict(self.inputs),
             "tags": list(self.tags),
@@ -451,3 +466,18 @@ def _observed_branches(stored: object) -> tuple[BranchObservation, ...] | None:
     if not isinstance(stored, list):
         return None
     return tuple(BranchObservation.model_validate(entry) for entry in stored)
+
+
+def read_quarantined_refs(raw: object) -> tuple[QuarantinedRef, ...]:
+    """Stored quarantine refs as typed refs; an unreadable row reads as none (#1547).
+
+    Logged rather than raised, for the reason every `from_stored` here exists:
+    one bad row must not strand the whole read model.
+    """
+    if not isinstance(raw, list):
+        return ()
+    try:
+        return tuple(QuarantinedRef.model_validate(r) for r in raw)
+    except ValidationError:
+        logger.warning("Unreadable quarantined_refs on an execution detail; treating as none")
+        return ()
