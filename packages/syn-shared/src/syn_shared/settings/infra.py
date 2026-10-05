@@ -215,7 +215,7 @@ class InfraSettings(BaseSettings):
         description=(
             "CPU weight (docker cpu_shares) of the control plane: api,"
             " timescaledb, event-store and gateway. Agent workspaces run at"
-            " Docker's default of 1024, so under contention the control plane"
+            " SYN_WORKSPACE_CPU_SHARES (1024), so under contention the control plane"
             " gets 4x a workspace's share of the host. A limit caps a"
             " container; this decides who wins when the limits together exceed"
             " the host's cores, which they do once workspaces x 2 > cores."

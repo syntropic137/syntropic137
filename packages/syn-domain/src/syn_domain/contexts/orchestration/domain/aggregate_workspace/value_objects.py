@@ -161,6 +161,7 @@ class SecurityPolicy:
     # Resource limits
     memory_limit_mb: int = 4096
     cpu_limit_cores: float = 2.0
+    cpu_shares: int = 1024  # Relative weight; below the control plane's (#1600)
     disk_limit_gb: int = 10
     timeout_seconds: int = 3600  # Max lifetime
 

@@ -136,6 +136,7 @@ def build_isolation_config(
         security_policy=SecurityPolicy(
             memory_limit_mb=config.memory_limit_mb,
             cpu_limit_cores=config.cpu_limit_cores,
+            cpu_shares=config.cpu_shares,
         ),
         environment=merged_environment,
     )

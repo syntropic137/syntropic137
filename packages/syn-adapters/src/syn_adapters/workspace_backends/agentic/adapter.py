@@ -288,6 +288,9 @@ class AgenticIsolationAdapter:
         # between. See image_verification for the full policy.
         image = await verify_image_async(image)
 
+        # TODO(#1600): config.security_policy carries cpu_limit_cores and
+        # cpu_shares, but WorkspaceConfig has no field for either yet, so both
+        # stop here. The provider change that accepts them is in PR #1602.
         ws_config = WorkspaceConfig(
             provider="docker",
             image=image,
