@@ -41,6 +41,16 @@ A Phase is completed only when the Execution recorded it so. A Phase that
 started and did not complete has no partial credit: there is no mid-phase
 resume.
 
+## Phase Deadline
+
+When a Phase's agent is killed on its timeout (#1546). The clock starts when
+the Phase's workspace is ready (`WorkspaceProvisionedForPhase`), not at
+`PhaseStarted`, so the deadline is `provisioned_at` plus the effective timeout,
+NOT the Phase's start plus it. The agent is told the same deadline as
+`SYN_PHASE_DEADLINE`. Upstream-busy retries inside one run share it; a retried
+Phase is provisioned again and gets a new one. It is derived, never recorded as
+its own event: the facts it is made of are already events.
+
 ## Review Verdict
 
 What a reviewing Phase concluded about the change in front of it: `certified`

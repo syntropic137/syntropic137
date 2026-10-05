@@ -1356,6 +1356,22 @@ class PhaseActivityInfo(BaseModel):
     budget - not that there was none, and not zero.
     """
 
+    deadline: datetime | None = None
+    """When this phase is killed on its budget (#1546), in UTC: the moment its
+    workspace was ready plus ``timeout_seconds``.
+
+    Not ``started_at`` plus ``timeout_seconds``. The phase starts before its
+    workspace is provisioned and its clock only after, so that sum is early by
+    the provisioning time - which is why phases appeared to run past their
+    limit. This is the deadline the agent is told as ``SYN_PHASE_DEADLINE``,
+    to within the moment between the workspace being recorded ready and the
+    agent being dispatched. Like that variable it is in whole seconds,
+    truncated, so it is never later than the agent's.
+
+    ``None`` until the workspace is ready, when the budget is unknown, or for
+    a phase provisioned before this was recorded.
+    """
+
 
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""

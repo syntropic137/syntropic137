@@ -88,6 +88,14 @@ class PhaseExecutionDetail:
     one of the three reaches no reader.
     """
 
+    provisioned_at: datetime | str | None = None
+    """When this phase's workspace was ready, and so when its clock started.
+
+    The phase's deadline is this plus ``timeout_seconds`` (#1546), not
+    ``started_at`` plus it: the phase starts before its workspace is
+    provisioned. ``None`` until the workspace is ready.
+    """
+
     error_message: str | None = None
     """Error message if phase failed."""
 
@@ -171,6 +179,7 @@ class PhaseExecutionDetail:
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
             "timeout_seconds": self.timeout_seconds,
+            "provisioned_at": self._to_iso_string(self.provisioned_at),
             "error_message": self.error_message,
             "deliverable_recovered": self.deliverable_recovered,
             "reported_side_effects": (
@@ -216,6 +225,7 @@ class PhaseExecutionDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             timeout_seconds=data.get("timeout_seconds"),
+            provisioned_at=data.get("provisioned_at"),
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=SideEffectStatus.from_stored(data.get("reported_side_effects")),
