@@ -22,6 +22,7 @@ import {
   ListPagination,
   ListToolbar,
   PageLoader,
+  StaleResults,
   TimeWindowPicker,
 } from '../components'
 import { useArtifactList } from '../hooks/useArtifactList'
@@ -89,6 +90,9 @@ export function ArtifactList() {
   const {
     artifacts,
     loading,
+    stale,
+    failed,
+    retry,
     searchQuery,
     setSearchQuery,
     typeFilter,
@@ -141,24 +145,28 @@ export function ArtifactList() {
 
       {loading ? (
         <PageLoader />
-      ) : artifacts.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={FileText}
-            title={searchQuery ? 'No matching artifacts' : 'No artifacts yet'}
-            description={
-              searchQuery
-                ? 'Try adjusting your search query'
-                : 'Artifacts will appear here when workflows generate outputs'
-            }
-          />
-        </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {artifacts.map((artifact, idx) => (
-            <ArtifactCard key={artifact.id} artifact={artifact} idx={idx} />
-          ))}
-        </div>
+        <StaleResults stale={stale} failed={failed} onRetry={retry}>
+          {artifacts.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon={FileText}
+                title={searchQuery ? 'No matching artifacts' : 'No artifacts yet'}
+                description={
+                  searchQuery
+                    ? 'Try adjusting your search query'
+                    : 'Artifacts will appear here when workflows generate outputs'
+                }
+              />
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {artifacts.map((artifact, idx) => (
+                <ArtifactCard key={artifact.id} artifact={artifact} idx={idx} />
+              ))}
+            </div>
+          )}
+        </StaleResults>
       )}
 
       <ListPagination

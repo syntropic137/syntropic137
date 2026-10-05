@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration._shared.tags import TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
@@ -27,12 +28,15 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        DelegationFailure,
         ExecutablePhase,
         FailureClassification,
         PhaseDefinition,
         ReportedFailureReason,
+        ReviewVerdict,
         SideEffectStatus,
     )
+    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 class StartExecutionCommand:
@@ -151,6 +155,8 @@ class FailExecutionCommand:
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
+        upstream_failure_kind: UpstreamFailureKind | None = None,
+        delegation_failure: DelegationFailure | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -210,6 +216,15 @@ class FailExecutionCommand:
         #: the classification and never folded into it (#1392): an operator
         #: reads the agent's word, and no number is computed from it.
         self.reported_failure_reason = reported_failure_reason
+        #: What kind of upstream fault ended the run, when a service such as
+        #: GitHub raised it (#1593). Beside the classification like the field
+        #: above: `PLATFORM` either way, and this says whether a resume clears
+        #: it or an operator must act.
+        self.upstream_failure_kind = upstream_failure_kind
+        #: Which required delegate did not happen, and why (#894). `None` for
+        #: every failure that is not a failed delegation - every call site but
+        #: the one whose phase declared one.
+        self.delegation_failure = delegation_failure
 
 
 class StartPhaseCommand:
@@ -324,7 +339,12 @@ class InterruptExecutionCommand:
 
 
 class ProvisionWorkspaceCompletedCommand:
-    """Command reported by WorkspaceProvisionHandler after workspace is ready."""
+    """Command reported by WorkspaceProvisionHandler after workspace is ready.
+
+    `checked_out_commits` is where each pinned repository was actually found,
+    read back off the workspace once setup finished and verified against its
+    pin (#967) - the run's recorded starting state, not its request.
+    """
 
     def __init__(
         self,
@@ -332,11 +352,13 @@ class ProvisionWorkspaceCompletedCommand:
         phase_id: str,
         workspace_id: str,
         session_id: str = "",
+        checked_out_commits: Sequence[SourceCommit] = (),
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.workspace_id = workspace_id
         self.session_id = session_id
+        self.checked_out_commits = tuple(checked_out_commits)
 
 
 class AgentExecutionCompletedCommand:
@@ -360,6 +382,7 @@ class AgentExecutionCompletedCommand:
         cache_read_tokens: int = 0,
         last_agent_message: str | None = None,
         reported_side_effects: SideEffectStatus | None = None,
+        reported_review_verdict: ReviewVerdict | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -371,6 +394,7 @@ class AgentExecutionCompletedCommand:
         self.cache_read_tokens = cache_read_tokens
         self.last_agent_message = last_agent_message
         self.reported_side_effects = reported_side_effects
+        self.reported_review_verdict = reported_review_verdict
 
 
 class ArtifactsCollectedCommand:
