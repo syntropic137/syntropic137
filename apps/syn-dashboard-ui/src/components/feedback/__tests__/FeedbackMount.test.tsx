@@ -85,6 +85,7 @@ function renderAppAt(path: string) {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -146,9 +147,15 @@ describe('FeedbackMount', () => {
    * stats fetch live, the tickets opened from the real widget — and then ten
    * seconds of clock, which is long enough for any render loop or poll to
    * show up as more than one list request.
+   *
+   * The clock is faked before anything mounts. A timer created while the
+   * widget or list mounts under the real clock is never advanced by the fake
+   * one, so a late switch would let an interval reload sail past the count.
+   * `shouldAdvanceTime` keeps waitFor and the dynamic import moving.
    */
   it('loads the ticket list once when it is opened, and not again while it sits open', async () => {
-    const user = userEvent.setup()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     // The feedback endpoints answer as production did. Everything else is a
     // 404, which the detail page renders as "not found" rather than tripping
     // over an empty body shaped for a list.
@@ -172,17 +179,14 @@ describe('FeedbackMount', () => {
       CHUNK_TIMEOUT,
     )
     expect(listCalls()).toBe(0)
+    // The bubble's own stats fetch, which drives its open count, is live.
+    await waitFor(() => expect(statsCalls()).toBeGreaterThan(0))
 
     await user.keyboard('{Control>}{Shift>}T{/Shift}{/Control}')
     await waitFor(() => expect(listCalls()).toBe(1))
     const statsAtOpen = statsCalls()
 
-    vi.useFakeTimers()
-    try {
-      await act(() => vi.advanceTimersByTimeAsync(10_000))
-    } finally {
-      vi.useRealTimers()
-    }
+    await act(() => vi.advanceTimersByTimeAsync(10_000))
 
     expect(listCalls()).toBe(1)
     expect(statsCalls()).toBe(statsAtOpen)
