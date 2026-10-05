@@ -117,29 +117,28 @@ def test_an_event_written_before_894_still_loads_with_no_delegation_failure() ->
 # #894 and #1593 each added one optional field to this event, in parallel
 # branches. Every combination the store can hold must load: events written
 # before both, before either one, and after both.
-_STORED_UPSTREAM = "unavailable"
-
-
 @pytest.mark.parametrize(
-    ("extra", "upstream", "delegation"),
+    ("upstream", "delegation"),
     [
-        ({}, None, None),
-        ({"upstream_failure_kind": _STORED_UPSTREAM}, UpstreamFailureKind.UNAVAILABLE, None),
-        ({"delegation_failure": _STORED_DELEGATION}, None, DelegationFailureReason.FAILED),
-        (
-            {"upstream_failure_kind": _STORED_UPSTREAM, "delegation_failure": _STORED_DELEGATION},
-            UpstreamFailureKind.UNAVAILABLE,
-            DelegationFailureReason.FAILED,
-        ),
+        (None, None),
+        (UpstreamFailureKind.UNAVAILABLE, None),
+        (None, DelegationFailureReason.FAILED),
+        (UpstreamFailureKind.UNAVAILABLE, DelegationFailureReason.FAILED),
     ],
     ids=["neither", "upstream-only", "delegation-only", "both"],
 )
 def test_each_combination_of_the_two_failure_accounts_replays(
-    extra: dict[str, object],
     upstream: UpstreamFailureKind | None,
     delegation: DelegationFailureReason | None,
 ) -> None:
-    stored = json.loads(json.dumps({**_BASE, **extra}))
+    # A key absent rather than null, as the store holds events written before
+    # the field existed.
+    written = dict(_BASE)
+    if upstream is not None:
+        written["upstream_failure_kind"] = upstream.value
+    if delegation is not None:
+        written["delegation_failure"] = {**_STORED_DELEGATION, "reason": delegation.value}
+    stored = json.loads(json.dumps(written))
 
     event = WorkflowFailedEvent.model_validate(stored)
 
