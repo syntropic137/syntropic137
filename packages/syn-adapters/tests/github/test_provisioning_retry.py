@@ -25,10 +25,8 @@ from syn_adapters.github.client_retry import RetryPolicy
 from syn_adapters.workspace_backends.service import setup_phase_secrets
 from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    UpstreamFailureKind,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import failure_account
+from syn_shared.upstream_failure import UpstreamFailureKind
 
 pytestmark = pytest.mark.unit
 

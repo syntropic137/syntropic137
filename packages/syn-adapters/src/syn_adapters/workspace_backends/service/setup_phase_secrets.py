@@ -21,9 +21,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
-from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
-    UpstreamFailureError,
-)
+from syn_shared.upstream_failure import UpstreamFailureError
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence

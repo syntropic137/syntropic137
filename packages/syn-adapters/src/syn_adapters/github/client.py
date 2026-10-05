@@ -50,12 +50,7 @@ from syn_adapters.github.client_token import get_installation_token as _get_inst
 from syn_adapters.github.client_token import (
     revoke_installation_token as _revoke_installation_token,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    UpstreamFailureKind,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
-    UpstreamFailureError,
-)
+from syn_shared.upstream_failure import UpstreamFailureError, UpstreamFailureKind
 
 if TYPE_CHECKING:
     from collections.abc import Collection

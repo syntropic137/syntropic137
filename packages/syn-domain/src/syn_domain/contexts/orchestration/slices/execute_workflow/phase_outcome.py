@@ -57,12 +57,12 @@ if TYPE_CHECKING:
         BranchObservation,
         PhaseResult,
         ReportedFailureReason,
-        UpstreamFailureKind,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
         ObservedBranches,
         SavedWork,
     )
+    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 def failed_phase_elapsed_seconds(

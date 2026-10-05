@@ -25,9 +25,6 @@ __all__ = [
     "UpstreamFailureReader",
 ]
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    UpstreamFailureKind,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
     codex_login_fault_reason,
@@ -37,24 +34,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     api_error_label,
     api_error_with_message,
 )
+from syn_shared.upstream_failure import UpstreamFailureError, UpstreamFailureKind
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-
-class UpstreamFailureError(Exception):
-    """A failure an upstream service reported, carrying its kind (#1593).
-
-    The port for every upstream that is not an agent harness - GitHub during
-    provisioning first. The adapter that talks to the service knows which kind
-    its failure was and raises a subclass saying so; `failure_account` reads
-    the kind off the exception and never off its message, so the domain
-    learns what the failure asks of an operator without learning the service.
-    """
-
-    def __init__(self, message: str, *, upstream_kind: UpstreamFailureKind) -> None:
-        super().__init__(message)
-        self.upstream_kind = upstream_kind
 
 
 class UpstreamFailureReader(Protocol):

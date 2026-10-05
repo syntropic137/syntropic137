@@ -20,12 +20,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
         ReportedFailureReason,
-        UpstreamFailureKind,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
         AgentVerdict,
     )
     from syn_shared.diagnostics import SignalDeath
+    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 def describe_exception(error: BaseException) -> str:

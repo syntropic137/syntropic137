@@ -34,7 +34,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
-    UpstreamFailureKind,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     StartExecutionCommand,
@@ -78,6 +77,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
+from syn_shared.upstream_failure import UpstreamFailureKind
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable

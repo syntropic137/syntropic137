@@ -12,8 +12,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     BranchObservation,
     FailureClassification,
     ReportedFailureReason,
-    UpstreamFailureKind,
 )
+from syn_shared.upstream_failure import UpstreamFailureKind  # noqa: TC001 - Pydantic field type
 
 
 @event("WorkflowFailed", "v1")

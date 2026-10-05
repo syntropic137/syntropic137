@@ -32,8 +32,8 @@ if TYPE_CHECKING:
         PhaseDefinition,
         ReportedFailureReason,
         SideEffectStatus,
-        UpstreamFailureKind,
     )
+    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 class StartExecutionCommand:
