@@ -11,12 +11,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Final, Protocol
 
-from event_sourcing import (
-    AggregateRoot,
-    aggregate,
-    command_handler,
-    event_sourcing_handler,
-)
+from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,

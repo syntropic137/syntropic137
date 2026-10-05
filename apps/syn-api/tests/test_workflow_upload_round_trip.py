@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import yaml
+from pydantic import JsonValue, TypeAdapter
 
 from syn_api.types import Ok
 
@@ -37,7 +38,8 @@ from workflow_yaml_reference import FIXTURE, Reference  # noqa: E402
 from syn_domain.contexts.orchestration import WorkflowDefinition  # noqa: E402
 
 _UPLOADS_FILE = FIXTURE.parent / "workflow-upload-bodies.json"
-_UPLOADS: dict[str, object] = json.loads(_UPLOADS_FILE.read_text(encoding="utf-8"))
+# A body is whatever document the CLI uploads; the server is what types it.
+_UPLOADS = TypeAdapter(dict[str, JsonValue]).validate_json(_UPLOADS_FILE.read_bytes())
 _REFERENCE = Reference.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
 # These declare vendored `./skills/...`. `syn workflow install` pins those refs
 # through the skill-registration API (runSkillPreflight) before uploading, so the
