@@ -384,11 +384,6 @@ allowed_prefixes = [
 # Pulled in when the gate stopped deciding scope by filename and started
 # reading the dispatch table's shape (#1281 review). Same debt, measured
 # correctly for the first time - never a relaxed ratchet.
-"apps/syn-api/src/syn_api/_wiring_agent_command.py:_build_context_appendix.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
-"apps/syn-api/src/syn_api/_wiring_agent_command.py:_build_workspace_prompt.param:inputs" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
-"apps/syn-api/src/syn_api/_wiring_agent_command.py:_build_workspace_prompt.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
-"apps/syn-api/src/syn_api/_wiring_agent_command.py:_substitute_inputs.param:inputs" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
-"apps/syn-api/src/syn_api/_wiring_agent_command.py:_substitute_inputs.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
 "apps/syn-api/src/syn_api/routes/capture.py:_counted_loss.param:payload" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
 "apps/syn-api/src/syn_api/routes/capture.py:_parsed_time.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
 "apps/syn-api/src/syn_api/routes/capture.py:_state_of.param:payload" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
