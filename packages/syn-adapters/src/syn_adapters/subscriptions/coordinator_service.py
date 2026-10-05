@@ -491,6 +491,7 @@ def create_coordinator_service(
         TriggerHistoryProjection,
     )
     from syn_domain.contexts.orchestration import (
+        QuarantineNoticeProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
     )
@@ -515,9 +516,6 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
     from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.projection import (
         GlobalClaudePluginsProjection,
-    )
-    from syn_domain.contexts.orchestration.slices.notify_quarantine import (
-        QuarantineNoticeProcessManager,
     )
     from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
         ClaudePluginLockProjection,

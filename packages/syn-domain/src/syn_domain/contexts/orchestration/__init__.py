@@ -198,6 +198,10 @@ from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins impor
     GlobalClaudePluginEntry,
     GlobalClaudePluginNotFoundError,
 )
+from syn_domain.contexts.orchestration.slices.notify_quarantine import (
+    PullRequestCommenter,
+    QuarantineNoticeProcessManager,
+)
 from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
 )
@@ -300,6 +304,8 @@ __all__ = [
     "PhaseExecutionType",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "PullRequestCommenter",
+    "QuarantineNoticeProcessManager",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",

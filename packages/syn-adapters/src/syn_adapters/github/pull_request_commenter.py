@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from syn_domain.contexts.orchestration.slices.notify_quarantine import PullRequestCommenter
+from syn_domain.contexts.orchestration import PullRequestCommenter
 
 if TYPE_CHECKING:
     from collections.abc import Callable
