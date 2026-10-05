@@ -34,8 +34,8 @@ from event_sourcing import (
     ProjectionStore,
 )
 
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
-from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     ResumedEventShape,
     classify_resumed_payload,
@@ -52,6 +52,8 @@ from syn_domain.contexts.orchestration.slices.start_resume.value_objects import 
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +140,7 @@ class ResumeStarter(Protocol):
     Returns the ticket the gate issued, so "started" is written from the
     admission decision and not from the absence of an exception - the same
     contract as `run_workflow` on the trigger path. Raises
-    `MaintenancePausedError` synchronously when admission is closed.
+    an `AdmissionRefusedError` synchronously when admission is refused.
 
     The start itself runs AFTER this returns, so a failure there cannot be
     raised to the caller. It is handed to ``on_failure`` instead, and a starter
@@ -374,8 +376,13 @@ class ResumeStartProcessManager(ProcessManager):
         dispatch and never for whatever replaced it (codex review of #1466).
         """
         parent = record.parent_execution_id
-        if isinstance(exc, MaintenancePausedError):
-            logger.info("Start of the resume of %s held: %s", parent, exc.mode.refusal_detail)
+        if isinstance(exc, AdmissionRefusedError):
+            # #1387/#1560: held, not counted toward the attempt ceiling, for
+            # every refusal reason. Each clears without touching this record (a
+            # deploy ends, an operator frees space), and counting one would fail
+            # an admitted resume because the door stayed shut for
+            # MAX_START_ATTEMPTS passes.
+            logger.warning("Start of the resume of %s held: %s", parent, exc)
             await self._save(record.model_copy(update={"status": "paused"}), only_over=dispatched)
             return
         if isinstance(exc, ValueError):

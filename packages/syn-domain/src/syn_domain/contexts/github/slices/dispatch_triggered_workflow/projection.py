@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
     from event_sourcing.core.checkpoint import DispatchContext
 
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
+
 from event_sourcing import (
     DispatchContext,
     DomainEvent,
@@ -32,8 +34,8 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
-from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 
@@ -269,20 +271,18 @@ class WorkflowDispatchProjection(ProcessManager):
         try:
             await self._execute_and_record(record, execution_id, workflow_id, trigger_id)
             return True
-        except MaintenancePausedError as exc:
-            # #1387: refused, not broken. The execution service raises this
-            # SYNCHRONOUSLY, before any task exists, so nothing was started and
-            # this record is the whole truth about the trigger. Recording it as
-            # `failed` would say the dispatch was attempted and went wrong;
+        except AdmissionRefusedError as exc:
+            # #1387/#1560: refused, not broken. The execution service raises
+            # this SYNCHRONOUSLY, before any task exists, so nothing was started
+            # and this record is the whole truth about the trigger. Recording it
+            # as `failed` would say the dispatch was attempted and went wrong;
             # `paused` says it was held back, and _pending_records() picks it up
-            # again once the gate clears.
-            logger.info(
-                "Dispatch of workflow %s for trigger %s held: %s",
-                workflow_id,
-                trigger_id,
-                exc.mode.refusal_detail,
+            # again once the refusal clears. Caught as the family, not by
+            # reason: naming one reason is how a full disk dropped triggers.
+            logger.warning(
+                "Dispatch of workflow %s for trigger %s held: %s", workflow_id, trigger_id, exc
             )
-            await self._save_record_status(execution_id, record, _PAUSED, "maintenance_mode")
+            await self._save_record_status(execution_id, record, _PAUSED, exc.hold_reason)
             return False
         except Exception:
             logger.exception(
@@ -323,7 +323,7 @@ class WorkflowDispatchProjection(ProcessManager):
                     repo_slug,
                 )
 
-        # #1387: `run_workflow` either raises MaintenancePausedError - which
+        # #1387: `run_workflow` either raises an AdmissionRefusedError - which
         # _dispatch_record records as `paused` - or hands back the admission
         # ticket the gate issued under its transition lock. The record below is
         # written FROM that ticket, so "dispatched" cannot be a guess: there is

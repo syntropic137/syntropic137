@@ -626,12 +626,15 @@ async def _refuse_while_paused() -> None:
     :func:`_admit_or_409` is what actually admits.
     """
     from syn_api._wiring_admission import get_admission_gate
-    from syn_domain.contexts._shared import MaintenancePausedError
+    from syn_domain.contexts._shared import InsufficientDiskSpaceError, MaintenancePausedError
 
     try:
         await get_admission_gate().refuse_early()
     except MaintenancePausedError as exc:
         raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
+    except InsufficientDiskSpaceError as exc:
+        # #1560: 507 Insufficient Storage, before anything was written.
+        raise HTTPException(status_code=507, detail=str(exc)) from None
 
 
 @asynccontextmanager
@@ -645,13 +648,16 @@ async def _admit_or_409() -> AsyncIterator[AdmissionTicket]:
     ``PUT /maintenance`` behind a network round trip.
     """
     from syn_api._wiring_admission import get_admission_gate
-    from syn_domain.contexts._shared import MaintenancePausedError
+    from syn_domain.contexts._shared import InsufficientDiskSpaceError, MaintenancePausedError
 
     try:
         async with get_admission_gate().admitting() as ticket:
             yield ticket
     except MaintenancePausedError as exc:
         raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
+    except InsufficientDiskSpaceError as exc:
+        # #1560: 507 Insufficient Storage, before anything was written.
+        raise HTTPException(status_code=507, detail=str(exc)) from None
 
 
 async def _launch_eval(

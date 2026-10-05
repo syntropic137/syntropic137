@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
     from syn_adapters.dedup.postgres_dedup import PostgresDedupAdapter
     from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
+    from syn_adapters.disk_space import StatvfsDiskSpace
     from syn_adapters.events.store import AgentEventStore
     from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
@@ -138,6 +139,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.tokens.token_vending_adapter import (
         TokenVendingServiceAdapter,
     )
+    from syn_domain.contexts._shared.disk_space import DiskSpacePort
     from syn_domain.contexts._shared.maintenance import MaintenancePort
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
@@ -396,6 +398,10 @@ if TYPE_CHECKING:
         _postgres: MaintenancePort = postgres
         _redis: MaintenancePort = redis
         _memory: MaintenancePort = memory
+
+    def _disk_space(statvfs: StatvfsDiskSpace) -> None:
+        """The workspace-volume probe /health and admission both judge (#1560)."""
+        _statvfs: DiskSpacePort = statvfs
 
     def _session_inventory(
         evidence: PostgresSessionEvidence,

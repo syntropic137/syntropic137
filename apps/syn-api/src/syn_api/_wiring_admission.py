@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from syn_domain.contexts._shared.disk_space import DiskSpaceGuard
     from syn_domain.contexts._shared.maintenance import (
         AdmissionGate,
         AdmissionTicket,
@@ -112,6 +113,23 @@ def get_maintenance_port() -> MaintenancePort:
 _admission_gate_singleton: AdmissionGate | None = None
 
 
+_disk_space_guard_singleton: DiskSpaceGuard | None = None
+
+
+def get_disk_space_guard() -> DiskSpaceGuard:
+    """The one judge of the workspace volume's free space (#1560).
+
+    Shared by the admission gate and /health so the two cannot disagree about
+    one filesystem: a refusal is always visible on /health as ``critical``.
+    """
+    global _disk_space_guard_singleton
+    if _disk_space_guard_singleton is None:
+        from syn_adapters.disk_space import build_disk_space_guard
+
+        _disk_space_guard_singleton = build_disk_space_guard()
+    return _disk_space_guard_singleton
+
+
 def get_admission_gate() -> AdmissionGate:
     """Return the process-wide admission gate (#1387).
 
@@ -140,6 +158,7 @@ def get_admission_gate() -> AdmissionGate:
     _admission_gate_singleton = _AdmissionGate(
         get_maintenance_port(),
         EventStoreAdmissionAnnouncer(get_event_store_client()),
+        get_disk_space_guard(),
     )
     return _admission_gate_singleton
 

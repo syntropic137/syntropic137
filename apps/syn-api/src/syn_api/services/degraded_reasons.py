@@ -32,3 +32,4 @@ class DegradedReason(StrEnum):
     CHECK_RUN_POLLER = "check_run_poller"
     ANTHROPIC_API_KEY = "anthropic_api_key"
     GITHUB_APP = "github_app"
+    DISK_SPACE = "disk_space"
