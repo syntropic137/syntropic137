@@ -62,7 +62,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from syn_api._wiring import _build_claude_command
+from syn_api._wiring_agent_command import _build_claude_command
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,

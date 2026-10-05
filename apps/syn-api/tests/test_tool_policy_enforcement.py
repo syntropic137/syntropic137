@@ -43,7 +43,7 @@ def _phase(tools=None, provider=AgentProvider.CLAUDE, model="haiku"):
 
 class TestAvailabilityNotAutoApproval:
     def test_declared_tools_emit_the_availability_flag(self) -> None:
-        from syn_api._wiring import _build_claude_command
+        from syn_api._wiring_agent_command import _build_claude_command
 
         cmd = _build_claude_command(_phase([ToolName.BASH, ToolName.READ]), "prompt")
 
@@ -52,7 +52,7 @@ class TestAvailabilityNotAutoApproval:
 
     def test_the_tool_list_is_one_comma_separated_argument(self) -> None:
         """`--tools` takes one list; repeating the flag keeps only the last."""
-        from syn_api._wiring import _build_claude_command
+        from syn_api._wiring_agent_command import _build_claude_command
 
         cmd = _build_claude_command(_phase([ToolName.BASH, ToolName.READ]), "prompt")
 
@@ -61,7 +61,7 @@ class TestAvailabilityNotAutoApproval:
 
     def test_an_undeclared_phase_is_left_unrestricted(self) -> None:
         """Omitting the field must not silently become "no tools at all"."""
-        from syn_api._wiring import _build_claude_command
+        from syn_api._wiring_agent_command import _build_claude_command
 
         cmd = _build_claude_command(_phase([]), "prompt")
 
@@ -71,7 +71,7 @@ class TestAvailabilityNotAutoApproval:
 class TestCodexRefusesWhatItCannotHonour:
     def test_codex_rejects_a_tool_declaration_rather_than_ignoring_it(self) -> None:
         """Silently discarding a declared control is how you believe you have one."""
-        from syn_api._wiring import UnsupportedToolPolicyError, _build_agent_command
+        from syn_api._wiring_agent_command import UnsupportedToolPolicyError, _build_agent_command
 
         with pytest.raises(UnsupportedToolPolicyError) as exc:
             _build_agent_command(_phase([ToolName.BASH], provider=AgentProvider.CODEX), "p")
@@ -79,7 +79,7 @@ class TestCodexRefusesWhatItCannotHonour:
         assert "codex" in str(exc.value).lower()
 
     def test_codex_without_a_declaration_still_runs(self) -> None:
-        from syn_api._wiring import _build_agent_command
+        from syn_api._wiring_agent_command import _build_agent_command
 
         cmd = _build_agent_command(_phase([], provider=AgentProvider.CODEX), "p")
 
@@ -90,7 +90,7 @@ class TestPromptCarriesTheGrant:
     """The only harness-NEUTRAL mechanism, and it needs no CLI support."""
 
     def test_declared_tools_are_named_in_the_prompt(self) -> None:
-        from syn_api._wiring import apply_tool_policy_to_prompt
+        from syn_api._codex_command import apply_tool_policy_to_prompt
 
         prompt = apply_tool_policy_to_prompt("do the thing", [ToolName.BASH, ToolName.READ])
 
@@ -99,12 +99,12 @@ class TestPromptCarriesTheGrant:
         assert "Read" in prompt
 
     def test_an_undeclared_phase_gets_an_unmodified_prompt(self) -> None:
-        from syn_api._wiring import apply_tool_policy_to_prompt
+        from syn_api._codex_command import apply_tool_policy_to_prompt
 
         assert apply_tool_policy_to_prompt("do the thing", []) == "do the thing"
 
     def test_the_grant_does_not_name_tools_that_were_not_declared(self) -> None:
-        from syn_api._wiring import apply_tool_policy_to_prompt
+        from syn_api._codex_command import apply_tool_policy_to_prompt
 
         prompt = apply_tool_policy_to_prompt("x", [ToolName.READ])
 

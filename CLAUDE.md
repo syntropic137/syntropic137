@@ -29,6 +29,8 @@ stub bridge leaves this file 3 levels of nested imports, a copy leaves 4.
 
 Syntropic137 - orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability. Two capabilities: **orchestration** (workspace lifecycle, secure token handling, GitHub App integration) and **observability** (tool use, tokens, costs, errors - all streamed to a real-time dashboard).
 
+**North star:** 20 concurrent executions now, 100 as soon as possible, 1,000 for production. Judge every design against it: read [docs/north-star.md](docs/north-star.md).
+
 The end goal: a `gh`-style CLI (`syn`) that integrates with Claude Code and OpenClaw for agentic workflow automation.
 
 ## Architecture
