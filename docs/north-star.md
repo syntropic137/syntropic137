@@ -41,7 +41,7 @@ From [the 2026-10-04 retrospective](retrospectives/2026-10-04-dogfood-orchestrat
 **20 on one node:**
 - control-plane CPU reserved, and admission that will not oversubscribe host cores (#1600);
 - one concurrency budget with visible queued starts (#1557);
-- execution isolation in the trigger dispatcher: it shares one processor whose state is keyed by `phase_id`, so two concurrent runs of one workflow read each other's inputs and one cancellation tears down the others' containers (#865). The setting `max_concurrent_dispatches` defaults to 1 for that reason (`syn_shared/settings/polling.py`). API-started runs build their own processor and are not affected;
+- retire the trigger dispatcher's separate cap. `max_concurrent_dispatches` still defaults to 1, citing #865, but #865 was fixed on 2026-09-22 (one `PhaseRuntime` per execution); the default and its comment are stale and fold into the single budget (#1574);
 - cheaper in-workspace gates (#1585);
 - retry on transient errors (#1593);
 - a measured per-run resource profile, so the budget is set from data rather than guessed.
@@ -53,7 +53,7 @@ From [the 2026-10-04 retrospective](retrospectives/2026-10-04-dogfood-orchestrat
 - rate-limit-aware dispatch for model providers and GitHub;
 - event ingestion and projections sized for the event rate at 100 runs.
 
-Host budgets, event rates and recovery targets for 100 come from the capacity plan in flight (research run exec-ada7853eb9b3, to be posted on #1310). Until then they are unknown, not assumed.
+The capacity plan (exec-ada7853eb9b3, posted on #1310) concludes that 100 on one 16-core node is not reachable by configuration: it would need about 8x less CPU and 4x less disk per running execution. 100 therefore means more nodes, or much cheaper runs. Host budgets and event rates for 100 come from that plan's measurements once they exist.
 
 **1,000:**
 - many executor hosts or cloud sandboxes through `IsolationBackendPort`;
