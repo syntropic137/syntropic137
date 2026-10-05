@@ -32,6 +32,7 @@ from syn_api.services.admission_announcement import announce_admission_if_open
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
+from syn_api.services.health_probes import describe_codex_auth_health
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -66,7 +67,6 @@ if TYPE_CHECKING:
         CheckRunIngestionService,
         GitHubEventIngestionScheduler,
     )
-    from syn_shared.codex_auth_status import CodexAuthStatus
 
 logger = logging.getLogger(__name__)
 SubscriptionHealthResult = tuple[SubscriptionHealth | None, tuple[DegradedReason, ...]]
@@ -335,7 +335,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
     # that is precisely when the question gets asked (#1380).
     subscription, read_path_reasons = await _describe_subscription_health()
     degraded_reasons = [*_state.degraded_reasons, *read_path_reasons]
-    codex_auth = _describe_codex_auth_health()
+    codex_auth = describe_codex_auth_health()
     warnings = [codex_auth.detail] if codex_auth is not None and codex_auth.needs_attention else []
 
     return Ok(
@@ -350,28 +350,6 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
         )
     )
-
-
-def _describe_codex_auth_health() -> CodexAuthStatus | None:
-    """How fresh this instance's codex credential is, or None if it cannot be said.
-
-    WHY HERE: a stale codex credential is invisible until a phase fails, and the
-    failure names no credential. Every instance holds its own copy and expires
-    independently, so this has to be reported per instance rather than centrally,
-    which is exactly what a health endpoint is for.
-
-    Never raises. A freshness hint that can take /health down is worse than no
-    hint, so any failure degrades to omitting the block.
-    """
-    try:
-        from syn_shared.codex_auth_status import describe_codex_auth
-        from syn_shared.settings import get_settings
-
-        secret = get_settings().codex_auth_json
-        return describe_codex_auth(secret.get_secret_value() if secret else None)
-    except Exception:
-        logger.debug("codex auth freshness probe failed", exc_info=True)
-        return None
 
 
 # ── Private helpers ─────────────────────────────────────────────────
