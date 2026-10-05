@@ -39,6 +39,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartExecutionCommand,
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+    WorkflowFailedEvent,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
@@ -74,6 +77,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
+from syn_shared.upstream_failure import UpstreamFailureKind
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -91,6 +95,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
         WorkflowExecutionRepositoryPort,
     )
+    from syn_shared.settings.github import GitHubAppSettings
 
     FailWith = Callable[[_Aggregate], Awaitable[None]]
 
@@ -130,6 +135,43 @@ def _upstream(reason: str) -> Exception:
     failure = phase_failure(result, phase_id=PHASE_ID)
     assert failure is not None
     return failure
+
+
+def _github(status_or_drop: int | None) -> Exception:
+    """What a real `GitHubAppClient` raises minting a token over a scripted network.
+
+    None drops every connection, so the retrying transport exhausts its three
+    attempts; an int answers the mint with that status. Built by the production
+    client and transport, not by hand, so the exception's kind is the one a
+    provisioning failure actually carries (#1593).
+    """
+    import httpx
+
+    from syn_adapters.github.client import GitHubAppClient
+    from syn_adapters.github.client_retry import RetryPolicy
+
+    def answer(_request: httpx.Request) -> httpx.Response:
+        if status_or_drop is None:
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        return httpx.Response(status_or_drop, json={"message": "scripted"})
+
+    settings = cast("GitHubAppSettings", _GitHubSettings())
+    client = GitHubAppClient(settings, transport=httpx.MockTransport(answer))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(GitHubAppClient, "_generate_jwt", lambda _self: "jwt")
+        patch.setattr(RetryPolicy, "delay_after", lambda _self, _attempt: 0.0)
+        try:
+            asyncio.run(client.get_installation_token("7"))
+        except Exception as raised:
+            return raised
+    raise AssertionError("the scripted mint did not fail")
+
+
+@dataclass(frozen=True)
+class _GitHubSettings:
+    is_configured: bool = True
+    bot_name: str = "syn-bot"
+    bot_email: str = "bot@example.com"
 
 
 class _SilentRecorder:
@@ -203,6 +245,10 @@ _PHASE_FAILURES: dict[str, BaseException] = {
     "exec-capacity": _upstream(CODEX_AT_CAPACITY),
     "exec-auth": _upstream(CLAUDE_UNAUTHORISED),
     "exec-codex-auth": _upstream(CODEX_UNAUTHORISED),
+    # exec-2bb840f5c9b6's shape: GitHub dropped the connection while the
+    # workspace's token was minted, on every attempt the transport allowed.
+    "exec-github-unavailable": _github(None),
+    "exec-github-auth": _github(401),
     "exec-crash": RuntimeError("workspace container exited 137 before the agent reported"),
     "exec-refusal": _reported(
         'TASK_RESULT: {"success": false, "comments": "premise false"}\nTASK_RESULT_END'
@@ -426,7 +472,21 @@ async def test_the_failed_phase_carries_the_same_error_and_classification(
 async def test_capacity_and_auth_say_what_they_ask_of_an_operator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both are `platform`; the record still says which wants a wait and which a fix."""
+    """Both are `platform`; the record still says which wants a wait and which a fix.
+
+    The kind is asserted on the stored WorkflowFailed event, not only in the
+    prose: `phase_failure` once named it in the message and the event kept
+    `None`, so nothing reading the field could tell a busy provider from a
+    crash (#1593).
+    """
+    for execution_id, kind in (
+        ("exec-capacity", UpstreamFailureKind.CAPACITY),
+        ("exec-auth", UpstreamFailureKind.AUTH),
+        ("exec-codex-auth", UpstreamFailureKind.AUTH),
+    ):
+        failed = (await _failure_events(execution_id))[-1]
+        assert isinstance(failed, WorkflowFailedEvent)
+        assert failed.upstream_failure_kind is kind, execution_id
     manager = await _projections()
     capacity = await _detail(monkeypatch, manager, "exec-capacity")
     auths = [
@@ -448,3 +508,38 @@ async def test_capacity_and_auth_say_what_they_ask_of_an_operator(
         assert "resumable" not in auth.error_message
         (phase,) = auth.phases
         assert phase.error_message == auth.error_message
+
+
+@pytest.mark.asyncio
+async def test_github_unavailable_is_recorded_resumable_and_github_auth_as_an_operators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three dropped connections and a 401 are both `platform`, and opposite asks (#1593).
+
+    The kind is asserted on the stored WorkflowFailed event, typed, and the
+    sentence an operator reads on the execution and its failed phase.
+    """
+    unavailable = (await _failure_events("exec-github-unavailable"))[-1]
+    auth = (await _failure_events("exec-github-auth"))[-1]
+    assert isinstance(unavailable, WorkflowFailedEvent)
+    assert isinstance(auth, WorkflowFailedEvent)
+    assert unavailable.upstream_failure_kind is UpstreamFailureKind.UNAVAILABLE
+    assert auth.upstream_failure_kind is UpstreamFailureKind.AUTH
+    assert unavailable.failure_classification is FailureClassification.PLATFORM
+    assert auth.failure_classification is FailureClassification.PLATFORM
+
+    manager = await _projections()
+    resumable = await _detail(monkeypatch, manager, "exec-github-unavailable")
+    operator = await _detail(monkeypatch, manager, "exec-github-auth")
+    assert resumable.error_message is not None
+    assert "Upstream failure: unavailable - transient; the phase is resumable." in (
+        resumable.error_message
+    )
+    assert operator.error_message is not None
+    assert "Upstream failure: auth - an operator must fix the credentials." in (
+        operator.error_message
+    )
+    assert "resumable" not in operator.error_message
+    for detail in (resumable, operator):
+        (phase,) = detail.phases
+        assert phase.error_message == detail.error_message
