@@ -2927,6 +2927,33 @@ export interface components {
          * @enum {string}
          */
         CoverageState: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+        /**
+         * CpuThrottling
+         * @description CPU throttling of the process answering /health, since its cgroup was created.
+         */
+        CpuThrottling: {
+            /**
+             * Status
+             * @description 'measured' when cgroup v2 cpu.stat reported throttling counters; 'unknown' on cgroup v1, outside a container, or with no CPU limit set. Unknown is not zero: the counters are null, not 0.
+             * @enum {string}
+             */
+            status: "measured" | "unknown";
+            /**
+             * Nr Periods
+             * @description Scheduling periods in which this cgroup was runnable.
+             */
+            nr_periods?: number | null;
+            /**
+             * Nr Throttled
+             * @description Periods in which the cgroup hit its CPU limit and was held back. nr_throttled / nr_periods is the share of time the control plane was starved.
+             */
+            nr_throttled?: number | null;
+            /**
+             * Throttled Usec
+             * @description Total time spent throttled, in microseconds.
+             */
+            throttled_usec?: number | null;
+        };
         /** CreateArtifactRequest */
         CreateArtifactRequest: {
             /** Workflow Id */
@@ -4446,6 +4473,8 @@ export interface components {
              * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
              */
             warnings?: string[] | null;
+            /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
+            cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
         };
         /**
          * HeatmapDayBucketResponse

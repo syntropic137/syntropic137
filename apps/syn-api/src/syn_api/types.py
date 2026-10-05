@@ -34,6 +34,7 @@ from pydantic import (
 # rather than restated - the probe that produces a shape is the only place
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -2178,6 +2179,12 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Human-readable notes that need attention but do not degrade the "
         "instance. Omitted when there are none.",
+    )
+    cpu_throttling: CpuThrottling | None = Field(
+        default=None,
+        description="How often the API container hit its CPU limit (#1600). Always present "
+        "once the gate is ready, with status 'unknown' when the cgroup does not say; "
+        "omitted only while the gate is withholding the API.",
     )
 
 

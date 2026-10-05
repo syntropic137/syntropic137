@@ -29,6 +29,7 @@ from syn_api._wiring import (
 from syn_api.build_info import get_build_info
 from syn_api.services import inventory_lifecycle
 from syn_api.services.admission_announcement import announce_admission_if_open
+from syn_api.services.cpu_throttling import read_cpu_throttling
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
@@ -347,6 +348,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             subscription=subscription,
             codex_auth=codex_auth,
             warnings=warnings or None,
+            cpu_throttling=read_cpu_throttling(),
         )
     )
 
