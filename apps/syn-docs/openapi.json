@@ -10018,6 +10018,13 @@
               }
             ]
           },
+          "quarantined_refs": {
+            "items": {
+              "$ref": "#/components/schemas/QuarantinedRef"
+            },
+            "type": "array",
+            "title": "Quarantined Refs"
+          },
           "deliverable_produced": {
             "type": "boolean",
             "title": "Deliverable Produced",
@@ -14593,6 +14600,70 @@
         ],
         "title": "ProjectionLag",
         "description": "One projection's distance from the head of the event store."
+      },
+      "QuarantinedRef": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "commit_count": {
+            "type": "integer",
+            "title": "Commit Count"
+          },
+          "pull_request": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request"
+          },
+          "diffstat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diffstat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repository",
+          "branch",
+          "ref",
+          "commit",
+          "commit_count"
+        ],
+        "title": "QuarantinedRef",
+        "description": "Where one repository's unpushed work was saved when its phase ended (#1547).\n\nThe structured half of what `describe_saved_work` writes as prose into\n`error_message`: only work that LANDED, because a ref that does not exist\nis nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the\nPR the run was working on can be told, by a ProcessManager rather than by\nwhoever happened to read the error."
       },
       "RegisterClaudePluginRequest": {
         "properties": {

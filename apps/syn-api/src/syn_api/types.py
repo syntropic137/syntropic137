@@ -86,6 +86,7 @@ from syn_domain.contexts.orchestration import (
     DelegationFailure,
     EvalId,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
     SideEffectStatus,
@@ -738,6 +739,12 @@ class ExecutionDetail(BaseModel):
     Distinct from `unknown`, which is the word a phase writes to say it could
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
+    """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
     """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
@@ -1579,6 +1586,12 @@ class ExecutionDetailFull(BaseModel):
     Distinct from `unknown`, which is the word a phase writes to say it could
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
+    """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
     """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
