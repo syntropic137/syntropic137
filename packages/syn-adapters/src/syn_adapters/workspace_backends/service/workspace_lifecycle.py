@@ -23,6 +23,9 @@ from syn_domain.contexts.orchestration import (
     TerminateWorkspaceCommand,
     WorkspaceAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    WorkspaceUsage,
+)
 from syn_shared.diagnostics import name_exit_status
 
 if TYPE_CHECKING:
@@ -35,7 +38,6 @@ if TYPE_CHECKING:
         IsolationBackendType,
         IsolationHandle,
         SidecarHandle,
-        WorkspaceUsage,
     )
 
 logger = logging.getLogger(__name__)
@@ -270,10 +272,14 @@ async def _destroy_isolation(
     nothing or the destroy itself failed.
     """
     try:
-        return await service._isolation.destroy(isolation_handle)
+        usage: object = await service._isolation.destroy(isolation_handle)
     except Exception as e:
         logger.warning("Failed to destroy isolation: %s", e)
         return None
+    # Checked, not trusted: this value is only telemetry, and it is read in a
+    # `finally`. A backend that returned something else must cost the record,
+    # never the teardown.
+    return usage if isinstance(usage, WorkspaceUsage) else None
 
 
 async def cleanup_workspace(
