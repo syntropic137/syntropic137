@@ -28,7 +28,9 @@ from check_complexity_thresholds import find_violations, measure
 _ROOT = Path(__file__).resolve().parents[2]
 _APS = _ROOT / "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-needs_aps = pytest.mark.skipif(not _APS.exists(), reason=f"no aps binary at {_APS}; run `just aps-build`")
+needs_aps = pytest.mark.skipif(
+    not _APS.exists(), reason=f"no aps binary at {_APS}; run `just aps-build`"
+)
 
 
 def _aps_measurements(root: Path, out: Path) -> Counter[tuple[str, str, int]]:
@@ -68,7 +70,7 @@ def _over_limit_fixture(root: Path) -> None:
 
 # Every decision node the Python grammar counts, plus the ones it ignores
 # (finally, raise), the elif/else-if distinction, and nesting.
-_SHAPES = '''
+_SHAPES = """
 def shapes(a, b=1 if True else 2) -> int:
     if a and b or a:
         pass
@@ -106,7 +108,7 @@ def shapes(a, b=1 if True else 2) -> int:
     def inner():
         return a if b else lambda: a and b
     return 0
-'''
+"""
 
 
 @needs_aps

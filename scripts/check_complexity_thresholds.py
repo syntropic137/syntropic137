@@ -111,7 +111,9 @@ def python_files(root: Path) -> list[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if not _skipped(d))
         found.extend(
-            Path(dirpath, f) for f in sorted(filenames) if f.endswith((".py", ".pyi")) and not _skipped(f)
+            Path(dirpath, f)
+            for f in sorted(filenames)
+            if f.endswith((".py", ".pyi")) and not _skipped(f)
         )
     return found
 
@@ -136,13 +138,19 @@ def _decisions(node: ast.AST, lines: list[str]) -> int:
     children: list[ast.AST] = list(ast.iter_child_nodes(node))
     if isinstance(node, ast.If):
         own = 1  # if_statement or elif_clause
-        chained_elif = len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If) and _is_elif(node.orelse[0], lines)
+        chained_elif = (
+            len(node.orelse) == 1
+            and isinstance(node.orelse[0], ast.If)
+            and _is_elif(node.orelse[0], lines)
+        )
         own += bool(node.orelse) and not chained_elif  # else_clause
     elif isinstance(node, ast.For | ast.AsyncFor | ast.While):
         own = 1 + bool(node.orelse)
     elif isinstance(node, ast.Try | ast.TryStar):
         own = len(node.handlers) + bool(node.orelse)
-        children = [c for c in children if not any(c is f for f in node.finalbody)]  # finally_clause
+        children = [
+            c for c in children if not any(c is f for f in node.finalbody)
+        ]  # finally_clause
     elif isinstance(node, ast.BoolOp):
         own = len(node.values) - 1  # one boolean_operator per and/or
     elif isinstance(node, ast.match_case | ast.ListComp | ast.IfExp | ast.Assert):
@@ -154,7 +162,11 @@ def _cyclomatic(func: ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]) 
     # The function node excludes its own decorators (they sit in the parent
     # decorated_definition), but includes defaults and annotations.
     parts = [*func.args.defaults, *(d for d in func.args.kw_defaults if d), *func.body]
-    parts += [a.annotation for a in (*func.args.posonlyargs, *func.args.args, *func.args.kwonlyargs) if a.annotation]
+    parts += [
+        a.annotation
+        for a in (*func.args.posonlyargs, *func.args.args, *func.args.kwonlyargs)
+        if a.annotation
+    ]
     parts += [a.annotation for a in (func.args.vararg, func.args.kwarg) if a and a.annotation]
     if func.returns:
         parts.append(func.returns)
@@ -172,9 +184,15 @@ def measure(root: Path) -> list[Measurement]:
         except SyntaxError as e:
             raise SystemExit(f"{path}: cannot parse ({e.msg}, line {e.lineno})") from e
         lines = source.splitlines()
-        functions = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
+        functions = [
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+        ]
         for func in functions:
-            measurements.append(Measurement("max-cyclomatic", f"python:{module}::{func.name}", _cyclomatic(func, lines)))
+            measurements.append(
+                Measurement(
+                    "max-cyclomatic", f"python:{module}::{func.name}", _cyclomatic(func, lines)
+                )
+            )
         if functions:
             loc = sum(min(f.end_lineno or f.lineno, len(lines)) - f.lineno + 1 for f in functions)
             measurements.append(Measurement("max-loc-file", module, loc))
