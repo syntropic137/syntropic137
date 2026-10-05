@@ -1134,13 +1134,15 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 # runner stops at the first failure and prints `[preflight-agent] <step> ok
 # <seconds>` for each.
 #
-# Fast: the static checks, then the APS thresholds (max-loc-file,
-# max-cyclomatic, via fitness-agent), the checks agents most often fail. Those
-# need the Rust aps binary, so `aps-prewarm` builds it in the background from
-# the first second and fitness-agent waits on that build's exit status. On a
+# Fast: first the APS thresholds agents most often fail (max-loc-file,
+# max-cyclomatic) measured for Python without Rust or topology
+# (check-complexity-thresholds, seconds), then the static checks, then the
+# full APS fitness-check (fitness-agent). That needs the Rust aps binary, so
+# `aps-prewarm` builds it in the background from the first second and
+# fitness-agent waits on that build's exit status. On a
 # cold workspace the first run pays the build once, overlapped with the static
 # steps; every later run finds the binary fresh. What `preflight-agent-fast` runs.
-_preflight_agent_fast_steps := "check-agent-docs check-docs-content check-ci-parity lint format-check check-no-public-ports check-compose check-test-debt check-env-example validate-domain-events check-plugin-schemas check-workflows check-openapi-drift check-untyped-dicts fitness-cross-context fitness-agent"
+_preflight_agent_fast_steps := "check-complexity-thresholds check-agent-docs check-docs-content check-ci-parity lint format-check check-no-public-ports check-compose check-test-debt check-env-example validate-domain-events check-plugin-schemas check-workflows check-openapi-drift check-untyped-dicts fitness-cross-context fitness-agent"
 # Slow: the rest of preflight-portable and the full `pytest ci/fitness` suite.
 # test_ci_and_preflight_agree.py fails if fast + slow ever stops covering
 # preflight-portable, fitness-agent and fitness-invariants-agent.
@@ -1151,6 +1153,12 @@ _preflight_agent_prewarm := "--prewarm aps-prewarm:fitness-agent"
 # the background half of the gate runner's --prewarm (#1585).
 aps-prewarm:
     @bash scripts/agent-fitness.sh --build-only
+
+# fitness.toml's max-loc-file and max-cyclomatic for Python, measured the way
+# APS measures them, in seconds and with no Rust build or topology (#1585).
+# An early warning: fitness-check still runs both through APS.
+check-complexity-thresholds:
+    @uv run python scripts/check_complexity_thresholds.py
 
 # The cross-context import rules from `fitness-invariants`, alone, with CI's
 # flags: the part of that suite cheap enough for the fast loop. The full gate
