@@ -20,8 +20,7 @@ import os
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from pathlib import Path
-from collections.abc import Awaitable, Callable
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -104,6 +103,9 @@ from syn_domain.contexts.orchestration.slices.update_eval import UpdateEvalHandl
 from syn_domain.testing.fake_revision_resolver import FakeRevisionResolver
 from syn_domain.testing.stored_replay import stored_envelopes
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 _SHA_MAIN = "a1" * 20
@@ -112,6 +114,7 @@ _SHA_DEV = "d2" * 20
 
 def _widgets_at(ref: str) -> BaselineRequest:
     return BaselineRequest(repository=RepositoryRef.from_slug("acme/widgets"), requested_ref=ref)
+
 
 _WORKFLOW = (
     Path(__file__).resolve().parents[8] / "workflows" / "sdlc" / "quickfix" / "workflow.yaml"

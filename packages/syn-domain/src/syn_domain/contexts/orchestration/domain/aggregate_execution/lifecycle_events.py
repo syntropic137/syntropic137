@@ -14,13 +14,13 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        EvalBaselinePin,
-    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         CompleteExecutionCommand,
         FailExecutionCommand,
         StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        EvalBaselinePin,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
