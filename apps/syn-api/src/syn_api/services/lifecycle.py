@@ -35,6 +35,7 @@ from syn_api.services.admission_announcement import (
 )
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.execution_concurrency_posture import log_execution_concurrency_posture
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
 from syn_api.services.read_path_health import _judge_read_path
@@ -53,7 +54,6 @@ from syn_api.types import (
     Result,
     SubscriptionHealth,
 )
-from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
     ENV_SYN_SESSION_STORE_DEPLOYMENT,
@@ -262,7 +262,7 @@ async def startup(
         logger.warning("Could not determine session capture posture at startup.")
 
     try:
-        _log_execution_concurrency_posture(settings.polling.max_concurrent_dispatches)
+        log_execution_concurrency_posture(settings.polling.max_concurrent_dispatches)
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 
@@ -365,37 +365,6 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
 
 
 # ── Private helpers ─────────────────────────────────────────────────
-
-
-def _log_execution_concurrency_posture(max_concurrent: int) -> None:
-    """Say so when this deployment runs workflows concurrently.
-
-    Beside the capture posture and for the same reason: an operator should
-    learn a risky posture at startup rather than from its consequences.
-
-    Emitted HERE, once, rather than while constructing the dispatcher. In the
-    dispatcher it fired only if construction got that far, was skipped
-    entirely on the test and offline startup paths, and could repeat on every
-    subscription-recovery attempt. Posture is a property of the settings, so it
-    is reported where the settings are read.
-
-    Concurrent executions are not isolated from each other (#865): they share
-    the processor instance holding their per-run state, so one can read
-    another's inputs and finish successfully against the wrong target, and one
-    execution's cancellation tears down the others' containers.
-    """
-    if max_concurrent <= 1:
-        return
-
-    logger.warning(
-        "%s is %d, so workflow executions can run concurrently. They are NOT "
-        "yet isolated from each other (#865): concurrent executions can read "
-        "each other's inputs and finish against the wrong target, and one "
-        "execution's cancellation tears down the others' containers. Set it "
-        "to 1 until that is fixed.",
-        ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
-        max_concurrent,
-    )
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
@@ -626,13 +595,19 @@ async def _describe_subscription_health() -> SubscriptionHealthResult:
             _state.subscription_service.describe_read_model_lag(),
             timeout=_LAG_PROBE_TIMEOUT_S,
         )
-        verdict = _judge_read_path(running=sub_status.running, lag=lag)
+        # Never scans on this path: the latest background reconciliation (#1545).
+        drops = await _state.subscription_service.describe_unapplied_starts()
+        unapplied = list(drops.unapplied) if drops is not None else None
+        verdict = _judge_read_path(
+            running=sub_status.running, lag=lag, dropped_events=bool(unapplied)
+        )
 
         health = SubscriptionHealth(
             status=verdict.status,
             running=sub_status.running,
             projection_count=sub_status.projection_count,
             realtime_enabled=sub_status.realtime_enabled,
+            unapplied_starts=unapplied,
             **(lag.model_dump() if lag is not None else {}),
         )
         return health, verdict.degraded_reasons

@@ -3157,7 +3157,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -7233,10 +7233,10 @@ export interface components {
         SubscriptionHealth: {
             /**
              * Status
-             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed.
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed.
              * @enum {string}
              */
-            status: "healthy" | "degraded" | "stalled" | "catching_up" | "unknown";
+            status: "healthy" | "degraded" | "dropped_events" | "stalled" | "catching_up" | "unknown";
             /**
              * Running
              * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
@@ -7282,6 +7282,11 @@ export interface components {
              * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
              */
             lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
+            /**
+             * Unapplied Starts
+             * @description Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured.
+             */
+            unapplied_starts?: components["schemas"]["UnappliedStart"][] | null;
         };
         /**
          * SystemActionResponse
@@ -8074,6 +8079,27 @@ export interface components {
              * @default 0
              */
             other: number;
+        };
+        /**
+         * UnappliedStart
+         * @description One execution whose start a projection skipped past. Published on /health as is.
+         */
+        UnappliedStart: {
+            /**
+             * Projection
+             * @description Read model that skipped the start.
+             */
+            projection: string;
+            /**
+             * Execution Id
+             * @description Execution whose WorkflowExecutionStarted it skipped.
+             */
+            execution_id: string;
+            /**
+             * Global Nonce
+             * @description Store position of that start event.
+             */
+            global_nonce: number;
         };
         /** UpdateArtifactRequest */
         UpdateArtifactRequest: {

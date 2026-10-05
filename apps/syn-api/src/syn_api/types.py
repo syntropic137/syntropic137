@@ -34,6 +34,7 @@ from pydantic import (
 # rather than restated - the probe that produces a shape is the only place
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_adapters.subscriptions.unapplied_starts import UnappliedStart  # noqa: TC001
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -2137,7 +2138,9 @@ class _OmitsAbsentFields(BaseModel):
 #: is added here because only /health can produce it — it is what the probe
 #: reports when it failed and has no verdict to publish.
 #: ``test_health_contract.py`` fails if those four ever stop being a subset.
-SubscriptionHealthStatus = Literal["healthy", "degraded", "stalled", "catching_up", "unknown"]
+SubscriptionHealthStatus = Literal[
+    "healthy", "degraded", "dropped_events", "stalled", "catching_up", "unknown"
+]
 
 
 class SubscriptionHealth(_OmitsAbsentFields):
@@ -2166,7 +2169,8 @@ class SubscriptionHealth(_OmitsAbsentFields):
     status: SubscriptionHealthStatus = Field(
         description="Verdict on the read path: 'healthy', 'catching_up' during a replay "
         "that ends by itself, 'stalled' for a projection that does not, 'degraded' "
-        "for a coordinator that is not running, or 'unknown' when the probe failed.",
+        "for a coordinator that is not running, 'dropped_events' when a read model "
+        "passed an event without applying it, or 'unknown' when the probe failed.",
     )
     running: bool | None = Field(
         default=None,
@@ -2205,6 +2209,13 @@ class SubscriptionHealth(_OmitsAbsentFields):
         default=None,
         description="Every projection short of the head, furthest behind first. Empty when "
         "all are at the head; null when lag is unmeasurable.",
+    )
+    unapplied_starts: list[UnappliedStart] | None = Field(
+        default=None,
+        description="Executions whose WorkflowExecutionStarted an execution read model's "
+        "checkpoint passed without applying (#1545). Lag cannot show these: the read model "
+        "is at the head and wrong. Non-empty sets status 'dropped_events'; repair per "
+        "docs/runbooks/repair-dropped-execution-start.md. Null when not measured.",
     )
 
 

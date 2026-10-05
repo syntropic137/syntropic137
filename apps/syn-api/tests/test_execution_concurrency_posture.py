@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
-from syn_api.services.lifecycle import _log_execution_concurrency_posture
+from syn_api.services.execution_concurrency_posture import log_execution_concurrency_posture
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings import get_settings
 
@@ -23,7 +23,7 @@ from syn_shared.settings import get_settings
 class TestConcurrencyPosture:
     def test_the_safe_posture_says_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING):
-            _log_execution_concurrency_posture(1)
+            log_execution_concurrency_posture(1)
 
         assert not caplog.records
 
@@ -32,7 +32,7 @@ class TestConcurrencyPosture:
         self, caplog: pytest.LogCaptureFixture, value: int
     ) -> None:
         with caplog.at_level(logging.WARNING):
-            _log_execution_concurrency_posture(value)
+            log_execution_concurrency_posture(value)
 
         (record,) = caplog.records
         message = record.getMessage()
