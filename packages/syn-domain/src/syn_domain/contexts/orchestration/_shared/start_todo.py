@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from event_sourcing import ProcessManager, ProjectionStore
 
-from syn_domain.contexts._shared.maintenance import MaintenancePausedError
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts.orchestration._shared.start_record import (
     StartRecord,
     StartStatus,
@@ -219,8 +219,13 @@ class StartToDoProcessManager[R: StartRecord](ProcessManager):
         whatever replaced it (codex review of #1466).
         """
         key = record.key
-        if isinstance(exc, MaintenancePausedError):
-            logger.info("Start of %s held: %s", key, exc.mode.refusal_detail)
+        if isinstance(exc, AdmissionRefusedError):
+            # #1387/#1560: held, not counted toward the attempt ceiling, for
+            # every refusal reason. Each clears without touching this record (a
+            # deploy ends, an operator frees space), and counting one would fail
+            # an admitted start because the door stayed shut for
+            # MAX_START_ATTEMPTS passes.
+            logger.warning("Start of %s held: %s", key, exc)
             await self._save(record.model_copy(update={"status": "paused"}), only_over=dispatched)
             return
         if isinstance(exc, ValueError):

@@ -108,7 +108,7 @@ class ResumeStarter(Protocol):
     Returns the ticket the gate issued, so "started" is written from the
     admission decision and not from the absence of an exception - the same
     contract as `run_workflow` on the trigger path. Raises
-    `MaintenancePausedError` synchronously when admission is closed.
+    an `AdmissionRefusedError` synchronously when admission is refused.
 
     The start itself runs AFTER this returns, so a failure there cannot be
     raised to the caller. It is handed to ``on_failure`` instead, and a starter

@@ -29,7 +29,11 @@ from syn_api._wiring import (
 )
 from syn_api.build_info import get_build_info
 from syn_api.services import cpu_throttling, inventory_lifecycle
-from syn_api.services.admission_announcement import announce_admission_if_open
+from syn_api.services.admission_announcement import (
+    announce_admission_if_open,
+    start_disk_recovery_watch,
+    stop_disk_recovery_watch,
+)
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.execution_posture import (
@@ -37,7 +41,7 @@ from syn_api.services.execution_posture import (
     log_execution_concurrency_posture,
 )
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
-from syn_api.services.health_probes import describe_codex_auth_health
+from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -348,7 +352,8 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
     # must not wait behind a probe that the same stall is holding up (#1583).
     db_pools = DbPoolHealth.snapshot() or None
     subscription, read_path_reasons = await _describe_subscription_health()
-    degraded_reasons = [*_state.degraded_reasons, *read_path_reasons]
+    disk, disk_reasons = describe_disk_health()
+    degraded_reasons = [*_state.degraded_reasons, *read_path_reasons, *disk_reasons]
     codex_auth = describe_codex_auth_health()
     warnings = [codex_auth.detail] if codex_auth is not None and codex_auth.needs_attention else []
 
@@ -361,6 +366,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             subscription=subscription,
             codex_auth=codex_auth,
             warnings=warnings or None,
+            disk=disk,
             db_pools=db_pools,
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
         )
@@ -722,10 +728,13 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     logger.info("Subscription coordinator started")
 
     await announce_admission_if_open()
+    # #1560: freeing disk space is not an event either, so a clock asks.
+    start_disk_recovery_watch()
 
 
 async def _shutdown_subscriptions(state: LifecycleState) -> None:
     """Stop subscription coordinator and workflow dispatcher."""
+    await stop_disk_recovery_watch()
     await inventory_lifecycle.stop_session_inventory()
     if state.workflow_dispatcher is not None:
         await state.workflow_dispatcher.shutdown()

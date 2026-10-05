@@ -123,6 +123,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     InputDeclaration,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    ExecutionResult,
     ImageManifest,
     IsolationConfig,
     SecurityPolicy,
@@ -199,6 +200,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspace import (
+    OrphanedWorkspace,
+    ReclaimableDir,
+    WorkspaceDirRemover,
+    guard_orphaned_workspace,
+    remove_reclaimed_dir,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
@@ -331,6 +339,8 @@ __all__ = [
     "ExecutionRequestStartRecord",
     "ExecutionRequestStarter",
     "ExecutionRequestedEvent",
+    # Value objects - workspace
+    "ExecutionResult",
     "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
@@ -339,7 +349,6 @@ __all__ = [
     "GlobalClaudePluginNotFoundError",
     # Aggregates
     "HandlerResult",
-    # Value objects - workspace
     "ImageManifest",
     "InheritanceUnavailableError",
     "InjectTokensCommand",
@@ -348,6 +357,7 @@ __all__ = [
     "InvalidTagsError",
     "IsolationConfig",
     "LaunchEval",
+    "OrphanedWorkspace",
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
@@ -356,6 +366,7 @@ __all__ = [
     "PullRequestCommenter",
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",
+    "ReclaimableDir",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
@@ -406,8 +417,10 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "WorkspaceDirRemover",
     "announce_as",
     "build_command_from_definition",
+    "guard_orphaned_workspace",
     "inherited_outputs",
     "is_phase_id",
     "launch_eval_for",
@@ -416,6 +429,7 @@ __all__ = [
     "read_record",
     "read_start_record",
     "refuse_resume_start",
+    "remove_reclaimed_dir",
     "render_workspace_prompt",
     "require_supported_execution_type",
     "retired_field_notices",

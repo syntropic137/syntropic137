@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 
 from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
+from syn_shared.settings.disk import DiskSettings  # noqa: E402
 from syn_shared.settings.execution import ExecutionSettings  # noqa: E402
 from syn_shared.settings.git_identity import OperatorSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
@@ -494,6 +495,15 @@ def generate_env_example() -> str:
             "OBJECT STORAGE (MinIO / artifacts / claude plugins)",
             prefix="SYN_STORAGE_",
             description="MinIO buckets and credentials. See ADR-012 (artifacts) and issue #726 (claude plugins).",
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
+            DiskSettings,
+            "DISK SPACE (workspace volume)",
+            prefix="SYN_DISK_",
+            description="Free-space thresholds: /health degrades below the first, admission refuses below the second (#1560).",
         )
     )
 

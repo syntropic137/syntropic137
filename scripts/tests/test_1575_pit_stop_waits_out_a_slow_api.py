@@ -126,6 +126,7 @@ run() {{ "$@"; }}
 sleep() {{ :; }}
 {stub}
 {_function("projections_healthy")}
+{_function("disk_space")}
 """
     proc = subprocess.run(
         ["bash", "-c", preamble + _tail(), str(_SCRIPT)],
@@ -169,6 +170,14 @@ def test_a_swap_that_works_first_time_does_not_wait(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     assert len(calls) == 1
     assert "waiting up to" not in proc.stdout
+
+
+def test_the_swap_reports_the_disk_after_verify(tmp_path: Path) -> None:
+    """The post-swap tail calls ``disk_space`` (#1560). The harness must run the
+    script's own function, or the swap dies on ``command not found``."""
+    proc, _ = _run_swap(tmp_path, health=["running 0 healthy"])
+    assert proc.returncode == 0, proc.stderr
+    assert "disk: not reported by this API" in proc.stdout
 
 
 def test_an_api_that_never_turns_healthy_aborts_with_the_manual_recovery(
