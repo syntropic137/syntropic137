@@ -37,7 +37,10 @@ from syn_perf.loadtest.implement_v3_artifacts import IMPLEMENT_V3_ARTIFACTS
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from syn_domain.contexts.orchestration import PhaseDefinition, WorkflowDefinition
+    from syn_domain.contexts.orchestration import WorkflowDefinition
+    from syn_domain.contexts.orchestration._shared.workflow_definition import (
+        PhaseYamlDefinition,
+    )
 
 STUB_AGENT_PROFILE_ENV: Final = "SYN_STUB_AGENT_PROFILE"
 """The one environment variable a stub workspace reads its profile from."""
@@ -299,7 +302,7 @@ class StubAgentProfile(_Contract):
         return cls(tier=tier, fixture_repo=fixture_repo, phases=phases)
 
 
-def _stream_for(phase: PhaseDefinition, stream: StubStream) -> StubStream:
+def _stream_for(phase: PhaseYamlDefinition, stream: StubStream) -> StubStream:
     provider = (phase.agent.provider if phase.agent else None) or "claude"
     if stream.harness != provider:
         msg = (
@@ -311,7 +314,7 @@ def _stream_for(phase: PhaseDefinition, stream: StubStream) -> StubStream:
 
 
 def _side_effect_for(
-    phase: PhaseDefinition, tier: Literal["platform", "node"]
+    phase: PhaseYamlDefinition, tier: Literal["platform", "node"]
 ) -> ReportOnly | PushBranch | OpenPullRequest | VerifyRemoteBranch:
     if not phase.clone_repos:
         return OpenPullRequest() if tier == "node" else VerifyRemoteBranch()
