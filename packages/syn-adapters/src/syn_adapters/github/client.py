@@ -26,6 +26,7 @@ import httpx
 
 from syn_adapters.github.agent_token import mint_agent_token as _mint_agent_token
 from syn_adapters.github.client_api import api_get as _api_get
+from syn_adapters.github.client_api import api_patch as _api_patch
 from syn_adapters.github.client_api import api_post as _api_post
 from syn_adapters.github.client_api import api_put as _api_put
 from syn_adapters.github.client_api import check_response as _check_response_fn
@@ -283,6 +284,12 @@ class GitHubAppClient:
     ) -> dict:
         """Make an authenticated PUT request. See client_api.api_put for details."""
         return await _api_put(self, path, json, installation_id)
+
+    async def api_patch(
+        self, path: str, json: dict[str, str], installation_id: str | None = None
+    ) -> object:
+        """Make an authenticated PATCH request. See client_api.api_patch for details."""
+        return await _api_patch(self, path, json, installation_id)
 
     def _check_response(self, response: httpx.Response) -> None:
         """Check response for errors. See client_api.check_response for details."""

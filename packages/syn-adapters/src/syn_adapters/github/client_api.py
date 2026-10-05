@@ -126,3 +126,24 @@ async def api_put(
 
     check_response(response)
     return response.json()
+
+
+async def api_patch(
+    client: GitHubAppClient,
+    path: str,
+    json: dict[str, str],
+    installation_id: str | None = None,
+) -> object:
+    """Make an authenticated PATCH request to the GitHub API (#1547: edit a comment).
+
+    Raises:
+        GitHubAppError: On API errors.
+    """
+    token = await client.get_installation_token(installation_id)
+    response = await client._http.patch(
+        path,
+        headers={"Authorization": f"Bearer {token}"},
+        json=json,
+    )
+    check_response(response)
+    return response.json()

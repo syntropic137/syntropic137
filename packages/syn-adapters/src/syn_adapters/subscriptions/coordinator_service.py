@@ -491,8 +491,14 @@ def create_coordinator_service(
         ResumeStarter,
         ResumeStartProcessManager,
     )
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.pull_request_commenter import GitHubPullRequestCommenter
+    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_quarantine import (
+        QuarantineNoticeProcessManager,
     )
     from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
         ExecutionCostProjection,
@@ -557,6 +563,13 @@ def create_coordinator_service(
             ResumeStartProcessManager(
                 resume_starter=cast("ResumeStarter | None", execution_service),
                 store=projection_store,
+            ),
+            # #1547: tells the PR a failed phase's work is on a quarantine
+            # ref. Host-side, with the App's credential, and only when live.
+            QuarantineNoticeProcessManager(
+                commenter=GitHubPullRequestCommenter(get_github_client),
+                store=projection_store,
+                branches=GitHubRemoteBranchReader(get_github_client),
             ),
             TriggerQueryProjection(projection_store),
             # --- Agent sessions context ---

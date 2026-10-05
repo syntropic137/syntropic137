@@ -41,11 +41,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     exit_code_of,
     failure_account,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_notice import (
-    quarantined_refs,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_notice import (
+    quarantined_refs,
 )
 
 if TYPE_CHECKING:

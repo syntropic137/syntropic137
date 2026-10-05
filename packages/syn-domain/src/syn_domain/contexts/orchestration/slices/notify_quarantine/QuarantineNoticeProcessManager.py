@@ -122,7 +122,9 @@ class QuarantineNoticeProcessManager(ProcessManager):
             )
             return ProjectionResult.SUCCESS
         except Exception:
-            logger.exception("Error in quarantine notice process manager", extra={"type": event_type})
+            logger.exception(
+                "Error in quarantine notice process manager", extra={"type": event_type}
+            )
             return ProjectionResult.FAILURE
 
     async def _record(self, event: WorkflowFailedEvent) -> None:
