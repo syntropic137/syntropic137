@@ -159,9 +159,18 @@ platform's clock tick guarantees a pass comes. (#1547.)
 A cancelled Execution's landed Quarantine Refs that the event store refused to
 take as `CancelledWorkQuarantined`, even after retries. They are kept in a
 durable store, keyed by Execution and Phase, and the processor appends them at
-the start of its next run. The row is removed only once the event is on the
-stream. Until then the fact exists in exactly one of the two places, so the
-Quarantine Notice is late but never lost. (#1547.)
+the start of its next run. The row is removed after the event is on the
+stream. A delete that fails leaves the row to be settled again. The aggregate
+records a cancel's work once, so settling it twice still gives one fact.
+(#1547.)
+
+## Unrecorded Work
+
+A cancel's landed Quarantine Refs that neither the event store nor the owed
+store took. The cancelled result names them in `unrecorded_work`, so the cancel
+is not reported as handled. The processor holds them in memory and its next run
+tries both stores again. A restart before then loses that copy. The refs then
+survive only in the result and the error log. (#1547.)
 
 ## Admission
 
