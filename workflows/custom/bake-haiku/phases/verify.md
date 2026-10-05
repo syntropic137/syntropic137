@@ -62,7 +62,15 @@ minutes); later runs reuse both. A `FITNESS NOT RUN:` line means the gate did
 not run, which is not a pass: report it, never certify around it. The pytest
 summary lists each test skipped as `NOT RUN` for a binary this image lacks
 (today, the docker-backed `test_gateway_bind.py`); CI still runs those, and
-how to read its result is the next section.
+how to read its result is the section after this one.
+
+**Run the whole gate, not the sub-commands you think it contains.** A change can
+pass every test, typecheck and build and still fail on something none of them
+touch. A CLI flag added in this repository drifted a generated docs page and
+failed `codegen-check`, a real PR-gating job, while every direct test passed.
+
+Run `git status --porcelain` before and after. Verification commands in this
+repository have mutated tracked files; if the tree changed, report it.
 
 ## A check this workspace cannot run is settled by CI on the same head SHA
 
@@ -112,14 +120,6 @@ the outcome:
 - **No CI evidence for this SHA** (no PR yet, the PR head is a different SHA, or
   no job ran the test): nothing has answered the question. Report the check as
   not run, name it, and never claim CI passed it.
-
-**Run the whole gate, not the sub-commands you think it contains.** A change can
-pass every test, typecheck and build and still fail on something none of them
-touch. A CLI flag added in this repository drifted a generated docs page and
-failed `codegen-check`, a real PR-gating job, while every direct test passed.
-
-Run `git status --porcelain` before and after. Verification commands in this
-repository have mutated tracked files; if the tree changed, report it.
 
 ## Attack the tests
 
