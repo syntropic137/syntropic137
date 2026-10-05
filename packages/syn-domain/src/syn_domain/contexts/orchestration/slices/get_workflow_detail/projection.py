@@ -166,6 +166,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                require_delegation=bool(p.get("require_delegation", False)),
                 # #1429. The sibling site in read_models/workflow_detail.py
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.

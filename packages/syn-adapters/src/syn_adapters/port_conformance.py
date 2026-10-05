@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.history_source import PostgresHistoricalEvidenceSource
     from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
     from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
+    from syn_adapters.session_inventory.phase_delegations import ChildJournalDelegations
     from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
     from syn_adapters.session_inventory.postgres_jobs import PostgresSessionInventoryJobs
     from syn_adapters.session_inventory.postgres_settlements import PostgresSettlementDeadlines
@@ -224,6 +225,9 @@ if TYPE_CHECKING:
         ClaudePluginStoragePort,
     )
     from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutPort
+    from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
+        DelegationEvidencePort,
+    )
     from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
         GlobalClaudePluginRegistryRepositoryPort,
     )
@@ -305,6 +309,7 @@ if TYPE_CHECKING:
         memory_injection: MemoryTokenInjectionAdapter,
         workspace: ManagedWorkspace,
         service: WorkspaceService,
+        delegations: ChildJournalDelegations,
     ) -> None:
         """The backends ``WorkspaceService`` composes, and the facade itself.
 
@@ -324,6 +329,7 @@ if TYPE_CHECKING:
         _direct_injection: TokenInjectionPort = direct_injection
         _memory_injection: TokenInjectionPort = memory_injection
         _rollout: CodexRolloutPort = workspace
+        _delegations: DelegationEvidencePort = delegations
         _service: WorkspaceServicePort = service
 
     def _observability(

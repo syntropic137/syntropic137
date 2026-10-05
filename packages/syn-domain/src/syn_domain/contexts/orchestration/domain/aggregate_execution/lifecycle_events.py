@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         EvalBaselinePin,
+        ReviewVerdict,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
@@ -82,8 +83,16 @@ def _eval_baseline(command: StartExecutionCommand) -> list[EvalBaselinePin] | No
     ]
 
 
-def completed_event(command: CompleteExecutionCommand, workflow_id: str) -> WorkflowCompletedEvent:
-    """The `WorkflowCompleted` a completed run records."""
+def completed_event(
+    command: CompleteExecutionCommand,
+    workflow_id: str,
+    review_verdict: ReviewVerdict | None = None,
+) -> WorkflowCompletedEvent:
+    """The `WorkflowCompleted` a completed run records.
+
+    ``review_verdict`` is the aggregate's, never the command's: how a run ended
+    is read off its own stream, not taken from whoever asked it to end.
+    """
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
     )
@@ -106,6 +115,7 @@ def completed_event(command: CompleteExecutionCommand, workflow_id: str) -> Work
         ),
         total_duration_seconds=command.duration_seconds,
         artifact_ids=command.artifact_ids,
+        review_verdict=review_verdict,
     )
 
 
@@ -157,4 +167,7 @@ def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFai
         # event is where the two stop being one frame's local variables and
         # start being the record every read model is built from.
         reported_failure_reason=command.reported_failure_reason,
+        # Typed, so a client selects on reason and delegate rather than
+        # parsing `error` (#894).
+        delegation_failure=command.delegation_failure,
     )

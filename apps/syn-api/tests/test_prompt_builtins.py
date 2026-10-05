@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from syn_api._wiring import _owner_repo_from_url, _substitute_builtins
+from syn_api._wiring_agent_command import _owner_repo_from_url, _substitute_builtins
 
 
 @pytest.mark.unit
