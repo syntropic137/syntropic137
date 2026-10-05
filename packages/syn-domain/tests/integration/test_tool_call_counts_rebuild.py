@@ -599,15 +599,15 @@ async def test_the_application_starts_as_a_role_that_cannot_create_tables(
     await conn.execute(f"GRANT SELECT ON agent_events TO {role}")
     for table in (tool_call_counts.TABLE, tool_call_counts.VERSION_TABLE):
         await conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON {table} TO {role}")
-    # Startup reads the usage rollup's completion stamp; the rollups are
-    # trigger-maintained, so the app needs DML on them and nothing more.
+    # Startup's schema validation reads the rollups (#1558), and only reads
+    # them: this role never ingests, so it gets SELECT and nothing more.
     for table in (
         "agent_event_day_rollup",
         "agent_summary_usage",
         "agent_turn_usage_rollup",
         "agent_usage_rollup_state",
     ):
-        await conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {role}")
+        await conn.execute(f"GRANT SELECT ON {table} TO {role}")
 
     parts = urlsplit(dsn)
     unprivileged = urlunsplit(parts._replace(netloc=f"{role}:tally@{parts.hostname}:{parts.port}"))
