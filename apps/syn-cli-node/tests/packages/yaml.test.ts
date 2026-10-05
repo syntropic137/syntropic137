@@ -107,10 +107,18 @@ describe("parseYaml", () => {
     expect(() => parseYaml("id: a\nid: b\n", "x.yaml")).toThrow(YamlParseError);
   });
 
-  it("fails on a value that has no JSON form", () => {
-    expect(() => parseYaml("when: 2026-10-05\n", "x.yaml")).toThrow(
-      /x\.yaml: \$\.when is a YAML Date/,
+  it("fails with source and line on a value that has no JSON form", () => {
+    expect(() => parseYaml("id: a\nwhen: 2026-10-05\n", "x.yaml")).toThrow(
+      /^x\.yaml:2: a YAML Date has no JSON form/,
     );
+    expect(() => parseYaml("b: !!binary aGk=\n", "x.yaml")).toThrow(/^x\.yaml:1: a YAML (Buffer|Uint8Array) has no JSON form/);
+  });
+
+  it("fails with source and line on a cyclic alias instead of overflowing", () => {
+    expect(() => parseYaml("x: 1\na: &a {b: *a}\n", "x.yaml")).toThrow(
+      /^x\.yaml:2: alias \*a is inside the node it refers to/,
+    );
+    expect(() => parseYaml("a: &a\n  k: 1\n  <<: *a\n", "x.yaml")).toThrow(/^x\.yaml:3: alias \*a/);
   });
 
   it("fails on more than one document", () => {

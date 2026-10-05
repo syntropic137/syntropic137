@@ -13,7 +13,7 @@
  * naming the file and line, never a best guess.
  */
 
-import { LineCounter, parseDocument, visit } from "yaml";
+import { type Alias, type Document, LineCounter, type Node, parseDocument, visit } from "yaml";
 
 type YamlValue =
   | string
@@ -49,39 +49,59 @@ export function parseYaml(input: string, source = "<yaml>"): YamlValue {
     const where = line === undefined ? source : `${source}:${line}`;
     throw new YamlParseError(`${where}: ${problem.message}`);
   }
-  // A 1.1 timestamp or binary would come back as a Date or Uint8Array, which
-  // the upload's JSON.stringify would silently rewrite. Refuse instead.
-  let unresolved: number | undefined;
+  const problemAt = findUnsupported(doc);
+  if (problemAt !== undefined) {
+    const { line } = lineCounter.linePos(problemAt.offset);
+    throw new YamlParseError(`${source}:${line}: ${problemAt.message}`);
+  }
+  return doc.toJS() as YamlValue;
+}
+
+/**
+ * The first node the JSON upload cannot carry faithfully: an alias with no
+ * anchor, an alias inside the node it names (a cycle `toJS` would recurse into
+ * forever), or a 1.1 timestamp/binary that `JSON.stringify` would silently
+ * rewrite. Checked on the AST so the error can name the line.
+ */
+function findUnsupported(doc: Document): { offset: number; message: string } | undefined {
+  let found: { offset: number; message: string } | undefined;
   visit(doc, {
     Alias(_, node) {
-      if (node.resolve(doc) !== undefined) return undefined;
-      unresolved = node.range?.[0] ?? 0;
+      const target = node.resolve(doc);
+      const offset = node.range?.[0] ?? 0;
+      if (target === undefined) {
+        found = { offset, message: "alias refers to an anchor not defined above it" };
+        return visit.BREAK;
+      }
+      if (contains(target, node)) {
+        found = { offset, message: `alias *${node.source} is inside the node it refers to (a cycle)` };
+        return visit.BREAK;
+      }
+      return undefined;
+    },
+    Scalar(_, node) {
+      const value: unknown = node.value;
+      if (value === null || typeof value !== "object") return undefined;
+      const kind = (value as object).constructor?.name ?? typeof value;
+      found = {
+        offset: node.range?.[0] ?? 0,
+        message: `a YAML ${kind} has no JSON form; quote it to make it a string`,
+      };
       return visit.BREAK;
     },
   });
-  if (unresolved !== undefined) {
-    const { line } = lineCounter.linePos(unresolved);
-    throw new YamlParseError(`${source}:${line}: alias refers to an anchor not defined above it`);
-  }
-  const value: unknown = doc.toJS();
-  assertJsonShaped(value, source, "$");
-  return value as YamlValue;
+  return found;
 }
 
-function assertJsonShaped(value: unknown, source: string, at: string): void {
-  if (value === null || ["string", "number", "boolean"].includes(typeof value)) return;
-  if (Array.isArray(value)) {
-    value.forEach((item, i) => assertJsonShaped(item, source, `${at}[${i}]`));
-    return;
-  }
-  if (Object.getPrototypeOf(value) === Object.prototype) {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      assertJsonShaped(v, source, `${at}.${k}`);
-    }
-    return;
-  }
-  const kind = (value as object).constructor?.name ?? typeof value;
-  throw new YamlParseError(
-    `${source}: ${at} is a YAML ${kind}, which has no JSON form; quote it to make it a string`,
-  );
+function contains(root: Node, needle: Alias): boolean {
+  if (root === needle) return true;
+  let hit = false;
+  visit(root, {
+    Alias(_, node) {
+      if (node !== needle) return undefined;
+      hit = true;
+      return visit.BREAK;
+    },
+  });
+  return hit;
 }
