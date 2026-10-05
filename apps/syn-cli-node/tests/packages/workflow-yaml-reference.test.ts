@@ -12,7 +12,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installWorkflowsViaApi } from "../../src/commands/workflow/install.js";
-import { resolvePackage } from "../../src/packages/resolver.js";
+import { detectFormat, resolvePackage } from "../../src/packages/resolver.js";
+import type { ResolvedWorkflow } from "../../src/packages/models.js";
 import { parseYaml } from "../../src/packages/yaml.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../../..");
@@ -93,6 +94,84 @@ describe("CLI YAML loader agrees with the PyYAML reference", () => {
       "fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3",
       "finalize_pr",
     ]);
+  });
+});
+
+const UPLOAD_FIXTURE = path.join(import.meta.dirname, "../fixtures/workflow-upload-bodies.json");
+
+/**
+ * The directory `syn workflow install` is pointed at to install `rel`: the
+ * nearest plugin root above it, else the directory holding it.
+ */
+function installRootOf(rel: string): string {
+  const workflowsDir = path.join(REPO_ROOT, "workflows");
+  for (let dir = path.dirname(path.join(REPO_ROOT, rel)); dir.startsWith(workflowsDir); dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, "syntropic137-plugin.json"))) return dir;
+  }
+  return path.dirname(path.join(REPO_ROOT, rel));
+}
+
+/** The YAML files `resolvePackage(root)` reads, in the order it returns them. */
+function yamlsResolvedFrom(root: string): string[] {
+  const format = detectFormat(root);
+  if (format === "single") return [path.join(root, "workflow.yaml")];
+  if (format === "multi") {
+    const dir = path.join(root, "workflows");
+    return fs
+      .readdirSync(dir)
+      .sort()
+      .map((d) => path.join(dir, d, "workflow.yaml"))
+      .filter((f) => fs.existsSync(f));
+  }
+  return fs
+    .readdirSync(root)
+    .filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"))
+    .sort()
+    .map((f) => path.join(root, f));
+}
+
+/** Every phase-bearing workflow YAML, as the CLI's loader resolves it for upload. */
+function uploadBodies(): Record<string, Record<string, unknown>> {
+  const wanted = new Set(Object.keys(reference.files).filter((rel) => reference.files[rel]!.phases.length > 0));
+  const bodies: Record<string, Record<string, unknown>> = {};
+  for (const root of new Set([...wanted].map(installRootOf))) {
+    const files = yamlsResolvedFrom(root);
+    const { workflows } = resolvePackage(root);
+    expect(workflows.map((w: ResolvedWorkflow) => w.id)).toHaveLength(files.length);
+    files.forEach((file, i) => {
+      const rel = path.relative(REPO_ROOT, file).split(path.sep).join("/");
+      if (wanted.has(rel)) bodies[rel] = workflows[i]!.definition;
+    });
+  }
+  expect(Object.keys(bodies).sort()).toEqual([...wanted].sort());
+  return bodies;
+}
+
+describe("CLI package loader agrees with the PyYAML reference", () => {
+  // `parseYaml` agreeing is not enough: install uploads what `resolvePackage`
+  // makes of the file, after prompt files are inlined and frontmatter merged.
+  const bodies = uploadBodies();
+
+  it.each(Object.keys(bodies))("%s", (rel) => {
+    const expected = reference.files[rel]!.phases;
+    const resolved = phasesOf(bodies[rel]);
+    expect(resolved.map(({ id, order }) => ({ id, order }))).toEqual(
+      expected.map(({ id, order }) => ({ id, order })),
+    );
+    // An explicit YAML model wins over frontmatter, so it must survive as is.
+    resolved.forEach((phase, i) => {
+      if (expected[i]!.model !== null) expect(phase.model).toBe(expected[i]!.model);
+      expect(phase.prompt_file).toBeNull();
+    });
+  });
+
+  it("matches the committed upload bodies the server-side test stores", () => {
+    // scripts/tests/test_workflow_yaml_reference.py posts each of these to the
+    // from-yaml service and checks the stored phases. Regenerate with
+    // UPDATE_UPLOAD_FIXTURE=1 pnpm exec vitest run tests/packages/workflow-yaml-reference.test.ts
+    const rendered = `${JSON.stringify(bodies, null, 2)}\n`;
+    if (process.env["UPDATE_UPLOAD_FIXTURE"] === "1") fs.writeFileSync(UPLOAD_FIXTURE, rendered);
+    expect(fs.readFileSync(UPLOAD_FIXTURE, "utf-8")).toBe(rendered);
   });
 });
 

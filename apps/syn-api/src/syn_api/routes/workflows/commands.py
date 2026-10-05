@@ -786,7 +786,7 @@ _ACCEPTED_YAML_CONTENT_TYPES = frozenset(
         # has no YAML emitter, and hand-rolling one around arbitrary prompt
         # bodies is where emitters get subtly wrong. Accepting JSON costs this
         # endpoint nothing. The CLI parses YAML 1.1 like this endpoint does, held
-        # to it by scripts/tests/test_workflow_yaml_reference.py (#1618).
+        # to it by apps/syn-api/tests/test_workflow_upload_round_trip.py (#1618).
         "application/json",
     }
 )

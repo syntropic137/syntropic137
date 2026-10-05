@@ -7,9 +7,12 @@ phases instead of ten. This script writes what PyYAML reads, and two tests hold
 both sides to it:
 
 - ``scripts/tests/test_workflow_yaml_reference.py`` - the fixture is still what
-  PyYAML reads, and the server stores every phase of it.
+  PyYAML reads.
 - ``apps/syn-cli-node/tests/packages/workflow-yaml-reference.test.ts`` - the
-  CLI's loader reads the same thing.
+  CLI's loader reads the same thing, and its package loader produces the
+  committed upload bodies (``workflow-upload-bodies.json``).
+- ``apps/syn-api/tests/test_workflow_upload_round_trip.py`` - the server stores
+  every phase of those upload bodies.
 
 Regenerate after editing any workflow YAML:
 
