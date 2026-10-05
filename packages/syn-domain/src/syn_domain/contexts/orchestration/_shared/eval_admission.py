@@ -21,6 +21,7 @@ from syn_domain.contexts.orchestration.domain.commands.FreezeEvalCommand import 
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, LaunchEval
     from syn_domain.contexts.orchestration._shared.repository_baseline import (
         RepositoryBaseline,
     )
@@ -78,3 +79,22 @@ async def admit_launch(
         return winner.baseline_repos
     aggregate.mark_events_as_committed()
     return aggregate.baseline_repos
+
+
+async def launch_eval_for(
+    repository: Repository[EvalAggregate],
+    choice: EvalChoice,
+    workflow_default: str | None,
+) -> LaunchEval:
+    """The eval a launch joins, admitted, carrying the baseline every run of it checks out.
+
+    Called ONCE, by whoever builds the ``ExecuteWorkflowCommand``, and the
+    answer travels on the command. A retried dispatch of that command
+    therefore joins the eval it was dispatched into, at the SHAs it was
+    dispatched with, even if the workflow's default changed in between.
+    Refuses (``EvalUnavailableError``) an eval that is missing or archived.
+    """
+    launch = choice.resolve(workflow_default)
+    if launch.eval_id is None:
+        return launch
+    return launch.admitted(await admit_launch(repository, launch.eval_id))

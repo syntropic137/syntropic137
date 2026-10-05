@@ -19,6 +19,7 @@ import os
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from unittest.mock import AsyncMock, MagicMock
@@ -30,8 +31,11 @@ from event_sourcing.client.memory import MemoryEventStoreClient
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration._shared.eval_admission import EvalUnavailableError
-from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
+from syn_domain.contexts.orchestration._shared.eval_admission import (
+    EvalUnavailableError,
+    launch_eval_for,
+)
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, LaunchEval
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -142,6 +146,16 @@ def _repository[A](client: MemoryEventStoreClient, aggregate: type[A], name: str
     return RepositoryAdapter(EventStoreRepository(client, aggregate, name))  # type: ignore[arg-type,return-value]  # ESP SDK TEvent invariance
 
 
+@dataclass
+class _DefaultBranch:
+    """Where each repository's default branch (``main``) is NOW, as ``resolver`` has it."""
+
+    resolver: FakeRevisionResolver
+
+    async def head_sha(self, repo: RepositoryRef) -> str | None:
+        return self.resolver.shas.get((repo.slug, "main"))
+
+
 class _World:
     """Real repositories over in-memory stores, and the real handlers."""
 
@@ -175,18 +189,15 @@ class _World:
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         )
-        self.execute = self.launcher(self.evals)
+        self.execute = ExecuteWorkflowHandler(
+            processor=self.processor,
+            workflow_repository=self.templates,
+            # The run's own commit reader: where each default branch is NOW.
+            commit_resolver=_DefaultBranch(self.resolver),
+        )
         self.attach = AttachExecutionToEvalHandler(self.executions, self.evals)
         self.detach = DetachExecutionFromEvalHandler(self.executions)
         self.set_default = SetWorkflowDefaultEvalHandler(self.templates, self.evals)
-
-    def launcher(self, evals: RepositoryAdapter[EvalAggregate]) -> ExecuteWorkflowHandler:
-        """The real launch handler, admitting through ``evals``."""
-        return ExecuteWorkflowHandler(
-            processor=self.processor,
-            workflow_repository=self.templates,
-            eval_repository=evals,
-        )
 
     @property
     def workflow_id(self) -> str:
@@ -225,22 +236,36 @@ class _World:
         )
         assert result is not None and result.success
 
+    async def dispatch(
+        self,
+        execution_id: str,
+        choice: EvalChoice | None = None,
+        *,
+        admitting_through: RepositoryAdapter[EvalAggregate] | None = None,
+    ) -> ExecuteWorkflowCommand:
+        """The command a dispatcher builds: its eval resolved and admitted once, here."""
+        template = await self.templates.get_by_id(self.workflow_id)
+        assert template is not None
+        launch_eval = await launch_eval_for(
+            admitting_through or self.evals, choice or EvalChoice(), template.default_eval_id
+        )
+        return ExecuteWorkflowCommand(
+            aggregate_id=self.workflow_id,
+            execution_id=execution_id,
+            repos=[RepositoryRef.from_slug("acme/widgets")],
+            inputs={"task": "fix it"},
+            launch_eval=launch_eval,
+        )
+
     async def run(
         self,
         execution_id: str,
         choice: EvalChoice | None = None,
         *,
-        through: ExecuteWorkflowHandler | None = None,
+        admitting_through: RepositoryAdapter[EvalAggregate] | None = None,
     ) -> None:
-        await (through or self.execute).handle(
-            ExecuteWorkflowCommand(
-                aggregate_id=self.workflow_id,
-                execution_id=execution_id,
-                repos=[RepositoryRef.from_slug("acme/widgets")],
-                inputs={"task": "fix it"},
-                eval_choice=choice or EvalChoice(),
-            )
-        )
+        command = await self.dispatch(execution_id, choice, admitting_through=admitting_through)
+        await self.execute.handle(command)
 
     async def stored[E: _ExecutionEvent](self, kind: type[E], execution_id: str) -> list[E]:
         """Events of ``kind`` on the run, as read back from the store's JSON."""
@@ -254,14 +279,23 @@ class _World:
         [event] = await self.stored(WorkflowExecutionStartedEvent, execution_id)
         return event
 
-    async def membership(self, execution_id: str) -> EvalMembership:
-        """Rebuilt from the stream by a repository that has never seen the run."""
+    async def rebuilt(self, execution_id: str) -> WorkflowExecutionAggregate:
+        """The run, rebuilt from the stream by a repository that has never seen it."""
         fresh: RepositoryAdapter[WorkflowExecutionAggregate] = _repository(
             self.executions_store, WorkflowExecutionAggregate, "WorkflowExecution"
         )
         execution = await fresh.get_by_id(execution_id)
         assert execution is not None
-        return execution.eval_membership
+        return execution
+
+    async def membership(self, execution_id: str) -> EvalMembership:
+        return (await self.rebuilt(execution_id)).eval_membership
+
+    async def checked_out(self, execution_id: str) -> dict[str, str]:
+        """What the run's first phase clones each repository at - what provisioning reads."""
+        execution = await self.rebuilt(execution_id)
+        first_phase = execution.start_pins.pinned_phases[0].phase_id
+        return execution.start_pins.checkout_for(first_phase).commits
 
 
 def _explicit(eval_id: str) -> EvalChoice:
@@ -382,6 +416,60 @@ async def test_a_later_run_starts_from_the_frozen_baseline_not_where_the_ref_mov
     assert pin.commit_sha == _SHA_MAIN
 
 
+async def test_a_run_in_an_eval_checks_out_the_frozen_sha_after_the_branch_moved() -> None:
+    """The baseline is not just recorded: provisioning clones at it.
+
+    The ordinary run launched at the same moment proves the branch really
+    moved: it checks out the new head, which the eval run must not.
+    """
+    world = await _world()
+    await world.create_eval("eval-1", "main")
+    await world.run("exec-freeze", _explicit("eval-1"))
+
+    world.resolver.shas[("acme/widgets", "main")] = _SHA_DEV
+    await world.run("exec-eval", _explicit("eval-1"))
+    await world.run("exec-ordinary", EvalChoice(ordinary=True))
+
+    assert await world.checked_out("exec-eval") == {"acme/widgets": _SHA_MAIN}
+    assert await world.checked_out("exec-ordinary") == {"acme/widgets": _SHA_DEV}
+
+
+async def test_a_retried_dispatch_keeps_its_eval_after_the_default_changes() -> None:
+    """Resolved once, at the boundary: the retry carries the original eval and SHAs."""
+    world = await _world()
+    await world.create_eval("eval-a", "main")
+    await world.create_eval("eval-b", "dev")
+    await world.default_to("eval-a")
+    command = await world.dispatch("exec-1")
+
+    await world.default_to("eval-b")
+    world.resolver.shas[("acme/widgets", "main")] = _SHA_DEV
+    await world.execute.handle(command)
+
+    started = await world.started("exec-1")
+    assert (started.eval_id, started.eval_selection) == ("eval-a", "workflow_default")
+    assert [pin.commit_sha for pin in started.eval_baseline or []] == [_SHA_MAIN]
+    assert await world.checked_out("exec-1") == {"acme/widgets": _SHA_MAIN}
+
+
+async def test_an_unresolved_launch_of_a_workflow_with_a_default_eval_is_refused() -> None:
+    """A dispatcher that made no eval decision must not silently run outside the default."""
+    world = await _world("eval-default")
+    await world.default_to("eval-default")
+
+    with pytest.raises(ValueError, match="without a resolved eval"):
+        await world.execute.handle(
+            ExecuteWorkflowCommand(
+                aggregate_id=world.workflow_id,
+                execution_id="exec-1",
+                repos=[RepositoryRef.from_slug("acme/widgets")],
+                inputs={"task": "fix it"},
+            )
+        )
+
+    assert await world.stored(WorkflowExecutionStartedEvent, "exec-1") == []
+
+
 class _RivalWritesFirst(RepositoryAdapter[EvalAggregate]):
     """Hands out the eval, but first lets ``rival`` write through the real store.
 
@@ -418,7 +506,7 @@ async def test_a_first_launch_losing_the_freeze_race_records_the_winners_baselin
         await world.run("exec-rival", _explicit("eval-1"))
 
     racing = _RivalWritesFirst(world.evals, rebaseline_then_launch)
-    await world.run("exec-1", _explicit("eval-1"), through=world.launcher(racing))
+    await world.run("exec-1", _explicit("eval-1"), admitting_through=racing)
 
     for execution_id in ("exec-rival", "exec-1"):
         [pin] = (await world.started(execution_id)).eval_baseline or []
@@ -439,7 +527,7 @@ async def test_a_launch_racing_a_baseline_edit_is_refused_and_records_nothing() 
 
     racing = _RivalWritesFirst(world.evals, rebaseline)
     with pytest.raises(ConcurrencyConflictError):
-        await world.run("exec-1", _explicit("eval-1"), through=world.launcher(racing))
+        await world.run("exec-1", _explicit("eval-1"), admitting_through=racing)
 
     assert await world.stored(WorkflowExecutionStartedEvent, "exec-1") == []
 

@@ -16,7 +16,7 @@ from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration._shared.eval_admission import admit_launch
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -48,7 +48,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
     )
-    from syn_domain.contexts.orchestration._shared.eval_choice import LaunchEval
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
     )
@@ -57,9 +56,6 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration._shared.skill_ref import (
         SkillRef,
-    )
-    from syn_domain.contexts.orchestration.domain.aggregate_eval.EvalAggregate import (
-        EvalAggregate,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
@@ -74,7 +70,6 @@ if TYPE_CHECKING:
         WorkflowExecutionProcessor,
         WorkflowExecutionResult,
     )
-    from syn_domain.repository import Repository
 
 # WHY (issue #726, PR2): the resolver is injected as a callable so the
 # domain handler does not import the application service. The wiring layer
@@ -361,7 +356,6 @@ class ExecuteWorkflowHandler:
         phase_skill_resolver: PhaseSkillResolver | None = None,
         maintenance: MaintenancePort | None = None,
         commit_resolver: SourceCommitResolverPort | None = None,
-        eval_repository: Repository[EvalAggregate] | None = None,
     ) -> None:
         self._processor = processor
         self._workflow_repo = workflow_repository
@@ -384,10 +378,6 @@ class ExecuteWorkflowHandler:
         # unknown, which is honest and resumes exactly as before. Production
         # passes the GitHub resolver.
         self._commit_resolver = commit_resolver
-        # WHY optional (#967): a handler without one can still launch ordinary
-        # runs, and refuses any launch that resolves to an eval rather than
-        # recording membership nobody checked.
-        self._eval_repo = eval_repository
 
     async def handle(
         self,
@@ -444,11 +434,9 @@ class ExecuteWorkflowHandler:
         # Raises (a ValueError) if the union exceeds the tag limit.
         tags = workflow.tags.union(command.tags)
 
-        # #967: also a launch snapshot, and decided last of the refusals, so a
-        # launch refused for anything else never freezes the eval it named.
-        launch_eval = await self._admit_to_eval(
-            command.eval_choice.resolve(workflow.default_eval_id)
-        )
+        # #967: also a launch snapshot, taken by the dispatcher and carried on
+        # the command, so a retry joins the eval it was dispatched into.
+        launch_eval = self._launch_eval(command, workflow)
 
         execution_id = (
             command.execution_id
@@ -470,7 +458,9 @@ class ExecuteWorkflowHandler:
                 execution_id=execution_id,
                 repos=repos,
                 admitted=admitted,
-                source_commits=await source_commits_for(self._commit_resolver, repos),
+                source_commits=await source_commits_for(
+                    self._commit_resolver, repos, launch_eval.baseline
+                ),
                 tags=tags,
                 launch_eval=launch_eval,
             )
@@ -481,17 +471,26 @@ class ExecuteWorkflowHandler:
             )
             raise DuplicateExecutionError(execution_id) from None
 
-    async def _admit_to_eval(self, launch_eval: LaunchEval) -> LaunchEval:
-        """Refuse a launch whose eval is missing or archived; freeze it and carry its baseline."""
-        if launch_eval.eval_id is None:
-            return launch_eval
-        if self._eval_repo is None:
+    @staticmethod
+    def _launch_eval(
+        command: ExecuteWorkflowCommand, workflow: WorkflowTemplateAggregate
+    ) -> LaunchEval:
+        """The eval the dispatcher resolved and admitted; never re-resolved here.
+
+        A command that carries none was built by a dispatcher that made no eval
+        decision. That is an ordinary run only if the workflow has no default
+        eval; otherwise it is refused, rather than silently run outside it.
+        """
+        if command.launch_eval is not None:
+            return command.launch_eval
+        if workflow.default_eval_id:
             msg = (
-                f"This launch resolves to eval {launch_eval.eval_id}, but no eval "
-                "repository is wired to admit it"
+                f"Workflow {command.aggregate_id} defaults to eval "
+                f"{workflow.default_eval_id}, but this launch was dispatched without "
+                "a resolved eval (eval_admission.launch_eval_for)"
             )
             raise ValueError(msg)
-        return launch_eval.admitted(await admit_launch(self._eval_repo, launch_eval.eval_id))
+        return LaunchEval(None, EvalSelection.NONE)
 
     @staticmethod
     def _merge_inputs(
