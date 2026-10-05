@@ -127,12 +127,16 @@ def _finalize(inputs: dict[str, str]) -> tuple[str, set[str]]:
     raw = _FINALIZE.read_text()
     prompt = re.sub(r"\s+", " ", raw)
     report = next((inputs[path] for path in _reports_finalize_reads(prompt) if path in inputs), "")
-    lines = report.splitlines()
-    verdict = (
-        lines[0]
-        if len(lines) >= 2 and lines[0] in ("CERTIFIED", "BLOCKED") and lines[1] == "Round: 3 of 3"
-        else "FINAL_REPORT_UNUSABLE"
+    rule = re.search(
+        r"first line is exactly `(\w+)` or `(\w+)` and its second line is exactly `([^`]+)`",
+        prompt,
     )
+    assert rule, "finalize_pr no longer says what makes the final report usable"
+    *verdicts, round_line = rule.groups()
+    assert round_line == f"Round: {_ROUNDS} of {_ROUNDS}"
+    lines = report.splitlines()
+    usable = len(lines) >= 2 and lines[0] in verdicts and lines[1] == round_line
+    verdict = lines[0] if usable else "FINAL_REPORT_UNUSABLE"
     branch = "CERTIFIED" if verdict == "CERTIFIED" else "BLOCKED"
     start = raw.index(f"\n## If {branch}\n")
     end = raw.index("\n## ", start + 1)
