@@ -80,6 +80,5 @@ async def test_one_successful_delegate_completes_the_phase() -> None:
 @pytest.mark.asyncio
 async def test_a_phase_that_declared_no_delegation_is_never_asked() -> None:
     assert (
-        await delegation_failure(None, None, phase_id="implement", allow_delegation=False)
-        is None
+        await delegation_failure(None, None, phase_id="implement", allow_delegation=False) is None
     )

@@ -148,7 +148,9 @@ async def delegation_failure(
             phase_id=phase_id, reason=DelegationFailureReason.UNVERIFIABLE, detail=str(error)
         )
     if not attempts:
-        return DelegationFailedError(phase_id=phase_id, reason=DelegationFailureReason.NOT_ATTEMPTED)
+        return DelegationFailedError(
+            phase_id=phase_id, reason=DelegationFailureReason.NOT_ATTEMPTED
+        )
     if any(attempt.outcome is DelegationOutcome.SUCCEEDED for attempt in attempts):
         return None
     return DelegationFailedError(

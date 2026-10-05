@@ -28,10 +28,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts im
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
     phase_failure,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
-    DelegationEvidencePort,
-    delegation_failure,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     UnfinishedPhase,
 )
@@ -53,6 +49,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
+    DelegationEvidencePort,
+    delegation_failure,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     cancelled_execution,

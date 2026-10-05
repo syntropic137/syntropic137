@@ -240,8 +240,8 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
 
     from syn_adapters.github.client import get_github_client
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
-    from syn_adapters.session_inventory.phase_delegations import ChildJournalDelegations
     from syn_adapters.projection_stores import get_projection_store
+    from syn_adapters.session_inventory.phase_delegations import ChildJournalDelegations
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
