@@ -219,12 +219,26 @@ class GitHubRepoResponse(BaseModel):
     installation_id: str
 
 
+class GitHubRepoLookup(StrEnum):
+    """How much of the GitHub App's access a repo listing actually covers.
+
+    Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+    ``partial`` listing still proves access for every repo it contains; an
+    ``unavailable`` one proves nothing.
+    """
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+
+
 class GitHubRepoListResponse(BaseModel):
     """List of repositories accessible to the GitHub App."""
 
     repos: list[GitHubRepoResponse] = Field(default_factory=list)
     total: int = 0
     installation_id: str | None = None
+    lookup: GitHubRepoLookup
 
 
 class ObservabilityError(StrEnum):
