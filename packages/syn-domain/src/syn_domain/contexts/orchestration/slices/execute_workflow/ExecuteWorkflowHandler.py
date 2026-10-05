@@ -225,6 +225,7 @@ def _phase_declares_anything(
     model: str | None,
     provider: str | None,
     allow_delegation: bool,
+    require_delegation: bool,
     allowed_tools: tuple[str, ...],
     sandbox: str | None,
 ) -> bool:
@@ -237,7 +238,14 @@ def _phase_declares_anything(
     `allowed_tools` a release. For `sandbox` the same bug would run a phase
     with authority it explicitly declined.
     """
-    return bool(model or provider or allow_delegation or allowed_tools or sandbox is not None)
+    return bool(
+        model
+        or provider
+        or allow_delegation
+        or require_delegation
+        or allowed_tools
+        or sandbox is not None
+    )
 
 
 def _grant_skill_invocation(
@@ -284,7 +292,11 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
-    allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
+    require_delegation: bool = bool(getattr(phase, "require_delegation", False))
+    # A requirement implies the permission: a stored template never saw the
+    # YAML validator that insists on both, and a required delegate whose auth
+    # was not staged could only ever fail.
+    allow_delegation: bool = require_delegation or bool(getattr(phase, "allow_delegation", False))
     sandbox: str | None = getattr(phase, "sandbox", None)
     phase_id: str | None = getattr(phase, "phase_id", None)
     # Canonicalise here, not just in the YAML validator: a stored template
@@ -317,6 +329,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
         model=phase_model,
         provider=phase_provider,
         allow_delegation=allow_delegation,
+        require_delegation=require_delegation,
         allowed_tools=allowed_tools,
         sandbox=sandbox,
     ):
@@ -325,6 +338,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
         provider=resolved_provider,
         model=phase_model,
         allow_delegation=allow_delegation,
+        require_delegation=require_delegation,
         allowed_tools=allowed_tools,
         # `is not None`, NOT `or`: a stored phase carrying sandbox="" is
         # invalid input, and `or` would quietly widen it to the write-capable

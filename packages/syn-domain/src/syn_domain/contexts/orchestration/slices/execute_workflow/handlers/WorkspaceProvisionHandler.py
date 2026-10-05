@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.checkout_verification import (
+    verify_checkout,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
     PinnedCommitUnreachableError,
@@ -293,6 +296,14 @@ def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
     return {ENV_GH_REPO: primary[0]} if primary else {}
 
 
+def _cloned_pins(repos: Sequence[str], pinned_commits: Sequence[SourceCommit]) -> dict[str, str]:
+    """``owner/name`` -> pinned commit, for the pinned repositories this phase clones."""
+    cloned = set(_repo_full_names(repos))
+    return {
+        c.repository: c.sha for c in pinned_commits if c.sha is not None and c.repository in cloned
+    }
+
+
 class ProvisionResult:
     """Result of workspace provisioning."""
 
@@ -416,6 +427,18 @@ class WorkspaceProvisionHandler:
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
             )
+            # Read back BEFORE anything else is staged and long before the agent
+            # is launched: a workspace not at its pins is refused here (#967).
+            checked_out = (
+                await verify_checkout(
+                    workspace,
+                    _cloned_pins(effective_repos, pinned_commits),
+                    continued_branches=continued_branches or {},
+                    phase_name=phase.name,
+                )
+                if phase.clone_repos
+                else ()
+            )
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
             await self._install_baked_delegation_skill(workspace, phase)
@@ -434,6 +457,7 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 outputs.primary,
                 inputs,
+                checked_out,
             )
         except BaseException as exc:
             await workspace_cm.__aexit__(type(exc), exc, exc.__traceback__)
@@ -622,6 +646,7 @@ class WorkspaceProvisionHandler:
         effective_repos: list[str],
         outputs: dict[str, str],
         inputs: dict[str, object] | None,
+        checked_out: Sequence[SourceCommit] = (),
     ) -> ProvisionResult:
         """Build prompt, CLI command, and return the ProvisionResult."""
         # repo_url for {{repo_url}} prompt substitution (backward compat — uses first repo)
@@ -658,6 +683,7 @@ class WorkspaceProvisionHandler:
             phase_id=todo.phase_id,
             workspace_id=workspace.workspace_id,
             session_id=session_id,
+            checked_out_commits=checked_out,
         )
         return ProvisionResult(
             workspace=workspace,

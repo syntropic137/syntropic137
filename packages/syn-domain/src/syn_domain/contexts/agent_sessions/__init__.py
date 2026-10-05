@@ -69,6 +69,9 @@ from syn_domain.contexts.agent_sessions.domain.aggregate_inventory_reconciliatio
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
+from syn_domain.contexts.agent_sessions.domain.events.DelegationFinishedEvent import (
+    DelegationOutcome,
+)
 from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSweepEvent import (
     InventoryReconciliationSweepEvent,
 )
@@ -277,6 +280,7 @@ __all__ = [
     "CompleteSessionHandler",
     "CostCalculator",
     "CoverageState",
+    "DelegationOutcome",
     "EvidenceBatch",
     "EvidenceClass",
     "EvidencePage",

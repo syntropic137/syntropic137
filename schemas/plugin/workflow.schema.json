@@ -55,6 +55,11 @@
           "default": false,
           "title": "Allow Delegation",
           "type": "boolean"
+        },
+        "require_delegation": {
+          "default": false,
+          "title": "Require Delegation",
+          "type": "boolean"
         }
       },
       "title": "AgentYamlDefinition",

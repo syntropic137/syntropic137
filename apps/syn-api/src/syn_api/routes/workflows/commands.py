@@ -190,6 +190,9 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 allow_delegation=_as_bool(
                     _agent_field(p, "allow_delegation", False), "allow_delegation"
                 ),
+                require_delegation=_as_bool(
+                    _agent_field(p, "require_delegation", False), "require_delegation"
+                ),
                 # Dropping this silently downgrades a phase's declared
                 # authority to the default, which for a review phase means it
                 # can write the code it certifies (#1161). Caught by the
@@ -806,7 +809,8 @@ _ACCEPTED_YAML_CONTENT_TYPES = frozenset(
         # against the package directory), which it must serialize itself; it
         # has no YAML emitter, and hand-rolling one around arbitrary prompt
         # bodies is where emitters get subtly wrong. Accepting JSON costs this
-        # endpoint nothing and keeps the CLI dependency-free.
+        # endpoint nothing. The CLI parses YAML 1.1 like this endpoint does, held
+        # to it by apps/syn-api/tests/test_workflow_upload_round_trip.py (#1618).
         "application/json",
     }
 )

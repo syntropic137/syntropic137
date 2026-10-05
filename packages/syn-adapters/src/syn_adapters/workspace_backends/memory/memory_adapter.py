@@ -87,6 +87,23 @@ class MemoryIsolationState:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+def _answer(state: MemoryIsolationState, command: list[str]) -> str:
+    """Stdout for ``command``: empty, except where a real workspace's is implied.
+
+    A setup script this double "ran" checked each pinned repository out at its
+    pin, so `git -C <repo> rev-parse HEAD` answers with that pin, as a
+    workspace that really ran it would (#967). Read off the script it was
+    given, through the module that wrote those lines.
+    """
+    from syn_adapters.workspace_backends.service.pinned_checkout import pinned_heads
+
+    if command[-2:] != ["rev-parse", "HEAD"] or "-C" not in command:
+        return ""
+    script = state.files.get(".setup/setup.sh", b"").decode()
+    head = pinned_heads(script).get(command[command.index("-C") + 1])
+    return f"{head}\n" if head else ""
+
+
 # =============================================================================
 # MEMORY ISOLATION ADAPTER
 # =============================================================================
@@ -182,16 +199,17 @@ class MemoryIsolationAdapter(InMemoryAdapter):
             )
 
         # Record the command
-        result_tuple = (0, "", "")  # Default: success with no output
+        stdout = _answer(state, command)
+        result_tuple = (0, stdout, "")  # Default: success with no output
         state.command_history.append((command, *result_tuple))
 
         return ExecutionResult(
             exit_code=0,
             success=True,
             duration_ms=1.0,  # Mock duration
-            stdout="",
+            stdout=stdout,
             stderr="",
-            stdout_lines=0,
+            stdout_lines=stdout.count("\n"),
             stderr_lines=0,
             timed_out=False,
         )
