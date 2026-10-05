@@ -17,9 +17,9 @@ from syn_perf.loadtest import (
     OpenPullRequest,
     PushBranch,
     ReportOnly,
-    StubAgentProfile,
-    StubPhase,
-    StubStream,
+    ScriptedAgentProfile,
+    ScriptedPhase,
+    ScriptedStream,
     SyntheticWorkload,
     VerifyRemoteBranch,
     head_sha_handed_over,
@@ -41,7 +41,7 @@ _AFTER_PREMISE = [
     "finalize_pr",
 ]
 """Every phase that names the head it hands over, in workflow order."""
-_SCHEMA = _REPO / "packages/syn-perf/src/syn_perf/loadtest/stub_agent_profile.schema.json"
+_SCHEMA = _REPO / "packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.schema.json"
 _FIXTURE = "syntropic137/loadtest-fixture"
 _HEAD = "3b7f2bd49a4609f24a516bb4617aadbc1edf751e"
 _PUSHED_OVER = "0f0e0d0c0b0a09080706050403020100ffeeddcc"
@@ -52,10 +52,10 @@ def workflow() -> WorkflowDefinition:
     return WorkflowDefinition.from_file(_WORKFLOW)
 
 
-def _streams(workflow: WorkflowDefinition) -> dict[str, StubStream]:
+def _streams(workflow: WorkflowDefinition) -> dict[str, ScriptedStream]:
     """One recording per phase, matching the harness the phase really runs."""
     return {
-        p.id: StubStream(
+        p.id: ScriptedStream(
             harness=(p.agent.provider if p.agent else None) or "claude",
             recording=f"/recordings/{p.id}.jsonl",
             cli_version="9.9.9",
@@ -65,8 +65,10 @@ def _streams(workflow: WorkflowDefinition) -> dict[str, StubStream]:
     }
 
 
-def _profile(workflow: WorkflowDefinition, tier: str, workload: object = None) -> StubAgentProfile:
-    return StubAgentProfile.for_workflow(
+def _profile(
+    workflow: WorkflowDefinition, tier: str, workload: object = None
+) -> ScriptedAgentProfile:
+    return ScriptedAgentProfile.for_workflow(
         workflow,
         tier=tier,  # type: ignore[arg-type]
         fixture_repo=_FIXTURE,
@@ -135,7 +137,7 @@ def test_a_recording_from_the_wrong_harness_is_refused(workflow: WorkflowDefinit
     streams["verify"] = streams["verify"].model_copy(update={"harness": "claude"})
 
     with pytest.raises(ValueError, match="phase verify runs codex"):
-        StubAgentProfile.for_workflow(
+        ScriptedAgentProfile.for_workflow(
             workflow, tier="node", fixture_repo=_FIXTURE, streams=streams, workload=NoWorkload()
         )
 
@@ -145,7 +147,7 @@ def test_a_phase_without_a_stream_is_an_error_not_a_default(workflow: WorkflowDe
     del streams["fix"]
 
     with pytest.raises(ValueError, match="'fix'"):
-        StubAgentProfile.for_workflow(
+        ScriptedAgentProfile.for_workflow(
             workflow, tier="node", fixture_repo=_FIXTURE, streams=streams, workload=NoWorkload()
         )
 
@@ -157,9 +159,9 @@ def test_the_profile_survives_the_env_var_unchanged(workflow: WorkflowDefinition
     profile = _profile(workflow, "node")
 
     env = profile.to_env()
-    restored = StubAgentProfile.from_env(env)
+    restored = ScriptedAgentProfile.from_env(env)
 
-    assert list(env) == ["SYN_STUB_AGENT_PROFILE"]
+    assert list(env) == ["SYN_SCRIPTED_AGENT_PROFILE"]
     assert restored == profile
     assert restored.phases["verify"].stream.pacing_factor == 0.25
     assert restored.phases["implement"].workload == SyntheticWorkload(
@@ -172,12 +174,12 @@ def test_an_unknown_field_in_the_env_var_is_refused(workflow: WorkflowDefinition
     payload["phases"]["premise"]["side_effect"]["force_push"] = True
 
     with pytest.raises(ValidationError, match="force_push"):
-        StubAgentProfile.from_env({StubAgentProfile.ENV: json.dumps(payload)})
+        ScriptedAgentProfile.from_env({ScriptedAgentProfile.ENV: json.dumps(payload)})
 
 
 def test_a_missing_env_var_names_itself() -> None:
-    with pytest.raises(LookupError, match="SYN_STUB_AGENT_PROFILE"):
-        StubAgentProfile.from_env({})
+    with pytest.raises(LookupError, match="SYN_SCRIPTED_AGENT_PROFILE"):
+        ScriptedAgentProfile.from_env({})
 
 
 # --- invariants that keep a run at scale safe -----------------------------
@@ -186,7 +188,7 @@ def test_a_missing_env_var_names_itself() -> None:
 @pytest.mark.parametrize("repo", ["syntropic137/syntropic137", "Syntropic137/SYNTROPIC137"])
 def test_the_fixture_is_never_this_repository(workflow: WorkflowDefinition, repo: str) -> None:
     with pytest.raises(ValueError, match="cannot be the load-test fixture"):
-        StubAgentProfile.for_workflow(
+        ScriptedAgentProfile.for_workflow(
             workflow,
             tier="platform",
             fixture_repo=repo,
@@ -202,23 +204,53 @@ def test_a_hand_written_platform_profile_cannot_open_prs(workflow: WorkflowDefin
     with pytest.raises(
         ValidationError, match=r"must not open pull requests \(phases \['finalize_pr'\]\)"
     ):
-        StubAgentProfile.model_validate(payload)
+        ScriptedAgentProfile.model_validate(payload)
+
+
+def test_a_validated_platform_profile_cannot_gain_a_pr_opening_phase(
+    workflow: WorkflowDefinition,
+) -> None:
+    profile = _profile(workflow, "platform")
+    opening = _profile(workflow, "node").phases["finalize_pr"]
+
+    with pytest.raises(TypeError):
+        profile.phases["finalize_pr"] = opening  # type: ignore[index]
+    with pytest.raises(TypeError):
+        del profile.phases["premise"]  # type: ignore[attr-defined]
+
+    sent = json.loads(profile.to_env()[ScriptedAgentProfile.ENV])
+    assert sent["phases"]["finalize_pr"]["side_effect"] == {"kind": "verify_remote_branch"}
+
+
+def test_the_callers_mapping_is_not_the_profiles(workflow: WorkflowDefinition) -> None:
+    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1")
+    report = ScriptedPhase(
+        stream=stream, workload=NoWorkload(), side_effect=ReportOnly(), artifact="x"
+    )
+    phases = {"premise": report}
+    profile = ScriptedAgentProfile(tier="platform", fixture_repo=_FIXTURE, phases=phases)
+
+    phases["finalize_pr"] = _profile(workflow, "node").phases["finalize_pr"]
+    phases.clear()
+
+    sent = json.loads(profile.to_env()[ScriptedAgentProfile.ENV])
+    assert list(sent["phases"]) == ["premise"]
 
 
 def test_gates_on_a_phase_without_a_tree_is_refused() -> None:
-    stream = StubStream(harness="claude", recording="/r.jsonl", cli_version="1")
+    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1")
 
     with pytest.raises(ValidationError, match="no working tree"):
-        StubPhase(
+        ScriptedPhase(
             stream=stream, workload=GatesWorkload(), side_effect=VerifyRemoteBranch(), artifact="x"
         )
 
 
 def test_an_artifact_naming_a_field_the_stub_cannot_fill_is_refused() -> None:
-    stream = StubStream(harness="claude", recording="/r.jsonl", cli_version="1")
+    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1")
 
     with pytest.raises(ValidationError, match="pr_url"):
-        StubPhase(
+        ScriptedPhase(
             stream=stream,
             workload=NoWorkload(),
             side_effect=PushBranch(),
@@ -274,13 +306,15 @@ def test_every_pushing_phase_reports_the_file_its_side_effect_commits(
 
 
 def test_the_committed_schema_matches_the_model() -> None:
-    generated = json.dumps(StubAgentProfile.model_json_schema(), indent=2, sort_keys=True) + "\n"
+    generated = (
+        json.dumps(ScriptedAgentProfile.model_json_schema(), indent=2, sort_keys=True) + "\n"
+    )
 
     assert _SCHEMA.read_text(encoding="utf-8") == generated, (
-        "stub_agent_profile.schema.json is stale; regenerate with: uv run python -c "
-        "'import json; from syn_perf.loadtest import StubAgentProfile as P; "
+        "scripted_agent_profile.schema.json is stale; regenerate with: uv run python -c "
+        "'import json; from syn_perf.loadtest import ScriptedAgentProfile as P; "
         "print(json.dumps(P.model_json_schema(), indent=2, sort_keys=True))' "
-        "> packages/syn-perf/src/syn_perf/loadtest/stub_agent_profile.schema.json"
+        "> packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.schema.json"
     )
 
 
@@ -341,13 +375,13 @@ _MAX_FLOAT = 1.7976931348623157e308
 _FINITE = [0.0, 5e-324, 0.25, 1.0, 1e9, _MAX_FLOAT]
 
 
-def _one_phase_profile(pacing_factor: float, cpu_seconds: float, size: int) -> StubAgentProfile:
-    return StubAgentProfile(
+def _one_phase_profile(pacing_factor: float, cpu_seconds: float, size: int) -> ScriptedAgentProfile:
+    return ScriptedAgentProfile(
         tier="platform",
         fixture_repo=_FIXTURE,
         phases={
-            "implement": StubPhase(
-                stream=StubStream(
+            "implement": ScriptedPhase(
+                stream=ScriptedStream(
                     harness="claude",
                     recording="/r.jsonl",
                     cli_version="1",
@@ -368,7 +402,7 @@ def _one_phase_profile(pacing_factor: float, cpu_seconds: float, size: int) -> S
 def test_every_accepted_profile_survives_the_env_var(value: float, size: int) -> None:
     profile = _one_phase_profile(pacing_factor=value, cpu_seconds=value, size=size)
 
-    assert StubAgentProfile.from_env(profile.to_env()) == profile
+    assert ScriptedAgentProfile.from_env(profile.to_env()) == profile
 
 
 @pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])

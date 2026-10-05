@@ -69,7 +69,7 @@
       "title": "ReportOnly",
       "type": "object"
     },
-    "StubPhase": {
+    "ScriptedPhase": {
       "additionalProperties": false,
       "description": "Everything the stub does in one phase.",
       "properties": {
@@ -105,7 +105,7 @@
           "title": "Side Effect"
         },
         "stream": {
-          "$ref": "#/$defs/StubStream"
+          "$ref": "#/$defs/ScriptedStream"
         },
         "workload": {
           "discriminator": {
@@ -136,10 +136,10 @@
         "side_effect",
         "artifact"
       ],
-      "title": "StubPhase",
+      "title": "ScriptedPhase",
       "type": "object"
     },
-    "StubStream": {
+    "ScriptedStream": {
       "additionalProperties": false,
       "description": "The recorded session a phase replays, and how fast.\n\nThe harness decides the format - ``claude`` replays stream-json, ``codex``\nreplays JSONL - so it is not declared twice. ``cli_version`` is the\nversion the recording was captured from; the driver refuses a run whose\npinned image carries a different one (plan section 8), because a stream\nfrom another CLI version exercises a parser production no longer runs.",
       "properties": {
@@ -173,7 +173,7 @@
         "recording",
         "cli_version"
       ],
-      "title": "StubStream",
+      "title": "ScriptedStream",
       "type": "object"
     },
     "SyntheticWorkload": {
@@ -237,7 +237,7 @@
       "minProperties": 1,
       "patternProperties": {
         "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
-          "$ref": "#/$defs/StubPhase"
+          "$ref": "#/$defs/ScriptedPhase"
         }
       },
       "title": "Phases",
@@ -257,6 +257,6 @@
     "fixture_repo",
     "phases"
   ],
-  "title": "StubAgentProfile",
+  "title": "ScriptedAgentProfile",
   "type": "object"
 }

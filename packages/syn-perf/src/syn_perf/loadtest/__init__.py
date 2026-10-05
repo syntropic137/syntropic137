@@ -6,17 +6,17 @@ JSON; the driver (7c) will live beside it here.
 """
 
 from syn_perf.loadtest.handoff import HEAD_SHA_LINE, head_sha_handed_over
-from syn_perf.loadtest.stub_agent_profile import (
+from syn_perf.loadtest.scripted_agent_profile import (
     LOADTEST_BRANCH_PREFIX,
-    STUB_AGENT_PROFILE_ENV,
+    SCRIPTED_AGENT_PROFILE_ENV,
     GatesWorkload,
     NoWorkload,
     OpenPullRequest,
     PushBranch,
     ReportOnly,
-    StubAgentProfile,
-    StubPhase,
-    StubStream,
+    ScriptedAgentProfile,
+    ScriptedPhase,
+    ScriptedStream,
     SyntheticWorkload,
     VerifyRemoteBranch,
 )
@@ -24,15 +24,15 @@ from syn_perf.loadtest.stub_agent_profile import (
 __all__ = [
     "HEAD_SHA_LINE",
     "LOADTEST_BRANCH_PREFIX",
-    "STUB_AGENT_PROFILE_ENV",
+    "SCRIPTED_AGENT_PROFILE_ENV",
     "GatesWorkload",
     "NoWorkload",
     "OpenPullRequest",
     "PushBranch",
     "ReportOnly",
-    "StubAgentProfile",
-    "StubPhase",
-    "StubStream",
+    "ScriptedAgentProfile",
+    "ScriptedPhase",
+    "ScriptedStream",
     "SyntheticWorkload",
     "VerifyRemoteBranch",
     "head_sha_handed_over",

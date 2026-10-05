@@ -5,11 +5,12 @@ agentic-workspace) so N executions can run without spending a token. The
 stub has to exercise the same platform paths a real agent does, or the test
 measures something that never happens in production. This module is the
 contract between the driver that configures a run and the image that carries
-it out: one ``StubAgentProfile`` per run, passed to every workspace as a
+it out: one ``ScriptedAgentProfile`` per run, passed to every workspace as a
 single JSON environment variable, keyed by phase id.
 
 Two rules make it trustworthy, and both are enforced here rather than left to
-whoever writes a profile by hand:
+whoever writes a profile by hand (and the profile is read-only once
+validated, so neither can be undone after the fact):
 
 - **Side effects follow the workflow, not a list.** ``for_workflow`` derives
   each phase's side effect from the same ``WorkflowDefinition`` fields the
@@ -20,6 +21,11 @@ whoever writes a profile by hand:
   branch per execution; at 100 executions that must not land on
   ``syntropic137/syntropic137``.
 
+"Scripted", not "Stub": these are production contract models describing a
+scripted workload, not test doubles, and the ADR-060 in-memory guard treats a
+``Stub*`` class as one. See "Scripted Agent" in
+docs/architecture/orchestration-ubiquitous-language.md.
+
 Nothing in production reads this. The stub is selected only by the load-test
 stack's workspace image (plan 6.3).
 """
@@ -27,22 +33,30 @@ stack's workspace image (plan 6.3).
 from __future__ import annotations
 
 import string
+from collections.abc import Mapping  # noqa: TC003 - pydantic resolves the field type at runtime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Annotated, ClassVar, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    StringConstraints,
+    model_validator,
+)
 
 from syn_perf.loadtest.handoff import FULL_SHA
 from syn_perf.loadtest.implement_v3_artifacts import IMPLEMENT_V3_ARTIFACTS
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from syn_domain.contexts.orchestration import WorkflowDefinition
     from syn_domain.contexts.orchestration._shared.workflow_definition import (
         PhaseYamlDefinition,
     )
 
-STUB_AGENT_PROFILE_ENV: Final = "SYN_STUB_AGENT_PROFILE"
+SCRIPTED_AGENT_PROFILE_ENV: Final = "SYN_SCRIPTED_AGENT_PROFILE"
 """The one environment variable a stub workspace reads its profile from."""
 
 LOADTEST_BRANCH_PREFIX: Final = "loadtest/"
@@ -71,7 +85,7 @@ def _named_fields(template: str) -> set[str]:
     return {field for _, field, _, _ in string.Formatter().parse(template) if field}
 
 
-class StubStream(_Contract):
+class ScriptedStream(_Contract):
     """The recorded session a phase replays, and how fast.
 
     The harness decides the format - ``claude`` replays stream-json, ``codex``
@@ -167,10 +181,10 @@ SideEffect = Annotated[
 _NO_WORKING_TREE: Final = (OpenPullRequest, VerifyRemoteBranch)
 
 
-class StubPhase(_Contract):
+class ScriptedPhase(_Contract):
     """Everything the stub does in one phase."""
 
-    stream: StubStream
+    stream: ScriptedStream
     workload: Workload
     side_effect: SideEffect
     artifact: str = Field(min_length=1)
@@ -179,7 +193,7 @@ class StubPhase(_Contract):
     doubled."""
 
     @model_validator(mode="after")
-    def _consistent(self) -> StubPhase:
+    def _consistent(self) -> ScriptedPhase:
         if isinstance(self.workload, GatesWorkload) and isinstance(
             self.side_effect, _NO_WORKING_TREE
         ):
@@ -197,18 +211,26 @@ class StubPhase(_Contract):
         return self
 
 
-class StubAgentProfile(_Contract):
+class ScriptedAgentProfile(_Contract):
     """One load-test run's instructions to the stub agent, per phase id."""
 
-    ENV: ClassVar[str] = STUB_AGENT_PROFILE_ENV
+    ENV: ClassVar[str] = SCRIPTED_AGENT_PROFILE_ENV
 
     tier: Literal["platform", "node"]
     fixture_repo: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
     """``owner/name`` of the dedicated repository the stub pushes to."""
-    phases: dict[PhaseId, StubPhase] = Field(min_length=1)
+    phases: Annotated[
+        Mapping[PhaseId, ScriptedPhase],
+        Field(min_length=1),
+        AfterValidator(MappingProxyType),
+        PlainSerializer(dict, return_type=dict[PhaseId, ScriptedPhase]),
+    ]
+    """Read-only once validated: ``frozen`` stops reassigning the field, and
+    this stops editing it in place, so no phase can be added or swapped after
+    the checks below have passed it."""
 
     @model_validator(mode="after")
-    def _safe_to_run_at_scale(self) -> StubAgentProfile:
+    def _safe_to_run_at_scale(self) -> ScriptedAgentProfile:
         if self.fixture_repo.lower() in _FORBIDDEN_FIXTURE_REPOS:
             msg = f"{self.fixture_repo} cannot be the load-test fixture repository"
             raise ValueError(msg)
@@ -253,7 +275,7 @@ class StubAgentProfile(_Contract):
         return {self.ENV: self.model_dump_json()}
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str]) -> StubAgentProfile:
+    def from_env(cls, environ: Mapping[str, str]) -> ScriptedAgentProfile:
         try:
             raw = environ[cls.ENV]
         except KeyError:
@@ -268,10 +290,10 @@ class StubAgentProfile(_Contract):
         *,
         tier: Literal["platform", "node"],
         fixture_repo: str,
-        streams: Mapping[str, StubStream],
+        streams: Mapping[str, ScriptedStream],
         workload: NoWorkload | SyntheticWorkload | GatesWorkload,
         artifacts: Mapping[str, str] = IMPLEMENT_V3_ARTIFACTS,
-    ) -> StubAgentProfile:
+    ) -> ScriptedAgentProfile:
         """Build the profile for every phase of ``workflow``.
 
         The side effect is the real phase's contract: no working tree means
@@ -291,7 +313,7 @@ class StubAgentProfile(_Contract):
             raise ValueError(msg)
 
         phases = {
-            phase.id: StubPhase(
+            phase.id: ScriptedPhase(
                 stream=_stream_for(phase, streams[phase.id]),
                 workload=workload if phase.clone_repos else NoWorkload(),
                 side_effect=_side_effect_for(phase, tier),
@@ -302,7 +324,7 @@ class StubAgentProfile(_Contract):
         return cls(tier=tier, fixture_repo=fixture_repo, phases=phases)
 
 
-def _stream_for(phase: PhaseYamlDefinition, stream: StubStream) -> StubStream:
+def _stream_for(phase: PhaseYamlDefinition, stream: ScriptedStream) -> ScriptedStream:
     provider = (phase.agent.provider if phase.agent else None) or "claude"
     if stream.harness != provider:
         msg = (
