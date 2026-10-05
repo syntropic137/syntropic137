@@ -10,7 +10,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import syn_api._wiring as wiring
+import pytest
+
+import syn_api._wiring_launch as wiring
+
+pytestmark = pytest.mark.unit
 
 
 def test_the_composition_root_passes_launches() -> None:
@@ -22,6 +26,6 @@ def test_the_composition_root_passes_launches() -> None:
         and isinstance(node.func, ast.Name)
         and node.func.id == "ExecuteWorkflowHandler"
     ]
-    assert constructions, "_wiring no longer constructs ExecuteWorkflowHandler; this check is blind"
+    assert constructions, "_wiring_launch no longer constructs ExecuteWorkflowHandler; this check is blind"
     for call in constructions:
         assert any(kw.arg == "launches" for kw in call.keywords)

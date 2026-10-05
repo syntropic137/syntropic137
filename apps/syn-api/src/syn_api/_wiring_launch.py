@@ -9,13 +9,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration._shared.template_launch import TemplateLaunches
+from syn_domain.contexts.orchestration import TemplateLaunches
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration import StartResumeHandler
-    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
-        ExecuteWorkflowHandler,
-    )
+    from syn_domain.contexts.orchestration import ExecuteWorkflowHandler, StartResumeHandler
 
 
 async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:

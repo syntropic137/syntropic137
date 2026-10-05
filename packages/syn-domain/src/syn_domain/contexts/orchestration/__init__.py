@@ -59,6 +59,9 @@ from syn_domain.contexts.orchestration._shared.tags import (
     InvalidTagsError,
     TagSet,
 )
+from syn_domain.contexts.orchestration._shared.template_launch import (
+    TemplateLaunches,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PHASE_ID_PATTERN,
     RESERVED_INPUT_NAMES,
@@ -340,6 +343,7 @@ __all__ = [
     "StreamResult",
     "SubagentTracker",
     "TagSet",
+    "TemplateLaunches",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
     "UnsupportedExecutionTypeError",
