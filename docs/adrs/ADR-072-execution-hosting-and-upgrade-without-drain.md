@@ -185,9 +185,13 @@ atomic one:
 
 1. **Append first.** Load the aggregate and append `WorkflowInterruptedEvent`
    through `ExecutionJournal.append`. If the stream already ends in a terminal
-   event, the aggregate rejects the command and nothing is appended. A
-   `ConcurrencyError` means another writer advanced the stream: reload and
-   decide again.
+   event, the aggregate rejects the command and nothing is appended.
+   `append` reports every rejected store write the same way: it raises
+   `EventsNotRecordedError`, with the repository's exception as its
+   `__cause__`, and nothing was written. When that cause is a
+   `ConcurrencyConflictError`, another writer advanced the stream: reload and
+   decide again whether to append or only close. Any other cause leaves the
+   row `reaped`, and the next reconciliation turn retries from step 1.
 2. **Then close the row** with `close_interrupted`, guarded on the row's
    current `lease_token`. Only this releases the slot.
 
@@ -205,17 +209,19 @@ host is stopped by two separate mechanisms:
   (`RunLeaseLost`), within one renewal interval of its process running again.
   It then cancels its own runs, which take the bounded interruption path of
   #1381, and its `close` is refused on the token.
-- **Optimistic concurrency, through the stream.** Its appends raise
-  `ConcurrencyError` only **after** some other writer has advanced the stream,
-  in practice the reconciler's interruption in step 1. Before that, from the
-  moment of fencing until step 1 lands, an append by the old host **succeeds**.
+- **Optimistic concurrency, through the stream.** Its appends are refused
+  only **after** some other writer has advanced the stream, in practice the
+  reconciler's interruption in step 1, and the refusal reaches it as the same
+  `EventsNotRecordedError` wrapping a `ConcurrencyConflictError`. Before that,
+  from the moment of fencing until step 1 lands, an append by the old host
+  **succeeds**.
 
 The race is resolved by stream order, not by the token. If the old host appends
 first (a phase completion, say), the reconciler's load or append sees it:
-either a `ConcurrencyError` and reload, or a reload that already contains the
-event. It then interrupts after that event, or appends nothing if the event was
+either an `EventsNotRecordedError` caused by a `ConcurrencyConflictError` and
+a reload, or a load that already contains the event. It then interrupts after that event, or appends nothing if the event was
 terminal, and closes the row either way. If the reconciler appends first, every
-later append by the old host fails on the version. Either way the stream is one
+later append by the old host is refused on the version and writes nothing. Either way the stream is one
 consistent history of one run, and the row is closed only after the stream is
 terminal.
 

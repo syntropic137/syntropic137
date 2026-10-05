@@ -17,9 +17,12 @@ not the other is the plausible mistake.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import TypedDict
 
 import pytest
+from event_sourcing import ConcurrencyConflictError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     StartExecutionCommand,
@@ -29,6 +32,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     WorkflowExecutionAggregate,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    EventsNotRecordedError,
     ExecutionJournal,
 )
 
@@ -179,3 +183,71 @@ async def test_an_event_the_projection_ignores_is_not_an_error() -> None:
     await journal.open(aggregate)
 
     assert trace == ["save_new", "on_phase_started"]
+
+
+class _ConflictingRepository(_ClearingRepository):
+    """A stream another writer has already advanced: every append is refused."""
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        self._trace.append("save")
+        raise ConcurrencyConflictError(expected_version=1, actual_version=2)
+
+
+@pytest.mark.unit
+async def test_a_stream_conflict_reaches_the_caller_wrapped_with_its_cause() -> None:
+    """ADR-072 D5 tells the reconciler to reload on a conflict; this is what it catches.
+
+    The conflict is not what escapes `append`: the wrapper is, and the
+    conflict is only its cause. A caller written against the bare conflict
+    never sees it, and treats a stale read as any other lost write.
+    """
+    trace: list[str] = []
+    projection = _RecordingProjection(trace)
+    journal = ExecutionJournal(_ConflictingRepository(trace), projection)
+    aggregate = _running_aggregate()
+    aggregate.mark_events_as_committed()
+    _raise_phase_started(aggregate, "phase-a")
+
+    with pytest.raises(EventsNotRecordedError) as raised:
+        await journal.append(aggregate)
+
+    assert isinstance(raised.value.__cause__, ConcurrencyConflictError)
+    assert projection.phases_started == [], "nothing was written, so nothing is projected"
+
+
+def _adr_072_d5() -> str:
+    """The D5 section of ADR-072, which states what the journal raises."""
+    root = next(p for p in Path(__file__).resolve().parents if (p / "docs" / "adrs").is_dir())
+    (adr,) = (root / "docs" / "adrs").glob("ADR-072-*.md")
+    text = adr.read_text()
+    start = text.index("### D5.")
+    end = text.index("\n### ", start + 1)
+    return text[start:end]
+
+
+def _defined_exception_names() -> set[str]:
+    """Every exception class the journal's callers can see, by name."""
+    root = next(p for p in Path(__file__).resolve().parents if (p / "docs" / "adrs").is_dir())
+    sources = [
+        root / "packages",
+        root / "apps",
+        root / "lib" / "event-sourcing-platform" / "event-sourcing" / "python" / "src",
+    ]
+    names: set[str] = set()
+    for source in sources:
+        for path in source.rglob("*.py"):
+            names.update(re.findall(r"^class (\w+Error)\b", path.read_text(), re.MULTILINE))
+    return names
+
+
+@pytest.mark.unit
+def test_adr_072_d5_names_only_exceptions_the_code_raises() -> None:
+    """The reconciler is built from D5's prose, so its exception names must be real.
+
+    D5 once said the journal raised `ConcurrencyError`, a class that exists
+    nowhere: a reconciler written from it would catch nothing and never reload.
+    """
+    section = _adr_072_d5()
+    named = set(re.findall(r"`(\w+Error)`", section))
+    assert {"EventsNotRecordedError", "ConcurrencyConflictError"} <= named
+    assert named <= _defined_exception_names(), named - _defined_exception_names()
