@@ -303,7 +303,6 @@ class ExecuteWorkflowRequest(BaseModel):
         deprecated=True,
     )
 
-
     @field_validator("task")
     @classmethod
     def _task_has_content(cls, task: str | None) -> str | None:
