@@ -35,11 +35,11 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
 from syn_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
 )
-from syn_domain.pagination import Page, matches_search
+from syn_domain.pagination import Page, ProjectionRecord, matches_search
 from syn_domain.projection_scan import paginate_projection
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Mapping
+    from collections.abc import Collection, Iterable
     from datetime import datetime
 
     from event_sourcing import ProjectionStore
@@ -151,7 +151,7 @@ class EvalListProjection(AutoDispatchProjection):
         """
         required = frozenset(tags or ())
 
-        def base(record: Mapping[str, object]) -> bool:
+        def base(record: ProjectionRecord) -> bool:
             stored = record.get("tags")
             if required and not (isinstance(stored, list) and required.issubset(stored)):
                 return False
@@ -230,5 +230,5 @@ def _baseline(
     )
 
 
-def _from_document(document: Mapping[str, object]) -> EvalRecord:
+def _from_document(document: ProjectionRecord) -> EvalRecord:
     return EvalRecord.model_validate(document)

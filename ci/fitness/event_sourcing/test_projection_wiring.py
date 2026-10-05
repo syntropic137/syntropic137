@@ -82,10 +82,10 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.orchestration.slices.get_workflow_detail import (
         WorkflowDetailProjection,
     )
+    from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
     from syn_domain.contexts.orchestration.slices.list_executions import (
         WorkflowExecutionListProjection,
     )
-    from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
     from syn_domain.contexts.orchestration.slices.list_workflows import (
         WorkflowListProjection,
     )
