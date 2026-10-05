@@ -10,6 +10,10 @@ It must agree with :meth:`PageQuery.run`, which is ``paginate``:
   read as UTC (``coerce_datetime``). A value that does not look like an ISO
   8601 timestamp is UNDATED rather than an error, as ``coerce_datetime``
   returns None for it;
+- search is ``str.casefold``, which PostgreSQL 16 does not have: its
+  ``lower()`` misses the full foldings (``ß`` -> ``ss``) and follows the
+  database locale. The fold is done in SQL from a table built out of Python's
+  own ``casefold``, so the two cannot drift;
 - facets count dated, in-window rows ignoring the status filter; ``total`` and
   the undated count apply it;
 - rows are ordered by the timestamp TEXT, newest first, with absent last.
@@ -18,6 +22,7 @@ It must agree with :meth:`PageQuery.run`, which is ``paginate``:
 from __future__ import annotations
 
 import json
+from functools import cache
 from typing import TYPE_CHECKING
 
 from syn_adapters.postgres_text import pg_safe
@@ -35,8 +40,27 @@ if TYPE_CHECKING:
 
 #: What ``datetime.fromisoformat`` can read from a stored timestamp. Anything
 #: else is undated rather than a cast error that would fail the whole request.
-_ISO_TIMESTAMP = r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?)?(Z|[+-]\d{2}:?\d{2})?$"
-_HAS_OFFSET = r"(Z|[+-]\d{2}:?\d{2})$"
+#: The ranges matter as well as the shape: PostgreSQL reads ``24:00`` and a
+#: leap second ``:60``, which Python refuses. A day the month does not have
+#: (``02-30``) passes any regex, so ``pg_input_is_valid`` judges that.
+_HOUR = r"([01]\d|2[0-3])"
+_SIXTY = r"[0-5]\d"
+_OFFSET = rf"(Z|[+-]{_HOUR}:?{_SIXTY})"
+_ISO_TIMESTAMP = (
+    rf"^\d{{4}}-\d{{2}}-\d{{2}}([T ]{_HOUR}:{_SIXTY}(:{_SIXTY}(\.\d{{1,6}})?)?)?{_OFFSET}?$"
+)
+_HAS_OFFSET = rf"{_OFFSET}$"
+
+
+@cache
+def _folds() -> tuple[list[str], list[str]]:
+    """Every character ``str.casefold`` changes, and what it changes it to.
+
+    ``casefold`` works one character at a time, so folding a string is this
+    table applied to each of its characters.
+    """
+    folded = [(c, c.casefold()) for c in map(chr, range(0x110000)) if c.casefold() != c]
+    return [c for c, _ in folded], [f for _, f in folded]
 
 
 def _field(name: str) -> str:
@@ -72,7 +96,22 @@ def _instant_sql(name: str) -> str:
     text = f"data->>'{name}'"
     return (
         f"CASE WHEN {text} ~ '{_ISO_TIMESTAMP}' THEN CASE WHEN {text} ~ '{_HAS_OFFSET}' "
-        f"THEN ({text})::timestamptz ELSE ({text})::timestamp AT TIME ZONE 'UTC' END END"
+        f"THEN CASE WHEN pg_input_is_valid({text}, 'timestamptz') THEN ({text})::timestamptz END "
+        f"ELSE CASE WHEN pg_input_is_valid({text}, 'timestamp') "
+        f"THEN ({text})::timestamp AT TIME ZONE 'UTC' END END END"
+    )
+
+
+def _fold_sql(text: str, sources: str, targets: str) -> str:
+    """``text.casefold()`` in SQL; ASCII, the usual case, skips the table."""
+    upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    return (
+        f"CASE WHEN octet_length({text}) = char_length({text}) "
+        f"THEN translate({text}, '{upper}', '{upper.lower()}') "
+        f"ELSE (SELECT string_agg(COALESCE(f.target, c.ch), '' ORDER BY c.n) "
+        f"FROM regexp_split_to_table({text}, '') WITH ORDINALITY AS c(ch, n) "
+        f"LEFT JOIN unnest({sources}::text[], {targets}::text[]) AS f(source, target) "
+        "ON f.source = c.ch) END"
     )
 
 
@@ -87,12 +126,15 @@ def _match_sql(query: PageQuery, params: _Params) -> str:
             tags = json.dumps(sorted(pg_safe(tag) for tag in required))
             conditions.append(f"data->'{_field(name)}' @> {params.add(tags)}::text::jsonb")
     if query.search and query.search_fields:
-        needle = params.add(pg_safe(query.search))
+        needle = params.add(pg_safe(query.search).casefold())
+        sources, targets = _folds()
+        source_param, target_param = params.add(sources), params.add(targets)
         conditions.append(
             "("
             + " OR ".join(
                 f"(jsonb_typeof(data->'{_field(name)}') = 'string' "
-                f"AND strpos(lower(data->>'{name}'), lower({needle}::text)) > 0)"
+                f"AND strpos({_fold_sql(f"data->>'{name}'", source_param, target_param)}, "
+                f"{needle}::text) > 0)"
                 for name in query.search_fields
             )
             + ")"

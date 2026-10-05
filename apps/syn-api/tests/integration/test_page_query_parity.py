@@ -3,8 +3,10 @@
 ``PageQuery.run`` is ``paginate``, the definition of a list page. The store
 answers the same query in one SQL statement; this seeds documents chosen to
 be awkward for SQL - a timestamp with no offset, one with ``Z``, one that does
-not parse, one absent, tied timestamps, a non-list ``tags``, a non-string
-search field, mixed case - and compares the two answers whole for every query.
+not parse, ones shaped like a timestamp on no real day or hour, one absent,
+tied timestamps, a non-list ``tags``, a non-string search field, mixed case, a
+``ß`` only ``casefold`` matches - and compares the two answers whole for every
+query.
 """
 
 from __future__ import annotations
@@ -69,6 +71,11 @@ DOCS: dict[str, ProjectionRecord] = {
         "tags": ["y"],
         "eval_id": "e2",
     },
+    # ``casefold`` turns ß into ss; PostgreSQL's ``lower()`` does not.
+    "h": {"name": "Straße", "status": "running", "at": "2026-10-03T08:00:00Z", "eval_id": "e2"},
+    # Shaped like a timestamp, but no such day or hour: undated, not a cast error.
+    "i": {"name": "Leap", "status": "failed", "at": "2026-02-30T10:00:00Z", "eval_id": "e1"},
+    "j": {"name": "Midnight", "status": "failed", "at": "2026-10-02T24:00:00", "eval_id": "e1"},
 }
 
 AFTER = datetime(2026, 10, 2, tzinfo=UTC)
@@ -90,6 +97,10 @@ QUERIES = [
     ),
     PageQuery(status=TEXT, timestamp_field="at", contains_all={"tags": frozenset({"x", "y"})}),
     PageQuery(status=TEXT, timestamp_field="at", search="alpha", search_fields=("name",)),
+    PageQuery(status=TEXT, timestamp_field="at", search="STRASSE", search_fields=("name",)),
+    PageQuery(
+        status=TEXT, timestamp_field="at", after=AFTER, search="straß", search_fields=("name",)
+    ),
     PageQuery(status=TEXT, timestamp_field="at", equals={"eval_id": "e1"}, limit=0),
     PageQuery(status=FLAG, timestamp_field="at", statuses=frozenset({"active"}), limit=3),
     PageQuery(
