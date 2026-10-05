@@ -39,6 +39,9 @@ dev = [
     "pyright>=1.1.408",
     # Keep feedback available to API codegen and tests; production installs opt in.
     "ui-feedback-api",
+    # The load-test contract and its tests (#1310). No image installs the root
+    # project, so this reaches developers and CI only.
+    "syn-perf",
 ]
 
 [build-system]
@@ -155,6 +158,7 @@ testpaths = [
     "packages/syn-shared/tests",
     "packages/syn-shared/src",  # co-located tests, same convention
     "packages/syn-tokens/tests",
+    "packages/syn-perf/tests",
     "scripts/workflows",
     "scripts/tests",
     "infra/scripts/tests",
