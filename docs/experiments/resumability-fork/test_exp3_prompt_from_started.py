@@ -11,7 +11,7 @@ WorkflowExecutionProcessor.run does before the start command (inputs["repos"],
 :256-257). The event is written through a real event-store client and READ
 BACK (memory, or gRPC->Rust->Postgres when EXP_GRPC_ADDR is set), so the JSON
 round trip is part of what is measured. The prompt is rendered by the real
-production builder, syn_api._wiring._build_workspace_prompt.
+production builder, syn_api._wiring_agent_command._build_workspace_prompt.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import pytest
 from event_sourcing import EventStoreRepository
 from event_sourcing.client.memory import MemoryEventStoreClient
 
-from syn_api._wiring import _build_workspace_prompt
+from syn_api._wiring_agent_command import _build_workspace_prompt
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     PhaseDefinition,

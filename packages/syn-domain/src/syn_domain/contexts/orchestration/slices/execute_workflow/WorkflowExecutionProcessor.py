@@ -25,9 +25,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
     run_phase_agent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
-    phase_failure,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     UnfinishedPhase,
 )
@@ -52,6 +49,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
+    completion_failure,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     cancelled_execution,
@@ -115,6 +115,7 @@ if TYPE_CHECKING:
         ResumeOrigin,
         SourceCommit,
     )
+    from syn_domain.contexts.orchestration.ports import DelegationEvidencePort
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -198,8 +199,12 @@ class WorkflowExecutionProcessor:
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
         owed_cancelled_work: ProjectionStore | None = None,
+        delegation_evidence: DelegationEvidencePort | None = None,
     ) -> None:
         self._session_repo = session_repository
+        #: Read as a phase that declared delegation completes, to show its
+        #: delegate actually ran (#894). See `phase_delegation`.
+        self._delegation_evidence = delegation_evidence
         # How a phase answers a provider that is simply busy (#1303). Injected
         # only so a test can collapse the backoff to zero; production takes the
         # policy's own numbers and no caller chooses them.
@@ -821,7 +826,13 @@ class WorkflowExecutionProcessor:
             # and checked before the aggregate is told the run completed
             # (#1256). WHICH channel ended the run, and what the failure is
             # counted as, are `agent_run_outcome`'s to decide (#1367).
-            failure = phase_failure(result, phase_id=todo.phase_id)
+            failure = await completion_failure(
+                result,
+                phase_id=todo.phase_id,
+                evidence=self._delegation_evidence,
+                workspace=runtime.workspace_for(todo.phase_id),
+                required_delegate=phase.agent_config.required_delegate,
+            )
             if failure is not None:
                 logger.error(str(failure))
                 # A retried attempt keeps nothing: the phase is not over, and

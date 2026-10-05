@@ -13,9 +13,11 @@ from pydantic import ValidationError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    DelegationFailure,
     FailureClassification,
     QuarantinedRef,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
@@ -309,6 +311,14 @@ class WorkflowExecutionDetail:
     the UI can fix a total that was already wrong when it was summed.
     """
 
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported, recorded on completion (PC-63).
+
+    On a `completed` run, `blocked` means COMPLETED WITH UNRESOLVED FINDINGS:
+    every round ran and the last review still refused the change. None for a
+    run that reviewed nothing, and for every completion predating the field.
+    """
+
     reported_failure_reason: ReportedFailureReason | None = None
     """What the failing phase SAID caused it (#1372), `None` when it said nothing.
 
@@ -326,6 +336,11 @@ class WorkflowExecutionDetail:
     Empty for a run that quarantined nothing, and for every failure recorded
     before the field existed: the refs were prose in `error_message` then.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894), `None` for every
+    other failure. A platform observation: its reason and the attempts the
+    child journal held, typed, so a client never parses `error_message` for
+    them."""
 
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
@@ -421,6 +436,8 @@ class WorkflowExecutionDetail:
                 data.get("reported_failure_reason")
             ),
             quarantined_refs=read_quarantined_refs(data.get("quarantined_refs")),
+            review_verdict=ReviewVerdict.from_stored(data.get("review_verdict")),
+            delegation_failure=DelegationFailure.from_stored(data.get("delegation_failure")),
             repos=tuple(data.get("repos", [])),
             inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
             tags=tuple(data.get("tags") or ()),
@@ -460,6 +477,12 @@ class WorkflowExecutionDetail:
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
             "quarantined_refs": [r.model_dump(mode="json") for r in self.quarantined_refs],
+            "review_verdict": None if self.review_verdict is None else self.review_verdict.value,
+            "delegation_failure": (
+                None
+                if self.delegation_failure is None
+                else self.delegation_failure.model_dump(mode="json")
+            ),
             "repos": list(self.repos),
             "inputs": dict(self.inputs),
             "tags": list(self.tags),

@@ -9165,6 +9165,124 @@
         "title": "DegradedReason",
         "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
       },
+      "DelegationAttempt": {
+        "properties": {
+          "delegate_id": {
+            "type": "string",
+            "title": "Delegate Id"
+          },
+          "target_harness": {
+            "type": "string",
+            "title": "Target Harness"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "delegate_id",
+          "target_harness",
+          "outcome"
+        ],
+        "title": "DelegationAttempt",
+        "description": "One delegate the phase's agent launched, as the platform observed it."
+      },
+      "DelegationFailure": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DelegationFailureReason"
+          },
+          "required_delegate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Delegate"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/DelegationAttempt"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "default": []
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "DelegationFailure",
+        "description": "The typed account of a failed required delegation."
+      },
+      "DelegationFailureReason": {
+        "type": "string",
+        "enum": [
+          "not_attempted",
+          "failed",
+          "unverifiable"
+        ],
+        "title": "DelegationFailureReason",
+        "description": "Why a required delegation is counted as not having happened."
+      },
+      "DelegationOutcome": {
+        "type": "string",
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "DelegationOutcome",
+        "description": "How a delegated run ended, in provider-neutral terms.\n\nWHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit\nstatus is shell-specific baggage. The native same-harness fan-out path\nreports a boolean success and has no process to exit; cancellation and\ntimeout have no natural integer either. Since these events are v1 and this\nrepo has no upcaster framework, encoding a shell assumption now would need\na v2 to undo."
+      },
       "DeleteWorkflowResponse": {
         "properties": {
           "workflow_id": {
@@ -9770,6 +9888,16 @@
             "$ref": "#/components/schemas/FailureClassification",
             "default": "unclassified"
           },
+          "delegation_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reported_failure_reason": {
             "anyOf": [
               {
@@ -9791,6 +9919,16 @@
             "type": "boolean",
             "title": "Deliverable Produced",
             "default": false
+          },
+          "review_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reported_side_effects": {
             "anyOf": [
@@ -13630,6 +13768,11 @@
             "title": "Allow Delegation",
             "default": false
           },
+          "require_delegation": {
+            "type": "boolean",
+            "title": "Require Delegation",
+            "default": false
+          },
           "clone_repos": {
             "type": "boolean",
             "title": "Clone Repos",
@@ -15319,6 +15462,15 @@
         ],
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
+      },
+      "ReviewVerdict": {
+        "type": "string",
+        "enum": [
+          "certified",
+          "blocked"
+        ],
+        "title": "ReviewVerdict",
+        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for rounds 2 and 3.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
       },
       "RootResponse": {
         "properties": {

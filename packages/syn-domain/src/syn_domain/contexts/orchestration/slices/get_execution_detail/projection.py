@@ -21,8 +21,10 @@ from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
@@ -93,7 +95,15 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # both bumped 10 -> 11 independently, on separate branches. Taking either
     # literal 11 would leave a deployment that had already rebuilt at the other
     # one's 11 seeing no change here, and so never rebuilding for this field.
-    VERSION = 13  # v13: tags and inherited_tags (#967)
+    # v14: rebuild so stored PhaseFailed events populate the phase failure
+    # fields #1592 added (failure_classification, reported_failure_reason);
+    # a row built before them reads `unclassified`. Also picks up
+    # review_verdict (PC-63), which only new completions carry.
+    # v15, not 14: #1590 added delegation_failure (#894) to this read model on
+    # main without bumping from 13, while PC-63 bumped 13 -> 14. A deployment
+    # that had already rebuilt at this branch's 14 would never rebuild for
+    # delegation_failure, so the merge takes the higher and bumps once more.
+    VERSION = 15
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -398,6 +408,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["status"] = "completed"
         existing["completed_at"] = event_data.get("completed_at")
+        verdict = ReviewVerdict.from_stored(event_data.get("review_verdict"))
+        existing["review_verdict"] = None if verdict is None else verdict.value
         existing["completed_phases"] = self._completed_phases_after(
             event_data, existing.get("completed_phases", 0)
         )
@@ -450,6 +462,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # word be summed as a measurement (#1392).
         reported = ReportedFailureReason.from_stored(event_data.get("reported_failure_reason"))
         reported_value = None if reported is None else reported.value
+        # Which required delegate did not happen (#894). Validated through its
+        # value object here so the row holds the one shape the read model reads.
+        delegation = DelegationFailure.from_stored(event_data.get("delegation_failure"))
+        delegation_value = None if delegation is None else delegation.model_dump(mode="json")
 
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not existing:
@@ -470,6 +486,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 "failure_classification": classification.value,
                 "reported_failure_reason": reported_value,
                 "quarantined_refs": event_data.get("quarantined_refs") or [],
+                "delegation_failure": delegation_value,
                 "completed_phases": event_data.get("completed_phases", 0),
                 "total_phases": event_data.get("total_phases", 0),
             }
@@ -487,6 +504,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # Where the failed phase's unpushed work landed (#1547). New events
             # only carry it, so no replay is needed: older rows read as none.
             existing["quarantined_refs"] = event_data.get("quarantined_refs") or []
+            existing["delegation_failure"] = delegation_value
             existing["completed_phases"] = self._completed_phases_after(
                 event_data, existing.get("completed_phases", 0)
             )

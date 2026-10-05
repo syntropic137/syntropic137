@@ -10,6 +10,7 @@ from pydantic import field_validator
 
 # Runtime import needed for the Pydantic field type (noqa: TC001)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ReviewVerdict,  # noqa: TC001 - needed at runtime for Pydantic
     SideEffectStatus,  # noqa: TC001 - needed at runtime for Pydantic
 )
 
@@ -59,6 +60,10 @@ class AgentExecutionCompletedEvent(DomainEvent):
     #: comment, a push), or None when it said nothing. A report, carried here
     #: so a restart between this event and PhaseCompleted cannot lose it.
     reported_side_effects: SideEffectStatus | None = None
+    #: What a reviewing phase concluded (PC-63), or None when it said nothing.
+    #: Carried here for the same restart reason: the aggregate decides the next
+    #: phase from it at collection, a later to-do item.
+    reported_review_verdict: ReviewVerdict | None = None
 
     @field_validator("last_agent_message")
     @classmethod
