@@ -273,9 +273,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: The tags it launched with and the tags it carries now (#967).
         self._tags = ExecutionTags()
         self._eval = EvalMembership()
-        #: The first verified checkout, as the first workspace found it (#967).
-        #: None until the first provisioning is applied, so one that recorded
-        #: nothing is still the first and no later phase's checkout replaces it.
+        #: The first workspace's verified checkout (#967); None until it is applied.
         self._starting_checkout: list[SourceCommit] | None = None
 
     def get_aggregate_type(self) -> str:
