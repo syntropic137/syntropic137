@@ -293,13 +293,12 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         Returns:
             List of execution summaries for this workflow.
         """
-        all_data = await self._store.get_all(self.PROJECTION_NAME)
-        executions = []
-
-        # get_all returns a list, not a dict
-        for data in all_data:
-            if data.get("workflow_id") == workflow_id:
-                executions.append(WorkflowExecutionSummary.from_dict(data))
+        # Filtered in the store, not here. Reading every execution and keeping
+        # one workflow's decoded the whole history on each call, and
+        # /metrics?workflow_id= makes two: the E1 latency gate's p95 was
+        # 309-422ms on CI against a 300ms budget for exactly that reason.
+        rows = await self._store.query(self.PROJECTION_NAME, filters={"workflow_id": workflow_id})
+        executions = [WorkflowExecutionSummary.from_dict(data) for data in rows]
 
         # Sort by started_at descending (most recent first)
         executions.sort(key=lambda e: e.started_at or "", reverse=True)
