@@ -165,12 +165,22 @@ the outcome:
   this PR's base or event. Prove it from the job's `if:` condition in
   `.github/workflows/` (read it, never edit it): for example
   `Python Integration Tests` runs on `pull_request` only when
-  `github.base_ref == 'release'`, so a PR into `main` never gets it. That check
-  is NOT a blocker, since no CI result is coming to wait for, and NOT a pass,
-  since nothing ran it. List it in the verdict under a heading
-  `Unverified by design`, one line per check: the job name, the check it would
-  have run, and the skip reason quoted from the `if:`. Carry the same lines into
-  the PR body under the same heading, so a reviewer sees what was never run.
+  `github.base_ref == 'release'`, so a PR into `main` never gets it. Then
+  decide whether the job covers this PR: compare the test paths in the job's
+  command with `git diff --name-only origin/main...HEAD`. The job covers this
+  PR when a changed file is one of those tests or code they exercise.
+  - **It covers nothing this PR changes:** that check is NOT a blocker, since
+    no CI result is coming to wait for, and NOT a pass, since nothing ran it.
+    List it in the verdict under a heading `Unverified by design`, one line per
+    check: the job name, the check it would have run, and the skip reason
+    quoted from the `if:`. Carry the same lines into the PR body under the same
+    heading, so a reviewer sees what was never run.
+  - **It covers code or tests this PR changes:** the skip does not settle it,
+    because this PR changes the behaviour that job exists to check. Produce
+    independent evidence on this head SHA: run those tests here if this
+    workspace can, or cite another CI job that ran them on this SHA, read as
+    above. Without either, it IS a blocker: put it under BLOCKING with the job
+    name, the changed files it covers, and the run that would close it.
 - **No CI evidence for this SHA** (no PR yet, the PR head is a different SHA, or
   no job ran the test although its `if:` admits this PR): nothing has answered
   the question. Report the check as not run, name it, and never claim CI passed

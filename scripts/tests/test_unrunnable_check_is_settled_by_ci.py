@@ -168,6 +168,37 @@ class TestTheRule:
         assert "Carry the same lines into the PR body under the same heading" in section
         assert "the skip reason quoted from the `if:`" in section
 
+    def test_it_compares_the_skipped_job_with_the_diff(
+        self, sections: dict[tuple[str, str], str], key: tuple[str, str]
+    ) -> None:
+        section = sections[key]
+        assert "compare the test paths in the job's command with" in section
+        assert "`git diff --name-only origin/main...HEAD`" in section
+
+    def test_a_skipped_job_covering_nothing_changed_stays_unverified_by_design(
+        self, sections: dict[tuple[str, str], str], key: tuple[str, str]
+    ) -> None:
+        section = sections[key]
+        unrelated = section.index("**It covers nothing this PR changes:**")
+        covered = section.index("**It covers code or tests this PR changes:**")
+        bucket = section[unrelated:covered]
+        assert "that check is NOT a blocker" in bucket
+        assert "under a heading `Unverified by design`" in bucket
+        assert "BLOCKING" not in bucket
+
+    def test_a_skipped_job_covering_changed_code_needs_independent_evidence(
+        self, sections: dict[tuple[str, str], str], key: tuple[str, str]
+    ) -> None:
+        # PR #1587 review: a skipped check was never BLOCKING, even when the PR
+        # changed the very test it covers, so it passed as merely disclosed.
+        section = sections[key]
+        start = section.index("**It covers code or tests this PR changes:**")
+        bucket = section[start : section.index("**No CI evidence for this SHA**", start)]
+        assert "run those tests here if this workspace can" in bucket
+        assert "or cite another CI job that ran them on this SHA" in bucket
+        assert "Without either, it IS a blocker: put it under BLOCKING" in bucket
+        assert "Unverified by design" not in bucket
+
 
 def test_the_skip_example_is_still_true_of_ci(sections: dict[tuple[str, str], str]) -> None:
     """The prompt teaches the bucket with a real job; it must still be skipped on PRs into main."""
@@ -204,5 +235,7 @@ def test_no_other_instruction_blocks_a_job_skipped_by_design(key: tuple[str, str
         flat = re.sub(r"\s+", " ", paragraph)
         if "BLOCKING" in flat and "environment limitation" in flat:
             assert "skipped by design for this PR" in flat, flat
+            assert "and covers nothing this PR changes" in flat, flat
             assert "it is never `BLOCKING`" in flat, flat
+            assert "without independent evidence it is `BLOCKING`" in flat, flat
             assert "under `Unverified by design`" in flat, flat
