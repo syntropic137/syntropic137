@@ -719,6 +719,10 @@ class QuarantinedRef(BaseModel):
     commit_count: int
     pull_request: int | None = None
     """The PR open from ``branch`` as the phase failed, when one was."""
+    diffstat: str | None = None
+    """``git diff --stat`` of what ``ref`` holds against the newest commit a
+    remote already had, so a reviewer sees what was kept before fetching it.
+    None when it could not be read inside its bound, and for older events."""
 
     @property
     def fetch_command(self) -> str:

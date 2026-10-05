@@ -51,6 +51,7 @@ def quarantined_refs(
             commit=record.commit,
             commit_count=record.commit_count,
             pull_request=open_pr.get((record.repo, record.branch)),
+            diffstat=record.diffstat,
         )
         for record in records
         if record.pushed_ref is not None

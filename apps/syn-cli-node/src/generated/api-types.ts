@@ -5422,6 +5422,8 @@ export interface components {
             commit_count: number;
             /** Pull Request */
             pull_request?: number | null;
+            /** Diffstat */
+            diffstat?: string | null;
         };
         /**
          * RegisterClaudePluginRequest

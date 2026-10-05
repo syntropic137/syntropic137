@@ -77,6 +77,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
     WorkflowExecutionProcessor,
     _DispatchContext,
 )
+from syn_domain.contexts.orchestration.slices.notify_quarantine.value_objects import (
+    QuarantineNotice,
+)
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
 if TYPE_CHECKING:
@@ -3524,6 +3527,19 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
     assert landed.ref == _QUARANTINE_REF
     assert landed.ref in clone.origin_refs()
     run.processor._journal.append.assert_awaited_with(run.aggregate)
+    # The diffstat is of what LANDED - the workflow-safe rescue commit, so the
+    # refused workflow files are absent - and it reaches the PR's comment.
+    assert landed.diffstat is not None
+    assert "feature.py" in landed.diffstat and "notes.md" in landed.diffstat
+    assert "4 files changed, 16 insertions(+)" in landed.diffstat
+    assert ".github/workflows" not in landed.diffstat
+    body = QuarantineNotice(
+        execution_id=_EXECUTION_ID,
+        phase_id=_PHASE_ID,
+        failed_at=datetime.now(UTC),
+        quarantined=landed,
+    ).body()
+    assert landed.diffstat in body
 
 
 def test_records_come_from_the_gate_error_or_the_save_and_never_both() -> None:

@@ -14329,6 +14329,17 @@
               }
             ],
             "title": "Pull Request"
+          },
+          "diffstat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diffstat"
           }
         },
         "additionalProperties": false,

@@ -70,6 +70,7 @@ class QuarantineNotice(BaseModel):
                 f"- Ref: `{q.ref}`",
                 f"- Commit: {commit} ({q.commit_count} unpushed commit(s))",
                 "",
+                *(["```", q.diffstat.replace("`", "'"), "```", ""] if q.diffstat else []),
                 "Nothing on this PR includes it. To review or recover it:",
                 "",
                 "```",
