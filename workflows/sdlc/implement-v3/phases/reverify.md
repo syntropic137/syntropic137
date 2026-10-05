@@ -2,9 +2,21 @@
 
 $ARGUMENTS
 
-Read `artifacts/input/fix/fix.md` first, falling back to the temporary
-compatibility alias `artifacts/input/fix.md`. It says what the previous phase
-did about the defects the first verification pass found.
+## Which round this is
+
+This prompt runs up to three times: as `reverify`, `reverify_2` and
+`reverify_3`, each straight after the fix round of the same number. Your round
+is the newest fix report present (directory form first, flat alias as the
+fallback):
+
+| This round's fix report | Your round | The verdict that fix round acted on |
+|---|---|---|
+| `artifacts/input/fix_3/fix.md` | 3 of 3 | `reverify_2/reverify.md` |
+| `artifacts/input/fix_2/fix.md` | 2 of 3 | `reverify/reverify.md` |
+| `artifacts/input/fix/fix.md` | 1 of 3 | `verify/verify.md` |
+
+Read this round's fix report first. It says what the previous phase did about
+the defects still open.
 
 Then read `artifacts/input/verify/verify.md`, again preferring the directory
 form and using the flat alias `artifacts/input/verify.md` only as a fallback.
@@ -19,7 +31,9 @@ form and using the flat alias `artifacts/input/verify.md` only as a fallback.
 
 **`verify.md`, not `fix.md`, is the authoritative enumeration of blocking
 defects.** Before you review any code, reproduce every blocking finding from
-`verify.md` as a checklist. `fix.md` supplies the claimed response to each item;
+`verify.md` as a checklist. In round 2 or 3, add every finding an earlier
+`reverify` report listed as still open or newly introduced: those reports are
+how one round's findings reach the next, so dropping one lets it go unchecked. `fix.md` supplies the claimed response to each item;
 it must not define or narrow the checklist. It was written by the agent you are
 checking, so a report that omits, merges or misstates a blocker would otherwise
 shrink your scope to whatever the fix phase chose to remember - and a partial
@@ -28,10 +42,12 @@ repair would certify.
 If either report is missing, write a BLOCKED `artifacts/output/reverify.md`
 naming which one, and stop.
 
-This is the **second and final** verification pass. There is no third. What you
-report here decides whether the run delivers a pull request or throws away
-everything it has paid for, so be decisive: say whether the branch is
-deliverable, and if it is not, say exactly why in terms the next run can act on.
+In rounds 1 and 2 a BLOCKED verdict sends the run into one more fix round,
+which works from your report alone. **Round 3 is final**: there is no fourth,
+and what you report decides whether the run delivers a pull request or leaves a
+draft with the blocker written on it. Either way be decisive: say whether the
+branch is deliverable, and if it is not, say exactly why in terms the next
+round can act on.
 
 ## Check out the candidate you will certify
 
@@ -40,8 +56,8 @@ nothing you are about to certify is on disk yet. Read the branch, the first-pass
 verified SHA and the final pushed SHA from the artifacts, and decide which SHA
 is the candidate:
 
-- If `fix.md` says no change was made, the candidate is the first-pass verified
-  SHA.
+- If `fix.md` says no change was made, the candidate is the SHA the verdict
+  that fix round acted on named (the first-pass verified SHA in round 1).
 - Otherwise the candidate is the full SHA `fix.md` says it pushed.
 
 Then run:
@@ -64,6 +80,9 @@ the resulting code. **Never certify from `fix.md` alone** - it is the claim, not
 the evidence.
 
 ## If the fix phase changed nothing, say so quickly
+
+In round 2 or 3 this is the case whenever the previous round CERTIFIED: the
+fix round made no change, so carry that certification forward on the same SHA.
 
 If `fix.md` reports that the first pass certified the change and no edit was
 made, the checkout above has already confirmed it: the remote head is still the
@@ -93,9 +112,9 @@ work is done and re-doing it is how a second pass costs as much as the first.
 
 ## Be specific about what would make it deliverable
 
-If you find a blocking defect, the run ends without a PR and the branch is left
-for a future pass. That future pass will have only your report to work from, so
-write it as an instruction rather than an observation:
+If you find a blocking defect, the next fix round - or, in round 3, whoever
+picks up the draft - has only your report to work from. So write it as an
+instruction rather than an observation:
 
 - name the file and line
 - state what is wrong in one sentence
@@ -123,21 +142,24 @@ should have caught Y".
 under `artifacts/output/` FAILS.** Write the file before you finish.
 
 1. **CERTIFIED** or **BLOCKED**, as the first line, in one word.
+   Then `Round: N of 3` on the second line. If round 3 is BLOCKED, the third
+   line is `Repair bound reached: 3 of 3 rounds used, findings still open.` -
+   the run stops here and must not read as though it ran out of anything else.
 2. **The branch and the full commit SHA you certified** - or, if BLOCKED, the
    one you checked out and refused - with the `git rev-parse origin/<branch>`
    and `git rev-parse HEAD` output that proves you checked it out. The phase
    after you opens a PR only for that exact SHA, and an abbreviated or absent
    one leaves it nothing to compare against. On a BLOCKED verdict the future
    pass that picks this up needs to know which head your findings describe.
-3. **Each blocking defect from `verify.md`** - every one, not only the ones
-   `fix.md` discusses - and whether it is now closed, with the `file:line` you
+3. **Each blocking defect from `verify.md` and earlier `reverify` reports** -
+   every one, not only the ones `fix.md` discusses - and whether it is now closed, with the `file:line` you
    checked.
 4. **Any regression** the fix introduced.
 5. **The mutation evidence** for tests the fix touched, and whether you believe
    it.
 6. If BLOCKED: **what would close it**, file and line and assertion.
 
-The phase after you opens a pull request if and only if you certify.
+A pull request is marked ready if and only if the last round run certifies.
 
 `--recurse-submodules` is required, not optional. Without it `git checkout`
 moves the superproject but leaves submodule working directories where they

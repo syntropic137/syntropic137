@@ -19,7 +19,28 @@ verification input is missing, and stop without changing or pushing anything.
 You have no findings to act on, and a fix phase that guesses at what
 verification might have said edits a certified branch at nobody's request.
 
+## Which round this is
+
+This prompt runs up to three times: as `fix`, `fix_2` and `fix_3`. Each round
+repairs what the round before it left open, so the findings you act on are the
+**latest verdict**, not necessarily the first one. Find it by taking the first
+of these that exists (directory form first, flat alias as the fallback):
+
+| Latest verdict | Your round |
+|---|---|
+| `artifacts/input/reverify_2/reverify.md` | 3 of 3 |
+| `artifacts/input/reverify/reverify.md` | 2 of 3 |
+| `artifacts/input/verify/verify.md` | 1 of 3 |
+
+In round 2 or 3, read every `verify.md` below as "the latest verdict": its
+blocking findings are your scope, and the SHA it names as the one it checked out
+is the verified SHA you check out and build on. Read the earlier reports too, so
+you do not undo a repair an earlier round made, but the latest verdict decides
+what is still open. A verdict whose first line is `CERTIFIED` has no blocking
+defect, which is the next section's case.
+
 ## If verification certified the change, stop
+
 
 Your first job is to decide whether there is any work here at all.
 
@@ -140,12 +161,14 @@ becomes remote red.
 under `artifacts/output/` FAILS.** Write the file before you finish, including
 when the answer is "nothing to do".
 
-1. **What verification found** - one line per defect.
-2. **What you changed** for each, with `file:line`, or why you did not.
-3. **The mutation** for each test you touched, and the failure it produced.
-4. **The identity the next phase checks out**: the branch, the full first-pass
+1. **`Round: N of 3`** as the first line, from the table above, and which
+   report you took as the latest verdict.
+2. **What verification found** - one line per defect.
+3. **What you changed** for each, with `file:line`, or why you did not.
+4. **The mutation** for each test you touched, and the failure it produced.
+5. **The identity the next phase checks out**: the branch, the full first-pass
    verified SHA, and the full SHA you pushed - or, if you changed nothing, say
    so explicitly and give the verified SHA as the unchanged head. Full SHAs,
    not abbreviations: the next phase compares them against `git rev-parse`.
-5. **Anything you disagreed with**, and the evidence.
-6. **One line** on any different problem you noticed and did not touch.
+6. **Anything you disagreed with**, and the evidence.
+7. **One line** on any different problem you noticed and did not touch.

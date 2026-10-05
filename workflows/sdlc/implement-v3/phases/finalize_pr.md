@@ -2,9 +2,17 @@
 
 $ARGUMENTS
 
-The final verification report is at `artifacts/input/reverify.md`. It is the
-SECOND verification pass - the first pass's findings were handed to a `fix`
-phase, and `reverify` says whether that fix closed them.
+The final verification report is the newest of the repair rounds' reports -
+the first of these that exists:
+
+1. `artifacts/input/reverify_3/reverify.md` (round 3 of 3, the last there is)
+2. `artifacts/input/reverify_2/reverify.md` (round 2 of 3)
+3. `artifacts/input/reverify/reverify.md` (round 1 of 3)
+
+Each round handed the open findings to a fix phase, and its `reverify` says
+whether that fix closed them. Only the newest verdict is current; an older
+BLOCKED that a later round certified is history. Below, `reverify.md` means
+that newest report.
 
 > **Where to find that input.** The durable location is the directory
 > `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
@@ -19,7 +27,7 @@ number and URL in its artifact. This phase decides what that draft becomes. It
 is the only phase allowed to mark it ready (#1197).
 
 Read `reverify.md`, not `verify.md`. Its first line is one word: `CERTIFIED` or
-`BLOCKED`. The first pass's findings may describe defects the `fix` phase has
+`BLOCKED`, and its second says which round it was. The first pass's findings may describe defects the `fix` phase has
 since closed; treating them as current is how a good branch gets abandoned.
 
 This workspace has no checkout at all. Work from the remote branch and the PR.
@@ -70,7 +78,9 @@ both SHAs, and stop.
 
 Keep it a **draft**. Do not close it. Post one comment (`gh pr comment <n>`)
 that names the blocking finding, quotes what `reverify.md` says would close it,
-and gives the head SHA it applies to. A draft carrying a known defect with the
+gives the head SHA it applies to, and says how many repair rounds ran (`3 of 3`
+means the bound was reached; another round is a person's decision, not this
+run's). A draft carrying a known defect with the
 blocker written on it is recoverable; a branch nobody can find is not.
 
 Do not merge. Never push, never force push, never rebase.
@@ -81,5 +91,6 @@ Do not merge. Never push, never force push, never rebase.
 nothing under `artifacts/output/` FAILS - after the work is done, and the
 work is lost with the workspace.** Write the file before you finish.
 
-First line: `READY` or `DRAFT`. Then the PR URL, the branch, the head SHA, and -
-if it stayed a draft - the blocking finding in one sentence.
+First line: `READY` or `DRAFT`. Then `Repair rounds: N of 3`, the PR URL, the
+branch, the head SHA, and - if it stayed a draft - the blocking finding in one
+sentence.
