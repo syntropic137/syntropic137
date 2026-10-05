@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         ExecutablePhase,
         FailureClassification,
         PhaseDefinition,
+        QuarantinedRef,
         ReportedFailureReason,
         SideEffectStatus,
     )
@@ -151,9 +152,12 @@ class FailExecutionCommand:
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
+        quarantined: tuple[QuarantinedRef, ...] = (),
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
+        #: The unpushed work saved to quarantine refs as the phase ended (#1547).
+        self.quarantined = quarantined
         self.error_type = error_type
         self.failed_phase_id = failed_phase_id
         self.completed_phases = completed_phases

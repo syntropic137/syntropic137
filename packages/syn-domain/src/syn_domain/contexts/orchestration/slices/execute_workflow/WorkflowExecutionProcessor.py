@@ -671,8 +671,9 @@ class WorkflowExecutionProcessor:
         # Whichever of the two saved it, the workflow changes a rescue had to
         # leave out are stored now, while the run still knows them, and
         # pointed at from the failed phase like everything else it kept (#1437).
+        records = quarantined_records(error, saved)
         for artifact_id in await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
-            quarantined_records(error, saved),
+            records,
             workflow_id=workflow_id,
             phase_id=failed_phase_id,
             execution_id=execution_id,
@@ -691,6 +692,8 @@ class WorkflowExecutionProcessor:
             kept_artifact_ids=kept,
             usage=usage,
             saved=saved,
+            quarantined=records,
+            repositories=[c.repository for c in aggregate.start_pins.source_commits],
         )
         if failure.result is not None:
             phase_results.append(failure.result)

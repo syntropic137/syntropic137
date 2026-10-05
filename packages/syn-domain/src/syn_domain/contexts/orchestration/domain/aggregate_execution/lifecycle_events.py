@@ -113,6 +113,7 @@ def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFai
         # clean exit for a phase nobody watched (#1319).
         exit_code=command.exit_code,
         failed_phase_artifact_ids=list(command.failed_phase_artifact_ids),
+        quarantined_refs=list(command.quarantined),
         # Spread into four named fields HERE, once, rather than carried as
         # a nested object: every sibling `failed_phase_*` field on this
         # event is flat, and the projection that reads them reads flat

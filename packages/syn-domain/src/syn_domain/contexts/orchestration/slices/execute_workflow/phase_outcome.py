@@ -32,6 +32,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionMetrics,
     FailureClassification,
     PhaseUsage,
+    QuarantinedRef,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_exception,
@@ -39,6 +40,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_saved_work,
     exit_code_of,
     failure_account,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_notice import (
+    quarantined_refs,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
@@ -60,6 +64,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
         ObservedBranches,
+        QuarantinedWork,
         SavedWork,
     )
 
@@ -170,6 +175,10 @@ class PhaseFailure:
     separately which ids belong to the failed phase is how they would come to
     disagree."""
 
+    quarantined: tuple[QuarantinedRef, ...] = ()
+    """The failing phase's work that landed on a quarantine ref (#1547), as
+    data rather than the paragraph `reason` already carries about it."""
+
     def as_command(
         self, execution_id: str, *, completed_phases: int, total_phases: int
     ) -> FailExecutionCommand:
@@ -197,6 +206,7 @@ class PhaseFailure:
             exit_code=self.exit_code,
             failed_phase_artifact_ids=self.artifact_ids,
             failed_phase_usage=self.usage,
+            quarantined=self.quarantined,
             classification=self.classification,
             reported_failure_reason=self.reported_failure_reason,
         )
@@ -249,6 +259,8 @@ def failed_phase_outcome(
     kept_artifact_ids: Sequence[str] = (),
     usage: PhaseUsage | None = None,
     saved: SavedWork | None = None,
+    quarantined: Sequence[QuarantinedWork] = (),
+    repositories: Sequence[str] = (),
 ) -> PhaseFailure:
     """What a failed run reports, derived from the exception that ended it.
 
@@ -313,6 +325,7 @@ def failed_phase_outcome(
         classification=account.classification,
         reported_failure_reason=account.reported_reason,
         observed_branches=observed.recorded if observed is not None else None,
+        quarantined=quarantined_refs(quarantined, observed, repositories),
         phase_id=phase_id,
         exit_code=exit_code,
         artifact_ids=kept,

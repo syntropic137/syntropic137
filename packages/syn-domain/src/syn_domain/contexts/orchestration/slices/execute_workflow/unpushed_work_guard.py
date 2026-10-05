@@ -771,7 +771,9 @@ async def _quarantine(
             ),
         )
         cancellation = cancellation or cancelled_rescuing
-    return _record(repo, work, ref=ref, pushed=pushed, rescue=rescue), cancellation
+    return _record(
+        repo, work, ref=ref, commit=commit.strip(), pushed=pushed, rescue=rescue
+    ), cancellation
 
 
 def _record(
@@ -779,6 +781,7 @@ def _record(
     work: _UnsavedWork,
     *,
     ref: str,
+    commit: str,
     pushed: ExecutionResult,
     rescue: RescueAttempt | None,
 ) -> QuarantinedWork:
@@ -790,6 +793,7 @@ def _record(
         commit_count=work.commit_count,
         files=work.files,
         pushed_ref=ref,
+        commit=commit,
     )
     if pushed.exit_code == 0:
         logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
@@ -800,7 +804,10 @@ def _record(
         # refusal is the whole story, as before.
         logger.error("Quarantine push failed for %s -> %s: %s", repo, ref, pushed.stderr)
         return replace(
-            landed, pushed_ref=None, push_error=push_failure("The quarantine push", pushed)
+            landed,
+            pushed_ref=None,
+            commit=None,
+            push_error=push_failure("The quarantine push", pushed),
         )
     if rescue.second is not None and rescue.second.exit_code == 0:
         logger.warning(
@@ -809,7 +816,7 @@ def _record(
             ref,
             UNPUSHABLE_WORKFLOW_DIR,
         )
-        return replace(landed, dropped=rescue.dropped)
+        return replace(landed, commit=None, dropped=rescue.dropped)
     if rescue.second is not None:
         then = push_failure("the workflow-safe retry", rescue.second)
     else:
@@ -818,7 +825,11 @@ def _record(
         "Both quarantine pushes failed for %s -> %s: %s; then %s", repo, ref, rescue.refusal, then
     )
     return replace(
-        landed, pushed_ref=None, push_error=f"{rescue.refusal}; then {then}", dropped=rescue.dropped
+        landed,
+        pushed_ref=None,
+        commit=None,
+        push_error=f"{rescue.refusal}; then {then}",
+        dropped=rescue.dropped,
     )
 
 
