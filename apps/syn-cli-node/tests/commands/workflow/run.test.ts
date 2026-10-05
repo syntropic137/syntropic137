@@ -867,9 +867,9 @@ describe("workflow run commands", () => {
     // which would have run a full implement workflow on nothing.
 
     it.each([
-      ["empty", ""],
-      ["whitespace-only", "  \t\n "],
-    ])("refuses an %s -t without calling the API (PC-66)", async (_label, task) => {
+      ["an empty", ""],
+      ["a whitespace-only", "  \t\n "],
+    ])("refuses %s -t without calling the API (PC-66)", async (_label, task) => {
       mockResolveThen(taskWorkflow("Your assignment: $ARGUMENTS"));
 
       await expect(
