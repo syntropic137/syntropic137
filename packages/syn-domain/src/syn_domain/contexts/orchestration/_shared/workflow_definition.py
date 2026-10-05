@@ -283,6 +283,23 @@ class AgentYamlDefinition(BaseModel):
     preserves single-provider isolation. See
     docs/superpowers/plans/2026-07-23-codex-claude-delegation.md."""
 
+    require_delegation: bool = False
+    """When true, the phase MUST delegate to the other harness: it completes
+    only once a delegate to that harness reported success, however the agent
+    itself exited (#894). ``allow_delegation`` alone is a permission and is
+    never gated. Requires ``allow_delegation: true``, which stages the auth the
+    delegate needs."""
+
+    @model_validator(mode="after")
+    def _require_delegation_needs_permission(self) -> AgentYamlDefinition:
+        if self.require_delegation and not self.allow_delegation:
+            msg = (
+                "agent.require_delegation needs agent.allow_delegation: true - a phase "
+                "cannot be required to delegate without the other harness's auth staged."
+            )
+            raise ValueError(msg)
+        return self
+
     @field_validator("provider", mode="before")
     @classmethod
     def _reject_removed_provider(cls, value: object) -> object:
@@ -578,6 +595,7 @@ class PhaseYamlDefinition(BaseModel):
         provider = self.agent.provider if self.agent else None
         agent_model = self.agent.model if self.agent else None
         allow_delegation = self.agent.allow_delegation if self.agent else False
+        require_delegation = self.agent.require_delegation if self.agent else False
         sandbox = (self.agent.sandbox if self.agent else None) or DEFAULT_PHASE_SANDBOX
         model = self.model or agent_model
 
@@ -599,6 +617,7 @@ class PhaseYamlDefinition(BaseModel):
             model=model,
             provider=provider,
             allow_delegation=allow_delegation,
+            require_delegation=require_delegation,
             sandbox=sandbox,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),
@@ -772,7 +791,7 @@ class WorkflowDefinition(BaseModel):
         because the declaration and the injection are keyed on different
         vocabularies:
 
-          - injection is keyed on PHASE IDs. `_wiring.py` substitutes
+          - injection is keyed on PHASE IDs. `_wiring_agent_command.py` substitutes
             `{{<phase-id>}}` and builds the context appendix per phase id.
           - declaration is keyed on ARTIFACT TYPES (`input_artifacts` ->
             `input_artifact_types`).
