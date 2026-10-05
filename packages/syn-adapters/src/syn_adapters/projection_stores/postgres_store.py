@@ -4,6 +4,7 @@ This implementation persists projection data to PostgreSQL,
 using per-projection tables for isolation and testability.
 """
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -42,6 +43,9 @@ class PostgresProjectionStore:
         self._initialized_tables: set[str] = set()
         # Tables whose lean column (lean_documents) is ready for list scans.
         self._lean_tables: set[str] = set()
+        # Background list-index builds (postgres_page), held so they are not
+        # collected mid-flight and can be cancelled on close.
+        self._index_builds: set[asyncio.Task[None]] = set()
 
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create the connection pool."""
@@ -74,9 +78,17 @@ class PostgresProjectionStore:
 
         if await ensure_lean_column(pool, projection, table_name):
             self._lean_tables.add(projection)
-        from syn_adapters.projection_stores.postgres_page import ensure_list_indexes
+        from syn_adapters.projection_stores.postgres_page import (
+            LIST_FILTER_INDEXES,
+            ensure_list_indexes,
+        )
 
-        await ensure_list_indexes(pool, projection, table_name)
+        if projection in LIST_FILTER_INDEXES:
+            # In the background: a CONCURRENTLY build waits out every open
+            # transaction on the table, and no request should wait with it.
+            build = asyncio.create_task(ensure_list_indexes(pool, projection, table_name))
+            self._index_builds.add(build)
+            build.add_done_callback(self._index_builds.discard)
 
     async def _ensure_state_table(self) -> None:
         """Ensure the projection_states table exists."""
@@ -339,6 +351,11 @@ class PostgresProjectionStore:
 
     async def close(self) -> None:
         """Close the connection pool."""
+        for build in list(self._index_builds):
+            # A cancelled build leaves an INVALID index; the next start rebuilds it.
+            build.cancel()
+        if self._index_builds:
+            await asyncio.gather(*self._index_builds, return_exceptions=True)
         if self._pool:
             await self._pool.close()
             self._pool = None

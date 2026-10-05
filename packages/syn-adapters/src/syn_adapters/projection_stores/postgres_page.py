@@ -356,18 +356,28 @@ LIST_FILTER_INDEXES: dict[str, tuple[str, ...]] = {
 }
 
 
-async def ensure_list_indexes(pool: asyncpg.Pool, projection: str, table_name: str) -> None:
-    """Build the list filter indexes without ever blocking a writer.
+#: How long a build may wait for the transactions CONCURRENTLY waits out. One
+#: long transaction would otherwise hold the build - and its pool connection -
+#: indefinitely; past this it fails, is logged, and the next start retries.
+_INDEX_LOCK_TIMEOUT = "5s"
 
-    CONCURRENTLY, outside any transaction. A concurrent build that died leaves
-    an INVALID index that ``IF NOT EXISTS`` would skip forever, so an invalid
-    one is dropped and rebuilt. A failure is logged and swallowed: the index
-    makes a filtered page fast; without it the page scans and answers the same.
+
+async def ensure_list_indexes(pool: asyncpg.Pool, projection: str, table_name: str) -> None:
+    """Build the list filter indexes without ever blocking a writer or a reader.
+
+    CONCURRENTLY, outside any transaction, so writers never wait for it; the
+    store runs it as a background task, so no request does either. Its own
+    waits are bounded by ``_INDEX_LOCK_TIMEOUT``. A concurrent build that died
+    (timed out, cancelled) leaves an INVALID index that ``IF NOT EXISTS`` would
+    skip forever, so an invalid one is dropped and rebuilt. A failure is logged
+    and swallowed: the index makes a filtered page fast; without it the page
+    scans and answers the same.
     """
     for field in LIST_FILTER_INDEXES.get(projection, ()):
         name = f"idx_{table_name}_list_{_field(field)}"
         try:
             async with pool.acquire() as conn:
+                await conn.execute(f"SET lock_timeout = '{_INDEX_LOCK_TIMEOUT}'")
                 valid = await conn.fetchval(
                     "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
                     "WHERE c.relname = $1 AND c.relnamespace = current_schema()::regnamespace",

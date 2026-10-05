@@ -19,6 +19,7 @@ disagree and the store must hand the row to Python instead of guessing:
 
 from __future__ import annotations
 
+import asyncio
 import random
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -252,11 +253,18 @@ async def test_an_ordinary_page_is_one_statement(pool: asyncpg.Pool) -> None:
 
 
 async def test_the_list_filters_are_indexed_and_the_planner_uses_them(pool: asyncpg.Pool) -> None:
-    from syn_adapters.projection_stores.postgres_page import LIST_FILTER_INDEXES
+    from syn_adapters.projection_stores.postgres_page import (
+        LIST_FILTER_INDEXES,
+        ensure_list_indexes,
+    )
 
     store = PostgresProjectionStore(pool)
     for projection, fields in LIST_FILTER_INDEXES.items():
         await store.save(projection, "k", {"id": "k"})
+        # The store builds them in the background; wait for that build, and
+        # check a second pass over valid indexes is a no-op.
+        await asyncio.gather(*store._index_builds)
+        await ensure_list_indexes(pool, projection, projection)
         async with pool.acquire() as conn:
             for field in fields:
                 valid = await conn.fetchval(
