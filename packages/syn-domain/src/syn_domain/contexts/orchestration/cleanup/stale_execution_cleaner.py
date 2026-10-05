@@ -233,7 +233,10 @@ class StaleExecutionCleaner:
             execution_id=execution_id,
             error=message,
             error_type=reason,
-            failed_phase_id=None,  # Unknown which phase was running
+            # The phase that was mid-flight, so the phase read models fail it
+            # too. With None the phase stays "running" under a "failed"
+            # execution with no reason on it - reconciliation's #1036, here.
+            failed_phase_id=aggregate.running_phase_id,
             completed_phases=completed_phases,
             total_phases=total_phases,
             # A run swept up for exceeding its wall-clock threshold: budget is

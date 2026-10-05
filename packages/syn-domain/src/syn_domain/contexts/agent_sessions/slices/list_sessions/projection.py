@@ -24,9 +24,9 @@ from syn_domain.pagination import (
     Page,
     ProjectionRecord,
     matches_search,
-    paginate,
     within_window,
 )
+from syn_domain.projection_scan import paginate_projection
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +156,13 @@ def _update_subagent_record(
             subagent["tools_used"] = event_data.get("tools_used", {})
             subagent["success"] = event_data.get("success", True)
             break
+
+
+#: Every field ``page``'s predicates read - the filters, the facet, the window
+#: and the search. ``paginate_projection`` scans only these for the whole
+#: collection and reads whole documents for the page alone (E2). A predicate
+#: that reads a field missing here raises rather than matching on None.
+_PAGE_FIELDS = ("id", "workflow_id", "status", "started_at")
 
 
 class SessionListProjection(AutoDispatchProjection):
@@ -414,8 +421,13 @@ class SessionListProjection(AutoDispatchProjection):
         def base(record: ProjectionRecord) -> bool:
             return matches_search(search, record.get("id"), record.get("workflow_id"))
 
-        return paginate(
-            await self._store.query(
+        return await paginate_projection(
+            self._store,
+            self.PROJECTION_NAME,
+            fields=_PAGE_FIELDS,
+            filters=filters or None,
+            order_by="-started_at",
+            full_read=lambda: self._store.query(
                 self.PROJECTION_NAME,
                 filters=filters if filters else None,
                 order_by="-started_at",
@@ -428,7 +440,7 @@ class SessionListProjection(AutoDispatchProjection):
             timestamp_of=lambda r: r.get("started_at"),
             after=started_after,
             before=started_before,
-            to_row=SessionSummary.from_dict,
+            to_row=lambda record: SessionSummary.from_dict(dict(record)),
             offset=offset,
             limit=limit,
         )

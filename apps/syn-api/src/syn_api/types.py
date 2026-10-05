@@ -82,9 +82,11 @@ from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRe
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    DelegationFailure,
     EvalId,
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
     TagSet,
 )
@@ -94,6 +96,7 @@ from syn_domain.contexts.orchestration import (
 # guard on AliasResolutionBasis both unused and misleading.
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
+from syn_shared.display import format_utc_timestamp
 from syn_shared.observed_model import format_observed_model
 
 # ---------------------------------------------------------------------------
@@ -219,12 +222,26 @@ class GitHubRepoResponse(BaseModel):
     installation_id: str
 
 
+class GitHubRepoLookup(StrEnum):
+    """How much of the GitHub App's access a repo listing actually covers.
+
+    Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+    ``partial`` listing still proves access for every repo it contains; an
+    ``unavailable`` one proves nothing.
+    """
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+
+
 class GitHubRepoListResponse(BaseModel):
     """List of repositories accessible to the GitHub App."""
 
     repos: list[GitHubRepoResponse] = Field(default_factory=list)
     total: int = 0
     installation_id: str | None = None
+    lookup: GitHubRepoLookup
 
 
 class ObservabilityError(StrEnum):
@@ -528,6 +545,9 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
+    # The obligation beside the permission (#894): a phase declaring it fails
+    # unless its delegate succeeded.
+    require_delegation: bool = False
     clone_repos: bool = True
     delivers_repo_changes: bool = True
     sandbox: str = DEFAULT_PHASE_SANDBOX
@@ -693,6 +713,13 @@ class ExecutionDetail(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -720,6 +747,9 @@ class ExecutionDetail(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -1353,6 +1383,13 @@ class PhaseExecution(BaseModel):
     """What this phase's agent said happened to its external writes, ``None``
     when it said nothing. A report, never a measurement, and it never decides
     whether the phase completed."""
+    failure_classification: FailureClassification | None = None
+    """Why this phase failed - ``platform``, ``task``, ``correct_refusal`` or
+    ``unclassified`` - and ``None`` exactly when it did not fail. The same fact
+    as the execution's ``failure_classification``, at the phase it failed in."""
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What this phase's agent SAID caused its failure, ``None`` when it said
+    nothing. A report beside the classification, never a replacement for it."""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -1501,6 +1538,13 @@ class ExecutionDetailFull(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -1528,6 +1572,9 @@ class ExecutionDetailFull(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -1972,8 +2019,8 @@ class BuildInfo(_NamesTheRunningRelease):
     twenty releases behind the installed package.
 
     The release and its status come from ``_NamesTheRunningRelease``. What this
-    model adds is the two build-time stamps, which only an image can supply and
-    only ``/health`` reports.
+    model adds is the two build-time stamps, which only an image can supply,
+    and when this process went live, which only the process can.
     """
 
     image_tag: str | None = Field(
@@ -1987,6 +2034,20 @@ class BuildInfo(_NamesTheRunningRelease):
         description="Git commit the image was built from, stamped at image build time. "
         "Null when the build did not stamp one.",
     )
+    started_at: datetime = Field(
+        description="When this API process started (UTC, ISO 8601): the moment the "
+        "running deployment went live. Captured once per process, so it changes only "
+        "when the process is replaced, which is what a redeploy does.",
+    )
+
+    @computed_field(
+        description="started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. "
+        "Relative and local-time renderings are the client's to make from started_at.",
+    )
+    @property
+    def started_at_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``started_at``."""
+        return format_utc_timestamp(self.started_at)
 
 
 class RootResponse(_NamesTheRunningRelease):
@@ -2136,7 +2197,12 @@ class HealthResponse(_OmitsAbsentFields):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    status: str = Field(description="'healthy' while the process is alive and accepting writes.")
+    status: str = Field(
+        description="'healthy' while the process is alive and accepting writes; 'starting' "
+        "while it is alive but startup (a long migration, say) has not finished, when every "
+        "route but /health and /version answers 503; 'failed' when startup failed after serving "
+        "began and the process is exiting; 'unhealthy' when the probe failed.",
+    )
     mode: str = Field(description="'full', or 'degraded' when some subsystem is impaired.")
     build: BuildInfo = Field(description="Which build is answering (#1380).")
     degraded_reasons: list[DegradedReason] | None = Field(

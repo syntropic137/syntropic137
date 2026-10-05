@@ -103,7 +103,7 @@ This provides protection against novel failure modes we haven't anticipated — 
 
 ### 5. InMemoryAdapter base class (production guard)
 
-All in-memory adapters that must NOT run in production inherit from a single base class: `InMemoryAdapter` in `packages/syn-adapters/src/syn_adapters/in_memory.py`.
+All in-memory adapters that must NOT run in production inherit from a single base class: `InMemoryAdapter` in `packages/syn-shared/src/syn_shared/in_memory.py`.
 
 **The problem:** Before this change, the environment check was copy-pasted 7 times across 7 files, with 3 different strategies:
 
@@ -131,7 +131,9 @@ class InMemoryAdapter:
 - `_create_dedup_adapter()` and `get_pending_sha_store()` raise `RuntimeError` instead of falling back to in-memory -- belt-and-suspenders with the base class guard
 - A standalone `assert_test_only()` function is exported for dataclasses (`InMemoryEventStore`, `InMemoryProjectionStore`) that use `__post_init__`
 
-**Location:** `packages/syn-adapters/src/syn_adapters/in_memory.py`
+**Location:** `packages/syn-shared/src/syn_shared/in_memory.py` (re-exported from `syn_adapters.in_memory`), so packages that cannot depend on syn-adapters can use it too.
+
+**Enforced, not remembered:** `ci/fitness/code_quality/test_in_memory_adapters_are_guarded.py` fails the build when a production class it identifies as an in-memory adapter or double can be constructed without running `assert_test_only()`. It identifies them by name (`InMemory*`, `Memory*`, `Fake*`, `Stub*`) or by naming a port as a base inside a `memory`/`fake` module. Limits: test files (`test_*.py`, `conftest.py`) are not scanned, a port implemented structurally without naming it as a base is invisible to it, and listed exceptions bypass it. Those cases still follow the rule by review.
 
 ### 6. Cold-Start Fence (HistoricalPoller)
 

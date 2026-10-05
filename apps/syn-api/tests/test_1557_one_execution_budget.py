@@ -48,7 +48,10 @@ from syn_api.execution_budget import ExecutionBudget, StartPath
 from syn_api.routes.executions import commands, queries
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
 from syn_domain.contexts._shared import AdmissionGate
-from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration import EvalId, ExecuteWorkflowCommand, LaunchEval
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, EvalSelection
+from syn_domain.contexts.orchestration._shared.repository_baseline import RepositoryBaseline
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
@@ -64,8 +67,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionRequestAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
+    ExecutionRequestAggregate as _Request,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
+    ExecutionRequestedEvent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
@@ -205,6 +214,39 @@ class _Requests:
         return await self._repo.get_by_id(aggregate_id)
 
 
+_SHA_A = "a1" * 20
+_SHA_B = "b2" * 20
+
+
+class _DefaultEval:
+    """The workflow's default eval and the SHA it froze, as admission reads it NOW.
+
+    None until a test sets one, so every other start here is an ordinary run.
+    Admission is the double; the eval it answers rides the real request,
+    dispatcher and handler to the execution's start event.
+    """
+
+    def __init__(self) -> None:
+        self.eval_id: str | None = None
+        self.sha = _SHA_A
+        self.asked: list[EvalChoice] = []
+
+    def resolve(self, choice: EvalChoice) -> LaunchEval:
+        self.asked.append(choice)
+        launch = choice.resolve(self.eval_id)
+        if launch.eval_id is None:
+            return launch
+        return launch.admitted(
+            (
+                RepositoryBaseline(
+                    repository=RepositoryRef.from_slug("acme/widgets"),
+                    requested_ref="main",
+                    commit_sha=self.sha,
+                ),
+            )
+        )
+
+
 class _Templates:
     def __init__(self, template: WorkflowTemplateAggregate) -> None:
         self._template = template
@@ -330,6 +372,7 @@ class _World:
         self._direct: list[asyncio.Task[None]] = []
         self._delivered = 0
         self._checkpoints = MemoryCheckpointStore()
+        self.default_eval = _DefaultEval()
         self._start_process()
 
         monkeypatch.setattr(wiring, "get_projection_mgr", lambda: self.projections)
@@ -346,11 +389,13 @@ class _World:
 
         monkeypatch.setattr(commands, "_validate_execution_request", _validated)
 
-        async def _no_eval(workflow: object, request: ExecuteWorkflowRequest) -> EvalChoice:
-            del workflow, request
-            return EvalChoice()
+        async def _launch_eval(workflow: object, request: ExecuteWorkflowRequest) -> LaunchEval:
+            del workflow
+            return self.default_eval.resolve(
+                EvalChoice(eval_id=request.eval_id, ordinary=request.no_eval)
+            )
 
-        monkeypatch.setattr(commands, "_check_eval_choice", _no_eval)
+        monkeypatch.setattr(commands, "_launch_eval", _launch_eval)
 
     def _start_process(self) -> None:
         self.budget = ExecutionBudget(LIMIT)
@@ -367,6 +412,7 @@ class _World:
             maintenance=self.gate,
             resume_handler=StartResumeHandler(processor, self.executions),  # type: ignore[arg-type]
             requests=self.requests,  # type: ignore[arg-type]
+            launch_eval_for_workflow=self._launch_eval_for_workflow,
         )
         self.manager = ResumeStartProcessManager(
             resume_starter=self.dispatcher,
@@ -408,6 +454,21 @@ class _World:
         self._direct = []
         self._start_process()
         self._delivered = 0
+
+    async def _launch_eval_for_workflow(self, workflow_id: str, choice: EvalChoice) -> LaunchEval:
+        del workflow_id
+        return self.default_eval.resolve(choice)
+
+    def started_eval(self, execution_id: str) -> tuple[str | None, list[str]]:
+        """The eval and baseline SHAs the execution's start event recorded."""
+        (started,) = [
+            e.event
+            for e in self.log.envelopes
+            if e.metadata.event_type == "WorkflowExecutionStarted"
+            and e.metadata.aggregate_id == execution_id
+        ]
+        pins = getattr(started, "eval_baseline", None) or []
+        return getattr(started, "eval_id", None), [pin.commit_sha for pin in pins]
 
     async def _handler(self) -> ExecuteWorkflowHandler:
         return self.handler
@@ -753,6 +814,100 @@ class TestADirectStartSurvivesARestart:
         assert await world.coordinate() == (0, 0)
         assert world.agent.entered.count(requested) == 1
         assert world.executions.streams[requested].status.value == "completed"
+
+
+class TestARecoveredStartKeepsTheEvalItWasAcceptedInto:
+    """#967 on #1557's path: the eval is resolved once, when the start is accepted.
+
+    The plan forbids re-resolving it, so a start that waited for a slot, then
+    lost its process, must still join the eval and SHAs in force at its 200 -
+    not whatever the workflow's default became while it was queued.
+    """
+
+    async def test_a_request_recovered_after_a_restart_starts_with_its_original_eval(
+        self, world: _World
+    ) -> None:
+        world.default_eval.eval_id = "eval-a"
+        running = [await world.post_execute(), await world.post_execute()]
+        queued = await world.post_execute()
+        await world.agent.until(lambda: len(world.agent.inside) == LIMIT)
+        assert queued not in world.agent.inside
+
+        await world.restart()
+        # While nothing held it, the workflow's default moved to another eval.
+        world.default_eval.eval_id, world.default_eval.sha = "eval-b", _SHA_B
+        asked_before = len(world.default_eval.asked)
+
+        assert await world.coordinate() == (0, 1)
+        await world.agent.until(lambda: queued in world.agent.inside)
+        await _release_everything(world)
+
+        assert world.started_eval(queued) == ("eval-a", [_SHA_A])
+        for execution_id in running:
+            assert world.started_eval(execution_id) == ("eval-a", [_SHA_A])
+        assert len(world.default_eval.asked) == asked_before, "a recovered start re-resolved"
+
+    async def test_an_old_shape_request_replays_and_resolves_its_choice_once(
+        self, world: _World
+    ) -> None:
+        """Recorded before requests carried their resolved eval: it still starts.
+
+        Such a request holds only the launch's choice, so it is the one case
+        that resolves at start - with the choice it recorded, not a blank one.
+        """
+        legacy = ExecutionRequestedEvent.model_validate(
+            {
+                "execution_id": "exec-legacy0001",
+                "workflow_id": WORKFLOW_ID,
+                "inputs": {},
+                "repos": [],
+                "tags": [],
+                "eval_id": "eval-named",
+                "eval_ordinary": False,
+                "requested_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        replayed = _Request()
+        replayed._initialize("exec-legacy0001")  # pyright: ignore[reportPrivateUsage]
+        replayed.on_execution_requested(legacy)
+        assert replayed.launch_eval is None
+        assert replayed.eval_choice == EvalChoice(eval_id=EvalId("eval-named"))
+
+        handled: list[ExecuteWorkflowCommand] = []
+
+        class _Recording:
+            async def validate_stored_declarations(self, _workflow_id: str) -> None:
+                return None
+
+            async def handle(self, command: ExecuteWorkflowCommand, *, admitted: object) -> None:
+                del admitted
+                handled.append(command)
+
+        class _Legacy:
+            async def get_by_id(self, _aggregate_id: str) -> _Request | None:
+                return replayed
+
+        dispatcher = BackgroundWorkflowDispatcher(
+            _Recording(),  # type: ignore[arg-type]
+            budget=world.budget,
+            requests=_Legacy(),  # type: ignore[arg-type]
+            launch_eval_for_workflow=world._launch_eval_for_workflow,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        async def _unexpected(exc: Exception) -> None:
+            raise AssertionError(exc)
+
+        await dispatcher.start_requested("exec-legacy0001", on_failure=_unexpected)
+        async with asyncio.timeout(_WITHIN):
+            while dispatcher._tasks:  # pyright: ignore[reportPrivateUsage]
+                await asyncio.gather(*dispatcher._tasks)  # pyright: ignore[reportPrivateUsage]
+                await asyncio.sleep(0)
+
+        (command,) = handled
+        assert command.launch_eval is not None
+        assert str(command.launch_eval.eval_id) == "eval-named"
+        assert command.launch_eval.selection is EvalSelection.EXPLICIT
+        assert world.default_eval.asked == [EvalChoice(eval_id=EvalId("eval-named"))]
 
 
 class TestTheProcessManagerAndTheRouteRaceForOneRequest:

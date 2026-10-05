@@ -211,7 +211,7 @@ class TestYamlWithInputs:
 class TestArgumentsSubstitution:
     """Tests for $ARGUMENTS substitution logic.
 
-    The actual substitution happens in _build_workspace_prompt in _wiring.py.
+    The actual substitution happens in _build_workspace_prompt in _wiring_agent_command.py.
     These tests verify the logic in isolation.
     """
 

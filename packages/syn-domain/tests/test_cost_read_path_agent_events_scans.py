@@ -34,6 +34,12 @@ The four cost paths live here; the fifth is the ``/executions`` route itself,
 covered by ``apps/syn-api/tests/test_executions_list_reads_the_tool_call_tally.py``
 where it lives.
 
+E2 added a second kind of statement: the span lookup on
+``agent_event_day_rollup`` (``syn_domain.agent_event_span``) that bounds each
+id-keyed scan to the days its telemetry is on. It is not an ``agent_events``
+scan, so it is inventoried on its own in ``_EXPECTED_SPAN_LOOKUPS``, and every
+statement a path issues must be one of the kinds counted here.
+
 The assertion is deliberately about the EVENT TYPE, not the SQL text:
 filtering ``agent_events`` on ``tool_execution_completed`` is the only way to
 derive the tool count from raw events, so a read path that never mentions it -
@@ -50,7 +56,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
-from syn_domain import tool_call_counts
+from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
     SessionCostQueryService,
 )
@@ -173,6 +179,49 @@ _EXPECTED_SCANS: dict[_Case, frozenset[str]] = {
 }
 
 
+#: The span lookups (``agent_event_span``) each read path makes, in order, by
+#: which id they key on. NOT ``agent_events`` scans - they read
+#: ``agent_event_day_rollup`` - and inventoried separately so they are
+#: accounted for rather than invisible: each is a round trip the E2 time bound
+#: costs, and a path that stops making one has stopped bounding its reads.
+#:
+#: The /executions page's summarised arm makes two: one for its own reads and
+#: one inside the per-phase cost query it delegates to. The executions list
+#: makes one, for that same per-phase query, and only on the arm that reaches
+#: it; its other reads are not keyed on an id and are not bounded.
+_SESSION_SPAN = "session"
+_EXECUTION_SPAN = "execution"
+_EXPECTED_SPAN_LOOKUPS: dict[_Case, tuple[str, ...]] = {
+    _case("GET /costs/sessions (list)", _Branch.SUMMARISED): (),
+    _case("GET /costs/sessions (list)", _Branch.IN_PROGRESS): (),
+    _case("GET /costs/sessions/{id} (detail, via the batch path)", _Branch.SUMMARISED): (
+        _SESSION_SPAN,
+    ),
+    _case("GET /costs/sessions/{id} (detail, via the batch path)", _Branch.IN_PROGRESS): (
+        _SESSION_SPAN,
+    ),
+    _case("GET /costs/executions (list)", _Branch.SUMMARISED): (_EXECUTION_SPAN,),
+    _case("GET /costs/executions (list)", _Branch.IN_PROGRESS): (),
+    _case("GET /executions (one page, by id)", _Branch.SUMMARISED): (
+        _EXECUTION_SPAN,
+        _EXECUTION_SPAN,
+    ),
+    _case("GET /executions (one page, by id)", _Branch.IN_PROGRESS): (_EXECUTION_SPAN,),
+    _case("GET /costs/executions/{id} (detail)", _Branch.SUMMARISED): (_EXECUTION_SPAN,),
+    _case("GET /costs/executions/{id} (detail)", _Branch.IN_PROGRESS): (_EXECUTION_SPAN,),
+}
+
+#: The span every bounded read must bind: the one day ``_cell`` says the rollup holds.
+_SPAN = agent_event_span.EventSpan.of_days(_WHEN.date(), _WHEN.date())
+
+#: The two statements ``agent_event_span.custom_plans`` issues, in this order,
+#: at the top of its transaction; neither reads anything. The first makes the
+#: span lookup and the reads it bounds share one snapshot, and is only
+#: effective as the transaction's first statement.
+_SNAPSHOT_SETTING = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+_PLAN_SETTING = "SET LOCAL plan_cache_mode"
+
+
 def _cell(key: str) -> object:
     """A plausible value for any column any of these queries selects.
 
@@ -196,6 +245,10 @@ def _cell(key: str) -> object:
         return Decimal("1.25")
     if key.endswith(("_at", "_observation", "_time")):
         return _WHEN
+    if key in {"first_day", "last_day"}:
+        # The span lookup's answer: a real day, so the bounded reads are
+        # driven with a real span rather than the unbounded fallback.
+        return _WHEN.date()
     return 1
 
 
@@ -220,10 +273,15 @@ class _RecordingConnection:
         self.branch = branch
         self.statements: list[str] = []
         self.args: list[tuple[object, ...]] = []
+        #: Per statement, the index of the first statement of the transaction
+        #: it ran in, or None outside one.
+        self.transaction_starts: list[int | None] = []
+        self.open_transaction_at: int | None = None
 
     def _record(self, query: str, args: tuple[object, ...]) -> None:
         self.statements.append(query)
         self.args.append(args)
+        self.transaction_starts.append(self.open_transaction_at)
 
     def _has_rows(self, args: tuple[object, ...]) -> bool:
         return self.branch is _Branch.SUMMARISED or SESSION_SUMMARY not in args
@@ -231,6 +289,10 @@ class _RecordingConnection:
     async def execute(self, query: str, *args: object) -> str:
         self._record(query, args)
         return "OK"
+
+    def transaction(self) -> _Transaction:
+        """What ``agent_event_span.custom_plans`` opens around a bounded read."""
+        return _Transaction(self)
 
     async def fetch(self, query: str, *args: object) -> list[_AnyRow]:
         self._record(query, args)
@@ -272,6 +334,84 @@ class _RecordingConnection:
     @property
     def tally_reads(self) -> list[str]:
         return [s for s in self.statements if tool_call_counts.TABLE in s]
+
+    @property
+    def span_lookups(self) -> tuple[str, ...]:
+        """Each ``agent_event_day_rollup`` lookup, in order, by the id it keys on."""
+        return tuple(
+            _SESSION_SPAN if "session_id = ANY" in s else _EXECUTION_SPAN
+            for s in self.statements
+            if "agent_event_day_rollup" in s
+        )
+
+    def unaccounted(self) -> list[str]:
+        """Statements that are none of: a scan, a tally read, a span lookup, a plan setting."""
+        return [
+            s
+            for s in self.statements
+            if "agent_events" not in s
+            and tool_call_counts.TABLE not in s
+            and "agent_event_day_rollup" not in s
+            and _PLAN_SETTING not in s
+            and _SNAPSHOT_SETTING not in s
+        ]
+
+    def bounded_statements_outside_one_snapshot(self) -> list[str]:
+        """Span lookups and the reads they bound, not run under custom_plans.
+
+        Each must run in a transaction whose first statement set the read-only
+        snapshot and whose second set the plan mode: otherwise the span and the
+        read can see different data, or the read is planned without its bounds.
+        """
+        wrong: list[str] = []
+        seen_span = False
+        for i, statement in enumerate(self.statements):
+            if "agent_event_day_rollup" in statement:
+                seen_span = True
+            elif not (seen_span and "agent_events" in statement):
+                continue
+            start = self.transaction_starts[i]
+            if (
+                start is None
+                or _SNAPSHOT_SETTING not in self.statements[start]
+                or _PLAN_SETTING not in self.statements[start + 1]
+            ):
+                wrong.append(statement)
+        return wrong
+
+    def unbounded_scans_after_a_span(self) -> list[str]:
+        """``agent_events`` statements issued once a span is known, that do not bind it."""
+        unbounded: list[str] = []
+        seen_span = False
+        for statement, args in zip(self.statements, self.args, strict=True):
+            if "agent_event_day_rollup" in statement:
+                seen_span = True
+            elif (
+                seen_span
+                and "agent_events" in statement
+                and args[-2:]
+                != (
+                    _SPAN.lower,
+                    _SPAN.upper,
+                )
+            ):
+                unbounded.append(statement)
+        return unbounded
+
+
+class _Transaction:
+    """Marks which statements ran inside it, and where it began."""
+
+    def __init__(self, conn: _RecordingConnection) -> None:
+        self._conn = conn
+
+    async def __aenter__(self) -> None:
+        assert self._conn.open_transaction_at is None, "custom_plans must be outermost"
+        self._conn.open_transaction_at = len(self._conn.statements)
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        self._conn.open_transaction_at = None
+        return False
 
 
 class _Acquire:
@@ -345,6 +485,7 @@ def _id(value: object) -> str:
 def test_the_inventory_covers_every_read_path_in_both_branches() -> None:
     """A case missing from ``_EXPECTED_SCANS`` is an unmeasured case."""
     assert set(_EXPECTED_SCANS) == {case for case, _read in _cases()}
+    assert set(_EXPECTED_SPAN_LOOKUPS) == {case for case, _read in _cases()}
 
 
 def test_no_read_path_is_permitted_to_count_tool_events() -> None:
@@ -430,3 +571,47 @@ async def test_the_tallys_number_reaches_the_read_model(
     result = await read(_Pool(conn))
 
     assert _tool_calls_of(result) == [_TOOL_CALLS], f"{case} lost the count"
+
+
+@pytest.mark.parametrize(("case", "read"), _cases(), ids=_id)
+async def test_every_statement_a_read_path_issues_is_accounted_for(
+    case: _Case,
+    read: Callable[[_Pool], Awaitable[object]],
+) -> None:
+    """Nothing is issued that the inventories above do not classify.
+
+    ``agent_events_scans`` only looks at statements naming ``agent_events``,
+    so a read of some other table would pass it unseen. Every statement must
+    be a scan, a tally read, a span lookup or the plan setting around them.
+    """
+    conn = _RecordingConnection(case.branch)
+
+    await read(_Pool(conn))
+
+    assert conn.unaccounted() == [], f"{case} issued statements nothing inventories"
+
+
+@pytest.mark.parametrize(("case", "read"), _cases(), ids=_id)
+async def test_each_read_path_looks_up_exactly_the_inventoried_spans(
+    case: _Case,
+    read: Callable[[_Pool], Awaitable[object]],
+) -> None:
+    """The E2 span lookups, against their own inventory, and the bound they produce.
+
+    Equality, as for the scans: a path that stops looking up its span has
+    stopped bounding its reads, and one that grows a lookup has grown a round
+    trip. Every ``agent_events`` read issued after a lookup must bind the span
+    it returned as its last two parameters, which is the only reason to make
+    the lookup at all.
+    """
+    conn = _RecordingConnection(case.branch)
+
+    await read(_Pool(conn))
+
+    assert conn.span_lookups == _EXPECTED_SPAN_LOOKUPS[case], (
+        f"{case} looked up spans {conn.span_lookups}, inventoried as {_EXPECTED_SPAN_LOOKUPS[case]}"
+    )
+    assert conn.unbounded_scans_after_a_span() == [], f"{case} ignored the span it looked up"
+    assert conn.bounded_statements_outside_one_snapshot() == [], (
+        f"{case} looked up a span or read by it outside one read-only snapshot"
+    )

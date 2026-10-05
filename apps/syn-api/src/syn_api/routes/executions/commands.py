@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from event_sourcing import ConcurrencyConflictError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,13 +46,15 @@ from syn_domain.contexts.orchestration import (
     EvalChoice,
     EvalId,
     EvalUnavailableError,
+    LaunchEval,
+    RepositoryOutsideBaselineError,
     RequestExecutionCommand,
     SkillError,
     SkillRef,
     TagSet,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
-    open_eval,
+    launch_eval_for,
     validate_phase_declarations,
 )
 from syn_shared.agents import (
@@ -350,7 +353,7 @@ async def execute(
     repos: list[RepositoryRef] | None = None,
     admitted: AdmissionTicket | None = None,
     tags: TagSet | None = None,
-    eval_choice: EvalChoice | None = None,
+    launch_eval: LaunchEval | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -362,8 +365,9 @@ async def execute(
         tenant_id: Optional tenant ID for multi-tenant deployments.
         repos: Typed repository refs (ADR-063 anti-corruption layer).
         tags: Tags for this run, united with the workflow's at launch (#967).
-        eval_choice: The eval this run joins, or an ordinary run. Omitted, the
-            run joins the workflow's default eval, if any (#967).
+        launch_eval: The eval this run joins and the baseline it checks out,
+            already resolved and admitted (`launch_eval_for`, #967). Omitted,
+            the run is ordinary, and is refused if its workflow has a default.
         admitted: The ticket the admission gate issued for this execution
             (#1387). Omitting it is not a way to skip the gate - the handler
             checks the flag itself when no ticket arrives. It is how a caller
@@ -399,7 +403,7 @@ async def execute(
             execution_id=execution_id,
             task=task,
             tags=tags or TagSet(),
-            eval_choice=eval_choice or EvalChoice(),
+            launch_eval=launch_eval,
         )
         result = await handler.handle(cmd, admitted=admitted)
     except WorkflowNotFoundError:
@@ -648,26 +652,30 @@ async def _admit_or_409() -> AsyncIterator[AdmissionTicket]:
         raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
 
 
-async def _check_eval_choice(
+async def _launch_eval(
     workflow: WorkflowTemplateAggregate, request: ExecuteWorkflowRequest
-) -> EvalChoice:
-    """The launch's eval choice, refused here if the eval it resolves to cannot take runs.
+) -> LaunchEval:
+    """The eval this launch joins, resolved and admitted ONCE, here, before dispatch.
 
-    The handler admits the run again in the background task; this is what makes
-    a missing (404) or archived (409) eval an answer to the request rather than
-    a 200 followed by an execution that never starts (#967).
+    The answer rides on the command, so the background task never re-resolves
+    it against a workflow default that may have changed since (#967), and a
+    missing (404) or archived (409) eval is an answer to the request rather
+    than a 200 followed by an execution that never starts.
     """
     if request.no_eval and request.eval_id is not None:
         raise HTTPException(status_code=422, detail="Pass either eval_id or no_eval, not both")
     choice = EvalChoice(eval_id=request.eval_id, ordinary=request.no_eval)
-    eval_id = choice.resolve(workflow.default_eval_id).eval_id
-    if eval_id is not None:
-        try:
-            await open_eval(get_eval_repo(), eval_id)
-        except EvalUnavailableError as exc:
-            status = 404 if exc.missing else 409
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
-    return choice
+    try:
+        return await launch_eval_for(get_eval_repo(), choice, workflow.default_eval_id)
+    except EvalUnavailableError as exc:
+        status = 404 if exc.missing else 409
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except ConcurrencyConflictError as exc:
+        # Lost the freeze to a baseline edit: the eval is not frozen at what
+        # this request read, so it starts nothing and the caller may retry.
+        raise HTTPException(
+            status_code=409, detail="The eval's baseline changed during this launch; retry"
+        ) from exc
 
 
 async def _validate_execution_request(
@@ -762,7 +770,13 @@ async def execute_workflow_endpoint(
     workflow, effective_inputs, typed_repos = await _validate_execution_request(
         workflow_id, request
     )
-    eval_choice = await _check_eval_choice(workflow, request)
+    launch_eval = await _launch_eval(workflow, request)
+    try:
+        # The handler refuses this too; here it is a 422 rather than a 200
+        # followed by an execution that never starts.
+        launch_eval.refuse_unpinned(typed_repos)
+    except RepositoryOutsideBaselineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     # Bound by the `async with` below, and closed over like every other value
@@ -780,7 +794,7 @@ async def execute_workflow_endpoint(
             repos=typed_repos,
             admitted=admitted,
             tags=request.tags,
-            eval_choice=eval_choice,
+            launch_eval=launch_eval,
         )
         if isinstance(result, Err):
             logger.error(
@@ -809,7 +823,7 @@ async def execute_workflow_endpoint(
                 task=request.task,
                 repos=typed_repos,
                 tags=request.tags,
-                eval_choice=eval_choice,
+                launch_eval=launch_eval,
             ),
             admitted,
         )

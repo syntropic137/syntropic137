@@ -30,6 +30,7 @@ from syn_domain.contexts.orchestration import (
     TokenAccumulator,
 )
 from syn_shared.agents import AgentRunner
+from syn_shared.in_memory import assert_test_only
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -84,6 +85,7 @@ class FakeAgentExecutionHandler:
         uses_tools: Sequence[str] = (),
         attempts: Sequence[FakeAgentExecutionHandler] = (),
     ) -> None:
+        assert_test_only()
         self._interrupt = interrupt
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
@@ -231,6 +233,7 @@ class FakeAgentExecutionHandler:
             # the real handler does, so processor tests see what production
             # records about the phase's write-backs.
             reported_side_effects=stream_result.verdict.reported_side_effects,
+            reported_review_verdict=stream_result.verdict.reported_review_verdict,
         )
         return AgentExecutionResult(
             stream_result=stream_result,

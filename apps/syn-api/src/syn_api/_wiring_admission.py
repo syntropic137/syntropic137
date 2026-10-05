@@ -33,9 +33,11 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.orchestration import (
+        EvalChoice,
         ExecuteWorkflowCommand,
         ExecuteWorkflowHandler,
         ExecutionRequestAggregate,
+        LaunchEval,
     )
     from syn_domain.contexts.orchestration.slices.start_resume import (
         ResumeChild,
@@ -178,6 +180,8 @@ def get_execution_budget() -> ExecutionBudget:
 #: Builds a :class:`StartResumeHandler` on demand. See the constructor for why
 #: this is not simply the handler.
 ResumeHandlerFactory = Callable[[], Awaitable["StartResumeHandler"]]
+#: The eval a launch of this workflow joins, given what it asked for, admitted (#967).
+LaunchEvalResolver = Callable[[str, "EvalChoice"], Awaitable["LaunchEval"]]
 
 
 class ExecutionRequests(Protocol):
@@ -203,6 +207,7 @@ class BackgroundWorkflowDispatcher:
         resume_handler: StartResumeHandler | ResumeHandlerFactory | None = None,
         budget: ExecutionBudget | None = None,
         requests: ExecutionRequests | None = None,
+        launch_eval_for_workflow: LaunchEvalResolver | None = None,
     ) -> None:
         """``budget`` is the ONE execution budget every start path shares (#1557).
 
@@ -217,6 +222,11 @@ class BackgroundWorkflowDispatcher:
         out come apart, so it needs the thing that can hold them together.
         """
         self._handler = handler
+        # #967: a trigger names no eval, so its run joins the workflow's
+        # default. Resolved once per trigger, when it is accepted and before it
+        # queues, so neither the queue nor the handler re-resolves it. None:
+        # every run is ordinary.
+        self._launch_eval_for_workflow = launch_eval_for_workflow
         self._tasks: set[asyncio.Task[None]] = set()
         self._budget = budget if budget is not None else ExecutionBudget(max_concurrent)
         self._maintenance = maintenance
@@ -425,7 +435,7 @@ class BackgroundWorkflowDispatcher:
             execution_id=execution_id,
             task=request.task,
             tags=request.tags,
-            eval_choice=request.eval_choice,
+            launch_eval=await self._requested_launch_eval(request),
         )
         if self._maintenance is not None:
             await self._maintenance.refuse_early()
@@ -436,6 +446,20 @@ class BackgroundWorkflowDispatcher:
         async with self._maintenance.admitting() as ticket:
             self._spawn_requested(command, ticket, on_failure)
             return ticket
+
+    async def _requested_launch_eval(self, request: ExecutionRequestAggregate) -> LaunchEval | None:
+        """The eval the request was accepted into, carried unchanged (#967).
+
+        Resolved at acceptance and recorded on the request, so a start that
+        waited for a slot, or is recovered after a restart, joins that eval at
+        those SHAs even if the workflow's default changed since. Only a request
+        recorded before it carried that answer resolves its choice here, once.
+        """
+        if request.launch_eval is not None:
+            return request.launch_eval
+        if self._launch_eval_for_workflow is None or request.workflow_id is None:
+            return None
+        return await self._launch_eval_for_workflow(request.workflow_id, request.eval_choice)
 
     def _spawn_requested(
         self,
@@ -513,7 +537,8 @@ class BackgroundWorkflowDispatcher:
         # `failed`: the trigger was refused, not broken.
         if self._maintenance is None:
             await self._handler.validate_stored_declarations(workflow_id)
-            self._spawn(workflow_id, inputs, execution_id, task, repos, None)
+            launch_eval = await self._launch_eval(workflow_id)
+            self._spawn(workflow_id, inputs, execution_id, task, repos, None, launch_eval)
             return None
 
         # Two reads, and they are not the same check twice. This first one is
@@ -523,6 +548,7 @@ class BackgroundWorkflowDispatcher:
         await self._maintenance.refuse_early()
 
         await self._handler.validate_stored_declarations(workflow_id)
+        launch_eval = await self._launch_eval(workflow_id)
 
         # The decisive one. Inside `admitting()` no maintenance transition can
         # complete, and the task is created before the ticket is spent - so
@@ -534,8 +560,22 @@ class BackgroundWorkflowDispatcher:
         # the projection, which is the only place it can still change what the
         # trigger record says.
         async with self._maintenance.admitting() as ticket:
-            self._spawn(workflow_id, inputs, execution_id, task, repos, ticket)
+            self._spawn(workflow_id, inputs, execution_id, task, repos, ticket, launch_eval)
             return ticket
+
+    async def _launch_eval(self, workflow_id: str) -> LaunchEval | None:
+        """The eval this trigger joins, resolved and admitted NOW, at acceptance (#967).
+
+        Not in the task: it may wait for a budget slot while the workflow's
+        default eval changes, and a trigger accepted into one eval must not
+        start in another. Synchronous for the same reason as the refusals
+        above: a missing or archived eval marks the trigger record `failed`.
+        """
+        if self._launch_eval_for_workflow is None:
+            return None
+        from syn_domain.contexts.orchestration import EvalChoice
+
+        return await self._launch_eval_for_workflow(workflow_id, EvalChoice())
 
     def _spawn(
         self,
@@ -545,6 +585,7 @@ class BackgroundWorkflowDispatcher:
         task: str | None,
         repos: list[RepositoryRef] | None,
         ticket: AdmissionTicket | None,
+        launch_eval: LaunchEval | None,
     ) -> None:
         """Claim the start's place and create its fire-and-forget task. Synchronous,
         so nothing interleaves between the gate's answer and the work existing.
@@ -567,7 +608,13 @@ class BackgroundWorkflowDispatcher:
             return
         asyncio_task = asyncio.create_task(
             self._run_in_budget(
-                workflow_id, inputs, claim, task=task, repos=repos, admitted=ticket
+                workflow_id,
+                inputs,
+                claim,
+                task=task,
+                repos=repos,
+                admitted=ticket,
+                launch_eval=launch_eval,
             ),
             name=f"workflow-exec-{execution_id}",
         )
@@ -581,6 +628,7 @@ class BackgroundWorkflowDispatcher:
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
         admitted: AdmissionTicket | None = None,
+        launch_eval: LaunchEval | None = None,
     ) -> None:
         # #1387: the lease spans the wait for a slot. This is the case that
         # rebuilt the execution-loss window - a ticket spent at `create_task`
@@ -599,6 +647,7 @@ class BackgroundWorkflowDispatcher:
                     task=task,
                     repos=repos,
                     admitted=admitted,
+                    launch_eval=launch_eval,
                 )
 
     async def _run(
@@ -609,6 +658,7 @@ class BackgroundWorkflowDispatcher:
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
         admitted: AdmissionTicket | None = None,
+        launch_eval: LaunchEval | None = None,
     ) -> None:
         from syn_domain.contexts.orchestration import (
             DuplicateExecutionError,
@@ -622,6 +672,7 @@ class BackgroundWorkflowDispatcher:
                 repos=repos or [],
                 execution_id=execution_id or None,
                 task=task,
+                launch_eval=launch_eval,
             )
             # #1387: carry the gate's answer in rather than asking again. This
             # runs after the caller was told the work started, so a second

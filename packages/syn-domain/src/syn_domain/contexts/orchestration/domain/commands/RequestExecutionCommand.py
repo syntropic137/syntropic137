@@ -8,7 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts._shared.repository_ref import (
     RepositoryRef,  # noqa: TC001 - runtime field type
 )
-from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
+from syn_domain.contexts.orchestration._shared.eval_choice import LaunchEval  # noqa: TC001
+from syn_domain.contexts.orchestration._shared.repository_baseline import (
+    RepositoryBaseline,
+)
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 
 
@@ -24,10 +27,16 @@ class RequestExecutionCommand(BaseModel):
     task: str | None = None
     repos: list[RepositoryRef] = Field(default_factory=list)
     tags: TagSet = Field(default_factory=TagSet)
-    eval_choice: EvalChoice = Field(default_factory=EvalChoice)
-    """The launch's eval choice (#967), resolved against the workflow's default
-    only when the start runs, as for any other launch."""
+    launch_eval: LaunchEval
+    """The eval the start joins and its frozen baseline (#967), resolved and
+    admitted at acceptance (``launch_eval_for``) and never again: a start that
+    waits for a slot, or is recovered after a restart, still joins this one."""
 
     @property
     def aggregate_id(self) -> str:
         return self.execution_id
+
+
+# As `ExecuteWorkflowCommand`: `LaunchEval.baseline` names `RepositoryBaseline`
+# only under TYPE_CHECKING, so pydantic is given the name here.
+RequestExecutionCommand.model_rebuild(_types_namespace={"RepositoryBaseline": RepositoryBaseline})
