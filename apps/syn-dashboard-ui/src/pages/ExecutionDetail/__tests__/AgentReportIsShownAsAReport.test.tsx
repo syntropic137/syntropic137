@@ -60,6 +60,9 @@ function failedPhase(): PhaseExecutionDetail {
     workflow_phase_id: 'phase-1',
     name: 'implement',
     status: 'failed',
+    // Its own classification, as the API sends it (#1592): the card is
+    // coloured from the phase, never from the run.
+    failure_classification: 'correct_refusal',
     session_id: null,
     agent_session_id: null,
     artifact_id: null,
