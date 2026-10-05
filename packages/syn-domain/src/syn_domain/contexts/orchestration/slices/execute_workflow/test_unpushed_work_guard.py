@@ -1247,7 +1247,14 @@ class _PhaseRun:
     told and what teardown ran, never about the guard's return value.
     """
 
-    def __init__(self, workspace: object, *, also_as: str | None = None) -> None:
+    def __init__(
+        self,
+        workspace: object,
+        *,
+        also_as: str | None = None,
+        execution_repository: object | None = None,
+        owed_cancelled_work: object | None = None,
+    ) -> None:
         from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
         from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
             ExecutionTodoProjection,
@@ -1261,7 +1268,7 @@ class _PhaseRun:
         self.phase_results: list[PhaseResult] = []
         self.session = AsyncMock()
         self.processor = WorkflowExecutionProcessor(
-            execution_repository=AsyncMock(),
+            execution_repository=execution_repository or AsyncMock(),  # type: ignore[arg-type]
             session_repository=AsyncMock(),
             workspace_service=MagicMock(),
             artifact_repository=AsyncMock(),
@@ -1273,6 +1280,7 @@ class _PhaseRun:
             prompt_builder=AsyncMock(return_value="prompt"),
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+            owed_cancelled_work=owed_cancelled_work,  # type: ignore[arg-type]
         )
         # `also_as` puts the SAME workspace behind a second phase id, which is
         # what lets one dirty tree be completed twice under two declarations.
@@ -3569,6 +3577,120 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
         quarantined=landed,
     ).body()
     assert landed.diffstat in body
+
+
+@pytest.mark.parametrize("store_refuses_the_cancel", [False, True])
+async def test_a_cancel_through_the_processor_tells_its_pr_once_from_the_stored_event(
+    clone: _Clone, store_refuses_the_cancel: bool
+) -> None:
+    """The whole cancel path, with nothing supplied that the processor should produce.
+
+    ``store_refuses_the_cancel``: the store refuses every append of what
+    landed, so the processor owes it; it recovers, and the processor's NEXT
+    run - another execution entirely - is what appends it.
+
+    A real aggregate is started and cancelled on a real journal; the
+    processor's own save lands the ref on the clone's origin; the processor
+    appends what landed; the coordinator reads that stored event and tells the
+    PR. Remove the processor's append and no event reaches the store, so the
+    post never happens - the failure #1547's re-verification named.
+    """
+    from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
+    from event_sourcing.subscriptions.coordinator import SubscriptionCoordinator
+
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        CancelExecutionCommand,
+        StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        PhaseDefinition,
+        SourceCommit,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+        OWED_CANCELLED_WORK,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_quarantine import (
+        QuarantineNoticeProcessManager,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_quarantine.test_quarantine_notice import (
+        _Commenter,
+        _Forge,
+        _LiveStore,
+        _replay_posts_nothing,
+        _settled,
+        _Stream,
+    )
+
+    _a_phase_that_edited_a_workflow(clone)
+    store = _LiveStore()
+    stream = _Stream(store)
+    owed = InMemoryProjectionStore()
+    run = _PhaseRun(clone.workspace, execution_repository=stream, owed_cancelled_work=owed)
+    run.processor._artifact_repo = _SavesArtifacts()  # type: ignore[assignment]
+    commenter = _Commenter(repository=f"acme/{_REPO}")
+    manager = QuarantineNoticeProcessManager(
+        commenter=commenter, store=InMemoryProjectionStore(), branches=_Forge(open_pr=42)
+    )
+    checkpoints = MemoryCheckpointStore()
+    coordinator = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=checkpoints, projections=[manager]
+    )
+    runner = asyncio.create_task(coordinator.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.start_execution(
+            StartExecutionCommand(
+                execution_id=_EXECUTION_ID,
+                workflow_id="wf-1",
+                workflow_name="Cancelled with work",
+                total_phases=1,
+                inputs={},
+                phase_definitions=[PhaseDefinition(phase_id=_PHASE_ID, name="Make", order=1)],
+                source_commits=[SourceCommit(repository=f"acme/{_REPO}")],
+            )
+        )
+        await run.processor._journal.open(aggregate)
+        aggregate.cancel_execution(
+            CancelExecutionCommand(execution_id=_EXECUTION_ID, phase_id=_PHASE_ID, reason="stop")
+        )
+        await run.processor._journal.append(aggregate)
+        assert stream.recorded("CancelledWorkQuarantined") == 0
+        stream.rejections = 99 if store_refuses_the_cancel else 0
+
+        result = await run.processor._cancel_execution(
+            aggregate,
+            _EXECUTION_ID,
+            "wf-1",
+            run.phase_results,
+            [],
+            datetime.now(UTC),
+            cancel_reason="stop",
+            phase_id=_PHASE_ID,
+        )
+
+        assert result.status == "cancelled"
+        assert _QUARANTINE_REF in clone.origin_refs()
+        if store_refuses_the_cancel:
+            assert stream.recorded("CancelledWorkQuarantined") == 0
+            assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
+            stream.rejections = 0
+            await run.processor.run("wf-2", "Next", [], {}, "exec-next")
+        assert await owed.get_all(OWED_CANCELLED_WORK) == []
+        assert stream.recorded("CancelledWorkQuarantined") == 1
+        await asyncio.wait_for(_settled(coordinator, checkpoints, len(stream.history)), 5)
+        assert commenter.posts == 1
+        (body,) = commenter.comments.values()
+        assert _QUARANTINE_REF in body and f"`{_PHASE_ID}`" in body
+    finally:
+        await coordinator.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+    await _replay_posts_nothing(store, manager, commenter)
 
 
 def test_records_come_from_the_gate_error_or_the_save_and_never_both() -> None:
