@@ -30,6 +30,9 @@ services:
   # ===========================================================================
   timescaledb:
     container_name: syn137-timescaledb
+    # Control-plane CPU weight: wins over agent workspaces (default 1024)
+    # under contention, so dispatched work cannot starve it (#1600).
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     environment:
       # Clear POSTGRES_PASSWORD from base compose — _FILE variant is exclusive
       POSTGRES_PASSWORD: ""
@@ -59,7 +62,7 @@ services:
       resources:
         limits:
           memory: ${POSTGRES_MEMORY_LIMIT:-1g}
-          cpus: "${POSTGRES_CPU_LIMIT:-1.0}"
+          cpus: "${POSTGRES_CPU_LIMIT:-2.0}"
     logging:
       driver: "json-file"
       options:
@@ -73,6 +76,9 @@ services:
   # ===========================================================================
   event-store:
     container_name: syn137-event-store
+    # Control-plane CPU weight: wins over agent workspaces (default 1024)
+    # under contention, so dispatched work cannot starve it (#1600).
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
@@ -192,6 +198,9 @@ services:
   # ===========================================================================
   api:
     container_name: syn137-api
+    # Control-plane CPU weight: wins over agent workspaces (default 1024)
+    # under contention, so dispatched work cannot starve it (#1600).
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     build:
       args:
         INCLUDE_OP_CLI: "${INCLUDE_OP_CLI:-0}"
@@ -273,7 +282,7 @@ services:
       resources:
         limits:
           memory: ${API_MEMORY_LIMIT:-512m}
-          cpus: "${API_CPU_LIMIT:-0.5}"
+          cpus: "${API_CPU_LIMIT:-2.0}"
     logging:
       driver: "json-file"
       options:
@@ -291,6 +300,9 @@ services:
       context: ..
       dockerfile: infra/docker/images/gateway/Dockerfile
     container_name: syn137-gateway
+    # Control-plane CPU weight: wins over agent workspaces (default 1024)
+    # under contention, so dispatched work cannot starve it (#1600).
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     ports:
       - "${SYN_GATEWAY_BIND:-127.0.0.1}:${SYN_GATEWAY_PORT:-8137}:80"
     environment:

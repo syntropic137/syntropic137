@@ -80,6 +80,7 @@ from syn_api.inventory_types import TranscriptDeletionResponse as TranscriptDele
 from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdentityRequest
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
+from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
     DelegationFailure,
@@ -2225,6 +2226,12 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Human-readable notes that need attention but do not degrade the "
         "instance. Omitted when there are none.",
+    )
+    cpu_throttling: CpuThrottling | None = Field(
+        default=None,
+        description="How often the API container hit its CPU limit (#1600). Always present "
+        "once the gate is ready, with status 'unknown' when the cgroup does not say; "
+        "omitted only while the gate is withholding the API.",
     )
 
 
