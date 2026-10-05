@@ -32,7 +32,10 @@ export class YamlParseError extends Error {
  * (normally the file path).
  *
  * @throws YamlParseError on any syntax error, duplicate key, unresolved
- *   alias, multiple documents, or a value with no JSON form.
+ *   alias, multiple documents, or a value with no JSON form, and on every
+ *   warning: `yaml` reports an unknown tag (`!typo text`) as a warning and
+ *   reads it as a plain string, where PyYAML rejects the file. No warning is
+ *   treated as benign; a workflow file has no reason to raise one.
  */
 export function parseYaml(input: string, source = "<yaml>"): YamlValue {
   const lineCounter = new LineCounter();
@@ -43,7 +46,7 @@ export function parseYaml(input: string, source = "<yaml>"): YamlValue {
     uniqueKeys: true,
     prettyErrors: true,
   });
-  const problem = doc.errors[0];
+  const problem = doc.errors[0] ?? doc.warnings[0];
   if (problem !== undefined) {
     const line = problem.linePos?.[0].line;
     const where = line === undefined ? source : `${source}:${line}`;

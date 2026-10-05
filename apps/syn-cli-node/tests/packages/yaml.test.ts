@@ -121,6 +121,13 @@ describe("parseYaml", () => {
     expect(() => parseYaml("a: &a\n  k: 1\n  <<: *a\n", "x.yaml")).toThrow(/^x\.yaml:3: alias \*a/);
   });
 
+  it("fails with source and line on an unknown tag instead of dropping it", () => {
+    expect(() => parseYaml("id: a\ndescription: !typo text\n", "wf/workflow.yaml")).toThrow(
+      /^wf\/workflow\.yaml:2: Unresolved tag: !typo/,
+    );
+    expect(() => parseYaml("phases: !typo [a]\n", "x.yaml")).toThrow(/^x\.yaml:1: Unresolved tag: !typo/);
+  });
+
   it("fails on more than one document", () => {
     expect(() => parseYaml("a: 1\n---\nb: 2\n", "x.yaml")).toThrow(/^x\.yaml:\d+: /);
   });
