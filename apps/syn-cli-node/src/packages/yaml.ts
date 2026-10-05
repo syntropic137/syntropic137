@@ -1,12 +1,19 @@
 /**
- * Minimal YAML subset parser — zero dependencies.
+ * YAML loading for workflow packages, plugin manifests and frontmatter.
  *
- * Supports: maps, lists, strings (plain/quoted/multiline), numbers,
- * booleans, null. Enough for workflow.yaml and syntropic137.yaml files.
+ * Parses as YAML 1.1, the dialect of PyYAML's `safe_load`, which is what the
+ * API and the domain use on every definition (`WorkflowDefinition.from_yaml`).
+ * The CLI and the server must read the same file the same way: anchors,
+ * aliases, merge keys (`<<: *x`) and 1.1 scalars (`yes`/`no`) included.
  *
- * Does NOT support: anchors, aliases, tags, flow sequences/maps on
- * multiple lines, complex keys, merge keys.
+ * WHY a real parser: the hand-rolled subset this replaced did not support
+ * anchors or merge keys and did not notice them either. It collapsed the ten
+ * phases of sdlc/implement-v3 into four with keys "0".."9" and reported a
+ * successful install (#1618). Anything this parser cannot read is an error
+ * naming the file and line, never a best guess.
  */
+
+import { type Alias, type Document, LineCounter, type Node, parseDocument, visit } from "yaml";
 
 type YamlValue =
   | string
@@ -16,332 +23,88 @@ type YamlValue =
   | YamlValue[]
   | { [key: string]: YamlValue };
 
-export function parseYaml(input: string): YamlValue {
-  const lines = input.split("\n");
-  const { value } = parseNode(lines, 0, -1);
-  return value;
+export class YamlParseError extends Error {
+  override readonly name = "YamlParseError";
 }
 
-interface ParseResult {
-  value: YamlValue;
-  nextLine: number;
-}
-
-function skipBlanksAndComments(lines: string[], start: number): number {
-  let i = start;
-  while (i < lines.length) {
-    const trimmed = lines[i]!.trim();
-    if (trimmed !== "" && !trimmed.startsWith("#")) break;
-    i++;
+/**
+ * Parse one YAML document. `source` names the input in error messages
+ * (normally the file path).
+ *
+ * @throws YamlParseError on any syntax error, duplicate key, unresolved
+ *   alias, multiple documents, or a value with no JSON form, and on every
+ *   warning: `yaml` reports an unknown tag (`!typo text`) as a warning and
+ *   reads it as a plain string, where PyYAML rejects the file. No warning is
+ *   treated as benign; a workflow file has no reason to raise one.
+ */
+export function parseYaml(input: string, source = "<yaml>"): YamlValue {
+  const lineCounter = new LineCounter();
+  const doc = parseDocument(input, {
+    lineCounter,
+    version: "1.1",
+    merge: true,
+    uniqueKeys: true,
+    prettyErrors: true,
+  });
+  const problem = doc.errors[0] ?? doc.warnings[0];
+  if (problem !== undefined) {
+    const line = problem.linePos?.[0].line;
+    const where = line === undefined ? source : `${source}:${line}`;
+    throw new YamlParseError(`${where}: ${problem.message}`);
   }
-  return i;
-}
-
-function parseNode(
-  lines: string[],
-  startLine: number,
-  _parentIndent: number,
-): ParseResult {
-  const i = skipBlanksAndComments(lines, startLine);
-
-  if (i >= lines.length) {
-    return { value: null, nextLine: i };
+  const problemAt = findUnsupported(doc);
+  if (problemAt !== undefined) {
+    const { line } = lineCounter.linePos(problemAt.offset);
+    throw new YamlParseError(`${source}:${line}: ${problemAt.message}`);
   }
-
-  const line = lines[i]!;
-  const indent = getIndent(line);
-  const trimmed = line.trim();
-
-  if (trimmed.startsWith("- ") || trimmed === "-") {
-    return parseList(lines, i, indent);
-  }
-
-  if (trimmed.includes(":")) {
-    return parseMap(lines, i, indent);
-  }
-
-  return { value: parseScalar(trimmed), nextLine: i + 1 };
+  return doc.toJS() as YamlValue;
 }
 
-function parseMapEntry(
-  lines: string[],
-  i: number,
-  afterColon: string,
-  mapIndent: number,
-): ParseResult {
-  if (afterColon === "" || afterColon.startsWith("#")) {
-    return parseNode(lines, i + 1, mapIndent);
-  }
-
-  if (afterColon === "|" || afterColon === ">") {
-    return parseMultilineString(lines, i + 1, afterColon as "|" | ">");
-  }
-
-  return { value: parseInlineValue(afterColon), nextLine: i + 1 };
+/**
+ * The first node the JSON upload cannot carry faithfully: an alias with no
+ * anchor, an alias inside the node it names (a cycle `toJS` would recurse into
+ * forever), or a 1.1 timestamp/binary that `JSON.stringify` would silently
+ * rewrite. Checked on the AST so the error can name the line.
+ */
+function findUnsupported(doc: Document): { offset: number; message: string } | undefined {
+  let found: { offset: number; message: string } | undefined;
+  visit(doc, {
+    Alias(_, node) {
+      const target = node.resolve(doc);
+      const offset = node.range?.[0] ?? 0;
+      if (target === undefined) {
+        found = { offset, message: "alias refers to an anchor not defined above it" };
+        return visit.BREAK;
+      }
+      if (contains(target, node)) {
+        found = { offset, message: `alias *${node.source} is inside the node it refers to (a cycle)` };
+        return visit.BREAK;
+      }
+      return undefined;
+    },
+    Scalar(_, node) {
+      const value: unknown = node.value;
+      if (value === null || typeof value !== "object") return undefined;
+      const kind = (value as object).constructor?.name ?? typeof value;
+      found = {
+        offset: node.range?.[0] ?? 0,
+        message: `a YAML ${kind} has no JSON form; quote it to make it a string`,
+      };
+      return visit.BREAK;
+    },
+  });
+  return found;
 }
 
-function parseMap(
-  lines: string[],
-  startLine: number,
-  mapIndent: number,
-): ParseResult {
-  const result: Record<string, YamlValue> = {};
-  let i = startLine;
-
-  while (i < lines.length) {
-    const trimmed = lines[i]!.trim();
-
-    if (trimmed === "" || trimmed.startsWith("#")) {
-      i++;
-      continue;
-    }
-
-    const indent = getIndent(lines[i]!);
-    if (indent !== mapIndent) break;
-
-    const colonIdx = findUnquotedColon(trimmed);
-    if (colonIdx === -1) break;
-
-    const key = trimmed.slice(0, colonIdx).trim();
-    const afterColon = trimmed.slice(colonIdx + 1).trim();
-
-    const { value, nextLine } = parseMapEntry(lines, i, afterColon, mapIndent);
-    result[key] = value;
-    i = nextLine;
-  }
-
-  return { value: result, nextLine: i };
-}
-
-function parseListItem(
-  lines: string[],
-  i: number,
-  trimmed: string,
-  indent: number,
-): ParseResult {
-  const afterDash = trimmed.slice(2).trim();
-
-  if (afterDash === "" || trimmed === "-") {
-    const { value, nextLine } = parseNode(lines, i + 1, indent);
-    return { value, nextLine };
-  }
-
-  if (afterDash.includes(":") && !isQuoted(afterDash)) {
-    return parseInlineMapItem(lines, i, afterDash, indent);
-  }
-
-  return { value: parseInlineValue(afterDash), nextLine: i + 1 };
-}
-
-function parseInlineMapItem(
-  lines: string[],
-  i: number,
-  afterDash: string,
-  indent: number,
-): ParseResult {
-  const itemIndent = indent + 2;
-  const originalLine = lines[i]!;
-  lines[i] = " ".repeat(itemIndent) + afterDash;
-  const { value, nextLine } = parseMap(lines, i, itemIndent);
-  lines[i] = originalLine;
-  return { value, nextLine };
-}
-
-function parseList(
-  lines: string[],
-  startLine: number,
-  listIndent: number,
-): ParseResult {
-  const result: YamlValue[] = [];
-  let i = startLine;
-
-  while (i < lines.length) {
-    const trimmed = lines[i]!.trim();
-
-    if (trimmed === "" || trimmed.startsWith("#")) {
-      i++;
-      continue;
-    }
-
-    const indent = getIndent(lines[i]!);
-    if (indent !== listIndent) break;
-    if (!trimmed.startsWith("- ") && trimmed !== "-") break;
-
-    const { value, nextLine } = parseListItem(lines, i, trimmed, indent);
-    result.push(value);
-    i = nextLine;
-  }
-
-  return { value: result, nextLine: i };
-}
-
-function collectMultilineContent(
-  lines: string[],
-  startLine: number,
-): { contentLines: string[]; nextLine: number } {
-  const contentLines: string[] = [];
-  let i = startLine;
-  let blockIndent = -1;
-
-  while (i < lines.length) {
-    const line = lines[i]!;
-    if (line.trim() === "") {
-      contentLines.push("");
-      i++;
-      continue;
-    }
-    const indent = getIndent(line);
-    if (blockIndent === -1) blockIndent = indent;
-    if (indent < blockIndent) break;
-    contentLines.push(line.slice(blockIndent));
-    i++;
-  }
-
-  while (contentLines.length > 0 && contentLines[contentLines.length - 1] === "") {
-    contentLines.pop();
-  }
-
-  return { contentLines, nextLine: i };
-}
-
-function parseMultilineString(
-  lines: string[],
-  startLine: number,
-  blockStyle: "|" | ">",
-): ParseResult {
-  const { contentLines, nextLine } = collectMultilineContent(lines, startLine);
-
-  const value =
-    blockStyle === "|"
-      ? contentLines.join("\n")
-      : contentLines.join(" ").replace(/\s+/g, " ").trim();
-
-  return { value, nextLine };
-}
-
-function parseInlineValue(raw: string): YamlValue {
-  const value = stripInlineComment(raw);
-
-  if (value.startsWith("[") && value.endsWith("]")) {
-    const inner = value.slice(1, -1).trim();
-    if (inner === "") return [];
-    return splitFlow(inner).map((item) => parseScalar(item.trim()));
-  }
-
-  return parseScalar(value);
-}
-
-const TRUE_VALUES = new Set(["true", "True", "TRUE"]);
-const FALSE_VALUES = new Set(["false", "False", "FALSE"]);
-const NULL_VALUES = new Set(["null", "~", ""]);
-
-function parseQuoted(raw: string): string | null {
-  if (
-    (raw.startsWith('"') && raw.endsWith('"')) ||
-    (raw.startsWith("'") && raw.endsWith("'"))
-  ) {
-    return raw.slice(1, -1);
-  }
-  return null;
-}
-
-function parseNumber(raw: string): number | null {
-  if (/^-?\d+$/.test(raw)) return parseInt(raw, 10);
-  if (/^-?\d+\.\d+$/.test(raw)) return parseFloat(raw);
-  return null;
-}
-
-function parseScalar(raw: string): string | number | boolean | null {
-  if (NULL_VALUES.has(raw)) return null;
-  if (TRUE_VALUES.has(raw)) return true;
-  if (FALSE_VALUES.has(raw)) return false;
-
-  const quoted = parseQuoted(raw);
-  if (quoted !== null) return quoted;
-
-  const num = parseNumber(raw);
-  if (num !== null) return num;
-
-  return raw;
-}
-
-function getIndent(line: string): number {
-  let count = 0;
-  for (const ch of line) {
-    if (ch === " ") count++;
-    else break;
-  }
-  return count;
-}
-
-const QUOTE_CHARS = new Set(["'", '"']);
-
-function toggleQuote(current: string, ch: string): string {
-  if (current === "") return QUOTE_CHARS.has(ch) ? ch : "";
-  return ch === current ? "" : current;
-}
-
-function buildQuoteMask(text: string): boolean[] {
-  const mask = new Array<boolean>(text.length);
-  let quote = "";
-  for (let i = 0; i < text.length; i++) {
-    quote = toggleQuote(quote, text[i]!);
-    mask[i] = quote !== "";
-  }
-  return mask;
-}
-
-function findUnquotedColon(text: string): number {
-  const mask = buildQuoteMask(text);
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] !== ":" || mask[i]) continue;
-    if (i + 1 >= text.length || text[i + 1] === " ") return i;
-  }
-  return -1;
-}
-
-function isQuoted(text: string): boolean {
-  return (
-    (text.startsWith('"') && text.endsWith('"')) ||
-    (text.startsWith("'") && text.endsWith("'"))
-  );
-}
-
-function stripInlineComment(text: string): string {
-  const mask = buildQuoteMask(text);
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] !== " " || mask[i]) continue;
-    if (text[i + 1] === "#") return text.slice(0, i).trim();
-  }
-  return text;
-}
-
-const DEPTH_CHANGE: Record<string, number> = { "[": 1, "]": -1 };
-
-function buildDepthMap(text: string, mask: boolean[]): Int8Array {
-  const depths = new Int8Array(text.length);
-  let depth = 0;
-  for (let i = 0; i < text.length; i++) {
-    if (!mask[i]) depth += DEPTH_CHANGE[text[i]!] ?? 0;
-    depths[i] = depth;
-  }
-  return depths;
-}
-
-function splitFlow(text: string): string[] {
-  const mask = buildQuoteMask(text);
-  const depths = buildDepthMap(text, mask);
-  const items: string[] = [];
-  let start = 0;
-
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "," && !mask[i] && depths[i] === 0) {
-      items.push(text.slice(start, i));
-      start = i + 1;
-    }
-  }
-
-  const last = text.slice(start);
-  if (last.trim()) items.push(last);
-  return items;
+function contains(root: Node, needle: Alias): boolean {
+  if (root === needle) return true;
+  let hit = false;
+  visit(root, {
+    Alias(_, node) {
+      if (node !== needle) return undefined;
+      hit = true;
+      return visit.BREAK;
+    },
+  });
+  return hit;
 }

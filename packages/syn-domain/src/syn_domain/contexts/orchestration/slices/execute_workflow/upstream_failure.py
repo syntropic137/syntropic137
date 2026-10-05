@@ -15,8 +15,15 @@ changes whenever a CLI does, and is not decided here.
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar, Protocol
+
+__all__ = [
+    "UPSTREAM_FAILURES",
+    "StreamReasonUpstreamFailureReader",
+    "UpstreamFailureError",
+    "UpstreamFailureKind",
+    "UpstreamFailureReader",
+]
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
@@ -27,43 +34,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     api_error_label,
     api_error_with_message,
 )
+from syn_shared.upstream_failure import UpstreamFailureError, UpstreamFailureKind
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-
-class UpstreamFailureKind(StrEnum):
-    """The upstream's own account of why it did not serve an attempt."""
-
-    CAPACITY = "capacity"
-    """The model provider had no capacity for the request (overloaded, 529)."""
-
-    RATE_LIMITED = "rate_limited"
-    """The provider is throttling us (429)."""
-
-    AUTH = "auth"
-    """The provider refused our credentials or their permissions (401, 403)."""
-
-    UNKNOWN = "unknown"
-    """The harness reported a fault, and nothing recognised its kind."""
-
-    @property
-    def is_transient(self) -> bool:
-        """Whether another attempt may succeed with nothing changed: the phase is resumable."""
-        return self in (UpstreamFailureKind.CAPACITY, UpstreamFailureKind.RATE_LIMITED)
-
-    @property
-    def needs_operator(self) -> bool:
-        """Whether nothing will succeed until somebody fixes the platform's access."""
-        return self is UpstreamFailureKind.AUTH
-
-    def account(self) -> str:
-        """The sentence an operator reads beside the failure, saying what to do about it."""
-        if self.is_transient:
-            return f"Upstream failure: {self.value} - transient; the phase is resumable."
-        if self.needs_operator:
-            return f"Upstream failure: {self.value} - an operator must fix the credentials."
-        return f"Upstream failure: {self.value} - not recognised; read the reason above."
 
 
 class UpstreamFailureReader(Protocol):
