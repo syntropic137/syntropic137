@@ -212,8 +212,14 @@ phases:
   # prompt may name only phases that have already run; the files differ only in
   # their "Which round this is" section, and the test below keeps them so.
   #
-  # A round whose predecessor CERTIFIED changes nothing and certifies on the
-  # same SHA; the prompts say so and make that path cheap. `finalize_pr` reads
+  # A round whose predecessor CERTIFIED never runs. Each reverify reports a
+  # `review_verdict` (certified | blocked) in its TASK_RESULT, and the execution
+  # aggregate - not the prompts - picks the next phase from it: `certified`
+  # skips every phase before the final one (recorded as `skipped_phase_ids`
+  # on NextPhaseReady), `blocked` advances by order. A run that is still
+  # blocked after round 3 completes with `review_verdict: blocked`, i.e. with
+  # unresolved findings, on the execution. See review_rounds.py. `finalize_pr`
+  # must therefore stay the LAST phase. `finalize_pr` reads
   # the newest of `reverify_3/`, `reverify_2/`, `reverify/`. Adding a round
   # means a pair here, two prompt files, and a line in phases/finalize_pr.md;
   # scripts/tests/test_implement_v3_repair_rounds.py fails if they disagree.

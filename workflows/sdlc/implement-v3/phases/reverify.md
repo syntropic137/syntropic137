@@ -42,8 +42,8 @@ the evidence.
 
 ## If the fix phase changed nothing, say so quickly
 
-In round 2 or 3 this is the case whenever the previous round CERTIFIED: the
-fix round made no change, so carry that certification forward on the same SHA.
+A round whose predecessor CERTIFIED never reaches you: the engine reads the
+`review_verdict` below and skips the remaining rounds itself.
 
 If `fix.md` reports that the first pass certified the change and no edit was
 made, the checkout above has already confirmed it: the remote head is still the
@@ -119,6 +119,19 @@ under `artifacts/output/` FAILS.** Write the file before you finish.
 5. **The mutation evidence** for tests the fix touched, and whether you believe
    it.
 6. If BLOCKED: **what would close it**, file and line and assertion.
+
+## Report the verdict to the engine, not only in prose
+
+Your `TASK_RESULT` block MUST carry `"review_verdict"`, exactly `"certified"`
+or `"blocked"`, matching your first line. The engine reads that key, and only
+that key, to decide what runs next: `certified` skips every remaining repair
+round and goes straight to `finalize_pr`; `blocked` runs the next round, or
+ends the run with **unresolved findings** once the rounds are spent. A missing
+or misspelled verdict is read as no verdict, which never skips a round and
+never counts as certified.
+
+`review_verdict` is not `success`. A BLOCKED review you completed is a
+successful phase: write `"success": true, "review_verdict": "blocked"`.
 
 A pull request is marked ready if and only if the last round run certifies.
 

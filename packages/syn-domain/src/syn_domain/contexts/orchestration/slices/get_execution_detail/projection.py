@@ -23,6 +23,7 @@ from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_ed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
@@ -93,7 +94,11 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # both bumped 10 -> 11 independently, on separate branches. Taking either
     # literal 11 would leave a deployment that had already rebuilt at the other
     # one's 11 seeing no change here, and so never rebuilding for this field.
-    VERSION = 13  # v13: tags and inherited_tags (#967)
+    # v14: rebuild so stored PhaseFailed events populate the phase failure
+    # fields #1592 added (failure_classification, reported_failure_reason);
+    # a row built before them reads `unclassified`. Also picks up
+    # review_verdict (PC-63), which only new completions carry.
+    VERSION = 14
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -398,6 +403,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["status"] = "completed"
         existing["completed_at"] = event_data.get("completed_at")
+        verdict = ReviewVerdict.from_stored(event_data.get("review_verdict"))
+        existing["review_verdict"] = None if verdict is None else verdict.value
         existing["completed_phases"] = self._completed_phases_after(
             event_data, existing.get("completed_phases", 0)
         )

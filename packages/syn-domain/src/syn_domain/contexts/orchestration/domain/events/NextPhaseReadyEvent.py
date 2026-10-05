@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
+from pydantic import Field
 
 
 @event("NextPhaseReady", "v1")
@@ -25,4 +26,4 @@ class NextPhaseReadyEvent(DomainEvent):
     #: because a review verdict made them unnecessary (PC-63). Recorded here,
     #: on the decision, so a skipped phase is distinguishable from one that
     #: has simply not started yet.
-    skipped_phase_ids: list[str] = []
+    skipped_phase_ids: list[str] = Field(default_factory=list)

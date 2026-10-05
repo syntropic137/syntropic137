@@ -41,6 +41,42 @@ A Phase is completed only when the Execution recorded it so. A Phase that
 started and did not complete has no partial credit: there is no mid-phase
 resume.
 
+## Review Verdict
+
+What a reviewing Phase concluded about the change in front of it: `certified`
+(nothing blocks it) or `blocked` (something must be fixed first). The Phase
+REPORTS it, as `review_verdict` in its TASK_RESULT block; the Execution
+DECIDES on it. `certified` ends the repair loop: every Phase before the
+Workflow's final Phase becomes a Skipped Phase. `blocked`, or no verdict, runs
+the next Phase by `order`. A word other than exactly `certified` or `blocked`
+is no verdict - it never skips anything.
+
+Not `success`. A Phase that finished a review that blocks the change
+succeeded; its verdict is `blocked`.
+
+## Skipped Phase
+
+A Phase the Execution decided will never run, because a Review Verdict made it
+unnecessary. Recorded on the `NextPhaseReady` decision as `skipped_phase_ids`.
+Never started, never completed, never billed.
+
+## Unresolved Findings
+
+How a `completed` Execution ended when its last Review Verdict was `blocked`:
+every repair round the Workflow allows ran, and the last review still refused
+the change. Recorded as `review_verdict: blocked` on `WorkflowCompleted`, and
+visible on the execution detail API. A `completed` Execution with
+`review_verdict: certified` is a certified one; with none, nothing reviewed it.
+
+A status, deliberately not: the run did not fail - every Phase did its job -
+and the bound was the Workflow's own decision.
+
+**Unclear:** whether such a run should be continuable. A Resume restarts at the
+first Phase that did not complete, and here every Phase completed, so a Resume
+has nothing to start. Running one more round past the bound is starting from a
+CHOSEN Phase, which is the capability #1468 reserves. Until that ships, a run
+that ended with Unresolved Findings is continued by hand.
+
 ## Workflow
 
 The definition a run is made from - its Phases and their configuration.
