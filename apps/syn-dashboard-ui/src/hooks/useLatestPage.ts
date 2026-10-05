@@ -54,7 +54,7 @@ const EMPTY_PAGE: ListPage<never> = {
 export interface LatestPageState<TRow> {
   /** The newest page received. `EMPTY_PAGE` until the first one lands. */
   result: ListPage<TRow>
-  /** Nothing has settled yet, so there are no rows worth showing. */
+  /** Nothing has answered, and the current query has not failed: no rows worth showing. */
   loading: boolean
   /**
    * `result` answers a query the caller has since left - a filter, a page or a
@@ -136,7 +136,9 @@ export function useLatestPage<TRow>(
 
   const isCurrent = (request: PageRequest<TRow> | null) =>
     request !== null && request.fetchPage === fetchPage && request.query === query
-  const loading = answeredFor === null && failedFor === null
+  // A failure settles only its own query: one left behind says nothing about
+  // whether the current one has an answer yet.
+  const loading = answeredFor === null && !isCurrent(failedFor)
   const stale = answeredFor !== null && !isCurrent(answeredFor)
   const failed = isCurrent(failedFor)
 

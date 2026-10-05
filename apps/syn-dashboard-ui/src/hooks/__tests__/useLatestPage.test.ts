@@ -312,6 +312,37 @@ describe('useLatestPage', () => {
       consoleError.mockRestore()
     }
   })
+  it('is loading for a new query after the first one failed, until that one settles', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const filtered = deferred<ListPage<{ id: string }>>()
+      const FILTERED: ListQuery = { page: 1, page_size: LIST_PAGE_SIZE, statuses: ['failed'] }
+      const fetchPage = vi.fn((query: ListQuery) =>
+        query === FIRST_PAGE ? Promise.reject(new Error('Network error')) : filtered.promise,
+      )
+
+      const { result, rerender } = renderHook(({ query }) => useLatestPage(fetchPage, query), {
+        initialProps: { query: FIRST_PAGE },
+      })
+      await waitFor(() => expect(result.current.failed).toBe(true))
+      expect(result.current.loading).toBe(false)
+
+      rerender({ query: FILTERED })
+
+      // The defect: the failure belonged to the old query, yet it alone kept
+      // `loading` false, so an empty list read as the new query's answer.
+      expect(result.current.failed).toBe(false)
+      expect(result.current.loading).toBe(true)
+
+      await act(async () => filtered.resolve(page(['a'], 1)))
+
+      expect(result.current.loading).toBe(false)
+      expect(result.current.result.rows).toEqual([{ id: 'a' }])
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   describe('stale: whether the rows on screen answer the current query', () => {
     it('is true while a new query is in flight, with the previous rows still held', async () => {
       const nextPage = deferred<ListPage<{ id: string }>>()
