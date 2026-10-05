@@ -116,8 +116,11 @@ class UpstreamExitError(NonZeroExitError, UpstreamFailureError):
     """
 
     def __init__(self, message: str, *, exit_code: int, upstream_kind: UpstreamFailureKind) -> None:
-        super().__init__(message, exit_code=exit_code)
-        # `RuntimeError.__init__` does not continue the MRO, so this is set here.
+        # Not `super().__init__`: in this class's MRO, `NonZeroExitError`'s
+        # `super()` resolves to `UpstreamFailureError`, whose `upstream_kind` is
+        # keyword-only and would be missing, so construction raised TypeError.
+        RuntimeError.__init__(self, message)
+        self.exit_code = exit_code
         self.upstream_kind = upstream_kind
 
 
