@@ -48,6 +48,9 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
 
 if TYPE_CHECKING:
     from syn_api.routes.executions.models import ExecutionDetailResponse
+    from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+        WorkflowFailedEvent,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -85,8 +88,8 @@ _FAILURES: dict[str, BaseException] = {
 }
 
 
-def _failed_event_payload(execution_id: str, error: BaseException) -> dict[str, object]:
-    """The WorkflowFailed payload the REAL aggregate emits for a run that died on `error`."""
+def _failed_event(execution_id: str, error: BaseException) -> WorkflowFailedEvent:
+    """The WorkflowFailed event the REAL aggregate emits for a run that died on `error`."""
     outcome = failed_phase_outcome(
         error,
         phase_id=PHASE_ID,
@@ -107,7 +110,7 @@ def _failed_event_payload(execution_id: str, error: BaseException) -> dict[str, 
     aggregate.fail_execution(outcome.as_command(execution_id, completed_phases=0, total_phases=1))
     event = aggregate.get_uncommitted_events()[-1].event
     assert event.event_type == "WorkflowFailed", event.event_type
-    return event.model_dump()
+    return event
 
 
 @dataclass
@@ -142,7 +145,7 @@ async def _projections() -> _StubProjectionManager:
                 started_at=_STARTED_AT,
             ).model_dump()
         )
-        await detail.on_workflow_failed(_failed_event_payload(execution_id, error))
+        await detail.on_workflow_failed(_failed_event(execution_id, error).model_dump())
     return _StubProjectionManager(store=store, workflow_execution_detail=detail)
 
 
