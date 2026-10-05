@@ -40,15 +40,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.orchestration import LaunchEval, StartResumeHandler
+    from syn_domain.contexts.orchestration import LaunchEval
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
         GlobalClaudePluginRegistryAggregate,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
-        ExecuteWorkflowHandler,
     )
     from syn_domain.contexts.orchestration.slices.list_claude_plugins import (
         ListClaudePluginsHandler,
@@ -106,9 +103,9 @@ from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_api._wiring_admission import (
     BackgroundWorkflowDispatcher,
     get_admission_gate,
-    get_maintenance_port,
 )
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
+from syn_api._wiring_launch import _build_resume_handler, get_execute_workflow_handler
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared.env_constants import (
@@ -318,6 +315,11 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
 def get_workflow_repo():
     """Return the workflow template repository."""
     return get_workflow_repository()
+
+
+def get_execution_repo():
+    """Return the workflow execution repository."""
+    return get_workflow_execution_repository()
 
 
 def get_eval_repo():
@@ -677,61 +679,6 @@ def get_controller() -> ExecutionController:
 
 
 logger = logging.getLogger(__name__)
-
-
-async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
-    """Single composition root for ExecuteWorkflowHandler.
-
-    Both the synchronous POST /workflows/{id}/execute route and the
-    background dispatcher path go through this. Keeping the construction
-    in one place prevents drift like #726's missed phase_plugin_resolver
-    wiring, where one path materialized claude plugins into workspaces and
-    the other silently skipped them.
-
-    WHY (issue #726): bind the resolution service's per-phase resolver so
-    ``ExecuteWorkflowHandler`` populates ``ExecutablePhase.claude_plugins``
-    with lock-resolved entries before dispatch reaches the processor.
-
-    WHY (issue #772): mirrors the claude plugin wiring for skills -- binds
-    ``SkillResolutionService.resolve_for_phase`` so
-    ``ExecutablePhase.skills`` is populated the same way.
-    """
-    from syn_adapters.github.client import get_github_client
-    from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
-    from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
-
-    processor = await get_execution_processor()
-    resolution_service = await get_claude_plugin_resolution_service()
-    skill_resolution_service = await get_skill_resolution_service()
-    return ExecuteWorkflowHandler(
-        processor=processor,
-        workflow_repository=get_workflow_repository(),
-        phase_plugin_resolver=resolution_service.resolve_for_phase,
-        phase_skill_resolver=skill_resolution_service.resolve_for_phase,
-        # #1387: the backstop. Both admission paths refuse earlier and more
-        # informatively than this, but a path added later that only knows about
-        # the handler is still refused rather than silently admitted.
-        maintenance=get_maintenance_port(),
-        # #1457: every start records the commit each repository was at, so a
-        # resume of it can name the code its parent ran against.
-        commit_resolver=GitHubSourceCommitResolver(get_github_client),
-    )
-
-
-async def _build_resume_handler() -> StartResumeHandler:
-    """The resume start handler, built when a resume is first requested."""
-    from syn_adapters.github.client import get_github_client
-    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
-    from syn_domain.contexts.orchestration import StartResumeHandler
-
-    return StartResumeHandler(
-        await get_execution_processor(),
-        get_workflow_execution_repository(),
-        maintenance=get_maintenance_port(),
-        # #1513: confirms the branch the parent pushed is still where it was
-        # left, and finds the PR open from it, before the child continues it.
-        remote_branches=GitHubRemoteBranchReader(get_github_client),
-    )
 
 
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:

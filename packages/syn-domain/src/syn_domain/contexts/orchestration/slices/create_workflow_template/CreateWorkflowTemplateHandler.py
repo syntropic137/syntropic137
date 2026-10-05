@@ -241,5 +241,6 @@ def _to_update_command(
         default_eval_id=command.default_eval_id,
         version=command.version,
         source_digest=command.source_digest,
+        package_name=command.package_name,
         force=command.force,
     )

@@ -87,5 +87,8 @@ class UpdateWorkflowTemplateCommand(BaseModel):
     source_digest: str | None = None
     """Resolved source commit SHA. Same version + different digest is refused."""
 
+    package_name: str | None = None
+    """Package that installed this definition (#1588). Read back by prune."""
+
     force: bool = False
     """Explicit intent to overwrite. Required to reinstall a matching version."""
