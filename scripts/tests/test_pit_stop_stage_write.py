@@ -27,7 +27,7 @@ _FIXTURES = Path(__file__).parent / "fixtures" / "pit_stop"
 _COMPOSE = "docker-compose.syntropic137.yaml"
 _TAG = "v0.33.2-beta.1"
 
-_START = 'step "stage: back up the deployed compose and repoint both pins"'
+_START = 'step "stage: back up the deployed compose and repoint $REPOINTS"'
 _END = 'if [ "$MODE" = "stage" ]; then'
 
 _FULL = 'remote() { bash -c "$*"; }'
@@ -45,11 +45,14 @@ def _stage_block() -> str:
     return "\n".join(lines[starts[0] : ends[0]])
 
 
-def _run_stage(fixture: str, host: Path, tmp: Path, stub: str) -> subprocess.CompletedProcess[str]:
+def _run_stage(
+    fixture: str, host: Path, tmp: Path, stub: str, service: str = "all"
+) -> subprocess.CompletedProcess[str]:
     shutil.copy(_FIXTURES / fixture, host / _COMPOSE)
+    n = {"all": 2, "gateway": 1}[service]
     preamble = f"""
 set -euo pipefail
-TAG={_TAG}; MODE=stage; DRY=0; HOST=fake-host
+TAG={_TAG}; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; N={n}
 COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; TMP={tmp}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
@@ -112,3 +115,21 @@ def test_a_short_transfer_leaves_the_deployed_compose_untouched(
     assert "did not arrive intact" in proc.stderr
     assert not (host / f"{_COMPOSE}.pit-stop").exists()
     assert not list(host.glob(f"{_COMPOSE}.bak-*"))
+
+
+def test_a_gateway_only_stage_repoints_one_pin_and_passes_its_own_count(
+    dirs: tuple[Path, Path],
+) -> None:
+    """#1310: the stage passes `--service gateway` to the repoint and then
+    requires 1/1. A repoint that ignored the flag would move syn-api too and
+    fail that count, so this pins both hops."""
+    host, tmp = dirs
+    proc = _run_stage("compose-digest.yaml", host, tmp, _FULL, service="gateway")
+    assert proc.returncode == 0, proc.stderr
+
+    deployed = (host / _COMPOSE).read_text()
+    assert deployed.count(f"syn-gateway:{_TAG}") == 1
+    assert f"syn-api:{_TAG}" not in deployed
+    assert "syn-api@sha256:bf783882d031" in deployed
+    (backup,) = host.glob(f"{_COMPOSE}.bak-*")
+    assert backup.name == f"{_COMPOSE}.bak-sha256-6b416d4a25dd"

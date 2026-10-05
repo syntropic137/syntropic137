@@ -126,6 +126,7 @@ run() {{ "$@"; }}
 sleep() {{ :; }}
 {stub}
 {_function("projections_healthy")}
+{_function("swapped_is_running")}
 """
     proc = subprocess.run(
         ["bash", "-c", preamble + _tail(), str(_SCRIPT)],
