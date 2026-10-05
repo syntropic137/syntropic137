@@ -14,9 +14,12 @@
 /.github/                                                                       @NeuralEmpowerment
 
 # --- Supply chain: submodule sources/branches; local build, push, retag and
-# release-asset recipes in the justfile.
+# release-asset recipes, which live in just/release.just (imported by the root
+# justfile) so the rest of the justfile is not owned. The fitness test pins the
+# import and that no unowned file redefines a release recipe.
 /.gitmodules                                                                    @NeuralEmpowerment
-/justfile                                                                       @NeuralEmpowerment
+/just/release.just                                                              @NeuralEmpowerment
+/ci/fitness/infrastructure/test_release_recipes_are_owned.py                    @NeuralEmpowerment
 
 # --- Which images agents run, and how they are verified (settings AND code).
 /packages/syn-shared/src/syn_shared/settings/workspace_images.py                @NeuralEmpowerment
@@ -63,6 +66,14 @@
 # secret forwarding, published ports), the port/settings checks that guard
 # them, the gateway (auth, CSP, bind) and the tunnel ingress.
 /docker/docker-compose*.yaml                                                    @NeuralEmpowerment
+# Settings passthrough: GENERATED from the Settings classes into
+# docker/generated/api.env.yaml (deliberately not owned) and inlined into the
+# published compose, so a new setting changes no owned file. The generator and
+# its check are owned; the published file is generated from owned inputs and
+# `just check-compose` fails if it differs, so it is un-owned here (an entry
+# with no owner) for the same reason.
+/docker/docker-compose.syntropic137.yaml
+/ci/fitness/infrastructure/test_compose_env_forwarding.py                       @NeuralEmpowerment
 /docker/selfhost-entrypoint.sh                                                  @NeuralEmpowerment
 /scripts/no_public_ports.py                                                     @NeuralEmpowerment
 /scripts/no_public_ports.sh                                                     @NeuralEmpowerment
