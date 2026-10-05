@@ -150,6 +150,18 @@ Even without a restart, rotation is a control-plane operation. It consults the
 same in-flight check used before deployment (#1179 / #1181) and refuses to
 proceed silently while work is running. Unknown is never reported as clear.
 
+**Where the drain-aware path lives (2026-10-05).** D4 and D5 assume that a
+rotation can wait for running work without stopping the platform. While
+executions run inside the API process, the only "in-flight check" is the
+platform-wide one pit_stop uses, and a restart-free rotation still has to wait
+for the whole platform to go idle. [ADR-072](ADR-072-execution-hosting-and-upgrade-without-drain.md)
+D10 supplies the path these decisions assume: the **executor drain**, where a
+host stops claiming, finishes what it holds and exits. Admission stays open
+while it drains. A rotation that affects executors drains them one host or
+generation at a time, and the count it consults is the run queue's
+`in_use()`, not execution statuses. A rotation that affects only the API or
+gateway no longer has to wait for running executions at all.
+
 ### D6. Rollback is symmetric and always available
 
 Every rotation writes the previous value to a backup before changing anything,
