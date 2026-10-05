@@ -179,29 +179,38 @@ async function archiveOne(
       params: { path: { workflow_id: wfRef.id }, query: { expected_package_name: packageName } },
     })
     .catch(() => ({ error: undefined, response: null }));
-  // WHY the detail is read: the API answers 409 for "already archived", for
-  // "has active executions" and for "package mismatch", and only the message
-  // tells them apart.
-  const detail = JSON.stringify(error ?? "").toLowerCase();
-  const alreadyArchived = detail.includes("already archived");
-  if (response?.status === 409 && detail.includes("package mismatch")) {
-    // Not this package's any more: in no bucket, like a foreign owner above.
-    print(style("skipped: the server now records it under another package", YELLOW));
-  } else if (response?.ok === true) {
-    print(style("done", GREEN));
-    result.archived.push(wfRef);
-  } else if (response?.status === 404 || alreadyArchived) {
-    // Already archived is the desired end state.
-    print(style("already archived", DIM));
-    result.archived.push(wfRef);
-  } else if (response?.status === 409) {
-    // The server refuses to archive a workflow with active executions
-    // (ArchiveWorkflowTemplateHandler). That is the guard working, not a
-    // failure: the workflow stays live and tracked for a later prune.
-    print(style("skipped: it has running executions", YELLOW));
-    result.retained.push(wfRef);
-  } else {
-    print(style(`failed${response ? ` (${response.status})` : ""}`, RED));
-    result.failed.push(wfRef);
-  }
+  const outcome = archiveOutcome(response?.ok === true, response?.status, error);
+  const [label, color, bucket] = OUTCOME[outcome];
+  print(style(outcome === "failed" && response ? `${label} (${response.status})` : label, color));
+  if (bucket !== null) result[bucket].push(wfRef);
 }
+
+type ArchiveOutcome = "archived" | "already" | "retained" | "failed" | "foreign";
+
+/** What each outcome prints, and which PruneResult bucket (if any) it lands in. */
+const OUTCOME: Record<ArchiveOutcome, [string, string, keyof PruneResult | null]> = {
+  archived: ["done", GREEN, "archived"],
+  // Already archived (or gone) is the desired end state.
+  already: ["already archived", DIM, "archived"],
+  // The server refuses to archive a workflow with active executions
+  // (ArchiveWorkflowTemplateHandler). That is the guard working, not a
+  // failure: the workflow stays live and tracked for a later prune.
+  retained: ["skipped: it has running executions", YELLOW, "retained"],
+  failed: ["failed", RED, "failed"],
+  // Not this package's any more: in no bucket, like a foreign owner above.
+  foreign: ["skipped: the server now records it under another package", YELLOW, null],
+};
+
+/**
+ * WHY the detail is read: the API answers 409 for "already archived", for
+ * "has active executions" and for "package mismatch", and only the message
+ * tells them apart.
+ */
+function archiveOutcome(ok: boolean, status: number | undefined, error: unknown): ArchiveOutcome {
+  const detail = JSON.stringify(error ?? "").toLowerCase();
+  if (ok) return "archived";
+  if (status === 404 || detail.includes("already archived")) return "already";
+  if (status !== 409) return "failed";
+  return detail.includes("package mismatch") ? "foreign" : "retained";
+}
+
