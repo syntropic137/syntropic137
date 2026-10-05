@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.events.EvalArchivedEvent import EvalArchivedEvent
 from syn_domain.contexts.orchestration.domain.events.EvalCreatedEvent import (
@@ -31,9 +32,6 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
     EvalDetail,
     EvalRecord,
     EvalSummary,
-)
-from syn_domain.contexts.orchestration.slices.list_executions.projection import (
-    WorkflowExecutionListProjection,
 )
 from syn_domain.pagination import Page, ProjectionRecord
 from syn_domain.projection_page import PageQuery, StatusOf, page_projection
@@ -57,7 +55,7 @@ class EvalListProjection(AutoDispatchProjection):
 
     def __init__(self, store: ProjectionStore):
         self._store = store
-        self._runs = WorkflowExecutionListProjection(store)
+        self._runs = ExecutionListReads(store)
 
     def get_name(self) -> str:
         return self.PROJECTION_NAME
