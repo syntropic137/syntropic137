@@ -112,6 +112,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors
     WorkflowTemplateProvenanceStrippedError,
     WorkflowTemplateVersionAlreadyInstalledError,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
+    TASK_PLACEHOLDER,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
 )
@@ -241,6 +244,7 @@ __all__ = [
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     "RETIRED_PHASE_FIELDS",
+    "TASK_PLACEHOLDER",
     # Tag edits after creation (#967)
     "AddExecutionTagsCommand",
     "AddExecutionTagsHandler",
