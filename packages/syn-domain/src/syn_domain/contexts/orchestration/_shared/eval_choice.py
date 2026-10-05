@@ -15,15 +15,22 @@ Whether the eval can take the run is ``eval_admission``'s question.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import (  # noqa: TC001 - pydantic field type
     EvalId,
 )
+
+if TYPE_CHECKING:
+    # Annotation only: a dataclass never evaluates it, and importing it at
+    # runtime would cycle through the ports package back into the commands.
+    from syn_domain.contexts.orchestration._shared.repository_baseline import (
+        RepositoryBaseline,
+    )
 
 
 class EvalSelection(StrEnum):
@@ -67,7 +74,17 @@ class EvalChoice(BaseModel):
 
 @dataclass(frozen=True)
 class LaunchEval:
-    """A resolved launch: the eval joined (or None) and how it was chosen."""
+    """A resolved launch: the eval joined (or None), how it was chosen, and its baseline.
+
+    ``baseline`` is empty until the eval admits the launch: only the eval's
+    frozen baseline is ever recorded, so it is read back from the aggregate
+    that froze it (``eval_admission.admit_launch``), never taken from a request.
+    """
 
     eval_id: str | None
     selection: EvalSelection
+    baseline: tuple[RepositoryBaseline, ...] = ()
+
+    def admitted(self, baseline: tuple[RepositoryBaseline, ...]) -> LaunchEval:
+        """This launch, carrying the baseline its eval froze when it admitted it."""
+        return replace(self, baseline=baseline)

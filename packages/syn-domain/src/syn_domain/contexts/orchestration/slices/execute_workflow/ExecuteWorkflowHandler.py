@@ -446,8 +446,9 @@ class ExecuteWorkflowHandler:
 
         # #967: also a launch snapshot, and decided last of the refusals, so a
         # launch refused for anything else never freezes the eval it named.
-        launch_eval = command.eval_choice.resolve(workflow.default_eval_id)
-        await self._admit_to_eval(launch_eval)
+        launch_eval = await self._admit_to_eval(
+            command.eval_choice.resolve(workflow.default_eval_id)
+        )
 
         execution_id = (
             command.execution_id
@@ -480,17 +481,17 @@ class ExecuteWorkflowHandler:
             )
             raise DuplicateExecutionError(execution_id) from None
 
-    async def _admit_to_eval(self, launch_eval: LaunchEval) -> None:
-        """Refuse a launch whose eval is missing or archived, and freeze it otherwise."""
+    async def _admit_to_eval(self, launch_eval: LaunchEval) -> LaunchEval:
+        """Refuse a launch whose eval is missing or archived; freeze it and carry its baseline."""
         if launch_eval.eval_id is None:
-            return
+            return launch_eval
         if self._eval_repo is None:
             msg = (
                 f"This launch resolves to eval {launch_eval.eval_id}, but no eval "
                 "repository is wired to admit it"
             )
             raise ValueError(msg)
-        await admit_launch(self._eval_repo, launch_eval.eval_id)
+        return launch_eval.admitted(await admit_launch(self._eval_repo, launch_eval.eval_id))
 
     @staticmethod
     def _merge_inputs(

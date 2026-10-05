@@ -20,11 +20,12 @@ import os
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Protocol
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from event_sourcing import EventStoreRepository
+from event_sourcing import ConcurrencyConflictError, EventStoreRepository
 from event_sourcing.client.memory import MemoryEventStoreClient
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
@@ -32,6 +33,7 @@ from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.eval_admission import EvalUnavailableError
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
+from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
@@ -42,6 +44,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membershi
     EvalMembership,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    EvalBaselinePin,
     ExecutionStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
@@ -97,10 +100,18 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
 from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
 )
+from syn_domain.contexts.orchestration.slices.update_eval import UpdateEvalHandler
 from syn_domain.testing.fake_revision_resolver import FakeRevisionResolver
 from syn_domain.testing.stored_replay import stored_envelopes
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+_SHA_MAIN = "a1" * 20
+_SHA_DEV = "d2" * 20
+
+
+def _widgets_at(ref: str) -> BaselineRequest:
+    return BaselineRequest(repository=RepositoryRef.from_slug("acme/widgets"), requested_ref=ref)
 
 _WORKFLOW = (
     Path(__file__).resolve().parents[8] / "workflows" / "sdlc" / "quickfix" / "workflow.yaml"
@@ -144,7 +155,10 @@ class _World:
         self.evals: RepositoryAdapter[EvalAggregate] = _repository(
             self.evals_store, EvalAggregate, "Eval"
         )
-        processor = WorkflowExecutionProcessor(
+        self.resolver = FakeRevisionResolver(
+            shas={("acme/widgets", "main"): _SHA_MAIN, ("acme/widgets", "dev"): _SHA_DEV}
+        )
+        self.processor = WorkflowExecutionProcessor(
             execution_repository=self.executions,
             session_repository=AsyncMock(),
             workspace_service=_failing_workspace(),
@@ -158,14 +172,18 @@ class _World:
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         )
-        self.execute = ExecuteWorkflowHandler(
-            processor=processor,
-            workflow_repository=self.templates,
-            eval_repository=self.evals,
-        )
+        self.execute = self.launcher(self.evals)
         self.attach = AttachExecutionToEvalHandler(self.executions, self.evals)
         self.detach = DetachExecutionFromEvalHandler(self.executions)
         self.set_default = SetWorkflowDefaultEvalHandler(self.templates, self.evals)
+
+    def launcher(self, evals: RepositoryAdapter[EvalAggregate]) -> ExecuteWorkflowHandler:
+        """The real launch handler, admitting through ``evals``."""
+        return ExecuteWorkflowHandler(
+            processor=self.processor,
+            workflow_repository=self.templates,
+            eval_repository=evals,
+        )
 
     @property
     def workflow_id(self) -> str:
@@ -176,11 +194,20 @@ class _World:
         template.create_workflow(build_command_from_definition(self.definition))
         await self.templates.save_new(template)
 
-    async def create_eval(self, eval_id: str) -> None:
-        created = await CreateEvalHandler(self.evals, FakeRevisionResolver()).handle(
-            eval_id=EvalId(eval_id), name=eval_id, goal=Goal("Keep tests green")
+    async def create_eval(self, eval_id: str, *refs: str) -> None:
+        created = await CreateEvalHandler(self.evals, self.resolver).handle(
+            eval_id=EvalId(eval_id),
+            name=eval_id,
+            goal=Goal("Keep tests green"),
+            baseline=[_widgets_at(ref) for ref in refs],
         )
         assert created.success
+
+    async def rebaseline(self, evals: RepositoryAdapter[EvalAggregate], eval_id: str) -> None:
+        updated = await UpdateEvalHandler(evals, self.resolver).handle(
+            eval_id=EvalId(eval_id), baseline=[_widgets_at("dev")]
+        )
+        assert updated is not None and updated.success
 
     async def archive_eval(self, eval_id: str) -> None:
         archived = await ArchiveEvalHandler(self.evals).handle(eval_id=EvalId(eval_id))
@@ -195,8 +222,14 @@ class _World:
         )
         assert result is not None and result.success
 
-    async def run(self, execution_id: str, choice: EvalChoice | None = None) -> None:
-        await self.execute.handle(
+    async def run(
+        self,
+        execution_id: str,
+        choice: EvalChoice | None = None,
+        *,
+        through: ExecuteWorkflowHandler | None = None,
+    ) -> None:
+        await (through or self.execute).handle(
             ExecuteWorkflowCommand(
                 aggregate_id=self.workflow_id,
                 execution_id=execution_id,
@@ -297,6 +330,115 @@ async def test_a_launch_freezes_the_eval_it_joins() -> None:
 
     stored = await world.evals.get_by_id("eval-1")
     assert stored is not None and stored.is_frozen
+
+
+# -- the frozen baseline the run starts from (step 4A) ----------------------
+
+
+async def test_the_start_records_the_baseline_its_eval_froze() -> None:
+    world = await _world()
+    await world.create_eval("eval-1", "main")
+
+    await world.run("exec-1", _explicit("eval-1"))
+
+    started = await world.started("exec-1")
+    assert started.eval_baseline == [
+        EvalBaselinePin(repository="acme/widgets", requested_ref="main", commit_sha=_SHA_MAIN)
+    ]
+
+
+async def test_a_run_into_an_eval_with_no_repositories_records_an_empty_baseline() -> None:
+    """Empty, not None: "the eval pins nothing" is not "this run is in no eval"."""
+    world = await _world("eval-1")
+
+    await world.run("exec-1", _explicit("eval-1"))
+
+    assert (await world.started("exec-1")).eval_baseline == []
+
+
+async def test_a_run_in_no_eval_writes_no_baseline_key() -> None:
+    world = await _world()
+    await world.create_eval("eval-1", "main")
+
+    await world.run("exec-1")
+
+    started = await world.started("exec-1")
+    assert started.eval_baseline is None
+    assert "eval_baseline" not in started.model_dump()
+
+
+async def test_a_later_run_starts_from_the_frozen_baseline_not_where_the_ref_moved() -> None:
+    world = await _world()
+    await world.create_eval("eval-1", "main")
+    await world.run("exec-1", _explicit("eval-1"))
+
+    world.resolver.shas[("acme/widgets", "main")] = _SHA_DEV
+    await world.run("exec-2", _explicit("eval-1"))
+
+    [pin] = (await world.started("exec-2")).eval_baseline or []
+    assert pin.commit_sha == _SHA_MAIN
+
+
+class _RivalWritesFirst(RepositoryAdapter[EvalAggregate]):
+    """Hands out the eval, but first lets ``rival`` write through the real store.
+
+    Only the first read races; the reload after the conflict sees the truth.
+    The conflict itself is the real repository's expected-version check.
+    """
+
+    def __init__(
+        self, inner: RepositoryAdapter[EvalAggregate], rival: Callable[[], Awaitable[None]]
+    ) -> None:
+        super().__init__(inner.sdk_repository)
+        self._rival: Callable[[], Awaitable[None]] | None = rival
+
+    async def get_by_id(self, aggregate_id: str) -> EvalAggregate | None:
+        seen = await super().get_by_id(aggregate_id)
+        if self._rival is not None:
+            rival, self._rival = self._rival, None
+            await rival()
+        return seen
+
+
+async def test_a_first_launch_losing_the_freeze_race_records_the_winners_baseline() -> None:
+    """Two first launches: the rival re-baselines and launches between our read and our freeze.
+
+    Ours read the eval at ``main``; the stream froze it at ``dev``. The run
+    must record ``dev`` - the baseline every other run of the eval starts from
+    - never the stale one it read before losing.
+    """
+    world = await _world()
+    await world.create_eval("eval-1", "main")
+
+    async def rebaseline_then_launch() -> None:
+        await world.rebaseline(world.evals, "eval-1")
+        await world.run("exec-rival", _explicit("eval-1"))
+
+    racing = _RivalWritesFirst(world.evals, rebaseline_then_launch)
+    await world.run("exec-1", _explicit("eval-1"), through=world.launcher(racing))
+
+    for execution_id in ("exec-rival", "exec-1"):
+        [pin] = (await world.started(execution_id)).eval_baseline or []
+        assert (pin.requested_ref, pin.commit_sha) == ("dev", _SHA_DEV)
+    frozen = [
+        e for e in await stored_envelopes(world.evals_store) if e.event.event_type == "EvalFrozen"
+    ]
+    assert len(frozen) == 1
+
+
+async def test_a_launch_racing_a_baseline_edit_is_refused_and_records_nothing() -> None:
+    """The edit won; the eval is not frozen, so the stale read must not start a run."""
+    world = await _world()
+    await world.create_eval("eval-1", "main")
+
+    async def rebaseline() -> None:
+        await world.rebaseline(world.evals, "eval-1")
+
+    racing = _RivalWritesFirst(world.evals, rebaseline)
+    with pytest.raises(ConcurrencyConflictError):
+        await world.run("exec-1", _explicit("eval-1"), through=world.launcher(racing))
+
+    assert await world.stored(WorkflowExecutionStartedEvent, "exec-1") == []
 
 
 @pytest.mark.parametrize("archived_default", [False, True])
@@ -582,3 +724,21 @@ async def test_an_unknown_run_is_not_a_result() -> None:
         )
         is None
     )
+
+
+# -- evolution: eval_baseline is new on WorkflowExecutionStarted ------------
+
+
+async def test_an_eval_start_written_before_the_baseline_field_still_replays() -> None:
+    """A step-3 eval run's start event, stored without `eval_baseline`, reads typed."""
+    world = await _world()
+    await world.create_eval("eval-1", "main")
+    await world.run("exec-1", _explicit("eval-1"))
+    payload = (await world.started("exec-1")).model_dump(mode="json")
+    del payload["eval_baseline"]
+
+    old = WorkflowExecutionStartedEvent.model_validate(payload)
+
+    assert old.eval_id == "eval-1"
+    assert old.eval_baseline is None
+    assert "eval_baseline" not in old.model_dump(mode="json")
