@@ -7,7 +7,6 @@ installations). These hit the GitHub API directly — not projections.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -27,8 +26,6 @@ from syn_api.types import (
     Ok,
     Result,
 )
-
-_INSTALLATION_SYNC_TTL = timedelta(hours=1)
 
 
 class _RepoLister(Protocol):
@@ -136,17 +133,6 @@ async def _fetch_repos(
     return await _aggregate_all_installations(client, include_private)
 
 
-def _is_stale(installations: list) -> bool:
-    """Return True if the installation cache is empty or any record is past the TTL."""
-    if not installations:
-        return True
-    now = datetime.now(UTC)
-    return any(
-        inst.synced_at is None or (now - inst.synced_at) > _INSTALLATION_SYNC_TTL
-        for inst in installations
-    )
-
-
 async def _sync_installations(
     client: _RepoLister,
     projection: InstallationProjection,
@@ -234,17 +220,15 @@ async def _known_installations(
 ) -> tuple[list, bool]:
     """Return the installations to query and whether that list is current.
 
-    Refreshes the installation cache from GitHub if it is empty or older than
-    the TTL, so the endpoint works without a webhook configured. If the refresh
-    fails the stale list is kept, but it may be missing an installation; so may
-    a refreshed list when an installation failed to persist.
+    Asks GitHub every time: a cached list, however recent, cannot know about an
+    installation added since, and the listing is labelled complete on the
+    strength of this answer. If GitHub cannot be asked, the cached list is used
+    but is not current; nor is a refreshed list when an installation failed to
+    persist.
     """
-    installations = await projection.get_all_active()
-    if not _is_stale(installations):
-        return installations, True
     refreshed = await _sync_installations(client, projection)
     if refreshed is None:
-        return installations, False
+        return await projection.get_all_active(), False
     return refreshed
 
 

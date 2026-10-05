@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from syn_api.routes.github import _is_stale, list_accessible_repos
+from syn_api.routes.github import list_accessible_repos
 from syn_api.types import Err, GitHubError, GitHubRepoLookup, Ok
 
 
@@ -161,45 +161,10 @@ async def test_include_private_false_filters() -> None:
     assert all(not r.private for r in result.value.repos)
 
 
-# =============================================================================
-# _is_stale helper
-# =============================================================================
-
-
 def _make_installation_with_synced_at(synced_at: datetime | None) -> MagicMock:
     inst = MagicMock()
     inst.synced_at = synced_at
     return inst
-
-
-def test_is_stale_empty_list() -> None:
-    """Empty installation list is stale."""
-    assert _is_stale([]) is True
-
-
-def test_is_stale_none_synced_at() -> None:
-    """synced_at=None (pre-migration record) is treated as stale."""
-    inst = _make_installation_with_synced_at(None)
-    assert _is_stale([inst]) is True
-
-
-def test_is_stale_fresh() -> None:
-    """Record synced 30 minutes ago is not stale."""
-    inst = _make_installation_with_synced_at(datetime.now(UTC) - timedelta(minutes=30))
-    assert _is_stale([inst]) is False
-
-
-def test_is_stale_past_ttl() -> None:
-    """Record synced 90 minutes ago is stale."""
-    inst = _make_installation_with_synced_at(datetime.now(UTC) - timedelta(minutes=90))
-    assert _is_stale([inst]) is True
-
-
-def test_is_stale_one_stale_record_triggers_refresh() -> None:
-    """Any stale record in the list marks the whole set as stale."""
-    fresh = _make_installation_with_synced_at(datetime.now(UTC) - timedelta(minutes=10))
-    stale = _make_installation_with_synced_at(datetime.now(UTC) - timedelta(minutes=90))
-    assert _is_stale([fresh, stale]) is True
 
 
 # =============================================================================
@@ -242,24 +207,22 @@ async def test_empty_projection_triggers_github_api_sync() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stale_projection_triggers_refresh() -> None:
-    """When synced_at is past the TTL, list_installations() is called."""
-    stale_inst = _make_installation_with_synced_at(datetime.now(UTC) - timedelta(minutes=90))
-    stale_inst.installation_id = "inst-1"
+async def test_recently_synced_projection_still_refreshes() -> None:
+    """However recent the cache, list_installations() is asked: it may predate an installation."""
+    cached_inst = _make_installation_with_synced_at(datetime.now(UTC) - timedelta(minutes=1))
+    cached_inst.installation_id = "inst-1"
 
     raw_installations = [
         {"id": "inst-1", "account": {"id": 1, "login": "acme", "type": "Org"}, "permissions": {}}
     ]
-    fresh_inst = _make_installation_with_synced_at(datetime.now(UTC))
-    fresh_inst.installation_id = "inst-1"
 
     mock_client = MagicMock()
     mock_client.list_installations = AsyncMock(return_value=raw_installations)
     mock_client.list_accessible_repos = AsyncMock(return_value=[_make_repo(1)])
 
     mock_projection = MagicMock()
-    mock_projection.get_all_active = AsyncMock(return_value=[stale_inst])
-    mock_projection.upsert_from_github_api = AsyncMock(return_value=fresh_inst)
+    mock_projection.get_all_active = AsyncMock(return_value=[cached_inst])
+    mock_projection.upsert_from_github_api = AsyncMock(return_value=cached_inst)
 
     with (
         patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
@@ -273,33 +236,6 @@ async def test_stale_projection_triggers_refresh() -> None:
 
     mock_ensure.assert_awaited_once()
     mock_client.list_installations.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_fresh_projection_skips_refresh() -> None:
-    """When all records are within the TTL, list_installations() is NOT called."""
-    fresh_inst = _make_installation_with_synced_at(datetime.now(UTC) - timedelta(minutes=10))
-    fresh_inst.installation_id = "inst-1"
-
-    mock_client = MagicMock()
-    mock_client.list_installations = AsyncMock(return_value=[])
-    mock_client.list_accessible_repos = AsyncMock(return_value=[_make_repo(1)])
-
-    mock_projection = MagicMock()
-    mock_projection.get_all_active = AsyncMock(return_value=[fresh_inst])
-
-    with (
-        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
-        patch("syn_adapters.github.client.get_github_client", return_value=mock_client),
-        patch(
-            "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
-            return_value=mock_projection,
-        ),
-    ):
-        await list_accessible_repos(installation_id=None)
-
-    mock_ensure.assert_awaited_once()
-    mock_client.list_installations.assert_not_awaited()
 
 
 @pytest.mark.asyncio

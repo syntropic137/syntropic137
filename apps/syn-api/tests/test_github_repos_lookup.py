@@ -62,19 +62,23 @@ def _get(
 ) -> JsonValue:
     """Serve one `/github/repos` request against a scripted GitHub client.
 
-    ``upserted`` scripts persisting each synced installation, in order; by
-    default every upsert succeeds.
+    ``installations_sync`` scripts GitHub's installation list; by default it
+    lists exactly the cached installations. ``upserted`` scripts persisting
+    each synced installation, in order; by default every upsert succeeds.
     """
     client = MagicMock()
     client.list_accessible_repos = AsyncMock(side_effect=repos_by_installation)
+    if installations_sync is None:
+        installations_sync = [{"id": inst.installation_id} for inst in cached]
     if isinstance(installations_sync, Exception):
         client.list_installations = AsyncMock(side_effect=installations_sync)
     else:
-        client.list_installations = AsyncMock(return_value=installations_sync or [])
+        client.list_installations = AsyncMock(return_value=installations_sync)
     projection = MagicMock()
     projection.get_all_active = AsyncMock(return_value=cached)
+    by_id = {inst.installation_id: inst for inst in cached}
     if upserted is None:
-        projection.upsert_from_github_api = AsyncMock(side_effect=lambda _raw: cached[0])
+        projection.upsert_from_github_api = AsyncMock(side_effect=lambda raw: by_id[raw["id"]])
     else:
         projection.upsert_from_github_api = AsyncMock(side_effect=upserted)
 
@@ -172,10 +176,10 @@ def test_installation_sync_success_with_no_installations_is_complete() -> None:
     assert _lookup(body).lookup == GitHubRepoLookup.COMPLETE
 
 
-def test_stale_cache_kept_after_sync_failure_is_partial() -> None:
+def test_cache_kept_after_sync_failure_is_partial() -> None:
     """The kept list may be missing an installation, so absence proves nothing."""
     body = _get(
-        cached=[_installation("inst-1", synced_minutes_ago=90)],
+        cached=[_installation("inst-1")],
         repos_by_installation=[[_raw_repo(1, "acme/payments")]],
         installations_sync=RuntimeError("GitHub 502"),
     )
@@ -207,3 +211,19 @@ def test_one_installation_failing_to_persist_makes_the_lookup_partial() -> None:
     listing = _lookup(body)
     assert [r.full_name for r in listing.repos] == ["acme/payments"]
     assert listing.lookup == GitHubRepoLookup.PARTIAL
+
+
+def test_an_installation_added_while_the_cache_is_warm_is_queried() -> None:
+    """A fresh cache may predate an installation, so it cannot vouch for completeness."""
+    body = _get(
+        cached=[_installation("inst-1", synced_minutes_ago=1)],
+        repos_by_installation=[
+            [_raw_repo(1, "acme/payments")],
+            [_raw_repo(2, "newco/billing")],
+        ],
+        installations_sync=[{"id": "inst-1"}, {"id": "inst-2"}],
+        upserted=[_installation("inst-1"), _installation("inst-2")],
+    )
+    listing = _lookup(body)
+    assert [r.full_name for r in listing.repos] == ["acme/payments", "newco/billing"]
+    assert listing.lookup == GitHubRepoLookup.COMPLETE
