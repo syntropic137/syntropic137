@@ -47,6 +47,37 @@ _GATING_PHASES = [
 _HEADING = "## A check this workspace cannot run is settled by CI on the same head SHA"
 
 
+_GATEWAY = "ci/fitness/infrastructure/test_gateway_bind.py"
+
+#: Architectural Fitness on run 37247898846 (PR #1587, head 9b2f098a), green.
+#: The repo's `addopts` adds `-q` to the job's `-v`: one progress line per file.
+_GREEN_CI_LOG = f"""\
+uv run pytest ci/fitness/ -v --tb=short -m architecture
+ci/fitness/infrastructure/test_compose_env_forwarding.py ............... [ 92%]
+...............                                                          [ 93%]
+{_GATEWAY} ...                       [ 93%]
+ci/fitness/infrastructure/test_phase_definition_roundtrip.py .           [ 93%]
+=========================== short test summary info ============================
+SKIPPED [1] ci/fitness/event_sourcing/test_event_ownership.py:86: got empty parameter set
+========== 990 passed, 5 skipped, 21 deselected, 2 warnings in 44.88s ==========
+"""
+
+#: The same job had the gateway tests skipped: green, and settles nothing.
+_SKIPPED_CI_LOG = f"""\
+{_GATEWAY} sss                       [ 93%]
+=========================== short test summary info ============================
+SKIPPED [1] {_GATEWAY}:40: docker not available
+"""
+
+
+def _prompt_grep(section: str, log: str) -> list[str]:
+    """Run the prompt's own `--log | grep` over a CI log, as the agent would."""
+    found = re.search(r"--log \| grep (-F )?'([^']+)'", section)
+    assert found, "the section gives no grep over the job log"
+    pattern = found.group(2).replace("<test-file>", _GATEWAY)
+    return [line for line in log.splitlines() if pattern in line]
+
+
 def _installed_section(workflow: str, phase_name: str) -> str:
     """The section as installed, with whitespace collapsed so a re-flow is not a failure."""
     command = build_command_from_definition(
@@ -95,7 +126,23 @@ class TestTheRule:
         section = sections[key]
         assert "the check is closed. It is not a blocker" in section
         # A green job that deselected the test did not run it (#1562's -m architecture).
-        assert "--log | grep '<test-file>::'" in section
+        assert "the number of dots must equal that count" in section
+        assert "uv run pytest --collect-only -q -m <the job's marker> <test-file>" in section
+
+    def test_its_grep_finds_the_evidence_in_a_real_ci_log(
+        self, sections: dict[tuple[str, str], str], key: tuple[str, str]
+    ) -> None:
+        # PR #1587's first draft grepped for `<test-file>::` and wanted `PASSED`,
+        # which `-q` never prints, so it could not close a check CI had passed.
+        matched = _prompt_grep(sections[key], _GREEN_CI_LOG)
+        assert any(_GATEWAY + " ..." in line for line in matched), matched
+
+    def test_its_grep_surfaces_a_skip_of_the_file(
+        self, sections: dict[tuple[str, str], str], key: tuple[str, str]
+    ) -> None:
+        matched = _prompt_grep(sections[key], _SKIPPED_CI_LOG)
+        assert any(line.startswith("SKIPPED") for line in matched), matched
+        assert "a `SKIPPED` line naming the file all mean the check was not run" in sections[key]
 
     def test_a_pending_run_is_waited_on_with_a_bound(
         self, sections: dict[tuple[str, str], str], key: tuple[str, str]

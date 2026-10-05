@@ -120,18 +120,32 @@ Then find the job that runs the check (`Architectural Fitness` runs
 ```
 gh pr checks <n> --json name,state,link,workflow
 gh run view <run-id> --json headSha,status,conclusion
-gh run view --job <job-id> --log | grep '<test-file>::'
+gh run view --job <job-id> --log | grep -F '<test-file>'
+uv run pytest --collect-only -q -m <the job's marker> <test-file>
 ```
 
 The job's `link` ends in `/actions/runs/<run-id>/job/<job-id>`. Print the run's
-`headSha` next to your `git rev-parse HEAD`; both must be the same full SHA. The
-log line shows the test actually ran in that job and PASSED. A job that is green
-because it deselected or skipped the test did not run it, and settles nothing.
+`headSha` next to your `git rev-parse HEAD`; both must be the same full SHA.
+
+Then show from that log that the test ran and passed. The repo's pytest config
+adds `-q`, so CI prints one progress line per file, not one line per test:
+`ci/fitness/infrastructure/test_gateway_bind.py ...   [ 93%]`, one character per
+test (a long file wraps onto following lines of bare characters). `.` is a pass;
+`s`, `F`, `E`, `x` or `X` is not. Do not look for `<test-file>::` or `PASSED`
+lines: that output does not print them. Collecting needs no docker, so count the
+file's tests here with the job's own `-m` marker (the log prints the job's pytest
+command); the number of dots must equal that count. The same grep also shows any
+`SKIPPED [n] <test-file>:...` line from the job's short summary, and there must
+be none. A job that is green because it deselected or skipped the test did not
+run it, and settles nothing: no progress line for the file, fewer dots than
+collected tests, any character other than `.`, or a `SKIPPED` line naming the
+file all mean the check was not run.
 
 Then decide, and report the SHA pair, the job link and the log lines whatever
 the outcome:
 
-- **Passed on this SHA** (conclusion `success`, the test `PASSED` in its log):
+- **Passed on this SHA** (conclusion `success`, one `.` per collected test on the file's progress line, no
+  `SKIPPED` line naming it):
   the check is closed. It is not a blocker, and you do not need to run it here.
 - **Not finished yet:** wait on it, bounded, rather than blocking:
   `timeout 25m gh pr checks <n> --watch --interval 60`, then read it again as
