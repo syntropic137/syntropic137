@@ -1,10 +1,10 @@
 id: sdlc-implement-v3
 name: "SDLC: Premise, implement + draft PR, verify, fix, re-verify, mark ready (v3)"
 description: >
-  Take a well-specified issue to a reviewed pull request. Six phases: check the
-  premise, make the change, verify it independently, fix what verification
-  found, confirm the fix, open the PR. Verification is separate from
-  implementation on purpose, and a defect it finds is repaired rather than
+  Take a well-specified issue to a reviewed pull request: check the premise,
+  make the change, verify it independently, fix what verification found and
+  confirm the fix (up to three rounds), open the PR. Verification is separate
+  from implementation on purpose, and a defect it finds is repaired rather than
   ending the run.
 type: implementation
 classification: standard
@@ -139,7 +139,8 @@ phases:
       - syntropic137/software-leverage-points/software-complexity@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/verify.md
 
-  - id: fix
+  - &fix_round
+    id: fix
     name: Address what verification found
     order: 4
     execution_type: sequential
@@ -165,7 +166,8 @@ phases:
       - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/fix.md
 
-  - id: reverify
+  - &reverify_round
+    id: reverify
     name: Confirm the fix closed what verification found
     order: 5
     execution_type: sequential
@@ -199,9 +201,46 @@ phases:
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/reverify.md
 
+  # BOUNDED REPAIR ROUNDS (PC-63). On 2026-10-05 four runs (#1589, #1596,
+  # #1597, #1603) ended with `reverify` BLOCKED on findings one more edit would
+  # have closed, and each needed a second round built by hand. The engine
+  # advances strictly by `order` and has no loop construct, so the repeat is
+  # written out here instead: two extra fix/reverify pairs, the same prompts
+  # under new ids. That makes the bound part of the definition - three rounds
+  # in total, never more - and every round a phase on the execution, so the
+  # round count is visible there.
+  #
+  # A round whose predecessor CERTIFIED changes nothing and certifies on the
+  # same SHA; both prompts say so and make that path cheap. The phase ids are
+  # load-bearing: the prompts find "the latest verdict" by looking for
+  # `reverify_3/`, `reverify_2/`, `reverify/` in that order, and
+  # `finalize_pr` reads whichever is newest. Adding a round means adding a pair
+  # here AND extending that list in phases/fix.md, phases/reverify.md and
+  # phases/finalize_pr.md; scripts/tests/test_implement_v3_repair_rounds.py
+  # fails if they disagree.
+  - <<: *fix_round
+    id: fix_2
+    name: Address what verification found (round 2)
+    order: 6
+
+  - <<: *reverify_round
+    id: reverify_2
+    name: Confirm the fix closed what verification found (round 2)
+    order: 7
+
+  - <<: *fix_round
+    id: fix_3
+    name: Address what verification found (round 3)
+    order: 8
+
+  - <<: *reverify_round
+    id: reverify_3
+    name: Confirm the fix closed what verification found (round 3)
+    order: 9
+
   - id: finalize_pr
     name: Open the pull request
-    order: 6
+    order: 10
     execution_type: sequential
     input_artifacts:
       - markdown
