@@ -13,6 +13,9 @@ import os
 
 # Set test environment BEFORE any imports that might read settings
 os.environ["APP_ENVIRONMENT"] = "test"
+# Container creation labels its host (#1310); without this the default would ask
+# whatever Docker daemon the test machine has. Tests of that default unset it.
+os.environ.setdefault("SYN_HOST_ID", "test-host")
 
 
 import pytest

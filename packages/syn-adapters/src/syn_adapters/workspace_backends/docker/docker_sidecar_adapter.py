@@ -51,6 +51,7 @@ from syn_adapters.workspace_backends.docker.docker_sidecar_helpers import (
     build_sidecar_docker_cmd,
     run_sidecar_container,
 )
+from syn_adapters.workspace_backends.host_labels import host_labels
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,7 @@ class DockerSidecarAdapter:
             network_name,
             self._token_service_url,
             self._default_image,
+            await host_labels(),
         )
 
         logger.info(

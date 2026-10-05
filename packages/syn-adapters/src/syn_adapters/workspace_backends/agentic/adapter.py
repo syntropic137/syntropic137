@@ -298,7 +298,7 @@ class AgenticIsolationAdapter:
             labels={
                 "syn.execution_id": config.execution_id,
                 "syn.workspace_id": config.workspace_id,
-                **host_labels(),
+                **(await host_labels()),
             },
             security=self._security,
         )

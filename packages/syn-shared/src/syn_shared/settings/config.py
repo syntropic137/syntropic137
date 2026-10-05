@@ -10,7 +10,6 @@ See ADR-004: Environment Configuration with Pydantic Settings.
 from __future__ import annotations
 
 import json
-import socket
 from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated
@@ -215,29 +214,27 @@ class Settings(BaseSettings):
         ),
     )
 
-    syn_host_id: str = Field(
-        default_factory=socket.gethostname,
+    syn_host_id: str | None = Field(
+        default=None,
         description=(
-            "Identity of the host process that creates workspace and sidecar "
-            "containers, stamped on them as the syn.host_id label. "
-            "Defaults to the container hostname."
+            "Identity of the Docker host whose workspace, sidecar and recovery "
+            "containers this API creates, stamped on them as the syn.host_id "
+            "label. Must be stable across API container recreation and distinct "
+            "per host. Defaults to the Docker engine ID (`docker info`), which "
+            "already is; never the API container hostname, which is not."
         ),
     )
-
-    @field_validator("syn_host_id", mode="before")
-    @classmethod
-    def _empty_host_id_to_hostname(cls, v: object) -> object:
-        """Treat an empty SYN_HOST_ID as unset rather than as a blank identity."""
-        if v == "":
-            return socket.gethostname()
-        return v
 
     # =========================================================================
     # VALIDATORS - Convert empty strings to None
     # =========================================================================
 
     @field_validator(
-        "esp_event_store_db_url", "syn_observability_db_url", "event_store_url", mode="before"
+        "esp_event_store_db_url",
+        "syn_observability_db_url",
+        "event_store_url",
+        "syn_host_id",
+        mode="before",
     )
     @classmethod
     def empty_str_to_none(cls, v: str | None) -> str | None:

@@ -9,6 +9,7 @@ SeshMagic instance, and that is only true if the disabled path emits nothing.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -44,6 +45,9 @@ from syn_shared.settings.session_store import (
     SESHMAGIC_PROVIDER,
     SessionStoreSettings,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 # These are pure/mocked and must run in CI's `pytest -m unit` job — an opt-in
 # guarantee that CI never checks is not a guarantee.
@@ -385,6 +389,15 @@ async def _create(
 class TestAdapterIntegration:
     """The adapter is the seam that actually reaches the provider."""
 
+    @pytest.fixture(autouse=True)
+    def _stamped_host(self, monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
+        # A fixed host identity, so creation never asks a real Docker daemon.
+        monkeypatch.setenv("SYN_HOST_ID", "host-under-test-7f3a")
+        monkeypatch.setenv("SYN_BUILD_IMAGE_TAG", "v0.99.0-gen-c0ffee")
+        reset_settings()
+        yield
+        reset_settings()
+
     @pytest.mark.asyncio
     async def test_configured_store_reaches_the_provider(self) -> None:
         provider = await _create(_enabled_settings())
@@ -410,17 +423,9 @@ class TestAdapterIntegration:
         assert ws_config.environment["EXISTING_VAR"] == "kept"
 
     @pytest.mark.asyncio
-    async def test_unconfigured_store_changes_nothing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_unconfigured_store_changes_nothing(self) -> None:
         """Self-hostability guarantee at the real call site."""
-        monkeypatch.setenv("SYN_HOST_ID", "host-under-test-7f3a")
-        monkeypatch.setenv("SYN_BUILD_IMAGE_TAG", "v0.99.0-gen-c0ffee")
-        reset_settings()
-        try:
-            provider = await _create(_disabled_settings())
-        finally:
-            reset_settings()
+        provider = await _create(_disabled_settings())
         ws_config = provider.create.await_args.args[0]
 
         assert ws_config.environment == {

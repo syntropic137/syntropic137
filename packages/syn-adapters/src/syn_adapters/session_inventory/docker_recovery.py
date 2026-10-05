@@ -11,6 +11,7 @@ from agentic_isolation.child_journal import WorkspaceChildJournalReader
 from agentic_isolation.providers.base import ExecuteResult
 from agentic_isolation.session_spool import WorkspaceSpoolReader, capture_retained_partition
 
+from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 
 from .recovery_worker import RecoveryReaders
@@ -88,6 +89,7 @@ class DockerSpoolRecovery:
         exclusive = await volume_unreferenced(location.volume_name)
         image = await verify_image_async(self._image)
         name = f"syn-capture-recovery-{uuid4().hex}"
+        labels = [f"--label={key}={value}" for key, value in (await host_labels()).items()]
         try:
             created = await _docker(
                 [
@@ -108,6 +110,7 @@ class DockerSpoolRecovery:
                     "--mount",
                     f"type=volume,source={location.volume_name},target=/spool",
                     "--entrypoint=/usr/bin/timeout",
+                    *labels,
                     image,
                     "1800",
                     "/bin/sleep",

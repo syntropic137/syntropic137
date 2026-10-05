@@ -10,10 +10,11 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_shared.process_exit import describe_process_failure
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         SidecarConfig,
     )
@@ -27,6 +28,7 @@ def build_sidecar_docker_cmd(
     network_name: str,
     token_service_url: str,
     default_image: str,
+    host: Mapping[str, str],
 ) -> list[str]:
     """Build the docker run command for a sidecar container.
 
@@ -36,6 +38,7 @@ def build_sidecar_docker_cmd(
         network_name: Docker network to attach to
         token_service_url: URL of Token Vending Service
         default_image: Default sidecar Docker image
+        host: The creating host's labels, from ``host_labels()``
 
     Returns:
         Command arguments list for docker run.
@@ -65,7 +68,7 @@ def build_sidecar_docker_cmd(
         "syn.execution_id": config.execution_id,
         "syn.workspace_id": config.workspace_id,
         "syn.component": "sidecar",
-        **host_labels(),
+        **host,
     }
     docker_cmd.extend(f"--label={key}={value}" for key, value in labels.items())
 
