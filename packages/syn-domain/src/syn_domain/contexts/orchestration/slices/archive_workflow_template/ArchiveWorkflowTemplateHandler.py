@@ -16,6 +16,7 @@ from event_sourcing import ConcurrencyConflictError
 
 from syn_domain.contexts.orchestration._shared.template_launch import (
     ExecutionLookup,
+    ProjectionBarrier,
     active_launches,
 )
 from syn_domain.contexts.orchestration.domain import HandlerResult
@@ -56,8 +57,8 @@ class ExecutionProjection(Protocol):
     """Protocol for querying executions by workflow ID.
 
     Consulted only for executions launched before launches were recorded on
-    the template's stream (#1588): those were projected long ago. Every newer
-    one is asked of its own aggregate.
+    the template's stream (#1588), and only once ``ProjectionBarrier`` says it
+    has caught up. Every newer one is asked of its own aggregate.
     """
 
     async def get_by_workflow_id(self, workflow_id: str) -> Sequence[_ExecutionSummary]:
@@ -90,8 +91,12 @@ class ArchiveWorkflowTemplateHandler:
         execution_projection: ExecutionProjection,
         executions: ExecutionLookup,
         event_publisher: EventPublisher | None = None,
+        projection_barrier: ProjectionBarrier | None = None,
     ) -> None:
         self._repository = repository
+        # Optional so a fixture with no subscription can archive; production
+        # passes it, and without it the legacy check below trusts a lagging read.
+        self._projection_barrier = projection_barrier
         self._execution_projection = execution_projection
         self._executions = executions
         self._event_publisher = event_publisher
@@ -108,6 +113,14 @@ class ArchiveWorkflowTemplateHandler:
         if aggregate is None:
             logger.warning("Workflow template not found: %s", command.workflow_id)
             return None
+
+        # Barrier first: the legacy check reads the projection, which is only
+        # complete once it has processed every event that existed before now.
+        if self._projection_barrier is not None and not (
+            await self._projection_barrier.projected_through_head()
+        ):
+            msg = "Cannot archive: execution history is still being projected; retry"
+            return HandlerResult(success=False, error=msg)
 
         # Cross-aggregate guard: check for active executions
         active = await self._active_executions(aggregate)

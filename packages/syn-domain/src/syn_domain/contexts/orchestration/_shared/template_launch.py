@@ -50,6 +50,18 @@ class ExecutionLookup(Protocol):
     async def get_by_id(self, aggregate_id: str) -> _Execution | None: ...
 
 
+class ProjectionBarrier(Protocol):
+    """Whether the execution projection has caught up with the store (#1588).
+
+    Executions launched before launches were recorded on the template's
+    stream have no record there, so only the projection knows them. It is
+    trustworthy only once it has processed every event that existed when the
+    question was asked: false means it may still be missing one.
+    """
+
+    async def projected_through_head(self) -> bool: ...
+
+
 class TemplateLaunches:
     """Records each launch on the template's stream before the execution starts."""
 

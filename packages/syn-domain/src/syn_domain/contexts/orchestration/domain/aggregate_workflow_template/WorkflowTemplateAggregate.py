@@ -754,7 +754,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
 
         Refuses an archived template, so a launch that loses the race to an
         archive is refused rather than started against it. Recording the same
-        execution twice (a retried dispatch) records nothing.
+        execution again (a retried dispatch) renews its launch time: the retry
+        is about to start it, so it must claim the stream afresh rather than
+        ride a record an archive may already treat as expired.
         """
         from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchedEvent import (
             WorkflowTemplateExecutionLaunchedEvent,
@@ -763,8 +765,6 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         if self._is_archived:
             msg = f"Workflow {self.id} is archived and cannot launch executions"
             raise ValueError(msg)
-        if execution_id in self._launches:
-            return
         self._apply(
             WorkflowTemplateExecutionLaunchedEvent(
                 workflow_id=str(self.id), execution_id=execution_id, launched_at=launched_at

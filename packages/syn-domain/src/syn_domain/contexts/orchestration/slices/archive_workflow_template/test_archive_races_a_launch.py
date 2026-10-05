@@ -194,11 +194,93 @@ class TestLaunchAndArchiveShareOneStream:
         with pytest.raises(TemplateArchivedError, match="archived"):
             await TemplateLaunches(repo).record(WF, "exec-late")  # type: ignore[arg-type]
 
-    async def test_recording_the_same_launch_twice_records_it_once(self) -> None:
+    async def test_a_retry_after_the_grace_renews_the_claim_and_blocks_the_archive(
+        self,
+    ) -> None:
+        # The first dispatch recorded the launch and died before the execution
+        # stream was written; the grace has passed, so it no longer counts.
         repo = await _launched("exec-1")
+        repo.current()._launches["exec-1"] = datetime.now(UTC) - LAUNCH_GRACE * 2
         version = repo.current().version
+        # A retry of the same id is about to start it: it must write again.
         await TemplateLaunches(repo).record(WF, "exec-1")  # type: ignore[arg-type]
-        assert repo.current().version == version
+        assert repo.current().version == version + 1
+        result = await _archive(repo, Executions()).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and not result.success
+        assert not repo.current().is_archived
+
+    async def test_an_archive_racing_a_retry_conflicts(self) -> None:
+        repo = await _launched("exec-1")
+        repo.current()._launches["exec-1"] = datetime.now(UTC) - LAUNCH_GRACE * 2
+        executions = Executions()
+
+        async def the_retry_lands() -> None:
+            await TemplateLaunches(repo).record(WF, "exec-1")  # type: ignore[arg-type]
+
+        executions.on_read.append(the_retry_lands)
+        result = await _archive(repo, executions).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and not result.success
+        assert "launched while archiving" in (result.error or "")
+        assert not repo.current().is_archived
+
+
+class _Projected:
+    """A projection that lists one running execution once it has caught up."""
+
+    def __init__(self) -> None:
+        self.caught_up = False
+
+    async def get_by_workflow_id(self, workflow_id: str) -> list[_Execution]:
+        if not self.caught_up:
+            return []
+        return [_Execution(status="running", workflow_execution_id="exec-legacy")]
+
+
+class _Barrier:
+    def __init__(self, projection: _Projected, *, catches_up: bool) -> None:
+        self._projection = projection
+        self._catches_up = catches_up
+
+    async def projected_through_head(self) -> bool:
+        self._projection.caught_up = self._catches_up
+        return self._catches_up
+
+
+@pytest.mark.unit
+class TestAnExecutionStartedBeforeLaunchesWereRecorded:
+    """Rollout: a pre-#1588 start has no launch record, only a (lagging) projection row."""
+
+    @staticmethod
+    def _handler(repo: VersionedRepository, *, catches_up: bool) -> ArchiveWorkflowTemplateHandler:
+        projection = _Projected()
+        return ArchiveWorkflowTemplateHandler(
+            repository=repo,  # type: ignore[arg-type]
+            execution_projection=projection,
+            executions=Executions({"exec-legacy": "running"}),
+            projection_barrier=_Barrier(projection, catches_up=catches_up),
+        )
+
+    async def test_an_unprojected_legacy_execution_refuses_the_archive(self) -> None:
+        repo = await _launched()
+        result = await self._handler(repo, catches_up=False).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and not result.success
+        assert "still being projected" in (result.error or "")
+        assert not repo.current().is_archived
+
+    async def test_once_projected_the_legacy_execution_blocks_the_archive(self) -> None:
+        repo = await _launched()
+        result = await self._handler(repo, catches_up=True).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and not result.success
+        assert "1 active execution" in (result.error or "")
+        assert not repo.current().is_archived
 
 
 @pytest.mark.unit
@@ -245,3 +327,66 @@ class TestTheExecuteHandlerRecordsTheLaunch:
         with pytest.raises(TemplateArchivedError):
             await handler.handle(self._command())  # type: ignore[attr-defined]
         run.assert_not_awaited()
+
+
+@dataclass
+class _ResumeStart:
+    """The fields of a StartResumeCommand the handler reads before the run."""
+
+    aggregate_id: str = "exec-child"
+    workflow_id: str = WF
+    source_commits: tuple[()] = ()
+    continuation_candidates: tuple[()] = ()
+    remote_branches: list[object] | None = None
+
+
+@pytest.mark.unit
+class TestAResumedChildIsALaunch:
+    """A terminal parent's resume starts a child; archive must see it unprojected."""
+
+    @staticmethod
+    def _handler(repo: VersionedRepository) -> tuple[object, AsyncMock]:
+        from syn_domain.contexts.orchestration.slices.start_resume import StartResumeHandler
+
+        processor = AsyncMock()
+        no_child_yet = AsyncMock()
+        no_child_yet.get_by_id.return_value = None
+        handler = StartResumeHandler(
+            processor,
+            no_child_yet,
+            launches=TemplateLaunches(repo),  # type: ignore[arg-type]
+        )
+        handler._command_for = AsyncMock(return_value=_ResumeStart())  # type: ignore[method-assign]
+        return handler, processor.run_resume
+
+    async def test_an_unprojected_running_child_blocks_the_archive(self) -> None:
+        repo = await _launched("exec-parent")
+        handler, run_resume = self._handler(repo)
+        outcomes: list[object] = []
+
+        async def archive_while_the_child_runs(*_: object, **__: object) -> None:
+            # Parent finished; the child's stream is written and running, and
+            # the projection (NeverProjected) has seen neither.
+            executions = Executions({"exec-parent": "failed", "exec-child": "running"})
+            outcomes.append(
+                await _archive(repo, executions).handle(
+                    ArchiveWorkflowTemplateCommand(workflow_id=WF)
+                )
+            )
+
+        run_resume.side_effect = archive_while_the_child_runs
+        await handler.handle("exec-parent")  # type: ignore[attr-defined]
+
+        run_resume.assert_awaited_once()
+        assert "exec-child" in repo.current().launches
+        result = outcomes[0]
+        assert result is not None and not result.success  # type: ignore[attr-defined]
+        assert not repo.current().is_archived
+
+    async def test_an_archived_template_never_starts_the_child(self) -> None:
+        repo = await _launched()
+        await _archive(repo, Executions()).handle(ArchiveWorkflowTemplateCommand(workflow_id=WF))
+        handler, run_resume = self._handler(repo)
+        with pytest.raises(TemplateArchivedError):
+            await handler.handle("exec-parent")  # type: ignore[attr-defined]
+        run_resume.assert_not_awaited()

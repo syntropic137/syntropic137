@@ -269,6 +269,34 @@ class CoordinatorSubscriptionService:
             now=datetime.now(UTC),
         )
 
+    async def projected_through_head(
+        self, projection_name: str, *, timeout: float = 5.0, interval: float = 0.1
+    ) -> bool:
+        """Whether ``projection_name`` has processed every event in the store NOW (#1588).
+
+        The head is read once, first, so the target is fixed: a projection that
+        reaches it has seen every event written before the call, however many
+        are written while it waits. False if the subscription is not up or the
+        projection does not reach that head within ``timeout`` - the caller
+        refuses and asks again rather than trusting a read model that may lag.
+        """
+        if self._coordinator is None or self._checkpoint_store is None:
+            return False
+        head_events, _is_end, _next = await self._event_store.read_all(
+            from_global_nonce=sys.maxsize, max_count=1, forward=False
+        )
+        head = head_events[0].metadata.global_nonce if head_events else None
+        if head is None:
+            return True
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            checkpoint = await self._checkpoint_store.get_checkpoint(projection_name)
+            if checkpoint is not None and checkpoint.global_position >= head:
+                return True
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(interval)
+
     async def start(self) -> None:
         """Start the coordinator subscription service."""
         if self._running:

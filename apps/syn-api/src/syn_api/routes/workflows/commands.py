@@ -231,6 +231,7 @@ async def delete_workflow(
     Returns:
         Ok(None) on success, Err(WorkflowError) on failure.
     """
+    from syn_api._wiring_launch import ExecutionProjectionBarrier
     from syn_domain.contexts.orchestration import (
         ArchiveWorkflowTemplateCommand,
         ArchiveWorkflowTemplateHandler,
@@ -252,6 +253,9 @@ async def delete_workflow(
         execution_projection=execution_projection,
         executions=get_execution_repo(),
         event_publisher=publisher,
+        # #1588: executions started before launches were recorded are known
+        # only to the projection, so it must have caught up first.
+        projection_barrier=ExecutionProjectionBarrier(),
     )
 
     result = await handler.handle(command)
