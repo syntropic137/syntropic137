@@ -286,6 +286,8 @@ async def _map_phase_detail(
         error_message=phase.error_message,
         deliverable_recovered=phase.deliverable_recovered,
         reported_side_effects=phase.reported_side_effects,
+        failure_classification=phase.failure_classification,
+        reported_failure_reason=phase.reported_failure_reason,
         # None stays None: nothing observed a status is not a clean exit (#1319).
         exit_code=phase.exit_code,
         input_tokens=phase.input_tokens,
@@ -372,6 +374,8 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         error_message=phase.error_message,
         deliverable_recovered=phase.deliverable_recovered,
         reported_side_effects=phase.reported_side_effects,
+        failure_classification=phase.failure_classification,
+        reported_failure_reason=phase.reported_failure_reason,
         # Passed through for the reason spelled out below: this constructor
         # re-lists every field by hand and is the hop that drops one (#1319).
         exit_code=phase.exit_code,
