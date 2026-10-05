@@ -1,0 +1,6 @@
+name: attach-execution-to-eval
+type: command
+aggregate: WorkflowExecution
+emits:
+  - ExecutionAttachedToEvalEvent
+returns: EvalMembershipResult

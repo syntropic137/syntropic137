@@ -22,8 +22,14 @@ from syn_domain.pagination import (
     Page,
     ProjectionRecord,
     matches_search,
-    paginate,
 )
+from syn_domain.projection_scan import paginate_projection
+
+#: Every field ``page``'s predicates read - the filters, the facet, the window
+#: and the search. ``paginate_projection`` scans only these for the whole
+#: collection and reads whole documents for the page alone (E2). A predicate
+#: that reads a field missing here raises rather than matching on None.
+_PAGE_FIELDS = ("id", "name", "workflow_id", "phase_id", "artifact_type", "created_at")
 
 
 class ArtifactListProjection(AutoDispatchProjection):
@@ -326,8 +332,13 @@ class ArtifactListProjection(AutoDispatchProjection):
                 record.get("phase_id"),
             )
 
-        return paginate(
-            await self._store.query(
+        return await paginate_projection(
+            self._store,
+            self.PROJECTION_NAME,
+            fields=_PAGE_FIELDS,
+            filters=filters or None,
+            order_by="-created_at",
+            full_read=lambda: self._store.query(
                 self.PROJECTION_NAME,
                 filters=filters if filters else None,
                 order_by="-created_at",
@@ -340,7 +351,7 @@ class ArtifactListProjection(AutoDispatchProjection):
             timestamp_of=lambda r: r.get("created_at"),
             after=created_after,
             before=created_before,
-            to_row=ArtifactSummary.from_dict,
+            to_row=lambda record: ArtifactSummary.from_dict(dict(record)),
             offset=offset,
             limit=limit,
         )

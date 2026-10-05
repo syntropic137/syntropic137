@@ -17,6 +17,7 @@ import { configGroup } from "./commands/config.js";
 import { controlGroup } from "./commands/control.js";
 import { conversationsGroup } from "./commands/conversations.js";
 import { costsGroup } from "./commands/costs.js";
+import { evalGroup } from "./commands/eval.js";
 import { eventsGroup } from "./commands/events.js";
 import { executionGroup } from "./commands/execution.js";
 import { feedbackGroup } from "./commands/feedback.js";
@@ -46,6 +47,7 @@ export const commandGroups: readonly CommandGroup[] = [
   controlGroup,
   conversationsGroup,
   costsGroup,
+  evalGroup,
   eventsGroup,
   executionGroup,
   feedbackGroup,

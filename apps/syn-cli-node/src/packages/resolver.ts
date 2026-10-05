@@ -230,7 +230,7 @@ export function loadManifest(pkgPath: string): PluginManifest | null {
 
 function parseManifestFile(filePath: string, format: "json" | "yaml"): PluginManifest {
   const content = fs.readFileSync(filePath, "utf-8");
-  const data: unknown = format === "json" ? JSON.parse(content) : parseYaml(content);
+  const data: unknown = format === "json" ? JSON.parse(content) : parseYaml(content, filePath);
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
     throw new Error(`${path.basename(filePath)} must be a ${format === "json" ? "JSON object" : "YAML mapping"}`);
   }
@@ -260,7 +260,7 @@ function loadWorkflowYamlFromPath(
 ): ResolvedWorkflow {
   const workflowDir = path.dirname(yamlPath);
   const content = fs.readFileSync(yamlPath, "utf-8");
-  const data = parseYaml(content) as Record<string, unknown>;
+  const data = parseYaml(content, yamlPath) as Record<string, unknown>;
 
   const phases = Array.isArray(data["phases"]) ? data["phases"] : [];
   const resolvedPhases = phases.map((phase) =>
@@ -460,7 +460,7 @@ function resolvePhase(
     : resolveLocalPromptPath(phaseId, promptFile, workflowDir);
 
   const promptContent = fs.readFileSync(promptPath, "utf-8");
-  const { frontmatter, body } = parseFrontmatter(promptContent);
+  const { frontmatter, body } = parseFrontmatter(promptContent, promptPath);
   const resolved: Record<string, unknown> = { ...phase };
 
   if (frontmatter) {
@@ -555,7 +555,7 @@ function findDelimiters(lines: string[]): [number, number] | null {
  * previous `indexOf("---", 3)` scan disagreed with the domain on every one of
  * those, and the body is what gets uploaded as `prompt_template`.
  */
-function parseFrontmatter(content: string): {
+function parseFrontmatter(content: string, source: string): {
   frontmatter: Record<string, unknown> | null;
   body: string;
 } {
@@ -564,7 +564,7 @@ function parseFrontmatter(content: string): {
   if (bounds === null) return { frontmatter: null, body: content.trim() };
 
   const [open, close] = bounds;
-  const fm = parseYaml(lines.slice(open + 1, close).join(""));
+  const fm = parseYaml(lines.slice(open + 1, close).join(""), `${source} (frontmatter)`);
   const body = lines.slice(close + 1).join("").trim();
 
   if (typeof fm === "object" && fm !== null && !Array.isArray(fm)) {
@@ -619,7 +619,7 @@ function resolveStandaloneYaml(
   return files.map((f) => {
     const filePath = path.join(pkgPath, f);
     const content = fs.readFileSync(filePath, "utf-8");
-    const data = parseYaml(content) as Record<string, unknown>;
+    const data = parseYaml(content, filePath) as Record<string, unknown>;
     const baseName = path.basename(f, path.extname(f));
 
     // Resolve prompt_file against the package dir for the same reason the

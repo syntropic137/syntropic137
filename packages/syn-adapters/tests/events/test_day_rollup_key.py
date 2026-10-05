@@ -75,10 +75,12 @@ class _TransactionRecordingConnection(CatalogueConnection):
 
     async def __aenter__(self) -> _TransactionRecordingConnection:
         self.executed.append(self.BEGIN)
+        self.transaction_depth += 1
         return self
 
     async def __aexit__(self, *_: object) -> bool:
         self.executed.append(self.COMMIT)
+        self.transaction_depth -= 1
         return False
 
 

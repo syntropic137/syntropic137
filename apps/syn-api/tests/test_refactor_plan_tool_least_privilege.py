@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from syn_api._wiring import _build_claude_command
+from syn_api._wiring_agent_command import _build_claude_command
 from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import ExecutablePhase
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (

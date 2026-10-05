@@ -160,6 +160,10 @@ def _fake_pool(summary_rows: list[_FakeRow]) -> MagicMock:
         # are about pricing and have no tool calls to serve.
         if tool_call_counts.TABLE in query:
             return []
+        # The E2 span lookup (agent_event_span): these rows carry no times, so
+        # the rollup has nothing to narrow by and the reads run unbounded.
+        if "agent_event_day_rollup" in query:
+            return [_FakeRow({"first_day": None, "last_day": None})]
         # _COST_BY_PHASE_QUERY groups by phase_id; no phase data in these tests.
         if "phase_id" in query:
             return []
@@ -168,6 +172,13 @@ def _fake_pool(summary_rows: list[_FakeRow]) -> MagicMock:
     conn = AsyncMock()
     conn.fetch = AsyncMock(side_effect=fetch_side_effect)
     conn.fetchval = AsyncMock(return_value=0)
+    # agent_event_span.custom_plans: one transaction around the bounded reads.
+    conn.execute = AsyncMock(return_value="SET")
+    conn.transaction = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=None), __aexit__=AsyncMock(return_value=None)
+        )
+    )
     # Completed summary path: every observed session has a session_summary.
     conn.fetchrow = AsyncMock(return_value={"summarised": 2, "observed": 2})
 

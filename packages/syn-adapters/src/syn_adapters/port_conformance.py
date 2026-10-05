@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
     from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
+    from syn_adapters.github.revision_resolver import GitHubRevisionResolver
     from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
     from syn_adapters.maintenance import (
         InMemoryMaintenanceAdapter,
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.history_source import PostgresHistoricalEvidenceSource
     from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
     from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
+    from syn_adapters.session_inventory.phase_delegations import ChildJournalDelegations
     from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
     from syn_adapters.session_inventory.postgres_jobs import PostgresSessionInventoryJobs
     from syn_adapters.session_inventory.postgres_settlements import PostgresSettlementDeadlines
@@ -223,6 +225,9 @@ if TYPE_CHECKING:
         ClaudePluginStoragePort,
     )
     from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutPort
+    from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
+        DelegationEvidencePort,
+    )
     from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
         GlobalClaudePluginRegistryRepositoryPort,
     )
@@ -230,6 +235,9 @@ if TYPE_CHECKING:
         ObservabilityServicePort,
     )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+    from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
+        RevisionResolverPort,
+    )
     from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
         SessionRepositoryPort,
     )
@@ -301,6 +309,7 @@ if TYPE_CHECKING:
         memory_injection: MemoryTokenInjectionAdapter,
         workspace: ManagedWorkspace,
         service: WorkspaceService,
+        delegations: ChildJournalDelegations,
     ) -> None:
         """The backends ``WorkspaceService`` composes, and the facade itself.
 
@@ -320,6 +329,7 @@ if TYPE_CHECKING:
         _direct_injection: TokenInjectionPort = direct_injection
         _memory_injection: TokenInjectionPort = memory_injection
         _rollout: CodexRolloutPort = workspace
+        _delegations: DelegationEvidencePort = delegations
         _service: WorkspaceServicePort = service
 
     def _observability(
@@ -356,6 +366,7 @@ if TYPE_CHECKING:
         memory_pending: InMemoryPendingSHAStore,
         source_commits: GitHubSourceCommitResolver,
         remote_branches: GitHubRemoteBranchReader,
+        revisions: GitHubRevisionResolver,
     ) -> None:
         """GitHub ingestion and execution control.
 
@@ -367,6 +378,7 @@ if TYPE_CHECKING:
         _checks: GitHubChecksAPIPort = checks_client
         _source_commits: SourceCommitResolverPort = source_commits
         _remote_branches: RemoteBranchPort = remote_branches
+        _revisions: RevisionResolverPort = revisions
         _redis_dedup: DedupPort = redis_dedup
         _postgres_dedup: DedupPort = postgres_dedup
         _memory_dedup: DedupPort = memory_dedup

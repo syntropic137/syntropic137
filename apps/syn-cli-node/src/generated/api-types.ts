@@ -607,6 +607,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{execution_id}/eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach Execution To Eval Endpoint
+         * @description Attach an execution to an eval, in any status. Never copies the eval's baseline.
+         */
+        post: operations["attach_execution_to_eval_endpoint_executions__execution_id__eval_post"];
+        /**
+         * Detach Execution From Eval Endpoint
+         * @description Detach an execution from its eval. The launch record (`launched_eval_id`) is kept.
+         */
+        delete: operations["detach_execution_from_eval_endpoint_executions__execution_id__eval_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/default-eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Workflow Default Eval Endpoint
+         * @description Set or clear the eval a workflow's runs join when the launch names none.
+         */
+        put: operations["set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions": {
         parameters: {
             query?: never;
@@ -1268,6 +1312,9 @@ export interface paths {
          *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
          *     GitHub API without requiring a webhook URL. Stale data is kept as a
          *     fallback if the GitHub API is unreachable during refresh.
+         *
+         *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
+         *     the App's reach (``complete``) or merely went unseen because GitHub failed.
          */
         get: operations["list_accessible_repos_endpoint_github_repos_get"];
         put?: never;
@@ -2191,6 +2238,12 @@ export interface paths {
         /**
          * Health
          * @description Health check endpoint with detailed subscription status.
+         *
+         *     This is the container's LIVENESS check (#1575): while the gate withholds
+         *     the API it answers 200 with the gate's phase - "starting", or "failed"
+         *     in the moment between a late startup failure and the process exiting -
+         *     without probing anything startup has not built. "healthy" is what
+         *     readiness waits for, so it is only ever said once the gate is ready.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -2414,6 +2467,14 @@ export interface components {
             system_id: string;
         };
         /**
+         * AttachEvalRequest
+         * @description The eval to attach an execution to (#967).
+         */
+        AttachEvalRequest: {
+            /** @description The eval to attach to. It must exist and not be archived. Attaching to the eval the run already belongs to is a no-op; another eval needs a detach first. */
+            eval_id: components["schemas"]["EvalId"];
+        };
+        /**
          * BodyAvailability
          * @enum {string}
          */
@@ -2478,8 +2539,8 @@ export interface components {
          *     twenty releases behind the installed package.
          *
          *     The release and its status come from ``_NamesTheRunningRelease``. What this
-         *     model adds is the two build-time stamps, which only an image can supply and
-         *     only ``/health`` reports.
+         *     model adds is the two build-time stamps, which only an image can supply,
+         *     and when this process went live, which only the process can.
          */
         BuildInfo: {
             /**
@@ -2498,11 +2559,22 @@ export interface components {
              */
             commit?: string | null;
             /**
+             * Started At
+             * Format: date-time
+             * @description When this API process started (UTC, ISO 8601): the moment the running deployment went live. Captured once per process, so it changes only when the process is replaced, which is what a redeploy does.
+             */
+            started_at: string;
+            /**
              * Version Status
              * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
              * @enum {string}
              */
             readonly version_status: "installed" | "unavailable";
+            /**
+             * Started At Display
+             * @description started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. Relative and local-time renderings are the client's to make from started_at.
+             */
+            readonly started_at_display: string;
         };
         /**
          * CancelRequest
@@ -3025,6 +3097,56 @@ export interface components {
          * @enum {string}
          */
         DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
+        /**
+         * DelegationAttempt
+         * @description One delegate the phase's agent launched, as the platform observed it.
+         */
+        DelegationAttempt: {
+            /** Delegate Id */
+            delegate_id: string;
+            /** Target Harness */
+            target_harness: string;
+            outcome: components["schemas"]["DelegationOutcome"] | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * DelegationFailure
+         * @description The typed account of a failed required delegation.
+         */
+        DelegationFailure: {
+            reason: components["schemas"]["DelegationFailureReason"];
+            /** Required Delegate */
+            required_delegate?: string | null;
+            /**
+             * Attempts
+             * @default []
+             */
+            attempts: components["schemas"]["DelegationAttempt"][];
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * DelegationFailureReason
+         * @description Why a required delegation is counted as not having happened.
+         * @enum {string}
+         */
+        DelegationFailureReason: "not_attempted" | "failed" | "unverifiable";
+        /**
+         * DelegationOutcome
+         * @description How a delegated run ended, in provider-neutral terms.
+         *
+         *     WHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit
+         *     status is shell-specific baggage. The native same-harness fan-out path
+         *     reports a boolean success and has no process to exit; cancellation and
+         *     timeout have no natural integer either. Since these events are v1 and this
+         *     repo has no upcaster framework, encoding a shell assumption now would need
+         *     a v2 to undo.
+         * @enum {string}
+         */
+        DelegationOutcome: "succeeded" | "failed" | "cancelled" | "timed_out";
         /** DeleteWorkflowResponse */
         DeleteWorkflowResponse: {
             /** Workflow Id */
@@ -3032,6 +3154,11 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * EvalId
+         * @description The identity of one eval, and the id of its stream.
+         */
+        EvalId: string;
         /**
          * EventListResponse
          * @description List of events response.
@@ -3123,6 +3250,14 @@ export interface components {
              * @description Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422.
              */
             tags?: string[];
+            /** @description The eval this run joins, overriding the workflow's default eval (#967). 404 if it does not exist, 409 if it is archived. */
+            eval_id?: components["schemas"]["EvalId"] | null;
+            /**
+             * No Eval
+             * @description Launch an ordinary run: join no eval, even if the workflow has a default eval (#967). Cannot be combined with `eval_id` (422).
+             * @default false
+             */
+            no_eval: boolean;
             /**
              * Provider
              * @deprecated
@@ -3322,12 +3457,14 @@ export interface components {
             error_message?: string | null;
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
+            delegation_failure?: components["schemas"]["DelegationFailure"] | null;
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /**
              * Deliverable Produced
              * @default false
              */
             deliverable_produced: boolean;
+            review_verdict?: components["schemas"]["ReviewVerdict"] | null;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Repos */
             repos?: string[];
@@ -3340,6 +3477,20 @@ export interface components {
                 [key: string]: string;
             };
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
+        };
+        /**
+         * ExecutionEvalResponse
+         * @description An execution's eval membership after an edit, read from the aggregate (#967).
+         */
+        ExecutionEvalResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Eval Id */
+            eval_id: string | null;
+            /** Association Kind */
+            association_kind: ("launched" | "attached") | null;
+            /** Launched Eval Id */
+            launched_eval_id: string | null;
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -4147,7 +4298,18 @@ export interface components {
             total: number;
             /** Installation Id */
             installation_id?: string | null;
+            lookup: components["schemas"]["GitHubRepoLookup"];
         };
+        /**
+         * GitHubRepoLookup
+         * @description How much of the GitHub App's access a repo listing actually covers.
+         *
+         *     Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+         *     ``partial`` listing still proves access for every repo it contains; an
+         *     ``unavailable`` one proves nothing.
+         * @enum {string}
+         */
+        GitHubRepoLookup: "complete" | "partial" | "unavailable";
         /**
          * GitHubRepoResponse
          * @description A repository accessible to the GitHub App installation.
@@ -4323,7 +4485,7 @@ export interface components {
         HealthResponse: {
             /**
              * Status
-             * @description 'healthy' while the process is alive and accepting writes.
+             * @description 'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed.
              */
             status: string;
             /**
@@ -5005,6 +5167,11 @@ export interface components {
              */
             allow_delegation: boolean;
             /**
+             * Require Delegation
+             * @default false
+             */
+            require_delegation: boolean;
+            /**
              * Clone Repos
              * @default true
              */
@@ -5081,6 +5248,8 @@ export interface components {
              */
             deliverable_recovered: boolean;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
+            failure_classification?: components["schemas"]["FailureClassification"] | null;
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Model */
             model?: string | null;
             /** Requested Model */
@@ -5952,6 +6121,31 @@ export interface components {
             dispatched_at?: string | null;
         };
         /**
+         * ReviewVerdict
+         * @description What a reviewing phase concluded about the change in front of it (PC-63).
+         *
+         *     THE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes
+         *     ``review_verdict`` in its TASK_RESULT block; the aggregate reads it when
+         *     the phase's artifacts are collected and chooses the next phase from it
+         *     (see `WorkflowExecutionAggregate.artifacts_collected`):
+         *
+         *     * ``certified`` ends the repair loop. Every phase before the workflow's
+         *       final phase is skipped, so a run that certifies in round 1 does not pay
+         *       for rounds 2 and 3.
+         *     * ``blocked`` - or no verdict at all - advances by order, which is the
+         *       next repair round, or the final phase once the rounds are spent.
+         *
+         *     The latest verdict a run reported is also how it ended: a run completed
+         *     on ``blocked`` completed with UNRESOLVED FINDINGS, and says so on
+         *     `WorkflowCompleted` rather than looking certified.
+         *
+         *     A missing or misspelled verdict is never read as ``certified``: skipping
+         *     review on a word the reader did not recognise is the one mistake here that
+         *     costs more than a repair round.
+         * @enum {string}
+         */
+        ReviewVerdict: "certified" | "blocked";
+        /**
          * RootResponse
          * @description Payload of ``GET /`` — what this API is, and which build is serving it.
          *
@@ -6655,6 +6849,14 @@ export interface components {
              * @default 0
              */
             cache_read_tokens: number;
+        };
+        /**
+         * SetDefaultEvalRequest
+         * @description The eval a workflow's runs join when the launch names none (#967).
+         */
+        SetDefaultEvalRequest: {
+            /** @description The default eval, which must exist and not be archived. Null clears it. Runs already started keep the eval they launched into. */
+            eval_id: components["schemas"]["EvalId"] | null;
         };
         /**
          * SetMaintenanceModeRequest
@@ -7899,6 +8101,16 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * WorkflowDefaultEvalResponse
+         * @description A workflow's default eval after an edit, read from the aggregate (#967).
+         */
+        WorkflowDefaultEvalResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Default Eval Id */
+            default_eval_id: string | null;
+        };
         /** WorkflowListResponse */
         WorkflowListResponse: {
             /** Workflows */
@@ -7949,6 +8161,8 @@ export interface components {
             requires_repos: boolean;
             /** Tags */
             tags?: string[];
+            /** Default Eval Id */
+            default_eval_id?: string | null;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -8079,6 +8293,8 @@ export interface operations {
                 page_size?: number;
                 /** @description Sort field (- prefix = descending) */
                 order_by?: string | null;
+                /** @description Case-insensitive substring match on name or id, applied before paging */
+                search?: string | null;
             };
             header?: never;
             path?: never;
@@ -9265,6 +9481,146 @@ export interface operations {
                 content?: never;
             };
             /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    attach_execution_to_eval_endpoint_executions__execution_id__eval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionEvalResponse"];
+                };
+            };
+            /** @description No execution has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    detach_execution_from_eval_endpoint_executions__execution_id__eval_delete: {
+        parameters: {
+            query: {
+                /** @description The eval to detach from. Must be the eval the run belongs to, or none. */
+                eval_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionEvalResponse"];
+                };
+            };
+            /** @description No execution has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDefaultEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowDefaultEvalResponse"];
+                };
+            };
+            /** @description No workflow has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, or the id prefix matches more than one workflow */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
             422: {
                 headers: {
                     [name: string]: unknown;

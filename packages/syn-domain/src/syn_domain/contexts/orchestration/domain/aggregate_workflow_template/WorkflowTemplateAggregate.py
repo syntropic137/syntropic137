@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.skill_ref import (
         SkillRef,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
@@ -42,11 +43,17 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.RemoveWorkflowTagsCommand import (
         RemoveWorkflowTagsCommand,
     )
+    from syn_domain.contexts.orchestration.domain.commands.SetWorkflowDefaultEvalCommand import (
+        SetWorkflowDefaultEvalCommand,
+    )
     from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
         UpdatePhasePromptCommand,
     )
     from syn_domain.contexts.orchestration.domain.commands.UpdateWorkflowTemplateCommand import (
         UpdateWorkflowTemplateCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+        WorkflowDefaultEvalSetEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
         WorkflowPhaseUpdatedEvent,
@@ -104,6 +111,10 @@ def _normalize_event_data(event: DomainEvent) -> dict[str, Any]:
 def _event_tags(event: DomainEvent) -> list[str]:
     """The ``tags`` of a typed event or a GenericDomainEvent from the store."""
     return [str(t) for t in (_normalize_event_data(event).get("tags") or [])]
+
+
+def _eval_id_str(eval_id: EvalId | None) -> str | None:
+    return None if eval_id is None else str(eval_id)
 
 
 def _parse_enum(value: str | StrEnum, enum_type: type[StrEnum]) -> StrEnum:
@@ -226,6 +237,8 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # WHY (issue #967): copied onto each execution at launch. Part of the
         # definition, so a reinstall replaces it like every other field.
         self._tags: TagSet = TagSet()
+        # The eval a launch that names none joins (#967). Read at dispatch.
+        self._default_eval_id: str | None = None
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -288,6 +301,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def tags(self) -> TagSet:
         """Tags every execution launched from this workflow starts with."""
         return self._tags
+
+    @property
+    def default_eval_id(self) -> str | None:
+        """The eval a launch that names none joins (#967), or None."""
+        return self._default_eval_id
 
     @property
     def package_version(self) -> str | None:
@@ -353,6 +371,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             claude_plugins=command.claude_plugins,
             skills=command.skills,
             tags=list(command.tags),
+            default_eval_id=_eval_id_str(command.default_eval_id),
             version=command.version,
             source_digest=command.source_digest,
         )
@@ -410,6 +429,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             self._claude_plugins,
             self._skills,
             self._tags,
+            self._default_eval_id,
             self._package_version,
             self._source_digest,
         )
@@ -432,6 +452,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             list(command.claude_plugins),
             list(command.skills),
             command.tags,
+            _eval_id_str(command.default_eval_id),
             command.version,
             command.source_digest,
         )
@@ -538,6 +559,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             claude_plugins=command.claude_plugins,
             skills=command.skills,
             tags=list(command.tags),
+            default_eval_id=_eval_id_str(command.default_eval_id),
             version=command.version,
             source_digest=command.source_digest,
         )
@@ -662,6 +684,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # WHY (issue #967): legacy events have no tags; recorded() because the
         # event already holds validated tags and replay must not re-judge them.
         self._tags = TagSet.recorded(data.get("tags") or [])
+        self._default_eval_id = data.get("default_eval_id")
 
         # A full definition event reactivates the template. Applying this in
         # the shared path rather than only on Updated keeps archive semantics
@@ -732,6 +755,25 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         if not present:
             return
         self._apply(WorkflowTagsRemovedEvent(workflow_id=str(self.id), tags=list(present)))
+
+    @command_handler("SetWorkflowDefaultEvalCommand")
+    def set_default_eval(self, command: SetWorkflowDefaultEvalCommand) -> None:
+        """Set or clear the default eval. Unchanged, no event."""
+        from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+            WorkflowDefaultEvalSetEvent,
+        )
+
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+        eval_id = _eval_id_str(command.eval_id)
+        if eval_id != self._default_eval_id:
+            self._apply(WorkflowDefaultEvalSetEvent(workflow_id=str(self.id), eval_id=eval_id))
+
+    @event_sourcing_handler("WorkflowDefaultEvalSet")
+    def on_default_eval_set(self, event: WorkflowDefaultEvalSetEvent) -> None:
+        """Apply WorkflowDefaultEvalSetEvent."""
+        self._default_eval_id = _normalize_event_data(event).get("eval_id")
 
     @event_sourcing_handler("WorkflowTagsAdded")
     def on_tags_added(self, event: WorkflowTagsAddedEvent) -> None:

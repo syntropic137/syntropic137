@@ -2,7 +2,7 @@
  * Mobile card content for a single execution.
  *
  * Pure presentation: renders the inner header row + metric grid. The outer
- * card wrapper, hover/focus state, and tap-to-detail navigation are owned
+ * card wrapper, hover/focus state, and link-to-detail navigation are owned
  * by ResourceCardList.
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md

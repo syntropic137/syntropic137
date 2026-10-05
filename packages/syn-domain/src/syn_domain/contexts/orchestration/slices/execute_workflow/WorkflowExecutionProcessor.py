@@ -25,9 +25,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
     run_phase_agent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
-    phase_failure,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     UnfinishedPhase,
 )
@@ -49,6 +46,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
+    completion_failure,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     cancelled_execution,
@@ -104,11 +104,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports import (
         ArtifactContentStoragePort,
     )
+    from syn_domain.contexts.orchestration._shared.eval_choice import LaunchEval
     from syn_domain.contexts.orchestration._shared.tags import TagSet
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
         SourceCommit,
     )
+    from syn_domain.contexts.orchestration.ports import DelegationEvidencePort
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -191,8 +193,12 @@ class WorkflowExecutionProcessor:
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
+        delegation_evidence: DelegationEvidencePort | None = None,
     ) -> None:
         self._session_repo = session_repository
+        #: Read as a phase that declared delegation completes, to show its
+        #: delegate actually ran (#894). See `phase_delegation`.
+        self._delegation_evidence = delegation_evidence
         # How a phase answers a provider that is simply busy (#1303). Injected
         # only so a test can collapse the backoff to zero; production takes the
         # policy's own numbers and no caller chooses them.
@@ -290,6 +296,7 @@ class WorkflowExecutionProcessor:
         admitted: AdmissionTicket | None = None,
         source_commits: list[SourceCommit] | None = None,
         tags: TagSet | None = None,
+        launch_eval: LaunchEval | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern.
 
@@ -317,6 +324,7 @@ class WorkflowExecutionProcessor:
             pinned_phases=phases,
             source_commits=source_commits,
             tags=tags,
+            launch_eval=launch_eval,
         )
         aggregate.start_execution(start_cmd)
         return await self._run_started(aggregate, workflow_id, phases, inputs, repos, admitted)
@@ -798,7 +806,13 @@ class WorkflowExecutionProcessor:
             # and checked before the aggregate is told the run completed
             # (#1256). WHICH channel ended the run, and what the failure is
             # counted as, are `agent_run_outcome`'s to decide (#1367).
-            failure = phase_failure(result, phase_id=todo.phase_id)
+            failure = await completion_failure(
+                result,
+                phase_id=todo.phase_id,
+                evidence=self._delegation_evidence,
+                workspace=runtime.workspace_for(todo.phase_id),
+                required_delegate=phase.agent_config.required_delegate,
+            )
             if failure is not None:
                 logger.error(str(failure))
                 # A retried attempt keeps nothing: the phase is not over, and
