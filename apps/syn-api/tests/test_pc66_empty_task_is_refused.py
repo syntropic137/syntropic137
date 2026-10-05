@@ -200,3 +200,100 @@ class TestAWorkflowThatTakesNoTask:
 
         assert response.status_code == 200, response.text
         assert len(execution.launched) == 1
+
+
+async def _store_predeclaration_workflow(
+    prompts: list[str], *, declarations: list[dict[str, object]] | None = None
+) -> str:
+    """Store a definition as installs before PC-66 left it: phases, no ``task`` declaration.
+
+    The stream is written once and never re-read from YAML, so this is what an
+    existing installation holds until someone reinstalls it.
+    """
+    from syn_api.routes.workflows import create_workflow
+    from syn_api.types import Ok
+
+    result = await create_workflow(
+        name="Installed before PC-66",
+        workflow_type="implementation",
+        requires_repos=False,
+        phases=[{"name": f"phase {i}", "prompt_template": p} for i, p in enumerate(prompts)],
+        input_declarations=declarations or [],
+    )
+    assert isinstance(result, Ok)
+    return result.value.workflow_id
+
+
+def _implement_v3_prompts() -> list[str]:
+    phases = WorkflowDefinition.from_file(_IMPLEMENT_V3).get_domain_phases()
+    return [p.prompt_template or "" for p in phases]
+
+
+class TestAStoredDefinitionWithoutTheDeclaration:
+    """The review finding: existing installs never see the YAML's new ``inputs:``."""
+
+    async def test_implement_v3_as_installed_before_still_needs_a_task(
+        self, client: AsyncClient, execution: _CapturingExecute
+    ) -> None:
+        prompts = _implement_v3_prompts()
+        assert any("$ARGUMENTS" in p for p in prompts)
+        workflow_id = await _store_predeclaration_workflow(prompts)
+
+        response = await client.post(f"/workflows/{workflow_id}/execute", json={})
+
+        assert response.status_code == 422, response.text
+        assert "Missing required inputs: task" in response.text
+        assert execution.launched == []
+
+    @pytest.mark.parametrize("prompt", ["Do this: $ARGUMENTS", "Task: {{task}}"])
+    @pytest.mark.parametrize("task", _BLANK)
+    async def test_a_prompt_that_takes_the_task_refuses_a_blank_one(
+        self, client: AsyncClient, execution: _CapturingExecute, prompt: str, task: str
+    ) -> None:
+        workflow_id = await _store_predeclaration_workflow(["Read the repo.", prompt])
+
+        response = await client.post(
+            f"/workflows/{workflow_id}/execute", json={"inputs": {"task": task}}
+        )
+
+        assert response.status_code == 422, response.text
+        assert "Missing required inputs: task" in response.text
+        assert execution.launched == []
+
+    async def test_with_a_task_it_is_launched(
+        self, client: AsyncClient, execution: _CapturingExecute
+    ) -> None:
+        workflow_id = await _store_predeclaration_workflow(_implement_v3_prompts())
+
+        response = await client.post(
+            f"/workflows/{workflow_id}/execute", json={"task": "Fix PC-66."}
+        )
+
+        assert response.status_code == 200, response.text
+        assert len(execution.launched) == 1
+
+    async def test_prompts_that_never_take_a_task_run_without_one(
+        self, client: AsyncClient, execution: _CapturingExecute
+    ) -> None:
+        workflow_id = await _store_predeclaration_workflow(
+            ["Summarise the repository.", "Report {{execution_id}}."]
+        )
+
+        response = await client.post(f"/workflows/{workflow_id}/execute", json={})
+
+        assert response.status_code == 200, response.text
+        assert len(execution.launched) == 1
+
+    async def test_an_explicit_declaration_outranks_the_prompt(
+        self, client: AsyncClient, execution: _CapturingExecute
+    ) -> None:
+        """A workflow that declares ``task`` optional means it, $ARGUMENTS or not."""
+        workflow_id = await _store_predeclaration_workflow(
+            ["Optional focus: $ARGUMENTS"],
+            declarations=[{"name": "task", "required": False}],
+        )
+
+        response = await client.post(f"/workflows/{workflow_id}/execute", json={})
+
+        assert response.status_code == 200, response.text
+        assert len(execution.launched) == 1

@@ -181,13 +181,16 @@ def _check_missing_declarations(
 ) -> None:
     """Raise 422 if any required InputDeclaration (with no default) is absent or blank.
 
+    The declarations are the workflow's required ones, so a stored definition
+    that predates its ``task`` declaration is still held to it (PC-66).
+
     Blank counts as absent: ``-t ""`` or ``--input task=" "`` supplies the key
     and nothing else, and a required input rendered empty runs the workflow on
     nothing (PC-66).
     """
     missing = [
         decl.name
-        for decl in workflow.input_declarations
+        for decl in workflow.required_input_declarations
         if decl.required and decl.default is None and not merged.get(decl.name, "").strip()
     ]
     if not missing:
