@@ -2,32 +2,35 @@
 
 $ARGUMENTS
 
-The final verification report is the newest of the repair rounds' reports -
-the first of these that exists:
+The final verification report is **round 3's, and only round 3's**. The
+engine runs every round before this phase, so round 3 always ran; a round-3
+report that is missing or unreadable is a broken report, not a sign that an
+earlier round was the last. Read exactly one file, the first of these that
+exists:
 
-1. `artifacts/input/reverify_3/reverify.md` (round 3 of 3, the last there is)
-2. `artifacts/input/reverify_2/reverify.md` (round 2 of 3)
-3. `artifacts/input/reverify/reverify.md` (round 1 of 3)
+1. `artifacts/input/reverify_3/reverify.md`
+2. `artifacts/input/reverify_3.md` (the same round's flat alias, kept for one
+   release - issue #988)
 
-Each round handed the open findings to a fix phase, and its `reverify` says
-whether that fix closed them. Only the newest verdict is current; an older
-BLOCKED that a later round certified is history. Below, `reverify.md` means
-that newest report.
+Never take the verdict from `reverify_2` or `reverify`, even when round 3's
+report is absent. Each round handed the open findings to a fix phase and its
+`reverify` says whether that fix closed them; round 3 carries a certification
+forward when nothing changed, so an older verdict is history either way.
+Below, `reverify.md` means round 3's report.
 
-> **Where to find that input.** The durable location is the directory
-> `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
-> `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
-> today, but `ArtifactCollector` marks it "kept for one release (issue #988)", so
-> a prompt that reads only the flat path will silently receive nothing once it
-> goes. Look in the directory first and fall back to the flat file. If neither
-> exists, stop and say so rather than proceeding on no input.
+**The report is usable only if its first line is exactly `CERTIFIED` or
+`BLOCKED` and its second line is exactly `Round: 3 of 3`.** Anything else -
+neither file exists, the report was recovered from a transcript (its first
+line is a recovery notice, not a verdict), or the lines do not match - is the
+error `FINAL_REPORT_UNUSABLE`. Treat it as BLOCKED: follow "If BLOCKED" below,
+name `FINAL_REPORT_UNUSABLE` and what you found instead in the comment, and
+never mark the PR ready on it.
 
 The implement phase opened a **draft** PR on its first push and recorded its
 number and URL in its artifact. This phase decides what that draft becomes. It
 is the only phase allowed to mark it ready (#1197).
 
-Read `reverify.md`, not `verify.md`. Its first line is one word: `CERTIFIED` or
-`BLOCKED`, and its second says which round it was. The first pass's findings may describe defects the `fix` phase has
+Read `reverify.md`, not `verify.md`. The first pass's findings may describe defects the `fix` phase has
 since closed; treating them as current is how a good branch gets abandoned.
 
 This workspace has no checkout at all. Work from the remote branch and the PR.
@@ -93,4 +96,4 @@ work is lost with the workspace.** Write the file before you finish.
 
 First line: `READY` or `DRAFT`. Then `Repair rounds: N of 3`, the PR URL, the
 branch, the head SHA, and - if it stayed a draft - the blocking finding in one
-sentence.
+sentence (or `FINAL_REPORT_UNUSABLE` and why).
