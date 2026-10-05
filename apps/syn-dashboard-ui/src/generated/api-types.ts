@@ -1312,6 +1312,9 @@ export interface paths {
          *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
          *     GitHub API without requiring a webhook URL. Stale data is kept as a
          *     fallback if the GitHub API is unreachable during refresh.
+         *
+         *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
+         *     the App's reach (``complete``) or merely went unseen because GitHub failed.
          */
         get: operations["list_accessible_repos_endpoint_github_repos_get"];
         put?: never;
@@ -4232,7 +4235,18 @@ export interface components {
             total: number;
             /** Installation Id */
             installation_id?: string | null;
+            lookup: components["schemas"]["GitHubRepoLookup"];
         };
+        /**
+         * GitHubRepoLookup
+         * @description How much of the GitHub App's access a repo listing actually covers.
+         *
+         *     Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+         *     ``partial`` listing still proves access for every repo it contains; an
+         *     ``unavailable`` one proves nothing.
+         * @enum {string}
+         */
+        GitHubRepoLookup: "complete" | "partial" | "unavailable";
         /**
          * GitHubRepoResponse
          * @description A repository accessible to the GitHub App installation.
