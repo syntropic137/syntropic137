@@ -140,8 +140,8 @@ class CheckoutMismatch:
         if self.branch is None:
             return f"{self.repository} is at {self.actual_sha}, pinned to {self.pinned_sha}"
         return (
-            f"{self.repository} is at {self.actual_sha}, not at the head of origin/{self.branch}"
-            f" containing its pin {self.pinned_sha}"
+            f"{self.repository} is at {self.actual_sha}, not on {self.branch} at the head of"
+            f" origin/{self.branch} containing its pin {self.pinned_sha}"
         )
 
 

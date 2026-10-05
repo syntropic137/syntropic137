@@ -13,9 +13,11 @@ A REPOSITORY CONTINUING A BRANCH IS HELD TO THAT BRANCH, NOT TO ITS PIN. The
 phase a resume resumes is checked out on its parent's branch at origin's head
 (#1513); HEAD there is legitimately later than the pin, so equality with the pin
 would refuse every such resume. What it is held to instead is the state the
-setup script was asked for: HEAD at the head of `origin/<branch>` as fetched,
-and that head containing the pin. Both are read back rather than taken from the
-script's exit, for the same reason a pinned repository's HEAD is.
+setup script was asked for: HEAD ON the branch, at the head of `origin/<branch>`
+as fetched, and that head containing the pin. All three are read back rather
+than taken from the script's exit, for the same reason a pinned repository's
+HEAD is. Being ON it is its own check: a HEAD detached at the right commit
+passes the other two, and an agent there commits onto no branch at all.
 
 AN UNANSWERED READ IS NOT A VERDICT. `git` raises
 `WorkspaceInspectionFailedError` for a workspace that does not answer, and that
@@ -60,11 +62,13 @@ async def verify_checkout(
 
     ``continued_branches`` maps ``owner/name`` to the branch that repository
     continues; such a repository is held to that branch's fetched head, which
-    must contain its pin, rather than to the pin itself.
+    must contain its pin, rather than to the pin itself, and must be checked
+    out on that branch rather than detached at it.
 
     Raises:
         CheckoutMismatchError: a repository is not at its pin, or not at the
-            head of the branch it continues, or that head lacks its pin.
+            head of the branch it continues, or not on that branch, or that head
+            lacks its pin.
         WorkspaceInspectionFailedError: the workspace did not answer.
     """
     checked_out: list[SourceCommit] = []
@@ -87,7 +91,11 @@ async def verify_checkout(
 async def _on_branch_head(
     workspace: GitWorkspace, repo_dir: str, branch: str, pinned_sha: str, actual_sha: str
 ) -> bool:
-    """Whether ``actual_sha`` is ``origin/<branch>``'s fetched head and contains the pin.
+    """Whether HEAD is on ``branch``, at ``origin/<branch>``'s fetched head, containing the pin.
+
+    Which branch HEAD is on is read with `rev-parse --symbolic-full-name`, which
+    answers `HEAD` for a detached HEAD with a zero exit, where `symbolic-ref`
+    would exit non-zero and be read as the workspace not answering.
 
     The containment read lists the pin's history NOT reachable from HEAD, which
     is empty exactly when HEAD contains the pin. It is asked that way, not with
@@ -98,6 +106,9 @@ async def _on_branch_head(
         await git(workspace, repo_dir, "rev-parse", "--verify", f"refs/remotes/origin/{branch}")
     ).strip()
     if actual_sha != branch_head:
+        return False
+    attached_to = await git(workspace, repo_dir, "rev-parse", "--symbolic-full-name", "HEAD")
+    if attached_to.strip() != f"refs/heads/{branch}":
         return False
     missing = await git(workspace, repo_dir, "rev-list", "-n", "1", pinned_sha, "--not", "HEAD")
     return not missing.strip()

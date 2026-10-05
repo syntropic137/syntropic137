@@ -70,6 +70,9 @@ ELSEWHERE = "0ff00000000000000000000000000000000000c3"
 #: The branch a resumed phase continues (#1513), and origin's head of it.
 BRANCH = "syn/967-continued"
 BRANCH_HEAD = "967c0000000000000000000000000000000000d4"
+#: What `rev-parse --symbolic-full-name HEAD` answers on the branch, and detached.
+ON_BRANCH = f"refs/heads/{BRANCH}"
+DETACHED = "HEAD"
 
 PINS = [SourceCommit(repository=APP, sha=APP_PIN), SourceCommit(repository=LIB, sha=LIB_PIN)]
 
@@ -90,18 +93,22 @@ def _workspace_at(
     *,
     branch_head: str = BRANCH_HEAD,
     contains_pin: bool = True,
+    attached_to: str = ON_BRANCH,
 ) -> MagicMock:
     """A workspace service whose setup succeeds and whose repos stand at ``heads``.
 
     ``heads`` maps a clone's directory to its HEAD. `git -C <dir> rev-parse HEAD`
     is answered from it, `origin/<BRANCH>` resolves to ``branch_head``, and
-    `rev-list <pin> --not HEAD` names the pin unless ``contains_pin``; any other
+    `rev-list <pin> --not HEAD` names the pin unless ``contains_pin``, and
+    `rev-parse --symbolic-full-name HEAD` answers ``attached_to``; any other
     command succeeds and says nothing.
     """
 
     async def execute(command: list[str], **_: object) -> ExecutionResult:
         stdout = ""
-        if command[-2:] == ["rev-parse", "HEAD"]:
+        if command[-2:] == ["--symbolic-full-name", "HEAD"]:
+            stdout = attached_to + "\n"
+        elif command[-2:] == ["rev-parse", "HEAD"]:
             stdout = heads[command[command.index("-C") + 1]] + "\n"
         elif command[-1] == f"refs/remotes/origin/{BRANCH}":
             stdout = branch_head + "\n"
@@ -131,9 +138,12 @@ async def _provision(
     continued_branches: Mapping[str, str] | None = None,
     branch_head: str = BRANCH_HEAD,
     contains_pin: bool = True,
+    attached_to: str = ON_BRANCH,
 ) -> ProvisionResult:
     handler = WorkspaceProvisionHandler(
-        workspace_service=_workspace_at(heads, branch_head=branch_head, contains_pin=contains_pin),
+        workspace_service=_workspace_at(
+            heads, branch_head=branch_head, contains_pin=contains_pin, attached_to=attached_to
+        ),
         prompt_builder=AsyncMock(return_value="Do the task"),
         command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
     )
@@ -307,7 +317,7 @@ async def test_a_continued_branch_left_at_an_unrelated_commit_is_refused() -> No
         )
 
     assert refused.value.mismatches == (CheckoutMismatch(APP, APP_PIN, ELSEWHERE, branch=BRANCH),)
-    assert f"not at the head of origin/{BRANCH}" in str(refused.value)
+    assert f"not on {BRANCH} at the head of origin/{BRANCH}" in str(refused.value)
 
 
 async def test_a_continued_branch_whose_head_lacks_the_pin_is_refused() -> None:
@@ -321,6 +331,100 @@ async def test_a_continued_branch_whose_head_lacks_the_pin_is_refused() -> None:
         )
 
     assert refused.value.mismatches == (CheckoutMismatch(APP, APP_PIN, BRANCH_HEAD, branch=BRANCH),)
+
+
+async def test_a_continued_branch_detached_at_its_head_is_refused() -> None:
+    """At the right commit, containing the pin, but on no branch: not the branch it continues."""
+    with pytest.raises(CheckoutMismatchError) as refused:
+        await _provision(
+            {"/workspace/repos/eval-app": BRANCH_HEAD},
+            [APP_URL],
+            continued_branches={APP: BRANCH},
+            attached_to=DETACHED,
+        )
+
+    assert refused.value.mismatches == (CheckoutMismatch(APP, APP_PIN, BRANCH_HEAD, branch=BRANCH),)
+    assert f"not on {BRANCH}" in str(refused.value)
+
+
+async def test_a_continued_branch_on_another_branch_at_its_head_is_refused() -> None:
+    with pytest.raises(CheckoutMismatchError):
+        await _provision(
+            {"/workspace/repos/eval-app": BRANCH_HEAD},
+            [APP_URL],
+            continued_branches={APP: BRANCH},
+            attached_to="refs/heads/main",
+        )
+
+
+async def _run_continuing(attached_to: str) -> tuple[str, AsyncMock]:
+    """A run whose one phase continues ``BRANCH``, its workspace's HEAD ``attached_to``.
+
+    The phase's checkout is the one a resume's resumed phase gets (#1513); it is
+    patched in at `checkout_for` so the run reaches provisioning as a resume would.
+    """
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+        PhaseCheckout,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import StartPins
+    from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+        WorkflowExecutionProcessor,
+    )
+    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+        ExecutionTodoProjection,
+    )
+
+    agent = AsyncMock()
+    processor = WorkflowExecutionProcessor(
+        execution_repository=AsyncMock(),
+        session_repository=AsyncMock(),
+        workspace_service=_workspace_at(
+            {"/workspace/repos/eval-app": BRANCH_HEAD}, attached_to=attached_to
+        ),
+        artifact_repository=AsyncMock(),
+        artifact_content_storage=None,
+        artifact_query=None,
+        conversation_storage=None,
+        observability_writer=None,
+        controller=None,
+        prompt_builder=AsyncMock(return_value="Do the task"),
+        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+        agent_handler=agent,
+    )
+    processor._journal._repository.save = AsyncMock()
+    continuing = PhaseCheckout(commits={APP: BRANCH_HEAD}, branches={APP: BRANCH})
+
+    with (
+        patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as secrets,
+        patch.object(StartPins, "checkout_for", return_value=continuing),
+    ):
+        secrets.create = AsyncMock(return_value=MagicMock())
+        result = await processor.run(
+            workflow_id=WORKFLOW,
+            workflow_name="Eval run",
+            phases=[_phase()],
+            inputs={},
+            execution_id=EXECUTION,
+            repos=[RepositoryRef.parse(APP)],
+            source_commits=[SourceCommit(repository=APP, sha=APP_PIN)],
+        )
+    return result.error_message or "", agent
+
+
+async def test_a_detached_continued_branch_fails_the_run_before_any_agent_runs() -> None:
+    error, agent = await _run_continuing(DETACHED)
+
+    assert f"{APP} is at {BRANCH_HEAD}, not on {BRANCH}" in error
+    agent.handle.assert_not_called()
+
+
+async def test_a_continued_branch_checked_out_on_it_reaches_the_agent() -> None:
+    """The control: the same run, on the branch, is handed to the agent."""
+    _, agent = await _run_continuing(ON_BRANCH)
+
+    agent.handle.assert_called()
 
 
 async def test_a_first_provisioning_that_recorded_no_checkout_stays_the_starting_state() -> None:
