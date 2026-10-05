@@ -15,9 +15,17 @@ from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        CancelExecutionCommand,
         CompleteExecutionCommand,
         FailExecutionCommand,
+        RecordCancelledWorkCommand,
         StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+        CancelledWorkQuarantinedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+        ExecutionCancelledEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
@@ -135,4 +143,36 @@ def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFai
         # event is where the two stop being one frame's local variables and
         # start being the record every read model is built from.
         reported_failure_reason=command.reported_failure_reason,
+    )
+
+
+def cancelled_work_event(
+    command: RecordCancelledWorkCommand, workflow_id: str
+) -> CancelledWorkQuarantinedEvent:
+    """The `CancelledWorkQuarantined` a cancelled run records for the refs its save landed."""
+    from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+        CancelledWorkQuarantinedEvent,
+    )
+
+    return CancelledWorkQuarantinedEvent(
+        workflow_id=workflow_id,
+        execution_id=command.aggregate_id,
+        phase_id=command.phase_id,
+        quarantined_at=datetime.now(UTC),
+        quarantined_refs=list(command.quarantined),
+    )
+
+
+def cancelled_event(command: CancelExecutionCommand, workflow_id: str) -> ExecutionCancelledEvent:
+    """The `ExecutionCancelled` a cancelled run records."""
+    from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+        ExecutionCancelledEvent,
+    )
+
+    return ExecutionCancelledEvent(
+        workflow_id=workflow_id,
+        execution_id=command.aggregate_id,
+        phase_id=command.phase_id,
+        cancelled_at=datetime.now(UTC),
+        reason=command.reason,
     )

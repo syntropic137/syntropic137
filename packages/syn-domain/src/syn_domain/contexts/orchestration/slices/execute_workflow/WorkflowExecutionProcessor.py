@@ -34,6 +34,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     UpstreamRetryPolicy,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+    record_cancelled_work,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
 )
@@ -574,15 +577,9 @@ class WorkflowExecutionProcessor:
                 saved=saved,
                 repositories=[c.repository for c in aggregate.start_pins.source_commits],
             )
-            try:
-                aggregate.record_cancelled_work(cancellation.as_command(execution_id, phase_id))
-                await self._journal.append(aggregate)
-            except Exception:
-                # The refs are still in `reason`; only the PR notice is lost.
-                logger.exception(
-                    "Could not record the quarantined work of cancelled execution %s",
-                    execution_id,
-                )
+            await record_cancelled_work(
+                aggregate, cancellation.as_command(execution_id, phase_id), journal=self._journal
+            )
             try:
                 await runtime.report_cancelled(cancellation.reason)
             except Exception:

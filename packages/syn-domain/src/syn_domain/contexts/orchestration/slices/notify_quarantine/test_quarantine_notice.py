@@ -34,6 +34,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow import cancelled_work_record
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+    record_cancelled_work,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    ExecutionJournal,
+)
 from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     QuarantineNoticeProcessManager,
 )
@@ -354,3 +361,139 @@ def test_a_cancelled_execution_whose_save_landed_nothing_records_nothing() -> No
     aggregate.mark_events_as_committed()
     aggregate.record_cancelled_work(RecordCancelledWorkCommand("exec-q2", "implement", ()))
     assert aggregate.get_uncommitted_events() == []
+
+
+class _Stream:
+    """The execution's stream, written to the live store, refusing its first ``rejections`` saves.
+
+    A rejected save writes nothing, as `ExecutionJournal.append`'s contract
+    says; `get_by_id` rebuilds from what was actually written, as a real
+    repository does.
+    """
+
+    def __init__(self, store: _LiveStore, *, rejections: int = 0) -> None:
+        self._store = store
+        self.rejections = rejections
+        self.history: list[EventEnvelope] = []
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        if self.rejections:
+            self.rejections -= 1
+            raise RuntimeError("wrong expected version")
+        for envelope in aggregate.get_uncommitted_events():
+            self.history.append(envelope)
+            self._store.publish(envelope.event, envelope.event.event_type)
+        aggregate.mark_events_as_committed()
+
+    async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
+        await self.save(aggregate)
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.rehydrate(self.history)
+        return aggregate
+
+    def recorded(self, event_type: str) -> int:
+        return sum(1 for e in self.history if e.event.event_type == event_type)
+
+
+async def _a_cancelled_run(stream: _Stream) -> tuple[WorkflowExecutionAggregate, ExecutionJournal]:
+    """Started and cancelled through the real journal, so both are on the stream."""
+    journal = ExecutionJournal(stream, object())  # type: ignore[arg-type]
+    aggregate = WorkflowExecutionAggregate()
+    aggregate.start_execution(
+        StartExecutionCommand(
+            execution_id="exec-q1",
+            workflow_id="wf-1",
+            workflow_name="Quarantine on cancel",
+            total_phases=1,
+            inputs={},
+            phase_definitions=[PhaseDefinition(phase_id="implement", name="Implement", order=1)],
+        )
+    )
+    await journal.open(aggregate)
+    aggregate.cancel_execution(
+        CancelExecutionCommand(execution_id="exec-q1", phase_id="implement", reason="stop")
+    )
+    await journal.append(aggregate)
+    return aggregate, journal
+
+
+_LANDED = RecordCancelledWorkCommand(
+    execution_id="exec-q1",
+    phase_id="implement",
+    quarantined=(
+        QuarantinedRef(
+            repository="acme/widget",
+            branch="feat/thing",
+            ref=REF,
+            commit=SHA,
+            commit_count=1,
+            pull_request=42,
+        ),
+    ),
+)
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_run_whose_append_is_rejected_still_tells_its_pr_once() -> None:
+    """Aggregate -> journal -> stored event -> coordinator -> one post, and none on replay.
+
+    The first append of the landed refs is REJECTED, as a version conflict
+    would be. The fact must still reach the stream exactly once, and the PR
+    hear of it from the stored event alone - nothing here calls
+    `process_pending()`.
+    """
+    manager, commenter = _manager()
+    store = _LiveStore()
+    checkpoints = MemoryCheckpointStore()
+    coordinator = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=checkpoints, projections=[manager]
+    )
+    runner = asyncio.create_task(coordinator.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        stream = _Stream(store)
+        aggregate, journal = await _a_cancelled_run(stream)
+        stream.rejections = 1
+
+        assert await record_cancelled_work(aggregate, _LANDED, journal=journal)
+
+        assert stream.rejections == 0, "the rejection was never exercised"
+        assert stream.recorded("CancelledWorkQuarantined") == 1
+        await asyncio.wait_for(_settled(coordinator, checkpoints, len(stream.history)), 5)
+        assert commenter.posts == 1
+        (body,) = commenter.comments.values()
+        assert REF in body and SHA in body
+    finally:
+        await coordinator.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+
+    # A restart: the whole stream again, from a checkpoint that has none of it.
+    replay = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=MemoryCheckpointStore(), projections=[manager]
+    )
+    runner = asyncio.create_task(replay.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        await replay.wait_for_process_managers()
+        assert commenter.posts == 1 and commenter.edits == 0
+    finally:
+        await replay.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_never_takes_the_landed_refs_is_reported_not_returned_as_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cancelled_work_record, "_ATTEMPTS", 2)
+    stream = _Stream(_LiveStore())
+    aggregate, journal = await _a_cancelled_run(stream)
+    stream.rejections = 2
+
+    assert not await record_cancelled_work(aggregate, _LANDED, journal=journal)
+    assert stream.rejections == 0
+    assert stream.recorded("CancelledWorkQuarantined") == 0

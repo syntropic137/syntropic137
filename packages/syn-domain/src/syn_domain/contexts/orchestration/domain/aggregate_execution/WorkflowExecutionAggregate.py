@@ -47,6 +47,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_s
     resumed_event_applies,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
+    cancelled_event,
+    cancelled_work_event,
     completed_event,
     failed_event,
     started_event,
@@ -702,44 +704,20 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("CancelExecutionCommand")
     def cancel_execution(self, command: CancelExecutionCommand) -> None:
         """Handle CancelExecutionCommand."""
-        from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
-            ExecutionCancelledEvent,
-        )
-
         if not self.accepts_control(ControlSignalType.CANCEL):
             msg = f"Cannot cancel execution in status {self._status}"
             raise ValueError(msg)
 
-        event = ExecutionCancelledEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            cancelled_at=datetime.now(UTC),
-            reason=command.reason,
-        )
-        self._apply(event)
+        self._apply(cancelled_event(command, self._workflow_id or ""))
 
     @command_handler("RecordCancelledWorkCommand")
     def record_cancelled_work(self, command: RecordCancelledWorkCommand) -> None:
         """Record the work a cancelled phase's save landed. Nothing landed, no event."""
-        from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
-            CancelledWorkQuarantinedEvent,
-        )
-
         if self._status != ExecutionStatus.CANCELLED:
             msg = f"Cannot record cancelled work in status {self._status}"
             raise ValueError(msg)
-        if not command.quarantined:
-            return
-        self._apply(
-            CancelledWorkQuarantinedEvent(
-                workflow_id=self._workflow_id or "",
-                execution_id=command.aggregate_id,
-                phase_id=command.phase_id,
-                quarantined_at=datetime.now(UTC),
-                quarantined_refs=list(command.quarantined),
-            )
-        )
+        if command.quarantined:
+            self._apply(cancelled_work_event(command, self._workflow_id or ""))
 
     @command_handler("AddExecutionTagsCommand")
     def add_tags(self, command: AddExecutionTagsCommand) -> None:
