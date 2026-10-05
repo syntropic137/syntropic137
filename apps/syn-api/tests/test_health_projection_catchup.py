@@ -62,7 +62,7 @@ PEERS = ("workflow_executions", "workflow_execution_details", "dashboard_metrics
 class _SubscriptionServiceStub:
     """Stands in for the started CoordinatorSubscriptionService.
 
-    Only the two methods /health calls. The lag it returns is produced by the
+    Only the methods /health calls; no dropped starts here (see test_read_path_verdict.py). The lag it returns is produced by the
     real measurement, so these tests fail if that measurement stops reporting a
     replay — see test_read_model_lag.py for the service's own end of the chain.
     """
@@ -75,6 +75,9 @@ class _SubscriptionServiceStub:
 
     async def describe_read_model_lag(self) -> ReadModelLag:
         return self._lag
+
+    async def describe_unapplied_starts(self) -> None:
+        return None
 
 
 # Checkpoint ages either side of the stall threshold. MOVING is the mid-dispatch

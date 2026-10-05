@@ -9267,6 +9267,7 @@
           "subscription_coordinator",
           "projection_catchup",
           "projection_stalled",
+          "projection_dropped_event",
           "event_poller",
           "check_run_poller",
           "anthropic_api_key",
@@ -17564,12 +17565,13 @@
             "enum": [
               "healthy",
               "degraded",
+              "dropped_events",
               "stalled",
               "catching_up",
               "unknown"
             ],
             "title": "Status",
-            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed."
+            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed."
           },
           "running": {
             "anyOf": [
@@ -17682,6 +17684,21 @@
             ],
             "title": "Lagging Projections",
             "description": "Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable."
+          },
+          "unapplied_starts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UnappliedStart"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unapplied Starts",
+            "description": "Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured."
           }
         },
         "additionalProperties": false,
@@ -19058,6 +19075,34 @@
         "type": "object",
         "title": "TypeCount",
         "description": "Count of items by type."
+      },
+      "UnappliedStart": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Read model that skipped the start."
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id",
+            "description": "Execution whose WorkflowExecutionStarted it skipped."
+          },
+          "global_nonce": {
+            "type": "integer",
+            "title": "Global Nonce",
+            "description": "Store position of that start event."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "execution_id",
+          "global_nonce"
+        ],
+        "title": "UnappliedStart",
+        "description": "One execution whose start a projection skipped past. Published on /health as is."
       },
       "UpdateArtifactRequest": {
         "properties": {

@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Mapping
+    from collections.abc import Collection, Mapping, Sequence
     from datetime import datetime
 
     from event_sourcing import ProjectionStore
@@ -34,7 +34,7 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_sum
     WorkflowExecutionSummary,
 )
 from syn_domain.pagination import Page, matches_search
-from syn_domain.projection_scan import paginate_projection
+from syn_domain.projection_scan import paginate_projection, read_by_keys
 
 #: Every field ``page``'s predicates read - the filters, the facet, the window
 #: and the search. ``paginate_projection`` scans only these for the whole
@@ -303,6 +303,20 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         # Sort by started_at descending (most recent first)
         executions.sort(key=lambda e: e.started_at or "", reverse=True)
         return executions
+
+    async def applied_starts(self, execution_ids: Sequence[str]) -> set[str]:
+        """Which of ``execution_ids`` this read model applied the start of, in one query.
+
+        A row alone does not prove it: the #598 fallback in `on_workflow_failed`
+        creates a row for a failure whose start was never seen, with no
+        `started_at`. That is the shape a dropped start leaves behind (#1545),
+        so a start counts as applied only when `started_at` is set. The document
+        key is the execution id, so this is a primary-key read, not a JSON filter.
+        """
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, execution_ids)
+        return {
+            key for key, document in documents.items() if document.get("started_at") is not None
+        }
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
         """Get a specific execution by ID.
