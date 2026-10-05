@@ -25,9 +25,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     ArtifactsCollectedCommand,
     CompleteExecutionCommand,
     CompletePhaseCommand,
+    ResumeExecutionCommand,
     StartExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
@@ -228,6 +232,55 @@ class TestRepairRoundsAreDecidedByTheAggregate:
         ]
         assert [d.next_phase_id for d in after_round_two] == ["finalize_pr"]
         assert store.load().review_verdict is ReviewVerdict.CERTIFIED
+
+
+def _resume(store: _Store, *, acknowledge_external_effects: bool = True) -> ExecutionResumedEvent:
+    """Ask the finished run, loaded from its stream, for a resume."""
+    parent = store.load()
+    parent.resume_execution(
+        ResumeExecutionCommand(
+            execution_id=EXECUTION,
+            resume_execution_id="exec-rounds-continued",
+            acknowledge_external_effects=acknowledge_external_effects,
+        )
+    )
+    store.save(parent)
+    (resumed,) = store.of_type(ExecutionResumedEvent)
+    return resumed
+
+
+class TestUnresolvedFindingsAreResumable:
+    """A run blocked at the bound completes, and continues at its last fix."""
+
+    def test_resumes_at_the_last_rounds_fix_inheriting_everything_before_it(self) -> None:
+        _, store = _run({"reverify": "blocked", "reverify_2": "blocked", "reverify_3": "blocked"})
+
+        resumed = _resume(store)
+
+        assert resumed.resume_phase_id == "fix_3"
+        assert [p.phase_id for p in resumed.inherited_phases] == list(
+            PHASES[: PHASES.index("fix_3")]
+        )
+        assert resumed.external_effects_acknowledged
+
+    def test_the_rerun_fix_may_have_pushed_so_it_needs_acknowledgement(self) -> None:
+        _, store = _run({"reverify": "blocked", "reverify_2": "blocked", "reverify_3": "blocked"})
+
+        with pytest.raises(ValueError, match="phase fix_3 started"):
+            _resume(store, acknowledge_external_effects=False)
+
+    @pytest.mark.parametrize(
+        "verdicts",
+        [{"reverify": "certified"}, {"reverify": "blocked", "reverify_2": "certified"}, {}],
+        ids=["certified-round-1", "certified-round-2", "no-review"],
+    )
+    def test_a_completed_run_without_unresolved_findings_is_not_resumable(
+        self, verdicts: dict[str, str]
+    ) -> None:
+        _, store = _run(verdicts)
+
+        with pytest.raises(ValueError, match="Cannot resume execution in status completed"):
+            _resume(store)
 
 
 class TestNextPhase:

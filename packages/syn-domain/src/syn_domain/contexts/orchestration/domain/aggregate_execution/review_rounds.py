@@ -77,6 +77,8 @@ class ReviewRecord:
     #: The verdict of the last COLLECTED phase that reported one: how the run
     #: stands, and what `WorkflowCompleted` records it ended on.
     latest: ReviewVerdict | None = None
+    #: The phase that reported ``latest``.
+    latest_phase_id: str | None = None
 
     def report(self, phase_id: str, verdict: ReviewVerdict | None) -> None:
         """A phase's agent run finished, saying ``verdict`` (or nothing)."""
@@ -91,6 +93,23 @@ class ReviewRecord:
         verdict = self._reported.get(phase_id)
         if verdict is not None:
             self.latest = verdict
+            self.latest_phase_id = phase_id
+
+    def repair_point(self, phase_definitions: Sequence[PhaseDefinition]) -> str | None:
+        """Where a run that ended with UNRESOLVED FINDINGS continues, or None.
+
+        The phase before the review that blocked it - the last round's fix -
+        so a resume runs that round again against the findings still open,
+        then its review and everything after. None unless the run's last
+        verdict was ``blocked``. The review itself when nothing precedes it.
+        """
+        if self.latest is not ReviewVerdict.BLOCKED:
+            return None
+        ids = [p.phase_id for p in phase_definitions]
+        if self.latest_phase_id not in ids:
+            return None
+        at = ids.index(self.latest_phase_id)
+        return ids[max(at - 1, 0)]
 
 
 def next_phase(

@@ -41,8 +41,11 @@ if TYPE_CHECKING:
 #: CANCELLED is deliberately absent: a cancel IS that decision - it may have
 #: been issued because the run targeted the wrong repository or its task held
 #: a secret - so it is resumable only on `override_cancellation`, never merely
-#: because it is terminal. COMPLETED has nothing left to run; RUNNING is
-#: still live, and resuming it would put two runs on one piece of work; an
+#: because it is terminal. COMPLETED is resumable only when it ended with
+#: UNRESOLVED FINDINGS - its last review verdict `blocked` at the workflow's
+#: repair bound (PC-63) - and then at the last round's fix, not at the first
+#: unfinished phase (there is none); otherwise it has nothing left to run.
+#: RUNNING is still live, and resuming it would put two runs on one piece of work; an
 #: execution that never started has nothing to inherit.
 RESUMABLE_STATUSES: Final[frozenset[ExecutionStatus]] = frozenset(
     {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}
@@ -102,8 +105,13 @@ def refuse_resume(
     resume_execution_id: str | None,
     requested_resume_id: str,
     override_cancellation: bool,
+    repair_point: str | None = None,
 ) -> str | None:
     """Why this execution may not be resumed, or None if it may.
+
+    ``repair_point`` is where a completed run with unresolved findings
+    continues (`ReviewRecord.repair_point`); a completed run without one is
+    refused.
 
     Returns the refusal MESSAGE rather than raising, so the whole admission
     decision is one expression the caller turns into a `ValueError`.
@@ -122,6 +130,9 @@ def refuse_resume(
                 f"Cannot resume execution {execution_id}: it was cancelled, and "
                 "resuming a cancelled execution needs an explicit override"
             )
+    elif status is ExecutionStatus.COMPLETED:
+        if repair_point is None:
+            return f"Cannot resume execution in status {status}"
     elif status not in RESUMABLE_STATUSES:
         return f"Cannot resume execution in status {status}"
     if resumed:
@@ -192,12 +203,17 @@ def decide_resume(
     phase_owners: Mapping[str, str],
     started_phase_ids: Mapping[str, int] | frozenset[str] | set[str],
     command: ResumeExecutionCommand,
+    repair_point: str | None = None,
 ) -> ResumeDecision:
     """Every rule above, applied in order.
 
     The ORDER matters: the prefix is only computed once the parent is resumable at
     all, and the resume point is judged only once there is a prefix to judge it
     against.
+
+    A completed run with unresolved findings inherits only the phases before
+    its ``repair_point``: the prefix stops there as if that phase had never
+    completed, so the resume re-runs the last round and what follows it.
     """
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
@@ -210,10 +226,14 @@ def decide_resume(
         resume_execution_id=resume_execution_id,
         requested_resume_id=command.resume_execution_id,
         override_cancellation=command.override_cancellation,
+        repair_point=repair_point,
     )
     if refusal is not None:
         return ResumeRefused(refusal)
 
+    if status is ExecutionStatus.COMPLETED and repair_point is not None:
+        ids = [p.phase_id for p in phase_definitions]
+        completed_phase_ids = set(ids[: ids.index(repair_point)]) & set(completed_phase_ids)
     inherited, resume_phase_id = completed_prefix(
         phase_definitions,
         completed_phase_ids,

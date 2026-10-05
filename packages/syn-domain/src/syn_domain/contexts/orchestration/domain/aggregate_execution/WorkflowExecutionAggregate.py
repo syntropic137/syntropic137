@@ -799,6 +799,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             phase_owners=self._inherited_owners(),
             started_phase_ids=self._phase_attempts,
             command=command,
+            repair_point=self._reviews.repair_point(self._phase_definitions),
         )
         if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
