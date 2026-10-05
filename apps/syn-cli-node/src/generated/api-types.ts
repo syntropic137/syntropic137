@@ -3402,6 +3402,7 @@ export interface components {
              * @default false
              */
             deliverable_produced: boolean;
+            review_verdict?: components["schemas"]["ReviewVerdict"] | null;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Repos */
             repos?: string[];
@@ -6052,6 +6053,31 @@ export interface components {
             /** Dispatched At */
             dispatched_at?: string | null;
         };
+        /**
+         * ReviewVerdict
+         * @description What a reviewing phase concluded about the change in front of it (PC-63).
+         *
+         *     THE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes
+         *     ``review_verdict`` in its TASK_RESULT block; the aggregate reads it when
+         *     the phase's artifacts are collected and chooses the next phase from it
+         *     (see `WorkflowExecutionAggregate.artifacts_collected`):
+         *
+         *     * ``certified`` ends the repair loop. Every phase before the workflow's
+         *       final phase is skipped, so a run that certifies in round 1 does not pay
+         *       for rounds 2 and 3.
+         *     * ``blocked`` - or no verdict at all - advances by order, which is the
+         *       next repair round, or the final phase once the rounds are spent.
+         *
+         *     The latest verdict a run reported is also how it ended: a run completed
+         *     on ``blocked`` completed with UNRESOLVED FINDINGS, and says so on
+         *     `WorkflowCompleted` rather than looking certified.
+         *
+         *     A missing or misspelled verdict is never read as ``certified``: skipping
+         *     review on a word the reader did not recognise is the one mistake here that
+         *     costs more than a repair round.
+         * @enum {string}
+         */
+        ReviewVerdict: "certified" | "blocked";
         /**
          * RootResponse
          * @description Payload of ``GET /`` — what this API is, and which build is serving it.
