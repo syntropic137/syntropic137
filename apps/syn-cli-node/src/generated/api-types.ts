@@ -2235,6 +2235,12 @@ export interface paths {
         /**
          * Health
          * @description Health check endpoint with detailed subscription status.
+         *
+         *     This is the container's LIVENESS check (#1575): while the gate withholds
+         *     the API it answers 200 with the gate's phase - "starting", or "failed"
+         *     in the moment between a late startup failure and the process exiting -
+         *     without probing anything startup has not built. "healthy" is what
+         *     readiness waits for, so it is only ever said once the gate is ready.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -4402,7 +4408,7 @@ export interface components {
         HealthResponse: {
             /**
              * Status
-             * @description 'healthy' while the process is alive and accepting writes.
+             * @description 'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed.
              */
             status: string;
             /**
