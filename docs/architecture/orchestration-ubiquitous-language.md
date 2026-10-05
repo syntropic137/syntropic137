@@ -295,6 +295,12 @@ is retried, so Fencing has no time bound once a Lease expires.
 `fence_expired` returns each one as a `FencedRun`: the Execution and the host
 that held it.
 
+Fencing gives the row one **reconciler**, and only that host takes turns on it.
+Another Executor replaces it (**takeover**) only once the reconciler has
+**left**: its `executor_hosts` row is gone, by clean exit after a Drain, by a
+restart in the same container, or by an operator **retiring** it after stopping
+it. A stopped heartbeat is not leaving. A `host_id` is never reused.
+
 An expired Lease is never claimed again to run. So an Execution runs at most
 once: never a second workspace, never an automatic re-run, and no automatic
 Resume after a host dies. An agent on a stalled host can still act until its
@@ -318,7 +324,10 @@ The version of the orchestration events' shapes,
 `ORCHESTRATION_EVENT_EPOCH`. Admission records the epoch it wrote with as a run
 row's `writer_epoch`, and an Executor claims only rows whose `writer_epoch` is
 no higher than its own. So an older Executor never loads events it cannot read:
-newer work waits for a newer Executor. Changing an orchestration event's schema
+newer work waits for a newer Executor. Every later append is held to the row's
+`reader_epoch`, the least epoch of any host that may still load the stream (the
+claimer and the reconciler); it rises only once the host holding it down has
+left (ADR-072 D9). Changing an orchestration event's schema
 without bumping the epoch fails a fitness test.
 
 ## Queued

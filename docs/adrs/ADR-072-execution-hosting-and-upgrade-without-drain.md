@@ -170,12 +170,14 @@ which ends only when a reap succeeds.
 ### D5. At most one run per execution, and the limits of that guarantee
 
 **An expired lease is never claimed to run.** The only way out of an expired
-`claimed` row is reconciliation, performed by any live executor on every loop
-turn as a state machine on the row:
+`claimed` row is reconciliation. Any live executor may **fence** an expired
+row on any loop turn; from then on the row has exactly one **reconciler**, and
+only that host takes turns on it:
 
 | Step | Action | Guard |
 |---|---|---|
-| `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, `reconciler_epoch = <its epoch>`, one UPDATE | `leased_until < now()` and `writer_epoch <= <its epoch>` (D9) |
+| `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch = LEAST(reader_epoch, <its epoch>)`, one UPDATE | `leased_until < now()` and `writer_epoch <= <its epoch>` (D9) |
+| takeover, in `fencing` or `reaped` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch` recomputed (D9), one UPDATE | the current `reconciler` has **left**: it has no `executor_hosts` row (below), and `writer_epoch <= <its epoch>` |
 | `fencing` → `reaped` | remove containers labelled `syn.host_id=<dead host>`, `syn.execution_id=<id>` | the reap reports complete (the existing `fully_reaped` rule in `reconciliation.py`); otherwise stay `fencing` and retry |
 | `reaped` → `interrupted` | two ordered steps, below | |
 
@@ -201,8 +203,33 @@ atomic one:
 2. **Then close the row** with `close_interrupted`, guarded on the row's
    current `lease_token`. Only this releases the slot.
 
+**Reconciliation turns are exclusive.** Every turn on a `fencing` or `reaped`
+row is taken by the row's `reconciler` and no other host, so two turns on one
+row never overlap. Another executor replaces it only by takeover, and only once
+the reconciler has **left**: its `executor_hosts` row is gone. A heartbeat that
+stopped is not leaving, for the same reason an expired lease is not proof that
+a run stopped: a stalled process can resume and load the stream. A host's
+`executor_hosts` row disappears in exactly three ways, and each comes after
+the host's last stream load:
+
+- **Clean exit.** A draining executor (D10) finishes its turns, and deleting
+  its own `executor_hosts` row is the last thing it does before exiting 0.
+- **Restart.** `executor_hosts` records the container a host runs in. A
+  process starting in a container that already has a host row deletes that row
+  before it registers its own: the restart is the proof that the previous
+  process in that container has stopped.
+- **Retirement.** An operator retires a host that died or stalled
+  (`DELETE /executors/{host_id}`), after stopping its process. That is the same
+  manual act the reap-window alert below already asks for.
+
+A `host_id` is never reused: a restarted process registers a new one. So a
+deleted row cannot come back, and a host that has left cannot load the stream
+again. A row whose reconciler stalled without leaving waits, in `fencing` or
+`reaped`, and raises the same alert as a stuck reap, naming the host to retire.
+
 A crash between the steps leaves the row `reaped` with the stream already
-terminal. The next reconciliation turn reloads, sees the terminal stream, appends
+terminal. The next reconciliation turn (by the same reconciler, or after a
+crash by the host that takes over) reloads, sees the terminal stream, appends
 nothing, and closes the row. Until the row is closed it is counted in use (D3),
 so a crash can hold a slot for a turn but can never free one early.
 
@@ -349,39 +376,74 @@ rule is on every append, not on admission:
 > A writer whose epoch is higher raises it, with one guarded UPDATE, **before**
 > it appends.
 
-Claim records the claimant's epoch on the row as `claimer_epoch`. The raise is
-`SET writer_epoch = GREATEST(writer_epoch, :mine)`, and its guard decides by
-row state:
+**`reader_epoch` is the least epoch of any host that may still load the
+stream.** While a row is `claimed`, `fencing` or `reaped`, those hosts are the
+claimer and, once it is fenced, the row's one reconciler (D5); a previous
+reconciler is not among them, because takeover requires it to have left.
+`executor_hosts` records each host's epoch. Three single-row UPDATEs write
+`reader_epoch`, and nothing else does:
+
+| UPDATE | `reader_epoch` becomes |
+|---|---|
+| claim | the claimer's epoch |
+| `claimed` → `fencing` | `LEAST(reader_epoch, <reconciler's epoch>)`. The fenced claimer has not left: a stalled host that resumes loads the stream on the interruption path of #1381. |
+| every reconciliation turn, takeover included, begins with a recompute | `LEAST(<reconciler's epoch>, <claimer's epoch, if the claimer still has an executor_hosts row>)` |
+
+So `reader_epoch` rises only in a recompute that read the host holding it down
+as gone, and a host that has gone never loads the stream again (D5). No turn
+rewrites it upward on the strength of its own epoch alone.
+
+The raise is `SET writer_epoch = GREATEST(writer_epoch, :mine)`, and its guard
+decides by row state:
 
 | Row state | Append from a newer epoch |
 |---|---|
 | `opening`, `admitted`, `abandoned` | Raise, then append. An older executor no longer claims the row; it waits, visibly, as at admission. |
-| `claimed` | Allowed only if `:mine <= claimer_epoch`. Otherwise the raise matches no row and the append is refused with 409, naming both epochs: the running executor reloads its aggregate and could not read the event. Retry after that executor is upgraded or the run ends. |
-| `fencing`, `reaped` | Allowed only if `:mine <= reconciler_epoch`, the same rule as `claimed` with the reconciler in place of the run: the reconciler loads the stream and appends `WorkflowInterruptedEvent` from this state (D5). Otherwise the raise matches no row and the append is refused with 409, naming both epochs. The route returns that 409 to its caller unchanged, so `syn` shows it and no write is half-applied; retry once the row is `interrupted`, which takes one reconciliation turn when the reap succeeds. |
+| `claimed`, `fencing`, `reaped` | Allowed only if `:mine <= reader_epoch`. Otherwise the raise matches no row and the append is refused with 409, naming both epochs: a host that may still load the stream could not read the event. The route returns that 409 to its caller unchanged, so `syn` shows it and no write is half-applied. Retry after the run ends, or once the row is `interrupted`, which takes one reconciliation turn when the reap succeeds and the fenced claimer has left. |
 | `done`, `interrupted`, or no row | No executor loads the stream again; no constraint. |
+
+The reconciler's own `WorkflowInterruptedEvent` passes the same gate. If the
+fenced claimer is older than the reconciler and has not left, that append is
+refused and the row waits in `reaped`, under the alert in D5, until the claimer
+is retired: the claimer could not read the event, so refusing it is correct.
+
+**Why no host ever loads an event it cannot read.** Two invariants, each held
+by single-row UPDATEs that serialise on the row lock:
+
+- **Becoming a reader.** Claim, fencing and takeover are each guarded on
+  `writer_epoch <= <the host's epoch>`, and raise-then-append keeps every event
+  in the stream at or below `writer_epoch`. So a host can read every event
+  already in the stream at the moment it becomes a reader.
+- **Staying a reader.** Until a host has left, `reader_epoch <=` its epoch, and
+  every raise is held to `reader_epoch`. So it can read every event appended
+  while it may still load.
 
 Raise-then-append crosses the same two stores as D5 and is ordered the same
 way: a crash between them leaves a raised epoch and no event, which can only
-delay a claim, never let an old executor mis-read. The raise and the claim are
-single UPDATEs on one row, so they serialise: a claim that wins is seen by the
-raise as `claimed`, and a raise that wins is seen by the claim as too new.
-Fencing serialises the same way, in both orders. If the raise wins, `claimed`
-→ `fencing` matches no row for a reconciler older than the new `writer_epoch`,
-and the row waits for a new enough executor to reconcile it. If fencing wins,
-the raise sees `fencing` and is held to `reconciler_epoch`, so a reconciler
-never loads an event it cannot read, between its fencing UPDATE and its row
-closure. Any later reconciliation turn on a `fencing` or `reaped` row, by the
-same executor or another, is guarded the same way: `writer_epoch <=` its own
-epoch, and it rewrites `reconciler_epoch` to that epoch. The implementation
-carries a transition test for each order.
+delay a claim, never let an old executor mis-read. Each race is therefore one
+choice of order between two UPDATEs on one row:
+
+| Race | Raise first | Other UPDATE first |
+|---|---|---|
+| claim and raise | the claim sees the new `writer_epoch` and matches no row for an older executor, which leaves it to a newer one | the raise sees `claimed` and is held to the claimer's epoch |
+| fencing and raise | `claimed` → `fencing` matches no row for a reconciler older than the new `writer_epoch`; the row waits for a new enough executor | the raise sees `fencing` and is held to `LEAST(claimer, reconciler)` |
+| reconciler A (epoch 1) in flight, B (epoch 2) takes over, epoch-2 append | while A still has an `executor_hosts` row, B's takeover matches no row and the raise is held to `reader_epoch <= 1`: refused with 409 | B's takeover can match only after A's row is gone, which happens after A's last stream load (D5: clean exit, restart or retirement). The raise is then held to the recomputed `reader_epoch`, which is 2 only if the claimer has left too. An epoch-2 event can land only when no epoch-1 host can load |
+| fenced claimer X resumes while A reconciles | the raise was held to `reader_epoch <= X`'s epoch, so X's load reads it | X's load sees only events at or below `writer_epoch`, which was `<=` X's epoch when it claimed and has been held to `reader_epoch <=` X's epoch since |
+
+If A stalls without leaving, B never takes over and no newer append lands: the
+row waits, and the D5 alert names A. That is the price of the guarantee, and
+it is paid in latency on one row, never in a mis-read. The implementation
+carries a transition test for each cell of that table, plus one that a
+recompute does not raise `reader_epoch` while the host holding it down still
+has an `executor_hosts` row.
 
 **Enforced in one place:** the repository every one of those routes gets from
 `get_workflow_execution_repository()`
 (`packages/syn-adapters/src/syn_adapters/storage/repositories.py:182`) is
 wrapped so its `save` performs the raise first. A route cannot append to an
 execution without passing the gate, and no route has to know the gate exists.
-An executor's own appends pass it trivially, since it writes at its own epoch
-and that is its `claimer_epoch`.
+A running executor's own appends pass it, since it writes at its own epoch and
+while it is the only reader that is the row's `reader_epoch`.
 
 ### D10. Upgrade without drain
 
@@ -394,7 +456,8 @@ and that is its `claimer_epoch`.
 
 **Drain (of an executor)** is: `executor_hosts.draining` is set
 (`PUT /executors/{host_id}/drain`), the host checks it every loop turn between
-claims, stops claiming, finishes what it holds and exits 0. The processor
+claims, stops claiming, finishes what it holds (runs and reconciliation
+turns), deletes its own `executor_hosts` row as its last act (D5) and exits 0. The processor
 receives no new signal; this is a property of the host, not of an execution,
 which avoids repeating the Pause mistake (an event nothing in the execution
 path observed). It is not the pit-stop drain, which closes admission and waits
