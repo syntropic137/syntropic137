@@ -111,7 +111,7 @@ class _GitHub:
         path: str,
         headers: dict[str, str] | None = None,
         json: dict[str, dict[str, str] | list[str]] | None = None,
-        extensions: dict[str, object] | None = None,
+        extensions: object = None,
     ) -> httpx.Response:
         installation = path.split("/")[3]
         request = None if json is None else TokenRequest.model_validate(json)

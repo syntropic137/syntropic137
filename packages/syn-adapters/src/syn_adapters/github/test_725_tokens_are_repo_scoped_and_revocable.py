@@ -53,7 +53,7 @@ class _FakeHttp:
         path: str,
         headers: dict[str, str] | None = None,
         json: dict[str, dict[str, str] | list[str]] | None = None,
-        extensions: dict[str, object] | None = None,
+        extensions: object = None,
     ) -> httpx.Response:
         self.token_requests.append(None if json is None else TokenRequest.model_validate(json))
         expires = datetime.now(UTC) + timedelta(hours=1)

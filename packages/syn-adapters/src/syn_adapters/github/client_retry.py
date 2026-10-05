@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 #: Request extension a caller sets when a non-idempotent request is still safe
 #: to send twice: `extensions=RETRY_SAFE`.
-RETRY_SAFE: dict[str, object] = {"syn_retry_safe": True}
+RETRY_SAFE = {"syn_retry_safe": True}
 
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 _TRANSIENT_STATUSES = frozenset({502, 503, 504})
