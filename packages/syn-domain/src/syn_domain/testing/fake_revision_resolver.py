@@ -1,7 +1,7 @@
 """A ``RevisionResolverPort`` answered from a table the test writes (#967).
 
-The real resolver is a later evals run; until then every consumer of the port
-is tested against this one, and so is the contract it has to keep.
+Every consumer of the port is tested against this one. The GitHub resolver,
+``syn_adapters.github.revision_resolver``, is tested against GitHub's answers.
 """
 
 from __future__ import annotations

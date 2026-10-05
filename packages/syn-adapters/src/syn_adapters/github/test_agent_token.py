@@ -74,6 +74,7 @@ class _FakeHttp:
         path: str,
         headers: dict[str, str] | None = None,
         json: dict[str, dict[str, str] | list[str]] | None = None,
+        extensions: object = None,
     ) -> httpx.Response:
         self.token_request_bodies.append(json)
         self.minted += 1

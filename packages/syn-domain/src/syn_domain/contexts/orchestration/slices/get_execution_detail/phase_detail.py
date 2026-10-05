@@ -111,6 +111,12 @@ class PhaseDetail:
     comment, a push): ``none``, ``succeeded``, ``denied`` or ``failed``, or
     ``None`` when it said nothing. A report, not a measurement - see
     `SideEffectStatus`."""
+    failure_classification: str | None = None
+    """Why this phase failed, as `FailureClassification` stores it; ``None``
+    for a phase that did not fail. Written only by `FailedPhaseRecord`."""
+    reported_failure_reason: str | None = None
+    """What this phase's agent said caused its failure, ``None`` when it said
+    nothing or did not fail."""
 
     @classmethod
     def running(
@@ -190,6 +196,8 @@ class PhaseDetail:
             "exit_code": self.exit_code,
             "deliverable_recovered": self.deliverable_recovered,
             "reported_side_effects": self.reported_side_effects,
+            "failure_classification": self.failure_classification,
+            "reported_failure_reason": self.reported_failure_reason,
         }
 
     @classmethod
@@ -215,4 +223,6 @@ class PhaseDetail:
             exit_code=data.get("exit_code"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=_side_effects(data.get("reported_side_effects")),
+            failure_classification=data.get("failure_classification"),
+            reported_failure_reason=data.get("reported_failure_reason"),
         )
