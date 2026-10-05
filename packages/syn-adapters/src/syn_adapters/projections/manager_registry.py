@@ -156,7 +156,7 @@ def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
         "workflow_detail": WorkflowDetailProjection(store),
         "workflow_execution_list": WorkflowExecutionListProjection(store),
         "workflow_execution_detail": WorkflowExecutionDetailProjection(store),
-        "eval_list": EvalListProjection(store),
+        "evals": EvalListProjection(store),
         "session_list": SessionListProjection(store),
         "artifact_list": ArtifactListProjection(store),
         "dashboard_metrics": DashboardMetricsProjection(store),

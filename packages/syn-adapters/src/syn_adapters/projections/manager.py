@@ -198,7 +198,7 @@ class ProjectionManager:
     def eval_list(self) -> EvalListProjection:
         """Get the eval list and detail projection (#967)."""
         self._ensure_initialized()
-        return self._projections["eval_list"]
+        return self._projections["evals"]
 
     # Backward compatibility aliases
     @property
