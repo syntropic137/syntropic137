@@ -15,9 +15,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
-    WorkspaceUsage,
-)
+from syn_domain.contexts.orchestration import WorkspaceUsage
 
 
 @runtime_checkable

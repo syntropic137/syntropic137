@@ -111,6 +111,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationConfig,
     SecurityPolicy,
     SidecarConfig,
+    WorkspaceUsage,
 )
 from syn_domain.contexts.orchestration.domain.commands import (
     AddExecutionTagsCommand,
@@ -345,6 +346,7 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "WorkspaceUsage",
     "announce_as",
     "build_command_from_definition",
     "inherited_outputs",

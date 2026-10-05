@@ -22,8 +22,6 @@ from syn_domain.contexts.orchestration import (
     SidecarConfig,
     TerminateWorkspaceCommand,
     WorkspaceAggregate,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     WorkspaceUsage,
 )
 from syn_shared.diagnostics import name_exit_status
