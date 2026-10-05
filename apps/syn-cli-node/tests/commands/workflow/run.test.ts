@@ -818,6 +818,27 @@ describe("workflow run commands", () => {
       expect(mockFetch).toHaveBeenCalledTimes(3);
     });
 
+    it("refuses before sending when only a later phase of a stored definition consumes the task (PC-66)", async () => {
+      // The rule is "any phase", not "the first phase": a checker that stopped
+      // after phase one would dispatch this and the API would answer 422.
+      mockResolveThen({
+        ...taskWorkflow("Check out the repo and run the QA ladder."),
+        phases: [
+          { phase_id: "p1", name: "setup", prompt_template: "Check out the repo and run the QA ladder." },
+          { phase_id: "p2", name: "work", prompt_template: "Now do this: $ARGUMENTS" },
+        ],
+      });
+
+      await expect(runCommand.handler({ positionals: ["wf-task"], values: {} })).rejects.toThrow(
+        "Missing required inputs",
+      );
+
+      expect(stderrText()).toContain("Missing required inputs");
+      expect(stdout()).toContain('-t "<task>"');
+      // resolve (404), list, detail: no execute POST.
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
     it("refuses a blank -i task= on a stored definition whose prompt consumes {{task}} (PC-66)", async () => {
       mockResolveThen(taskWorkflow("Work on {{task}}."));
 
