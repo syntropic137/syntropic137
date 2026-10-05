@@ -543,6 +543,9 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
+    # The obligation beside the permission (#894): a phase declaring it fails
+    # unless its delegate succeeded.
+    require_delegation: bool = False
     clone_repos: bool = True
     delivers_repo_changes: bool = True
     sandbox: str = DEFAULT_PHASE_SANDBOX

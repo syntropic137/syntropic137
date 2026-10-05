@@ -190,6 +190,9 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 allow_delegation=_as_bool(
                     _agent_field(p, "allow_delegation", False), "allow_delegation"
                 ),
+                require_delegation=_as_bool(
+                    _agent_field(p, "require_delegation", False), "require_delegation"
+                ),
                 # Dropping this silently downgrades a phase's declared
                 # authority to the default, which for a review phase means it
                 # can write the code it certifies (#1161). Caught by the

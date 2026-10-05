@@ -811,7 +811,7 @@ class WorkflowExecutionProcessor:
                 phase_id=todo.phase_id,
                 evidence=self._delegation_evidence,
                 workspace=runtime.workspace_for(todo.phase_id),
-                allow_delegation=phase.agent_config.allow_delegation,
+                required_delegate=phase.agent_config.required_delegate,
             )
             if failure is not None:
                 logger.error(str(failure))

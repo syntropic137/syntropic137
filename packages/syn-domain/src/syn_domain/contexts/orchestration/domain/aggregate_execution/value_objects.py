@@ -33,6 +33,7 @@ from syn_shared.agents import (
     AgentProvider,
     resolve_phase_model,
 )
+from syn_shared.delegation import DELEGATION_TARGET_BY_PRIMARY, DelegationTarget
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -474,6 +475,10 @@ class AgentConfiguration:
     # When true, both agent auths are staged so this phase's primary agent may
     # delegate one-shot to the other CLI. Default false = single-provider isolation.
     allow_delegation: bool = False
+    # When true, the phase MUST delegate: it completes only once a delegate to
+    # `required_delegate` reported success (#894). A permission alone is never
+    # gated - an agent that may delegate and does the work itself succeeded.
+    require_delegation: bool = False
 
     def __post_init__(self) -> None:
         """Resolve the per-provider model default.
@@ -484,6 +489,18 @@ class AgentConfiguration:
         resolved_model = resolve_phase_model(self.provider, self.model)
         if resolved_model != self.model:
             object.__setattr__(self, "model", resolved_model)
+
+    @property
+    def required_delegate(self) -> DelegationTarget | None:
+        """The harness this phase must have delegated to, None when not required.
+
+        Always the OTHER harness: a delegate is a cross-harness child, so the
+        provider alone decides where it goes. A provider with no delegation
+        target (a test-only one) has no delegate to require.
+        """
+        if not self.require_delegation or self.provider not in DELEGATION_TARGET_BY_PRIMARY:
+            return None
+        return DELEGATION_TARGET_BY_PRIMARY[AgentProvider(self.provider)]
 
 
 @dataclass(frozen=True)
@@ -1084,9 +1101,9 @@ class DelegationFailureReason(StrEnum):
     """Why a required delegation is counted as not having happened."""
 
     NOT_ATTEMPTED = "not_attempted"
-    """The record was read and holds no delegation at all."""
+    """The record was read and holds no delegation to the required harness."""
     FAILED = "failed"
-    """Delegates were launched and none of them succeeded."""
+    """Delegates to the required harness were launched and none succeeded."""
     UNVERIFIABLE = "unverifiable"
     """No record could be read, so success cannot be shown."""
 
@@ -1121,9 +1138,12 @@ class DelegationFailure(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     reason: DelegationFailureReason
+    required_delegate: str | None = None
+    """The harness the phase declared it must delegate to. `None` only on an
+    account recorded before the declaration existed."""
     attempts: tuple[DelegationAttempt, ...] = ()
-    """Every cross-harness delegate the record held; empty for `not_attempted`
-    and `unverifiable`."""
+    """Every cross-harness delegate the record held, including any sent to a
+    harness other than `required_delegate`; empty for `unverifiable`."""
     detail: str | None = None
     """Why the record could not be read, for `unverifiable`."""
 

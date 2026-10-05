@@ -48,7 +48,8 @@ def delegation_attempt(intent: ChildIntent) -> DelegationAttempt | None:
 
     Only a cross-harness child (``target_harness`` set) is a delegation in the
     ``allow_delegation`` sense; a harness's own subagents are not what the
-    workflow declared.
+    workflow declared. WHICH harness it went to is carried, not judged: the
+    gate decides whether it is the one the phase required.
     """
     if intent.call.target_harness is None:
         return None
