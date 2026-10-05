@@ -164,7 +164,7 @@ def phase_definitions_of(phases: Sequence[ExecutablePhase]) -> list[PhaseDefinit
             phase_id=p.phase_id,
             name=p.name,
             order=p.order,
-            timeout_seconds=p.timeout_seconds or p.agent_config.timeout_seconds,
+            timeout_seconds=p.effective_timeout_seconds,
         )
         for p in phases
     ]

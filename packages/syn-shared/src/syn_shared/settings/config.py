@@ -234,6 +234,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    slow_request_log_threshold_ms: int = Field(
+        default=1000,
+        ge=1,
+        description=(
+            "API requests whose response takes at least this many milliseconds are "
+            "logged with method, route template, status, duration and DB-pool wait "
+            "(#1583). Faster requests are not logged individually."
+        ),
+    )
+
     # =========================================================================
     # AGENT CONFIGURATION
     # =========================================================================

@@ -37,8 +37,8 @@ export function FeedbackModal() {
 
         <div className="ui-feedback-modal-body">
           <div className="ui-feedback-badge-row">
-            <BadgeDropdown options={FEEDBACK_TYPES} value={form.feedbackType} onChange={(v) => form.setFeedbackType(v as FeedbackType)} className="ui-feedback-badge--type" />
-            <BadgeDropdown options={PRIORITIES} value={form.priority} onChange={(v) => form.setPriority(v as Priority)} className="ui-feedback-badge--priority" />
+            <BadgeDropdown options={FEEDBACK_TYPES} value={form.feedbackType} onChange={(v) => form.setFeedbackType(v as FeedbackType)} className="ui-feedback-badge--type" hotkey="1" />
+            <BadgeDropdown options={PRIORITIES} value={form.priority} onChange={(v) => form.setPriority(v as Priority)} className="ui-feedback-badge--priority" hotkey="2" />
             <div className="ui-feedback-location-compact">
               {locationContext.componentName && <span title={`Component: ${locationContext.componentName}`}>&lt;{locationContext.componentName}&gt;</span>}
               <span title="Viewport size">{locationContext.viewportWidth}&times;{locationContext.viewportHeight}</span>

@@ -371,8 +371,8 @@ async def test_the_application_projection_rebuild_recounts_the_tally(pool: async
         assert await _stored_tally(conn) == await _reference_tally(conn)
 
 
-def _migration_sql() -> str:
-    """The migration an operator applies by hand, read from the file that ships.
+def _migration_sql(migration: str = tool_call_counts.MIGRATION) -> str:
+    """A migration an operator applies by hand, read from the file that ships.
 
     Located through the installed package rather than by counting ``..`` up
     from this file, so moving either directory is a failure to import and not
@@ -382,12 +382,16 @@ def _migration_sql() -> str:
     """
     import syn_adapters
 
-    path = (
-        pathlib.Path(syn_adapters.__file__).parent
-        / "projection_stores/migrations"
-        / tool_call_counts.MIGRATION
-    )
+    path = pathlib.Path(syn_adapters.__file__).parent / "projection_stores/migrations" / migration
     return path.read_text()
+
+
+#: The other migrations a hand-migrated deploy must have applied before it can
+#: start at all: with auto-creation off, ``EventStoreSchema.validate`` refuses
+#: to start without the rollups /metrics and the heatmap read (#1558). Applied
+#: AFTER the tally's, in file order, so their backfills see the seeded history
+#: the way a real upgrade's would.
+_ROLLUP_MIGRATIONS = ("005_agent_event_day_rollup.sql", "007_agent_usage_rollup.sql")
 
 
 #: What migration 004 USED to end with, and the reason it no longer does. Kept
@@ -415,7 +419,8 @@ async def _hand_migrated_database(admin_url: str) -> AsyncIterator[tuple[str, as
     that hid in a private schema would fail before it reached the tally.
 
     ``agent_events`` is created and seeded here; the tally's tables come from
-    running the real migration file. The TimescaleDB extension is created
+    running the real migration file, and so do the rollups startup validates
+    (``_ROLLUP_MIGRATIONS``). The TimescaleDB extension is created
     too, as a privileged role, because ``002_agent_events.sql`` creates it on
     every real deploy and startup issues ``CREATE EXTENSION IF NOT EXISTS``
     unconditionally: present, that is a no-op any role may run; absent, it
@@ -442,6 +447,8 @@ async def _hand_migrated_database(admin_url: str) -> AsyncIterator[tuple[str, as
         await conn.execute(_AGENT_EVENTS_DDL)
         await _seed(conn, _SEEDED_HISTORY)
         await conn.execute(_migration_sql())
+        for migration in _ROLLUP_MIGRATIONS:
+            await conn.execute(_migration_sql(migration))
         yield dsn, conn
     finally:
         await conn.close()
@@ -592,6 +599,15 @@ async def test_the_application_starts_as_a_role_that_cannot_create_tables(
     await conn.execute(f"GRANT SELECT ON agent_events TO {role}")
     for table in (tool_call_counts.TABLE, tool_call_counts.VERSION_TABLE):
         await conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON {table} TO {role}")
+    # Startup's schema validation reads the rollups (#1558), and only reads
+    # them: this role never ingests, so it gets SELECT and nothing more.
+    for table in (
+        "agent_event_day_rollup",
+        "agent_summary_usage",
+        "agent_turn_usage_rollup",
+        "agent_usage_rollup_state",
+    ):
+        await conn.execute(f"GRANT SELECT ON {table} TO {role}")
 
     parts = urlsplit(dsn)
     unprivileged = urlunsplit(parts._replace(netloc=f"{role}:tally@{parts.hostname}:{parts.port}"))

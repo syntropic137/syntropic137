@@ -27,11 +27,13 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import inventory_lifecycle
+from syn_api.services import cpu_throttling, inventory_lifecycle
 from syn_api.services.admission_announcement import announce_admission_if_open
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.execution_concurrency_posture import log_execution_concurrency_posture
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
+from syn_api.services.health_probes import describe_codex_auth_health
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -40,6 +42,7 @@ from syn_api.services.reconciliation import (
 )
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import (
+    DbPoolHealth,
     Err,
     HealthResponse,
     LifecycleError,
@@ -47,7 +50,6 @@ from syn_api.types import (
     Result,
     SubscriptionHealth,
 )
-from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
     ENV_SYN_SESSION_STORE_DEPLOYMENT,
@@ -66,7 +68,6 @@ if TYPE_CHECKING:
         CheckRunIngestionService,
         GitHubEventIngestionScheduler,
     )
-    from syn_shared.codex_auth_status import CodexAuthStatus
 
 logger = logging.getLogger(__name__)
 SubscriptionHealthResult = tuple[SubscriptionHealth | None, tuple[DegradedReason, ...]]
@@ -257,7 +258,7 @@ async def startup(
         logger.warning("Could not determine session capture posture at startup.")
 
     try:
-        _log_execution_concurrency_posture(settings.polling.max_concurrent_dispatches)
+        log_execution_concurrency_posture(settings.polling.max_concurrent_dispatches)
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 
@@ -333,9 +334,13 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
     # Unconditional and never probed: an operator or an agent asking "which
     # build is this?" must get an answer from a degraded deployment too, since
     # that is precisely when the question gets asked (#1380).
+    # Pool gauges first, before anything awaits the database: they exist to
+    # show a pool stall, so they must describe the moment of the request and
+    # must not wait behind a probe that the same stall is holding up (#1583).
+    db_pools = DbPoolHealth.snapshot() or None
     subscription, read_path_reasons = await _describe_subscription_health()
     degraded_reasons = [*_state.degraded_reasons, *read_path_reasons]
-    codex_auth = _describe_codex_auth_health()
+    codex_auth = describe_codex_auth_health()
     warnings = [codex_auth.detail] if codex_auth is not None and codex_auth.needs_attention else []
 
     return Ok(
@@ -347,64 +352,13 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             subscription=subscription,
             codex_auth=codex_auth,
             warnings=warnings or None,
+            db_pools=db_pools,
+            cpu_throttling=cpu_throttling.read_cpu_throttling(),
         )
     )
 
 
-def _describe_codex_auth_health() -> CodexAuthStatus | None:
-    """How fresh this instance's codex credential is, or None if it cannot be said.
-
-    WHY HERE: a stale codex credential is invisible until a phase fails, and the
-    failure names no credential. Every instance holds its own copy and expires
-    independently, so this has to be reported per instance rather than centrally,
-    which is exactly what a health endpoint is for.
-
-    Never raises. A freshness hint that can take /health down is worse than no
-    hint, so any failure degrades to omitting the block.
-    """
-    try:
-        from syn_shared.codex_auth_status import describe_codex_auth
-        from syn_shared.settings import get_settings
-
-        secret = get_settings().codex_auth_json
-        return describe_codex_auth(secret.get_secret_value() if secret else None)
-    except Exception:
-        logger.debug("codex auth freshness probe failed", exc_info=True)
-        return None
-
-
 # ── Private helpers ─────────────────────────────────────────────────
-
-
-def _log_execution_concurrency_posture(max_concurrent: int) -> None:
-    """Say so when this deployment runs workflows concurrently.
-
-    Beside the capture posture and for the same reason: an operator should
-    learn a risky posture at startup rather than from its consequences.
-
-    Emitted HERE, once, rather than while constructing the dispatcher. In the
-    dispatcher it fired only if construction got that far, was skipped
-    entirely on the test and offline startup paths, and could repeat on every
-    subscription-recovery attempt. Posture is a property of the settings, so it
-    is reported where the settings are read.
-
-    Concurrent executions are not isolated from each other (#865): they share
-    the processor instance holding their per-run state, so one can read
-    another's inputs and finish successfully against the wrong target, and one
-    execution's cancellation tears down the others' containers.
-    """
-    if max_concurrent <= 1:
-        return
-
-    logger.warning(
-        "%s is %d, so workflow executions can run concurrently. They are NOT "
-        "yet isolated from each other (#865): concurrent executions can read "
-        "each other's inputs and finish against the wrong target, and one "
-        "execution's cancellation tears down the others' containers. Set it "
-        "to 1 until that is fixed.",
-        ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
-        max_concurrent,
-    )
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
@@ -586,6 +540,11 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
+#: Bound on /health's DB-backed read-model lag probe. Well inside the 5s
+#: timeout the compose healthchecks give /health as a whole.
+_LAG_PROBE_TIMEOUT_S = 2.0
+
+
 async def _describe_subscription_health() -> SubscriptionHealthResult:
     """The read-path block of /health, and any degraded reasons it raises.
 
@@ -615,21 +574,34 @@ async def _describe_subscription_health() -> SubscriptionHealthResult:
     field's job is to describe the read path and "healthy" was the lie.
 
     Never raises. A lag probe that can take /health down is worse than no probe,
-    so any failure degrades to reporting the subscription as unknown.
+    so any failure degrades to reporting the subscription as unknown. Nor may it
+    hang: the probe reads the database, so a stalled pool or database would hold
+    /health past every liveness timeout and hide the pool gauges reported beside
+    it, exactly when they are needed (#1583). Past ``_LAG_PROBE_TIMEOUT_S`` it
+    is abandoned and reported as unknown, like any other failure.
     """
     if _state.subscription_service is None:
         return None, ()
 
     try:
         sub_status = _state.subscription_service.get_status()
-        lag = await _state.subscription_service.describe_read_model_lag()
-        verdict = _judge_read_path(running=sub_status.running, lag=lag)
+        lag = await asyncio.wait_for(
+            _state.subscription_service.describe_read_model_lag(),
+            timeout=_LAG_PROBE_TIMEOUT_S,
+        )
+        # Never scans on this path: the latest background reconciliation (#1545).
+        drops = await _state.subscription_service.describe_unapplied_starts()
+        unapplied = list(drops.unapplied) if drops is not None else None
+        verdict = _judge_read_path(
+            running=sub_status.running, lag=lag, dropped_events=bool(unapplied)
+        )
 
         health = SubscriptionHealth(
             status=verdict.status,
             running=sub_status.running,
             projection_count=sub_status.projection_count,
             realtime_enabled=sub_status.realtime_enabled,
+            unapplied_starts=unapplied,
             **(lag.model_dump() if lag is not None else {}),
         )
         return health, verdict.degraded_reasons

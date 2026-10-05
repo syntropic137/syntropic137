@@ -151,9 +151,16 @@ def create_app() -> FastAPI:
 
     # Per-route request-timing (Lane 2 observability - see #1070). Always on:
     # in-process only, no event store or aggregate interaction, negligible cost.
+    # Requests slower than the threshold are also logged (#1583). The setting
+    # is read here, not in the middleware: Starlette builds the middleware
+    # stack on the first request, long after the app was configured.
     from syn_api.middleware.request_timing import RequestTimingMiddleware
+    from syn_shared.settings import get_settings
 
-    app.add_middleware(RequestTimingMiddleware)
+    app.add_middleware(
+        RequestTimingMiddleware,
+        slow_request_ms=get_settings().slow_request_log_threshold_ms,
+    )
 
     # Webhook recording middleware (opt-in via SYN_RECORD_WEBHOOKS=true)
     import os

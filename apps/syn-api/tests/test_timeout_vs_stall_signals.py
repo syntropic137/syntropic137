@@ -29,9 +29,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_adapters.projections.manager_event_map import EVENT_HANDLERS
 from syn_adapters.projections.session_tools import ToolOperation
 from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
+from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+    WorkspaceProvisionedForPhaseEvent,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -52,6 +56,9 @@ SESSION_ID = "sess-1262"
 BUDGET_SECONDS = 3600
 
 PHASE_STARTED_AT = datetime(2026, 9, 17, 10, 0, 0, tzinfo=UTC)
+#: When the workspace was ready: two minutes after the phase started. The
+#: phase's clock, and so its deadline, runs from HERE (#1546).
+PROVISIONED_AT = PHASE_STARTED_AT + timedelta(seconds=120)
 #: The kill: past the cap by the ~20s of teardown a real timeout overshoots by.
 PHASE_DIED_AT = PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS + 21)
 
@@ -163,6 +170,8 @@ async def _phase_as_an_api_client_sees_it(
     telemetry_raises: bool = False,
     died_at: datetime = PHASE_DIED_AT,
     session_id: str | None = SESSION_ID,
+    provisioned: bool = True,
+    provisioned_at: datetime = PROVISIONED_AT,
 ) -> PhaseExecutionInfo:
     """Drive a timed-out phase from its events to the served response model.
 
@@ -180,7 +189,9 @@ async def _phase_as_an_api_client_sees_it(
     being unavailable, arrived at by the two routes that reach it. `died_at`
     moves the kill, so a 124 can be put inside the budget as well as past it.
     `session_id=None` is the phase that never got a session at all, which has
-    no timeline to read by construction.
+    no timeline to read by construction. `provisioned=False` is the phase
+    whose workspace was never ready, so whose clock never started;
+    `provisioned_at` moves when it was ready.
     """
     store = InMemoryProjectionStore()
     projection = WorkflowExecutionDetailProjection(store)
@@ -215,6 +226,20 @@ async def _phase_as_an_api_client_sees_it(
             "started_at": PHASE_STARTED_AT.isoformat(),
         }
     )
+    if provisioned:
+        # The real event, routed by the real map: a renamed field or a
+        # projection left off the route both read as "no deadline".
+        provisioned_event = WorkspaceProvisionedForPhaseEvent(
+            workflow_id="wf-1262",
+            execution_id=EXECUTION_ID,
+            phase_id=PHASE_ID,
+            workspace_id="ws-1",
+            session_id=session_id or "",
+            provisioned_at=provisioned_at,
+        ).model_dump(mode="json")
+        for projection_name, method in EVENT_HANDLERS["WorkspaceProvisionedForPhase"]:
+            if projection_name == "workflow_execution_detail":
+                await getattr(projection, method)(provisioned_event)
     await projection.on_workflow_failed(
         {
             "execution_id": EXECUTION_ID,
@@ -395,7 +420,66 @@ async def test_a_run_that_stated_no_budget_says_so_rather_than_guessing() -> Non
     phase = await _phase_as_an_api_client_sees_it(_busy_timeline(), budgeted=False)
 
     assert phase.activity.timeout_seconds is None
+    assert phase.activity.deadline is None, "no budget, so no deadline either"
     assert phase.activity.operations_count == 301, "the other readings are unaffected"
+
+
+@pytest.mark.anyio
+async def test_the_served_deadline_runs_from_when_the_workspace_was_ready() -> None:
+    """#1546: the deadline the phase is held to, not its start plus its budget.
+
+    The phase started two minutes before its workspace was ready and its clock
+    started, so the start plus the budget would be two minutes early.
+    """
+    activity = (await _phase_as_an_api_client_sees_it(_busy_timeline())).activity
+
+    assert activity.deadline == PROVISIONED_AT + timedelta(seconds=BUDGET_SECONDS)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("ready_after", "clock_after"),
+    [
+        # Ready and dispatched inside the same second: the case a served
+        # value with microseconds puts AFTER the agent's whole-second one.
+        (timedelta(milliseconds=900), timedelta(milliseconds=950)),
+        # Dispatched into the next second.
+        (timedelta(milliseconds=900), timedelta(seconds=1, milliseconds=100)),
+        # Both on the second exactly.
+        (timedelta(0), timedelta(0)),
+    ],
+)
+async def test_the_served_deadline_is_never_later_than_the_agents(
+    ready_after: timedelta, clock_after: timedelta
+) -> None:
+    """#1546: an operator reading the API must not be told the phase has longer.
+
+    The agent's clock starts at or after its workspace is recorded ready, and
+    it reads its deadline as an ISO 8601 string in whole seconds. That string
+    is built here as the agent receives it, not from the served value.
+    """
+    ready = PROVISIONED_AT + ready_after
+    clock_started = PROVISIONED_AT + clock_after
+    told_the_agent = datetime.fromisoformat(
+        (clock_started + timedelta(seconds=BUDGET_SECONDS)).isoformat(timespec="seconds")
+    )
+
+    activity = (
+        await _phase_as_an_api_client_sees_it(_busy_timeline(), provisioned_at=ready)
+    ).activity
+
+    assert activity.deadline is not None
+    assert activity.deadline <= told_the_agent
+    assert told_the_agent - activity.deadline <= clock_after - ready_after + timedelta(seconds=1)
+
+
+@pytest.mark.anyio
+async def test_no_deadline_is_served_before_the_workspace_is_ready() -> None:
+    """A phase still provisioning has a budget and no clock yet; none is invented."""
+    activity = (await _phase_as_an_api_client_sees_it(_busy_timeline(), provisioned=False)).activity
+
+    assert activity.timeout_seconds == BUDGET_SECONDS
+    assert activity.deadline is None
 
 
 @pytest.mark.anyio
@@ -637,6 +721,7 @@ async def test_an_unreadable_timeline_still_says_whether_the_cap_was_reached() -
 
     assert activity.timeout_seconds == BUDGET_SECONDS
     assert activity.elapsed_seconds == float(BUDGET_SECONDS + 21)
+    assert activity.deadline == PROVISIONED_AT + timedelta(seconds=BUDGET_SECONDS)
 
 
 # -- the cap, and the 124 that is not the cap --------------------------------

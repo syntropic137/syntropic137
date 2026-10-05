@@ -47,6 +47,7 @@ from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CLAUDE_SESSION_ID,
     ENV_GH_REPO,
+    ENV_SYN_PHASE_DEADLINE,
 )
 from syn_shared.process_exit import describe_process_failure
 
@@ -185,6 +186,12 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
                 f"{prior_sha!r} vs {skill.resolved_sha!r}",
             )
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
+
+
+_DEADLINE_NOTICE = (
+    f"This phase is killed at ${ENV_SYN_PHASE_DEADLINE} (ISO 8601 UTC; read it with "
+    f"`echo ${ENV_SYN_PHASE_DEADLINE}`). Only pushed work survives: commit and push before then."
+)
 
 
 async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
@@ -831,4 +838,8 @@ class WorkspaceProvisionHandler:
             name = WorkspaceProvisionHandler._repo_name(url)
             lines.append(f"@/workspace/repos/{name}/AGENTS.md")
             lines.append(f"@/workspace/repos/{name}/CLAUDE.md")
+        # A pointer, not a time (#1546). This file is written before the
+        # phase's clock starts, so a timestamp here would disagree with the
+        # one the agent is killed on; the env var is set from that clock.
+        lines.append(_DEADLINE_NOTICE)
         return "\n".join(lines) + "\n"

@@ -340,12 +340,13 @@ moving to another S3-compatible store), not re-running a pull.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_MEMORY_LIMIT` | `512m` | API memory limit |
-| `API_CPU_LIMIT` | `0.5` | API CPU limit |
+| `API_CPU_LIMIT` | `2.0` | API CPU limit (cores) |
 | `UI_MEMORY_LIMIT` | `256m` | nginx memory limit |
 | `UI_CPU_LIMIT` | `0.25` | nginx CPU limit |
 | `POSTGRES_MEMORY_LIMIT` | `1g` | PostgreSQL memory limit |
-| `POSTGRES_CPU_LIMIT` | `1.0` | PostgreSQL CPU limit |
+| `POSTGRES_CPU_LIMIT` | `2.0` | PostgreSQL CPU limit (cores) |
 | `EVENT_STORE_MEMORY_LIMIT` | `512m` | Event store memory limit |
+| `CONTROL_PLANE_CPU_SHARES` | `4096` | CPU weight of api, timescaledb, event-store and gateway; workspaces run at Docker's default 1024, so the control plane wins under contention (#1600) |
 | `COLLECTOR_MEMORY_LIMIT` | `256m` | Collector memory limit |
 | `COLLECTOR_CPU_LIMIT` | `0.25` | Collector CPU limit |
 | `MINIO_MEMORY_LIMIT` | `256m` | MinIO memory limit |

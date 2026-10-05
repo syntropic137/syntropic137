@@ -29,7 +29,7 @@ async def _make_client(aggregator: RequestTimingAggregator):
     async def get_item(item_id: str) -> dict[str, str]:
         return {"item_id": item_id}
 
-    app.add_middleware(RequestTimingMiddleware, aggregator=aggregator)
+    app.add_middleware(RequestTimingMiddleware, aggregator=aggregator, slow_request_ms=60_000)
 
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")

@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
-import asyncpg
+from syn_adapters import postgres_pool
+
+if TYPE_CHECKING:
+    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +42,9 @@ async def init_shared_db_pool() -> asyncpg.Pool | None:
     async with _pool_lock:
         if _pool is not None:
             return _pool
-        _pool = await asyncpg.create_pool(
+        _pool = await postgres_pool.create_pool(
             str(db_url),
+            name="shared",
             min_size=2,
             max_size=5,
         )
