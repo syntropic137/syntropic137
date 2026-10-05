@@ -36,7 +36,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow import cancelled_work_record
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
-    record_cancelled_work,
+    OWED_CANCELLED_WORK,
+    CancelledWorkLedger,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
@@ -59,11 +60,12 @@ class _Commenter:
     comments: dict[int, str] = field(default_factory=dict)
     posts: int = 0
     edits: int = 0
+    repository: str = "acme/widget"
 
     async def upsert_comment(
         self, repository: str, pull_request: int, *, marker: str, body: str, comment_id: int | None
     ) -> int:
-        assert repository == "acme/widget"
+        assert repository == self.repository
         assert pull_request == 42
         assert body.startswith(marker)
         if comment_id is not None:
@@ -457,7 +459,7 @@ async def test_a_cancelled_run_whose_append_is_rejected_still_tells_its_pr_once(
         aggregate, journal = await _a_cancelled_run(stream)
         stream.rejections = 1
 
-        assert await record_cancelled_work(aggregate, _LANDED, journal=journal)
+        await CancelledWorkLedger(journal, InMemoryProjectionStore()).record(aggregate, _LANDED)
 
         assert stream.rejections == 0, "the rejection was never exercised"
         assert stream.recorded("CancelledWorkQuarantined") == 1
@@ -486,14 +488,74 @@ async def test_a_cancelled_run_whose_append_is_rejected_still_tells_its_pr_once(
 
 
 @pytest.mark.asyncio
-async def test_a_store_that_never_takes_the_landed_refs_is_reported_not_returned_as_done(
+async def test_refs_the_store_refuses_to_the_retry_limit_are_owed_until_it_takes_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cancelled_work_record, "_ATTEMPTS", 2)
-    stream = _Stream(_LiveStore())
-    aggregate, journal = await _a_cancelled_run(stream)
-    stream.rejections = 2
+    """Rejected through the limit, then a restart against a store that recovered.
 
-    assert not await record_cancelled_work(aggregate, _LANDED, journal=journal)
-    assert stream.rejections == 0
-    assert stream.recorded("CancelledWorkQuarantined") == 0
+    Owed survives the restart because it is in the durable store, not in the
+    ledger: the second ledger and journal share nothing with the first but
+    that store and the stream. One fact lands, and the PR hears of it from the
+    stored event alone, once, and not again on replay.
+    """
+    monkeypatch.setattr(cancelled_work_record, "_ATTEMPTS", 2)
+    manager, commenter = _manager()
+    store = _LiveStore()
+    checkpoints = MemoryCheckpointStore()
+    coordinator = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=checkpoints, projections=[manager]
+    )
+    runner = asyncio.create_task(coordinator.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        stream = _Stream(store)
+        owed = InMemoryProjectionStore()
+        aggregate, journal = await _a_cancelled_run(stream)
+        stream.rejections = 2
+
+        await CancelledWorkLedger(journal, owed).record(aggregate, _LANDED)
+
+        assert stream.rejections == 0, "the retry limit was never reached"
+        assert stream.recorded("CancelledWorkQuarantined") == 0
+        assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
+
+        # Still refusing: settling keeps it owed rather than dropping it.
+        stream.rejections = 2
+        restarted = CancelledWorkLedger(ExecutionJournal(stream, object()), owed)  # type: ignore[arg-type]
+        assert await restarted.settle() == 0
+        assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
+
+        # The store recovers; the next run's settle appends it, once.
+        stream.rejections = 0
+        assert await restarted.settle() == 1
+        assert await restarted.settle() == 0
+        assert await owed.get_all(OWED_CANCELLED_WORK) == []
+        assert stream.recorded("CancelledWorkQuarantined") == 1
+
+        await asyncio.wait_for(_settled(coordinator, checkpoints, len(stream.history)), 5)
+        assert commenter.posts == 1
+        (body,) = commenter.comments.values()
+        assert REF in body and SHA in body
+    finally:
+        await coordinator.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+    await _replay_posts_nothing(store, manager, commenter)
+
+
+async def _replay_posts_nothing(
+    store: _LiveStore, manager: QuarantineNoticeProcessManager, commenter: _Commenter
+) -> None:
+    """A restart: the whole stream again, from a checkpoint that has none of it."""
+    replay = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=MemoryCheckpointStore(), projections=[manager]
+    )
+    runner = asyncio.create_task(replay.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        await replay.wait_for_process_managers()
+        assert commenter.posts == 1 and commenter.edits == 0
+    finally:
+        await replay.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)

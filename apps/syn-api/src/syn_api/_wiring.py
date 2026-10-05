@@ -317,6 +317,9 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         # #1513: records which PR is open from each branch a failing phase
         # left, so a resume continues that PR and never one opened since.
         remote_branches=GitHubRemoteBranchReader(get_github_client),
+        # #1547: a cancel's landed refs the event store refused, kept durably
+        # until the next run appends them.
+        owed_cancelled_work=get_projection_store(),
     )
 
 

@@ -35,7 +35,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
     UpstreamRetryPolicy,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
-    record_cancelled_work,
+    CancelledWorkLedger,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
@@ -91,6 +91,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
 )
 
 if TYPE_CHECKING:
+    from event_sourcing import ProjectionStore
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
     from syn_adapters.workspace_backends.agentic.session_capture_service import (
@@ -195,6 +197,7 @@ class WorkflowExecutionProcessor:
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
+        owed_cancelled_work: ProjectionStore | None = None,
     ) -> None:
         self._session_repo = session_repository
         # How a phase answers a provider that is simply busy (#1303). Injected
@@ -216,6 +219,9 @@ class WorkflowExecutionProcessor:
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
         self._journal = ExecutionJournal(execution_repository, todo_projection)
+        #: A cancel's landed refs the store refused are owed there, and every
+        #: run settles them first, so the PR still hears (#1547).
+        self._cancelled_work = CancelledWorkLedger(self._journal, owed_cancelled_work)
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # WHY (issue #726, PR2): the materializer is the optional collaborator
         # that turns ResolvedClaudePlugin entries on the phase into workspace
@@ -363,6 +369,7 @@ class WorkflowExecutionProcessor:
         origin: ResumeOrigin | None = None,
     ) -> WorkflowExecutionResult:
         """Record the start, then drain the to-do list until the run ends."""
+        await self._cancelled_work.settle()
         started_at = datetime.now(UTC)
         execution_id = aggregate.id or ""
         phase_map = {p.phase_id: p for p in phases}
@@ -577,8 +584,8 @@ class WorkflowExecutionProcessor:
                 saved=saved,
                 repositories=[c.repository for c in aggregate.start_pins.source_commits],
             )
-            await record_cancelled_work(
-                aggregate, cancellation.as_command(execution_id, phase_id), journal=self._journal
+            await self._cancelled_work.record(
+                aggregate, cancellation.as_command(execution_id, phase_id)
             )
             try:
                 await runtime.report_cancelled(cancellation.reason)
