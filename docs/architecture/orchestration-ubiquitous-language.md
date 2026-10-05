@@ -168,9 +168,10 @@ records a cancel's work once, so settling it twice still gives one fact.
 
 A cancel's landed Quarantine Refs that neither the event store nor the owed
 store took. The cancelled result names them in `unrecorded_work`, so the cancel
-is not reported as handled. The processor holds them in memory and its next run
-tries both stores again. A restart before then loses that copy. The refs then
-survive only in the result and the error log. (#1547.)
+is not reported as handled: the API turns that result into an execution failure
+naming each ref and commit, never a cancelled summary. The processor holds them
+in memory and its next run tries both stores again. A restart before then loses
+that copy. The refs then survive only in that failure and the error log. (#1547.)
 
 ## Admission
 

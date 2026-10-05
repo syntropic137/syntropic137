@@ -24,7 +24,8 @@ that fails after the append leaves the row to be settled again, and the
 aggregate records a cancel's work once, so that second append adds nothing.
 
 When BOTH stores refuse, `record` says so and the processor's result carries
-the refs as `unrecorded_work`. The cancel is not reported as handled. The
+the refs as `unrecorded_work`. The cancel is not reported as handled: the API's
+`execute()` returns it as a failure naming every ref and commit. The
 command is then held by this ledger, the last place left, and the next
 `settle()` tries the stream and then the owed store again. The ledger is
 process memory, so a restart before then loses what it holds. After that the
