@@ -17,7 +17,8 @@ reproduces what `apss-dev run code-topology analyze` writes for Python
   grammar's `ignored_nodes` (finally, raise) count nothing; nested functions
   and lambdas count toward the function that holds them.
 - Module LOC: NOT lines in the file. `modules.json` sums each function's
-  total line span (`def` line to last line, nested functions counted again),
+  total line span (`def` line to last line, trailing indented comments
+  included, nested functions counted again),
   so a file with no functions has no module entry at all.
 
 `scripts/tests/test_check_complexity_thresholds.py` pins the equivalence
@@ -173,6 +174,23 @@ def _cyclomatic(func: ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]) 
     return 1 + sum(_decisions(p, lines) for p in parts)
 
 
+def _last_line(func: ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]) -> int:
+    """The function's last line as tree-sitter sees it: comments still indented
+    inside the body after its last statement belong to the body's block."""
+    last = func.end_lineno or func.lineno
+    for number in range(last + 1, len(lines) + 1):
+        text = lines[number - 1]
+        if not text.strip():
+            continue
+        if (
+            not text.lstrip().startswith("#")
+            or len(text) - len(text.lstrip()) < func.body[0].col_offset
+        ):
+            break
+        last = number
+    return min(last, len(lines))
+
+
 def measure(root: Path) -> list[Measurement]:
     """Every max-cyclomatic and max-loc-file measurement APS would make for Python under `root`."""
     measurements: list[Measurement] = []
@@ -194,7 +212,7 @@ def measure(root: Path) -> list[Measurement]:
                 )
             )
         if functions:
-            loc = sum(min(f.end_lineno or f.lineno, len(lines)) - f.lineno + 1 for f in functions)
+            loc = sum(_last_line(f, lines) - f.lineno + 1 for f in functions)
             measurements.append(Measurement("max-loc-file", module, loc))
     return measurements
 
