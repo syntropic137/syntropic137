@@ -219,8 +219,7 @@ class WorkflowExecutionProcessor:
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
         self._journal = ExecutionJournal(execution_repository, todo_projection)
-        #: A cancel's landed refs the store refused are owed there, and every
-        #: run settles them first, so the PR still hears (#1547).
+        #: Records what a cancel landed, owing it when refused; every run settles first (#1547).
         self._cancelled_work = CancelledWorkLedger(self._journal, owed_cancelled_work)
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # WHY (issue #726, PR2): the materializer is the optional collaborator
@@ -549,9 +548,7 @@ class WorkflowExecutionProcessor:
         """Close open sessions as cancelled and return cancelled result.
 
         Called when the to-do list empties due to ExecutionCancelledEvent.
-        The aggregate is already in CANCELLED status, so the cancel itself
-        needs no command. What the save below landed does: it is told to the
-        aggregate, which is what lets the PR be told too (#1547).
+        The aggregate is already CANCELLED; what the save landed is recorded for the PR (#1547).
 
         ``phase_id`` is the phase that was mid-flight when the cancel landed,
         from the run's own _DispatchContext for the reason ``failed_phase_id``
