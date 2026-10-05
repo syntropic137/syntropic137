@@ -142,6 +142,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import (
     split_moved_gitlinks,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_diffstat import diffstat
 from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_rehearsal import (
     run_quarantine_rehearsal,
 )
@@ -194,6 +195,10 @@ _MOUNT_FIELDS: Final[int] = 6
 #: ever shown it. It exists to be recovered on purpose, by someone who was told
 #: the name.
 _QUARANTINE_NAMESPACE: Final[str] = "refs/syn/lost"
+
+#: How long the quarantined work's diffstat may take, cancelled or not (#1547).
+#: Local git only, so seconds are plenty; past them the notice goes without it.
+_DIFFSTAT_SECONDS: Final[float] = 5.0
 
 #: How long the rescue push may go on being waited for AFTER the phase has
 #: been cancelled (#1396). A cancellation is a request to stop, so the salvage
@@ -771,7 +776,17 @@ async def _quarantine(
             ),
         )
         cancellation = cancellation or cancelled_rescuing
-    return _record(repo, work, ref=ref, pushed=pushed, rescue=rescue), cancellation
+    record = _record(repo, work, ref=ref, commit=commit.strip(), pushed=pushed, rescue=rescue)
+    if record.pushed_ref is None or record.commit is None:
+        return record, cancellation
+    # After the push, never before it: the push is the point, and a summary is
+    # not worth a second of it. Bounded like the push, for the same reason.
+    summary, cancelled_summarising = await _despite_cancellation(
+        diffstat(workspace, repo, record.commit, branch=work.branch),
+        seconds=_DIFFSTAT_SECONDS,
+        cut_off=lambda: None,
+    )
+    return replace(record, diffstat=summary), cancellation or cancelled_summarising
 
 
 def _record(
@@ -779,6 +794,7 @@ def _record(
     work: _UnsavedWork,
     *,
     ref: str,
+    commit: str,
     pushed: ExecutionResult,
     rescue: RescueAttempt | None,
 ) -> QuarantinedWork:
@@ -790,6 +806,7 @@ def _record(
         commit_count=work.commit_count,
         files=work.files,
         pushed_ref=ref,
+        commit=commit,
     )
     if pushed.exit_code == 0:
         logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
@@ -800,7 +817,10 @@ def _record(
         # refusal is the whole story, as before.
         logger.error("Quarantine push failed for %s -> %s: %s", repo, ref, pushed.stderr)
         return replace(
-            landed, pushed_ref=None, push_error=push_failure("The quarantine push", pushed)
+            landed,
+            pushed_ref=None,
+            commit=None,
+            push_error=push_failure("The quarantine push", pushed),
         )
     if rescue.second is not None and rescue.second.exit_code == 0:
         logger.warning(
@@ -809,7 +829,7 @@ def _record(
             ref,
             UNPUSHABLE_WORKFLOW_DIR,
         )
-        return replace(landed, dropped=rescue.dropped)
+        return replace(landed, commit=rescue.commit, dropped=rescue.dropped)
     if rescue.second is not None:
         then = push_failure("the workflow-safe retry", rescue.second)
     else:
@@ -818,7 +838,11 @@ def _record(
         "Both quarantine pushes failed for %s -> %s: %s; then %s", repo, ref, rescue.refusal, then
     )
     return replace(
-        landed, pushed_ref=None, push_error=f"{rescue.refusal}; then {then}", dropped=rescue.dropped
+        landed,
+        pushed_ref=None,
+        commit=None,
+        push_error=f"{rescue.refusal}; then {then}",
+        dropped=rescue.dropped,
     )
 
 

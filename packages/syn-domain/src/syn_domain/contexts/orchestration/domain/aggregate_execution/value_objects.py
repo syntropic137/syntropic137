@@ -779,6 +779,42 @@ class BranchObservation(BaseModel):
         return self.remote_moved or self.unpushed_commits > 0
 
 
+class QuarantinedRef(BaseModel):
+    """Where one repository's unpushed work was saved when its phase ended (#1547).
+
+    The structured half of what `describe_saved_work` writes as prose into
+    `error_message`: only work that LANDED, because a ref that does not exist
+    is nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the
+    PR the run was working on can be told, by a ProcessManager rather than by
+    whoever happened to read the error.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str
+    """``owner/name`` when the execution pinned it, else the clone's directory."""
+    branch: str
+    """The branch the workspace was on; the one a PR would be open from."""
+    ref: str
+    """The ``refs/syn/lost/<execution>/<phase>`` ref the work was pushed to."""
+    commit: str | None
+    """The commit ``ref`` was pushed at - the workflow-safe rescue commit when
+    that is what landed (#1437). None only for events from before it was set."""
+    commit_count: int
+    pull_request: int | None = None
+    """The PR open from ``branch`` as the phase failed, when one was."""
+    diffstat: str | None = None
+    """``git diff --stat`` of what ``ref`` holds against the newest commit a
+    remote already had, so a reviewer sees what was kept before fetching it.
+    None when it could not be read inside its bound, and for older events."""
+
+    @property
+    def fetch_command(self) -> str:
+        """The one command that brings the work back into a clone."""
+        local = self.ref.removeprefix("refs/syn/lost/")
+        return f"git fetch origin {self.ref}:refs/heads/recovered/{local}"
+
+
 class InheritedPhase(BaseModel):
     """One completed phase a resume takes over from its parent (ADR-014 s7).
 
@@ -1063,6 +1099,17 @@ class ExecutablePhase:
     # populates it from the workflow- and phase-scope SkillRefs, with phase
     # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
+
+    @property
+    def effective_timeout_seconds(self) -> int:
+        """The budget this phase actually runs under: its own, else its agent's.
+
+        THE one spelling of that fallback. The aggregate sequences by it, the
+        agent is killed on it and the agent is told it as its deadline (#1546),
+        so a second copy that drifted would advertise a deadline the phase is
+        not held to.
+        """
+        return self.timeout_seconds or self.agent_config.timeout_seconds
 
 
 # --- what a resume's start event carries ------------------------------------

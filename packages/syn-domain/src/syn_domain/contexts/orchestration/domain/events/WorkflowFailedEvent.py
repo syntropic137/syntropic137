@@ -12,6 +12,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     BranchObservation,
     DelegationFailure,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
     UpstreamFailureKind,
 )
@@ -153,6 +154,13 @@ class WorkflowFailedEvent(DomainEvent):
     # collecting artifacts is what a phase that finished does and emitting it
     # would tell the stream the next phase is ready in a run being failed.
     failed_phase_artifact_ids: list[str] = Field(default_factory=list)
+
+    # The failed phase's unpushed work that LANDED on a quarantine ref (#1547),
+    # one per repository; empty when nothing did, and for every event written
+    # before this field. Until it existed the refs were prose in
+    # `error_message` and nothing could act on them - above all, nothing told
+    # the PR the run was working on. `QuarantineNoticeProcessManager` does.
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
 
     # What the failed phase itself had spent when it died (#1262), zeros when
     # its agent never ran.

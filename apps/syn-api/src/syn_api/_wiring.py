@@ -312,8 +312,8 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         # #1513: records which PR is open from each branch a failing phase
         # left, so a resume continues that PR and never one opened since.
         remote_branches=GitHubRemoteBranchReader(get_github_client),
-        # #894: a phase that declared delegation completes only when its
-        # workspace's child journal shows a delegate that succeeded.
+        owed_cancelled_work=get_projection_store(),  # #1547: refused landed refs, until appended
+        # #894: a declared delegation completes only on a delegate its child journal shows succeeded.
         delegation_evidence=ChildJournalDelegations(),
     )
 

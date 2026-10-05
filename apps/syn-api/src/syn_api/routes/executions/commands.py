@@ -412,6 +412,12 @@ async def execute(
         logger.exception("Workflow execution error for %s", workflow_id)
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
+    if result.unrecorded_work_error is not None:
+        # #1547: neither store took the cancel's landed refs, so no event will
+        # ever tell the PR and a restart forgets them. That is not a handled
+        # cancel; a summary saying "cancelled" here is how it went unnoticed.
+        return Err(WorkflowError.EXECUTION_FAILED, message=result.unrecorded_work_error)
+
     repo_urls = [r.https_url for r in (repos or [])]
     return Ok(
         ExecutionSummary(

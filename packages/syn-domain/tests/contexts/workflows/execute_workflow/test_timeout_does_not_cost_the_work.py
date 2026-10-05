@@ -35,6 +35,9 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    CancelExecutionCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     PhaseDefinition,
@@ -630,8 +633,13 @@ async def test_cancelling_an_execution_does_not_destroy_its_commits(clone: _Clon
     """
     processor = await _provisioned(clone)
     lost = clone.commit("state_machine.py", "an hour of work, then cancelled\n")
+    aggregate = _running_aggregate()
+    aggregate.cancel_execution(
+        CancelExecutionCommand(execution_id=_EXECUTION_ID, phase_id=_PHASE_ID, reason="stop")
+    )
 
     result = await processor._cancel_execution(  # pyright: ignore[reportPrivateUsage]
+        aggregate,
         _EXECUTION_ID,
         _WORKFLOW_ID,
         [],
@@ -650,6 +658,15 @@ async def test_cancelling_an_execution_does_not_destroy_its_commits(clone: _Clon
     assert "Cancelled by user" in (result.error_message or ""), (
         "why it was cancelled must survive alongside where the work went"
     )
+    recorded = [
+        e.event.quarantined_refs
+        for e in aggregate.get_uncommitted_events()
+        if e.event.event_type == "CancelledWorkQuarantined"
+    ]
+    assert [[ref.ref for ref in refs] for refs in recorded] == [[_QUARANTINE_REF]], (
+        "the cancel saved the work but never told the aggregate where it went"
+    )
+    assert result.unrecorded_work == ()
 
 
 # ---------------------------------------------------------------------------

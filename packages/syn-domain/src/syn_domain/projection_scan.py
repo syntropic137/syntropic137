@@ -167,3 +167,41 @@ async def paginate_projection[T](
         status_counts=keys.status_counts,
         excluded_undated=keys.excluded_undated,
     )
+
+
+@runtime_checkable
+class ProjectionKeyLookup(Protocol):
+    """A projection store that reads many documents by primary key in one query."""
+
+    async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
+        """The full documents stored under ``keys``, by key; absent keys are omitted."""
+        ...
+
+
+@runtime_checkable
+class _ProjectionGet(Protocol):
+    async def get(self, projection: str, key: str) -> ProjectionRecord | None: ...
+
+
+async def read_by_keys(
+    store: object, projection: str, keys: Sequence[str]
+) -> dict[str, ProjectionRecord]:
+    """Documents by primary key: one ``id = ANY(...)`` query where the store has
+    ``get_many`` (Postgres), one keyed ``get`` per key otherwise (in-memory).
+
+    Never a JSON-field filter: those have no index unless one is declared,
+    and scan the whole table per call (#1545 review).
+    """
+    if not keys:
+        return {}
+    if isinstance(store, ProjectionKeyLookup):
+        return await store.get_many(projection, keys)
+    if not isinstance(store, _ProjectionGet):
+        msg = f"{type(store).__name__} can read neither many keys nor one"
+        raise TypeError(msg)
+    found: dict[str, ProjectionRecord] = {}
+    for key in keys:
+        document = await store.get(projection, key)
+        if document is not None:
+            found[key] = document
+    return found
