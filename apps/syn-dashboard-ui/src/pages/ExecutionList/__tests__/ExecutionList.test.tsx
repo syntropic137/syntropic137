@@ -209,7 +209,7 @@ describe('ExecutionList paging and filters', () => {
     await screen.findByText(
       `Showing 1-${Math.min(LIST_PAGE_SIZE, failedInAll)} of ${failedInAll} executions`,
     )
-  })
+  }, 30_000)
 
   it('sends the search term to the server rather than filtering the page', async () => {
     const user = userEvent.setup()

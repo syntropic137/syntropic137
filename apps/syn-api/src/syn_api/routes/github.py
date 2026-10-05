@@ -7,7 +7,6 @@ installations). These hit the GitHub API directly — not projections.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -22,12 +21,11 @@ from syn_api.types import (
     Err,
     GitHubError,
     GitHubRepoListResponse,
+    GitHubRepoLookup,
     GitHubRepoResponse,
     Ok,
     Result,
 )
-
-_INSTALLATION_SYNC_TTL = timedelta(hours=1)
 
 
 class _RepoLister(Protocol):
@@ -79,7 +77,7 @@ def _map_repo_dict(raw: dict, installation_id: str) -> GitHubRepoResponse | None
 async def list_accessible_repos(
     installation_id: str | None = None,
     include_private: bool = True,
-) -> Result[list[GitHubRepoResponse], GitHubError]:
+) -> Result[GitHubRepoListResponse, GitHubError]:
     """List repositories accessible to the GitHub App (live query).
 
     Args:
@@ -89,7 +87,9 @@ async def list_accessible_repos(
         auth: Authentication context (reserved for future use).
 
     Returns:
-        Ok with list of GitHubRepoResponse, or Err with error details.
+        Ok with the listing and how complete it is, or Err with error details.
+        A GitHub failure for one installation is reported in ``lookup``, not
+        hidden as an installation with no repos.
     """
     from syn_adapters.github.client import (
         GitHubAppError,
@@ -101,8 +101,15 @@ async def list_accessible_repos(
     await ensure_connected()
 
     try:
-        repos = await _fetch_repos(get_github_client(), installation_id, include_private)
-        return Ok(repos)
+        repos, lookup = await _fetch_repos(get_github_client(), installation_id, include_private)
+        return Ok(
+            GitHubRepoListResponse(
+                repos=repos,
+                total=len(repos),
+                installation_id=installation_id,
+                lookup=lookup,
+            )
+        )
     except GitHubAuthError as e:
         return Err(GitHubError.AUTH_REQUIRED, message=str(e))
     except GitHubRateLimitError as e:
@@ -115,34 +122,28 @@ async def _fetch_repos(
     client: _RepoLister,
     installation_id: str | None,
     include_private: bool,
-) -> list[GitHubRepoResponse]:
+) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
     """Dispatch to single-installation or aggregate query."""
     if installation_id:
+        # A failure here propagates: the caller asked about this one installation.
         raw_repos = await client.list_accessible_repos(installation_id=installation_id)
-        return _build_repo_list(raw_repos, installation_id, include_private)
+        return _build_repo_list(raw_repos, installation_id, include_private), (
+            GitHubRepoLookup.COMPLETE
+        )
     return await _aggregate_all_installations(client, include_private)
-
-
-def _is_stale(installations: list) -> bool:
-    """Return True if the installation cache is empty or any record is past the TTL."""
-    if not installations:
-        return True
-    now = datetime.now(UTC)
-    return any(
-        inst.synced_at is None or (now - inst.synced_at) > _INSTALLATION_SYNC_TTL
-        for inst in installations
-    )
 
 
 async def _sync_installations(
     client: _RepoLister,
     projection: InstallationProjection,
-) -> list | None:
+) -> tuple[list, bool] | None:
     """Fetch all installations from GitHub API and upsert into the projection.
 
-    Returns the refreshed installation list on success (may be empty if no
-    installations exist), or None if the GitHub API call itself failed so the
-    caller can distinguish a successful empty result from a network failure.
+    Returns the refreshed installation list (may be empty if no installations
+    exist) and whether it holds every installation GitHub returned; one that
+    failed to persist is missing from it. Returns None if the GitHub API call
+    itself failed so the caller can distinguish a successful empty result from
+    a network failure.
     """
     try:
         raw = await client.list_installations()
@@ -155,8 +156,8 @@ async def _sync_installations(
             result.append(await projection.upsert_from_github_api(item))
         except Exception:
             logger.warning("Failed to upsert installation %s", item.get("id"), exc_info=True)
-    logger.info("Synced %d installation(s) from GitHub API", len(result))
-    return result
+    logger.info("Synced %d of %d installation(s) from GitHub API", len(result), len(raw))
+    return result, len(result) == len(raw)
 
 
 async def _repos_for_installation(
@@ -164,8 +165,12 @@ async def _repos_for_installation(
     installation_id: str,
     seen_ids: set[int],
     include_private: bool,
-) -> list[GitHubRepoResponse]:
-    """Fetch repos for one installation, skipping IDs already in seen_ids."""
+) -> list[GitHubRepoResponse] | None:
+    """Fetch repos for one installation, skipping IDs already in seen_ids.
+
+    Returns None if GitHub could not be asked, so the caller can tell a failed
+    lookup apart from an installation that reaches no repos.
+    """
     try:
         raw_repos = await client.list_accessible_repos(installation_id=installation_id)
     except Exception:
@@ -174,7 +179,7 @@ async def _repos_for_installation(
             installation_id,
             exc_info=True,
         )
-        return []
+        return None
     result: list[GitHubRepoResponse] = []
     for repo in _build_repo_list(raw_repos, installation_id, include_private):
         if repo.github_id not in seen_ids:
@@ -186,35 +191,58 @@ async def _repos_for_installation(
 async def _aggregate_all_installations(
     client: _RepoLister,
     include_private: bool,
-) -> list[GitHubRepoResponse]:
-    """Query all active installations and return deduplicated repos.
-
-    Refreshes the installation cache from GitHub if it is empty or older than
-    the TTL, so the endpoint works without a webhook configured.
-    """
+) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
+    """Query all active installations and return deduplicated repos."""
     from syn_domain.contexts.github.slices.get_installation.projection import (
         get_installation_projection,
     )
 
-    projection = get_installation_projection()
-    installations = await projection.get_all_active()
-
-    if _is_stale(installations):
-        refreshed = await _sync_installations(client, projection)
-        if refreshed is not None:
-            # Success (even if empty): replace cache. None = API failure: keep stale.
-            installations = refreshed
-
-    if not installations:
-        return []
+    installations, installations_current = await _known_installations(
+        client, get_installation_projection()
+    )
 
     seen_ids: set[int] = set()
     repos: list[GitHubRepoResponse] = []
+    answered = 0
     for inst in installations:
-        repos.extend(
-            await _repos_for_installation(client, inst.installation_id, seen_ids, include_private)
+        found = await _repos_for_installation(
+            client, inst.installation_id, seen_ids, include_private
         )
-    return repos
+        if found is not None:
+            answered += 1
+            repos.extend(found)
+    return repos, _lookup_of(len(installations), answered, installations_current)
+
+
+async def _known_installations(
+    client: _RepoLister,
+    projection: InstallationProjection,
+) -> tuple[list, bool]:
+    """Return the installations to query and whether that list is current.
+
+    Asks GitHub every time: a cached list, however recent, cannot know about an
+    installation added since, and the listing is labelled complete on the
+    strength of this answer. If GitHub cannot be asked, the cached list is used
+    but is not current; nor is a refreshed list when an installation failed to
+    persist.
+    """
+    refreshed = await _sync_installations(client, projection)
+    if refreshed is None:
+        return await projection.get_all_active(), False
+    return refreshed
+
+
+def _lookup_of(asked: int, answered: int, installations_current: bool) -> GitHubRepoLookup:
+    """How much of the App's access a listing covers.
+
+    Complete only when the installation list is current and every installation
+    answered; nothing answered and nothing confirmed is unavailable.
+    """
+    if answered == asked and installations_current:
+        return GitHubRepoLookup.COMPLETE
+    if answered == 0:
+        return GitHubRepoLookup.UNAVAILABLE
+    return GitHubRepoLookup.PARTIAL
 
 
 def _build_repo_list(
@@ -251,6 +279,9 @@ async def list_accessible_repos_endpoint(
     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
     GitHub API without requiring a webhook URL. Stale data is kept as a
     fallback if the GitHub API is unreachable during refresh.
+
+    ``lookup`` says whether a repo missing from ``repos`` is known to be out of
+    the App's reach (``complete``) or merely went unseen because GitHub failed.
     """
     result = await list_accessible_repos(
         installation_id=installation_id,
@@ -266,8 +297,4 @@ async def list_accessible_repos_endpoint(
         status = status_map.get(result.error, 502)
         raise HTTPException(status_code=status, detail=result.message)
 
-    return GitHubRepoListResponse(
-        repos=result.value,
-        total=len(result.value),
-        installation_id=installation_id,
-    )
+    return result.value
