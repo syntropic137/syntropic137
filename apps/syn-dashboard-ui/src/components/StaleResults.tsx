@@ -47,7 +47,9 @@ export function StaleResults({ stale, failed = false, onRetry, children }: Stale
           </div>
         )
       )}
-      <div className={clsx('transition-opacity', stale && 'pointer-events-none opacity-50')}>
+      {/* `inert`, not just `pointer-events-none`: that stops the mouse, but Tab
+          would still reach a row control and act on the previous filter. */}
+      <div inert={stale} className={clsx('transition-opacity', stale && 'opacity-50')}>
         {children}
       </div>
     </div>
