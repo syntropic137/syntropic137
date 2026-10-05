@@ -20,6 +20,9 @@ from event_sourcing import (
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from datetime import datetime
+
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
     )
@@ -69,6 +72,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchedEvent import (
+        WorkflowTemplateExecutionLaunchedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
         WorkflowTemplateUpdatedEvent,
@@ -241,6 +247,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._tags: TagSet = TagSet()
         # The eval a launch that names none joins (#967). Read at dispatch.
         self._default_eval_id: str | None = None
+        # Every execution launched from this template, and when (#1588). The
+        # archive guard asks the execution aggregates about exactly these.
+        self._launches: dict[str, datetime] = {}
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -711,8 +720,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
 
         Guards against double-archive, and against archiving a template that
         the caller believes is a package's when it is no longer (#1588). The
-        active-execution guard is handled by the application service
-        (cross-aggregate concern).
+        active-execution guard needs the execution aggregates, so the
+        application service decides it from ``launches``; this stream's
+        version is what makes that decision race-free against a launch.
         """
         from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
             WorkflowTemplateArchivedEvent,
@@ -733,6 +743,38 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             archived_by=command.archived_by,
         )
         self._apply(event)
+
+    @property
+    def launches(self) -> Mapping[str, datetime]:
+        """Execution id -> launch time, for every launch recorded on this stream."""
+        return self._launches
+
+    def record_execution_launch(self, execution_id: str, launched_at: datetime) -> None:
+        """Record that an execution of this template is being launched (#1588).
+
+        Refuses an archived template, so a launch that loses the race to an
+        archive is refused rather than started against it. Recording the same
+        execution twice (a retried dispatch) records nothing.
+        """
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchedEvent import (
+            WorkflowTemplateExecutionLaunchedEvent,
+        )
+
+        if self._is_archived:
+            msg = f"Workflow {self.id} is archived and cannot launch executions"
+            raise ValueError(msg)
+        if execution_id in self._launches:
+            return
+        self._apply(
+            WorkflowTemplateExecutionLaunchedEvent(
+                workflow_id=str(self.id), execution_id=execution_id, launched_at=launched_at
+            )
+        )
+
+    @event_sourcing_handler("WorkflowTemplateExecutionLaunched")
+    def on_execution_launched(self, event: WorkflowTemplateExecutionLaunchedEvent) -> None:
+        """Apply WorkflowTemplateExecutionLaunchedEvent."""
+        self._launches[event.execution_id] = event.launched_at
 
     @event_sourcing_handler("WorkflowTemplateArchived")
     def on_workflow_archived(self, _event: WorkflowTemplateArchivedEvent) -> None:

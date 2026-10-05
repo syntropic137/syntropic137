@@ -1,14 +1,23 @@
 """ArchiveWorkflowTemplate handler - thin application service adapter.
 
 Checks for active executions (cross-aggregate guard) before dispatching
-the archive command to the WorkflowTemplateAggregate.
+the archive command to the WorkflowTemplateAggregate. The guard is decided
+from the template's own stream and the execution aggregates, not from a read
+model; ``_shared.template_launch`` explains why that closes the race (#1588).
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
+from event_sourcing import ConcurrencyConflictError
+
+from syn_domain.contexts.orchestration._shared.template_launch import (
+    ExecutionLookup,
+    active_launches,
+)
 from syn_domain.contexts.orchestration.domain import HandlerResult
 
 if TYPE_CHECKING:
@@ -37,11 +46,19 @@ class _ExecutionSummary(Protocol):
     """Minimal protocol for execution summary objects used in the archive guard."""
 
     @property
+    def workflow_execution_id(self) -> str: ...
+
+    @property
     def status(self) -> str: ...
 
 
 class ExecutionProjection(Protocol):
-    """Protocol for querying executions by workflow ID."""
+    """Protocol for querying executions by workflow ID.
+
+    Consulted only for executions launched before launches were recorded on
+    the template's stream (#1588): those were projected long ago. Every newer
+    one is asked of its own aggregate.
+    """
 
     async def get_by_workflow_id(self, workflow_id: str) -> Sequence[_ExecutionSummary]:
         """Return execution summaries for the given workflow."""
@@ -71,10 +88,12 @@ class ArchiveWorkflowTemplateHandler:
         self,
         repository: Repository[WorkflowTemplateAggregate],
         execution_projection: ExecutionProjection,
+        executions: ExecutionLookup,
         event_publisher: EventPublisher | None = None,
     ) -> None:
         self._repository = repository
         self._execution_projection = execution_projection
+        self._executions = executions
         self._event_publisher = event_publisher
 
     async def handle(self, command: ArchiveWorkflowTemplateCommand) -> HandlerResult | None:
@@ -91,10 +110,9 @@ class ArchiveWorkflowTemplateHandler:
             return None
 
         # Cross-aggregate guard: check for active executions
-        executions = await self._execution_projection.get_by_workflow_id(command.workflow_id)
-        active = [e for e in executions if e.status in _ACTIVE_STATUSES]
+        active = await self._active_executions(aggregate)
         if active:
-            msg = f"Cannot archive: {len(active)} active execution(s) in progress"
+            msg = f"Cannot archive: {active} active execution(s) in progress"
             return HandlerResult(success=False, error=msg)
 
         try:
@@ -105,7 +123,13 @@ class ArchiveWorkflowTemplateHandler:
         # Get events before save (save may mark as committed)
         events = aggregate.get_uncommitted_events()
 
-        await self._repository.save(aggregate)
+        # A conflict here is a launch recorded since the guard read the stream.
+        # Refuse rather than retry: the caller re-asks and the guard sees it.
+        try:
+            await self._repository.save(aggregate)
+        except ConcurrencyConflictError:
+            msg = "Cannot archive: an execution was launched while archiving; retry"
+            return HandlerResult(success=False, error=msg)
 
         # Publish events for integration with projections
         if self._event_publisher and events:
@@ -115,3 +139,13 @@ class ArchiveWorkflowTemplateHandler:
 
         logger.info("Archived workflow template %s", command.workflow_id)
         return HandlerResult(success=True)
+
+    async def _active_executions(self, aggregate: WorkflowTemplateAggregate) -> int:
+        recorded = await active_launches(aggregate, self._executions, datetime.now(UTC))
+        launched = aggregate.launches
+        legacy = [
+            e
+            for e in await self._execution_projection.get_by_workflow_id(str(aggregate.id))
+            if e.status in _ACTIVE_STATUSES and e.workflow_execution_id not in launched
+        ]
+        return len(recorded) + len(legacy)

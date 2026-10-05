@@ -320,6 +320,11 @@ def get_workflow_repo():
     return get_workflow_repository()
 
 
+def get_execution_repo():
+    """Return the workflow execution repository."""
+    return get_workflow_execution_repository()
+
+
 def get_eval_repo():
     """Return the eval repository (#967)."""
     return get_eval_repository()
@@ -703,9 +708,14 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     processor = await get_execution_processor()
     resolution_service = await get_claude_plugin_resolution_service()
     skill_resolution_service = await get_skill_resolution_service()
+    from syn_domain.contexts.orchestration._shared.template_launch import TemplateLaunches
+
     return ExecuteWorkflowHandler(
         processor=processor,
         workflow_repository=get_workflow_repository(),
+        # #1588: every launch is recorded on the template's stream before the
+        # execution starts, which is what lets archive refuse one race-free.
+        launches=TemplateLaunches(get_workflow_repository()),
         phase_plugin_resolver=resolution_service.resolve_for_phase,
         phase_skill_resolver=skill_resolution_service.resolve_for_phase,
         # #1387: the backstop. Both admission paths refuse earlier and more

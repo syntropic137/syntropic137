@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_api._wiring import (
     ensure_connected,
+    get_execution_repo,
     get_projection_mgr,
     get_publisher,
     get_workflow_repo,
@@ -249,6 +250,7 @@ async def delete_workflow(
     handler = ArchiveWorkflowTemplateHandler(
         repository=repository,
         execution_projection=execution_projection,
+        executions=get_execution_repo(),
         event_publisher=publisher,
     )
 
