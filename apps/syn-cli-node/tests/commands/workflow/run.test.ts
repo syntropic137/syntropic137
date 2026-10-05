@@ -606,7 +606,8 @@ describe("workflow run commands", () => {
 
       await runCommand.handler({
         positionals: ["wf-unref"],
-        values: { input: ["issue=syntropic137/syntropic137#993"] },
+        // The prompt consumes the task, so one is required (PC-66).
+        values: { task: "Scope the issue.", input: ["issue=syntropic137/syntropic137#993"] },
       });
 
       const out = stdout();
@@ -801,14 +802,55 @@ describe("workflow run commands", () => {
       expect(body.task).toBe("Close the flaky projection test.");
     });
 
-    it("warns, but still dispatches, when a phase consumes the task and none was supplied (issue #1280)", async () => {
+    it("refuses before sending when a stored definition declares no task but a phase consumes it (PC-66)", async () => {
+      // An older definition: no `task` declaration, but its prompt substitutes
+      // one. The API's admission infers it as required and answers 422; the CLI
+      // applies the same rule and refuses without making the execute call.
       mockResolveThen(taskWorkflow("Your assignment: $ARGUMENTS"));
+
+      await expect(runCommand.handler({ positionals: ["wf-task"], values: {} })).rejects.toThrow(
+        "Missing required inputs",
+      );
+
+      expect(stderrText()).toContain("Missing required inputs");
+      expect(stdout()).toContain('-t "<task>"');
+      // resolve (404), list, detail: no execute POST.
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("refuses a blank -i task= on a stored definition whose prompt consumes {{task}} (PC-66)", async () => {
+      mockResolveThen(taskWorkflow("Work on {{task}}."));
+
+      await expect(
+        runCommand.handler({ positionals: ["wf-task"], values: { input: ["task=  "] } }),
+      ).rejects.toThrow("Missing required inputs");
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("dispatches with no task when no phase prompt consumes it (PC-66)", async () => {
+      mockResolveThen(taskWorkflow("Run the QA ladder."));
+
+      await runCommand.handler({ positionals: ["wf-task"], values: {} });
+
+      expect(stdout()).toContain("execution started");
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.task).toBeNull();
+    });
+
+    it("warns, but still dispatches, when the workflow declares the task optional (issue #1280)", async () => {
+      // Declaring `task` optional is the author saying $ARGUMENTS is an
+      // addendum, so the declaration wins over the inference (PC-66).
+      mockResolveThen(
+        taskWorkflow("Your assignment: $ARGUMENTS", [
+          { name: "task", description: null, required: false, default: null },
+        ]),
+      );
 
       await runCommand.handler({ positionals: ["wf-task"], values: {} });
 
       expect(stdout()).toContain("Warning:");
       expect(stdout()).toContain("will render empty");
-      // A prompt may use $ARGUMENTS as an optional addendum, so this one runs.
       expect(stdout()).toContain("execution started");
       const executeReq = mockFetch.mock.calls[3]![0] as Request;
       const body = JSON.parse(await executeReq.clone().text());

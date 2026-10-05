@@ -7,6 +7,10 @@ installed: a declaration added to the YAML later never reaches it without a
 reinstall. So a workflow that declares nothing about ``task`` but whose prompts
 reference it requires one all the same. A workflow whose prompts never mention
 the task does not.
+
+The CLI applies this same rule before it sends a dispatch, in
+``requiredInputDeclarations`` in apps/syn-cli-node/src/commands/workflow/run.ts.
+Change one and you must change the other.
 """
 
 from __future__ import annotations

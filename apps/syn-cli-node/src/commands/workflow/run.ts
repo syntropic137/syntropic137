@@ -60,6 +60,35 @@ function declaredDefault(declarations: InputDeclaration[], name: string): boolea
 }
 
 /**
+ * The declarations admission enforces: the declared ones, plus an implied
+ * required `task` when the workflow declares nothing about `task` but a phase
+ * prompt consumes it. A definition installed before it declared `task` is
+ * stored exactly as installed, so its prompts still substitute a task it never
+ * declares; dispatching it with none runs the workflow on nothing (PC-66).
+ *
+ * This is the same rule the API applies, and the two must not drift: the
+ * source of truth is `required_input_declarations` in
+ * packages/syn-domain/.../aggregate_workflow_template/required_inputs.py.
+ */
+function requiredInputDeclarations(
+  declared: InputDeclaration[],
+  consumed: Set<string>,
+): InputDeclaration[] {
+  if (declared.some((d) => d.name === TASK_INPUT_NAME) || !consumed.has(TASK_INPUT_NAME)) {
+    return declared;
+  }
+  return [
+    ...declared,
+    {
+      name: TASK_INPUT_NAME,
+      description: "a phase prompt references the task",
+      required: true,
+      default: null,
+    },
+  ];
+}
+
+/**
  * Resolve each -R value into a form the API accepts (owner/repo or full URL).
  * `repo-*` values are looked up via the repos API and substituted with
  * `full_name`, so users can paste `syn repo list` IDs directly.
@@ -204,6 +233,7 @@ export const runCommand: CommandDef = {
     );
 
     const declarations: InputDeclaration[] = detail.input_declarations ?? [];
+    const consumed = consumedInputNames(detail.phases);
 
     // Input names this dispatch supplies a value for. `-t` supplies
     // TASK_INPUT_NAME just as surely as `-i task=...` does, so a workflow that
@@ -219,7 +249,7 @@ export const runCommand: CommandDef = {
       supplied.add(TASK_INPUT_NAME);
     }
 
-    const missingRequired = declarations.filter(
+    const missingRequired = requiredInputDeclarations(declarations, consumed).filter(
       (d) => d.required && d.default == null && !supplied.has(d.name),
     );
     if (missingRequired.length > 0) {
@@ -238,7 +268,6 @@ export const runCommand: CommandDef = {
     // purely local — the workflow detail already fetched above has
     // everything needed — and must fire on the --dry-run path too, since
     // dry-run's job is to answer "will this do what I typed?".
-    const consumed = consumedInputNames(detail.phases);
     for (const key of Object.keys(parsedInputs)) {
       if (!consumed.has(key)) {
         print(
@@ -268,10 +297,12 @@ export const runCommand: CommandDef = {
     //   The remedy is in the caller's hands either way: drop -t, or make a phase
     //   consume it.
     //
-    //   `$ARGUMENTS` with no task WARNS. It renders empty, which is degraded but
-    //   can be deliberate — `$ARGUMENTS` as an optional addendum to a prompt
-    //   that stands on its own is a legitimate template, and refusing would make
-    //   such a workflow unrunnable without a dummy task.
+    //   `$ARGUMENTS` with no task WARNS, but only where it is reachable: a
+    //   workflow that declares `task` optional. It renders empty, which is
+    //   degraded but was asked for — `$ARGUMENTS` as an optional addendum to a
+    //   prompt that stands on its own. A workflow that declares nothing about
+    //   `task` already refused above, because its prompt implies one is
+    //   required (PC-66, `requiredInputDeclarations`).
     const consumesTask = consumed.has(TASK_INPUT_NAME);
     if (consumesTask && !supplied.has(TASK_INPUT_NAME) && !declaredDefault(declarations, TASK_INPUT_NAME)) {
       print(
