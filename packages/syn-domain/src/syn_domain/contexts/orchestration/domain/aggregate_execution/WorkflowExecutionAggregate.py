@@ -865,16 +865,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_at = evt(event, "failed_at")
         self._error = evt(event, "error_message")
         self._status = ExecutionStatus.FAILED
-        # Coerced rather than read, because this applier replays events older
-        # than the field: `from_stored` turns a missing key - and a member some
-        # newer writer knows and this reader does not - into `UNCLASSIFIED`
-        # instead of a `ValueError` that would stop the whole stream rehydrating
-        # (#1357).
+        # Coerced rather than read: this applier replays events older than the field, and
+        # `from_stored` turns a missing key - or a member a newer writer knows and this reader
+        # does not - into `UNCLASSIFIED`, not a `ValueError` that stops the stream (#1357).
         self._failure_classification = FailureClassification.from_stored(
             evt(event, "failure_classification")
         )
-        # Same coercion, same reason, one field over: a reason written by a
-        # newer version is a word this reader does not know, and reads as "no
+        # Same coercion, one field over: a reason written by a newer version reads as "no
         # reason given" rather than stopping the stream (#1372).
         self._reported_failure_reason = ReportedFailureReason.from_stored(
             evt(event, "reported_failure_reason")
