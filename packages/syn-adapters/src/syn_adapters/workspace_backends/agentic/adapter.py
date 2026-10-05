@@ -40,6 +40,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_adapters.workspace_backends.host_security import host_security_failure
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
@@ -297,6 +298,7 @@ class AgenticIsolationAdapter:
             labels={
                 "syn.execution_id": config.execution_id,
                 "syn.workspace_id": config.workspace_id,
+                **host_labels(),
             },
             security=self._security,
         )

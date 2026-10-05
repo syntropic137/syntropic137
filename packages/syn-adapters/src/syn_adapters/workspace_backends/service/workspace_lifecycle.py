@@ -228,6 +228,7 @@ async def provision_workspace(
     if with_sidecar:
         sidecar_config = SidecarConfig(
             workspace_id=workspace_id,
+            execution_id=isolation_config.execution_id,
             listen_port=8080,
             allowed_hosts=service._config.allowed_hosts,
         )

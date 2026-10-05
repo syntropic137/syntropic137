@@ -38,6 +38,7 @@ from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_URL,
     SESSION_STORE_CONTRACT_ENV_VARS,
 )
+from syn_shared.settings import reset_settings
 from syn_shared.settings.session_store import (
     DEFAULT_SPOOL_DIR,
     SESHMAGIC_PROVIDER,
@@ -409,9 +410,17 @@ class TestAdapterIntegration:
         assert ws_config.environment["EXISTING_VAR"] == "kept"
 
     @pytest.mark.asyncio
-    async def test_unconfigured_store_changes_nothing(self) -> None:
+    async def test_unconfigured_store_changes_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Self-hostability guarantee at the real call site."""
-        provider = await _create(_disabled_settings())
+        monkeypatch.setenv("SYN_HOST_ID", "host-under-test-7f3a")
+        monkeypatch.setenv("SYN_BUILD_IMAGE_TAG", "v0.99.0-gen-c0ffee")
+        reset_settings()
+        try:
+            provider = await _create(_disabled_settings())
+        finally:
+            reset_settings()
         ws_config = provider.create.await_args.args[0]
 
         assert ws_config.environment == {
@@ -435,6 +444,9 @@ class TestAdapterIntegration:
         assert ws_config.labels == {
             "syn.execution_id": "exec-abc",
             "syn.workspace_id": "ws-xyz",
+            # Which host created the container, and on which build (#1310).
+            "syn.host_id": "host-under-test-7f3a",
+            "syn.host_generation": "v0.99.0-gen-c0ffee",
         }
 
     @pytest.mark.asyncio

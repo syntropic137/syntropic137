@@ -222,6 +222,7 @@ class SidecarConfig:
 
     # Identity
     workspace_id: str
+    execution_id: str
 
     # Proxy settings
     listen_port: int = 8080

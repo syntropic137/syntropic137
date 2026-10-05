@@ -10,6 +10,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_shared.process_exit import describe_process_failure
 
 if TYPE_CHECKING:
@@ -60,12 +61,13 @@ def build_sidecar_docker_cmd(
     for env in env_vars:
         docker_cmd.extend(["-e", env])
 
-    docker_cmd.extend(
-        [
-            f"--label=syn.workspace_id={config.workspace_id}",
-            "--label=syn.component=sidecar",
-        ]
-    )
+    labels = {
+        "syn.execution_id": config.execution_id,
+        "syn.workspace_id": config.workspace_id,
+        "syn.component": "sidecar",
+        **host_labels(),
+    }
+    docker_cmd.extend(f"--label={key}={value}" for key, value in labels.items())
 
     docker_cmd.append(config.proxy_image or default_image)
     return docker_cmd

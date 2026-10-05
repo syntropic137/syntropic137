@@ -10,6 +10,7 @@ See ADR-004: Environment Configuration with Pydantic Settings.
 from __future__ import annotations
 
 import json
+import socket
 from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated
@@ -213,6 +214,23 @@ class Settings(BaseSettings):
             "Example: /Users/user/repo/workspaces or ${PWD}/workspaces"
         ),
     )
+
+    syn_host_id: str = Field(
+        default_factory=socket.gethostname,
+        description=(
+            "Identity of the host process that creates workspace and sidecar "
+            "containers, stamped on them as the syn.host_id label. "
+            "Defaults to the container hostname."
+        ),
+    )
+
+    @field_validator("syn_host_id", mode="before")
+    @classmethod
+    def _empty_host_id_to_hostname(cls, v: object) -> object:
+        """Treat an empty SYN_HOST_ID as unset rather than as a blank identity."""
+        if v == "":
+            return socket.gethostname()
+        return v
 
     # =========================================================================
     # VALIDATORS - Convert empty strings to None

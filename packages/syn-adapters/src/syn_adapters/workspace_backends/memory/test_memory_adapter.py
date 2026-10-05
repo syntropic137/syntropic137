@@ -389,6 +389,7 @@ class TestMemorySidecarAdapter:
         """Create test sidecar config."""
         return SidecarConfig(
             workspace_id="ws-456",
+            execution_id="exec-456",
             listen_port=8080,
         )
 
