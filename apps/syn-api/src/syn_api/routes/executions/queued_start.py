@@ -163,5 +163,7 @@ async def not_yet_started(
         total_cache_creation_tokens=0,
         total_cache_read_tokens=0,
         total_tokens=0,
+        review_verdict=None,
+        delegation_failure=None,
         start_queue=start_queue_info(position, record),
     )
