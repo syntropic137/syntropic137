@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
         WorkspaceAggregate,
     )
+    from syn_shared.settings.workspace import WorkspaceSettings
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,15 @@ class WorkspaceServiceConfig:
     default_token_ttl: int = 300  # 5 minutes
     capabilities: tuple[CapabilityType, ...] = (CapabilityType.NETWORK,)
     environment: dict[str, str] = field(default_factory=dict)  # Non-sensitive env vars
+
+    @classmethod
+    def from_settings(cls, settings: WorkspaceSettings) -> WorkspaceServiceConfig:
+        """The configuration an operator asked for via SYN_WORKSPACE_*."""
+        return cls(
+            image=settings.docker_image,
+            memory_limit_mb=settings.memory_limit_mb,
+            cpu_limit_cores=settings.cpu_limit,
+        )
 
 
 class WorkspaceService:

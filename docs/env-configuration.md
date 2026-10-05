@@ -50,8 +50,6 @@ All env vars are routed through Pydantic Settings — **never use `os.environ.ge
 |----------|----------|---------|-------------|
 | `ESP_EVENT_STORE_DB_URL` | Production | None | Event Sourcing Platform DB URL (domain events) |
 | `SYN_OBSERVABILITY_DB_URL` | Production | None | Observability DB URL (agent events, projections) |
-| `DATABASE_POOL_SIZE` | No | `5` | Connection pool size |
-| `DATABASE_POOL_OVERFLOW` | No | `10` | Max overflow connections |
 
 > **Note:** After ADR-030, both URLs point to the same TimescaleDB instance but are named explicitly for each concern.
 

@@ -36,7 +36,6 @@ from syn_shared.settings.workspace_security import (  # noqa: F401
     WorkspaceSecuritySettings,
 )
 
-
 DEFAULT_WORKSPACE_MEMORY_LIMIT_MB = 4096
 """Memory ceiling for one workspace container, in MB."""
 

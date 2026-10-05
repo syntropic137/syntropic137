@@ -78,8 +78,6 @@ class TestWorkspaceSecuritySettings:
             assert security.max_workspace_size == "1Gi"
 
             # Resource limits set
-            assert security.max_memory == "512Mi"
-            assert security.max_cpu == 0.5
             assert security.max_pids == 100
             assert security.max_execution_time == 3600
 
@@ -87,16 +85,12 @@ class TestWorkspaceSecuritySettings:
         """Environment variables should override defaults."""
         env = {
             "SYN_SECURITY_ALLOW_NETWORK": "true",
-            "SYN_SECURITY_MAX_MEMORY": "2Gi",
-            "SYN_SECURITY_MAX_CPU": "2.0",
             "SYN_SECURITY_MAX_PIDS": "500",
         }
         with patch.dict(os.environ, env, clear=True):
             security = WorkspaceSecuritySettings(_env_file=None)
 
             assert security.allow_network is True
-            assert security.max_memory == "2Gi"
-            assert security.max_cpu == 2.0
             assert security.max_pids == 500
 
     def test_allowed_hosts_comma_format(self) -> None:
@@ -330,14 +324,14 @@ class TestSettingsWorkspaceIntegration:
         """Workspace settings should respect env vars."""
         env = {
             "SYN_WORKSPACE_MEMORY_LIMIT_MB": "2000",
-            "SYN_SECURITY_MAX_MEMORY": "1Gi",
+            "SYN_SECURITY_MAX_PIDS": "200",
         }
         with patch.dict(os.environ, env, clear=True):
             workspace = WorkspaceSettings(_env_file=None)
             security = WorkspaceSecuritySettings(_env_file=None)
 
             assert workspace.memory_limit_mb == 2000
-            assert security.max_memory == "1Gi"
+            assert security.max_pids == 200
 
 
 # =============================================================================
