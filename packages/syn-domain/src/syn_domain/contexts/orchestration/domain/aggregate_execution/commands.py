@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        DelegationFailure,
         ExecutablePhase,
         FailureClassification,
         PhaseDefinition,
@@ -152,6 +153,7 @@ class FailExecutionCommand:
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
+        delegation_failure: DelegationFailure | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -211,6 +213,10 @@ class FailExecutionCommand:
         #: the classification and never folded into it (#1392): an operator
         #: reads the agent's word, and no number is computed from it.
         self.reported_failure_reason = reported_failure_reason
+        #: Which required delegate did not happen, and why (#894). `None` for
+        #: every failure that is not a failed delegation - every call site but
+        #: the one whose phase declared one.
+        self.delegation_failure = delegation_failure
 
 
 class StartPhaseCommand:
