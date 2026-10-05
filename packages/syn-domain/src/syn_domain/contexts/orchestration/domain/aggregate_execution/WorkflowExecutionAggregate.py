@@ -64,6 +64,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
     resume_started_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import (
+    ReviewRecord,
     next_phase,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
@@ -250,13 +251,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: Same restart hazard as `_recovered_phases`: reported when the agent
         #: finishes, needed when the phase completes.
         self._reported_side_effects: dict[str, SideEffectStatus | None] = {}
-        #: What each phase's latest agent run concluded as a review (PC-63).
-        #: Reported when the agent finishes, read when its artifacts are
-        #: collected to choose the next phase - see `review_rounds`.
-        self._reported_review_verdicts: dict[str, ReviewVerdict | None] = {}
-        #: The verdict of the last COMPLETED phase that reported one: how this
-        #: run stands, and what `WorkflowCompleted` records it ended on.
-        self._review_verdict: ReviewVerdict | None = None
+        #: Review verdicts, which choose the next phase (PC-63).
+        self._reviews = ReviewRecord()
         #: Phases that completed, and what each one's collection stored. The
         #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
@@ -390,12 +386,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
     @property
     def review_verdict(self) -> ReviewVerdict | None:
-        """The last review verdict a completed phase reported, or None (PC-63).
-
-        On a completed run, `BLOCKED` is a run that completed with unresolved
-        findings.
-        """
-        return self._review_verdict
+        """The last review verdict reported; `BLOCKED` on a completed run is unresolved findings."""
+        return self._reviews.latest
 
     @property
     def failure_classification(self) -> FailureClassification:
@@ -492,7 +484,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             msg = f"Cannot complete execution in status {self._status}"
             raise ValueError(msg)
 
-        self._apply(completed_event(command, self._workflow_id or "", self._review_verdict))
+        self._apply(completed_event(command, self._workflow_id or "", self._reviews.latest))
 
     @command_handler("FailExecutionCommand")
     def fail_execution(self, command: FailExecutionCommand) -> None:
@@ -673,9 +665,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
             ArtifactsCollectedForPhaseEvent,
         )
-        from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
-            NextPhaseReadyEvent,
-        )
 
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot collect artifacts in status {self._status}"
@@ -694,26 +683,18 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
-        current_order = self._phase_order_map.get(command.phase_id)
-        if current_order is None:
-            return
-        # The verdict this phase reported decides what runs next: a
-        # certification skips the repair rounds it made unnecessary (PC-63).
+        # The phase's own verdict decides what runs next (PC-63).
         decided = next_phase(
             self._phase_definitions,
-            current_order,
-            self._reported_review_verdicts.get(command.phase_id),
+            self._phase_order_map.get(command.phase_id),
+            self._reviews.of(command.phase_id),
         )
         if decided is not None:
             self._apply(
-                NextPhaseReadyEvent(
+                decided.event(
                     workflow_id=self._workflow_id or "",
                     execution_id=command.aggregate_id,
                     completed_phase_id=command.phase_id,
-                    next_phase_id=decided.phase.phase_id,
-                    next_phase_order=decided.phase.order,
-                    decided_at=datetime.now(UTC),
-                    skipped_phase_ids=[p.phase_id for p in decided.skipped],
                 )
             )
 
@@ -866,11 +847,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._total_tokens = evt(event, "total_tokens", 0)
         self._artifact_ids = list(evt(event, "artifact_ids", []))
         self._status = ExecutionStatus.COMPLETED
-        # What the run ended on, as recorded - absent on every completion
-        # written before PC-63, which keeps whatever the stream already said.
-        self._review_verdict = (
-            ReviewVerdict.from_stored(evt(event, "review_verdict")) or self._review_verdict
-        )
 
     @event_sourcing_handler("WorkflowFailed")
     def on_execution_failed(self, event: WorkflowFailedEvent) -> None:
@@ -953,8 +929,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._reported_side_effects[reported_for] = SideEffectStatus.from_stored(
                 evt(event, "reported_side_effects")
             )
-            self._reported_review_verdicts[reported_for] = ReviewVerdict.from_stored(
-                evt(event, "reported_review_verdict")
+            self._reviews.report(
+                reported_for, ReviewVerdict.from_stored(evt(event, "reported_review_verdict"))
             )
         said = evt(event, "last_agent_message")
         if not said:
@@ -983,9 +959,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # is also what makes `stranded_deliverable` answer None once the
         # output is safely stored.
         self._finished_agent_runs.pop(phase_id, None)
-        verdict = self._reported_review_verdicts.get(phase_id)
-        if verdict is not None:
-            self._review_verdict = verdict
+        self._reviews.collect(phase_id)
 
     @event_sourcing_handler("NextPhaseReady")
     def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:
