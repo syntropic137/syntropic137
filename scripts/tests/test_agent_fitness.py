@@ -194,6 +194,8 @@ def run_real_just(tmp_path: Path, env: dict[str, str]) -> Run:
     """
     assert JUST
     shutil.copy(JUSTFILE, tmp_path / "justfile")
+    # The justfile imports `just/*.just` (#1622); a copy without them does not parse.
+    shutil.copytree(JUSTFILE.parent / "just", tmp_path / "just")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stubs = {

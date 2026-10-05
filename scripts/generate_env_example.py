@@ -167,7 +167,7 @@ def format_refusal(env_name: str) -> list[str]:
     Silence is what #1101 was: SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES was set, the
     API restarted, and the old behaviour continued without a word. The reasons
     live in scripts/settings_forwarding.py, which is the same table that
-    generates the compose forwarding block, so this line cannot describe a
+    generates the compose passthrough, so this line cannot describe a
     refusal the stack no longer makes.
     """
     reason = NOT_FORWARDED.get(env_name)

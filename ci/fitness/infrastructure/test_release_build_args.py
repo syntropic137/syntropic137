@@ -129,8 +129,14 @@ def _dockerfile_default() -> str:
 
 
 def _justfile_recipe_body(name: str) -> str:
-    """Return the indented body of a justfile recipe, without its signature."""
-    lines = (_repo_root() / "justfile").read_text().splitlines()
+    """Return the indented body of a justfile recipe, without its signature.
+
+    Searches the root justfile and every file it imports from just/: the
+    release recipes live in just/release.just so CODEOWNERS can own them alone.
+    """
+    root = _repo_root()
+    sources = [root / "justfile", *sorted((root / "just").glob("*.just"))]
+    lines = [line for source in sources for line in source.read_text().splitlines()]
     start = next(
         (i for i, line in enumerate(lines) if re.match(rf"^{re.escape(name)}(\s|:)", line)),
         None,
