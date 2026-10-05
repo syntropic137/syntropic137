@@ -100,20 +100,47 @@ without Postgres (ADR-060); the test double inherits `InMemoryAdapter`.
 
 ```
 opening ──▶ admitted ──claim──▶ claimed ──terminal──▶ done
-   │            ▲                  │
-   │            └── retry_at ──────┤ (resume claim deferred, see D7)
-   ▼                               ▼ lease expired
-abandoned                       fencing ──▶ reaped ──▶ interrupted
-(start not recorded)
+   │            ▲ ▲                │
+   │            │ └── retry_at ────┤ (resume claim deferred, see D7)
+   ▼            │                  ▼ lease expired
+abandoned ──────┘               fencing ──▶ reaped ──▶ interrupted
+(start not recorded;            (slot held until the row is closed)
+ promoted if the stream
+ later appears)
 ```
 
 **Admission writes the row before the stream.** Admission inserts
-`execution_runs(state='opening')`, then `journal.open` (NoStream), then sets
-`admitted`. Executors claim only `admitted`. A sweep resolves `opening` rows
-older than two minutes: stream present → `admitted` (a crash between the two
-writes); stream absent → `abandoned` with reason `start not recorded`. So every
-durable start has a row, and every row either reaches the queue or is closed
-with a reason.
+`execution_runs(state='opening')`, then `journal.open` (NoStream), then calls
+`mark_admitted`. Executors claim only `admitted`. The row and the stream are
+two stores with no shared transaction, so the age of an `opening` row says
+nothing about whether its admission is dead: a slow `inherited_outputs` read or
+a slow event-store write (plan item 1.3 brackets both between `reserve` and
+`journal.open`) can still be in progress when any fixed threshold passes.
+The sweep is therefore built so that it can be wrong about liveness without
+stranding a start:
+
+- **Every transition is a guarded compare-and-set.** `sweep_opening` updates
+  `WHERE state='opening'`; `mark_admitted` updates
+  `WHERE state IN ('opening','abandoned')`. Whichever writes second sees the
+  other's state and does nothing.
+- **Unknown is never absent.** The sweep reads the stream for `opening` rows
+  older than two minutes. Stream present → `admitted` (a crash between
+  the two writes). Stream **confirmed** absent → `abandoned`, reason
+  `start not recorded`. A failed or timed-out read changes nothing; the row stays
+  `opening` and is read again next turn.
+- **`abandoned` is provisional, not terminal.** A late `journal.open` that
+  succeeds after the sweep abandoned the row is followed by `mark_admitted`,
+  which promotes `abandoned → admitted`. Admission calls `mark_admitted` only
+  after its own open succeeded, so a promoted row always has a stream. If the
+  admitter crashes between that late open and `mark_admitted`, the sweep
+  also re-reads the stream of every `abandoned` row on each turn and
+  promotes any whose stream now exists. An `abandoned` row holds no slot, and
+  `reserve` still refuses a second row for its execution id.
+
+So every durable start has a row, and every row with a stream reaches the queue,
+however long admission took. A row that stays `abandoned` is one whose stream
+has never been seen. Item 1.3 carries a test where admission outlasts the sweep
+threshold and the start ends `admitted`, not stranded.
 
 ### D3. Capacity and claim are one transaction
 
@@ -134,8 +161,11 @@ route.
 
 ### D4. Lease timing
 
-Lease TTL **90 s**, renewed every **30 s** (TTL/3), as a setting. The TTL is
-also the upper bound of the expiry-to-reap window in D5.
+Lease TTL **90 s**, renewed every **30 s** (TTL/3), as a setting. The TTL
+bounds **detection**, not effect: provided the database clock and at least one
+executor's reconciliation loop are working, a host that stops renewing is seen
+as expired within the TTL. It does not bound the expiry-to-reap window in D5,
+which ends only when a reap succeeds.
 
 ### D5. At most one run per execution, and the limits of that guarantee
 
@@ -147,12 +177,47 @@ turn as a state machine on the row:
 |---|---|---|
 | `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, one UPDATE | `leased_until < now()` |
 | `fencing` → `reaped` | remove containers labelled `syn.host_id=<dead host>`, `syn.execution_id=<id>` | the reap reports complete (the existing `fully_reaped` rule in `reconciliation.py`); otherwise stay `fencing` and retry |
-| `reaped` → `interrupted` | append `WorkflowInterruptedEvent` through the aggregate; release the slot in the same transaction | the aggregate rejects it if already terminal, and the row is then just closed |
+| `reaped` → `interrupted` | two ordered steps, below | |
 
-**The old host fences itself.** Its next `renew` fails on the token
-(`RunLeaseLost`); it cancels its own runs, which take the bounded interruption
-path of #1381; any append it still attempts raises `ConcurrencyError`, because
-the stream version moved.
+The last step crosses two stores, the event store and `execution_runs`, and
+they share no transaction. It is two ordered, retryable steps, never one
+atomic one:
+
+1. **Append first.** Load the aggregate and append `WorkflowInterruptedEvent`
+   through `ExecutionJournal.append`. If the stream already ends in a terminal
+   event, the aggregate rejects the command and nothing is appended. A
+   `ConcurrencyError` means another writer advanced the stream: reload and
+   decide again.
+2. **Then close the row** with `close_interrupted`, guarded on the row's
+   current `lease_token`. Only this releases the slot.
+
+A crash between the steps leaves the row `reaped` with the stream already
+terminal. The next reconciliation turn reloads, sees the terminal stream, appends
+nothing, and closes the row. Until the row is closed it is counted in use (D3),
+so a crash can hold a slot for a turn but can never free one early.
+
+**The lease token fences the queue, not the stream.** Bumping `lease_token`
+changes `execution_runs` only. `ExecutionJournal.append` saves through the
+event repository, whose only check is the stream's expected version. So the old
+host is stopped by two separate mechanisms:
+
+- **Self-fencing, through the queue.** Its next `renew` fails on the token
+  (`RunLeaseLost`), within one renewal interval of its process running again.
+  It then cancels its own runs, which take the bounded interruption path of
+  #1381, and its `close` is refused on the token.
+- **Optimistic concurrency, through the stream.** Its appends raise
+  `ConcurrencyError` only **after** some other writer has advanced the stream,
+  in practice the reconciler's interruption in step 1. Before that, from the
+  moment of fencing until step 1 lands, an append by the old host **succeeds**.
+
+The race is resolved by stream order, not by the token. If the old host appends
+first (a phase completion, say), the reconciler's load or append sees it:
+either a `ConcurrencyError` and reload, or a reload that already contains the
+event. It then interrupts after that event, or appends nothing if the event was
+terminal, and closes the row either way. If the reconciler appends first, every
+later append by the old host fails on the version. Either way the stream is one
+consistent history of one run, and the row is closed only after the stream is
+terminal.
 
 **What is guaranteed:**
 
@@ -168,8 +233,17 @@ the stream version moved.
 stalled host's agent keeps running in its container until the reaper removes
 it, so a push can land in the expiry-to-reap window. That effect belongs to the
 one run; no second run duplicates it. The processor's rescue pushes also run in
-the workspace, so removing the container removes that path too. The window is
-bounded by the TTL plus one reconciliation turn.
+the workspace, so removing the container removes that path too.
+
+The window is **not** time-bounded by this design. It runs from the lease
+expiring to the first **successful** reap. Detection is bounded by the TTL
+(D4), but after that the row waits for a live executor's reconciliation turn,
+and a reap that fails (Docker unreachable, a container that will not stop)
+leaves the row in `fencing` to retry, exactly as `reconciliation.py` treats an
+incomplete cleanup today. Because the window has no bound, it is watched
+instead: a row in `fencing` for longer than one TTL, or with no executor
+heartbeat able to reap it, raises an operator alert naming the execution and
+the dead host. Removing that host's containers by hand ends the window.
 
 Visibility-timeout redelivery (Sidekiq, Celery, SQS) is deliberately not
 adopted: redelivering an hour-long agent phase is exactly the duplicate-effects
@@ -311,7 +385,9 @@ not, 1.2 carries the one-budget rule itself and #1557 closes with 2.3.
 - A new table set, a new process role and a new compose service to operate.
 - Admission becomes synchronous, so the dispatch and resume ProcessManagers'
   live `process_pending` gets slower (live-only, so replay is unaffected).
-- Effects in the expiry-to-reap window are accepted, not prevented (D5).
+- Effects in the expiry-to-reap window are accepted, not prevented, and the
+  window has no time bound: it ends at the first successful reap, so it is
+  alerted on rather than promised (D5).
 - Introducing the executor service is a compose change pit_stop cannot stage
   until #1511 ships; until then Phase 1 rolls out with one final full-drain
   install.

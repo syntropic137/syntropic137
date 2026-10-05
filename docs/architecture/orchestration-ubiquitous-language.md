@@ -168,7 +168,9 @@ work from Executors.
 A run row moves `opening` -> `admitted` -> `claimed` -> `done`. Admission
 writes `opening` before the Execution's stream exists and `admitted` after, so
 a row stranded at `opening` is swept to `admitted` (stream present) or
-`abandoned`, with reason `start not recorded` (stream absent). An expired
+`abandoned`, with reason `start not recorded` (stream confirmed absent; a failed
+read leaves it `opening`). `abandoned` is provisional: a late successful open,
+or a later sweep that finds the stream, promotes it to `admitted`. An expired
 Lease goes `claimed` -> `fencing` -> `reaped` -> `interrupted` (see Fencing). A
 resume whose inherited artifacts cannot yet be read is deferred back to
 `admitted` with a `retry_at`. `RunCounts` is the number of rows in each state.
@@ -195,15 +197,19 @@ How long a Claim stays valid without renewal: `leased_until`, plus a
 TTL/3 (90 s TTL, 30 s renewal). A renewal whose token was superseded raises
 `RunLeaseLost`, and the holder then cancels its own run.
 
-A Lease is not a lock on the Execution. The Execution's stream is what refuses
-a second writer; the Lease is what says which Executor is alive and holds the
-slot.
+A Lease is not a lock on the Execution. The token fences the Run Queue only:
+a fenced holder's `renew` and `close` fail, but its event appends still succeed
+until another writer advances the Execution's stream, whose expected-version
+check is what then refuses them. The Lease is what says which Executor is alive
+and holds the slot.
 
 ## Fencing
 
 What happens to a Claim whose Lease expired: another Executor bumps the token
 (`fencing`), removes the dead host's containers for that Execution (`reaped`),
-then appends `WorkflowInterruptedEvent` and frees the slot (`interrupted`).
+then appends `WorkflowInterruptedEvent` and, as a separate later step, closes
+the row and frees the slot (`interrupted`). A failed reap stays `fencing` and
+is retried, so Fencing has no time bound once a Lease expires.
 `fence_expired` returns each one as a `FencedRun`: the Execution and the host
 that held it.
 
