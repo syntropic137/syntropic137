@@ -4,7 +4,8 @@ On 2026-10-05 four runs (#1589, #1596, #1597, #1603) ended with `reverify`
 BLOCKED on findings one more edit would have closed, and each needed a second
 fix round built by hand. The engine advances strictly by `order` and reads no
 verdict, so the repeat is written into the workflow definition: three
-fix/reverify rounds under distinct phase ids, then `finalize_pr`.
+fix/reverify rounds under distinct phase ids, then `finalize_pr`. A round
+whose predecessor certified never runs: the aggregate skips to `finalize_pr`.
 
 Two halves have to agree, and each is tested where it lives:
 
@@ -12,10 +13,10 @@ Two halves have to agree, and each is tested where it lives:
   with the phase definitions `POST /workflows` would install shows how many
   rounds a run can take and that it ends - nothing in a processor loops.
 - The PROMPT half is which report each phase treats as current. The aggregate
-  cannot see a verdict; `finalize_pr` decides READY or DRAFT from whichever
-  `reverify*` report its prompt tells it to read first. These tests resolve that
-  order from the installed prompt text, so a prompt that reads an older round
-  before a newer one turns a certified second round into an abandoned run.
+  sees only the verdict an agent reports; `finalize_pr` decides READY or DRAFT
+  from the report of the newest round that ran. These tests resolve that
+  choice from the installed prompt text, so a prompt that insists on a round
+  the aggregate skipped turns an early certification into an abandoned run.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseDefinition,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
     StartExecutionCommand,
     WorkflowExecutionAggregate,
@@ -43,6 +45,9 @@ from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
 )
 
 pytestmark = pytest.mark.unit
@@ -72,8 +77,9 @@ def installed() -> tuple[list[PhaseDefinition], dict[str, str]]:
 def _run(phases: list[PhaseDefinition], reports: dict[str, str]) -> list[str]:
     """Drive the aggregate phase by phase; return the phase ids it ran.
 
-    Each phase "produces" `reports[phase_id]` as its artifact preview, which is
-    everything the aggregate is shown of a verdict.
+    Each phase "produces" `reports[phase_id]` as its artifact preview, and its
+    agent reports the report's first line as its `review_verdict` through the
+    reader production uses - which is what the aggregate decides on.
     """
     agg = WorkflowExecutionAggregate()
     agg._handle_command(
@@ -88,6 +94,20 @@ def _run(phases: list[PhaseDefinition], reports: dict[str, str]) -> list[str]:
     )
     ran = [phases[0].phase_id]
     while True:
+        said = reports.get(ran[-1], "").split("\n", 1)[0].lower()
+        verdict = AgentVerdict.from_agent_text(
+            f'TASK_RESULT: {{"success": true, "review_verdict": "{said}"}}\nTASK_RESULT_END'
+            if said
+            else 'TASK_RESULT: {"success": true}\nTASK_RESULT_END'
+        )
+        agg._handle_command(
+            AgentExecutionCompletedCommand(
+                execution_id="exec-pc63",
+                phase_id=ran[-1],
+                session_id=f"sess-{ran[-1]}",
+                reported_review_verdict=verdict.reported_review_verdict,
+            )
+        )
         seen = len(agg._uncommitted_events)
         agg._handle_command(
             ArtifactsCollectedCommand(
@@ -116,26 +136,47 @@ def _reports_finalize_reads(prompt: str) -> list[str]:
     return listed
 
 
+def _round_of(path: str) -> str:
+    """The round a listed report belongs to: `reverify`, `reverify_2`, ..."""
+    found = re.match(r"artifacts/input/(reverify(?:_\d)?)[/.]", path)
+    assert found, path
+    return found.group(1)
+
+
 def _finalize(inputs: dict[str, str]) -> tuple[str, set[str]]:
     """What `finalize_pr` does given the files injected into its workspace.
 
     Selection, validation and the `gh pr` actions are all read from the
-    installed prompt: the first listed report that exists, checked against the
-    two lines the prompt requires, then every `gh pr <verb>` in the section for
-    that verdict. An unusable report falls to the BLOCKED section, as it says.
+    installed prompt: the first listed round that RAN - anything of it was
+    injected - then that round's first listed report that exists, checked
+    against the two lines the prompt requires, then every `gh pr <verb>` in the
+    section for that verdict. An unusable report falls to the BLOCKED section,
+    as it says.
     """
     raw = _FINALIZE.read_text()
     prompt = re.sub(r"\s+", " ", raw)
-    report = next((inputs[path] for path in _reports_finalize_reads(prompt) if path in inputs), "")
+    listed = _reports_finalize_reads(prompt)
+    ran = [
+        r
+        for r in dict.fromkeys(map(_round_of, listed))
+        if any(
+            p.startswith(f"artifacts/input/{r}/") or p == f"artifacts/input/{r}.md" for p in inputs
+        )
+    ]
+    newest = ran[0] if ran else None
+    report = next((inputs[p] for p in listed if _round_of(p) == newest and p in inputs), "")
     rule = re.search(
         r"first line is exactly `(\w+)` or `(\w+)` and its second line is exactly `([^`]+)`",
         prompt,
     )
     assert rule, "finalize_pr no longer says what makes the final report usable"
     *verdicts, round_line = rule.groups()
-    assert round_line == f"Round: {_ROUNDS} of {_ROUNDS}"
+    assert round_line == f"Round: N of {_ROUNDS}"
+    n = 1 if newest == "reverify" else int((newest or "_0")[-1])
     lines = report.splitlines()
-    usable = len(lines) >= 2 and lines[0] in verdicts and lines[1] == round_line
+    usable = (
+        len(lines) >= 2 and lines[0] in verdicts and lines[1] == round_line.replace("N", str(n))
+    )
     verdict = lines[0] if usable else "FINAL_REPORT_UNUSABLE"
     branch = "CERTIFIED" if verdict == "CERTIFIED" else "BLOCKED"
     start = raw.index(f"\n## If {branch}\n")
@@ -153,39 +194,51 @@ def _round_report(verdict: str, n: int) -> str:
 
 
 class TestABlockedReverifyIsRepaired:
-    def test_blocked_then_certified_completes_certified(
-        self, installed: tuple[list[PhaseDefinition], dict[str, str]]
+    @pytest.mark.parametrize("certified_in", [1, 2, 3])
+    def test_a_certification_in_any_round_marks_the_pr_ready(
+        self, installed: tuple[list[PhaseDefinition], dict[str, str]], certified_in: int
     ) -> None:
         phases, _ = installed
+        rounds = ["reverify", "reverify_2", "reverify_3"]
         reports = {
-            "reverify": _round_report("BLOCKED", 1),
-            "reverify_2": _round_report("CERTIFIED", 2),
-            # Round 3's fix changed nothing and its reverify carried round 2's
-            # certification forward, as both prompts instruct.
-            "reverify_3": _round_report("CERTIFIED", 3),
+            phase: _round_report("CERTIFIED" if n == certified_in else "BLOCKED", n)
+            for n, phase in enumerate(rounds[:certified_in], start=1)
         }
         ran = _run(phases, reports)
 
-        assert ran.index("fix_2") == ran.index("reverify") + 1, (
-            "a BLOCKED first reverify must be followed by another fix round"
+        assert [p for p in ran if p in rounds] == rounds[:certified_in], (
+            "a BLOCKED reverify is followed by another round; a CERTIFIED one by none"
         )
         assert ran[-1] == "finalize_pr"
-        verdict, actions = _finalize(_injected(reports))
+        verdict, actions = _finalize(_injected({p: reports[p] for p in ran if p in reports}))
         assert verdict == "CERTIFIED"
         assert "ready" in actions, "a certified run must mark the PR ready"
         assert not actions & {"close", "merge"}
 
-    def test_only_round_three_is_ever_read(
+    def test_rounds_are_read_newest_first(
         self, installed: tuple[list[PhaseDefinition], dict[str, str]]
     ) -> None:
-        # Round 3 always runs before finalize_pr, so an earlier round's report
-        # is never the current one - listing it as a fallback is how a stale
-        # certification gets acted on.
+        # An older round's report is only the current one when no newer round
+        # ran; listing it first is how a stale certification gets acted on.
         _, prompts = installed
         assert _reports_finalize_reads(prompts["finalize_pr"]) == [
             "artifacts/input/reverify_3/reverify.md",
             "artifacts/input/reverify_3.md",
+            "artifacts/input/reverify_2/reverify.md",
+            "artifacts/input/reverify_2.md",
+            "artifacts/input/reverify/reverify.md",
+            "artifacts/input/reverify.md",
         ]
+
+    def test_a_newer_round_that_ran_without_a_report_never_falls_back(self) -> None:
+        verdict, actions = _finalize(
+            {
+                "artifacts/input/reverify/reverify.md": _round_report("CERTIFIED", 1),
+                "artifacts/input/reverify_2/fix-notes.md": "round 2 ran and wrote no report",
+            }
+        )
+        assert verdict == "FINAL_REPORT_UNUSABLE"
+        assert "ready" not in actions
 
     async def test_a_recovered_round_three_never_falls_back_to_round_two(self) -> None:
         """Round 2 CERTIFIED, round 3 wrote no file and was salvaged BLOCKED.

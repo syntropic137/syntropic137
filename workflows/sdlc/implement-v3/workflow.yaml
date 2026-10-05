@@ -218,9 +218,10 @@ phases:
   # skips every phase before the final one (recorded as `skipped_phase_ids`
   # on NextPhaseReady), `blocked` advances by order. A run that is still
   # blocked after round 3 completes with `review_verdict: blocked`, i.e. with
-  # unresolved findings, on the execution. See review_rounds.py. `finalize_pr`
-  # must therefore stay the LAST phase. `finalize_pr` reads
-  # the newest of `reverify_3/`, `reverify_2/`, `reverify/`. Adding a round
+  # unresolved findings, on the execution, and a resume of it re-runs `fix_3`
+  # onward. See review_rounds.py. `finalize_pr` must therefore stay the LAST
+  # phase. `finalize_pr` reads the newest round that ran, of `reverify_3/`,
+  # `reverify_2/`, `reverify/`. Adding a round
   # means a pair here, two prompt files, and a line in phases/finalize_pr.md;
   # scripts/tests/test_implement_v3_repair_rounds.py fails if they disagree.
   - <<: *fix_round

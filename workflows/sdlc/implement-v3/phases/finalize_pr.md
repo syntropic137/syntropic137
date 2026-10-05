@@ -2,25 +2,31 @@
 
 $ARGUMENTS
 
-The final verification report is **round 3's, and only round 3's**. The
-engine runs every round before this phase, so round 3 always ran; a round-3
-report that is missing or unreadable is a broken report, not a sign that an
-earlier round was the last. Read exactly one file, the first of these that
+The final verification report is **the last round's that ran**. A round
+whose predecessor certified never runs: the engine skips straight here, so a
+run certified in round 1 has no `reverify_2` or `reverify_3` input at all, and
+its round-1 report is the final one. A round RAN if anything of it was handed
+to you under `artifacts/input/` - its directory `reverify_N/` or its flat
+alias `reverify_N.md` (kept for one release - issue #988). Take the
+newest round that ran, then read its report, the first of its two files that
 exists:
 
 1. `artifacts/input/reverify_3/reverify.md`
-2. `artifacts/input/reverify_3.md` (the same round's flat alias, kept for one
-   release - issue #988)
+2. `artifacts/input/reverify_3.md`
+3. `artifacts/input/reverify_2/reverify.md`
+4. `artifacts/input/reverify_2.md`
+5. `artifacts/input/reverify/reverify.md`
+6. `artifacts/input/reverify.md`
 
-Never take the verdict from `reverify_2` or `reverify`, even when round 3's
-report is absent. Each round handed the open findings to a fix phase and its
-`reverify` says whether that fix closed them; round 3 carries a certification
-forward when nothing changed, so an older verdict is history either way.
-Below, `reverify.md` means round 3's report.
+Never take the verdict from an older round when a newer one ran, even when the
+newer round's report is missing or unreadable: that round handed the open
+findings to a fix and its verdict is the one that says whether the fix closed
+them, so an older verdict is history. Below, `reverify.md` means the report of
+the round you read, and N is that round's number (1 for `reverify`).
 
 **The report is usable only if its first line is exactly `CERTIFIED` or
-`BLOCKED` and its second line is exactly `Round: 3 of 3`.** Anything else -
-neither file exists, the report was recovered from a transcript (its first
+`BLOCKED` and its second line is exactly `Round: N of 3`.** Anything else -
+no round's report exists, the report was recovered from a transcript (its first
 line is a recovery notice, not a verdict), or the lines do not match - is the
 error `FINAL_REPORT_UNUSABLE`. Treat it as BLOCKED: follow "If BLOCKED" below,
 name `FINAL_REPORT_UNUSABLE` and what you found instead in the comment, and
@@ -83,7 +89,9 @@ Keep it a **draft**. Do not close it. Post one comment (`gh pr comment <n>`)
 that names the blocking finding, quotes what `reverify.md` says would close it,
 gives the head SHA it applies to, and says how many repair rounds ran (`3 of 3`
 means the bound was reached; another round is a person's decision, not this
-run's). A draft carrying a known defect with the
+run's). The run then completes with unresolved findings, and a person continues
+it by resuming it: the resume re-runs round 3's fix against this comment, then
+its re-verification and this phase. A draft carrying a known defect with the
 blocker written on it is recoverable; a branch nobody can find is not.
 
 Do not merge. Never push, never force push, never rebase.

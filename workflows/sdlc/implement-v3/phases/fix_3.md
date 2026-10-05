@@ -35,6 +35,13 @@ an earlier round made - but the latest verdict decides what is still open. If
 its first line is `CERTIFIED` there is no blocking defect, which is the next
 section's case. Write `Round: 3 of 3` as the first line of your report.
 
+**If this run is a resume of one that ended with unresolved findings,** round 3
+already ran once and was BLOCKED after it. Its findings are not in
+`artifacts/input/`; `finalize_pr` wrote them on the PR as a comment naming the
+blocking finding and the head SHA it applies to. Those findings are your scope
+too, and that head SHA - not the one `reverify_2` verified - is what you build
+on, so the previous attempt's commits are kept.
+
 ## If verification certified the change, stop
 
 

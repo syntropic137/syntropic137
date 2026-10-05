@@ -71,11 +71,21 @@ visible on the execution detail API. A `completed` Execution with
 A status, deliberately not: the run did not fail - every Phase did its job -
 and the bound was the Workflow's own decision.
 
-**Unclear:** whether such a run should be continuable. A Resume restarts at the
-first Phase that did not complete, and here every Phase completed, so a Resume
-has nothing to start. Running one more round past the bound is starting from a
-CHOSEN Phase, which is the capability #1468 reserves. Until that ships, a run
-that ended with Unresolved Findings is continued by hand.
+Continuable by a Resume. A `completed` Execution is resumable only when it
+ended with Unresolved Findings, and then not at its first unfinished Phase
+(there is none) but at its Repair Point: the Phase before the Review that
+blocked it - the last round's fix. The Resume inherits every Phase before the
+Repair Point and re-runs that round against the findings still open, then its
+review and everything after. That fix already ran and may have pushed, so the
+Resume must acknowledge external effects. A `completed` Execution that
+certified, or that nothing reviewed, still has nothing to resume.
+
+## Repair Point
+
+Where a Resume of an Execution with Unresolved Findings starts: the Phase
+immediately before the Phase whose `blocked` verdict the run ended on. Decided
+by the aggregate from its replayed Review Verdicts (`ReviewRecord.repair_point`),
+never by the caller.
 
 ## Workflow
 
@@ -87,7 +97,8 @@ needs rather than reading the Workflow later.
 
 Continuing an Execution that DID NOT FINISH, by starting a new Execution that
 inherits the Phases already completed and restarts at the first one that did
-not.
+not. Or one that finished with Unresolved Findings, restarting at
+its Repair Point.
 
 Applies to `failed` and `interrupted` on request, and to `cancelled` only with
 an explicit override - a cancel was a decision, and resuming past it needs a
