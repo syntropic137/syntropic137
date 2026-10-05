@@ -26,6 +26,8 @@ def test_the_composition_root_passes_launches() -> None:
         and isinstance(node.func, ast.Name)
         and node.func.id == "ExecuteWorkflowHandler"
     ]
-    assert constructions, "_wiring_launch no longer constructs ExecuteWorkflowHandler; this check is blind"
+    assert constructions, (
+        "_wiring_launch no longer constructs ExecuteWorkflowHandler; this check is blind"
+    )
     for call in constructions:
         assert any(kw.arg == "launches" for kw in call.keywords)
