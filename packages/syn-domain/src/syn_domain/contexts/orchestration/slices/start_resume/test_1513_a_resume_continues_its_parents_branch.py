@@ -185,6 +185,10 @@ class _World:
                 return "".join(f"{b}\n" for b in self.local)
             case ["rev-parse", "--abbrev-ref", "HEAD"]:
                 return "HEAD" if self.detached else self.head
+            case ["rev-parse", "--symbolic-full-name", "HEAD"]:
+                return "HEAD" if self.detached else f"refs/heads/{self.head}"
+            case ["rev-parse", "--verify", ref] if ref.startswith("refs/remotes/"):
+                return self.cache[ref.removeprefix("refs/remotes/")]
             case ["rev-parse", *_]:
                 return self.detached or self.local[self.head]
             case ["remote"]:
