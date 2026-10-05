@@ -30,6 +30,7 @@ from syn_domain.contexts.orchestration.slices.get_workflow_detail import (
 from syn_domain.contexts.orchestration.slices.list_executions import (
     WorkflowExecutionListProjection,
 )
+from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
 from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
 from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.projection import (
     GlobalClaudePluginsProjection,
@@ -155,6 +156,7 @@ def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
         "workflow_detail": WorkflowDetailProjection(store),
         "workflow_execution_list": WorkflowExecutionListProjection(store),
         "workflow_execution_detail": WorkflowExecutionDetailProjection(store),
+        "eval_list": EvalListProjection(store),
         "session_list": SessionListProjection(store),
         "artifact_list": ArtifactListProjection(store),
         "dashboard_metrics": DashboardMetricsProjection(store),

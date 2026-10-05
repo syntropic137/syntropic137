@@ -509,6 +509,7 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.list_executions import (
         WorkflowExecutionListProjection,
     )
+    from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
     from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
     from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.projection import (
         GlobalClaudePluginsProjection,
@@ -543,6 +544,7 @@ def create_coordinator_service(
             WorkflowDetailProjection(projection_store),
             WorkflowExecutionListProjection(projection_store),
             WorkflowExecutionDetailProjection(projection_store),
+            EvalListProjection(projection_store),
             DashboardMetricsProjection(projection_store),
             WorkflowPhaseMetricsProjection(projection_store),
             ExecutionTodoProjection(store=projection_store),

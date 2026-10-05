@@ -20,9 +20,18 @@ if TYPE_CHECKING:
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
+    AssociationKind,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
+    ExecutionAttachedToEvalEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
+    ExecutionDetachedFromEvalEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
     ExecutionTagsAddedEvent,
@@ -47,6 +56,7 @@ _PAGE_FIELDS = (
     "status",
     "started_at",
     "tags",
+    "eval_id",
 )
 
 
@@ -61,7 +71,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_executions"
-    VERSION = 7  # v7: tags and inherited_tags (#967)
+    VERSION = 8  # v8: eval_id and association_kind (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -102,6 +112,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         )
 
         launched_with = TagSet.recorded(event_data.get("tags") or []).values
+        eval_id = event_data.get("eval_id")
 
         summary = WorkflowExecutionSummary(
             workflow_execution_id=execution_id,
@@ -122,6 +133,8 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             repos=repos,
             tags=launched_with,
             inherited_tags=launched_with,
+            eval_id=eval_id,
+            association_kind=AssociationKind.LAUNCHED.value if eval_id else None,
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 
@@ -275,6 +288,27 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         event = ExecutionTagsRemovedEvent.model_validate(event_data)
         await self._edit_tags(event.execution_id, event.tags, added=False)
 
+    async def on_execution_attached_to_eval(self, event_data: ExecutionAttachedToEvalEvent) -> None:
+        """Handle ExecutionAttachedToEval (#967): the run is now an attached member."""
+        event = ExecutionAttachedToEvalEvent.model_validate(event_data)
+        await self._set_membership(event.execution_id, event.eval_id, AssociationKind.ATTACHED)
+
+    async def on_execution_detached_from_eval(
+        self, event_data: ExecutionDetachedFromEvalEvent
+    ) -> None:
+        """Handle ExecutionDetachedFromEval (#967): the run is in no Eval."""
+        event = ExecutionDetachedFromEvalEvent.model_validate(event_data)
+        await self._set_membership(event.execution_id, None, None)
+
+    async def _set_membership(
+        self, execution_id: str, eval_id: str | None, kind: AssociationKind | None
+    ) -> None:
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["eval_id"] = eval_id
+            existing["association_kind"] = None if kind is None else kind.value
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
     async def _edit_tags(self, execution_id: str, tags: list[str], *, added: bool) -> None:
         if not execution_id:
             return
@@ -327,6 +361,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         started_before: datetime | None = None,
         search: str | None = None,
         tags: Collection[str] | None = None,
+        eval_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> Page[WorkflowExecutionSummary]:
@@ -345,10 +380,17 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         `tags` keeps only executions carrying EVERY tag given (AND), matched
         against their current tags (#967). Pass them normalised: this compares
         exactly, so the caller validates through `TagSet` first.
+
+        `eval_id` keeps only the Eval's current members (#967), which makes
+        this the Eval's runs view too. It is handed to the store as a filter,
+        so it is applied in the query rather than over every execution.
         """
         required = frozenset(tags or ())
+        filters = None if eval_id is None else {"eval_id": eval_id}
 
         def base(record: Mapping[str, object]) -> bool:
+            if eval_id is not None and record.get("eval_id") != eval_id:
+                return False
             stored = record.get("tags")
             if required and not (isinstance(stored, list) and required.issubset(stored)):
                 return False
@@ -363,9 +405,13 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             self._store,
             self.PROJECTION_NAME,
             fields=_PAGE_FIELDS,
-            filters=None,
+            filters=filters,
             order_by=None,
-            full_read=lambda: self._store.get_all(self.PROJECTION_NAME),
+            full_read=lambda: (
+                self._store.get_all(self.PROJECTION_NAME)
+                if filters is None
+                else self._store.query(self.PROJECTION_NAME, filters=filters)
+            ),
             base_predicate=base,
             status_of=lambda r: str(r.get("status") or ""),
             statuses=statuses,
