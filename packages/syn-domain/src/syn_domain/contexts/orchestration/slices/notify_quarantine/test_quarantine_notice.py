@@ -160,12 +160,15 @@ async def test_with_no_pr_yet_it_posts_once_one_opens() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_quarantine_older_than_the_window_is_not_announced() -> None:
-    manager, commenter = _manager()
-    envelope = _failed()
+async def test_a_pr_opening_long_after_the_failure_still_gets_the_notice() -> None:
+    forge = _Forge()
+    manager, commenter = _manager(forge)
+    envelope = _failed(pull_request=None)
     old = envelope.event.model_copy(update={"failed_at": datetime.now(UTC) - timedelta(days=30)})
     await manager.handle_event(
         EventEnvelope(event=old, metadata=envelope.metadata), MemoryCheckpointStore()
     )
     assert await manager.process_pending() == 0
-    assert commenter.posts == 0
+    forge.open_pr = 42
+    assert await manager.process_pending() == 1
+    assert commenter.posts == 1

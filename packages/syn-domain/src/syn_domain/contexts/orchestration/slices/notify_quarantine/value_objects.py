@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime  # noqa: TC003 - runtime for Pydantic
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -15,16 +15,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 logger = logging.getLogger(__name__)
 
 #: `pending` is owed a post or an update; `awaiting_pr` knows no PR yet and
-#: asks the forge again on every pass; `posted` is done until the facts change;
-#: `expired` is a quarantine too old to announce.
-NoticeStatus = Literal["pending", "awaiting_pr", "posted", "expired"]
+#: asks the forge again on every pass; `posted` is done until the facts change.
+#: There is no expiry: a notice is owed until a PR exists to receive it. A
+#: fresh deploy replaying old failures cannot spam PRs with it, because events
+#: written before #1547 carry no `quarantined_refs`, and a rebuilt to-do list
+#: finds its old comment by marker and edits it rather than posting again.
+NoticeStatus = Literal["pending", "awaiting_pr", "posted"]
 
 OWED_STATUSES: tuple[NoticeStatus, ...] = ("pending", "awaiting_pr")
-
-#: How old a quarantine may be and still be announced. What stops a fresh
-#: deploy - which replays every `WorkflowFailed` ever stored into an empty
-#: to-do list - from commenting on every PR the platform has ever touched.
-NOTICE_WINDOW = timedelta(hours=24)
 
 
 class QuarantineNotice(BaseModel):

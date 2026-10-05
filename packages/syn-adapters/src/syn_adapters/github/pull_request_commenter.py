@@ -27,6 +27,8 @@ class _Comment(BaseModel):
     body: str | None = None
 
 
+_PAGE_SIZE = 100
+
 _COMMENTS: TypeAdapter[list[_Comment]] = TypeAdapter(list[_Comment])
 
 
@@ -49,13 +51,8 @@ class GitHubPullRequestCommenter(PullRequestCommenter):
         installation_id = await client.get_installation_for_repo(repository)
         existing = comment_id
         if existing is None:
-            listed: object = await client.api_get(
-                f"/repos/{repository}/issues/{pull_request}/comments?per_page=100",
-                installation_id,
-            )
-            existing = next(
-                (c.id for c in _COMMENTS.validate_python(listed) if marker in (c.body or "")),
-                None,
+            existing = await self._find_marked(
+                client, repository, pull_request, marker, installation_id
             )
         if existing is not None:
             await client.api_patch(
@@ -66,3 +63,29 @@ class GitHubPullRequestCommenter(PullRequestCommenter):
             f"/repos/{repository}/issues/{pull_request}/comments", {"body": body}, installation_id
         )
         return _Comment.model_validate(created).id
+
+    @staticmethod
+    async def _find_marked(
+        client: GitHubAppClient,
+        repository: str,
+        pull_request: int,
+        marker: str,
+        installation_id: str,
+    ) -> int | None:
+        """The comment carrying ``marker``, searched across EVERY page.
+
+        Stopping at the first page would post a duplicate on any PR busy
+        enough that the notice has scrolled past its first hundred comments.
+        """
+        page = 1
+        while True:
+            listed: object = await client.api_get(
+                f"/repos/{repository}/issues/{pull_request}/comments"
+                f"?per_page={_PAGE_SIZE}&page={page}",
+                installation_id,
+            )
+            comments = _COMMENTS.validate_python(listed)
+            found = next((c.id for c in comments if marker in (c.body or "")), None)
+            if found is not None or len(comments) < _PAGE_SIZE:
+                return found
+            page += 1

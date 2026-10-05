@@ -38,7 +38,6 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import 
     WorkflowFailedEvent,
 )
 from syn_domain.contexts.orchestration.slices.notify_quarantine.value_objects import (
-    NOTICE_WINDOW,
     OWED_STATUSES,
     QuarantineNotice,
     read_notice,
@@ -160,14 +159,10 @@ class QuarantineNoticeProcessManager(ProcessManager):
         if self._store is None or self._commenter is None:
             return 0
         posted = 0
-        now = datetime.now(UTC)
         for status in OWED_STATUSES:
             for row in await self._store.query(self.PROJECTION_NAME, filters={"status": status}):
                 notice = read_notice(row)
                 if notice is None:
-                    continue
-                if now - notice.failed_at > NOTICE_WINDOW:
-                    await self._save(notice.model_copy(update={"status": "expired"}))
                     continue
                 if await self._post(notice):
                     posted += 1
