@@ -100,6 +100,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FailureClassification,
     PhaseUsage,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
@@ -325,6 +326,7 @@ __all__ = [
     "ResumeStartRecord",
     "ResumeStartStatus",
     "ResumeStarter",
+    "ReviewVerdict",
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",

@@ -367,6 +367,66 @@ class SideEffectStatus(StrEnum):
         return max(present, key=rank.__getitem__) if present else None
 
 
+class ReviewVerdict(StrEnum):
+    """What a reviewing phase concluded about the change in front of it (PC-63).
+
+    THE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes
+    ``review_verdict`` in its TASK_RESULT block; the aggregate reads it when
+    the phase's artifacts are collected and chooses the next phase from it
+    (see `WorkflowExecutionAggregate.artifacts_collected`):
+
+    * ``certified`` ends the repair loop. Every phase before the workflow's
+      final phase is skipped, so a run that certifies in round 1 does not pay
+      for rounds 2 and 3.
+    * ``blocked`` - or no verdict at all - advances by order, which is the
+      next repair round, or the final phase once the rounds are spent.
+
+    The latest verdict a run reported is also how it ended: a run completed
+    on ``blocked`` completed with UNRESOLVED FINDINGS, and says so on
+    `WorkflowCompleted` rather than looking certified.
+
+    A missing or misspelled verdict is never read as ``certified``: skipping
+    review on a word the reader did not recognise is the one mistake here that
+    costs more than a repair round.
+    """
+
+    CERTIFIED = "certified"
+    """The review found nothing that blocks the change."""
+
+    BLOCKED = "blocked"
+    """The review found something that must be fixed before the change is usable."""
+
+    @classmethod
+    def from_stored(cls, value: object) -> ReviewVerdict | None:
+        """What a stored payload names, None when it names nothing known. Never raises."""
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value)
+        except ValueError:
+            return None
+
+    @classmethod
+    def from_reported(cls, value: object) -> ReviewVerdict | None:
+        """What a TASK_RESULT block named, None when it named nothing known.
+
+        Crosses the agent trust boundary, so it never raises; an unknown word
+        is logged so a verdict that quietly stops being read stays visible.
+        """
+        if value is None:
+            return None
+        matched = cls.from_stored(value)
+        if matched is None:
+            logger.warning(
+                "TASK_RESULT block named a review_verdict this reader does not know (%r). "
+                "It must be exactly one of %s. Recorded as no verdict, which never "
+                "skips a repair round.",
+                value,
+                [member.value for member in cls],
+            )
+        return matched
+
+
 class PhaseStatus(StrEnum):
     """Status of a single phase execution."""
 

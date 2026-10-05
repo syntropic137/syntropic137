@@ -9913,6 +9913,16 @@
             "title": "Deliverable Produced",
             "default": false
           },
+          "review_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reported_side_effects": {
             "anyOf": [
               {
@@ -15381,6 +15391,15 @@
         ],
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
+      },
+      "ReviewVerdict": {
+        "type": "string",
+        "enum": [
+          "certified",
+          "blocked"
+        ],
+        "title": "ReviewVerdict",
+        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for rounds 2 and 3.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
       },
       "RootResponse": {
         "properties": {

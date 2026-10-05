@@ -86,6 +86,7 @@ from syn_domain.contexts.orchestration import (
     EvalId,
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
     TagSet,
 )
@@ -745,6 +746,9 @@ class ExecutionDetail(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -1567,6 +1571,9 @@ class ExecutionDetailFull(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 

@@ -13,6 +13,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
@@ -304,6 +305,14 @@ class WorkflowExecutionDetail:
     the UI can fix a total that was already wrong when it was summed.
     """
 
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported, recorded on completion (PC-63).
+
+    On a `completed` run, `blocked` means COMPLETED WITH UNRESOLVED FINDINGS:
+    every round ran and the last review still refused the change. None for a
+    run that reviewed nothing, and for every completion predating the field.
+    """
+
     reported_failure_reason: ReportedFailureReason | None = None
     """What the failing phase SAID caused it (#1372), `None` when it said nothing.
 
@@ -414,6 +423,7 @@ class WorkflowExecutionDetail:
             reported_failure_reason=ReportedFailureReason.from_stored(
                 data.get("reported_failure_reason")
             ),
+            review_verdict=ReviewVerdict.from_stored(data.get("review_verdict")),
             delegation_failure=DelegationFailure.from_stored(data.get("delegation_failure")),
             repos=tuple(data.get("repos", [])),
             inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
@@ -453,6 +463,7 @@ class WorkflowExecutionDetail:
             "reported_failure_reason": (
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
+            "review_verdict": None if self.review_verdict is None else self.review_verdict.value,
             "delegation_failure": (
                 None
                 if self.delegation_failure is None

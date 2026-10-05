@@ -21,10 +21,19 @@ verification might have said edits a certified branch at nobody's request.
 
 ## Which round this is
 
-**Round 1 of 3.** This workflow repairs in up to three rounds (`fix`, `fix_2`,
-`fix_3`, each followed by its own re-verification). In round 1 the verdict you
-act on is `artifacts/input/verify/verify.md`, as above. Write `Round: 1 of 3` as
-the first line of your report.
+**Round 2 of 3.** The re-verification after the previous fix round did not
+certify the branch, so the run came back here. The verdict you act on is
+**`artifacts/input/reverify/reverify.md`** (flat alias
+`artifacts/input/reverify.md`): its first line is the verdict, and its blocking
+findings are your scope. If it is absent, say so in `fix.md` and stop without
+editing.
+
+Read every `verify.md` below as that report: its findings are what you fix, and
+the SHA it says it checked out is the verified SHA you check out and build on.
+Read the earlier reports in `artifacts/input/` too, so you do not undo a repair
+an earlier round made - but the latest verdict decides what is still open. If
+its first line is `CERTIFIED` there is no blocking defect, which is the next
+section's case. Write `Round: 2 of 3` as the first line of your report.
 
 ## If verification certified the change, stop
 

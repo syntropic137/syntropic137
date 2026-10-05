@@ -41,6 +41,52 @@ A Phase is completed only when the Execution recorded it so. A Phase that
 started and did not complete has no partial credit: there is no mid-phase
 resume.
 
+## Review Verdict
+
+What a reviewing Phase concluded about the change in front of it: `certified`
+(nothing blocks it) or `blocked` (something must be fixed first). The Phase
+REPORTS it, as `review_verdict` in its TASK_RESULT block; the Execution
+DECIDES on it. `certified` ends the repair loop: every Phase before the
+Workflow's final Phase becomes a Skipped Phase. `blocked`, or no verdict, runs
+the next Phase by `order`. A word other than exactly `certified` or `blocked`
+is no verdict - it never skips anything.
+
+Not `success`. A Phase that finished a review that blocks the change
+succeeded; its verdict is `blocked`.
+
+## Skipped Phase
+
+A Phase the Execution decided will never run, because a Review Verdict made it
+unnecessary. Recorded on the `NextPhaseReady` decision as `skipped_phase_ids`.
+Never started, never completed, never billed.
+
+## Unresolved Findings
+
+How a `completed` Execution ended when its last Review Verdict was `blocked`:
+every repair round the Workflow allows ran, and the last review still refused
+the change. Recorded as `review_verdict: blocked` on `WorkflowCompleted`, and
+visible on the execution detail API. A `completed` Execution with
+`review_verdict: certified` is a certified one; with none, nothing reviewed it.
+
+A status, deliberately not: the run did not fail - every Phase did its job -
+and the bound was the Workflow's own decision.
+
+Continuable by a Resume. A `completed` Execution is resumable only when it
+ended with Unresolved Findings, and then not at its first unfinished Phase
+(there is none) but at its Repair Point: the Phase before the Review that
+blocked it - the last round's fix. The Resume inherits every Phase before the
+Repair Point and re-runs that round against the findings still open, then its
+review and everything after. That fix already ran and may have pushed, so the
+Resume must acknowledge external effects. A `completed` Execution that
+certified, or that nothing reviewed, still has nothing to resume.
+
+## Repair Point
+
+Where a Resume of an Execution with Unresolved Findings starts: the Phase
+immediately before the Phase whose `blocked` verdict the run ended on. Decided
+by the aggregate from its replayed Review Verdicts (`ReviewRecord.repair_point`),
+never by the caller.
+
 ## Delegation
 
 A phase's agent handing part of its work to the **other** harness: a claude
@@ -74,7 +120,8 @@ needs rather than reading the Workflow later.
 
 Continuing an Execution that DID NOT FINISH, by starting a new Execution that
 inherits the Phases already completed and restarts at the first one that did
-not.
+not. Or one that finished with Unresolved Findings, restarting at
+its Repair Point.
 
 Applies to `failed` and `interrupted` on request, and to `cancelled` only with
 an explicit override - a cancel was a decision, and resuming past it needs a
