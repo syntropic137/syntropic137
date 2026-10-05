@@ -5,9 +5,7 @@ from __future__ import annotations
 from agentic_isolation.child_journal import ChildCall, ChildIntent
 
 from syn_adapters.session_inventory.phase_delegations import delegation_attempt
-from syn_domain.contexts.agent_sessions.domain.events.DelegationFinishedEvent import (
-    DelegationOutcome,
-)
+from syn_domain.contexts.orchestration.ports import DelegationOutcome
 
 
 def _intent(target: str | None, status: str | None, exit_code: int | None = None, **kw: object):

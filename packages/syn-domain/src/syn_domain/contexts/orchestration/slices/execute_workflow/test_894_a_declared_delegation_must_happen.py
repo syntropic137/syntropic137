@@ -6,12 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from syn_domain.contexts.agent_sessions.domain.events.DelegationFinishedEvent import (
+from syn_domain.contexts.orchestration.ports import (
+    DelegationAttempt,
+    DelegationEvidenceUnavailableError,
     DelegationOutcome,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
-    DelegationAttempt,
-    DelegationEvidenceUnavailableError,
     DelegationFailureReason,
     delegation_failure,
 )

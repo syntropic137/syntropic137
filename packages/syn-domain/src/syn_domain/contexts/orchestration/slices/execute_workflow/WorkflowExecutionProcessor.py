@@ -48,7 +48,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversatio
     record_phase_conversation,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
-    DelegationEvidencePort,
     completion_failure,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
@@ -111,6 +110,7 @@ if TYPE_CHECKING:
         ResumeOrigin,
         SourceCommit,
     )
+    from syn_domain.contexts.orchestration.ports import DelegationEvidencePort
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (

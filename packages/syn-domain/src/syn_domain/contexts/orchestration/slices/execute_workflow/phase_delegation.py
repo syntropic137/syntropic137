@@ -12,8 +12,8 @@ gate built on recognising ``codex exec`` in a command was removed in review of
 #896 as unsound (see ``syn_shared.delegation``). The delegate reports itself,
 through the platform's ``syn-delegate`` shim, into the workspace's child
 journal - a format agentic-workspace owns. This module reads it only through
-`DelegationEvidencePort`, already normalised to `DelegationAttempt`; nothing
-here knows what a claude or codex transcript looks like.
+`DelegationEvidencePort` (in ``orchestration.ports``), already normalised to
+`DelegationAttempt`; nothing here knows what a claude or codex transcript looks like.
 
 THE RULE. The workflow schema has one boolean, ``allow_delegation``, and no
 notion of an optional delegate, so a declared delegation is REQUIRED: at least
@@ -30,11 +30,13 @@ that enum is "the agent's own word, never an inference".
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions.domain.events.DelegationFinishedEvent import (
+from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
+    DelegationAttempt,
+    DelegationEvidencePort,
+    DelegationEvidenceUnavailableError,
     DelegationOutcome,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
@@ -46,44 +48,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
         AgentExecutionResult,
     )
-
-
-@dataclass(frozen=True)
-class DelegationAttempt:
-    """One delegate the phase's agent launched, as the platform observed it."""
-
-    delegate_id: str
-    """The journal's id for this child invocation."""
-    target_harness: str
-    """Which harness the work was delegated TO (``claude``, ``codex``)."""
-    outcome: DelegationOutcome | None
-    """How it ended; None when it launched and never reported an end."""
-    exit_code: int | None = None
-    reason: str | None = None
-    """Why it could not launch, when the shim named a reason."""
-
-    def describe(self) -> str:
-        ended = self.outcome.value if self.outcome is not None else "never reported an outcome"
-        detail = [f"exit_code={self.exit_code}"] if self.exit_code is not None else []
-        if self.reason is not None:
-            detail.append(f"reason={self.reason}")
-        suffix = f" ({', '.join(detail)})" if detail else ""
-        return f"delegate {self.delegate_id} -> {self.target_harness}: {ended}{suffix}"
-
-
-class DelegationEvidenceUnavailableError(Exception):
-    """The port could not read the delegation record for this workspace."""
-
-
-class DelegationEvidencePort(Protocol):
-    """Every cross-harness delegation a phase's workspace recorded.
-
-    Satisfied by an adapter over agentic-workspace's child journal. Raises
-    `DelegationEvidenceUnavailableError` when the record cannot be read; an
-    empty tuple is a positive answer - "read it, nothing delegated".
-    """
-
-    async def attempts(self, workspace: ManagedWorkspace) -> tuple[DelegationAttempt, ...]: ...
 
 
 class DelegationFailureReason(StrEnum):

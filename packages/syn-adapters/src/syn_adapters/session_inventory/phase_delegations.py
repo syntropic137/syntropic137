@@ -16,14 +16,14 @@ import shlex
 from typing import TYPE_CHECKING
 
 from agentic_isolation.child_journal import JournalReadError, WorkspaceChildJournalReader
-from agentic_isolation.providers.base import ExecuteResult
 
-from syn_domain.contexts.agent_sessions.domain.events.DelegationFinishedEvent import (
-    DelegationOutcome,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
+# The one ManagedWorkspace -> ExecFn adapter; its `env` parameter is the
+# external ExecFn contract and is already accounted for under #1268.
+from syn_adapters.workspace_backends.service.codex_rollout import _exec_fn_for
+from syn_domain.contexts.orchestration.ports import (
     DelegationAttempt,
     DelegationEvidenceUnavailableError,
+    DelegationOutcome,
 )
 from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_PARTITION,
@@ -65,26 +65,7 @@ class ChildJournalDelegations:
     """`DelegationEvidencePort` over the phase workspace's child journal."""
 
     async def attempts(self, workspace: ManagedWorkspace) -> tuple[DelegationAttempt, ...]:
-        async def execute(
-            command: str,
-            *,
-            timeout: float | None = None,
-            cwd: str | None = None,
-            env: dict[str, str] | None = None,
-        ) -> ExecuteResult:
-            result = await workspace.execute(
-                ["/bin/sh", "-c", command],
-                timeout_seconds=int(timeout) if timeout is not None else None,
-                working_directory=cwd,
-                environment=env,
-            )
-            return ExecuteResult(
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                duration_ms=result.duration_ms,
-            )
-
+        execute = _exec_fn_for(workspace)
         located = await execute(
             "printf '%s/.agentic-session-store/%s/children.sqlite' "
             f'"${shlex.quote(ENV_AGENTIC_SESSION_STORE_SPOOL)}" '
