@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * API client utilities for the feedback API
  */
@@ -67,6 +68,22 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 /**
+ * Development builds only: every request is logged with a running count per
+ * method and path. A report of the list being fetched "again and again" was
+ * never reproduced (PR #1603), so if it comes back the console shows how
+ * often and in what order each endpoint was called.
+ */
+const requestCounts = new Map<string, number>();
+
+function countRequest(url: string, method: string): void {
+  if (!import.meta.env.DEV) return;
+  const key = `${method} ${url.split('?')[0]}`;
+  const count = (requestCounts.get(key) ?? 0) + 1;
+  requestCounts.set(key, count);
+  console.debug(`[ui-feedback] ${key} #${count}`);
+}
+
+/**
  * Fetch `url` and parse the response, failing with a NetworkError if the whole
  * exchange, body included, has not finished within `timeoutMs`. A caller that
  * passes `options.signal` can cancel the request; it then rejects with that
@@ -75,6 +92,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
 export async function request<T>(url: string, options?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   const callerSignal = options?.signal;
   callerSignal?.throwIfAborted();
+  countRequest(url, options?.method ?? 'GET');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const cancel = () => controller.abort(callerSignal?.reason);

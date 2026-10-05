@@ -94,6 +94,29 @@ describe('FeedbackList', () => {
     expect(String(listCalls[0][0])).toBe('/api/v1/feedback?app=syn-dashboard-ui&limit=50')
   })
 
+  it('logs each request with a running count per endpoint in development', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {})
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => json(isStats(String(input)) ? STATS : listBody('item'))),
+    )
+    const logged = (path: string) =>
+      debug.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith(`[ui-feedback] GET ${path} #`))
+
+    renderList()
+    await screen.findByText('item 0')
+    const listBefore = logged('/api/v1/feedback').length
+    fireEvent.click(screen.getByText('Refresh'))
+    await waitFor(() => expect(logged('/api/v1/feedback')).toHaveLength(listBefore + 1))
+
+    // One running count per endpoint: the query string is not part of the key,
+    // and the module-level count carries on from earlier tests.
+    const counts = logged('/api/v1/feedback').map((line) => Number(line.split('#')[1]))
+    expect(counts.at(-1)).toBe(counts.at(-2)! + 1)
+    expect(logged('/api/v1/feedback/stats').length).toBeGreaterThan(0)
+    debug.mockRestore()
+  })
+
   it('turns a request that never answers into an error with Retry', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
