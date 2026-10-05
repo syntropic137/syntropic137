@@ -4,8 +4,9 @@ Each text carries the sections that phase's prompt requires under "Write to
 ``artifacts/output/<phase-id>.md``", in the same order and with the same first
 line where one is demanded (``CERTIFIED`` for reverify, ``READY`` for
 finalize_pr), so the next phase reads the shape it reads in production.
-``{execution_id}`` and ``{branch}`` are filled per execution by
-``StubAgentProfile.render_artifact``.
+``{execution_id}``, ``{branch}`` and ``{head_sha}`` are filled per execution
+by ``StubAgentProfile.render_artifact``. Every phase after premise names the
+head in ``HEAD_SHA_LINE``, because the phase after it checks that exact SHA.
 
 When a phase prompt changes what its artifact must contain, change it here.
 """
@@ -13,6 +14,8 @@ When a phase prompt changes what its artifact must contain, change it here.
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
+
+from syn_perf.loadtest.handoff import HEAD_SHA_LINE
 
 _STUB = "Load-test stub for execution `{execution_id}`; no agent ran."
 
@@ -44,6 +47,8 @@ One deterministic file, `loadtest/implement.txt`.
 
 `{{branch}}`
 
+{HEAD_SHA_LINE}
+
 ## Not done
 
 No product change; this is a load-test run.
@@ -63,6 +68,8 @@ Not run by the stub unless the profile's workload is `gates`.
 ## Head verified
 
 Branch `{{branch}}`.
+
+{HEAD_SHA_LINE}
 """,
         "fix": f"""# Fix
 
@@ -79,6 +86,8 @@ One deterministic file, `loadtest/fix.txt`.
 ## 4. Identity
 
 Branch `{{branch}}`.
+
+{HEAD_SHA_LINE}
 """,
         "reverify": f"""CERTIFIED
 
@@ -87,6 +96,8 @@ Branch `{{branch}}`.
 ## Branch and head certified
 
 Branch `{{branch}}`.
+
+{HEAD_SHA_LINE}
 
 ## Blocking defects
 
@@ -97,6 +108,8 @@ None (stub verdict).
 {_STUB}
 
 Branch: `{{branch}}`
+
+{HEAD_SHA_LINE}
 """,
     }
 )

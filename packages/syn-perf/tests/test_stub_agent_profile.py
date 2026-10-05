@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from syn_domain.contexts.orchestration import WorkflowDefinition
 from syn_perf.loadtest import (
+    HEAD_SHA_LINE,
     GatesWorkload,
     NoWorkload,
     OpenPullRequest,
@@ -20,6 +21,7 @@ from syn_perf.loadtest import (
     StubStream,
     SyntheticWorkload,
     VerifyRemoteBranch,
+    head_sha_handed_over,
 )
 
 pytestmark = pytest.mark.unit
@@ -28,6 +30,8 @@ _REPO = Path(__file__).resolve().parents[3]
 _WORKFLOW = _REPO / "workflows/sdlc/implement-v3/workflow.yaml"
 _SCHEMA = _REPO / "packages/syn-perf/src/syn_perf/loadtest/stub_agent_profile.schema.json"
 _FIXTURE = "syntropic137/loadtest-fixture"
+_HEAD = "3b7f2bd49a4609f24a516bb4617aadbc1edf751e"
+_PUSHED_OVER = "0f0e0d0c0b0a09080706050403020100ffeeddcc"
 
 
 @pytest.fixture(scope="module")
@@ -196,12 +200,12 @@ def test_gates_on_a_phase_without_a_tree_is_refused() -> None:
 def test_an_artifact_naming_a_field_the_stub_cannot_fill_is_refused() -> None:
     stream = StubStream(harness="claude", recording="/r.jsonl", cli_version="1")
 
-    with pytest.raises(ValidationError, match="head_sha"):
+    with pytest.raises(ValidationError, match="pr_url"):
         StubPhase(
             stream=stream,
             workload=NoWorkload(),
             side_effect=PushBranch(),
-            artifact="Branch {branch} at {head_sha}",
+            artifact="Branch {branch}, PR {pr_url}",
         )
 
 
@@ -210,7 +214,7 @@ def test_an_artifact_naming_a_field_the_stub_cannot_fill_is_refused() -> None:
 
 def test_rendered_artifacts_name_the_execution_and_its_branch(workflow: WorkflowDefinition) -> None:
     profile = _profile(workflow, "node")
-    rendered = {pid: profile.render_artifact(pid, "exec-7f3a") for pid in profile.phases}
+    rendered = {pid: profile.render_artifact(pid, "exec-7f3a", _HEAD) for pid in profile.phases}
 
     assert all("exec-7f3a" in text and "{" not in text for text in rendered.values())
     for pid in ("implement", "fix", "verify", "reverify", "finalize_pr"):
@@ -232,3 +236,95 @@ def test_the_committed_schema_matches_the_model() -> None:
         "print(json.dumps(P.model_json_schema(), indent=2, sort_keys=True))' "
         "> packages/syn-perf/src/syn_perf/loadtest/stub_agent_profile.schema.json"
     )
+
+
+# --- the head each phase hands to the next --------------------------------
+
+_HANDOFFS = [("implement", "verify"), ("fix", "reverify"), ("reverify", "finalize_pr")]
+
+
+@pytest.mark.parametrize(("writer", "reader"), _HANDOFFS)
+def test_the_next_phase_receives_the_full_head_the_previous_one_wrote(
+    workflow: WorkflowDefinition, writer: str, reader: str
+) -> None:
+    profile = _profile(workflow, "node")
+    handed = profile.render_artifact(writer, "exec-7f3a", _HEAD)
+
+    head = head_sha_handed_over(handed, branch_head=_HEAD)
+
+    assert head == _HEAD
+    assert f"`{_HEAD}`" in profile.render_artifact(reader, "exec-7f3a", head)
+
+
+@pytest.mark.parametrize(("writer", "reader"), _HANDOFFS)
+def test_a_branch_pushed_over_after_the_handoff_is_refused(
+    workflow: WorkflowDefinition, writer: str, reader: str
+) -> None:
+    handed = _profile(workflow, "node").render_artifact(writer, "exec-7f3a", _HEAD)
+
+    with pytest.raises(ValueError, match=f"handed over {_HEAD} but the branch is at"):
+        head_sha_handed_over(handed, branch_head=_PUSHED_OVER)
+
+
+@pytest.mark.parametrize(
+    "artifact", ["Branch `loadtest/exec-7f3a`.", HEAD_SHA_LINE.format(head_sha=_HEAD[:12])]
+)
+def test_an_artifact_without_a_full_head_hands_nothing_over(artifact: str) -> None:
+    with pytest.raises(ValueError, match="exactly one full head SHA"):
+        head_sha_handed_over(artifact, branch_head=_HEAD)
+
+
+@pytest.mark.parametrize("head_sha", [None, "", _HEAD[:12], _HEAD.upper(), _HEAD + "0"])
+@pytest.mark.parametrize("phase_id", ["implement", "verify", "fix", "reverify", "finalize_pr"])
+def test_a_phase_after_premise_cannot_write_its_artifact_without_a_full_head(
+    workflow: WorkflowDefinition, phase_id: str, head_sha: str | None
+) -> None:
+    with pytest.raises(ValueError, match=f"phase {phase_id} artifact names the head"):
+        _profile(workflow, "node").render_artifact(phase_id, "exec-7f3a", head_sha)
+
+
+# --- every value the model accepts survives the env var -------------------
+
+_MAX_FLOAT = 1.7976931348623157e308
+_FINITE = [0.0, 5e-324, 0.25, 1.0, 1e9, _MAX_FLOAT]
+
+
+def _one_phase_profile(pacing_factor: float, cpu_seconds: float, size: int) -> StubAgentProfile:
+    return StubAgentProfile(
+        tier="platform",
+        fixture_repo=_FIXTURE,
+        phases={
+            "implement": StubPhase(
+                stream=StubStream(
+                    harness="claude",
+                    recording="/r.jsonl",
+                    cli_version="1",
+                    pacing_factor=pacing_factor,
+                ),
+                workload=SyntheticWorkload(
+                    cpu_seconds=cpu_seconds, mem_bytes=size, disk_bytes=size
+                ),
+                side_effect=PushBranch(),
+                artifact="x",
+            )
+        },
+    )
+
+
+@pytest.mark.parametrize("value", _FINITE)
+@pytest.mark.parametrize("size", [0, 2**63 - 1, 2**80])
+def test_every_accepted_profile_survives_the_env_var(value: float, size: int) -> None:
+    profile = _one_phase_profile(pacing_factor=value, cpu_seconds=value, size=size)
+
+    assert StubAgentProfile.from_env(profile.to_env()) == profile
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+@pytest.mark.parametrize("field", ["pacing_factor", "cpu_seconds"])
+def test_a_value_json_cannot_carry_is_refused_when_the_profile_is_built(
+    field: str, value: float
+) -> None:
+    kwargs = {"pacing_factor": 1.0, "cpu_seconds": 1.0, field: value}
+
+    with pytest.raises(ValidationError, match="finite number"):
+        _one_phase_profile(size=0, **kwargs)

@@ -31,12 +31,13 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from syn_perf.loadtest.handoff import FULL_SHA
 from syn_perf.loadtest.implement_v3_artifacts import IMPLEMENT_V3_ARTIFACTS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from syn_domain.contexts.orchestration import WorkflowDefinition
+    from syn_domain.contexts.orchestration import PhaseDefinition, WorkflowDefinition
 
 STUB_AGENT_PROFILE_ENV: Final = "SYN_STUB_AGENT_PROFILE"
 """The one environment variable a stub workspace reads its profile from."""
@@ -49,7 +50,7 @@ _FORBIDDEN_FIXTURE_REPOS: Final = frozenset({"syntropic137/syntropic137"})
 #: The only fields an artifact template may name. Anything else is a typo the
 #: stub could not fill, so it is refused when the profile is built rather than
 #: when the hundredth workspace tries to render it.
-_ARTIFACT_FIELDS: Final = frozenset({"execution_id", "branch"})
+_ARTIFACT_FIELDS: Final = frozenset({"execution_id", "branch", "head_sha"})
 
 # Same shape the workflow parser accepts for a phase id
 # (``PHASE_ID_PATTERN`` in syn_domain's workflow_definition).
@@ -57,7 +58,14 @@ PhaseId = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*
 
 
 class _Contract(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # JSON has no infinity or NaN: pydantic writes them as ``null``, which
+    # ``from_env`` then refuses, so a profile that validated here would fail in
+    # every workspace it was sent to.
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+
+def _named_fields(template: str) -> set[str]:
+    return {field for _, field, _, _ in string.Formatter().parse(template) if field}
 
 
 class StubStream(_Contract):
@@ -164,7 +172,8 @@ class StubPhase(_Contract):
     side_effect: SideEffect
     artifact: str = Field(min_length=1)
     """Markdown written to ``artifacts/output/<phase_id>.md``. May name
-    ``{execution_id}`` and ``{branch}``; literal braces are doubled."""
+    ``{execution_id}``, ``{branch}`` and ``{head_sha}``; literal braces are
+    doubled."""
 
     @model_validator(mode="after")
     def _consistent(self) -> StubPhase:
@@ -176,8 +185,7 @@ class StubPhase(_Contract):
                 "cannot run the gates workload"
             )
             raise ValueError(msg)
-        named = {field for _, field, _, _ in string.Formatter().parse(self.artifact) if field}
-        if unknown := named - _ARTIFACT_FIELDS:
+        if unknown := _named_fields(self.artifact) - _ARTIFACT_FIELDS:
             msg = (
                 f"artifact names {sorted(unknown)}; only {sorted(_ARTIFACT_FIELDS)} "
                 "can be filled (double a literal brace)"
@@ -219,10 +227,23 @@ class StubAgentProfile(_Contract):
     def branch(execution_id: str) -> str:
         return f"{LOADTEST_BRANCH_PREFIX}{execution_id}"
 
-    def render_artifact(self, phase_id: str, execution_id: str) -> str:
-        """The exact artifact text the stub writes for this phase and execution."""
-        return self.phases[phase_id].artifact.format(
-            execution_id=execution_id, branch=self.branch(execution_id)
+    def render_artifact(self, phase_id: str, execution_id: str, head_sha: str | None = None) -> str:
+        """The exact artifact text the stub writes for this phase and execution.
+
+        ``head_sha`` is the full commit the execution's branch is at when the
+        phase writes its artifact: ``git rev-parse HEAD`` after pushing
+        (implement, fix) or checking out (verify, reverify), the ``git
+        ls-remote`` result where there is no tree (finalize_pr). A template
+        that names it will not render without a full 40-character SHA.
+        """
+        template = self.phases[phase_id].artifact
+        if "head_sha" in _named_fields(template) and not (
+            head_sha and FULL_SHA.fullmatch(head_sha)
+        ):
+            msg = f"phase {phase_id} artifact names the head; {head_sha!r} is not a full SHA"
+            raise ValueError(msg)
+        return template.format(
+            execution_id=execution_id, branch=self.branch(execution_id), head_sha=head_sha
         )
 
     def to_env(self) -> dict[str, str]:
@@ -266,27 +287,34 @@ class StubAgentProfile(_Contract):
             msg = f"workflow {workflow.id} phases without a stub: {missing}"
             raise ValueError(msg)
 
-        phases: dict[str, StubPhase] = {}
-        for phase in workflow.phases:
-            stream = streams[phase.id]
-            provider = (phase.agent.provider if phase.agent else None) or "claude"
-            if stream.harness != provider:
-                msg = (
-                    f"phase {phase.id} runs {provider} but its recording is "
-                    f"{stream.harness}; the stub would exercise the wrong harness"
-                )
-                raise ValueError(msg)
-            side_effect: ReportOnly | PushBranch | OpenPullRequest | VerifyRemoteBranch
-            if not phase.clone_repos:
-                side_effect = OpenPullRequest() if tier == "node" else VerifyRemoteBranch()
-            elif phase.delivers_repo_changes:
-                side_effect = PushBranch()
-            else:
-                side_effect = ReportOnly()
-            phases[phase.id] = StubPhase(
-                stream=stream,
+        phases = {
+            phase.id: StubPhase(
+                stream=_stream_for(phase, streams[phase.id]),
                 workload=workload if phase.clone_repos else NoWorkload(),
-                side_effect=side_effect,
+                side_effect=_side_effect_for(phase, tier),
                 artifact=artifacts[phase.id],
             )
+            for phase in workflow.phases
+        }
         return cls(tier=tier, fixture_repo=fixture_repo, phases=phases)
+
+
+def _stream_for(phase: PhaseDefinition, stream: StubStream) -> StubStream:
+    provider = (phase.agent.provider if phase.agent else None) or "claude"
+    if stream.harness != provider:
+        msg = (
+            f"phase {phase.id} runs {provider} but its recording is "
+            f"{stream.harness}; the stub would exercise the wrong harness"
+        )
+        raise ValueError(msg)
+    return stream
+
+
+def _side_effect_for(
+    phase: PhaseDefinition, tier: Literal["platform", "node"]
+) -> ReportOnly | PushBranch | OpenPullRequest | VerifyRemoteBranch:
+    if not phase.clone_repos:
+        return OpenPullRequest() if tier == "node" else VerifyRemoteBranch()
+    if phase.delivers_repo_changes:
+        return PushBranch()
+    return ReportOnly()

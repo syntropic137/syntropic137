@@ -5,6 +5,7 @@ in each phase. The stub image (7b) lives in agentic-workspace and reads it as
 JSON; the driver (7c) will live beside it here.
 """
 
+from syn_perf.loadtest.handoff import HEAD_SHA_LINE, head_sha_handed_over
 from syn_perf.loadtest.stub_agent_profile import (
     LOADTEST_BRANCH_PREFIX,
     STUB_AGENT_PROFILE_ENV,
@@ -21,6 +22,7 @@ from syn_perf.loadtest.stub_agent_profile import (
 )
 
 __all__ = [
+    "HEAD_SHA_LINE",
     "LOADTEST_BRANCH_PREFIX",
     "STUB_AGENT_PROFILE_ENV",
     "GatesWorkload",
@@ -33,4 +35,5 @@ __all__ = [
     "StubStream",
     "SyntheticWorkload",
     "VerifyRemoteBranch",
+    "head_sha_handed_over",
 ]
