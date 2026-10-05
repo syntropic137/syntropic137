@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
+from syn_domain.projection_count import count_by
 from syn_domain.projection_page import PageQuery, StatusOf, page_projection
-from syn_domain.projection_scan import ProjectionFieldScan
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -98,19 +98,17 @@ class ExecutionListReads:
         tallies: dict[str, dict[str, int]] = {eval_id: {} for eval_id in eval_ids}
         if not tallies:
             return tallies
-        filters = {"eval_id": sorted(tallies)}
-        if isinstance(self._store, ProjectionFieldScan):
-            members = [
-                values
-                for _, values in await self._store.scan_fields(
-                    WORKFLOW_EXECUTIONS, ("eval_id", "status"), filters=filters
-                )
-            ]
-        else:
-            members = await self._store.query(WORKFLOW_EXECUTIONS, filters=filters)
-        for member in members:
-            tally = tallies.get(str(member.get("eval_id")))
+        # Grouped in the store: only (eval, status, count) leaves the database,
+        # never a row per member execution.
+        groups = await count_by(
+            self._store,
+            WORKFLOW_EXECUTIONS,
+            ("eval_id", "status"),
+            filters={"eval_id": sorted(tallies)},
+        )
+        for (eval_id, status), count in groups.items():
+            tally = tallies.get(str(eval_id))
             if tally is not None:
-                status = str(member.get("status") or "")
-                tally[status] = tally.get(status, 0) + 1
+                key = status or ""
+                tally[key] = tally.get(key, 0) + count
         return tallies

@@ -1,4 +1,4 @@
-"""``scan_fields`` and ``get_many`` for the Postgres projection store (E2).
+"""``scan_fields``, ``count_by`` and ``get_many`` for the Postgres projection store (E2).
 
 The store half of :mod:`syn_domain.projection_scan`: read a few fields of every
 matching document, then whole documents for one page. Filters and order are
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     import asyncpg
 
     from syn_domain.pagination import ProjectionRecord
+    from syn_domain.projection_count import GroupKey
     from syn_domain.projection_scan import JsonValue
 
 
@@ -82,6 +83,51 @@ async def scan_fields(
         msg = f"expected a JSON array from the scan, got {type(pairs).__name__}"
         raise TypeError(msg)
     return [(str(key), values) for key, values in pairs]
+
+
+def build_count_query(
+    table_name: str,
+    fields: Sequence[str],
+    filters: Mapping[str, str | Sequence[str]] | None,
+    *,
+    lean_ready: bool,
+) -> tuple[str, list[str]]:
+    """A row of ``(field text..., count)`` per group of matching documents (projection_count)."""
+    if not fields:
+        msg = "count_by needs at least one field to group by"
+        raise ValueError(msg)
+    for field in fields:
+        if not _SAFE_FIELD.fullmatch(field):
+            msg = f"unsafe group field {field!r}: expected a plain identifier"
+            raise ValueError(msg)
+    picked = ", ".join(f"data->>'{field}'" for field in fields)
+    ordinals = ", ".join(str(position) for position in range(1, len(fields) + 1))
+    params: list[str] = []
+    where_sql = ""
+    if filters:
+        where_sql, params = _build_where_clause(dict(filters), start_idx=1)
+    query = (
+        f"SELECT {picked}, count(*) FROM ("
+        f"SELECT id, {lean_source(lean_ready=lean_ready)} AS data "
+        f"FROM {table_name}) AS documents{where_sql} GROUP BY {ordinals}"
+    )
+    return query, params
+
+
+async def count_by(
+    pool: asyncpg.Pool,
+    table_name: str,
+    fields: Sequence[str],
+    filters: Mapping[str, str | Sequence[str]] | None,
+    *,
+    lean_ready: bool,
+) -> list[tuple[GroupKey, int]]:
+    """Run :func:`build_count_query`; each group's field texts and its size."""
+    query, params = build_count_query(table_name, fields, filters, lean_ready=lean_ready)
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+    width = len(fields)
+    return [(tuple(row[:width]), int(row[width])) for row in rows]
 
 
 async def get_many(

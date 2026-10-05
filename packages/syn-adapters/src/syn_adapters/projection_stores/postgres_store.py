@@ -16,6 +16,7 @@ from syn_adapters import postgres_pool
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.record_match import holds
 from syn_domain.pagination import Page, ProjectionRecord
+from syn_domain.projection_count import GroupKey
 from syn_domain.projection_page import PageQuery
 from syn_domain.projection_scan import Decide, JsonValue, SqlPage, SqlPageRequest
 from syn_shared.settings import get_settings
@@ -231,6 +232,25 @@ class PostgresProjectionStore:
             fields,
             filters,
             order_by,
+            lean_ready=projection in self._lean_tables,
+        )
+
+    async def count_by(
+        self,
+        projection: str,
+        fields: Sequence[str],
+        *,
+        filters: Mapping[str, str | Sequence[str]] | None = None,
+    ) -> list[tuple[GroupKey, int]]:
+        """Matching documents counted per group of ``fields`` (syn_domain.projection_count)."""
+        from syn_adapters.projection_stores.postgres_scan import count_by
+
+        await self._ensure_table(projection)
+        return await count_by(
+            await self._get_pool(),
+            self._table_name(projection),
+            fields,
+            filters,
             lean_ready=projection in self._lean_tables,
         )
 

@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING
 import asyncpg
 import pytest
 
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.projection_stores.postgres_store import PostgresProjectionStore
+from syn_domain.projection_count import ProjectionGroupCount, count_by
 from syn_domain.projection_page import PageQuery, StatusOf
 
 if TYPE_CHECKING:
@@ -142,3 +144,37 @@ def _keys_in_read_order(stored: list[ProjectionRecord]) -> list[str]:
     """``get_all``'s order, which is the order ``paginate``'s stable sort breaks ties by."""
     names = {str(doc.get("name")): key for key, doc in DOCS.items()}
     return [names[str(doc.get("name"))] for doc in stored]
+
+
+@pytest.mark.parametrize(
+    ("fields", "filters"),
+    [
+        (("eval_id", "status"), {"eval_id": ["e1", "e2"]}),
+        (("eval_id", "status"), None),
+        (("name",), {"eval_id": "e1"}),
+    ],
+)
+async def test_postgres_count_by_answers_what_counting_the_documents_answers(
+    e2_database: str,
+    fields: tuple[str, ...],
+    filters: dict[str, str | list[str]] | None,
+) -> None:
+    """The grouped SQL tally (#967) equals reading every document and counting it.
+
+    The documents include a missing status, a null ``eval_id`` and a numeric
+    ``name``, the values where ``->>`` and a Python read could disagree.
+    """
+    pool = await asyncpg.create_pool(e2_database, min_size=1, max_size=2)
+    try:
+        store = PostgresProjectionStore(pool)
+        reference = InMemoryProjectionStore()
+        for key, document in DOCS.items():
+            await store.save(PROJECTION, key, dict(document))
+            await reference.save(PROJECTION, key, dict(document))
+
+        expected = await count_by(reference, PROJECTION, fields, filters=filters)
+
+        assert isinstance(store, ProjectionGroupCount)
+        assert dict(await store.count_by(PROJECTION, fields, filters=filters)) == expected
+    finally:
+        await pool.close()

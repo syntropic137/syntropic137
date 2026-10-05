@@ -12,6 +12,8 @@ shows up as an inflated count.
 from __future__ import annotations
 
 import os
+from collections import Counter
+from typing import TYPE_CHECKING, Any
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -26,6 +28,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
+from syn_domain.contexts.orchestration._shared.execution_list_reads import WORKFLOW_EXECUTIONS
 from syn_domain.contexts.orchestration._shared.repository_baseline import RepositoryBaseline
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalAggregate, EvalId, Goal
@@ -202,6 +205,52 @@ async def _replayed(stream: _Stream, *, times: int) -> EvalListProjection:
     return evals
 
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from syn_domain.projection_count import GroupKey
+
+
+class _GroupingStore(InMemoryProjectionStore):
+    """Answers ``count_by`` itself and refuses to hand out the member executions.
+
+    The Eval list's tallies must come from the store's groups (#967): reading
+    every member row to count them is the cost the grouping exists to remove.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.grouped: list[tuple[str, tuple[str, ...]]] = []
+
+    async def query(
+        self,
+        projection: str,
+        filters: dict[str, Any] | None = None,  # Any: the base store's own signature
+        order_by: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:  # Any: the base store's own signature
+        if (
+            projection == WORKFLOW_EXECUTIONS
+            and filters
+            and isinstance(filters.get("eval_id"), list)
+        ):
+            raise AssertionError("tallied by reading every member execution")
+        return await super().query(projection, filters, order_by, limit, offset)
+
+    async def count_by(
+        self,
+        projection: str,
+        fields: Sequence[str],
+        *,
+        filters: Mapping[str, str | Sequence[str]] | None = None,
+    ) -> list[tuple[GroupKey, int]]:
+        self.grouped.append((projection, tuple(fields)))
+        rows = await super().query(projection, dict(filters) if filters else None)
+        counts = Counter(tuple(row.get(field) for field in fields) for row in rows)
+        return list(counts.items())
+
+
 class TestReplay:
     async def test_eval_detail_has_baseline_and_current_members(self) -> None:
         evals = await _replayed(await _fixture(), times=1)
@@ -237,6 +286,20 @@ class TestReplay:
         assert page.total == 2
         assert page.status_counts == {"active": 1, "archived": 1}
         assert rows[str(_EVAL)].run_count == 2
+        assert rows[str(_EVAL)].run_status_counts == {"failed": 1, "running": 1}
+        assert rows[str(_OTHER)].run_count == 0
+
+    async def test_eval_list_tallies_come_from_the_stores_groups(self) -> None:
+        stream = await _fixture()
+        store = _GroupingStore()
+        evals = EvalListProjection(store)
+        executions = WorkflowExecutionListProjection(store)
+        await replay(stream.client, MemoryCheckpointStore(), evals, executions)
+
+        page = await evals.page()
+
+        rows = {row.record.eval_id: row for row in page.rows}
+        assert store.grouped == [(WORKFLOW_EXECUTIONS, ("eval_id", "status"))]
         assert rows[str(_EVAL)].run_status_counts == {"failed": 1, "running": 1}
         assert rows[str(_OTHER)].run_count == 0
 
