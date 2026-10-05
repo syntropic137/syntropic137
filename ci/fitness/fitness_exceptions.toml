@@ -61,6 +61,9 @@ allowed_prefixes = [
 "packages/syn-shared/src/syn_shared/in_memory.py::InMemoryAdapterError" = { reason = "The exception the guard raises, not an adapter. Holds no state." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_adapter.py::MemoryIsolationState" = { reason = "Per-workspace state record, constructed only inside the guarded MemoryIsolationAdapter. Not an adapter and implements no port." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_sidecar.py::MemorySidecarState" = { reason = "Per-sidecar state record, constructed only inside the guarded MemorySidecarAdapter. Not an adapter and implements no port." }
+"packages/syn-perf/src/syn_perf/loadtest/stub_agent_profile.py::StubStream" = { reason = "Frozen Pydantic contract model: the recorded stream a stub-agent phase replays, sent to the workspace as JSON. 'Stub' names the load-test agent it configures, not a test double. Holds no mutable state and implements no port." }
+"packages/syn-perf/src/syn_perf/loadtest/stub_agent_profile.py::StubPhase" = { reason = "Frozen Pydantic contract model: one phase of the stub agent's load-test profile, validated at construction. 'Stub' names the load-test agent it configures, not a test double. Holds no mutable state and implements no port." }
+"packages/syn-perf/src/syn_perf/loadtest/stub_agent_profile.py::StubAgentProfile" = { reason = "Frozen Pydantic contract model: the whole load-test profile handed to the stub agent through its env var. 'Stub' names the load-test agent it configures, not a test double. Holds no mutable state and implements no port." }
 
 [aggregate_guards]
 # @command_handler methods exempt from the guard requirement.
