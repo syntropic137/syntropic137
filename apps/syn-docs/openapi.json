@@ -216,7 +216,7 @@
           "workflows"
         ],
         "summary": "Archive (soft-delete) a workflow template",
-        "description": "Archive (soft-delete) a workflow template.\n\nArchived templates are excluded from listing by default but remain\naccessible via `GET /workflows/{id}` and with `?include_archived=true`.",
+        "description": "Archive (soft-delete) a workflow template.\n\nArchived templates are excluded from listing by default but remain\naccessible via `GET /workflows/{id}` and with `?include_archived=true`.\n\n``expected_package_name`` makes the archive conditional on the current\naggregate still attributing the workflow to that package (#1588). A prune\npicks candidates from `GET /workflows/{id}`, a read model that can lag;\nthis check is made against the aggregate at the moment of archive, so a\nworkflow reinstalled by another package is refused with 409 however stale\nthat read was.",
         "operationId": "delete_workflow_endpoint_workflows__workflow_id__delete",
         "parameters": [
           {
@@ -226,6 +226,22 @@
             "schema": {
               "type": "string",
               "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "expected_package_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected Package Name"
             }
           }
         ],
@@ -244,7 +260,7 @@
             "description": "Workflow template not found"
           },
           "409": {
-            "description": "Conflict; workflow has active executions or is already archived"
+            "description": "Conflict; workflow has active executions, is already archived, or is not attributed to expected_package_name"
           },
           "422": {
             "description": "Validation Error",

@@ -392,16 +392,21 @@ def _classify_workflow_error(error_msg: str) -> WorkflowError:
         return WorkflowError.HAS_ACTIVE_EXECUTIONS
     if "already archived" in lower:
         return WorkflowError.ALREADY_ARCHIVED
+    if "package mismatch" in lower:
+        return WorkflowError.PACKAGE_MISMATCH
     return WorkflowError.INVALID_INPUT
 
 
 async def delete_workflow(
     workflow_id: str,
+    expected_package_name: str | None = None,
 ) -> Result[None, WorkflowError]:
     """Archive (soft-delete) a workflow template.
 
     Args:
         workflow_id: ID of the workflow template to archive.
+        expected_package_name: Archive only if the aggregate still attributes
+            the template to this package (#1588).
 
     Returns:
         Ok(None) on success, Err(WorkflowError) on failure.
@@ -412,7 +417,9 @@ async def delete_workflow(
     )
 
     try:
-        command = ArchiveWorkflowTemplateCommand(workflow_id=workflow_id)
+        command = ArchiveWorkflowTemplateCommand(
+            workflow_id=workflow_id, expected_package_name=expected_package_name
+        )
     except ValueError as e:
         return Err(WorkflowError.INVALID_INPUT, message=str(e))
 
@@ -654,21 +661,38 @@ class DeleteWorkflowResponse(BaseModel):
     summary="Archive (soft-delete) a workflow template",
     responses={
         404: {"description": "Workflow template not found"},
-        409: {"description": "Conflict; workflow has active executions or is already archived"},
+        409: {
+            "description": (
+                "Conflict; workflow has active executions, is already archived, "
+                "or is not attributed to expected_package_name"
+            )
+        },
     },
 )
-async def delete_workflow_endpoint(workflow_id: str) -> DeleteWorkflowResponse:
+async def delete_workflow_endpoint(
+    workflow_id: str, expected_package_name: str | None = None
+) -> DeleteWorkflowResponse:
     """Archive (soft-delete) a workflow template.
 
     Archived templates are excluded from listing by default but remain
     accessible via `GET /workflows/{id}` and with `?include_archived=true`.
+
+    ``expected_package_name`` makes the archive conditional on the current
+    aggregate still attributing the workflow to that package (#1588). A prune
+    picks candidates from `GET /workflows/{id}`, a read model that can lag;
+    this check is made against the aggregate at the moment of archive, so a
+    workflow reinstalled by another package is refused with 409 however stale
+    that read was.
     """
-    result = await delete_workflow(workflow_id=workflow_id)
+    result = await delete_workflow(
+        workflow_id=workflow_id, expected_package_name=expected_package_name
+    )
     if isinstance(result, Err):
         status_map = {
             WorkflowError.NOT_FOUND: 404,
             WorkflowError.HAS_ACTIVE_EXECUTIONS: 409,
             WorkflowError.ALREADY_ARCHIVED: 409,
+            WorkflowError.PACKAGE_MISMATCH: 409,
         }
         status = status_map.get(result.error, 400)
         raise HTTPException(status_code=status, detail=result.message)

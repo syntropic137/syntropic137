@@ -103,7 +103,7 @@ export async function pruneWorkflows(
   }
 
   for (const wfRef of owned) {
-    await archiveOne(wfRef, result);
+    await archiveOne(wfRef, options.packageName, result);
   }
   return result;
 }
@@ -161,15 +161,33 @@ async function confirmArchive(count: number): Promise<boolean> {
   }
 }
 
-async function archiveOne(wfRef: InstalledWorkflowRef, result: PruneResult): Promise<void> {
+/**
+ * WHY `expected_package_name` is sent: the GET in `ownedByPackage` reads a
+ * projection that can lag the aggregate. A workflow another package has just
+ * reinstalled can still read as ours there. The server checks the attribution
+ * against the aggregate at the moment of archive and refuses with 409 when it
+ * has moved, so the GET only nominates and the archive itself decides.
+ */
+async function archiveOne(
+  wfRef: InstalledWorkflowRef,
+  packageName: string,
+  result: PruneResult,
+): Promise<void> {
   process.stdout.write(`  Archiving ${style(wfRef.name, BOLD)}... `);
   const { error, response } = await api
-    .DELETE("/workflows/{workflow_id}", { params: { path: { workflow_id: wfRef.id } } })
+    .DELETE("/workflows/{workflow_id}", {
+      params: { path: { workflow_id: wfRef.id }, query: { expected_package_name: packageName } },
+    })
     .catch(() => ({ error: undefined, response: null }));
-  // WHY the detail is read: the API answers 409 both for "already archived"
-  // and for "has active executions", and only the message tells them apart.
-  const alreadyArchived = JSON.stringify(error ?? "").toLowerCase().includes("already archived");
-  if (response?.ok === true) {
+  // WHY the detail is read: the API answers 409 for "already archived", for
+  // "has active executions" and for "package mismatch", and only the message
+  // tells them apart.
+  const detail = JSON.stringify(error ?? "").toLowerCase();
+  const alreadyArchived = detail.includes("already archived");
+  if (response?.status === 409 && detail.includes("package mismatch")) {
+    // Not this package's any more: in no bucket, like a foreign owner above.
+    print(style("skipped: the server now records it under another package", YELLOW));
+  } else if (response?.ok === true) {
     print(style("done", GREEN));
     result.archived.push(wfRef);
   } else if (response?.status === 404 || alreadyArchived) {

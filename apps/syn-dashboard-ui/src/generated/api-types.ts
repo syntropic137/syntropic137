@@ -45,6 +45,13 @@ export interface paths {
          *
          *     Archived templates are excluded from listing by default but remain
          *     accessible via `GET /workflows/{id}` and with `?include_archived=true`.
+         *
+         *     ``expected_package_name`` makes the archive conditional on the current
+         *     aggregate still attributing the workflow to that package (#1588). A prune
+         *     picks candidates from `GET /workflows/{id}`, a read model that can lag;
+         *     this check is made against the aggregate at the moment of archive, so a
+         *     workflow reinstalled by another package is refused with 409 however stale
+         *     that read was.
          */
         delete: operations["delete_workflow_endpoint_workflows__workflow_id__delete"];
         options?: never;
@@ -8273,7 +8280,9 @@ export interface operations {
     };
     delete_workflow_endpoint_workflows__workflow_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                expected_package_name?: string | null;
+            };
             header?: never;
             path: {
                 workflow_id: string;
@@ -8298,7 +8307,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Conflict; workflow has active executions or is already archived */
+            /** @description Conflict; workflow has active executions, is already archived, or is not attributed to expected_package_name */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -71,6 +71,23 @@ _openapi:
 
           accessible via `GET /workflows/{id}` and with
           `?include_archived=true`.
+
+
+          ``expected_package_name`` makes the archive conditional on the current
+
+          aggregate still attributing the workflow to that package (#1588). A
+          prune
+
+          picks candidates from `GET /workflows/{id}`, a read model that can
+          lag;
+
+          this check is made against the aggregate at the moment of archive, so
+          a
+
+          workflow reinstalled by another package is refused with 409 however
+          stale
+
+          that read was.
         heading: archive-soft-delete-a-workflow-template
       - content: Export a workflow as a distributable package or Claude Code plugin.
         heading: export-workflow-endpoint

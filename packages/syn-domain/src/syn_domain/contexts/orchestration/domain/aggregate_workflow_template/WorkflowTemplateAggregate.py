@@ -709,12 +709,20 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def archive_workflow(self, command: ArchiveWorkflowTemplateCommand) -> None:
         """Handle ArchiveWorkflowTemplateCommand.
 
-        Guards against double-archive. The active-execution guard is
-        handled by the application service (cross-aggregate concern).
+        Guards against double-archive, and against archiving a template that
+        the caller believes is a package's when it is no longer (#1588). The
+        active-execution guard is handled by the application service
+        (cross-aggregate concern).
         """
         from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
             WorkflowTemplateArchivedEvent,
         )
+
+        expected = command.expected_package_name
+        if expected is not None and expected != self._package_name:
+            owner = f"package '{self._package_name}'" if self._package_name else "no package"
+            msg = f"Package mismatch: workflow is installed by {owner}, not package '{expected}'"
+            raise ValueError(msg)
 
         if self._is_archived:
             msg = "Workflow template already archived"
