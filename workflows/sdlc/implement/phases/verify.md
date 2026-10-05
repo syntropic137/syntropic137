@@ -100,7 +100,57 @@ runs. The first run in a workspace installs stable Rust and builds `aps` (~6
 minutes); later runs reuse both. A `FITNESS NOT RUN:` line means the gate did
 not run, which is not a pass: report it, never certify around it. The pytest
 summary lists each test skipped as `NOT RUN` for a binary this image lacks
-(today, the docker-backed `test_gateway_bind.py`); CI still runs those.
+(today, the docker-backed `test_gateway_bind.py`); CI still runs those, and
+how to read its result is the next section.
+
+## A check this workspace cannot run is settled by CI on the same head SHA
+
+Some checks cannot run here at all: today the docker-backed fitness tests,
+which `preflight-agent` skips as `NOT RUN`. "Not run here" is not a pass, and
+on its own it is not a blocker either. It is a question CI answers for the same
+commit, so read CI's answer instead of holding the PR in draft. PRs #1562 and
+#1576 each sat BLOCKED on exactly this while CI's Architectural Fitness job had
+already run the test green on the same head, and each needed a human to
+override the verdict.
+
+**The SHA must match. A green CI run on an older head proves nothing about this
+one**, because the code it tested is not the code you are judging. So print both
+SHAs, in full, side by side, and compare them before reading any result:
+
+```
+git rev-parse HEAD
+gh pr list --head <branch> --state all --json number,headRefOid
+```
+
+Then find the job that runs the check (`Architectural Fitness` runs
+`ci/fitness`) and read its own record, not the PR's summary line:
+
+```
+gh pr checks <n> --json name,state,link,workflow
+gh run view <run-id> --json headSha,status,conclusion
+gh run view --job <job-id> --log | grep '<test-file>::'
+```
+
+The job's `link` ends in `/actions/runs/<run-id>/job/<job-id>`. Print the run's
+`headSha` next to your `git rev-parse HEAD`; both must be the same full SHA. The
+log line shows the test actually ran in that job and PASSED. A job that is green
+because it deselected or skipped the test did not run it, and settles nothing.
+
+Then decide, and report the SHA pair, the job link and the log lines whatever
+the outcome:
+
+- **Passed on this SHA** (conclusion `success`, the test `PASSED` in its log):
+  the check is closed. It is not a blocker, and you do not need to run it here.
+- **Not finished yet:** wait on it, bounded, rather than blocking:
+  `timeout 25m gh pr checks <n> --watch --interval 60`, then read it again as
+  above. Do not write your own `sleep` loop. If `timeout` exits 124, CI did not
+  finish in time: report the check open and pending, not passed.
+- **Failed on this SHA:** it IS a blocker. Put it under BLOCKING with the failing
+  job's link and a log excerpt from
+  `gh run view --job <job-id> --log-failed | tail -n 80`.
+- **No CI evidence for this SHA** (no PR yet, the PR head is a different SHA, or
+  no job ran the test): nothing has answered the question. Report the check as
+  not run, name it, and never claim CI passed it.
 
 **Run the whole gate, not the sub-commands you think it contains.** A change can
 pass every test, typecheck and build and still fail on something none of them
