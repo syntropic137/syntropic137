@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.orchestration import EvalChoice, LaunchEval, StartResumeHandler
+    from syn_domain.contexts.orchestration import StartResumeHandler
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
@@ -106,6 +106,7 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_api._wiring_admission import (
     BackgroundWorkflowDispatcher,
+    admitted_launch_eval,
     get_admission_gate,
     get_execution_budget,
     get_maintenance_port,
@@ -757,21 +758,8 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         # SYN_OBSERVABILITY_DB_URL break dispatcher construction for every
         # deployment, resuming or not.
         resume_handler=_build_resume_handler,
-        launch_eval_for_workflow=_admitted_launch_eval,
+        launch_eval_for_workflow=admitted_launch_eval,
     )
-
-
-async def _admitted_launch_eval(workflow_id: str, choice: EvalChoice) -> LaunchEval:
-    """The eval a dispatcher-started run joins, given its choice and the workflow's default.
-
-    A trigger names no eval, so its run joins the workflow's default (#967).
-    """
-    from syn_domain.contexts.orchestration import WorkflowNotFoundError, launch_eval_for
-
-    workflow = await get_workflow_repository().get_by_id(workflow_id)
-    if workflow is None:
-        raise WorkflowNotFoundError(workflow_id)
-    return await launch_eval_for(get_eval_repository(), choice, workflow.default_eval_id)
 
 
 class _NullSignalQueueAdapter:

@@ -45,7 +45,8 @@ if TYPE_CHECKING:
         StartResumeHandler,
     )
 
-from syn_adapters.storage import get_event_store_client
+from syn_adapters.storage import get_event_store_client, get_workflow_repository
+from syn_adapters.storage.repositories import get_eval_repository
 from syn_api.execution_budget import (
     ExecutionBudget,
     StartAlreadyClaimedError,
@@ -175,6 +176,19 @@ def get_execution_budget() -> ExecutionBudget:
 
         _execution_budget_singleton = ExecutionBudget(get_settings().execution.max_concurrent)
     return _execution_budget_singleton
+
+
+async def admitted_launch_eval(workflow_id: str, choice: EvalChoice) -> LaunchEval:
+    """The eval a dispatcher-started run joins, given its choice and the workflow's default.
+
+    A trigger names no eval, so its run joins the workflow's default (#967).
+    """
+    from syn_domain.contexts.orchestration import WorkflowNotFoundError, launch_eval_for
+
+    workflow = await get_workflow_repository().get_by_id(workflow_id)
+    if workflow is None:
+        raise WorkflowNotFoundError(workflow_id)
+    return await launch_eval_for(get_eval_repository(), choice, workflow.default_eval_id)
 
 
 #: Builds a :class:`StartResumeHandler` on demand. See the constructor for why
