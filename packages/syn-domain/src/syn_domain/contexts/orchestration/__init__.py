@@ -159,6 +159,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     AttemptClock,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+    CancelledWorkLedger,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     CredentialRenewalFailedError,
     DuplicateExecutionError,
@@ -171,6 +174,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
     validate_phase_declarations,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    ExecutionJournal,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
@@ -261,6 +267,7 @@ __all__ = [
     # The clock a phase's retry budget is measured on (#1303)
     "AttemptClock",
     # Claude plugin types + errors (issue #726)
+    "CancelledWorkLedger",
     "ClaudePluginError",
     "ClaudePluginInvalidName",
     "ClaudePluginInvalidPath",
@@ -289,6 +296,7 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionJournal",
     "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",

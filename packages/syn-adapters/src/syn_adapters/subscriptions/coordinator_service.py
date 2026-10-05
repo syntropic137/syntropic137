@@ -492,18 +492,14 @@ def create_coordinator_service(
         TriggerHistoryProjection,
     )
     from syn_domain.contexts.orchestration import (
+        CancelledWorkLedger,
+        ExecutionJournal,
         QuarantineNoticeProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
-        CancelledWorkLedger,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
-        ExecutionJournal,
     )
     from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
         ExecutionCostProjection,
