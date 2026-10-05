@@ -1064,6 +1064,17 @@ class ExecutablePhase:
     # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
 
+    @property
+    def effective_timeout_seconds(self) -> int:
+        """The budget this phase actually runs under: its own, else its agent's.
+
+        THE one spelling of that fallback. The aggregate sequences by it, the
+        agent is killed on it and the agent is told it as its deadline (#1546),
+        so a second copy that drifted would advertise a deadline the phase is
+        not held to.
+        """
+        return self.timeout_seconds or self.agent_config.timeout_seconds
+
 
 # --- what a resume's start event carries ------------------------------------
 #
