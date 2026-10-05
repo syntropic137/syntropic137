@@ -268,7 +268,8 @@ def test_preflight_agent_fast_is_the_cheap_front_of_the_full_gate() -> None:
 
     So a fast run that passes means the full gate gets past those steps too,
     and the full gate fails on them before it reaches anything slow. The full
-    `pytest ci/fitness` suite and typecheck stay out of the fast loop.
+    `pytest ci/fitness` suite, typecheck and the APS fitness-check stay out of
+    the fast loop.
     """
     fast = _gate_steps("preflight-agent-fast")
     full = _gate_steps("preflight-agent")
@@ -277,9 +278,9 @@ def test_preflight_agent_fast_is_the_cheap_front_of_the_full_gate() -> None:
         "`preflight-agent` must start with exactly the `preflight-agent-fast` steps, in order"
     )
     text = _JUSTFILE.read_text()
-    assert not {"typecheck", "fitness-invariants-agent"} & _gate_closure(
+    assert not {"typecheck", "fitness-invariants-agent", "fitness-agent"} & _gate_closure(
         "preflight-agent-fast", text
-    )
+    ), "the fast loop must not wait on typecheck, the fitness suite or the Rust aps build"
 
 
 _EARLY_THRESHOLDS = "check-complexity-thresholds"
@@ -312,7 +313,8 @@ def test_the_loc_and_complexity_thresholds_fail_fast(tmp_path: Path) -> None:
     full = _gate_steps("preflight-agent")
     assert fast[:1] == [_EARLY_THRESHOLDS], "the Python thresholds must run first"
     assert full[:1] == [_EARLY_THRESHOLDS]
-    assert "fitness-agent" in fast, "APS still runs the full fitness-check for CI parity"
+    assert "fitness-agent" not in fast, "the Rust aps build takes minutes"
+    assert "fitness-agent" in full, "APS still runs the full fitness-check for CI parity"
     early = _closure(_EARLY_THRESHOLDS, _JUSTFILE.read_text())
     assert not early & {"aps-build", "topology-analyze", "fitness-check"}
     commands = [a for a in _commands_run_by(_EARLY_THRESHOLDS) if _EARLY_SCRIPT in a]

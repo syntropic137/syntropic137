@@ -1009,6 +1009,10 @@ fitness-check: aps-build check-untyped-dicts check-test-markers
     # A waiver whose debt was already paid off still grants its headroom, and the
     # tool reports those but exits 0 - so they ride along in green runs (#1084).
     @uv run python scripts/check_stale_exceptions.py .topology/fitness-report.json
+    # check-complexity-thresholds runs first in preflight-agent; it is only
+    # worth that place while it measures what APS just measured (#1585). The aps
+    # binary exists here, so a missing one fails rather than skips.
+    SYN_REQUIRE_APS=1 uv run pytest scripts/tests/test_check_complexity_thresholds.py -m unit -v --tb=short -p no:cacheprovider
     @echo "✅ Fitness threshold checks passed"
 
 # `fitness-check` in a workspace that may have no Rust toolchain: installs
@@ -1136,17 +1140,17 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 #
 # Fast: first the APS thresholds agents most often fail (max-loc-file,
 # max-cyclomatic) measured for Python without Rust or topology
-# (check-complexity-thresholds, seconds), then the static checks, then the
-# full APS fitness-check (fitness-agent). That needs the Rust aps binary, so
-# `aps-prewarm` builds it in the background from the first second and
-# fitness-agent waits on that build's exit status. On a
-# cold workspace the first run pays the build once, overlapped with the static
-# steps; every later run finds the binary fresh. What `preflight-agent-fast` runs.
-_preflight_agent_fast_steps := "check-complexity-thresholds check-agent-docs check-docs-content check-ci-parity lint format-check check-no-public-ports check-compose check-test-debt check-env-example validate-domain-events check-plugin-schemas check-workflows check-openapi-drift check-untyped-dicts fitness-cross-context fitness-agent"
-# Slow: the rest of preflight-portable and the full `pytest ci/fitness` suite.
+# (check-complexity-thresholds, seconds), then the static checks. No Rust and
+# no topology, so it finishes in under a minute. What `preflight-agent-fast` runs.
+_preflight_agent_fast_steps := "check-complexity-thresholds check-agent-docs check-docs-content check-ci-parity lint format-check check-no-public-ports check-compose check-test-debt check-env-example validate-domain-events check-plugin-schemas check-workflows check-openapi-drift check-untyped-dicts fitness-cross-context"
+# Slow: the full APS fitness-check (fitness-agent), the rest of
+# preflight-portable and the full `pytest ci/fitness` suite. fitness-agent needs
+# the Rust aps binary, so in the full gate `aps-prewarm` builds it in the
+# background from the first second and fitness-agent waits on that build's exit
+# status: on a cold workspace the build overlaps the fast steps.
 # test_ci_and_preflight_agree.py fails if fast + slow ever stops covering
 # preflight-portable, fitness-agent and fitness-invariants-agent.
-_preflight_agent_slow_steps := "typecheck check-test-markers fitness-invariants-agent"
+_preflight_agent_slow_steps := "fitness-agent typecheck check-test-markers fitness-invariants-agent"
 _preflight_agent_prewarm := "--prewarm aps-prewarm:fitness-agent"
 
 # Builds the aps binary (installing stable Rust if needed) and checks nothing:
@@ -1166,11 +1170,12 @@ check-complexity-thresholds:
 fitness-cross-context:
     uv run pytest ci/fitness/code_quality/test_cross_context_public_api.py ci/fitness/code_quality/test_typed_cross_context_boundaries.py -v --tb=short -m architecture
 
-# The static subset of `preflight-agent`, plus the APS thresholds, for
-# iterating (#1585). NOT a gate: it skips typecheck and the full fitness suite.
-# Run the full `preflight-agent` once, before the final push.
+# The static subset of `preflight-agent`, with max-loc-file and max-cyclomatic
+# measured for Python, for iterating (#1585). NOT a gate: it skips the full APS
+# fitness-check, typecheck and the full fitness suite. Run the full
+# `preflight-agent` once, before the final push.
 preflight-agent-fast:
-    @bash scripts/run-gate-steps.sh {{_preflight_agent_prewarm}} preflight-agent-fast {{_preflight_agent_fast_steps}}
+    @bash scripts/run-gate-steps.sh preflight-agent-fast {{_preflight_agent_fast_steps}}
     @echo "preflight-agent-fast is the iteration loop, not the gate: run 'just preflight-agent' before the final push."
 
 preflight-agent:
