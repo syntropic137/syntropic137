@@ -17,6 +17,7 @@ from syn_api.types import (
     StartPinsStatus,
 )
 from syn_domain.contexts.orchestration import (
+    DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
     ResumeStartStatus,  # Pydantic resolves it at runtime
@@ -274,6 +275,13 @@ class ExecutionDetailResponse(BaseModel):
     route actually returns, so a value that stops short of here never reaches
     a client.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 

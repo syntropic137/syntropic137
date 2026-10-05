@@ -8,6 +8,9 @@ from event_sourcing import DomainEvent, event
 from pydantic import Field
 
 # Runtime import needed for the Pydantic field type (noqa: TC001)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
+    DelegationFailure,  # noqa: TC001
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
     FailureClassification,
@@ -79,6 +82,12 @@ class WorkflowFailedEvent(DomainEvent):
     # #1372, every failure with no agent anywhere near it, and every report
     # whose word this reader does not know.
     reported_failure_reason: ReportedFailureReason | None = None
+
+    # Which required delegate did not happen, and why (#894). A platform
+    # observation, beside the agent's claim above and never folded into it.
+    # `None` for every failure that is not a failed delegation, which is every
+    # event written before #894.
+    delegation_failure: DelegationFailure | None = None
 
     # How long failed_phase_id had been running when the failure was caught.
     # None when no phase was in flight (e.g. failure between phases).

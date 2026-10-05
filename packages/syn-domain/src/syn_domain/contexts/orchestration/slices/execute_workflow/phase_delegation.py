@@ -23,18 +23,20 @@ the same way a missing one does, under its own reason, because "we could not
 tell" reading as green is exactly the defect.
 
 Every failure here is a platform-detected fact, never the agent's word, so it
-is raised as an ordinary exception and classified `PLATFORM` like any other
-(see `agent_run_outcome`). It is deliberately NOT a `ReportedFailureReason`:
-that enum is "the agent's own word, never an inference".
+is classified `PLATFORM` like any other (see `failure_account`), and carries
+its typed `DelegationFailure` - reason and attempts - which `failure_account`
+hands to every sink. It is deliberately NOT a `ReportedFailureReason`: that
+enum is "the agent's own word, never an inference".
 """
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
+    DelegationFailureReason,
+)
 from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
-    DelegationAttempt,
     DelegationEvidencePort,
     DelegationEvidenceUnavailableError,
     DelegationOutcome,
@@ -42,53 +44,15 @@ from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
     phase_failure,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    DelegationFailedError,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
         AgentExecutionResult,
     )
-
-
-class DelegationFailureReason(StrEnum):
-    """Why a required delegation is counted as not having happened."""
-
-    NOT_ATTEMPTED = "not_attempted"
-    """The record was read and holds no delegation at all."""
-    FAILED = "failed"
-    """Delegates were launched and none of them succeeded."""
-    UNVERIFIABLE = "unverifiable"
-    """No record could be read, so success cannot be shown."""
-
-
-class DelegationFailedError(RuntimeError):
-    """A phase that declared delegation did not delegate successfully (#894)."""
-
-    def __init__(
-        self,
-        *,
-        phase_id: str,
-        reason: DelegationFailureReason,
-        attempts: tuple[DelegationAttempt, ...] = (),
-        detail: str | None = None,
-    ) -> None:
-        self.phase_id = phase_id
-        self.reason = reason
-        self.attempts = attempts
-        lines = [
-            f"Required delegation failed for phase {phase_id} ({reason.value}): "
-            + _summary(reason, detail)
-        ]
-        lines.extend(f"  - {attempt.describe()}" for attempt in attempts)
-        super().__init__("\n".join(lines))
-
-
-def _summary(reason: DelegationFailureReason, detail: str | None) -> str:
-    if reason is DelegationFailureReason.NOT_ATTEMPTED:
-        return "the phase declared allow_delegation but no delegate was launched."
-    if reason is DelegationFailureReason.FAILED:
-        return "every delegate the phase launched failed or never finished."
-    return "the delegation record could not be read" + (f": {detail}" if detail else ".")
 
 
 async def delegation_failure(

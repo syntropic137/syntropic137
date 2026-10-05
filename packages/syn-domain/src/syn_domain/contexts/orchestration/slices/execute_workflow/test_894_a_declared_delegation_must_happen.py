@@ -48,7 +48,7 @@ async def _reason(evidence: _Evidence | None) -> DelegationFailureReason | None:
     failure = await delegation_failure(
         evidence, _WORKSPACE, phase_id="implement", allow_delegation=True
     )
-    return None if failure is None else failure.reason
+    return None if failure is None else failure.delegation_failure.reason
 
 
 @pytest.mark.asyncio
@@ -65,7 +65,7 @@ async def test_a_delegate_that_failed_fails_the_phase_and_is_named() -> None:
         allow_delegation=True,
     )
     assert failure is not None
-    assert failure.reason is DelegationFailureReason.FAILED
+    assert failure.delegation_failure.reason is DelegationFailureReason.FAILED
     assert "delegate child-7 -> codex: failed (exit_code=1)" in str(failure)
 
 

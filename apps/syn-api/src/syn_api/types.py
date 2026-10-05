@@ -82,6 +82,7 @@ from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRe
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    DelegationFailure,
     EvalId,
     FailureClassification,
     ReportedFailureReason,
@@ -707,6 +708,13 @@ class ExecutionDetail(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -1515,6 +1523,13 @@ class ExecutionDetailFull(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 

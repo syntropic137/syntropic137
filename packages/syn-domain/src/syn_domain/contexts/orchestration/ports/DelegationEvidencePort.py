@@ -10,12 +10,16 @@ normalised to `DelegationAttempt`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-# Imported at runtime, not under TYPE_CHECKING: the port re-exports the outcome
-# it answers with, so an adapter needs nothing deeper than `ports`.
+# Imported at runtime, not under TYPE_CHECKING: the port re-exports what it
+# answers with, so an adapter needs nothing deeper than `ports`. The attempt is
+# also what a failed phase records (`DelegationFailure`), so it lives with the
+# aggregate's value objects.
 from syn_domain.contexts.agent_sessions import DelegationOutcome
+from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
+    DelegationAttempt,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -26,29 +30,6 @@ __all__ = [
     "DelegationEvidenceUnavailableError",
     "DelegationOutcome",
 ]
-
-
-@dataclass(frozen=True)
-class DelegationAttempt:
-    """One delegate the phase's agent launched, as the platform observed it."""
-
-    delegate_id: str
-    """The journal's id for this child invocation."""
-    target_harness: str
-    """Which harness the work was delegated TO (``claude``, ``codex``)."""
-    outcome: DelegationOutcome | None
-    """How it ended; None when it launched and never reported an end."""
-    exit_code: int | None = None
-    reason: str | None = None
-    """Why it could not launch, when the shim named a reason."""
-
-    def describe(self) -> str:
-        ended = self.outcome.value if self.outcome is not None else "never reported an outcome"
-        detail = [f"exit_code={self.exit_code}"] if self.exit_code is not None else []
-        if self.reason is not None:
-            detail.append(f"reason={self.reason}")
-        suffix = f" ({', '.join(detail)})" if detail else ""
-        return f"delegate {self.delegate_id} -> {self.target_harness}: {ended}{suffix}"
 
 
 class DelegationEvidenceUnavailableError(Exception):
