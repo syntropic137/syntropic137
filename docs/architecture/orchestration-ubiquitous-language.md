@@ -154,6 +154,15 @@ rather than repeated when the Phase quarantines again. Owed until a PR exists
 to receive it; with none yet, it is asked again on every live pass, and the
 platform's clock tick guarantees a pass comes. (#1547.)
 
+## Owed Cancelled Work
+
+A cancelled Execution's landed Quarantine Refs that the event store refused to
+take as `CancelledWorkQuarantined`, even after retries. They are kept in a
+durable store, keyed by Execution and Phase, and the processor appends them at
+the start of its next run. The row is removed only once the event is on the
+stream. Until then the fact exists in exactly one of the two places, so the
+Quarantine Notice is late but never lost. (#1547.)
+
 ## Admission
 
 The decision that an operation may proceed, recorded before any work begins.
