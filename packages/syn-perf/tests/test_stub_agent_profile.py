@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,18 @@ pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
 _WORKFLOW = _REPO / "workflows/sdlc/implement-v3/workflow.yaml"
+_AFTER_PREMISE = [
+    "implement",
+    "verify",
+    "fix",
+    "reverify",
+    "fix_2",
+    "reverify_2",
+    "fix_3",
+    "reverify_3",
+    "finalize_pr",
+]
+"""Every phase that names the head it hands over, in workflow order."""
 _SCHEMA = _REPO / "packages/syn-perf/src/syn_perf/loadtest/stub_agent_profile.schema.json"
 _FIXTURE = "syntropic137/loadtest-fixture"
 _HEAD = "3b7f2bd49a4609f24a516bb4617aadbc1edf751e"
@@ -76,6 +89,10 @@ def test_side_effects_follow_the_implement_v3_phase_contracts(
         "verify": ReportOnly,
         "fix": PushBranch,
         "reverify": ReportOnly,
+        "fix_2": PushBranch,
+        "reverify_2": ReportOnly,
+        "fix_3": PushBranch,
+        "reverify_3": ReportOnly,
         "finalize_pr": OpenPullRequest,
     }
 
@@ -217,11 +234,28 @@ def test_rendered_artifacts_name_the_execution_and_its_branch(workflow: Workflow
     rendered = {pid: profile.render_artifact(pid, "exec-7f3a", _HEAD) for pid in profile.phases}
 
     assert all("exec-7f3a" in text and "{" not in text for text in rendered.values())
-    for pid in ("implement", "fix", "verify", "reverify", "finalize_pr"):
+    for pid in _AFTER_PREMISE:
         assert "`loadtest/exec-7f3a`" in rendered[pid], pid
     assert rendered["reverify"].splitlines()[0] == "CERTIFIED"
     assert rendered["finalize_pr"].splitlines()[0] == "READY"
     assert "## 1. Verdict: Confirmed" in rendered["premise"]
+
+
+@pytest.mark.parametrize(
+    ("n", "fix", "reverify"),
+    [(1, "fix", "reverify"), (2, "fix_2", "reverify_2"), (3, "fix_3", "reverify_3")],
+)
+def test_each_repair_round_reports_which_round_it_is(
+    workflow: WorkflowDefinition, n: int, fix: str, reverify: str
+) -> None:
+    """The fix prompts demand the round first; reverify demands it second (PC-63)."""
+    profile = _profile(workflow, "node")
+
+    fixed = profile.render_artifact(fix, "exec-7f3a", _HEAD).splitlines()
+    certified = profile.render_artifact(reverify, "exec-7f3a", _HEAD).splitlines()
+
+    assert fixed[0] == f"Round: {n} of 3"
+    assert certified[:2] == ["CERTIFIED", f"Round: {n} of 3"]
 
 
 # --- the schema agentic-workspace builds the stub image against -----------
@@ -240,7 +274,13 @@ def test_the_committed_schema_matches_the_model() -> None:
 
 # --- the head each phase hands to the next --------------------------------
 
-_HANDOFFS = [("implement", "verify"), ("fix", "reverify"), ("reverify", "finalize_pr")]
+# Each phase hands to the next by order; a certified reverify also hands
+# straight to finalize_pr, skipping the rounds after it.
+_HANDOFFS = [
+    *pairwise(_AFTER_PREMISE),
+    ("reverify", "finalize_pr"),
+    ("reverify_2", "finalize_pr"),
+]
 
 
 @pytest.mark.parametrize(("writer", "reader"), _HANDOFFS)
@@ -275,7 +315,7 @@ def test_an_artifact_without_a_full_head_hands_nothing_over(artifact: str) -> No
 
 
 @pytest.mark.parametrize("head_sha", [None, "", _HEAD[:12], _HEAD.upper(), _HEAD + "0"])
-@pytest.mark.parametrize("phase_id", ["implement", "verify", "fix", "reverify", "finalize_pr"])
+@pytest.mark.parametrize("phase_id", _AFTER_PREMISE)
 def test_a_phase_after_premise_cannot_write_its_artifact_without_a_full_head(
     workflow: WorkflowDefinition, phase_id: str, head_sha: str | None
 ) -> None:
