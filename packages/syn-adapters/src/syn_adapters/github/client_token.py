@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from syn_adapters.github.client_retry import RETRY_SAFE
+
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
 
@@ -315,6 +317,10 @@ async def installation_token(
             f"/app/installations/{iid}/access_tokens",
             headers={"Authorization": f"Bearer {jwt_token}"},
             json=body.to_json(),
+            # A POST, but sending it twice costs one extra token that expires
+            # within the hour. Failing provisioning on a dropped connection
+            # costs the execution (#1593).
+            extensions=RETRY_SAFE,
         )
 
         check_token_response(response, iid)

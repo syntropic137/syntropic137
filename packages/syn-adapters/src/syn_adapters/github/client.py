@@ -45,6 +45,7 @@ from syn_adapters.github.client_jwt import (
 from syn_adapters.github.client_jwt import (
     JWT_ALGORITHM as JWT_ALGORITHM,
 )
+from syn_adapters.github.client_retry import RetryingTransport
 from syn_adapters.github.client_token import get_installation_token as _get_installation_token
 from syn_adapters.github.client_token import (
     revoke_installation_token as _revoke_installation_token,
@@ -81,6 +82,15 @@ class GitHubAuthError(GitHubAppError):
     """Authentication failed."""
 
     pass
+
+
+class GitHubUnavailableError(GitHubAppError):
+    """GitHub did not answer after every retry the request was allowed (#1593).
+
+    A dropped connection, a timeout or a 502/503/504 - transient, so the run
+    that hit it is resumable. Deliberately not a `GitHubAuthError`: nothing an
+    operator configures would have changed the outcome.
+    """
 
 
 class GitHubRateLimitError(GitHubAppError):
@@ -136,11 +146,19 @@ class GitHubAppClient:
         response = await client.api_get("/repos/org/repo")
     """
 
-    def __init__(self, settings: GitHubAppSettings) -> None:
+    def __init__(
+        self,
+        settings: GitHubAppSettings,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         """Initialize the GitHub App client.
 
         Args:
             settings: GitHub App configuration from environment.
+            transport: What actually sends requests; the network by default.
+                Every request is retried on top of it while GitHub is
+                transiently unavailable (#1593).
 
         Raises:
             ValueError: If settings are not fully configured.
@@ -159,6 +177,7 @@ class GitHubAppClient:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
             timeout=30.0,
+            transport=RetryingTransport(transport or httpx.AsyncHTTPTransport()),
         )
 
     async def close(self) -> None:
