@@ -40,7 +40,18 @@ just pit-stop 0.29.1-beta.5 --stage-only   # bump, build, verify, ship, repoint:
 just pit-stop 0.29.1-beta.5 --swap-only    # wait for the drain, recreate api + gateway, verify
 just pit-stop 0.29.1-beta.5                # both, in one go
 just pit-stop 0.29.1-beta.5 --dry-run      # echo every mutating command; still run the read-only checks
+just pit-stop 0.29.1-beta.5 --service gateway   # the gateway alone: no gate, no drain
 ```
+
+**`--service gateway` swaps the gateway alone (#1310).** One image is built,
+shipped and repointed (`pit_stop_repoint.py --service gateway` leaves the
+`syn-api` pin as deployed), then `compose up -d --no-deps gateway`. There is no
+admission gate, no drain and no ungate: the gateway is on `syn-internal` only,
+never `agent-net`, so no execution depends on it and `--no-deps` leaves the API
+and everything it is running untouched. Verify checks the container runs the
+shipped image by id and that `GET /health` answers 200 through it; not
+`/version`, which reports the API's build. It combines with `--stage-only` and
+`--swap-only` as the default does.
 
 **Stage early, swap late.** Everything except the swap is safe while executions
 run, so stage as soon as the content is merged; the swap is one `compose up`
