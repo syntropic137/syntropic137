@@ -92,6 +92,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
     refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationAttempt,
+    DelegationFailure,
+    DelegationFailureReason,
     ExecutablePhase,
     ExecutionStatus,
     FailureClassification,
@@ -270,6 +273,9 @@ __all__ = [
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
     "CredentialRenewalFailedError",
+    "DelegationAttempt",
+    "DelegationFailure",
+    "DelegationFailureReason",
     "DetachExecutionFromEvalCommand",
     "DetachExecutionFromEvalHandler",
     # Errors

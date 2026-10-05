@@ -87,6 +87,29 @@ immediately before the Phase whose `blocked` verdict the run ended on. Decided
 by the aggregate from its replayed Review Verdicts (`ReviewRecord.repair_point`),
 never by the caller.
 
+## Delegation
+
+A phase's agent handing part of its work to the **other** harness: a claude
+phase to codex, a codex phase to claude. The delegate is a cross-harness child
+that reports itself through the platform's `syn-delegate` shim; a harness's
+own native subagents are not delegation. The provider alone decides where a
+delegate goes, so a phase never names its delegate's harness
+(`DELEGATION_TARGET_BY_PRIMARY`).
+
+- **Delegation permission** (`agent.allow_delegation`): the agent MAY
+  delegate. Both harnesses' auth is staged. Never gated: a permitted phase
+  whose agent did the work itself completed.
+- **Required delegation** (`agent.require_delegation`, `AgentConfiguration.require_delegation`):
+  the phase MUST delegate. It completes only when a delegate to its
+  **required delegate** - the other harness (`AgentConfiguration.required_delegate`) -
+  reported success. A delegate to any other harness does not count. Implies
+  the permission.
+- **Delegation failure** (`DelegationFailure`): the typed account of a
+  required delegation that did not happen - `not_attempted` (no delegate to
+  the required harness), `failed` (every one failed or never finished),
+  `unverifiable` (the record could not be read). Platform-observed, never the
+  agent's word (#894).
+
 ## Workflow
 
 The definition a run is made from - its Phases and their configuration.
