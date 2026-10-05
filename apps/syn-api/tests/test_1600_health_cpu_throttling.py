@@ -69,9 +69,9 @@ async def test_health_payload_carries_the_counters(
 ) -> None:
     stat = tmp_path / "cpu.stat"
     stat.write_text(_CPU_STAT_V2)
-    from syn_api.services import lifecycle
+    from syn_api.services import cpu_throttling, lifecycle
 
-    monkeypatch.setattr(lifecycle, "read_cpu_throttling", lambda: read_cpu_throttling(stat))
+    monkeypatch.setattr(cpu_throttling, "read_cpu_throttling", lambda: read_cpu_throttling(stat))
 
     result = await lifecycle.health_check()
     assert isinstance(result, Ok)
