@@ -30,6 +30,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     InterruptExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
+    RecordCancelledWorkCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
@@ -103,6 +104,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
         ArtifactsCollectedForPhaseEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+        CancelledWorkQuarantinedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
         ExecutionAttachedToEvalEvent,
@@ -715,6 +719,28 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
+    @command_handler("RecordCancelledWorkCommand")
+    def record_cancelled_work(self, command: RecordCancelledWorkCommand) -> None:
+        """Record the work a cancelled phase's save landed. Nothing landed, no event."""
+        from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+            CancelledWorkQuarantinedEvent,
+        )
+
+        if self._status != ExecutionStatus.CANCELLED:
+            msg = f"Cannot record cancelled work in status {self._status}"
+            raise ValueError(msg)
+        if not command.quarantined:
+            return
+        self._apply(
+            CancelledWorkQuarantinedEvent(
+                workflow_id=self._workflow_id or "",
+                execution_id=command.aggregate_id,
+                phase_id=command.phase_id,
+                quarantined_at=datetime.now(UTC),
+                quarantined_refs=list(command.quarantined),
+            )
+        )
+
     @command_handler("AddExecutionTagsCommand")
     def add_tags(self, command: AddExecutionTagsCommand) -> None:
         """Add tags to the current set. None new, no event."""
@@ -964,6 +990,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_at = evt(event, "cancelled_at")
         self._status = ExecutionStatus.CANCELLED
         self._cancel_reason = event.reason
+
+    @event_sourcing_handler("CancelledWorkQuarantined")
+    def on_cancelled_work_quarantined(self, event: CancelledWorkQuarantinedEvent) -> None:
+        """Apply CancelledWorkQuarantinedEvent. A fact for the PR, no state of its own."""
 
     @event_sourcing_handler("ExecutionTagsAdded")
     def on_execution_tags_added(self, event: ExecutionTagsAddedEvent) -> None:

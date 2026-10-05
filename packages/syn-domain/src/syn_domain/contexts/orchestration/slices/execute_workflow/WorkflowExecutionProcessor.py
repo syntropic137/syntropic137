@@ -402,6 +402,7 @@ class WorkflowExecutionProcessor:
                     i for i in dispatch_ctx.kept_artifact_ids if i not in all_artifact_ids
                 )
                 return await self._cancel_execution(
+                    aggregate,
                     execution_id,
                     workflow_id,
                     phase_results,
@@ -526,6 +527,7 @@ class WorkflowExecutionProcessor:
 
     async def _cancel_execution(
         self,
+        aggregate: WorkflowExecutionAggregate,
         execution_id: str,
         workflow_id: str,
         phase_results: list[PhaseResult],
@@ -537,7 +539,9 @@ class WorkflowExecutionProcessor:
         """Close open sessions as cancelled and return cancelled result.
 
         Called when the to-do list empties due to ExecutionCancelledEvent.
-        The aggregate is already in CANCELLED status - no new command needed.
+        The aggregate is already in CANCELLED status, so the cancel itself
+        needs no command. What the save below landed does: it is told to the
+        aggregate, which is what lets the PR be told too (#1547).
 
         ``phase_id`` is the phase that was mid-flight when the cancel landed,
         from the run's own _DispatchContext for the reason ``failed_phase_id``
@@ -564,8 +568,21 @@ class WorkflowExecutionProcessor:
             )
             all_artifact_ids.extend(i for i in dropped if i not in all_artifact_ids)
             cancellation = cancelled_execution(
-                cancel_reason, phase_results, all_artifact_ids, saved=saved
+                cancel_reason,
+                phase_results,
+                all_artifact_ids,
+                saved=saved,
+                repositories=[c.repository for c in aggregate.start_pins.source_commits],
             )
+            try:
+                aggregate.record_cancelled_work(cancellation.as_command(execution_id, phase_id))
+                await self._journal.append(aggregate)
+            except Exception:
+                # The refs are still in `reason`; only the PR notice is lost.
+                logger.exception(
+                    "Could not record the quarantined work of cancelled execution %s",
+                    execution_id,
+                )
             try:
                 await runtime.report_cancelled(cancellation.reason)
             except Exception:

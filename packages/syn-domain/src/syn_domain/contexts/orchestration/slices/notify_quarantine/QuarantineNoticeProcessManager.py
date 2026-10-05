@@ -1,7 +1,7 @@
 """Quarantine Notice ProcessManager (#1547, ADR-025).
 
-Subscribes to `WorkflowFailed` and tells the PR the failed run was working on
-that its unpushed work is on a quarantine ref, using the Processor To-Do List
+Subscribes to `WorkflowFailed` and `CancelledWorkQuarantined` and tells the PR
+the run was working on that its unpushed work is on a quarantine ref, using the Processor To-Do List
 pattern.
 
 PROJECTION SIDE (handle_event): writes one notice per (execution, phase,
@@ -35,6 +35,9 @@ from event_sourcing import (
     ProjectionStore,
 )
 
+from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+    CancelledWorkQuarantinedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
 )
@@ -45,11 +48,17 @@ from syn_domain.contexts.orchestration.slices.notify_quarantine.value_objects im
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        QuarantinedRef,
+    )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
 
 logger = logging.getLogger(__name__)
 
 _WORKFLOW_FAILED = "WorkflowFailed"
+_CANCELLED_WORK_QUARANTINED = "CancelledWorkQuarantined"
 
 #: Every event that can mean a PR has since been opened from a branch a notice
 #: is waiting on: a later phase, a resume, a run finishing. Subscribed for the
@@ -112,7 +121,7 @@ class QuarantineNoticeProcessManager(ProcessManager):
         return self.VERSION
 
     def get_subscribed_event_types(self) -> set[str] | None:
-        return {_WORKFLOW_FAILED, *_RECHECK_EVENTS}
+        return {_WORKFLOW_FAILED, _CANCELLED_WORK_QUARANTINED, *_RECHECK_EVENTS}
 
     async def handle_event(
         self,
@@ -123,8 +132,18 @@ class QuarantineNoticeProcessManager(ProcessManager):
         """PROJECTION SIDE: record each landed quarantine as owed. No side effects."""
         event_type = envelope.metadata.event_type or "Unknown"
         try:
-            if isinstance(envelope.event, WorkflowFailedEvent):
-                await self._record(envelope.event)
+            event = envelope.event
+            if isinstance(event, WorkflowFailedEvent) and event.failed_phase_id:
+                await self._record(
+                    event.execution_id,
+                    event.failed_phase_id,
+                    event.failed_at,
+                    event.quarantined_refs,
+                )
+            elif isinstance(event, CancelledWorkQuarantinedEvent):
+                await self._record(
+                    event.execution_id, event.phase_id, event.quarantined_at, event.quarantined_refs
+                )
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
                     projection_name=self.PROJECTION_NAME,
@@ -140,7 +159,13 @@ class QuarantineNoticeProcessManager(ProcessManager):
             )
             return ProjectionResult.FAILURE
 
-    async def _record(self, event: WorkflowFailedEvent) -> None:
+    async def _record(
+        self,
+        execution_id: str,
+        phase_id: str,
+        ended_at: datetime,
+        refs: Sequence[QuarantinedRef],
+    ) -> None:
         """Write a notice per landed ref, unless the store already holds its facts.
 
         Same facts: nothing is written, which is what keeps a replay from
@@ -149,13 +174,13 @@ class QuarantineNoticeProcessManager(ProcessManager):
         `comment_id` kept, so the processor edits that comment rather than
         adding a second.
         """
-        if self._store is None or not event.failed_phase_id:
+        if self._store is None:
             return
-        for quarantined in event.quarantined_refs:
+        for quarantined in refs:
             notice = QuarantineNotice(
-                execution_id=event.execution_id,
-                phase_id=event.failed_phase_id,
-                failed_at=event.failed_at,
+                execution_id=execution_id,
+                phase_id=phase_id,
+                failed_at=ended_at,
                 quarantined=quarantined,
             )
             row = await self._store.get(self.PROJECTION_NAME, notice.key)

@@ -18,14 +18,21 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
     RemoteBranchReading,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    CancelExecutionCommand,
     FailExecutionCommand,
+    RecordCancelledWorkCommand,
+    StartExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
     failed_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
+    PhaseDefinition,
     QuarantinedRef,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    WorkflowExecutionAggregate,
 )
 from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     QuarantineNoticeProcessManager,
@@ -270,3 +277,80 @@ async def _settled(
             break
         await asyncio.sleep(0)
     await coordinator.wait_for_process_managers()
+
+
+def _cancelled_with_work() -> EventEnvelope:
+    """A REAL aggregate cancelled mid-phase, then told what its save landed."""
+    aggregate = WorkflowExecutionAggregate()
+    aggregate.start_execution(
+        StartExecutionCommand(
+            execution_id="exec-q1",
+            workflow_id="wf-1",
+            workflow_name="Quarantine on cancel",
+            total_phases=1,
+            inputs={},
+            phase_definitions=[PhaseDefinition(phase_id="implement", name="Implement", order=1)],
+        )
+    )
+    aggregate.cancel_execution(
+        CancelExecutionCommand(execution_id="exec-q1", phase_id="implement", reason="stop")
+    )
+    aggregate.mark_events_as_committed()
+    aggregate.record_cancelled_work(
+        RecordCancelledWorkCommand(
+            execution_id="exec-q1",
+            phase_id="implement",
+            quarantined=(
+                QuarantinedRef(
+                    repository="acme/widget",
+                    branch="feat/thing",
+                    ref=REF,
+                    commit=SHA,
+                    commit_count=1,
+                    pull_request=42,
+                ),
+            ),
+        )
+    )
+    (envelope,) = aggregate.get_uncommitted_events()
+    assert envelope.event.event_type == "CancelledWorkQuarantined"
+    return EventEnvelope(
+        event=envelope.event,
+        metadata=envelope.metadata.model_copy(
+            update={"global_nonce": 7, "event_type": envelope.event.event_type}
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_execution_that_landed_a_ref_tells_its_pr_once() -> None:
+    manager, commenter = _manager()
+    envelope = _cancelled_with_work()
+    assert "CancelledWorkQuarantined" in (manager.get_subscribed_event_types() or set())
+    await manager.handle_event(envelope, MemoryCheckpointStore())
+    assert await manager.process_pending() == 1
+    await manager.handle_event(envelope, MemoryCheckpointStore())
+    assert await manager.process_pending() == 0
+    assert commenter.posts == 1 and commenter.edits == 0
+    (body,) = commenter.comments.values()
+    assert REF in body and SHA in body and "`implement`" in body
+
+
+def test_a_cancelled_execution_whose_save_landed_nothing_records_nothing() -> None:
+    aggregate = WorkflowExecutionAggregate()
+    aggregate.start_execution(
+        StartExecutionCommand(
+            execution_id="exec-q2",
+            workflow_id="wf-1",
+            workflow_name="n",
+            total_phases=1,
+            inputs={},
+            phase_definitions=[PhaseDefinition(phase_id="implement", name="I", order=1)],
+        )
+    )
+    with pytest.raises(ValueError, match="Cannot record cancelled work"):
+        aggregate.record_cancelled_work(RecordCancelledWorkCommand("exec-q2", "implement", ()))
+    aggregate.cancel_execution(CancelExecutionCommand(execution_id="exec-q2", phase_id="implement"))
+    aggregate.mark_events_as_committed()
+    aggregate.record_cancelled_work(RecordCancelledWorkCommand("exec-q2", "implement", ()))
+    assert aggregate.get_uncommitted_events() == []

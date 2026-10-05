@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CompleteExecutionCommand,
     FailExecutionCommand,
+    RecordCancelledWorkCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionMetrics,
@@ -577,6 +578,17 @@ class CancelledExecution:
     reason: str
     phase_results: list[PhaseResult]
     artifact_ids: list[str]
+    quarantined: tuple[QuarantinedRef, ...] = ()
+    """The cancelled phase's work that landed on a quarantine ref (#1547), as
+    data rather than the paragraph `reason` already carries about it."""
+
+    def as_command(self, execution_id: str, phase_id: str | None) -> RecordCancelledWorkCommand:
+        """What the aggregate is told the save landed. Nothing, and it records nothing."""
+        return RecordCancelledWorkCommand(
+            execution_id=execution_id,
+            phase_id=phase_id or "",
+            quarantined=self.quarantined if phase_id else (),
+        )
 
     def execution_result(
         self,
@@ -605,6 +617,7 @@ def cancelled_execution(
     phase_results: list[PhaseResult],
     artifact_ids: list[str],
     saved: SavedWork | None = None,
+    repositories: Sequence[str] = (),
 ) -> CancelledExecution:
     """Name what was cancelled and why, before anything is torn down.
 
@@ -621,4 +634,7 @@ def cancelled_execution(
         reason=said,
         phase_results=phase_results,
         artifact_ids=artifact_ids,
+        quarantined=quarantined_refs(
+            saved.quarantined if saved is not None else (), None, repositories
+        ),
     )

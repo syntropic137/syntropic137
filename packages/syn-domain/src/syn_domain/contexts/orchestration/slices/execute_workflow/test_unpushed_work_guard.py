@@ -3501,7 +3501,10 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
     run.processor._artifact_repo = artifacts  # type: ignore[assignment]
     all_artifact_ids: list[str] = []
 
+    run.processor._journal.append = AsyncMock()  # type: ignore[method-assign]
+
     await run.processor._cancel_execution(
+        run.aggregate,  # type: ignore[arg-type]
         _EXECUTION_ID,
         "wf-1",
         run.phase_results,
@@ -3513,6 +3516,14 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
 
     artifact = _the_patch_artifact(artifacts)
     assert artifact.id in all_artifact_ids  # type: ignore[attr-defined]
+    # The landed ref is TOLD to the aggregate, not only written into prose:
+    # that command is what becomes the event the PR notice is posted from.
+    (call,) = run.aggregate.record_cancelled_work.call_args_list
+    (landed,) = call.args[0].quarantined
+    assert call.args[0].phase_id == _PHASE_ID
+    assert landed.ref == _QUARANTINE_REF
+    assert landed.ref in clone.origin_refs()
+    run.processor._journal.append.assert_awaited_with(run.aggregate)
 
 
 def test_records_come_from_the_gate_error_or_the_save_and_never_both() -> None:

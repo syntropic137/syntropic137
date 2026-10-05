@@ -32,6 +32,7 @@ class QuarantineNotice(BaseModel):
 
     execution_id: str
     phase_id: str
+    #: When the phase failed, or the save after its cancellation ran.
     failed_at: datetime
     quarantined: QuarantinedRef
     status: NoticeStatus = "pending"

@@ -136,6 +136,24 @@ it was deleted, force-pushed or moved, its PR was closed, or the forge could not
 be asked. Recorded with that reason on the resumed Execution's start; the Phase
 starts fresh and is told so. Never a silent omission. (#1513.)
 
+## Quarantine Ref
+
+Where a Phase's unpushed work is saved when the Phase ends without pushing it:
+`refs/syn/lost/<execution>/<phase>`, outside every branch, fetched only on
+purpose. A Quarantine Ref that LANDED is a fact on the Execution's stream: on
+`WorkflowFailed` for a failure, and on `CancelledWorkQuarantined` for a
+cancellation, which is recorded after the cancelled Phase's save has run
+because `ExecutionCancelled` is written before it. Each carries a diffstat of
+what the ref holds. The PR open from the Phase's branch is told once, by a
+Quarantine Notice. (#1547.)
+
+## Quarantine Notice
+
+The one comment a PR gets naming the Quarantine Ref its run left behind, edited
+rather than repeated when the Phase quarantines again. Owed until a PR exists
+to receive it; with none yet, it is asked again on every live pass, and the
+platform's clock tick guarantees a pass comes. (#1547.)
+
 ## Admission
 
 The decision that an operation may proceed, recorded before any work begins.

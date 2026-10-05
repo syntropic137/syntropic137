@@ -305,6 +305,20 @@ class CancelExecutionCommand:
         self.reason = reason
 
 
+class RecordCancelledWorkCommand:
+    """Command to record what a cancelled phase's save landed on quarantine refs (#1547)."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        quarantined: tuple[QuarantinedRef, ...],
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.quarantined = quarantined
+
+
 class InterruptExecutionCommand:
     """Command to forcefully interrupt a workflow execution mid-stream."""
 
