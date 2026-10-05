@@ -129,6 +129,31 @@ describe("pruneWorkflows", () => {
     expect(stdout.join("")).toContain("skipped: it has running executions");
   });
 
+  it("asks the server to archive only if it still attributes the workflow to this package", async () => {
+    server({ [OLD.id]: "implement" });
+
+    await pruneWorkflows([OLD], { packageName: "implement", prune: true, yes: true });
+
+    const sent = mockFetch.mock.calls.map((c) => c[0] as Request).filter((r) => r.method === "DELETE");
+    expect(sent.map((r) => new URL(r.url).searchParams.get("expected_package_name"))).toEqual(["implement"]);
+  });
+
+  it("a stale GET says ours but the server refuses with 'package mismatch': neither archived nor tracked", async () => {
+    // The read model still names "implement"; the aggregate has moved on.
+    server(
+      { [V3.id]: "implement" },
+      409,
+      JSON.stringify({
+        detail: "Package mismatch: workflow is installed by package 'implement-v3', not package 'implement'",
+      }),
+    );
+
+    const result = await pruneWorkflows([V3], { packageName: "implement", prune: true, yes: true });
+
+    expect(result).toEqual({ archived: [], retained: [], failed: [] });
+    expect(stdout.join("")).toContain("skipped: the server now records it under another package");
+  });
+
   it("treats a 409 'already archived' as archived, not as running", async () => {
     server({ [OLD.id]: "implement" }, 409, JSON.stringify({ detail: "Workflow is already archived" }));
     const result = await pruneWorkflows([OLD], { packageName: "implement", prune: true, yes: true });
