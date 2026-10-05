@@ -8,6 +8,7 @@ each is a place the value can be dropped; these tests read it at the far end.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -16,7 +17,11 @@ from unittest.mock import patch
 import pytest
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
-from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
+from syn_adapters.workspace_backends.agentic.teardown_usage import (
+    USAGE_FIELDS,
+    TeardownReportLike,
+    usage_from_report,
+)
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
@@ -124,4 +129,63 @@ async def test_a_provider_that_reports_nothing_maps_to_none() -> None:
         IsolationHandle(isolation_id="iso-1", isolation_type="docker")
     )
     assert usage is None
-    assert usage_from_report(object()) is None
+
+
+@dataclass(frozen=True)
+class _RenamedFieldReport:
+    """A provider that renamed `memory_peak_bytes`; every other field is valid."""
+
+    cpu_usage_seconds: float | None = 4.25
+    cpu_throttled_seconds: float | None = None
+    nr_throttled: int | None = 0
+    memory_peak: int | None = 123_456_789
+    oom_kills: int | None = 1
+    disk_bytes_at_teardown: int | None = 2048
+    delete_failures: tuple[str, ...] | None = ()
+    net_rx_bytes: int | None = 10
+    net_tx_bytes: int | None = 20
+
+
+def test_a_mismatched_report_is_logged_and_keeps_what_it_carries(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        usage = usage_from_report(_RenamedFieldReport())
+
+    assert usage == WorkspaceUsage(
+        cpu_usage_seconds=4.25,
+        nr_throttled=0,
+        memory_peak_bytes=None,
+        oom_kills=1,
+        disk_bytes_at_teardown=2048,
+        delete_failures=(),
+        net_rx_bytes=10,
+        net_tx_bytes=20,
+    )
+    mismatch = [r for r in caplog.records if "TeardownReportLike" in r.getMessage()]
+    assert len(mismatch) == 1
+    assert "_RenamedFieldReport" in mismatch[0].getMessage()
+    assert "memory_peak_bytes" in mismatch[0].getMessage()
+
+
+def test_a_report_with_no_known_field_is_logged_not_silent(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert usage_from_report(object()) is None
+    assert any("TeardownReportLike" in r.getMessage() for r in caplog.records)
+
+
+def test_an_absent_report_is_not_a_mismatch(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert usage_from_report(None) is None
+    assert not caplog.records
+
+
+def test_the_protocol_names_exactly_the_usage_fields() -> None:
+    # The Protocol and `WorkspaceUsage` are two hand-written lists of the same
+    # nine names; this pins them so neither can drift alone.
+    members = {
+        name for name, value in vars(TeardownReportLike).items() if isinstance(value, property)
+    }
+    assert members == set(USAGE_FIELDS)

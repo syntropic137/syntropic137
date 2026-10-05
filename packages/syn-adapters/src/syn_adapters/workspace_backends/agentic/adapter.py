@@ -356,9 +356,10 @@ class AgenticIsolationAdapter:
             return None
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
-        # `object`: the pinned provider returns None today and a
-        # `TeardownReport` once agentic-workspace ships it; the Protocol in
-        # `teardown_usage` is the contract, not the provider's annotation.
+        # `object`: the pinned provider is annotated `-> None`, so pyright
+        # cannot check its report against `TeardownReportLike` yet; a field
+        # mismatch is logged at runtime by `usage_from_report` instead. Once
+        # agentic-workspace types `destroy` against the Protocol, drop this.
         report: object = await self._provider.destroy(workspace)  # type: ignore[arg-type,func-returns-value]  # Workspace vs AgenticWorkspace adapter boundary
         return usage_from_report(report)
 
