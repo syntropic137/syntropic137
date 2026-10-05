@@ -27,7 +27,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import inventory_lifecycle
+from syn_api.services import cpu_throttling, inventory_lifecycle
 from syn_api.services.admission_announcement import (
     announce_admission_if_open,
     start_disk_recovery_watch,
@@ -45,6 +45,7 @@ from syn_api.services.reconciliation import (
 )
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import (
+    DbPoolHealth,
     Err,
     HealthResponse,
     LifecycleError,
@@ -337,6 +338,10 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
     # Unconditional and never probed: an operator or an agent asking "which
     # build is this?" must get an answer from a degraded deployment too, since
     # that is precisely when the question gets asked (#1380).
+    # Pool gauges first, before anything awaits the database: they exist to
+    # show a pool stall, so they must describe the moment of the request and
+    # must not wait behind a probe that the same stall is holding up (#1583).
+    db_pools = DbPoolHealth.snapshot() or None
     subscription, read_path_reasons = await _describe_subscription_health()
     disk, disk_reasons = describe_disk_health()
     degraded_reasons = [*_state.degraded_reasons, *read_path_reasons, *disk_reasons]
@@ -353,6 +358,8 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             codex_auth=codex_auth,
             warnings=warnings or None,
             disk=disk,
+            db_pools=db_pools,
+            cpu_throttling=cpu_throttling.read_cpu_throttling(),
         )
     )
 
@@ -570,6 +577,11 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
+#: Bound on /health's DB-backed read-model lag probe. Well inside the 5s
+#: timeout the compose healthchecks give /health as a whole.
+_LAG_PROBE_TIMEOUT_S = 2.0
+
+
 async def _describe_subscription_health() -> SubscriptionHealthResult:
     """The read-path block of /health, and any degraded reasons it raises.
 
@@ -599,14 +611,21 @@ async def _describe_subscription_health() -> SubscriptionHealthResult:
     field's job is to describe the read path and "healthy" was the lie.
 
     Never raises. A lag probe that can take /health down is worse than no probe,
-    so any failure degrades to reporting the subscription as unknown.
+    so any failure degrades to reporting the subscription as unknown. Nor may it
+    hang: the probe reads the database, so a stalled pool or database would hold
+    /health past every liveness timeout and hide the pool gauges reported beside
+    it, exactly when they are needed (#1583). Past ``_LAG_PROBE_TIMEOUT_S`` it
+    is abandoned and reported as unknown, like any other failure.
     """
     if _state.subscription_service is None:
         return None, ()
 
     try:
         sub_status = _state.subscription_service.get_status()
-        lag = await _state.subscription_service.describe_read_model_lag()
+        lag = await asyncio.wait_for(
+            _state.subscription_service.describe_read_model_lag(),
+            timeout=_LAG_PROBE_TIMEOUT_S,
+        )
         verdict = _judge_read_path(running=sub_status.running, lag=lag)
 
         health = SubscriptionHealth(

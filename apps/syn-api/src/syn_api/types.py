@@ -80,11 +80,13 @@ from syn_api.inventory_types import TranscriptDeletionResponse as TranscriptDele
 from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdentityRequest
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
+from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
     DelegationFailure,
     EvalId,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
     SideEffectStatus,
@@ -737,6 +739,12 @@ class ExecutionDetail(BaseModel):
     Distinct from `unknown`, which is the word a phase writes to say it could
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
+    """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
     """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
@@ -1579,6 +1587,12 @@ class ExecutionDetailFull(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
+    """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
 
@@ -2211,6 +2225,33 @@ class DiskSpaceHealth(BaseModel):
     )
 
 
+class DbPoolHealth(BaseModel):
+    """One Postgres connection pool in this API process, at the moment of asking (#1583).
+
+    ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+    requests are queueing for a connection rather than for the database itself.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="What the pool serves, e.g. 'projections' or 'agent_events'.")
+    size: int = Field(description="Connections currently open.")
+    max_size: int = Field(description="Most connections the pool will open.")
+    in_use: int = Field(description="Connections checked out right now.")
+    waiting: int = Field(description="Callers blocked waiting for a connection right now.")
+
+    @classmethod
+    def snapshot(cls) -> list[DbPoolHealth]:
+        """Every open pool, read from in-process counters only.
+
+        Costs nothing and cannot hang on the database it describes, so /health
+        can always report it.
+        """
+        from syn_adapters.postgres_pool import pool_stats
+
+        return [cls.model_validate(stats, from_attributes=True) for stats in pool_stats()]
+
+
 class HealthResponse(_OmitsAbsentFields):
     """Payload of ``GET /health``.
 
@@ -2263,6 +2304,17 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Free space on the workspace volume (#1560). Omitted only when "
         "the probe itself could not be built.",
+    )
+    db_pools: list[DbPoolHealth] | None = Field(
+        default=None,
+        description="Every open Postgres pool in this process, by name. Omitted when none "
+        "is open, e.g. in offline mode.",
+    )
+    cpu_throttling: CpuThrottling | None = Field(
+        default=None,
+        description="How often the API container hit its CPU limit (#1600). Always present "
+        "once the gate is ready, with status 'unknown' when the cgroup does not say; "
+        "omitted only while the gate is withholding the API.",
     )
 
 

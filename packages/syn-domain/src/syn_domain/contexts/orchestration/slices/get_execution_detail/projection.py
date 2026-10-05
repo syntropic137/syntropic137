@@ -508,6 +508,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 "error_message": event_data.get("error_message"),
                 "failure_classification": classification.value,
                 "reported_failure_reason": reported_value,
+                "quarantined_refs": event_data.get("quarantined_refs") or [],
                 "delegation_failure": delegation_value,
                 "completed_phases": event_data.get("completed_phases", 0),
                 "total_phases": event_data.get("total_phases", 0),
@@ -523,6 +524,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # and stranding the whole read model.
             existing["failure_classification"] = classification.value
             existing["reported_failure_reason"] = reported_value
+            # Where the failed phase's unpushed work landed (#1547). New events
+            # only carry it, so no replay is needed: older rows read as none.
+            existing["quarantined_refs"] = event_data.get("quarantined_refs") or []
             existing["delegation_failure"] = delegation_value
             existing["completed_phases"] = self._completed_phases_after(
                 event_data, existing.get("completed_phases", 0)

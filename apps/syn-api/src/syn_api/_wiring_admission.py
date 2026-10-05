@@ -469,16 +469,30 @@ class BackgroundWorkflowDispatcher:
             # #1387: carry the gate's answer in rather than asking again. This
             # runs after the caller was told the work started, so a second
             # refusal here could only lose the execution, never prevent it.
-            await self._handler.handle(cmd, admitted=admitted)
+            result = await self._handler.handle(cmd, admitted=admitted)
         except DuplicateExecutionError:
             logger.info(
                 "Duplicate dispatch for execution %s, already running",
                 execution_id,
             )
+            return
         except Exception:
             logger.exception(
                 "Background workflow execution raised exception",
                 extra={"workflow_id": workflow_id, "execution_id": execution_id},
+            )
+            return
+        if result.unrecorded_work_error is not None:
+            # #1547: a trigger has no caller to hand an error to, so this log is
+            # the report. It is also the only place outside process memory that
+            # names the refs until the processor's next settle records them.
+            logger.error(
+                "Workflow execution failed",
+                extra={
+                    "execution_id": result.execution_id,
+                    "workflow_id": workflow_id,
+                    "error": result.unrecorded_work_error,
+                },
             )
 
     async def shutdown(self) -> None:

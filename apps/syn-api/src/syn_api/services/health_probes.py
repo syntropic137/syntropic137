@@ -1,8 +1,7 @@
-"""Probes behind optional /health blocks.
+"""Per-instance probes that /health reports and that need no lifecycle state.
 
-Each one never raises: a probe that could take /health down is worse than an
-omitted block, so any failure degrades to None. Moved out of lifecycle.py,
-which owns startup and shutdown, when the disk probe (#1560) arrived.
+Kept apart from ``lifecycle`` so ``health_check`` there only assembles the
+response; each probe here answers one question and never raises.
 """
 
 from __future__ import annotations

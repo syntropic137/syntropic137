@@ -27,11 +27,13 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CompleteExecutionCommand,
     FailExecutionCommand,
+    RecordCancelledWorkCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionMetrics,
     FailureClassification,
     PhaseUsage,
+    QuarantinedRef,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_exception,
@@ -42,6 +44,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_notice import (
+    quarantined_refs,
 )
 
 if TYPE_CHECKING:
@@ -61,6 +66,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
         ObservedBranches,
+        QuarantinedWork,
         SavedWork,
     )
     from syn_shared.upstream_failure import UpstreamFailureKind
@@ -178,6 +184,10 @@ class PhaseFailure:
     separately which ids belong to the failed phase is how they would come to
     disagree."""
 
+    quarantined: tuple[QuarantinedRef, ...] = ()
+    """The failing phase's work that landed on a quarantine ref (#1547), as
+    data rather than the paragraph `reason` already carries about it."""
+
     def as_command(
         self, execution_id: str, *, completed_phases: int, total_phases: int
     ) -> FailExecutionCommand:
@@ -205,6 +215,7 @@ class PhaseFailure:
             exit_code=self.exit_code,
             failed_phase_artifact_ids=self.artifact_ids,
             failed_phase_usage=self.usage,
+            quarantined=self.quarantined,
             classification=self.classification,
             reported_failure_reason=self.reported_failure_reason,
             upstream_failure_kind=self.upstream_failure_kind,
@@ -259,6 +270,8 @@ def failed_phase_outcome(
     kept_artifact_ids: Sequence[str] = (),
     usage: PhaseUsage | None = None,
     saved: SavedWork | None = None,
+    quarantined: Sequence[QuarantinedWork] = (),
+    repositories: Sequence[str] = (),
 ) -> PhaseFailure:
     """What a failed run reports, derived from the exception that ended it.
 
@@ -329,6 +342,7 @@ def failed_phase_outcome(
         upstream_failure_kind=account.upstream,
         delegation_failure=account.delegation_failure,
         observed_branches=observed.recorded if observed is not None else None,
+        quarantined=quarantined_refs(quarantined, observed, repositories),
         phase_id=phase_id,
         exit_code=exit_code,
         artifact_ids=kept,
@@ -580,6 +594,17 @@ class CancelledExecution:
     reason: str
     phase_results: list[PhaseResult]
     artifact_ids: list[str]
+    quarantined: tuple[QuarantinedRef, ...] = ()
+    """The cancelled phase's work that landed on a quarantine ref (#1547), as
+    data rather than the paragraph `reason` already carries about it."""
+
+    def as_command(self, execution_id: str, phase_id: str | None) -> RecordCancelledWorkCommand:
+        """What the aggregate is told the save landed. Nothing, and it records nothing."""
+        return RecordCancelledWorkCommand(
+            execution_id=execution_id,
+            phase_id=phase_id or "",
+            quarantined=self.quarantined if phase_id else (),
+        )
 
     def execution_result(
         self,
@@ -587,9 +612,14 @@ class CancelledExecution:
         execution_id: str,
         *,
         started_at: DateTime,
+        recorded: bool = True,
         now: DateTime | None = None,
     ) -> WorkflowExecutionResult:
-        """The result the execution hands back to its caller."""
+        """The result the execution hands back to its caller.
+
+        Not ``recorded``: neither store took the landed refs, so the result
+        names them as unrecorded rather than reading as a handled cancel.
+        """
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -600,6 +630,7 @@ class CancelledExecution:
             artifact_ids=self.artifact_ids,
             metrics=ExecutionMetrics.from_results(self.phase_results),
             error_message=self.reason,
+            unrecorded_work=() if recorded else self.quarantined,
         )
 
 
@@ -608,6 +639,7 @@ def cancelled_execution(
     phase_results: list[PhaseResult],
     artifact_ids: list[str],
     saved: SavedWork | None = None,
+    repositories: Sequence[str] = (),
 ) -> CancelledExecution:
     """Name what was cancelled and why, before anything is torn down.
 
@@ -624,4 +656,7 @@ def cancelled_execution(
         reason=said,
         phase_results=phase_results,
         artifact_ids=artifact_ids,
+        quarantined=quarantined_refs(
+            saved.quarantined if saved is not None else (), None, repositories
+        ),
     )

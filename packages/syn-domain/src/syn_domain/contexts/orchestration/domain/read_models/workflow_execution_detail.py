@@ -4,14 +4,18 @@ Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
 at the API boundary from the execution_cost projection.
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from pydantic import ValidationError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
     DelegationFailure,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
     SideEffectStatus,
@@ -19,6 +23,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     TASK_INPUT_KEY,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -334,6 +340,12 @@ class WorkflowExecutionDetail:
     it.
     """
 
+    quarantined_refs: tuple[QuarantinedRef, ...] = ()
+    """Where the failed phase's unpushed work landed, one per repository (#1547).
+
+    Empty for a run that quarantined nothing, and for every failure recorded
+    before the field existed: the refs were prose in `error_message` then.
+    """
     delegation_failure: DelegationFailure | None = None
     """Which required delegate did not happen, and why (#894), `None` for every
     other failure. A platform observation: its reason and the attempts the
@@ -433,6 +445,7 @@ class WorkflowExecutionDetail:
             reported_failure_reason=ReportedFailureReason.from_stored(
                 data.get("reported_failure_reason")
             ),
+            quarantined_refs=read_quarantined_refs(data.get("quarantined_refs")),
             review_verdict=ReviewVerdict.from_stored(data.get("review_verdict")),
             delegation_failure=DelegationFailure.from_stored(data.get("delegation_failure")),
             repos=tuple(data.get("repos", [])),
@@ -473,6 +486,7 @@ class WorkflowExecutionDetail:
             "reported_failure_reason": (
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
+            "quarantined_refs": [r.model_dump(mode="json") for r in self.quarantined_refs],
             "review_verdict": None if self.review_verdict is None else self.review_verdict.value,
             "delegation_failure": (
                 None
@@ -512,3 +526,18 @@ def _observed_branches(stored: object) -> tuple[BranchObservation, ...] | None:
     if not isinstance(stored, list):
         return None
     return tuple(BranchObservation.model_validate(entry) for entry in stored)
+
+
+def read_quarantined_refs(raw: object) -> tuple[QuarantinedRef, ...]:
+    """Stored quarantine refs as typed refs; an unreadable row reads as none (#1547).
+
+    Logged rather than raised, for the reason every `from_stored` here exists:
+    one bad row must not strand the whole read model.
+    """
+    if not isinstance(raw, list):
+        return ()
+    try:
+        return tuple(QuarantinedRef.model_validate(r) for r in raw)
+    except ValidationError:
+        logger.warning("Unreadable quarantined_refs on an execution detail; treating as none")
+        return ()

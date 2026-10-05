@@ -99,6 +99,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionStatus,
     FailureClassification,
     PhaseUsage,
+    QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
     SideEffectStatus,
@@ -163,6 +164,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     AttemptClock,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+    CancelledWorkLedger,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     CredentialRenewalFailedError,
     DuplicateExecutionError,
@@ -175,6 +179,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
     validate_phase_declarations,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    ExecutionJournal,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
@@ -214,6 +221,10 @@ from syn_domain.contexts.orchestration.slices.execution_cost.query_service impor
 from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
     GlobalClaudePluginEntry,
     GlobalClaudePluginNotFoundError,
+)
+from syn_domain.contexts.orchestration.slices.notify_quarantine import (
+    PullRequestCommenter,
+    QuarantineNoticeProcessManager,
 )
 from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
@@ -268,6 +279,7 @@ __all__ = [
     # The clock a phase's retry budget is measured on (#1303)
     "AttemptClock",
     # Claude plugin types + errors (issue #726)
+    "CancelledWorkLedger",
     "ClaudePluginError",
     "ClaudePluginInvalidName",
     "ClaudePluginInvalidPath",
@@ -299,6 +311,7 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionJournal",
     # Value objects - workspace
     "ExecutionResult",
     "ExecutionResumedEvent",
@@ -323,6 +336,9 @@ __all__ = [
     "PhaseExecutionType",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "PullRequestCommenter",
+    "QuarantineNoticeProcessManager",
+    "QuarantinedRef",
     "ReclaimableDir",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
