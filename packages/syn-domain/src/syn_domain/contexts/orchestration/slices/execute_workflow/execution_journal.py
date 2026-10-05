@@ -54,9 +54,8 @@ class EventsNotRecordedError(RuntimeError):
     THE ONE THING A CALLER ON A TEARDOWN PATH HAS TO KNOW (#1319). `append` is
     two steps - the store, then this run's local to-do list - and they fail for
     opposite reasons. A save that was not acknowledged means the events cannot
-    be counted on and nothing downstream will see them projected; a projection
-    that blew up afterwards means they DO exist and only the read model is
-    behind.
+    be counted on either way; a projection that blew up afterwards means they
+    DO exist and only the read model is behind.
 
     Not acknowledged is not the same as not written. Only a
     `ConcurrencyConflictError` cause proves the store wrote nothing; any other
@@ -111,7 +110,7 @@ class ExecutionJournal:
             await self._repository.save(aggregate)
         except Exception as err:
             raise EventsNotRecordedError(
-                f"event store rejected the write for execution {aggregate.id}: {err}"
+                f"event store did not acknowledge the write for execution {aggregate.id}: {err}"
             ) from err
         await self._project(uncommitted)
 

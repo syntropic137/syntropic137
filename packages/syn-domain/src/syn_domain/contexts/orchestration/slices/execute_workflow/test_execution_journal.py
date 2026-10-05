@@ -357,3 +357,25 @@ def test_adr_072_d5_claims_no_write_only_for_a_version_conflict() -> None:
     for sentence in re.split(r"(?<=\.)\s+", prose):
         if "`EventsNotRecordedError`" in sentence and _NO_WRITE.search(sentence):
             assert "`ConcurrencyConflictError`" in sentence, sentence
+
+
+_NOT_SEEN = re.compile(
+    r"nothing downstream will|never (?:be )?(?:seen|projected)|rejected the write"
+)
+
+
+@pytest.mark.unit
+def test_events_not_recorded_error_never_promises_the_events_are_absent() -> None:
+    """What a caller reads on the exception is what the ADR says, and no more.
+
+    The docstring once said an unacknowledged save meant nothing downstream
+    would see the events projected, two sentences before saying the store may
+    have committed them; the message said the store "rejected" the write. Both
+    told a reconciler it could append again without reloading.
+    """
+    texts = [" ".join((EventsNotRecordedError.__doc__ or "").split())]
+    source = Path(__file__).with_name("execution_journal.py").read_text()
+    (message,) = re.findall(r'raise EventsNotRecordedError\(\s*f"([^"]*)"', source)
+    texts.append(message)
+    for text in texts:
+        assert not _NOT_SEEN.search(text), text

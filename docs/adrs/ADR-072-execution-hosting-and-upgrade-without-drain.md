@@ -280,12 +280,20 @@ claim was traced:
 |---|---|---|
 | `get_pending(execution_id)` in the processor's drain loop | `execution_todo` | **Replaced** by a run-scoped fold (D8). An empty list is read as "done", so this one is critical. |
 | `inherited_outputs(...)` at the start of a resume | `artifact_list` | **Resumes only.** If it fails at claim, the row returns to `admitted` with `retry_at` backoff; after K attempts it fails with a reason naming the read model. Fresh starts do not call it. |
-| `ArtifactCollector` fallback for completed phases missing from the run's cache | `artifact_list` | Not reached within one executor run, since every completed phase is in that run's cache. Recorded as a dependency to revisit if mid-run reattach is ever built. |
+| `ArtifactCollector` fallback for completed phases missing from the run's cache | `artifact_list` | **Reached within one fresh run**, for every completed phase that recorded no primary output and no files. `PhaseOutputCache.record` stores empty results nowhere (`processor_types.py:60-67`), so `_resolve_phase_outputs` sends that phase to the projection (`ArtifactCollector.py:352-358`). Not replaced. See the claim below. |
 | Cancel and inject signals | none (Redis signal queue) | unchanged |
 
-**The claim, in exactly these words:** a projection replay does not stall or
-corrupt a **running fresh** execution. It can delay the **claim of a resume**
-until `artifact_list` is readable. It never delays the claim of a fresh start,
+**The claim, in exactly these words:** a projection replay does not stall a
+**running fresh** execution's to-do list, which no longer reads a shared read
+model (D8). It does reach one read: a completed phase that left nothing in the
+run's `PhaseOutputCache` is resolved from `artifact_list`, and during a replay
+that projection can be behind, so the next phase can inherit fewer files from
+that phase than it produced. Phases whose output is in the cache are never
+affected. This design does not close that gap; closing it means recording an
+empty result as authoritative, which `PhaseOutputCache.record` deliberately
+does not do (`processor_types.py:61-63`), and is a change to that rule, not to
+hosting. A replay can also delay the **claim of a resume** until
+`artifact_list` is readable. It never delays the claim of a fresh start,
 because discovery reads `execution_runs`.
 
 How long a replay delays a resume claim is measured, not assumed:
@@ -322,6 +330,44 @@ bump (a whole-codebase static property, so `ci/fitness/`), and
 `just check-event-compat` parses payloads across the previous release's
 `syn-domain` in both directions. Deploy order is then latency, not correctness:
 upgrade executors first.
+
+**Admission is not the last write.** The API appends to executions it did not
+admit: eval attach and detach (`apps/syn-api/src/syn_api/routes/evals.py:130`,
+`:153`), tag add and remove (`apps/syn-api/src/syn_api/routes/tags.py:126`,
+`:145`), resume (`apps/syn-api/src/syn_api/routes/executions/resume.py:112`)
+and reconciliation (`apps/syn-api/src/syn_api/services/reconciliation.py:217`).
+Checking the epoch only at admission would let a newer API add an event to an
+older `admitted` row that an older executor then claims and cannot load. So the
+rule is on every append, not on admission:
+
+> **The row's `writer_epoch` is the newest epoch of any event in the stream.**
+> A writer whose epoch is higher raises it, with one guarded UPDATE, **before**
+> it appends.
+
+Claim records the claimant's epoch on the row as `claimer_epoch`. The raise is
+`SET writer_epoch = GREATEST(writer_epoch, :mine)`, and its guard decides by
+row state:
+
+| Row state | Append from a newer epoch |
+|---|---|
+| `opening`, `admitted`, `abandoned` | Raise, then append. An older executor no longer claims the row; it waits, visibly, as at admission. |
+| `claimed` | Allowed only if `:mine <= claimer_epoch`. Otherwise the raise matches no row and the append is refused with 409, naming both epochs: the running executor reloads its aggregate and could not read the event. Retry after that executor is upgraded or the run ends. |
+| `fencing`, `reaped` | Reconciliation claims these rows under the same rule as a run: it acts only on rows with `writer_epoch <=` its own epoch, so it never loads what it cannot read. |
+| `done`, `interrupted`, or no row | No executor loads the stream again; no constraint. |
+
+Raise-then-append crosses the same two stores as D5 and is ordered the same
+way: a crash between them leaves a raised epoch and no event, which can only
+delay a claim, never let an old executor mis-read. The raise and the claim are
+single UPDATEs on one row, so they serialise: a claim that wins is seen by the
+raise as `claimed`, and a raise that wins is seen by the claim as too new.
+
+**Enforced in one place:** the repository every one of those routes gets from
+`get_workflow_execution_repository()`
+(`packages/syn-adapters/src/syn_adapters/storage/repositories.py:182`) is
+wrapped so its `save` performs the raise first. A route cannot append to an
+execution without passing the gate, and no route has to know the gate exists.
+An executor's own appends pass it trivially, since it writes at its own epoch
+and that is its `claimer_epoch`.
 
 ### D10. Upgrade without drain
 
