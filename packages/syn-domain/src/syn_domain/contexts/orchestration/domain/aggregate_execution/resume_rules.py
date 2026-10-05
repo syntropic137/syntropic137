@@ -124,22 +124,35 @@ def refuse_resume(
     """
     if execution_id is None:
         return "Cannot resume an execution that has not been started"
-    if status is ExecutionStatus.CANCELLED:
-        if not override_cancellation:
-            return (
-                f"Cannot resume execution {execution_id}: it was cancelled, and "
-                "resuming a cancelled execution needs an explicit override"
-            )
-    elif status is ExecutionStatus.COMPLETED:
-        if repair_point is None:
-            return f"Cannot resume execution in status {status}"
-    elif status not in RESUMABLE_STATUSES:
-        return f"Cannot resume execution in status {status}"
+    refusal = _refuse_status(execution_id, status, override_cancellation, repair_point)
+    if refusal is not None:
+        return refusal
     if resumed:
         named = resume_execution_id or "an execution this stream does not name"
         return f"Execution {execution_id} has already been resumed as {named}"
     if not requested_resume_id or requested_resume_id == execution_id:
         return f"A resume needs an execution id of its own, got {requested_resume_id!r}"
+    return None
+
+
+def _refuse_status(
+    execution_id: str,
+    status: ExecutionStatus,
+    override_cancellation: bool,
+    repair_point: str | None,
+) -> str | None:
+    """Why a parent in ``status`` may not be resumed, or None if its status allows it."""
+    if status is ExecutionStatus.CANCELLED:
+        if override_cancellation:
+            return None
+        return (
+            f"Cannot resume execution {execution_id}: it was cancelled, and "
+            "resuming a cancelled execution needs an explicit override"
+        )
+    if status is ExecutionStatus.COMPLETED and repair_point is not None:
+        return None
+    if status not in RESUMABLE_STATUSES:
+        return f"Cannot resume execution in status {status}"
     return None
 
 
