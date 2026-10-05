@@ -152,3 +152,113 @@ class TestGatewayOnly:
         )
         assert proc.returncode != 0
         assert "--service" in proc.stderr
+
+
+_BRANCH = 'if [ "$SERVICE" = gateway ]; then'
+
+
+def _gateway_branch() -> str:
+    """The gateway-only swap and verify, verbatim, from its `if` to its `fi`."""
+    lines = _SCRIPT.read_text().splitlines()
+    (start,) = [i for i, line in enumerate(lines) if line == _BRANCH]
+    end = next(i for i in range(start, len(lines)) if lines[i] == "fi")
+    return "\n".join(lines[start : end + 1])
+
+
+def _function(name: str) -> str:
+    lines = _SCRIPT.read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"{name}() {{"))
+    end = next(i for i in range(start, len(lines)) if lines[i] == "}")
+    return "\n".join(lines[start : end + 1])
+
+
+def _run_branch(
+    tmp: Path,
+    *,
+    running_image: str = "sha256:new",
+    running: str = "true",
+    health_fails: int = 0,
+    ssh_down: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run the branch for real (DRY=0) with `remote` and `api` playing the
+    host and the API. Every remote and api call is logged, in order."""
+    log = tmp / "calls"
+    preamble = f"""
+set -euo pipefail
+TAG=v0.33.2-beta.9; SERVICE=gateway; DRY=0; HOST=fake-host; API=http://fake/api/v1
+COMPOSE_DIR=/root/.syntropic137; COMPOSE=docker-compose.syntropic137.yaml; TMP={tmp}
+RECOVERY=""; T0=$(date +%s)
+step() {{ printf '==> %s\\n' "$*"; }}
+die() {{
+    printf 'PIT STOP ABORTED: %s\\n' "$*" >&2
+    if [ -n "$RECOVERY" ]; then printf '%s\\n' "$RECOVERY" >&2; fi
+    exit 1
+}}
+run() {{ "$@"; }}
+sleep() {{ :; }}
+remote() {{
+    echo "remote $*" >> {log}
+    if [ {int(ssh_down)} = 1 ]; then echo "ssh: connect timed out" >&2; return 255; fi
+    case "$*" in
+        *"docker compose"*) echo " Container syn137-gateway  Started" ;;
+        *"docker image inspect ghcr.io/syntropic137/syn-gateway:"*) echo sha256:new ;;
+        *"docker inspect syn137-gateway --format '{{{{.Image}}}}'"*) echo {running_image} ;;
+        *"docker inspect syn137-gateway --format '{{{{.State.Running}}}}'"*) echo {running} ;;
+        *) echo "unexpected remote: $*" >&2; return 99 ;;
+    esac
+}}
+api() {{
+    echo "api $1" >> {log}
+    n=$(grep -c '^api ' {log})
+    [ "$n" -gt {health_fails} ]
+}}
+maintenance() {{ echo "maintenance $1" >> {log}; }}
+{_function("swapped_is_running")}
+"""
+    proc = subprocess.run(
+        ["bash", "-c", preamble + _gateway_branch()],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    return proc, log.read_text().splitlines() if log.exists() else []
+
+
+class TestGatewayOnlyLive:
+    def test_swaps_and_verifies_without_touching_the_api_or_admission(self, tmp_path: Path) -> None:
+        proc, calls = _run_branch(tmp_path, health_fails=2)
+        assert proc.returncode == 0, proc.stderr
+        assert "PIT STOP DONE: syn-gateway v0.33.2-beta.9" in proc.stdout
+        compose = [c for c in calls if "docker compose" in c]
+        assert compose == [
+            "remote cd /root/.syntropic137 && docker compose -f "
+            "docker-compose.syntropic137.yaml up -d --no-deps gateway"
+        ]
+        assert not [c for c in calls if "syn137-api" in c or "syn-api" in c]
+        assert not [c for c in calls if c.startswith("maintenance")]
+        # /health, retried until the new gateway routes; never /version.
+        assert [c for c in calls if c.startswith("api ")] == ["api /health"] * 3
+
+    def test_a_gateway_on_the_old_image_fails_verify(self, tmp_path: Path) -> None:
+        proc, _ = _run_branch(tmp_path, running_image="sha256:old")
+        assert proc.returncode != 0
+        assert "syn137-gateway is not running the image tagged" in proc.stderr
+        assert "admission was never paused" in proc.stderr
+
+    def test_a_gateway_that_is_not_running_fails_verify(self, tmp_path: Path) -> None:
+        proc, _ = _run_branch(tmp_path, running="false")
+        assert proc.returncode != 0
+        assert "syn137-gateway is not running after the swap" in proc.stderr
+
+    def test_health_that_never_answers_fails_verify(self, tmp_path: Path) -> None:
+        proc, _ = _run_branch(tmp_path, health_fails=100)
+        assert proc.returncode != 0
+        assert "did not answer 200 through the new gateway" in proc.stderr
+
+    def test_losing_the_host_aborts_through_die_with_the_recovery(self, tmp_path: Path) -> None:
+        proc, _ = _run_branch(tmp_path, ssh_down=True)
+        assert proc.returncode != 0
+        assert "PIT STOP ABORTED" in proc.stderr
+        assert "up -d --no-deps gateway" in proc.stderr
