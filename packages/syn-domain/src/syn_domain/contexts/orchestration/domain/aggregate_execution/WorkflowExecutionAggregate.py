@@ -722,12 +722,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
     @command_handler("RecordCancelledWorkCommand")
     def record_cancelled_work(self, command: RecordCancelledWorkCommand) -> None:
-        """Record the work a cancelled phase's save landed. Nothing landed, no event.
+        """Record what a cancelled phase's save landed, as ONE fact for the PR (#1547).
 
-        Already recorded, no event either: a recovery whose append reached the
-        store but whose owed row survived appends again, and the PR and every
-        other reader must still see ONE fact (#1547).
-        """
+        No event when nothing landed, or when a recovery re-appends work already recorded."""
         if self._status != ExecutionStatus.CANCELLED:
             msg = f"Cannot record cancelled work in status {self._status}"
             raise ValueError(msg)

@@ -31,6 +31,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     UpstreamRetryPolicy,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown import (
+    record_cancel_and_release,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
     CancelledWorkLedger,
 )
@@ -54,7 +57,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation 
     completion_failure,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
-    cancelled_execution,
     completed_execution,
     completed_phase,
     failed_phase_outcome,
@@ -560,43 +562,19 @@ class WorkflowExecutionProcessor:
         is: with concurrent runs sharing this processor, anything else could
         name another execution's phase.
         """
-        runtime = self._runtimes.of(execution_id)
-        session_ids = runtime.timings().session_ids
-        # BEFORE the teardown below. `abandon_all` destroys the cancelled
-        # phase's container and commits that exist only in it go with it. The
-        # user asked for the run to stop, not for the work to be deleted
-        # (#1231).
-        try:
-            saved = await runtime.save_unpushed_work(phase_id, execution_id=execution_id)
-            # The workflow changes the rescue could not push, stored while
-            # this is still the run that knows them (#1437). No inputs: they
-            # are read only to provision, and storing an artifact is not that.
-            dropped = await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
-                saved.quarantined,
-                workflow_id=workflow_id,
-                phase_id=phase_id,
-                execution_id=execution_id,
-                session_id=session_ids.get(phase_id or "", ""),
-            )
-            all_artifact_ids.extend(i for i in dropped if i not in all_artifact_ids)
-            cancellation = cancelled_execution(
-                cancel_reason,
-                phase_results,
-                all_artifact_ids,
-                saved=saved,
-                repositories=[c.repository for c in aggregate.start_pins.source_commits],
-            )
-            command = cancellation.as_command(execution_id, phase_id)
-            recorded = await self._cancelled_work.record(aggregate, command)
-            try:
-                await runtime.report_cancelled(cancellation.reason)
-            except Exception:
-                logger.exception("Could not close the cancelled sessions of %s", execution_id)
-            return cancellation.execution_result(
-                workflow_id, execution_id, started_at=started_at, recorded=recorded
-            )
-        finally:
-            await runtime.abandon_all("cancel")
+        return await record_cancel_and_release(
+            aggregate=aggregate,
+            runtime=self._runtimes.of(execution_id),
+            workspaces=self._workspaces_for(execution_id, {}),
+            ledger=self._cancelled_work,
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            cancel_reason=cancel_reason,
+            phase_results=phase_results,
+            all_artifact_ids=all_artifact_ids,
+            started_at=started_at,
+        )
 
     async def _complete_execution(
         self,
