@@ -73,7 +73,7 @@ def _tools_flag(cmd: list[str]) -> list[str] | None:
 
 
 async def _claude_commands(template: _Template) -> dict[str, list[str]]:
-    from syn_api._wiring import _build_claude_command
+    from syn_api._wiring_agent_command import _build_claude_command
 
     phases = await _handler()._get_executable_phases(cast("object", template))  # type: ignore[arg-type]
     return {

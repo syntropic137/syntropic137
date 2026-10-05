@@ -233,6 +233,7 @@ class FakeAgentExecutionHandler:
             # the real handler does, so processor tests see what production
             # records about the phase's write-backs.
             reported_side_effects=stream_result.verdict.reported_side_effects,
+            reported_review_verdict=stream_result.verdict.reported_review_verdict,
         )
         return AgentExecutionResult(
             stream_result=stream_result,

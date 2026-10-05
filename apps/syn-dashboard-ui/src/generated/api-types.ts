@@ -1312,6 +1312,9 @@ export interface paths {
          *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
          *     GitHub API without requiring a webhook URL. Stale data is kept as a
          *     fallback if the GitHub API is unreachable during refresh.
+         *
+         *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
+         *     the App's reach (``complete``) or merely went unseen because GitHub failed.
          */
         get: operations["list_accessible_repos_endpoint_github_repos_get"];
         put?: never;
@@ -2235,6 +2238,12 @@ export interface paths {
         /**
          * Health
          * @description Health check endpoint with detailed subscription status.
+         *
+         *     This is the container's LIVENESS check (#1575): while the gate withholds
+         *     the API it answers 200 with the gate's phase - "starting", or "failed"
+         *     in the moment between a late startup failure and the process exiting -
+         *     without probing anything startup has not built. "healthy" is what
+         *     readiness waits for, so it is only ever said once the gate is ready.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -3077,6 +3086,56 @@ export interface components {
          * @enum {string}
          */
         DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
+        /**
+         * DelegationAttempt
+         * @description One delegate the phase's agent launched, as the platform observed it.
+         */
+        DelegationAttempt: {
+            /** Delegate Id */
+            delegate_id: string;
+            /** Target Harness */
+            target_harness: string;
+            outcome: components["schemas"]["DelegationOutcome"] | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * DelegationFailure
+         * @description The typed account of a failed required delegation.
+         */
+        DelegationFailure: {
+            reason: components["schemas"]["DelegationFailureReason"];
+            /** Required Delegate */
+            required_delegate?: string | null;
+            /**
+             * Attempts
+             * @default []
+             */
+            attempts: components["schemas"]["DelegationAttempt"][];
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * DelegationFailureReason
+         * @description Why a required delegation is counted as not having happened.
+         * @enum {string}
+         */
+        DelegationFailureReason: "not_attempted" | "failed" | "unverifiable";
+        /**
+         * DelegationOutcome
+         * @description How a delegated run ended, in provider-neutral terms.
+         *
+         *     WHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit
+         *     status is shell-specific baggage. The native same-harness fan-out path
+         *     reports a boolean success and has no process to exit; cancellation and
+         *     timeout have no natural integer either. Since these events are v1 and this
+         *     repo has no upcaster framework, encoding a shell assumption now would need
+         *     a v2 to undo.
+         * @enum {string}
+         */
+        DelegationOutcome: "succeeded" | "failed" | "cancelled" | "timed_out";
         /** DeleteWorkflowResponse */
         DeleteWorkflowResponse: {
             /** Workflow Id */
@@ -3387,12 +3446,14 @@ export interface components {
             error_message?: string | null;
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
+            delegation_failure?: components["schemas"]["DelegationFailure"] | null;
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /**
              * Deliverable Produced
              * @default false
              */
             deliverable_produced: boolean;
+            review_verdict?: components["schemas"]["ReviewVerdict"] | null;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Repos */
             repos?: string[];
@@ -4226,7 +4287,18 @@ export interface components {
             total: number;
             /** Installation Id */
             installation_id?: string | null;
+            lookup: components["schemas"]["GitHubRepoLookup"];
         };
+        /**
+         * GitHubRepoLookup
+         * @description How much of the GitHub App's access a repo listing actually covers.
+         *
+         *     Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+         *     ``partial`` listing still proves access for every repo it contains; an
+         *     ``unavailable`` one proves nothing.
+         * @enum {string}
+         */
+        GitHubRepoLookup: "complete" | "partial" | "unavailable";
         /**
          * GitHubRepoResponse
          * @description A repository accessible to the GitHub App installation.
@@ -4402,7 +4474,7 @@ export interface components {
         HealthResponse: {
             /**
              * Status
-             * @description 'healthy' while the process is alive and accepting writes.
+             * @description 'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed.
              */
             status: string;
             /**
@@ -5058,6 +5130,11 @@ export interface components {
              */
             allow_delegation: boolean;
             /**
+             * Require Delegation
+             * @default false
+             */
+            require_delegation: boolean;
+            /**
              * Clone Repos
              * @default true
              */
@@ -5134,6 +5211,8 @@ export interface components {
              */
             deliverable_recovered: boolean;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
+            failure_classification?: components["schemas"]["FailureClassification"] | null;
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Model */
             model?: string | null;
             /** Requested Model */
@@ -6004,6 +6083,31 @@ export interface components {
             /** Dispatched At */
             dispatched_at?: string | null;
         };
+        /**
+         * ReviewVerdict
+         * @description What a reviewing phase concluded about the change in front of it (PC-63).
+         *
+         *     THE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes
+         *     ``review_verdict`` in its TASK_RESULT block; the aggregate reads it when
+         *     the phase's artifacts are collected and chooses the next phase from it
+         *     (see `WorkflowExecutionAggregate.artifacts_collected`):
+         *
+         *     * ``certified`` ends the repair loop. Every phase before the workflow's
+         *       final phase is skipped, so a run that certifies in round 1 does not pay
+         *       for rounds 2 and 3.
+         *     * ``blocked`` - or no verdict at all - advances by order, which is the
+         *       next repair round, or the final phase once the rounds are spent.
+         *
+         *     The latest verdict a run reported is also how it ended: a run completed
+         *     on ``blocked`` completed with UNRESOLVED FINDINGS, and says so on
+         *     `WorkflowCompleted` rather than looking certified.
+         *
+         *     A missing or misspelled verdict is never read as ``certified``: skipping
+         *     review on a word the reader did not recognise is the one mistake here that
+         *     costs more than a repair round.
+         * @enum {string}
+         */
+        ReviewVerdict: "certified" | "blocked";
         /**
          * RootResponse
          * @description Payload of ``GET /`` — what this API is, and which build is serving it.

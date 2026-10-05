@@ -91,6 +91,10 @@ class StartPins(BaseModel):
     #: Set on a resume only: branches it could have continued and did not, and why.
     abandoned_branches: list[AbandonedBranch] = Field(default_factory=list)
 
+    def inherited_owners(self) -> dict[str, str]:
+        """Who holds the artifacts of each phase a resume inherited, by phase id."""
+        return {} if self.resumed_from is None else self.resumed_from.owners()
+
     def checkout_for(self, phase_id: str) -> PhaseCheckout:
         """What ``phase_id``'s repositories are checked out at (#1458, #1513).
 
@@ -201,13 +205,13 @@ def read_pinned_phases(raw: object) -> list[ExecutablePhase]:
 
 
 def read_source_commits(raw: object) -> list[SourceCommit]:
-    """The recorded source commits, or empty when absent or unreadable."""
+    """Recorded commits - a start's, or a provisioning's checkout - or empty when unreadable."""
     if not raw:
         return []
     try:
         return _SOURCE_COMMITS.validate_python(raw)
     except ValidationError:
-        logger.warning("Unreadable source_commits on a replayed start event; treating as absent")
+        logger.warning("Unreadable commits on a replayed event; treating as absent")
         return []
 
 
