@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationAttempt,
+    DelegationFailure,
+    DelegationFailureReason,
     FailureClassification,
 )
 from syn_shared.display import format_exit_code
@@ -372,6 +375,47 @@ class FailureAccount(NamedTuple):
     """What the AGENT SAID caused it, `None` when it said nothing this reader
     knows. An operator reads it; nothing counts it."""
 
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for
+    every failure that is not a failed delegation."""
+
+
+class DelegationFailedError(RuntimeError):
+    """A phase that required a delegate did not delegate successfully (#894)."""
+
+    def __init__(
+        self,
+        *,
+        phase_id: str,
+        required_delegate: str,
+        reason: DelegationFailureReason,
+        attempts: tuple[DelegationAttempt, ...] = (),
+        detail: str | None = None,
+    ) -> None:
+        self.phase_id = phase_id
+        #: The typed account every sink records (`failure_account`); the
+        #: message below is its rendering for `error`, never its source.
+        self.delegation_failure = DelegationFailure(
+            required_delegate=required_delegate, reason=reason, attempts=attempts, detail=detail
+        )
+        lines = [
+            f"Required delegation to {required_delegate} failed for phase {phase_id} "
+            f"({reason.value}): " + _summary(reason, required_delegate, detail)
+        ]
+        lines.extend(f"  - {attempt.describe()}" for attempt in attempts)
+        super().__init__("\n".join(lines))
+
+
+def _summary(reason: DelegationFailureReason, required_delegate: str, detail: str | None) -> str:
+    if reason is DelegationFailureReason.NOT_ATTEMPTED:
+        return (
+            f"the phase declared require_delegation but no delegate to "
+            f"{required_delegate} was launched."
+        )
+    if reason is DelegationFailureReason.FAILED:
+        return f"every delegate to {required_delegate} failed or never finished."
+    return "the delegation record could not be read" + (f": {detail}" if detail else ".")
+
 
 def failure_account(error: BaseException) -> FailureAccount:
     """What kind of failure `error` is, and what its phase said about it (#1357, #1372).
@@ -399,6 +443,10 @@ def failure_account(error: BaseException) -> FailureAccount:
     """
     if isinstance(error, PhaseReportedFailureError):
         return FailureAccount(error.failure_classification, error.reported_failure_reason)
+    if isinstance(error, DelegationFailedError):
+        # Still `PLATFORM`: the platform observed it, the agent claimed nothing.
+        # What it adds is the typed account of which delegate failed (#894).
+        return FailureAccount(FailureClassification.PLATFORM, None, error.delegation_failure)
     return FailureAccount(FailureClassification.PLATFORM, None)
 
 

@@ -17,6 +17,8 @@ from pydantic import (
     model_serializer,
 )
 
+# Runtime import: a pydantic field type of DelegationAttempt.
+from syn_domain.contexts.agent_sessions import DelegationOutcome  # noqa: TC001
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
@@ -31,6 +33,7 @@ from syn_shared.agents import (
     AgentProvider,
     resolve_phase_model,
 )
+from syn_shared.delegation import DELEGATION_TARGET_BY_PRIMARY, DelegationTarget
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -472,6 +475,10 @@ class AgentConfiguration:
     # When true, both agent auths are staged so this phase's primary agent may
     # delegate one-shot to the other CLI. Default false = single-provider isolation.
     allow_delegation: bool = False
+    # When true, the phase MUST delegate: it completes only once a delegate to
+    # `required_delegate` reported success (#894). A permission alone is never
+    # gated - an agent that may delegate and does the work itself succeeded.
+    require_delegation: bool = False
 
     def __post_init__(self) -> None:
         """Resolve the per-provider model default.
@@ -482,6 +489,18 @@ class AgentConfiguration:
         resolved_model = resolve_phase_model(self.provider, self.model)
         if resolved_model != self.model:
             object.__setattr__(self, "model", resolved_model)
+
+    @property
+    def required_delegate(self) -> DelegationTarget | None:
+        """The harness this phase must have delegated to, None when not required.
+
+        Always the OTHER harness: a delegate is a cross-harness child, so the
+        provider alone decides where it goes. A provider with no delegation
+        target (a test-only one) has no delegate to require.
+        """
+        if not self.require_delegation or self.provider not in DELEGATION_TARGET_BY_PRIMARY:
+            return None
+        return DELEGATION_TARGET_BY_PRIMARY[AgentProvider(self.provider)]
 
 
 @dataclass(frozen=True)
@@ -1061,3 +1080,78 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (  # noqa: E402
     ContinuedBranch as ContinuedBranch,
 )
+
+# --- Delegation failure (#894) -------------------------------------------
+#
+# Why a phase that declared delegation is recorded as not having delegated.
+# A value object rather than prose in ``error``: the reason and the delegates
+# the platform observed are what an operator acts on - a delegate that never
+# launched and a delegate that launched and failed are different incidents -
+# and a client cannot select between them by parsing a sentence. Carried from
+# the failure command through `WorkflowFailedEvent` to the execution detail
+# read model and its API response, unchanged at every hop.
+#
+# It is a platform-observed fact, never the agent's word, which is why it is a
+# field of its own and not a `ReportedFailureReason`. It lives here, not in a
+# module of its own, because `WorkflowFailedEvent` carries it and an event may
+# import value objects and nothing else from its aggregate (VSA).
+
+
+class DelegationFailureReason(StrEnum):
+    """Why a required delegation is counted as not having happened."""
+
+    NOT_ATTEMPTED = "not_attempted"
+    """The record was read and holds no delegation to the required harness."""
+    FAILED = "failed"
+    """Delegates to the required harness were launched and none succeeded."""
+    UNVERIFIABLE = "unverifiable"
+    """No record could be read, so success cannot be shown."""
+
+
+class DelegationAttempt(BaseModel):
+    """One delegate the phase's agent launched, as the platform observed it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    delegate_id: str
+    """The journal's id for this child invocation."""
+    target_harness: str
+    """Which harness the work was delegated TO (``claude``, ``codex``)."""
+    outcome: DelegationOutcome | None
+    """How it ended; None when it launched and never reported an end."""
+    exit_code: int | None = None
+    reason: str | None = None
+    """Why it could not launch, when the shim named a reason."""
+
+    def describe(self) -> str:
+        ended = self.outcome.value if self.outcome is not None else "never reported an outcome"
+        detail = [f"exit_code={self.exit_code}"] if self.exit_code is not None else []
+        if self.reason is not None:
+            detail.append(f"reason={self.reason}")
+        suffix = f" ({', '.join(detail)})" if detail else ""
+        return f"delegate {self.delegate_id} -> {self.target_harness}: {ended}{suffix}"
+
+
+class DelegationFailure(BaseModel):
+    """The typed account of a failed required delegation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: DelegationFailureReason
+    required_delegate: str | None = None
+    """The harness the phase declared it must delegate to. `None` only on an
+    account recorded before the declaration existed."""
+    attempts: tuple[DelegationAttempt, ...] = ()
+    """Every cross-harness delegate the record held, including any sent to a
+    harness other than `required_delegate`; empty for `unverifiable`."""
+    detail: str | None = None
+    """Why the record could not be read, for `unverifiable`."""
+
+    @classmethod
+    def from_stored(cls, value: object) -> DelegationFailure | None:
+        """The stored account, `None` for a failure that recorded none.
+
+        Every row and event written before #894 has no such key, and replays
+        as `None` rather than raising.
+        """
+        return None if value is None else cls.model_validate(value)
