@@ -255,7 +255,11 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     # The workspace service is the Docker headless path: claude -p and
     # codex exec both run there, keeping the stream-json pipeline, Envoy
     # token accounting, and telemetry.
-    ws_config = WorkspaceServiceConfig(image=ws_settings.docker_image)
+    ws_config = WorkspaceServiceConfig(
+        image=ws_settings.docker_image,
+        memory_limit_mb=ws_settings.memory_limit_mb,
+        cpu_limit_cores=ws_settings.cpu_limit,
+    )
 
     # WHY (issue #726, PR2): the materializer turns ResolvedClaudePlugin
     # entries on each phase into workspace files; the processor passes it

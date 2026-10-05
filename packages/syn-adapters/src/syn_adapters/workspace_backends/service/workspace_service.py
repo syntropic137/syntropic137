@@ -36,6 +36,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationBackendType,
     TokenType,
 )
+from syn_shared.settings.workspace import (
+    DEFAULT_WORKSPACE_CPU_LIMIT,
+    DEFAULT_WORKSPACE_MEMORY_LIMIT_MB,
+)
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
@@ -94,8 +98,8 @@ class WorkspaceServiceConfig:
 
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
     image: str = DEFAULT_WORKSPACE_IMAGE
-    memory_limit_mb: int = 2048  # 2GB - Claude CLI needs more memory
-    cpu_limit_cores: float = 2.0  # Allow more CPU for agent work
+    memory_limit_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
+    cpu_limit_cores: float = DEFAULT_WORKSPACE_CPU_LIMIT
     timeout_seconds: int = 3600  # 1 hour
     allowed_hosts: tuple[str, ...] = (
         "api.anthropic.com",
