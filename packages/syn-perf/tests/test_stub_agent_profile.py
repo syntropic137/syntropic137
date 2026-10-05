@@ -258,6 +258,18 @@ def test_each_repair_round_reports_which_round_it_is(
     assert certified[:2] == ["CERTIFIED", f"Round: {n} of 3"]
 
 
+def test_every_pushing_phase_reports_the_file_its_side_effect_commits(
+    workflow: WorkflowDefinition,
+) -> None:
+    """``PushBranch`` commits ``loadtest/<phase_id>.txt``; the report must name that file."""
+    profile = _profile(workflow, "node")
+    pushing = [pid for pid, p in profile.phases.items() if isinstance(p.side_effect, PushBranch)]
+
+    assert pushing == ["implement", "fix", "fix_2", "fix_3"]
+    for pid in pushing:
+        assert f"`loadtest/{pid}.txt`" in profile.render_artifact(pid, "exec-7f3a", _HEAD), pid
+
+
 # --- the schema agentic-workspace builds the stub image against -----------
 
 

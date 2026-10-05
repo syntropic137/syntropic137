@@ -24,6 +24,11 @@ _ROUNDS: Final = range(1, 4)
 """The repair rounds: ``fix``/``reverify``, then ``_2`` and ``_3`` (PC-63)."""
 
 
+def pushed_file(phase_id: str) -> str:
+    """The one file ``PushBranch`` commits for ``phase_id``; its report names it."""
+    return f"loadtest/{phase_id}.txt"
+
+
 def _round_id(phase: str, n: int) -> str:
     return phase if n == 1 else f"{phase}_{n}"
 
@@ -41,7 +46,7 @@ Nothing (stub verdict).
 
 ## 2. What changed
 
-One deterministic file, `loadtest/fix.txt`.
+One deterministic file, `{pushed_file(_round_id("fix", n))}`.
 
 ## 4. Identity
 
@@ -91,7 +96,7 @@ None. The stub changes nothing in this phase.
 
 ## What changed
 
-One deterministic file, `loadtest/implement.txt`.
+One deterministic file, `{pushed_file("implement")}`.
 
 ## Branch
 
