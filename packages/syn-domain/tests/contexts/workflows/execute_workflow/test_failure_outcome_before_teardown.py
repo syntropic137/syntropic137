@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import StartPins
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor
@@ -80,6 +81,9 @@ class _FakeAggregate:
     """Just enough aggregate for _fail_execution to save against."""
 
     workflow_id = "wf-1"
+    #: Real aggregates always carry their pins; the failure path reads them to
+    #: name repositories on quarantine notices (#1547).
+    start_pins = StartPins()
 
     def fail_execution(self, _command: object) -> None:
         return None

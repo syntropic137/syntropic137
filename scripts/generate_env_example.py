@@ -705,6 +705,7 @@ def generate_infra_env_example() -> str:
             "postgres_memory_limit",
             "postgres_cpu_limit",
             "event_store_memory_limit",
+            "control_plane_cpu_shares",
             "collector_memory_limit",
             "collector_cpu_limit",
             "minio_memory_limit",
@@ -726,6 +727,14 @@ def generate_infra_env_example() -> str:
             "backup_dir",
         ],
     }
+
+    # A field missing from section_map used to vanish from the file without a
+    # word, so a new infra setting shipped undocumented (#1600 nearly did).
+    unplaced = set(InfraSettings.model_fields) - {f for fs in section_map.values() for f in fs}
+    if unplaced:
+        raise SystemExit(
+            f"InfraSettings fields with no section in generate_infra_env_example: {sorted(unplaced)}"
+        )
 
     for section_name, field_names in section_map.items():
         lines.extend(

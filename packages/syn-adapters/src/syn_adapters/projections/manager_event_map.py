@@ -177,7 +177,10 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("realtime", "on_workflow_failed"),
         ("execution_todo", "on_workflow_failed"),
     ],
-    "WorkspaceProvisionedForPhase": [("execution_todo", "on_workspace_provisioned_for_phase")],
+    "WorkspaceProvisionedForPhase": [
+        ("execution_todo", "on_workspace_provisioned_for_phase"),
+        ("workflow_execution_detail", "on_workspace_provisioned_for_phase"),
+    ],
     "AgentExecutionCompleted": [("execution_todo", "on_agent_execution_completed")],
     "ArtifactsCollectedForPhase": [("execution_todo", "on_artifacts_collected_for_phase")],
     "NextPhaseReady": [("execution_todo", "on_next_phase_ready")],

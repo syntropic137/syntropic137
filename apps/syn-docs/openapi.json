@@ -8825,6 +8825,62 @@
         ],
         "title": "CoverageState"
       },
+      "CpuThrottling": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "measured",
+              "unknown"
+            ],
+            "title": "Status",
+            "description": "'measured' when cgroup v2 cpu.stat reported throttling counters; 'unknown' on cgroup v1, outside a container, or with no CPU limit set. Unknown is not zero: the counters are null, not 0."
+          },
+          "nr_periods": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nr Periods",
+            "description": "Scheduling periods in which this cgroup was runnable."
+          },
+          "nr_throttled": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nr Throttled",
+            "description": "Periods in which the cgroup hit its CPU limit and was held back. nr_throttled / nr_periods is the share of time the control plane was starved."
+          },
+          "throttled_usec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Throttled Usec",
+            "description": "Total time spent throttled, in microseconds."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "CpuThrottling",
+        "description": "CPU throttling of the process answering /health, since its cgroup was created."
+      },
       "CreateArtifactRequest": {
         "properties": {
           "workflow_id": {
@@ -9159,6 +9215,46 @@
           "status"
         ],
         "title": "CreateWorkflowResponse"
+      },
+      "DbPoolHealth": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "What the pool serves, e.g. 'projections' or 'agent_events'."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Connections currently open."
+          },
+          "max_size": {
+            "type": "integer",
+            "title": "Max Size",
+            "description": "Most connections the pool will open."
+          },
+          "in_use": {
+            "type": "integer",
+            "title": "In Use",
+            "description": "Connections checked out right now."
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting",
+            "description": "Callers blocked waiting for a connection right now."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "max_size",
+          "in_use",
+          "waiting"
+        ],
+        "title": "DbPoolHealth",
+        "description": "One Postgres connection pool in this API process, at the moment of asking (#1583).\n\n``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means\nrequests are queueing for a connection rather than for the database itself."
       },
       "DegradedReason": {
         "type": "string",
@@ -9921,6 +10017,13 @@
                 "type": "null"
               }
             ]
+          },
+          "quarantined_refs": {
+            "items": {
+              "$ref": "#/components/schemas/QuarantinedRef"
+            },
+            "type": "array",
+            "title": "Quarantined Refs"
           },
           "deliverable_produced": {
             "type": "boolean",
@@ -12237,6 +12340,32 @@
             ],
             "title": "Warnings",
             "description": "Human-readable notes that need attention but do not degrade the instance. Omitted when there are none."
+          },
+          "db_pools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DbPoolHealth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Pools",
+            "description": "Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode."
+          },
+          "cpu_throttling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CpuThrottling"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API."
           }
         },
         "additionalProperties": false,
@@ -13645,6 +13774,18 @@
               }
             ],
             "title": "Timeout Seconds"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
           }
         },
         "type": "object",
@@ -14459,6 +14600,70 @@
         ],
         "title": "ProjectionLag",
         "description": "One projection's distance from the head of the event store."
+      },
+      "QuarantinedRef": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "commit_count": {
+            "type": "integer",
+            "title": "Commit Count"
+          },
+          "pull_request": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request"
+          },
+          "diffstat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diffstat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repository",
+          "branch",
+          "ref",
+          "commit",
+          "commit_count"
+        ],
+        "title": "QuarantinedRef",
+        "description": "Where one repository's unpushed work was saved when its phase ended (#1547).\n\nThe structured half of what `describe_saved_work` writes as prose into\n`error_message`: only work that LANDED, because a ref that does not exist\nis nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the\nPR the run was working on can be told, by a ProcessManager rather than by\nwhoever happened to read the error."
       },
       "RegisterClaudePluginRequest": {
         "properties": {

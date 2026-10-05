@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         ExecutablePhase,
         FailureClassification,
         PhaseDefinition,
+        QuarantinedRef,
         ReportedFailureReason,
         ReviewVerdict,
         SideEffectStatus,
@@ -155,11 +156,14 @@ class FailExecutionCommand:
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
+        quarantined: tuple[QuarantinedRef, ...] = (),
         upstream_failure_kind: UpstreamFailureKind | None = None,
         delegation_failure: DelegationFailure | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
+        #: The unpushed work saved to quarantine refs as the phase ended (#1547).
+        self.quarantined = quarantined
         self.error_type = error_type
         self.failed_phase_id = failed_phase_id
         self.completed_phases = completed_phases
@@ -314,6 +318,20 @@ class CancelExecutionCommand:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.reason = reason
+
+
+class RecordCancelledWorkCommand:
+    """Command to record what a cancelled phase's save landed on quarantine refs (#1547)."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        quarantined: tuple[QuarantinedRef, ...],
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.quarantined = quarantined
 
 
 class InterruptExecutionCommand:

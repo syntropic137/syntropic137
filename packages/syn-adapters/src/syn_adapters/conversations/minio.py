@@ -13,8 +13,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
-import asyncpg
-
+from syn_adapters import postgres_pool
 from syn_adapters.conversations.minio_index import ensure_requested_model_column
 from syn_adapters.conversations.minio_session import (
     create_conversation_storage as _create_conversation_storage,
@@ -28,6 +27,7 @@ from syn_adapters.conversations.object_key import conversation_object_key
 from syn_adapters.postgres_text import pg_safe
 
 if TYPE_CHECKING:
+    import asyncpg
     from minio import Minio
 
     from syn_adapters.conversations.protocol import SessionContext
@@ -118,7 +118,9 @@ class MinioConversationStorage:
         # which marks conversation_storage as degraded and retries via the
         # recovery loop (ADR-057). _client is reset so retry re-initializes fully.
         try:
-            self._pool = await asyncpg.create_pool(self._db_url, min_size=1, max_size=5)
+            self._pool = await postgres_pool.create_pool(
+                self._db_url, name="conversation_index", min_size=1, max_size=5
+            )
             self._index_has_requested_model = await ensure_requested_model_column(
                 self._pool,
                 auto_create=os.environ.get("SYN_SKIP_AUTO_CREATE_TABLES", "").lower() != "true",

@@ -4,14 +4,18 @@ Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
 at the API boundary from the execution_cost projection.
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from pydantic import ValidationError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
     DelegationFailure,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
     SideEffectStatus,
@@ -19,6 +23,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     TASK_INPUT_KEY,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -86,6 +92,14 @@ class PhaseExecutionDetail:
     Same hop rule as every field around it: the projection writes it, this
     model carries it, and the API serves it, because a value that stops at any
     one of the three reaches no reader.
+    """
+
+    provisioned_at: datetime | str | None = None
+    """When this phase's workspace was ready, and so when its clock started.
+
+    The phase's deadline is this plus ``timeout_seconds`` (#1546), not
+    ``started_at`` plus it: the phase starts before its workspace is
+    provisioned. ``None`` until the workspace is ready.
     """
 
     error_message: str | None = None
@@ -171,6 +185,7 @@ class PhaseExecutionDetail:
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
             "timeout_seconds": self.timeout_seconds,
+            "provisioned_at": self._to_iso_string(self.provisioned_at),
             "error_message": self.error_message,
             "deliverable_recovered": self.deliverable_recovered,
             "reported_side_effects": (
@@ -216,6 +231,7 @@ class PhaseExecutionDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             timeout_seconds=data.get("timeout_seconds"),
+            provisioned_at=data.get("provisioned_at"),
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=SideEffectStatus.from_stored(data.get("reported_side_effects")),
@@ -324,6 +340,12 @@ class WorkflowExecutionDetail:
     it.
     """
 
+    quarantined_refs: tuple[QuarantinedRef, ...] = ()
+    """Where the failed phase's unpushed work landed, one per repository (#1547).
+
+    Empty for a run that quarantined nothing, and for every failure recorded
+    before the field existed: the refs were prose in `error_message` then.
+    """
     delegation_failure: DelegationFailure | None = None
     """Which required delegate did not happen, and why (#894), `None` for every
     other failure. A platform observation: its reason and the attempts the
@@ -423,6 +445,7 @@ class WorkflowExecutionDetail:
             reported_failure_reason=ReportedFailureReason.from_stored(
                 data.get("reported_failure_reason")
             ),
+            quarantined_refs=read_quarantined_refs(data.get("quarantined_refs")),
             review_verdict=ReviewVerdict.from_stored(data.get("review_verdict")),
             delegation_failure=DelegationFailure.from_stored(data.get("delegation_failure")),
             repos=tuple(data.get("repos", [])),
@@ -463,6 +486,7 @@ class WorkflowExecutionDetail:
             "reported_failure_reason": (
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
+            "quarantined_refs": [r.model_dump(mode="json") for r in self.quarantined_refs],
             "review_verdict": None if self.review_verdict is None else self.review_verdict.value,
             "delegation_failure": (
                 None
@@ -502,3 +526,18 @@ def _observed_branches(stored: object) -> tuple[BranchObservation, ...] | None:
     if not isinstance(stored, list):
         return None
     return tuple(BranchObservation.model_validate(entry) for entry in stored)
+
+
+def read_quarantined_refs(raw: object) -> tuple[QuarantinedRef, ...]:
+    """Stored quarantine refs as typed refs; an unreadable row reads as none (#1547).
+
+    Logged rather than raised, for the reason every `from_stored` here exists:
+    one bad row must not strand the whole read model.
+    """
+    if not isinstance(raw, list):
+        return ()
+    try:
+        return tuple(QuarantinedRef.model_validate(r) for r in raw)
+    except ValidationError:
+        logger.warning("Unreadable quarantined_refs on an execution detail; treating as none")
+        return ()

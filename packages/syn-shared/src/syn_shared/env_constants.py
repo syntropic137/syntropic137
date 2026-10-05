@@ -73,6 +73,13 @@ ENV_OTEL_EXPORTER_OTLP_ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
 #: variable is that answer.
 ENV_GH_REPO = "GH_REPO"
 
+#: When this phase is killed, as ISO 8601 UTC, and the whole budget it was
+#: given in seconds (#1546). Read by the agent, not by anything here: it cannot
+#: see a clock, and phases died at exit 124 holding finished, unpushed work.
+#: Fixed once per phase, so every retry attempt is told the same deadline.
+ENV_SYN_PHASE_DEADLINE = "SYN_PHASE_DEADLINE"
+ENV_SYN_PHASE_TIMEOUT_SECONDS = "SYN_PHASE_TIMEOUT_SECONDS"
+
 # ---------------------------------------------------------------------------
 # Workspace infrastructure env vars
 # Read by the workspace adapter at initialisation; not in pydantic Settings.

@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, cast
 
-import asyncpg
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
@@ -27,6 +26,7 @@ from event_sourcing import (
     SubscriptionCoordinator,
 )
 
+from syn_adapters import postgres_pool
 from syn_adapters.subscriptions.read_model_lag import (
     CheckpointState,
     ReadModelLag,
@@ -40,6 +40,7 @@ from syn_shared.settings import get_settings
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    import asyncpg
     from event_sourcing import DomainEvent, EventEnvelope, EventStoreClient
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
 
@@ -296,8 +297,9 @@ class CoordinatorSubscriptionService:
                     "Set it in your .env file."
                 )
             database_url = str(settings.syn_observability_db_url)
-            self._db_pool = await asyncpg.create_pool(
+            self._db_pool = await postgres_pool.create_pool(
                 database_url,
+                name="subscription_checkpoints",
                 min_size=2,
                 max_size=10,
             )
@@ -456,8 +458,12 @@ def create_coordinator_service(
     Returns:
         Configured CoordinatorSubscriptionService
     """
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.pull_request_commenter import GitHubPullRequestCommenter
+    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.projections.manager_registry import create_session_cost_projection
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
     from syn_adapters.subscriptions.projection_adapters import (
         ExecutionCostAdapter,
         SessionCostAdapter,
@@ -488,6 +494,9 @@ def create_coordinator_service(
         TriggerHistoryProjection,
     )
     from syn_domain.contexts.orchestration import (
+        CancelledWorkLedger,
+        ExecutionJournal,
+        QuarantineNoticeProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
     )
@@ -557,6 +566,22 @@ def create_coordinator_service(
             ResumeStartProcessManager(
                 resume_starter=cast("ResumeStarter | None", execution_service),
                 store=projection_store,
+            ),
+            # #1547: tells the PR a failed phase's work is on a quarantine
+            # ref. Host-side, with the App's credential, and only when live.
+            QuarantineNoticeProcessManager(
+                commenter=GitHubPullRequestCommenter(get_github_client),
+                store=projection_store,
+                branches=GitHubRemoteBranchReader(get_github_client),
+                # Settled on every live pass and clock tick, so a cancel's
+                # refused refs reach the stream with no later execution.
+                owed_work=CancelledWorkLedger(
+                    ExecutionJournal(
+                        get_workflow_execution_repository(),
+                        ExecutionTodoProjection(store=projection_store),
+                    ),
+                    projection_store,
+                ),
             ),
             TriggerQueryProjection(projection_store),
             # --- Agent sessions context ---
