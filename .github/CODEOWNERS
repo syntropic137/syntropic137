@@ -39,6 +39,8 @@
 /packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py @NeuralEmpowerment
 /infra/scripts/apparmor-setup.sh                                                @NeuralEmpowerment
 /infra/scripts/selfhost-update-host.sh                                          @NeuralEmpowerment
+# bootstrap.sh runs sudo on the host: it decides what gets root.
+/infra/scripts/bootstrap.sh                                                     @NeuralEmpowerment
 
 # --- Credentials: what an agent is given, how it is scoped and cleared, how
 # secrets are resolved, exported and redacted.
@@ -56,6 +58,8 @@
 /docker/sidecar-proxy/Dockerfile                                                @NeuralEmpowerment
 /docker/sidecar-proxy/*.yaml                                                    @NeuralEmpowerment
 /infra/docker/secrets/                                                          @NeuralEmpowerment
+# selfhost-env.sh loads credentials into the selfhost environment.
+/infra/scripts/selfhost-env.sh                                                  @NeuralEmpowerment
 
 # --- Public surface: webhook authentication and what it records.
 /apps/syn-api/src/syn_api/routes/webhooks/signature.py                          @NeuralEmpowerment
