@@ -13,7 +13,7 @@
  * particular page happens to carry.
  */
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -52,6 +52,21 @@ function stubApi(uiFeedback: boolean) {
   vi.stubGlobal('EventSource', InertEventSource)
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+const FEEDBACK_STATS = {
+  total: 3,
+  by_status: { open: 3, in_progress: 0, resolved: 0, closed: 0, wont_fix: 0 },
+  by_type: {},
+  by_priority: {},
+  by_app: {},
 }
 
 /** The floating button's title is the stable handle the widget exposes. */
@@ -122,5 +137,54 @@ describe('FeedbackMount', () => {
     await waitFor(() =>
       expect(screen.getByTitle('Cancel (Esc)')).toBeTruthy(),
     )
+  }, TEST_TIMEOUT)
+
+  /**
+   * The owner saw "View Tickets" spin, and the list endpoint called again and
+   * again. This drives it the way production renders it: the whole app, a
+   * detail route (so the widget has a non-null subject), the bubble's own
+   * stats fetch live, the tickets opened from the real widget — and then ten
+   * seconds of clock, which is long enough for any render loop or poll to
+   * show up as more than one list request.
+   */
+  it('loads the ticket list once when it is opened, and not again while it sits open', async () => {
+    const user = userEvent.setup()
+    // The feedback endpoints answer as production did. Everything else is a
+    // 404, which the detail page renders as "not found" rather than tripping
+    // over an empty body shaped for a list.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/features')) return jsonResponse({ ui_feedback: true })
+      if (url.includes('/feedback/stats')) return jsonResponse(FEEDBACK_STATS)
+      if (url.includes('/feedback?')) return jsonResponse({ items: [], total: 0, page: 1, page_size: 50 })
+      return jsonResponse({ detail: 'Not found' }, 404)
+    })
+    vi.stubGlobal('EventSource', InertEventSource)
+    vi.stubGlobal('fetch', fetchMock)
+    const listCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/feedback?')).length
+    const statsCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/feedback/stats')).length
+
+    renderAppAt('/executions/exec-1')
+    await waitFor(
+      () => expect(screen.getByTitle(FEEDBACK_BUTTON)).toBeTruthy(),
+      CHUNK_TIMEOUT,
+    )
+    expect(listCalls()).toBe(0)
+
+    await user.keyboard('{Control>}{Shift>}T{/Shift}{/Control}')
+    await waitFor(() => expect(listCalls()).toBe(1))
+    const statsAtOpen = statsCalls()
+
+    vi.useFakeTimers()
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(10_000))
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(listCalls()).toBe(1)
+    expect(statsCalls()).toBe(statsAtOpen)
   }, TEST_TIMEOUT)
 })
