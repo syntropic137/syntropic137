@@ -36,6 +36,7 @@ services:
       timeout: 5s
       retries: 5
     container_name: syn137-timescaledb
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     secrets:
     - db_password
     volumes:
@@ -61,7 +62,7 @@ services:
       resources:
         limits:
           memory: ${POSTGRES_MEMORY_LIMIT:-1g}
-          cpus: ${POSTGRES_CPU_LIMIT:-1.0}
+          cpus: ${POSTGRES_CPU_LIMIT:-2.0}
     logging:
       driver: json-file
       options:
@@ -87,6 +88,7 @@ services:
       retries: 5
       start_period: 30s
     container_name: syn137-event-store
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     volumes:
     - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
     entrypoint:
@@ -398,6 +400,7 @@ services:
     - syn-internal
     - docker-proxy
     container_name: syn137-api
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     entrypoint:
     - /bin/sh
     - /selfhost-entrypoint.sh
@@ -424,7 +427,7 @@ services:
       resources:
         limits:
           memory: ${API_MEMORY_LIMIT:-512m}
-          cpus: ${API_CPU_LIMIT:-0.5}
+          cpus: ${API_CPU_LIMIT:-2.0}
     logging:
       driver: json-file
       options:
@@ -433,6 +436,7 @@ services:
     image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}
   gateway:
     container_name: syn137-gateway
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     ports:
     - ${SYN_GATEWAY_BIND:-127.0.0.1}:${SYN_GATEWAY_PORT:-8137}:80
     environment:

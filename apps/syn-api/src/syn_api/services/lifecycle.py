@@ -27,7 +27,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import inventory_lifecycle
+from syn_api.services import cpu_throttling, inventory_lifecycle
 from syn_api.services.admission_announcement import announce_admission_if_open
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
@@ -353,6 +353,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             codex_auth=codex_auth,
             warnings=warnings or None,
             db_pools=db_pools,
+            cpu_throttling=cpu_throttling.read_cpu_throttling(),
         )
     )
 
