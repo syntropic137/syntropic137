@@ -146,6 +146,9 @@ from syn_domain.contexts.orchestration.domain.commands import (
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
+)
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
 )
@@ -371,6 +374,7 @@ __all__ = [
     "WorkflowDefinition",
     "WorkflowExecutionAggregate",
     "WorkflowExecutionProcessor",
+    "WorkflowExecutionStartedEvent",
     # Errors
     "WorkflowNotFoundError",
     "WorkflowTemplateAggregate",

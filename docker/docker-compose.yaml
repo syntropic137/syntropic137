@@ -147,6 +147,15 @@ services:
   # API - Query and Control Service
   # =============================================================================
   api:
+    # Every documented setting's passthrough lives in a GENERATED file
+    # (scripts/settings_forwarding.py, `just gen-compose`), so adding a setting
+    # never edits this file. Only pins and privilege-carrying values are written
+    # here; the keys below take precedence over the generated ones, and every
+    # overlay over both. A setting listed by hand here fails
+    # ci/fitness/infrastructure/test_compose_env_forwarding.py.
+    extends:
+      file: generated/api.env.yaml
+      service: api-env
     build:
       context: ..
       dockerfile: infra/docker/images/syn-api/Dockerfile
@@ -155,43 +164,13 @@ services:
       SYN_API_HOST: "0.0.0.0"
       # ADR-030: Use explicit database URLs
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
-      SYN_UI_FEEDBACK_ENABLED: ${SYN_UI_FEEDBACK_ENABLED:-false}
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       REDIS_URL: redis://redis:6379/0
       # Docker socket proxy (ISS-164) - all stacks use the same proxy
       DOCKER_HOST: tcp://docker-socket-proxy:2375
-      # Central session store (SeshMagic). Declared HERE, in the base, because
-      # every stack layers on this file - dev, dev-cloudflare, test,
-      # selfhost and ondemand. Declaring it per
-      # overlay is how dev and ondemand ended up unable to capture at all: the
-      # vault resolved both values, `just dev` exported them, and compose then
-      # dropped them because the dev api service never named them.
-      #
-      # An empty URL disables capture, which is a legitimate configuration, so
-      # the failure was indistinguishable from "capture deliberately off".
-      # Keep this in the base so a new overlay inherits it instead of having to
-      # remember it.
-      # Local capture is durable and independent of the optional remote store.
+      # Local session capture is durable and independent of the optional remote store.
       SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory
-      SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID: ${SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID:-}
-      SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS: ${SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS:-30}
-      SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS: ${SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS:-1800}
-      SYN_SESSION_INVENTORY_LEASE_SECONDS: ${SYN_SESSION_INVENTORY_LEASE_SECONDS:-120}
-      SYN_SESSION_INVENTORY_RETRY_SECONDS: ${SYN_SESSION_INVENTORY_RETRY_SECONDS:-10}
-      SYN_SESSION_INVENTORY_MAX_JOBS_PER_TICK: ${SYN_SESSION_INVENTORY_MAX_JOBS_PER_TICK:-2}
-      SYN_SESSION_INVENTORY_MAX_EVIDENCE_RECORDS: ${SYN_SESSION_INVENTORY_MAX_EVIDENCE_RECORDS:-100000}
-      SYN_SESSION_INVENTORY_MAX_EVIDENCE_BATCHES: ${SYN_SESSION_INVENTORY_MAX_EVIDENCE_BATCHES:-10000}
-      SYN_SESSION_STORE_URL: ${SYN_SESSION_STORE_URL:-}
-      SYN_SESSION_STORE_AUTH_TOKEN: ${SYN_SESSION_STORE_AUTH_TOKEN:-}
-      SYN_SESSION_STORE_LABEL: ${SYN_SESSION_STORE_LABEL:-}
-      # Operator co-authorship on agent commits (#1265). Same reasoning as the
-      # session-store trio directly above, and the same failure if omitted: the
-      # workspace image's prepare-commit-msg hook exits silently when either is
-      # missing, so a stack that does not pass them produces commits with no
-      # trailer and no error. Declared here so every overlay inherits it.
-      SYN_OPERATOR_NAME: ${SYN_OPERATOR_NAME:-}
-      SYN_OPERATOR_EMAIL: ${SYN_OPERATOR_EMAIL:-}
       # Operator escape hatch for pinning a different workspace image (#954).
       # Declared WITHOUT a value on purpose. Compose removes an unresolved
       # bare key from the container environment, but preserves an explicitly
@@ -201,111 +180,6 @@ services:
       SYN_WORKSPACE_DOCKER_IMAGE:
       # Note: secrets (GitHub App, Anthropic, storage) are injected via
       # overlay files (dev, selfhost, ondemand) using env_file or environment
-      # --- BEGIN GENERATED: settings forwarded from .env (just gen-compose) ---
-      # Every setting .env.example documents, forwarded so that writing one
-      # in .env has the effect the docs promise (#1101). Bare keys: compose
-      # drops an unset one, so an unwritten setting keeps its own default.
-      # Overlays may still override any of these with a fixed value.
-      OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV:
-      OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA:
-      OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING:
-      OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD:
-      APP_NAME:
-      APP_ENVIRONMENT:
-      DATABASE_POOL_SIZE:
-      DATABASE_POOL_OVERFLOW:
-      EVENT_STORE_TENANT_ID:
-      EVENT_STORE_TIMEOUT_SECONDS:
-      EVENT_STORE_URL:
-      LOG_LEVEL:
-      LOG_FORMAT:
-      ANTHROPIC_API_KEY:
-      DEFAULT_AGENT_TIMEOUT_SECONDS:
-      DEFAULT_MAX_TOKENS:
-      ARTIFACT_STORAGE_TYPE:
-      S3_BUCKET_NAME:
-      S3_ENDPOINT_URL:
-      S3_ACCESS_KEY_ID:
-      S3_SECRET_ACCESS_KEY:
-      DEBUG:
-      ESP_EVENT_STORE_DB_URL:
-      SLOW_REQUEST_LOG_THRESHOLD_MS:
-      CLAUDE_CODE_OAUTH_TOKEN:
-      CODEX_AUTH_JSON:
-      SYN_DEFAULT_CLAUDE_MODEL:
-      SYN_DEFAULT_CODEX_MODEL:
-      SETUP_PHASE_TIMEOUT_SECONDS:
-      COLLECTOR_URL:
-      COLLECTOR_API_KEY:
-      HOOK_BACKEND_URL:
-      HOOK_BATCH_SIZE:
-      HOOK_FLUSH_INTERVAL_SECONDS:
-      DASHBOARD_PORT:
-      DASHBOARD_HOST:
-      SYN_GITHUB_APP_ID:
-      SYN_GITHUB_APP_NAME:
-      SYN_GITHUB_WEBHOOK_SECRET:
-      DEV__WORKFLOW_FAIL_ON_PLUGIN_NOT_REGISTERED:
-      DEV__WORKFLOW_FAIL_ON_SKILL_NOT_REGISTERED:
-      SYN_WORKSPACE_ISOLATION_BACKEND:
-      SYN_WORKSPACE_POOL_SIZE:
-      SYN_WORKSPACE_MAX_CONCURRENT:
-      SYN_WORKSPACE_ENABLE_CLOUD_OVERFLOW:
-      SYN_WORKSPACE_CLOUD_PROVIDER:
-      SYN_WORKSPACE_CLOUD_API_KEY:
-      SYN_WORKSPACE_CLOUD_TEMPLATE:
-      SYN_WORKSPACE_DOCKER_RUNTIME:
-      SYN_WORKSPACE_DOCKER_NETWORK:
-      SYN_IMAGE_VERIFY_ENABLED:
-      SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP:
-      SYN_IMAGE_VERIFY_CERTIFICATE_OIDC_ISSUER:
-      SYN_IMAGE_VERIFY_NEW_BUNDLE_FORMAT:
-      SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES:
-      SYN_IMAGE_VERIFY_COSIGN_PATH:
-      SYN_IMAGE_VERIFY_TIMEOUT_SECONDS:
-      SYN_SECURITY_ALLOW_NETWORK:
-      SYN_SECURITY_ALLOWED_HOSTS:
-      SYN_SECURITY_READ_ONLY_ROOT:
-      SYN_SECURITY_MAX_WORKSPACE_SIZE:
-      SYN_SECURITY_MAX_MEMORY:
-      SYN_SECURITY_MAX_CPU:
-      SYN_SECURITY_MAX_PIDS:
-      SYN_SECURITY_MAX_EXECUTION_TIME:
-      SYN_GIT_USER_NAME:
-      SYN_GIT_USER_EMAIL:
-      SYN_GIT_TOKEN:
-      SYN_STORAGE_LOCAL_PATH:
-      SYN_STORAGE_BUCKET_NAME:
-      SYN_STORAGE_CLAUDE_PLUGIN_BUCKET_NAME:
-      SYN_STORAGE_SKILL_BUCKET_NAME:
-      SYN_STORAGE_MINIO_SECRET_KEY:
-      SYN_STORAGE_MAX_FILE_SIZE_MB:
-      SYN_STORAGE_PRESIGNED_URL_EXPIRY_SECONDS:
-      SYN_SESSION_INVENTORY_PARK_SAFETY_SECONDS:
-      SYN_SESSION_INVENTORY_LOCAL_BODY_RETENTION_SECONDS:
-      SYN_SESSION_INVENTORY_LOCAL_BODY_MAX_BYTES:
-      SYN_SESSION_INVENTORY_SPOOL_RETENTION_SECONDS:
-      SYN_SESSION_INVENTORY_SPOOL_MAX_BYTES:
-      SYN_SESSION_INVENTORY_REPLICATION_ENABLED:
-      SYN_SESSION_INVENTORY_REPLICATION_STORE_URL:
-      SYN_SESSION_INVENTORY_REPLICATION_WRITE_TOKEN:
-      SYN_SESSION_INVENTORY_CAPTURE_REPLICATION_ENABLED:
-      SYN_SESSION_INVENTORY_CAPTURE_WRITE_TOKEN:
-      SYN_SESSION_INVENTORY_EXPORTER_BINARY:
-      SYN_SESSION_STORE_READ_TOKEN:
-      SYN_SESSION_STORE_DEPLOYMENT:
-      SYN_SESSION_STORE_PROVIDER:
-      SYN_SESSION_STORE_SPOOL_DIR:
-      SYN_LOGGING_LEVEL:
-      SYN_LOGGING_FORMAT:
-      SYN_LOGGING_LOG_COMMANDS:
-      SYN_LOGGING_LOG_TOOL_CALLS:
-      SYN_LOGGING_LOG_API_CALLS:
-      SYN_LOGGING_REDACT_SECRETS:
-      SYN_LOGGING_REDACTION_PATTERNS:
-      SYN_LOGGING_LOG_FILE_PATH:
-      SYN_LOGGING_MAX_LOG_SIZE_MB:
-      # --- END GENERATED ---
     volumes:
       - session_inventory_data:/app/data/session-inventory
     depends_on:
