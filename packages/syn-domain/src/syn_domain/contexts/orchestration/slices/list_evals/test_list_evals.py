@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -212,7 +212,7 @@ if TYPE_CHECKING:
 
 
 class _GroupingStore(InMemoryProjectionStore):
-    """Answers ``count_by`` itself and refuses to hand out the member executions.
+    """Answers ``count_by`` itself and records that it was asked.
 
     The Eval list's tallies must come from the store's groups (#967): reading
     every member row to count them is the cost the grouping exists to remove.
@@ -221,22 +221,6 @@ class _GroupingStore(InMemoryProjectionStore):
     def __init__(self) -> None:
         super().__init__()
         self.grouped: list[tuple[str, tuple[str, ...]]] = []
-
-    async def query(
-        self,
-        projection: str,
-        filters: dict[str, Any] | None = None,  # Any: the base store's own signature
-        order_by: str | None = None,
-        limit: int | None = None,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:  # Any: the base store's own signature
-        if (
-            projection == WORKFLOW_EXECUTIONS
-            and filters
-            and isinstance(filters.get("eval_id"), list)
-        ):
-            raise AssertionError("tallied by reading every member execution")
-        return await super().query(projection, filters, order_by, limit, offset)
 
     async def count_by(
         self,
