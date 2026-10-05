@@ -1,10 +1,13 @@
 """The aggregate, not the prompts, decides how many repair rounds run (PC-63).
 
 Drives the aggregate the way the processor does: run whatever phase the last
-`NextPhaseReady` named, report the agent's TASK_RESULT through the same reader
-production uses, and collect. Between the agent finishing and its artifacts
-being collected the stream is written through JSON and loaded into a FRESH
-aggregate, so every decision below is one a restart rebuilds from the stream -
+`NextPhaseReady` named, report the agent's verdict through
+`ReviewVerdict.from_reported` - the parse production's TASK_RESULT reader
+applies; that reader lives in a slice the domain may not import, and
+scripts/tests/test_implement_v3_repair_rounds.py drives it - and collect.
+Between the agent finishing and its artifacts being collected the stream is
+written through JSON and loaded into a FRESH aggregate, so every decision
+below is one a restart rebuilds from the stream -
 the verdict is never in process memory when the choice is made.
 """
 
@@ -39,9 +42,6 @@ from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import 
 from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
     WorkflowCompletedEvent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
-    AgentVerdict,
-)
 
 pytestmark = pytest.mark.unit
 
@@ -60,12 +60,6 @@ PHASES = (
     "finalize_pr",
 )
 DEFINITIONS = [PhaseDefinition(phase_id=p, name=p, order=i + 1) for i, p in enumerate(PHASES)]
-
-
-def _said(verdict: str | None) -> str:
-    """The closing message an agent writes, with or without a review verdict."""
-    extra = "" if verdict is None else f', "review_verdict": "{verdict}"'
-    return f'TASK_RESULT: {{"success": true, "side_effects": "none"{extra}}}\nTASK_RESULT_END'
 
 
 class _Store:
@@ -121,13 +115,12 @@ def _run(verdicts: dict[str, str]) -> tuple[list[str], _Store]:
                 phase_order=PHASES.index(phase_id) + 1,
             )
         )
-        verdict = AgentVerdict.from_agent_text(_said(verdicts.get(phase_id)))
         aggregate.agent_execution_completed(
             AgentExecutionCompletedCommand(
                 execution_id=EXECUTION,
                 phase_id=phase_id,
                 session_id="s",
-                reported_review_verdict=verdict.reported_review_verdict,
+                reported_review_verdict=ReviewVerdict.from_reported(verdicts.get(phase_id)),
             )
         )
         store.save(aggregate)
