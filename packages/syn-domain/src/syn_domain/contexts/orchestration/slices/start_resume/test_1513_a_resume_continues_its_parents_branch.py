@@ -38,7 +38,7 @@ from pydantic import BaseModel, ConfigDict
 from syn_adapters.github.client import GitHubAppError
 from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
 from syn_adapters.workspace_backends.memory.memory_adapter import MemoryIsolationAdapter
-from syn_api._wiring import _build_agent_command, _build_workspace_prompt
+from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     AbandonedBranch,

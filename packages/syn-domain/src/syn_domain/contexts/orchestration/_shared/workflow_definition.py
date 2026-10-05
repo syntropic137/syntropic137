@@ -772,7 +772,7 @@ class WorkflowDefinition(BaseModel):
         because the declaration and the injection are keyed on different
         vocabularies:
 
-          - injection is keyed on PHASE IDs. `_wiring.py` substitutes
+          - injection is keyed on PHASE IDs. `_wiring_agent_command.py` substitutes
             `{{<phase-id>}}` and builds the context appendix per phase id.
           - declaration is keyed on ARTIFACT TYPES (`input_artifacts` ->
             `input_artifact_types`).

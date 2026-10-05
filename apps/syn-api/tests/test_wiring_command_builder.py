@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from syn_api._wiring import (
+from syn_api._wiring_agent_command import (
     _build_agent_command,
     _build_claude_command,
     _build_codex_command,
