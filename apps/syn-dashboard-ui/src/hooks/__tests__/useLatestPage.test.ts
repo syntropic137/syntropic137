@@ -312,4 +312,144 @@ describe('useLatestPage', () => {
       consoleError.mockRestore()
     }
   })
+  it('is loading for a new query after the first one failed, until that one settles', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const filtered = deferred<ListPage<{ id: string }>>()
+      const FILTERED: ListQuery = { page: 1, page_size: LIST_PAGE_SIZE, statuses: ['failed'] }
+      const fetchPage = vi.fn((query: ListQuery) =>
+        query === FIRST_PAGE ? Promise.reject(new Error('Network error')) : filtered.promise,
+      )
+
+      const { result, rerender } = renderHook(({ query }) => useLatestPage(fetchPage, query), {
+        initialProps: { query: FIRST_PAGE },
+      })
+      await waitFor(() => expect(result.current.failed).toBe(true))
+      expect(result.current.loading).toBe(false)
+
+      rerender({ query: FILTERED })
+
+      // The defect: the failure belonged to the old query, yet it alone kept
+      // `loading` false, so an empty list read as the new query's answer.
+      expect(result.current.failed).toBe(false)
+      expect(result.current.loading).toBe(true)
+
+      await act(async () => filtered.resolve(page(['a'], 1)))
+
+      expect(result.current.loading).toBe(false)
+      expect(result.current.result.rows).toEqual([{ id: 'a' }])
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  describe('stale: whether the rows on screen answer the current query', () => {
+    it('is true while a new query is in flight, with the previous rows still held', async () => {
+      const nextPage = deferred<ListPage<{ id: string }>>()
+      const fetchPage = vi.fn((query: ListQuery) =>
+        query.page === 1 ? Promise.resolve(page(['a'], 2)) : nextPage.promise,
+      )
+      const SECOND_PAGE: ListQuery = { page: 2, page_size: LIST_PAGE_SIZE }
+
+      const { result, rerender } = renderHook(({ query }) => useLatestPage(fetchPage, query), {
+        initialProps: { query: FIRST_PAGE },
+      })
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.stale).toBe(false)
+
+      rerender({ query: SECOND_PAGE })
+
+      // The defect: `loading` had settled on mount and nothing said the rows
+      // on screen now answered a query the operator had left.
+      expect(result.current.stale).toBe(true)
+      expect(result.current.loading).toBe(false)
+      expect(result.current.result.rows).toEqual([{ id: 'a' }])
+
+      await act(async () => nextPage.resolve(page(['b'], 2)))
+
+      expect(result.current.stale).toBe(false)
+      expect(result.current.result.rows).toEqual([{ id: 'b' }])
+    })
+
+    it('is true when only the fetcher changes, as a caller-owned filter does', async () => {
+      const narrowed = deferred<ListPage<{ id: string }>>()
+      const everything = vi.fn(async () => page(['a', 'b'], 2))
+      const onlyCode = vi.fn(() => narrowed.promise)
+
+      const { result, rerender } = renderHook(
+        ({ fetchPage }) => useLatestPage(fetchPage, FIRST_PAGE),
+        {
+          initialProps: { fetchPage: everything as typeof onlyCode },
+        },
+      )
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      rerender({ fetchPage: onlyCode })
+      expect(result.current.stale).toBe(true)
+
+      await act(async () => narrowed.resolve(page(['b'], 1)))
+      expect(result.current.stale).toBe(false)
+    })
+
+    it('stays false while the same query is asked again, so polls do not dim the list', async () => {
+      const again = deferred<ListPage<{ id: string }>>()
+      const outcomes = [Promise.resolve(page(['a'], 1)), again.promise]
+      const fetchPage = vi.fn(() => outcomes.shift()!)
+
+      const { result } = renderHook(() => useLatestPage(fetchPage, FIRST_PAGE))
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      act(() => result.current.refetch())
+      await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(2))
+
+      expect(result.current.stale).toBe(false)
+      await act(async () => again.resolve(page(['a'], 1)))
+    })
+
+    // A failure settles the request without answering it. Recording it as
+    // settled undimmed the old rows under the new filter, with no sign anything
+    // had gone wrong.
+    it('stays true when the new query fails, until a retry answers it', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const SECOND_PAGE: ListQuery = { page: 2, page_size: LIST_PAGE_SIZE }
+        const failing = deferred<ListPage<{ id: string }>>()
+        const retried = deferred<ListPage<{ id: string }>>()
+        const secondPageOutcomes = [failing.promise, retried.promise]
+        const fetchPage = vi.fn((query: ListQuery) =>
+          query.page === 1 ? Promise.resolve(page(['a'], 2)) : secondPageOutcomes.shift()!,
+        )
+
+        const { result, rerender } = renderHook(({ query }) => useLatestPage(fetchPage, query), {
+          initialProps: { query: FIRST_PAGE },
+        })
+        await waitFor(() => expect(result.current.loading).toBe(false))
+
+        rerender({ query: SECOND_PAGE })
+        expect(result.current.stale).toBe(true)
+        expect(result.current.failed).toBe(false)
+
+        await act(async () => failing.reject(new Error('Network error')))
+
+        expect(result.current.failed).toBe(true)
+        expect(result.current.stale).toBe(true)
+        expect(result.current.loading).toBe(false)
+        expect(result.current.result.rows).toEqual([{ id: 'a' }])
+
+        act(() => result.current.refetch())
+        await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(3))
+        // Asking again reads as updating, not as the failure still standing.
+        expect(result.current.failed).toBe(false)
+        expect(result.current.stale).toBe(true)
+
+        await act(async () => retried.resolve(page(['b'], 2)))
+
+        expect(result.current.failed).toBe(false)
+        expect(result.current.stale).toBe(false)
+        expect(result.current.result.rows).toEqual([{ id: 'b' }])
+      } finally {
+        consoleError.mockRestore()
+      }
+    })
+  })
 })

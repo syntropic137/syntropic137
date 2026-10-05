@@ -14,6 +14,7 @@ import {
   Bell,
   Box,
   FileText,
+  FolderGit2,
   GitBranch,
   Lightbulb,
   LayoutDashboard,
@@ -32,6 +33,7 @@ const navigation = [
   { name: 'Sessions', href: '/sessions', icon: Activity },
   { name: 'Artifacts', href: '/artifacts', icon: FileText },
   { name: 'Triggers', href: '/triggers', icon: Bell },
+  { name: 'Repos', href: '/repos', icon: FolderGit2 },
   { name: 'Insights', href: '/insights', icon: BarChart3 },
 ]
 

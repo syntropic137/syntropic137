@@ -477,9 +477,6 @@ allowed_prefixes = [
 "apps/syn-api/src/syn_api/routes/sessions.py:_load_tool_operations" = { issue = "#1341" }
 # An unreadable capture-observation query makes every phase report no agent
 # session, which the detail page renders as "no session was captured".
-# A GitHub API failure makes an installation report zero accessible repos,
-# which is also what an installation scoped to nothing looks like.
-"apps/syn-api/src/syn_api/routes/github.py:_repos_for_installation" = { issue = "#1341" }
 # The phase-metrics build failing makes a workflow report zero phases.
 "apps/syn-api/src/syn_api/routes/metrics.py:_build_phase_metrics" = { issue = "#1341" }
 # A collection failure makes an unfinished phase report zero artifacts kept,
