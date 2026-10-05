@@ -7,7 +7,7 @@ fix has two halves, and both have to reach the containers docker starts:
 * the CPU limits of api and timescaledb default to InfraSettings' values, so
   what ``infra/.env.example`` documents is what an unset variable gets;
 * api, timescaledb, event-store and gateway carry ``cpu_shares`` above
-  ``SYN_WORKSPACE_CPU_SHARES``, the weight every workspace is given, so under
+  Docker's default of 1024, which is what every workspace runs at, so under
   contention they win.
 
 Read from the PUBLISHED file, because that is what a self-hoster downloads and
@@ -25,11 +25,13 @@ import pytest
 import yaml
 
 from syn_shared.settings.infra import InfraSettings
-from syn_shared.settings.workspace import WorkspaceSettings
 
 pytestmark = pytest.mark.unit
 
 _PUBLISHED = Path(__file__).resolve().parents[3] / "docker" / "docker-compose.syntropic137.yaml"
+
+#: Docker's cpu_shares when none is set -- what every agent workspace runs at.
+_DOCKER_DEFAULT_CPU_SHARES = 1024
 
 _CONTROL_PLANE = ("api", "timescaledb", "event-store", "gateway")
 
@@ -57,7 +59,7 @@ def test_control_plane_outweighs_workspaces(service: str) -> None:
     shares = _default_of(_services()[service].get("cpu_shares"), "CONTROL_PLANE_CPU_SHARES")
 
     assert int(shares) == _field_default("control_plane_cpu_shares")
-    assert int(shares) > WorkspaceSettings.model_fields["cpu_shares"].default
+    assert int(shares) > _DOCKER_DEFAULT_CPU_SHARES
 
 
 @pytest.mark.parametrize(

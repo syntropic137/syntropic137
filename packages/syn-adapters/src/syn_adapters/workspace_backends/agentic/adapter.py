@@ -288,10 +288,6 @@ class AgenticIsolationAdapter:
         # between. See image_verification for the full policy.
         image = await verify_image_async(image)
 
-        # TODO(#1600): config.security_policy carries cpu_limit_cores and
-        # cpu_shares, and both stop here: ResourceLimits has no cpu_shares yet,
-        # so neither is passed as limits=. Wire both together once the provider
-        # change described in PR #1602 lands in agentic-workspace.
         ws_config = WorkspaceConfig(
             provider="docker",
             image=image,

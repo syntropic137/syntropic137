@@ -94,21 +94,6 @@ class WorkspaceSettings(BaseSettings):
         description="Maximum concurrent workspaces.",
     )
 
-    cpu_shares: int = Field(
-        default=1024,
-        ge=2,
-        le=262144,
-        description=(
-            "CPU weight (docker --cpu-shares) of each agent workspace. Kept below"
-            " CONTROL_PLANE_CPU_SHARES so that when workspaces oversubscribe the"
-            " host's cores, the api, database, event store and gateway still get"
-            " scheduled (#1600). Carried to the isolation adapter on every"
-            " workspace; the Docker provider in agentic-workspace does not yet"
-            " emit --cpu-shares, so until it does workspaces run at Docker's"
-            " default, which is this value."
-        ),
-    )
-
     enable_cloud_overflow: bool = Field(
         default=True,
         description="Enable cloud overflow when local capacity exceeded.",

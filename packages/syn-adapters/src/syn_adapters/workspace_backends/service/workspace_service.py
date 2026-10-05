@@ -88,7 +88,6 @@ class WorkspaceServiceConfig:
         image: Container image for workspace
         memory_limit_mb: Memory limit in MB
         cpu_limit_cores: CPU limit in cores
-        cpu_shares: CPU weight relative to the control plane (#1600)
         timeout_seconds: Default command timeout
         allowed_hosts: Allowed egress hosts for sidecar
         default_token_ttl: Default token TTL in seconds
@@ -98,7 +97,6 @@ class WorkspaceServiceConfig:
     image: str = DEFAULT_WORKSPACE_IMAGE
     memory_limit_mb: int = 2048  # 2GB - Claude CLI needs more memory
     cpu_limit_cores: float = 2.0  # Allow more CPU for agent work
-    cpu_shares: int = 1024  # Below CONTROL_PLANE_CPU_SHARES (#1600)
     timeout_seconds: int = 3600  # 1 hour
     allowed_hosts: tuple[str, ...] = (
         "api.anthropic.com",
@@ -222,7 +220,7 @@ class WorkspaceService:
                 merged_env = dict(cfg.environment)
                 merged_env.update(environment)
                 # replace(), not a field-by-field copy: a copy silently drops
-                # any field added later (cpu_shares, #1600).
+                # any field added later.
                 cfg = dataclasses.replace(cfg, environment=merged_env)
         else:
             cfg = WorkspaceServiceConfig(environment=environment or {})
