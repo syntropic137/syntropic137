@@ -6,7 +6,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { api, unwrap } from "../client/typed.js";
-import { printDim } from "../output/console.js";
+import { printDim, printWarning } from "../output/console.js";
 import { style, CYAN, DIM, GREEN, RED } from "../output/ansi.js";
 import { Table } from "../output/table.js";
 
@@ -31,6 +31,14 @@ const reposCommand: CommandDef = {
     }), "List GitHub repos");
 
     const items = data.repos ?? [];
+    // Only a complete lookup makes a missing repo mean the App cannot reach it.
+    if (data.lookup === "unavailable") {
+      printWarning("Could not reach GitHub for any installation; App access is unknown.");
+      return;
+    }
+    if (data.lookup === "partial") {
+      printWarning("GitHub failed for some installations; repositories they reach are missing below.");
+    }
     if (items.length === 0) { printDim("No accessible repositories found."); return; }
 
     const table = new Table({ title: "Accessible Repositories" });

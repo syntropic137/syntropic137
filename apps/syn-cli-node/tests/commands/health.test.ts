@@ -271,6 +271,14 @@ describe("health command", () => {
     await expect(healthCommand.handler(emptyArgs)).rejects.toThrow(CLIError);
   });
 
+  it("says a starting API is starting, not unhealthy (#1575)", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ build: BUILD, status: "starting", mode: "degraded" }),
+    );
+
+    await expect(healthCommand.handler(emptyArgs)).rejects.toThrow("API is still starting");
+  });
+
   // `syn health` is the interface an operator or an agent uses to answer "is
   // the new build live yet?". Until #1380 it could not: /health carried no
   // version and openapi.json claimed 0.5.1 against a 0.29.1b3 deployment.

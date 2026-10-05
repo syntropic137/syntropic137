@@ -27,6 +27,13 @@ _openapi:
           GitHub API without requiring a webhook URL. Stale data is kept as a
 
           fallback if the GitHub API is unreachable during refresh.
+
+
+          ``lookup`` says whether a repo missing from ``repos`` is known to be
+          out of
+
+          the App's reach (``complete``) or merely went unseen because GitHub
+          failed.
         heading: list-accessible-repos-endpoint
 ---
 

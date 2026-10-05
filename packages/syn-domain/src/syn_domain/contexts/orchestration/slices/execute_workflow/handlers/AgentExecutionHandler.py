@@ -564,6 +564,7 @@ class AgentExecutionHandler:
             # input (#1195, #1300).
             last_agent_message=stream_result.last_agent_message,
             reported_side_effects=stream_result.verdict.reported_side_effects,
+            reported_review_verdict=stream_result.verdict.reported_review_verdict,
         )
 
         return AgentExecutionResult(

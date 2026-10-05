@@ -199,6 +199,17 @@ def codex_fault_reason(message: str) -> str:
     return f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
 
 
+def codex_login_fault_reason(status: str, line: str) -> str:
+    """The reason text a codex CLI login fault on stdout is reported under.
+
+    A function for the same reason as `codex_fault_reason`: the upstream
+    failure reader recognises this shape as `auth` by the prefix this writes
+    with an empty `line`, so the two cannot drift apart.
+    """
+    label = api_error_label(ApiErrorType.AUTHENTICATION, status)
+    return f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
+
+
 def _as_int(value: object) -> int:
     """Narrow a JSON-boundary ``object`` value (from ``dict.get``) to ``int``.
 
@@ -748,11 +759,9 @@ class CodexStreamProcessor:
         if not _AUTH_FAILURE_MARKER_RE.search(line):
             return
         status = _HTTP_AUTH_STATUS_RE.search(line)
-        label = api_error_label(
-            ApiErrorType.AUTHENTICATION,
-            status.group(1) if status else "",
+        self._auth_fault_candidate = codex_login_fault_reason(
+            status.group(1) if status else "", line
         )
-        self._auth_fault_candidate = f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
         logger.warning("Codex auth fault seen on stdout: %s", line[:_MAX_FAULT_LINE_LEN])
 
     def _note_delegation_attempt(self, tool_use_id: str, command: str) -> None:

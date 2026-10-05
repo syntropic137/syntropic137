@@ -92,6 +92,11 @@ export const healthCommand: CommandDef = {
       for (const reason of reasonsOf(data["degraded_reasons"])) {
         print(style(`  • ${reason}`, YELLOW));
       }
+    } else if (status === "starting") {
+      // Alive but not ready (#1575): a long startup migration is running and
+      // every route but /health and /version answers 503 until it finishes.
+      print(style("Starting", BOLD, YELLOW) + " — startup still running; retry shortly");
+      throw new CLIError("API is still starting");
     } else {
       print(style("Unhealthy", BOLD, RED) + ` — status: ${status}`);
       throw new CLIError("API is unhealthy");

@@ -94,10 +94,13 @@ run here at all: `vsa-validate` (no `vsa`), `codegen-check` (no `pnpm`),
 seven; passing here does not promise a green CI, and if CI fails on one of them
 that is a real failure to fix, not an exception to claim.
 
-`preflight-agent` DOES run `fitness-check`, CI's thresholds unchanged (#1498).
-The first run in a workspace installs stable Rust and builds `aps` (~6 minutes);
-later runs reuse both. A `FITNESS NOT RUN:` line means the gate did not run,
-which is not a pass: report it, never certify around it.
+`preflight-agent` DOES run all of `fitness`: `fitness-check`, CI's thresholds
+unchanged (#1498), and `fitness-invariants`, the `pytest ci/fitness` suite CI
+runs. The first run in a workspace installs stable Rust and builds `aps` (~6
+minutes); later runs reuse both. A `FITNESS NOT RUN:` line means the gate did
+not run, which is not a pass: report it, never certify around it. The pytest
+summary lists each test skipped as `NOT RUN` for a binary this image lacks
+(today, the docker-backed `test_gateway_bind.py`); CI still runs those.
 
 **Run the whole gate, not the sub-commands you think it contains.** A change can
 pass every test, typecheck and build and still fail on something none of them

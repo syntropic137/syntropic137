@@ -46,6 +46,23 @@ _PIN_REMOTE_REF: Final = "refs/remotes/pinned"
 _BRANCH_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._/-]*")
 
 
+#: The refusal line every pin writes, in both variants: ``dest`` and ``sha``.
+_PIN_LINE_RE = re.compile(
+    r"git -C (\S+) cat-file -e ([0-9a-f]{64}|[0-9a-f]{40})\^\{commit\} 2>/dev/null; then"
+)
+
+
+def pinned_heads(script: str) -> dict[str, str]:
+    """Clone directory -> the commit ``script`` checks it out at (#967).
+
+    The reverse of `append_pinned_checkout`, kept beside it so the two cannot
+    drift: what a workspace that ran ``script`` successfully reports as each
+    pinned repository's HEAD. For a backend that runs no script - the
+    in-memory test double - and must still answer as one that did.
+    """
+    return {shlex.split(dest)[0]: sha for dest, sha in _PIN_LINE_RE.findall(script)}
+
+
 def append_pinned_checkout(
     lines: list[str], *, repository: str, dest: str, sha: str, branch: str | None = None
 ) -> None:

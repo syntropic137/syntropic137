@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol
 
+from syn_shared.in_memory import InMemoryAdapter
+
 if TYPE_CHECKING:
     from syn_tokens.models import ScopedToken
 
@@ -39,10 +41,11 @@ class TokenStore(Protocol):
         ...
 
 
-class InMemoryTokenStore:
-    """In-memory token store for testing."""
+class InMemoryTokenStore(InMemoryAdapter):
+    """In-memory token store for testing (ADR-060: raises outside test/offline)."""
 
     def __init__(self) -> None:
+        super().__init__()
         self._tokens: dict[str, ScopedToken] = {}
         self._execution_tokens: dict[str, set[str]] = {}
 
