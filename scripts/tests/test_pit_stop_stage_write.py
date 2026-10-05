@@ -45,19 +45,31 @@ def _stage_block() -> str:
     return "\n".join(lines[starts[0] : ends[0]])
 
 
+def _counters() -> str:
+    """`pins_on_tag` and `images_on_tag` as the script defines them."""
+    text = _SCRIPT.read_text()
+    start = text.index("pins_on_tag() {")
+    end = text.index('\nif [ "$MODE" != "swap" ]; then', start)
+    return text[start:end]
+
+
 def _run_stage(
-    fixture: str, host: Path, tmp: Path, stub: str, service: str = "all"
+    fixture: str, host: Path, tmp: Path, stub: str, service: str = "all", compose: str | None = None
 ) -> subprocess.CompletedProcess[str]:
-    shutil.copy(_FIXTURES / fixture, host / _COMPOSE)
-    n = {"all": 2, "gateway": 1}[service]
+    if compose is None:
+        shutil.copy(_FIXTURES / fixture, host / _COMPOSE)
+    else:
+        (host / _COMPOSE).write_text(compose)
+    n, swapped = {"all": (2, "api gateway"), "gateway": (1, "gateway")}[service]
     preamble = f"""
 set -euo pipefail
-TAG={_TAG}; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; N={n}
+TAG={_TAG}; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; N={n}; SWAPPED="{swapped}"
 COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; TMP={tmp}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 run() {{ "$@"; }}
 {stub}
+{_counters()}
 """
     # $0 is the real script, so `$(dirname "$0")/pit_stop_repoint.py` resolves.
     return subprocess.run(
@@ -121,8 +133,7 @@ def test_a_gateway_only_stage_repoints_one_pin_and_passes_its_own_count(
     dirs: tuple[Path, Path],
 ) -> None:
     """#1310: the stage passes `--service gateway` to the repoint and then
-    requires 1/1. A repoint that ignored the flag would move syn-api too and
-    fail that count, so this pins both hops."""
+    requires the gateway pin, alone, on the tag. syn-api keeps its digest."""
     host, tmp = dirs
     proc = _run_stage("compose-digest.yaml", host, tmp, _FULL, service="gateway")
     assert proc.returncode == 0, proc.stderr
@@ -133,3 +144,22 @@ def test_a_gateway_only_stage_repoints_one_pin_and_passes_its_own_count(
     assert "syn-api@sha256:bf783882d031" in deployed
     (backup,) = host.glob(f"{_COMPOSE}.bak-*")
     assert backup.name == f"{_COMPOSE}.bak-sha256-6b416d4a25dd"
+
+
+def test_a_gateway_only_stage_passes_when_the_api_is_already_on_the_tag(
+    dirs: tuple[Path, Path],
+) -> None:
+    """#1310 verification: a total over both services counted 2 here, aborted
+    with 2/1, and left the new compose deployed. Only the gateway is counted."""
+    host, tmp = dirs
+    compose = (
+        (_FIXTURES / "compose-tag.yaml")
+        .read_text()
+        .replace("syn-api:v0.33.1-beta.2", f"syn-api:{_TAG}")
+    )
+    proc = _run_stage("", host, tmp, _FULL, service="gateway", compose=compose)
+    assert proc.returncode == 0, proc.stderr
+
+    deployed = (host / _COMPOSE).read_text()
+    assert deployed.count(f"syn-api:{_TAG}") == 1
+    assert deployed.count(f"syn-gateway:{_TAG}") == 1

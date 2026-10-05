@@ -158,6 +158,28 @@ sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
 GATE
 }
 
+# How many of the services this pit stop swaps are on $TAG, counted PER
+# SERVICE, never as one total across both: a total cannot tell the gateway's
+# pin from the API's, so a gateway-only stage on a host whose API is already on
+# $TAG would count 2, and one whose API alone is there would pass at 1 with the
+# gateway still old (#1310). Each service must name $TAG exactly once.
+pins_on_tag() {
+    local n=0 svc c
+    for svc in $SWAPPED; do
+        c="$(remote "grep -c 'syn-$svc:$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
+        if [ "$c" = 1 ]; then n=$((n + 1)); fi
+    done
+    echo "$n"
+}
+images_on_tag() {
+    local n=0 svc c
+    for svc in $SWAPPED; do
+        c="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -cx 'ghcr.io/syntropic137/syn-$svc:$TAG'" || true)"
+        if [ "$c" = 1 ]; then n=$((n + 1)); fi
+    done
+    echo "$n"
+}
+
 if [ "$MODE" != "swap" ]; then
     step "prepare: worktree at $REF, bump to $VERSION"
     WT="$WT_BASE/pit-stop-$VERSION"
@@ -210,7 +232,7 @@ if [ "$MODE" != "swap" ]; then
     else
         printf '   (dry-run) docker save %s | ssh %s docker load\n' "$IMAGES" "$HOST"
     fi
-    [ "$DRY" = 1 ] || [ "$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -c ':$TAG\$'")" = "$N" ] \
+    [ "$DRY" = 1 ] || [ "$(images_on_tag)" = "$N" ] \
         || die "expected $N image(s) tagged $TAG on the host; the deploy would be half old"
 
     step "stage: back up the deployed compose and repoint $REPOINTS"
@@ -235,9 +257,10 @@ if [ "$MODE" != "swap" ]; then
         echo "   $REPOINTS already on $TAG"
     fi
     # The same count --swap-only prechecks, so a stage it would refuse fails here.
-    # A gateway-only stage leaves syn-api on its old pin, so this finds N=1.
+    # Only the swapped services are counted, so syn-api's pin, old or new, says
+    # nothing about a gateway-only stage.
     if [ "$DRY" = 0 ]; then
-        new_n="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
+        new_n="$(pins_on_tag)"
         [ "$new_n" = "$N" ] || die "the deployed compose pins $new_n/$N services to $TAG after the repoint"
     fi
     if [ "$MODE" = "stage" ]; then
@@ -251,9 +274,9 @@ if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then
     # --swap-only recreates whatever the compose file names. Without this it
     # would drain the platform and disrupt production containers before
     # discovering, at verify, that the file pins something else entirely.
-    pins="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
+    pins="$(pins_on_tag)"
     [ "$pins" = "$N" ] || die "the deployed compose file pins $pins/$N services to $TAG; stage it first"
-    staged="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -c ':$TAG\$'" || true)"
+    staged="$(images_on_tag)"
     [ "$staged" = "$N" ] || die "$staged/$N images tagged $TAG on $HOST; stage it first"
     echo "   pins=$N images=$N"
 fi

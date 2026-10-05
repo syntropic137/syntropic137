@@ -42,11 +42,18 @@ def _stage(
     return proc, staged
 
 
-def _precheck_count(compose: Path, tag: str = _TAG) -> int:
-    """Run the `--swap-only` precheck's own grep, as written in pit_stop.sh."""
-    (pattern,) = re.findall(r"pins=\"\$\(remote \"grep -c '([^']+)' ", _SCRIPT.read_text())
+def _precheck_count(compose: Path, tag: str = _TAG, swapped: str = "api gateway") -> int:
+    """Run the `--swap-only` precheck's own `pins_on_tag`, as written in pit_stop.sh."""
+    text = _SCRIPT.read_text()
+    start = text.index("pins_on_tag() {")
+    counter = text[start : text.index("\n}\n", start) + 3]
     proc = subprocess.run(
-        ["grep", "-c", pattern.replace("$TAG", tag), str(compose)],
+        [
+            "bash",
+            "-c",
+            f'remote() {{ bash -c "$*"; }}\nTAG={tag}; SWAPPED="{swapped}"\n'
+            f"COMPOSE_DIR={compose.parent}; COMPOSE={compose.name}\n{counter}pins_on_tag",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -108,8 +115,8 @@ class TestGatewayOnly:
         after = staged.read_text().splitlines()
         changed = [b.strip() for a, b in zip(before, after, strict=True) if a != b]
         assert changed == [f"image: ghcr.io/syntropic137/syn-gateway:{_TAG}"]
-        # One of the two pins the swap precheck counts, which is what it requires here.
-        assert _precheck_count(staged) == 1
+        # The one pin a gateway-only swap precheck counts, which is what it requires.
+        assert _precheck_count(staged, swapped="gateway") == 1
 
     def test_the_backup_is_named_for_the_gateway_pin(self, tmp_path: Path) -> None:
         proc, _ = _stage("compose-digest.yaml", tmp_path, _TAG, "--service", "gateway")
