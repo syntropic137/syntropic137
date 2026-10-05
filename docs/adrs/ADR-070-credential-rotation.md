@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Proposed. D4, D5 and the service and credential map revised in place 2026-10-05 for ADR-072.
 
 ## Context
 
@@ -102,13 +102,17 @@ not to be there.
 
 | Credential | Server | Clients |
 |---|---|---|
-| `db_password` | timescaledb | api, event-store, collector |
-| `redis_password` | redis | api |
-| `minio_password` | minio | api |
-| `github_app_private_key` | GitHub | api |
+| `db_password` | timescaledb | api, executor, event-store, collector |
+| `redis_password` | redis | api, executor |
+| `minio_password` | minio | api, executor |
+| `github_app_private_key` | GitHub | api, executor |
 
 `db_password` is the difficult one and the one npx#56 names: one server, three
-clients, all reading it at init.
+clients, all reading it at init. The `executor` role
+([ADR-072](ADR-072-execution-hosting-and-upgrade-without-drain.md) D1) adds a
+fourth when it ships: it holds the run-queue connection, the cancel and inject
+signal queue, artifact uploads and the credential keeper. Until then those are
+the `api` row, which is `all` in one process.
 
 ## Decision
 
@@ -142,25 +146,40 @@ reported success, and the mismatch only surfaced at the next restart.
 
 Given D1, a rotated credential is adopted by new connections while existing
 pooled connections continue on the credential they authenticated with. The
-cutover is a rolling drain rather than an event, and no execution is orphaned.
+cutover is a rolling drain **of connections** rather than an event: no process
+restarts, no process is drained, and no execution is orphaned. This is the
+rotation procedure for every client that satisfies D1.
+
+A **host drain** is a different thing and is never part of rotating a
+credential. It applies only to a client that does not yet satisfy D1, because
+it read the credential at init. That client must restart to adopt the value,
+and the restart follows D5's rule for that service. Each such case is a D1 gap
+to close, not a second rotation procedure.
 
 ### D5. Rotation is drain-aware
 
-Even without a restart, rotation is a control-plane operation. It consults the
-same in-flight check used before deployment (#1179 / #1181) and refuses to
-proceed silently while work is running. Unknown is never reported as clear.
+Even without a restart, rotation is a control-plane operation. Before changing
+anything it consults the in-flight check **of each affected service**, the
+clients of the credential in the map above, and reports what it found. It
+never proceeds silently while work is running, and unknown is never reported
+as clear: an in-flight check that cannot answer stops the rotation.
 
-**Where the drain-aware path lives (2026-10-05).** D4 and D5 assume that a
-rotation can wait for running work without stopping the platform. While
-executions run inside the API process, the only "in-flight check" is the
-platform-wide one pit_stop uses, and a restart-free rotation still has to wait
-for the whole platform to go idle. [ADR-072](ADR-072-execution-hosting-and-upgrade-without-drain.md)
-D10 supplies the path these decisions assume: the **executor drain**, where a
-host stops claiming, finishes what it holds and exits. Admission stays open
-while it drains. A rotation that affects executors drains them one host or
-generation at a time, and the count it consults is the run queue's
-`in_use()`, not execution statuses. A rotation that affects only the API or
-gateway no longer has to wait for running executions at all.
+One procedure per affected service (revised in place 2026-10-05):
+
+| Affected service | In-flight check | Restart-free rotation (D4) | Restart required (D1 gap) |
+|---|---|---|---|
+| `api`, before #1310 Phase 1 (also role `all`) | the platform-wide check pit_stop uses (#1179 / #1181), because executions run in this process | proceeds; reports the running count | waits until that check is clear |
+| `api`, after #1310 Phase 1 | none: the process runs no execution (ADR-072 D1) | proceeds | restarts without waiting |
+| `executor` | that host's claims in the run queue (`in_use()`, ADR-072 D2), not execution statuses | proceeds; reports the count | drains that host (ADR-072 D10): it stops claiming, finishes what it holds and exits, one host or generation at a time, with admission open |
+| `event-store`, `collector` | the platform-wide check | proceeds; reports the running count | waits until that check is clear |
+
+**Where the drain-aware path lives.** D4 and D5 were written assuming a
+restart, when one is needed, can wait for running work without stopping the
+platform. While executions run inside the API process, the only in-flight
+check is the platform-wide one, so any restart waits for the whole platform to
+go idle. [ADR-072](ADR-072-execution-hosting-and-upgrade-without-drain.md) D10
+supplies the path these decisions assume: the **executor drain**, scoped to one
+host.
 
 ### D6. Rollback is symmetric and always available
 

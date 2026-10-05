@@ -400,5 +400,6 @@ not, 1.2 carries the one-budget rule itself and #1557 closes with 2.3.
   for Phase 3, which is deferred and evidence-gated: no implementation issue
   until an experiment write-up under `docs/experiments/` is read.
 - The ADR-014 execution model and its resume semantics are unchanged.
-- ADR-070 D4/D5 assume a drain-aware control plane; D10's executor drain is
-  that path once executions leave the API process.
+- ADR-070 D4/D5, revised in place, keep rotation restart-free and give each
+  affected service one procedure; D10's executor drain is used only when a
+  client that has not yet adopted ADR-070 D1 must restart.
