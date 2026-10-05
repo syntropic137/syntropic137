@@ -19,10 +19,19 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
+    ExecutionTagsAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
+    ExecutionTagsRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
@@ -86,7 +95,15 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # both bumped 10 -> 11 independently, on separate branches. Taking either
     # literal 11 would leave a deployment that had already rebuilt at the other
     # one's 11 seeing no change here, and so never rebuilding for this field.
-    VERSION = 12
+    # v14: rebuild so stored PhaseFailed events populate the phase failure
+    # fields #1592 added (failure_classification, reported_failure_reason);
+    # a row built before them reads `unclassified`. Also picks up
+    # review_verdict (PC-63), which only new completions carry.
+    # v15, not 14: #1590 added delegation_failure (#894) to this read model on
+    # main without bumping from 13, while PC-63 bumped 13 -> 14. A deployment
+    # that had already rebuilt at this branch's 14 would never rebuild for
+    # delegation_failure, so the merge takes the higher and bumps once more.
+    VERSION = 15
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -152,6 +169,24 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         stated = event_data.get("completed_phases")
         return accumulated if stated is None else int(stated)
 
+    @staticmethod
+    def _repos_from(repos_input: str) -> list[str]:
+        """The repo URLs in a run's `repos` input (ADR-058: a comma-separated string).
+
+        No empty-string special case: "".split(",") is [""], which the filter
+        already drops, so a guard for it would decide nothing.
+        """
+        return [u.strip() for u in repos_input.split(",") if u.strip()]
+
+    @staticmethod
+    def _launch_tags(recorded: list[str] | None) -> TagSet:
+        """The tags a run launched with, as its started event recorded them (#967).
+
+        The event leaves `tags` out of its payload when there are none, so an
+        absent key is a run that launched untagged, not a gap in the record.
+        """
+        return TagSet.recorded(recorded or [])
+
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
 
@@ -168,10 +203,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # what its own task was.
         inputs = {str(k): str(v) for k, v in (event_data.get("inputs") or {}).items()}
 
-        # Extract repos from inputs field (ADR-058: stored as comma-separated string).
-        # No empty-string special case: "".split(",") is [""], which the filter
-        # already drops, so the guard that used to sit here decided nothing.
-        repos = [u.strip() for u in inputs.get("repos", "").split(",") if u.strip()]
+        repos = self._repos_from(inputs.get("repos", ""))
+        launch_tags = self._launch_tags(event_data.get("tags"))
 
         # Each phase's wall-clock budget, keyed by phase id. Stated once, on
         # this event, and not restated by the phase that later consumes it, so
@@ -224,6 +257,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "error_message": None,
             "repos": repos,
             "inputs": inputs,
+            # The launch snapshot, twice: `inherited_tags` is never edited and
+            # `tags` is what ExecutionTagsAdded/Removed edit from here (#967).
+            "tags": list(launch_tags),
+            "inherited_tags": list(launch_tags),
             # How many phases this run set out to do, and how many it has done.
             # Read off the SAME event the list projection reads them off, so a
             # run cannot report three phases in one view and one in the other
@@ -371,6 +408,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["status"] = "completed"
         existing["completed_at"] = event_data.get("completed_at")
+        verdict = ReviewVerdict.from_stored(event_data.get("review_verdict"))
+        existing["review_verdict"] = None if verdict is None else verdict.value
         existing["completed_phases"] = self._completed_phases_after(
             event_data, existing.get("completed_phases", 0)
         )
@@ -423,6 +462,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # word be summed as a measurement (#1392).
         reported = ReportedFailureReason.from_stored(event_data.get("reported_failure_reason"))
         reported_value = None if reported is None else reported.value
+        # Which required delegate did not happen (#894). Validated through its
+        # value object here so the row holds the one shape the read model reads.
+        delegation = DelegationFailure.from_stored(event_data.get("delegation_failure"))
+        delegation_value = None if delegation is None else delegation.model_dump(mode="json")
 
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not existing:
@@ -442,6 +485,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 "error_message": event_data.get("error_message"),
                 "failure_classification": classification.value,
                 "reported_failure_reason": reported_value,
+                "delegation_failure": delegation_value,
                 "completed_phases": event_data.get("completed_phases", 0),
                 "total_phases": event_data.get("total_phases", 0),
             }
@@ -456,6 +500,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # and stranding the whole read model.
             existing["failure_classification"] = classification.value
             existing["reported_failure_reason"] = reported_value
+            existing["delegation_failure"] = delegation_value
             existing["completed_phases"] = self._completed_phases_after(
                 event_data, existing.get("completed_phases", 0)
             )
@@ -589,6 +634,25 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         )
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_execution_tags_added(self, event_data: ExecutionTagsAddedEvent) -> None:
+        """Handle ExecutionTagsAdded (#967). Edits current tags, never inherited."""
+        event = ExecutionTagsAddedEvent.model_validate(event_data)
+        await self._edit_tags(event.execution_id, event.tags, added=True)
+
+    async def on_execution_tags_removed(self, event_data: ExecutionTagsRemovedEvent) -> None:
+        """Handle ExecutionTagsRemoved (#967). Edits current tags, never inherited."""
+        event = ExecutionTagsRemovedEvent.model_validate(event_data)
+        await self._edit_tags(event.execution_id, event.tags, added=False)
+
+    async def _edit_tags(self, execution_id: str, tags: list[str], *, added: bool) -> None:
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["tags"] = replay_tag_edit(existing.get("tags") or [], tags, added=added)
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:
         """Get execution detail by ID.

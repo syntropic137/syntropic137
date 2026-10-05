@@ -1,0 +1,45 @@
+"""A ``RevisionResolverPort`` answered from a table the test writes (#967).
+
+Every consumer of the port is tested against this one. The GitHub resolver,
+``syn_adapters.github.revision_resolver``, is tested against GitHub's answers.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
+    ResolvedRevision,
+    RevisionResolution,
+    UnresolvedReason,
+    UnresolvedRevision,
+)
+from syn_shared.in_memory import assert_test_only
+
+if TYPE_CHECKING:
+    from syn_domain.contexts._shared.repository_ref import RepositoryRef
+
+
+@dataclass
+class FakeRevisionResolver:
+    """Resolves ``(owner/name, ref)`` from ``shas``; anything else is NOT_FOUND."""
+
+    #: ``(repository slug, requested ref) -> full commit sha``.
+    shas: dict[tuple[str, str], str] = field(default_factory=dict)
+    #: Repositories that answer UNAVAILABLE whatever ref is asked for.
+    unavailable: set[str] = field(default_factory=set)
+    #: Every ``(slug, ref)`` asked for, in order.
+    asked: list[tuple[str, str]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        assert_test_only()
+
+    async def resolve(self, repository: RepositoryRef, requested_ref: str, /) -> RevisionResolution:
+        self.asked.append((repository.slug, requested_ref))
+        if repository.slug in self.unavailable:
+            return UnresolvedRevision(UnresolvedReason.UNAVAILABLE, "forge unreachable")
+        sha = self.shas.get((repository.slug, requested_ref))
+        if sha is None:
+            return UnresolvedRevision(UnresolvedReason.NOT_FOUND)
+        return ResolvedRevision(sha)

@@ -82,9 +82,13 @@ from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRe
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    DelegationFailure,
+    EvalId,
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
+    TagSet,
 )
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
@@ -217,12 +221,26 @@ class GitHubRepoResponse(BaseModel):
     installation_id: str
 
 
+class GitHubRepoLookup(StrEnum):
+    """How much of the GitHub App's access a repo listing actually covers.
+
+    Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+    ``partial`` listing still proves access for every repo it contains; an
+    ``unavailable`` one proves nothing.
+    """
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+
+
 class GitHubRepoListResponse(BaseModel):
     """List of repositories accessible to the GitHub App."""
 
     repos: list[GitHubRepoResponse] = Field(default_factory=list)
     total: int = 0
     installation_id: str | None = None
+    lookup: GitHubRepoLookup
 
 
 class ObservabilityError(StrEnum):
@@ -464,6 +482,8 @@ class WorkflowSummary(BaseModel):
     runs_count: int = 0
     is_archived: bool = False
     requires_repos: bool = True
+    tags: list[str] = Field(default_factory=list)
+    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -524,6 +544,9 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
+    # The obligation beside the permission (#894): a phase declaring it fails
+    # unless its delegate succeeded.
+    require_delegation: bool = False
     clone_repos: bool = True
     delivers_repo_changes: bool = True
     sandbox: str = DEFAULT_PHASE_SANDBOX
@@ -552,6 +575,10 @@ class WorkflowDetail(BaseModel):
     repos: list[str] = Field(default_factory=list)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
     requires_repos: bool = True
+    tags: list[str] = Field(default_factory=list)
+    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Future runs only."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -625,6 +652,8 @@ class ExecutionSummary(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -683,6 +712,13 @@ class ExecutionDetail(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -710,6 +746,9 @@ class ExecutionDetail(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -719,6 +758,8 @@ class ExecutionDetail(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""
@@ -784,6 +825,87 @@ class ArtifactSummary(BaseModel):
     #: configured".
     agent_provider: str | None = None
     agent_model: ObservedModelId | None = None
+
+
+# ---------------------------------------------------------------------------
+# Tag edit models (#967)
+# ---------------------------------------------------------------------------
+
+
+class AddTagsRequest(BaseModel):
+    """Tags to add to an execution or a workflow. Adds only: never replaces the set."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tags: TagSet = Field(
+        description=(
+            "Tags to add. Normalised (trimmed, lowercased, deduped); an invalid tag is "
+            "rejected with 422 and nothing is written. Tags already present are a no-op."
+        ),
+    )
+
+
+class ExecutionTagsResponse(BaseModel):
+    """An execution's tags after an edit, read from the aggregate, not a projection."""
+
+    execution_id: str
+    tags: list[str]
+    """The execution's current tags, normalised and sorted. What `?tag=` filters on."""
+    inherited_tags: list[str]
+    """The tags it launched with. A record of the launch: no edit ever changes it."""
+
+
+class WorkflowTagsResponse(BaseModel):
+    """A workflow's tags after an edit, read from the aggregate, not a projection."""
+
+    workflow_id: str
+    tags: list[str]
+    """The workflow's tags, normalised and sorted. Future runs inherit them."""
+
+
+class AttachEvalRequest(BaseModel):
+    """The eval to attach an execution to (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    eval_id: EvalId = Field(
+        description=(
+            "The eval to attach to. It must exist and not be archived. Attaching to the "
+            "eval the run already belongs to is a no-op; another eval needs a detach first."
+        ),
+    )
+
+
+class ExecutionEvalResponse(BaseModel):
+    """An execution's eval membership after an edit, read from the aggregate (#967)."""
+
+    execution_id: str
+    eval_id: str | None
+    """The eval the run belongs to now, or null if it belongs to none."""
+    association_kind: Literal["launched", "attached"] | None
+    """How it joined: chosen at launch, or attached afterwards. Null with no eval."""
+    launched_eval_id: str | None
+    """The eval the launch chose. A record of the launch: a detach never clears it."""
+
+
+class SetDefaultEvalRequest(BaseModel):
+    """The eval a workflow's runs join when the launch names none (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    eval_id: EvalId | None = Field(
+        description=(
+            "The default eval, which must exist and not be archived. Null clears it. "
+            "Runs already started keep the eval they launched into."
+        ),
+    )
+
+
+class WorkflowDefaultEvalResponse(BaseModel):
+    """A workflow's default eval after an edit, read from the aggregate (#967)."""
+
+    workflow_id: str
+    default_eval_id: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -1008,6 +1130,45 @@ class ToolOperation(BaseModel):
     git_repo: str | None = None
 
 
+class PinnedSkillInfo(BaseModel):
+    """One skill a phase was given at start, at the version it was resolved to (#1454)."""
+
+    name: str
+    version: str
+    """The version as declared - a tag, branch or sha."""
+    resolved_sha: str
+    """Content hash of the skill tree the workspace was actually given."""
+    source_url: str
+
+
+StartPinsStatus = Literal["recorded", "not_recorded", "unavailable"]
+"""Whether a phase's `pinned_at_start` could be answered (#1454).
+
+``recorded``: the start event carried this phase's pins. ``not_recorded``: the
+start event was read and carries none - an execution from before #1454.
+``unavailable``: the start event could not be read on this request, so nothing
+is known either way. Only ``not_recorded`` may be shown as "not recorded"."""
+
+
+class PhaseStartConfig(BaseModel):
+    """What a phase was configured with when its execution STARTED.
+
+    Read from the execution's own start event (`StartPins`, #1454), never from
+    the workflow template, which may have been edited since. That is the whole
+    point: this answers "what did the agent have", not "what would it get now".
+    """
+
+    provider: str
+    requested_model: str | None = None
+    """The model the phase ASKED for at start, possibly an alias such as
+    ``opus`` (ADR-067 D9: a request, not the harness-reported id). None when
+    the phase named none."""
+    allowed_tools: list[str] = Field(default_factory=list)
+    """Empty means the phase declared no restriction, so the harness ran with
+    its own default tool set - not that the agent had no tools."""
+    skills: list[PinnedSkillInfo] = Field(default_factory=list)
+
+
 class BranchObservationInfo(BaseModel):
     """One branch of a failed phase's workspace, as git had it (#1200).
 
@@ -1221,6 +1382,13 @@ class PhaseExecution(BaseModel):
     """What this phase's agent said happened to its external writes, ``None``
     when it said nothing. A report, never a measurement, and it never decides
     whether the phase completed."""
+    failure_classification: FailureClassification | None = None
+    """Why this phase failed - ``platform``, ``task``, ``correct_refusal`` or
+    ``unclassified`` - and ``None`` exactly when it did not fail. The same fact
+    as the execution's ``failure_classification``, at the phase it failed in."""
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What this phase's agent SAID caused its failure, ``None`` when it said
+    nothing. A report beside the classification, never a replacement for it."""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -1276,6 +1444,15 @@ class PhaseExecution(BaseModel):
     `[]` here, or anywhere below, would tell an API client that a workspace was
     verifiably unchanged when in truth nothing looked.
     """
+    pinned_at_start: PhaseStartConfig | None = None
+    """What this phase had at start: tools, skills and model (#1454).
+
+    Null is never filled in from the current template; `start_pins_status`
+    says why it is null.
+    """
+    start_pins_status: StartPinsStatus = "unavailable"
+    """Why `pinned_at_start` is or is not set. Defaults to ``unavailable``: a
+    constructor that never read the start event must not claim it was empty."""
     operations: list[ToolOperation] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, summarised from `operations`
@@ -1360,6 +1537,13 @@ class ExecutionDetailFull(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -1387,6 +1571,9 @@ class ExecutionDetailFull(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -1396,6 +1583,8 @@ class ExecutionDetailFull(BaseModel):
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""
@@ -1993,7 +2182,12 @@ class HealthResponse(_OmitsAbsentFields):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    status: str = Field(description="'healthy' while the process is alive and accepting writes.")
+    status: str = Field(
+        description="'healthy' while the process is alive and accepting writes; 'starting' "
+        "while it is alive but startup (a long migration, say) has not finished, when every "
+        "route but /health and /version answers 503; 'failed' when startup failed after serving "
+        "began and the process is exiting; 'unhealthy' when the probe failed.",
+    )
     mode: str = Field(description="'full', or 'degraded' when some subsystem is impaired.")
     build: BuildInfo = Field(description="Which build is answering (#1380).")
     degraded_reasons: list[DegradedReason] | None = Field(

@@ -133,9 +133,16 @@ class _Conn:
 
     async def fetchval(self, query: str, *_args: object) -> object:
         self._record(query)
-        # "do the tally's tables exist?" -> as configured.
-        if "to_regclass" in query:
+        # "do the tally's tables exist?" -> as configured. The tally binds the
+        # name; validate()'s rollup checks inline theirs, and the rollups are
+        # present here - their absence is test_schema_validation_requires_rollups.py's.
+        if "to_regclass($1)" in query:
             return self.tables_exist
+        if "to_regclass" in query:
+            return True
+        # ...and the usage rollup's backfill has completed.
+        if "agent_usage_rollup_state" in query:
+            return True
         # "what definition version were these rows recounted to?" -> none, the
         # state migration 004 leaves and the one a startup must not accept.
         # Asked before the tally's own name, which this table's contains.

@@ -11,11 +11,17 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         CompleteExecutionCommand,
         FailExecutionCommand,
         StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        EvalBaselinePin,
+        ReviewVerdict,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
@@ -47,11 +53,46 @@ def started_event(command: StartExecutionCommand) -> WorkflowExecutionStartedEve
         ),
         pinned_phases=command.pinned_phases,
         source_commits=command.source_commits,
+        tags=list(command.tags),
+        eval_id=None if command.launch_eval.eval_id is None else str(command.launch_eval.eval_id),
+        eval_selection=(
+            None
+            if command.launch_eval.selection is EvalSelection.NONE
+            else command.launch_eval.selection.value
+        ),
+        eval_baseline=_eval_baseline(command),
     )
 
 
-def completed_event(command: CompleteExecutionCommand, workflow_id: str) -> WorkflowCompletedEvent:
-    """The `WorkflowCompleted` a completed run records."""
+def _eval_baseline(command: StartExecutionCommand) -> list[EvalBaselinePin] | None:
+    """The admitted eval's frozen baseline, or None for a run in no eval."""
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        EvalBaselinePin,
+    )
+
+    launch = command.launch_eval
+    if launch.eval_id is None:
+        return None
+    return [
+        EvalBaselinePin(
+            repository=pin.repository.slug,
+            requested_ref=pin.requested_ref,
+            commit_sha=pin.commit_sha,
+        )
+        for pin in launch.baseline
+    ]
+
+
+def completed_event(
+    command: CompleteExecutionCommand,
+    workflow_id: str,
+    review_verdict: ReviewVerdict | None = None,
+) -> WorkflowCompletedEvent:
+    """The `WorkflowCompleted` a completed run records.
+
+    ``review_verdict`` is the aggregate's, never the command's: how a run ended
+    is read off its own stream, not taken from whoever asked it to end.
+    """
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
     )
@@ -74,6 +115,7 @@ def completed_event(command: CompleteExecutionCommand, workflow_id: str) -> Work
         ),
         total_duration_seconds=command.duration_seconds,
         artifact_ids=command.artifact_ids,
+        review_verdict=review_verdict,
     )
 
 
@@ -125,4 +167,8 @@ def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFai
         # event is where the two stop being one frame's local variables and
         # start being the record every read model is built from.
         reported_failure_reason=command.reported_failure_reason,
+        upstream_failure_kind=command.upstream_failure_kind,
+        # Typed, so a client selects on reason and delegate rather than
+        # parsing `error` (#894).
+        delegation_failure=command.delegation_failure,
     )

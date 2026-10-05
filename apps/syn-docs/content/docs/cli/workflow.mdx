@@ -191,6 +191,9 @@ syn workflow run <workflow-id> [options]
 | `--input`, `-i` | `text` | --- | Input variables as key=value |
 | `--task`, `-t` | `text` | --- | Primary task description ($ARGUMENTS) |
 | `--repo`, `-R` | `text` | --- | Repository to pre-clone (repeatable). Accepts owner/repo, full GitHub URL, or syn repo-* ID. |
+| `--tag` | `text` | --- | Tag for this run (repeatable), added to the workflow's own tags |
+| `--eval` | `text` | --- | Eval this run joins, overriding the workflow's default eval |
+| `--no-eval` | `boolean` | `false` | Ordinary run: join no eval, even the workflow's default |
 | `--dry-run`, `-n` | `boolean` | `false` | Validate without executing |
 | `--quiet`, `-q` | `boolean` | `false` | Minimal output |
 
@@ -249,6 +252,31 @@ syn workflow status <workflow-id>
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `workflow-id` | `text` | Yes | Workflow ID (partial match supported) |
+
+---
+
+## `syn workflow tag`
+
+Add or remove a workflow's tags. Future runs inherit them; existing runs keep their own
+
+```bash
+syn workflow tag <action> <workflow-id> <tags>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `action` | `text` | Yes | add or remove |
+| `workflow-id` | `text` | Yes | The workflow to edit |
+| `tags` | `text` | Yes | One or more tags |
+
+**Examples:**
+
+```bash
+syn workflow tag add <workflow-id> team:evals nightly
+syn workflow tag remove <workflow-id> nightly
+```
 
 ---
 

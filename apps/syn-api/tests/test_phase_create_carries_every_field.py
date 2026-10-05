@@ -78,6 +78,7 @@ _EVERY_FIELD: Mapping[str, object] = {
     "model": "gpt-5.6-sol",
     "provider": "codex",
     "allow_delegation": True,
+    "require_delegation": True,
     # NOT the default ("full-access"), so only the caller's value arriving
     # satisfies the assertion; a dropped mapping falls back and fails it.
     "sandbox": "workspace-write",
@@ -143,6 +144,7 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.model == "gpt-5.6-sol"
     assert phase.provider == "codex"
     assert phase.allow_delegation is True
+    assert phase.require_delegation is True
     assert phase.sandbox == "workspace-write"
     # IDENTITY, not cardinality. The previous version asserted `len(...) == 1`
     # while its comment claimed identity was checked -- so an implementation

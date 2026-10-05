@@ -6,6 +6,10 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ReviewVerdict,  # noqa: TC001 - needed at runtime for Pydantic
+)
+
 
 @event("WorkflowCompleted", "v1")
 class WorkflowCompletedEvent(DomainEvent):
@@ -31,3 +35,9 @@ class WorkflowCompletedEvent(DomainEvent):
 
     # Artifact IDs produced
     artifact_ids: list[str]
+
+    #: The last review verdict this run reported (PC-63), decided by the
+    #: aggregate from its own stream. `blocked` is a run that COMPLETED WITH
+    #: UNRESOLVED FINDINGS: every phase ran, and the last review still refused
+    #: the change. None for a run in which no phase reviewed anything.
+    review_verdict: ReviewVerdict | None = None

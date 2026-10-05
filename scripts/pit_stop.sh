@@ -27,6 +27,7 @@ API="${SYN_PIT_API:-http://100.114.86.77:8137/api/v1}"
 COMPOSE_DIR="/root/.syntropic137"
 COMPOSE="docker-compose.syntropic137.yaml"
 DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-10800}"
+API_READY_TIMEOUT="${SYN_PIT_API_READY_TIMEOUT:-900}"
 MODE="all"; DRY=0; STAGE_ONLY=0; SWAP_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -48,7 +49,15 @@ WT_BASE="$(dirname "$REPO_TOP")/$(basename "$REPO_TOP")_worktrees"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 T0=$(date +%s)
 step() { printf '\n==> [%s +%ss] %s\n' "$(date -u +%H:%M:%SZ)" "$(( $(date +%s) - T0 ))" "$*"; }
-die() { printf '\nPIT STOP ABORTED: %s\n' "$*" >&2; exit 1; }
+# Once the swap has begun, an abort leaves the new containers half up and
+# admission paused. Never silently: RECOVERY is set at the swap and every die
+# from then on prints how to finish by hand (#1575).
+RECOVERY=""
+die() {
+    printf '\nPIT STOP ABORTED: %s\n' "$*" >&2
+    if [ -n "$RECOVERY" ]; then printf '%s\n' "$RECOVERY" >&2; fi
+    exit 1
+}
 run() { if [ "$DRY" = 1 ]; then printf '   (dry-run) %s\n' "$*"; else "$@"; fi; }
 remote() { ssh -o ConnectTimeout=15 "$HOST" "$@"; }
 api() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m 90 "$API$1" -o "$2"; }
@@ -76,6 +85,9 @@ case "$VERSION" in
 esac
 case "$DRAIN_TIMEOUT" in
     ""|*[!0-9]*) die "SYN_PIT_DRAIN_TIMEOUT must be whole seconds (got: $DRAIN_TIMEOUT)" ;;
+esac
+case "$API_READY_TIMEOUT" in
+    ""|*[!0-9]*) die "SYN_PIT_API_READY_TIMEOUT must be whole seconds (got: $API_READY_TIMEOUT)" ;;
 esac
 
 # Whether the READ PATH is at the head of the event store. Asked before any
@@ -132,10 +144,6 @@ sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
 GATE
 }
 
-pinned_tag() {  # the tag the compose FILE pins syn-api to (not the running container)
-    remote "grep -oE 'syn-api:v[0-9][^[:space:]\"]*' $COMPOSE_DIR/$COMPOSE | head -1 | cut -d: -f2"
-}
-
 if [ "$MODE" != "swap" ]; then
     step "prepare: worktree at $REF, bump to $VERSION"
     WT="$WT_BASE/pit-stop-$VERSION"
@@ -182,18 +190,30 @@ if [ "$MODE" != "swap" ]; then
         || die "expected TWO images tagged $TAG on the host; the deploy would be half old"
 
     step "stage: back up the deployed compose and repoint both pins"
-    OLD="$(pinned_tag)"; [ -n "$OLD" ] || die "could not read the syn-api pin in the deployed compose file"
-    echo "   compose pins: $OLD -> new: $TAG"
-    if [ "$OLD" != "$TAG" ]; then
-        run remote "cd $COMPOSE_DIR && cp $COMPOSE $COMPOSE.bak-$OLD && sed -i 's#syn-api:$OLD#syn-api:$TAG#; s#syn-gateway:$OLD#syn-gateway:$TAG#' $COMPOSE"
-        # Two counts, not one: 0 old alone is also what a typo'd new tag gives;
-        # 2 new alone is also what a no-op sed on an already-current file gives.
+    # Read here, repointed locally, written back whole: a release-installed host
+    # pins each image by its own digest and a hotfixed one by its own tag, so no
+    # single substitution covers both services (scripts/pit_stop_repoint.py).
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
+    BAK="$(python3 "$(dirname "$0")/pit_stop_repoint.py" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged")" \
+        || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
+    if [ -n "$BAK" ]; then
+        # Written beside the file, checked against the staged checksum, and only
+        # then renamed over it. `cat` exits 0 on a short read, so without the
+        # check a dropped transfer would install half a compose file.
+        SUM="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.staged")"
+        run remote "cd $COMPOSE_DIR && cat > $COMPOSE.pit-stop && echo '$SUM  $COMPOSE.pit-stop' | sha256sum -c --status - && cp $COMPOSE $COMPOSE.bak-$BAK && mv $COMPOSE.pit-stop $COMPOSE || { rm -f $COMPOSE.pit-stop; exit 1; }" < "$TMP/compose.staged" \
+            || die "the staged compose did not arrive intact on $HOST; the deployed file is unchanged"
         if [ "$DRY" = 0 ]; then
-            old_n="$(remote "grep -c 'syn-\(api\|gateway\):$OLD' $COMPOSE_DIR/$COMPOSE" || true)"
-            new_n="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
-            echo "   pins: old=$old_n (want 0) new=$new_n (want 2)"
-            [ "$old_n" = 0 ] && [ "$new_n" = 2 ] || die "repoint did not change exactly the two pins"
+            remote "cat $COMPOSE_DIR/$COMPOSE" | cmp -s - "$TMP/compose.staged" || die "the compose on $HOST is not the one staged; the backup is $COMPOSE.bak-$BAK"
+            echo "   backed up to $COMPOSE.bak-$BAK"
         fi
+    else
+        echo "   both pins are already $TAG"
+    fi
+    # The same count --swap-only prechecks, so a stage it would refuse fails here.
+    if [ "$DRY" = 0 ]; then
+        new_n="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
+        [ "$new_n" = 2 ] || die "the deployed compose pins $new_n/2 services to $TAG after the repoint"
     fi
     if [ "$MODE" = "stage" ]; then
         step "staged $TAG; run with --swap-only once drained"
@@ -230,9 +250,54 @@ until drained; do
     sleep 60; waited=$((waited + 60))
 done
 
+# Bring api + gateway up. Idempotent: a second call recreates nothing that
+# already matches the compose file, it only starts what is still `Created`.
+swap_up() { run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway" 2>&1 | tail -4; }
+
+# Wait, bounded, for the API CONTAINER to pass its health check. That check is
+# liveness: /health answers 200 "starting" while a long startup migration runs
+# (#1575), so this normally returns within one health interval. A restart count
+# that moves is a crash loop, not a slow start, and is not waited out.
+wait_for_api_healthy() {
+    local waited=0 status restarts health restarts0=""
+    while :; do
+        read -r status restarts health <<<"$(remote "docker inspect syn137-api --format '{{.State.Status}} {{.RestartCount}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'" || echo "missing - -")"
+        printf '   [+%ss] syn137-api: status=%s restarts=%s health=%s\n' "$waited" "$status" "$restarts" "$health"
+        [ "$health" = healthy ] && return 0
+        [ -n "$restarts0" ] || restarts0="$restarts"
+        if [ "$restarts" != "$restarts0" ]; then echo "   syn137-api restarted while waiting: a crash loop, not a slow start"; return 1; fi
+        [ "$waited" -ge "$API_READY_TIMEOUT" ] && return 1
+        sleep 15; waited=$((waited + 15))
+    done
+}
+
+# Wait, bounded, for the API to be READY: /health says "healthy", not
+# "starting". Liveness got the gateway started; this is what admission waits on.
+wait_for_api_ready() {
+    local waited=0
+    until api "/health" "$TMP/ready.json" 2>/dev/null \
+        && python3 -c 'import json, sys; s = json.load(open(sys.argv[1]))["status"]; print("   /health status:", s); sys.exit(s != "healthy")' "$TMP/ready.json"; do
+        [ "$waited" -ge "$API_READY_TIMEOUT" ] && return 1
+        printf '   [+%ss] API not ready yet (a startup migration may still be running)\n' "$waited"
+        sleep 15; waited=$((waited + 15))
+    done
+}
+
 step "swap: recreate api + gateway (no pull: the images are only in the host's daemon)"
+RECOVERY="RECOVERY: admission is still PAUSED. Once syn137-api is healthy, finish by hand:
+   ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d gateway'
+   curl -fsS -u admin:\$SYN_API_PASSWORD $API/version     # image_tag must be $TAG
+   curl -fsS -u admin:\$SYN_API_PASSWORD -X PUT $API/maintenance -H 'Content-Type: application/json' -d '{\"active\": false, \"reason\": \"\", \"actor\": \"manual\"}'"
 # Re-checked immediately above; the swap runs in the same breath.
-run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway" | tail -4
+if ! swap_up; then
+    # The usual cause: the gateway waits on `api: service_healthy` and the API
+    # took longer than its health window. Wait for it, then start what compose
+    # left behind. Anything else fails the wait and stops here, loudly.
+    step "swap: compose up failed; waiting up to ${API_READY_TIMEOUT}s for syn137-api to report healthy"
+    [ "$DRY" = 1 ] || wait_for_api_healthy || die "syn137-api did not become healthy within ${API_READY_TIMEOUT}s"
+    step "swap: syn137-api is healthy; re-running compose up for its dependents"
+    swap_up || die "compose up failed again after syn137-api reported healthy"
+fi
 
 step "verify: images, docker CLI, projections, build identity"
 if [ "$DRY" = 0 ]; then
@@ -240,14 +305,22 @@ if [ "$DRY" = 0 ]; then
     # container was created from, and a tag is mutable: a container built from
     # the PREVIOUS bytes behind this same tag prints exactly what a correct
     # deploy prints. The id is the thing that actually changed.
+    #
+    # Every read guarded with `|| die`: under `set -e` a failed assignment exits
+    # on the spot, skipping die() and the RECOVERY it prints while admission is
+    # paused. An unreachable host is exactly when the operator needs it (#1575).
     for svc in api gateway; do
-        want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")"
-        got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")"
-        up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")"
+        want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")" \
+            || die "could not read the id of image syn-$svc:$TAG on $HOST"
+        got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")" \
+            || die "could not inspect syn137-$svc on $HOST"
+        up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")" \
+            || die "could not inspect syn137-$svc on $HOST"
         printf '   syn137-%s: running=%s image=%s\n' "$svc" "$up" "$got"
         [ "$up" = true ] || die "syn137-$svc is not running after the swap"
         [ "$got" = "$want" ] || die "syn137-$svc is not running the image tagged $TAG (has $got, wanted $want)"
     done
+    wait_for_api_ready || die "the API did not finish starting within ${API_READY_TIMEOUT}s"
     remote "docker exec syn137-api sh -c 'command -v docker'" >/dev/null || die "no docker CLI in syn-api (#1216): every execution will fail at bootstrap"
     # A `for` loop reports its LAST command, which here is `sleep`. Written as
     # `for ...; done || die`, every attempt could fail and the script would

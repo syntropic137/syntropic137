@@ -17,9 +17,19 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+    WorkflowDefaultEvalSetEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
+    WorkflowTagsAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
+    WorkflowTagsRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
     InputDeclarationDetail,
@@ -106,7 +116,14 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # NOT bumped again when `can_open_pr` was retired (#1477): that is the first
     # case, a removal. A v9 row that still carries the key stays readable,
     # because `from_dict` no longer looks for it, and the key stops surfacing.
-    VERSION = 9  # v9: surface can_open_pr, clone_repos, delivers_repo_changes, sandbox (#1429)
+    #
+    # v10 is the v9 case again (#967): a row written before tags existed has no
+    # `tags` key, and `from_dict` would report "no tags" for a workflow that
+    # has them -- and the export would then drop them on the way out.
+    #
+    # v11 is the same case for `default_eval_id` (#967): a v10 row would report
+    # no default for a workflow that has one, and the export would drop it.
+    VERSION = 11  # v11: default_eval_id (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -149,6 +166,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                require_delegation=bool(p.get("require_delegation", False)),
                 # #1429. The sibling site in read_models/workflow_detail.py
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.
@@ -190,6 +208,8 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             repository_url=event_data.get("repository_url"),
             repos=tuple(event_data.get("repos", [])),
             requires_repos=event_data.get("requires_repos", True),
+            tags=TagSet.recorded(event_data.get("tags") or []).values,
+            default_eval_id=event_data.get("default_eval_id"),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 
@@ -227,6 +247,33 @@ class WorkflowDetailProjection(AutoDispatchProjection):
         existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
         if existing:
             existing["runs_count"] = existing.get("runs_count", 0) + 1
+            await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+
+    async def on_workflow_default_eval_set(self, event_data: WorkflowDefaultEvalSetEvent) -> None:
+        """Handle WorkflowDefaultEvalSet (#967)."""
+        event = WorkflowDefaultEvalSetEvent.model_validate(event_data)
+        existing = await self._store.get(self.PROJECTION_NAME, event.workflow_id)
+        if existing:
+            existing["default_eval_id"] = event.eval_id
+            await self._store.save(self.PROJECTION_NAME, event.workflow_id, existing)
+
+    async def on_workflow_tags_added(self, event_data: WorkflowTagsAddedEvent) -> None:
+        """Handle WorkflowTagsAdded (#967)."""
+        event = WorkflowTagsAddedEvent.model_validate(event_data)
+        await self._edit_tags(event.workflow_id, event.tags, added=True)
+
+    async def on_workflow_tags_removed(self, event_data: WorkflowTagsRemovedEvent) -> None:
+        """Handle WorkflowTagsRemoved (#967)."""
+        event = WorkflowTagsRemovedEvent.model_validate(event_data)
+        await self._edit_tags(event.workflow_id, event.tags, added=False)
+
+    async def _edit_tags(self, workflow_id: str, tags: list[str], *, added: bool) -> None:
+        if not workflow_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if existing:
+            existing["tags"] = replay_tag_edit(existing.get("tags") or [], tags, added=added)
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
     async def on_workflow_phase_updated(self, event_data: dict) -> None:

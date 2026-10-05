@@ -20,9 +20,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
+from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
+from syn_shared.upstream_failure import UpstreamFailureError
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Collection, Mapping, Sequence
     from datetime import datetime
 
     from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
@@ -400,7 +402,18 @@ async def _lookup_installations(
             installation_id = await client.get_installation_for_repo(full_name)
             url_to_installation[url] = installation_id
             logger.debug("Resolved installation %s for repo %s", installation_id, full_name)
-        except Exception:
+        except Exception as exc:
+            # A lookup GitHub never answered says nothing about the installation,
+            # so it must not send an operator to change it (#1593).
+            if isinstance(exc, UpstreamFailureError) and exc.upstream_kind.is_transient:
+                logger.warning(
+                    "GitHub did not answer the installation lookup for %s: %s",
+                    full_name,
+                    exc,
+                )
+                if require_github:
+                    raise
+                continue
             if require_github:
                 logger.error(
                     "GitHub App not installed on repository: %s. "
@@ -524,6 +537,21 @@ class SetupPhaseSecrets:
     False therefore still resolves the installation, mints the token, writes
     the per-repo credential entries and configures gh. It skips ``git clone``
     and nothing else."""
+    pinned_commits: dict[str, str] = field(default_factory=dict)
+    """The commit to check a repository out at, by ``owner/name`` (#1458).
+
+    A repository absent from it is checked out at its default branch's head:
+    one whose commit nothing could resolve when its run started. Keyed like
+    ``repo_tokens``, by the repository rather than by position, so the two
+    lists can never fall out of step. Whether a run pins anything is the
+    execution's decision (`StartPins.checkout_commits`); this only carries it
+    out, and refuses the phase rather than run it anywhere else."""
+    continued_branches: dict[str, str] = field(default_factory=dict)
+    """The branch to check a pinned repository out ON, by ``owner/name`` (#1513).
+
+    Set for the phase a resume continues: that repository's pin is the
+    branch's head, checked out on the branch instead of detached
+    (`StartPins.checkout_for`)."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -548,6 +576,8 @@ class SetupPhaseSecrets:
         *,
         repositories: list[str] | None = None,
         clone_repos: bool = True,
+        pinned_commits: Mapping[str, str] | None = None,
+        continued_branches: Mapping[str, str] | None = None,
         require_github: bool = True,
         include_codex_auth: bool = False,
         ledger: IssuanceLedger,
@@ -565,6 +595,10 @@ class SetupPhaseSecrets:
             clone_repos: If False, the repos are credentialed but not checked
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
+            pinned_commits: ``owner/name`` -> the commit to check that
+                repository out at (#1458). Empty when no commit was recorded.
+            continued_branches: ``owner/name`` -> the branch a continuing
+                phase checks that pinned repository out on (#1513).
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -597,6 +631,8 @@ class SetupPhaseSecrets:
             gh_token=github.gh_token,
             issued=github.issued,
             clone_repos=clone_repos,
+            pinned_commits=dict(pinned_commits or {}),
+            continued_branches=dict(continued_branches or {}),
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             codex_auth_json=codex_auth_json,
@@ -617,6 +653,8 @@ class SetupPhaseSecrets:
         repo_tokens: dict[str, str] | None = None,
         gh_token: str | None = None,
         clone_repos: bool = True,
+        pinned_commits: Mapping[str, str] | None = None,
+        continued_branches: Mapping[str, str] | None = None,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -632,6 +670,8 @@ class SetupPhaseSecrets:
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
             gh_token: gh's credential; defaults to the one `create` would route to
             clone_repos: False to credential the repos without checking them out (#1187)
+            pinned_commits: ``owner/name`` -> the commit to check it out at (#1458)
+            continued_branches: ``owner/name`` -> the branch to continue at its head (#1513)
         """
         import os
 
@@ -647,6 +687,8 @@ class SetupPhaseSecrets:
             repositories=repositories or [],
             gh_token=gh_token,
             clone_repos=clone_repos,
+            pinned_commits=dict(pinned_commits or {}),
+            continued_branches=dict(continued_branches or {}),
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
@@ -663,6 +705,7 @@ class SetupPhaseSecrets:
         - Writes per-repo credential entries to ~/.git-credentials (not one blanket
           github.com entry) so git picks the correct token for each clone
         - Appends git clone commands with idempotency guards (safe to re-run)
+        - Checks a repository out at its pinned commit, if it has one (#1458)
         Whenever gh has a credential (repo-less workflows included), it is
         written to ~/.config/gh/hosts.yml - gh's only credential (#725).
 
@@ -674,6 +717,7 @@ class SetupPhaseSecrets:
                 into the same directory (#1223). Raised here, during
                 provisioning, so the execution is refused before any agent runs
                 rather than one repo being silently skipped.
+            ValueError: A pinned commit is not a full commit id (#1458).
         """
         lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
         self._append_codex_auth(lines)
@@ -861,6 +905,15 @@ class SetupPhaseSecrets:
             lines.append(
                 f"[ -d {shlex.quote(dest)} ] || git clone {shlex.quote(url)} {shlex.quote(dest)}"
             )
+            sha = self.pinned_commits.get(_repo_full_name(url))
+            if sha is not None:
+                append_pinned_checkout(
+                    lines,
+                    repository=_repo_full_name(url),
+                    dest=dest,
+                    sha=sha,
+                    branch=self.continued_branches.get(_repo_full_name(url)),
+                )
             # Outside the guard above: a repo cloned by an earlier setup phase may
             # still have uninitialized submodules. `submodule update --init` is
             # idempotent, so re-running it on a complete checkout is a no-op.

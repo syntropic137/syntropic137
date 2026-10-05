@@ -78,14 +78,22 @@ on #1120. Do not "fix" a Permission denied here by editing the justfile or
 running the recipes by hand: that hides the one condition this prefix exists to
 compensate for.
 
-**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv` and `node`
-and nothing else, so seven of the gates in `just preflight` cannot run here at
-all: `vsa-validate` (no `vsa`), `fitness` (no `cargo`), `codegen-check` (no
-`pnpm`), `check-submodules`, `check-compose-overlays`,
-`check-default-workspace-image` and `check-pinned-image-channels`. Attempting
+**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv`, `node`
+and `rustup` and nothing else, so seven of the gates in `just preflight` cannot
+run here at all: `vsa-validate` (no `vsa`), `codegen-check` (no `pnpm`),
+`check-submodules`, `check-compose-overlays`, `check-default-workspace-image`,
+`check-pinned-image-channels` and `check-compose-images-public`. Attempting
 `qa-ci` here fails on the missing binary, not on the change. CI runs those
 seven; passing here does not promise a green CI, and if CI fails on one of them
 that is a real failure to fix, not an exception to claim.
+
+`preflight-agent` DOES run all of `fitness`: `fitness-check`, CI's thresholds
+unchanged (#1498), and `fitness-invariants`, the `pytest ci/fitness` suite CI
+runs. The first run in a workspace installs stable Rust and builds `aps` (~6
+minutes); later runs reuse both. A `FITNESS NOT RUN:` line means the gate did
+not run, which is not a pass: report it, never certify around it. The pytest
+summary lists each test skipped as `NOT RUN` for a binary this image lacks
+(today, the docker-backed `test_gateway_bind.py`); CI still runs those.
 
 **Run the whole gate, not the sub-commands you think it contains.** A change can
 pass every test, typecheck and build and still fail on something none of them

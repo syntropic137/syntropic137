@@ -24,7 +24,7 @@ Run both: `just fitness`
 | 6 | Temporal Clarity | test_projection_wiring (subscriptions) | - | Enforced |
 | 7 | Cost Boundaries | test_cost_ceiling (F7) | - | Enforced |
 | 8 | Boundary Clarity | test_layer_separation, test_dependency_direction | fitness_exceptions.toml `[layer_separation]` | Enforced |
-| 9 | Scalability | test_in_memory_state_audit | fitness_exceptions.toml `[in_memory_state]` | Enforced |
+| 9 | Scalability | test_in_memory_state_audit, test_in_memory_adapters_are_guarded | fitness_exceptions.toml `[in_memory_state, in_memory_adapters_guarded]` | Enforced |
 | 10 | Declaration Integrity | test_phase_schema_fields_apply_or_refuse | declared tables in the test | Enforced |
 | 11 | Typed Boundaries | test_typed_cross_context_boundaries, test_typed_projection_handlers | fitness_exceptions.toml `[typed_cross_context_boundaries, typed_projection_handlers]` | Enforced |
 | 12 | Request Contract Honesty | test_unknown_query_params_rejected | routes discovered from the live app | Enforced |
@@ -308,6 +308,7 @@ Sections:
 - `[event_construction_outside_aggregate]` - DomainEvent construction outside aggregates
 - `[projection_purity]` - project-specific allowed import prefixes
 - `[in_memory_state]` - registry of in-memory state requiring classification
+- `[in_memory_adapters_guarded]` - classes matching the in-memory adapter rule that are not guarded (ADR-060). A non-adapter carries a `reason`; a real violation carries a `reason` and an `issue`. Stale entries fail the test
 
 ### 3. Inline in test files (being migrated to TOML)
 
@@ -340,6 +341,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_layer_separation | Domain doesn't import adapters/API at runtime | 2, 8 |
 | test_error_propagation | No silent except: pass handlers | 2 |
 | test_in_memory_state_audit | Every in-memory state var is classified | 9 |
+| test_in_memory_adapters_are_guarded | No in-memory adapter is constructible in production (ADR-060) | 9 |
 | test_harness_format_boundary | Vendor formats only in adapters; one inference owner; no harness branches | 15 |
 
 ### API (`ci/fitness/api/`)

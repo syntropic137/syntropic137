@@ -205,6 +205,12 @@ class PhaseDefinition(BaseModel):
     delegate one-shot to the other CLI. Headless providers only. Sourced from
     the workflow YAML ``agent.allow_delegation`` field."""
 
+    require_delegation: bool = False
+    """When true, the phase completes only once a delegate to the other
+    harness reported success (#894). Distinct from ``allow_delegation``, which
+    is a permission and never gated. Sourced from the workflow YAML
+    ``agent.require_delegation`` field."""
+
     # Workflow-author-declared plugin refs at phase scope (issue #726). PR1 carries
     # them through the YAML to the domain; PR2's resolution service rewrites them
     # into ResolvedClaudePlugin entries on ExecutablePhase.

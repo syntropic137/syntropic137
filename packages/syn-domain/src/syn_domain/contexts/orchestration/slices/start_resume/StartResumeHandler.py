@@ -23,9 +23,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePort
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+        RemoteBranchReading,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         StartResumeCommand,
     )
+    from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
     from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
         WorkflowExecutionRepositoryPort,
     )
@@ -52,9 +56,14 @@ class StartResumeHandler:
         processor: WorkflowExecutionProcessor,
         execution_repository: WorkflowExecutionRepositoryPort,
         maintenance: MaintenancePort | None = None,
+        remote_branches: RemoteBranchPort | None = None,
     ) -> None:
         self._processor = processor
         self._executions = execution_repository
+        #: Asks the forge whether the parent's pushed branches are still where
+        #: it left them (#1513). Without one, nothing can be verified, and every
+        #: candidate is abandoned with that reason rather than reused blind.
+        self._remote_branches = remote_branches
         # Optional for the same reason as on ExecuteWorkflowHandler (#1387):
         # a fixture admits nothing. Production passes it.
         self._maintenance = maintenance
@@ -83,9 +92,15 @@ class StartResumeHandler:
             return None
 
         # The repositories the PARENT ran against, as it recorded them - not
-        # the template's list, which may have changed. #1458 clones them at
-        # the recorded sha; until then the workspace clones the default branch.
+        # the template's list, which may have changed. Which commit each is
+        # checked out at is the child's own start pins' answer, read where the
+        # workspace is provisioned (`StartPins.checkout_commits`, #1458).
         repos = [RepositoryRef.from_slug(c.repository) for c in command.source_commits]
+        # The facts the aggregate decides continuation from (#1513): where each
+        # branch the parent's failing phase pushed is NOW. Read here, at the
+        # start, so a branch deleted or force-pushed since is abandoned with a
+        # recorded reason instead of reused stale.
+        command.remote_branches = await self._read_remote_branches(command)
         try:
             return await self._processor.run_resume(command, repos=repos, admitted=admitted)
         except StreamAlreadyExistsError:
@@ -113,6 +128,15 @@ class StartResumeHandler:
         # (codex review of #1459). Resolving it here means a vanished artifact is
         # refused before anything is dispatched.
         await self._processor.resolve_inheritance(command.resumed_from)
+
+    async def _read_remote_branches(self, command: StartResumeCommand) -> list[RemoteBranchReading]:
+        """What the forge says about each branch the child could continue."""
+        if self._remote_branches is None:
+            return []
+        return [
+            await self._remote_branches.read_branch(c.repository, c.branch)
+            for c in command.continuation_candidates
+        ]
 
     async def _command_for(self, parent_execution_id: str) -> StartResumeCommand:
         parent = await self._executions.get_by_id(parent_execution_id)

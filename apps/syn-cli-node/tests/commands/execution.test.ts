@@ -59,6 +59,20 @@ describe("execution commands", () => {
       expect(out).toContain("3/3");
     });
 
+    it("sends every --tag as a repeated ?tag= query parameter (#967)", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
+      await handler({ positionals: [], values: { tag: ["nightly", "eval-a"] } });
+      const url = new URL((mockFetch.mock.calls[0]![0] as Request).url);
+      expect(url.searchParams.getAll("tag")).toEqual(["nightly", "eval-a"]);
+    });
+
+    it("sends no tag parameter without --tag", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
+      await handler({ positionals: [], values: {} });
+      const url = new URL((mockFetch.mock.calls[0]![0] as Request).url);
+      expect(url.searchParams.has("tag")).toBe(false);
+    });
+
     it("shows empty message when no executions", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
       await handler({ positionals: [], values: {} });
@@ -171,6 +185,63 @@ describe("execution commands", () => {
         const rows = out.split("\n");
         expect(rows.find((r) => r.includes("implement"))).toMatch(/denied\s*$/);
         expect(rows.find((r) => r.includes("review"))).toMatch(/not reported\s*$/);
+      });
+
+      it("names why a failed execution and its failed phase failed", async () => {
+        const out = await show({
+          status: "failed",
+          error_message: "agent exited with code 124",
+          failure_classification: "platform",
+          reported_failure_reason: null,
+          phases: [
+            phase({ name: "research", status: "completed" }),
+            phase({
+              name: "implement",
+              status: "failed",
+              error_message: "agent exited with code 124",
+              failure_classification: "platform",
+              reported_failure_reason: null,
+            }),
+          ],
+        });
+        expect(out).toContain("  Failure:      platform\n");
+        expect(out).toContain("  Error:        agent exited with code 124\n");
+        expect(out).toContain("  ✗ implement: platform\n    agent exited with code 124\n");
+        expect(out).not.toContain("✗ research");
+      });
+
+      it("shows the agent's reported reason beside the classification, never as it", async () => {
+        const out = await show({
+          status: "failed",
+          error_message: "Phase implement reported failure",
+          failure_classification: "correct_refusal",
+          reported_failure_reason: "task",
+          phases: [
+            phase({
+              name: "implement",
+              status: "failed",
+              error_message: "Phase implement reported failure",
+              failure_classification: "correct_refusal",
+              reported_failure_reason: "task",
+            }),
+          ],
+        });
+        expect(out).toContain("  Failure:      correct_refusal (agent reported: task)\n");
+        expect(out).toContain("  ✗ implement: correct_refusal (agent reported: task)\n");
+      });
+
+      it("says so when a failed phase recorded no error text", async () => {
+        const out = await show({
+          status: "failed",
+          failure_classification: "unclassified",
+          phases: [phase({ name: "implement", status: "failed", error_message: null })],
+        });
+        expect(out).toContain("  ✗ implement: unclassified\n    no error recorded\n");
+      });
+
+      it("prints no Failure line for a run that did not fail", async () => {
+        const out = await show({ status: "completed", failure_classification: "unclassified" });
+        expect(out).not.toContain("Failure:");
       });
 
       it("marks a phase whose deliverable was recovered, and only that phase", async () => {

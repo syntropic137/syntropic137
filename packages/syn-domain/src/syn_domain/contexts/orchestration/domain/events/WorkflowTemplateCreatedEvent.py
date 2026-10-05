@@ -71,6 +71,13 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
     # field rehydrate cleanly.
     skills: list[SkillRef] = Field(default_factory=list)
 
+    # Ordinary labels (#967), already normalised by TagSet. Defaults to empty
+    # so events written before tags existed rehydrate cleanly (ADR-007).
+    tags: list[str] = Field(default_factory=list)
+
+    # The workflow's default eval (#967); absent on older events (ADR-007).
+    default_eval_id: str | None = None
+
     # Provenance (issue #822). Optional so events written before this field
     # existed rehydrate cleanly.
     version: str | None = None

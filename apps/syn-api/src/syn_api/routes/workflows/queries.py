@@ -57,6 +57,8 @@ class WorkflowSummaryResponse(BaseModel):
     # workflow while the stored rows said otherwise. An outward response model
     # must not manufacture domain truth - make omission a construction error.
     requires_repos: bool
+    tags: list[str] = Field(default_factory=list)
+    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
 
 
 class InputDeclarationModel(BaseModel):
@@ -103,6 +105,10 @@ class WorkflowResponse(BaseModel):
     repos: list[str] = Field(default_factory=list)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
     requires_repos: bool  # required for the same reason as the summary model
+    tags: list[str] = Field(default_factory=list)
+    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Future runs only."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -200,6 +206,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         model_display=format_phase_model_definition(resolution),
         provider=p.provider,
         allow_delegation=p.allow_delegation,
+        require_delegation=p.require_delegation,
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
         sandbox=p.sandbox,
@@ -235,6 +242,7 @@ async def list_workflows(
     limit: int = 100,
     offset: int = 0,
     include_archived: bool = False,
+    search: str | None = None,
 ) -> Result[list[WorkflowSummary], WorkflowError]:
     """List all workflow templates."""
     await ensure_connected()
@@ -243,6 +251,7 @@ async def list_workflows(
         limit=limit,
         offset=offset,
         include_archived=include_archived,
+        search=search,
     )
     return Ok(
         [
@@ -257,6 +266,7 @@ async def list_workflows(
                 runs_count=s.runs_count,
                 is_archived=s.is_archived,
                 requires_repos=s.requires_repos,
+                tags=list(s.tags),
             )
             for s in domain_summaries
         ]
@@ -286,6 +296,8 @@ async def get_workflow(
             repository_url=detail.repository_url,
             repos=list(detail.repos),
             requires_repos=detail.requires_repos,
+            tags=list(detail.tags),
+            default_eval_id=detail.default_eval_id,
         )
     )
 
@@ -462,6 +474,8 @@ def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
         entries.append(f"      model: {_yaml_quote(phase.model)}")
     if phase.allow_delegation:
         entries.append("      allow_delegation: true")
+    if phase.require_delegation:
+        entries.append("      require_delegation: true")
     # #1429. `sandbox` is an `agent.` field in the authoring schema, not a
     # top-level one, so it round-trips here. Emitted only when it differs from
     # the loader default: writing the default back would turn "inherits" into
@@ -605,6 +619,12 @@ def _build_workflow_yaml(detail: WorkflowDetail) -> str:
         f"description: {_yaml_quote(detail.description or '')}",
         f"type: {detail.workflow_type}",
         f"classification: {detail.classification}",
+        *([f"tags: {_yaml_flow_list(detail.tags)}"] if detail.tags else []),
+        *(
+            [f"default_eval_id: {_yaml_quote(detail.default_eval_id)}"]
+            if detail.default_eval_id
+            else []
+        ),
         *_yaml_input_lines(detail),
         "",
         "phases:",
@@ -707,6 +727,10 @@ async def list_workflows_endpoint(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     order_by: str | None = Query(None, description="Sort field (- prefix = descending)"),
+    search: str | None = Query(
+        None,
+        description="Case-insensitive substring match on name or id, applied before paging",
+    ),
 ) -> WorkflowListResponse:
     """List all workflow templates."""
     offset = (page - 1) * page_size
@@ -715,6 +739,7 @@ async def list_workflows_endpoint(
         limit=page_size,
         offset=offset,
         include_archived=include_archived,
+        search=search,
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
@@ -735,6 +760,7 @@ async def list_workflows_endpoint(
             # with detail. An agent that lists workflows, sees True, and passes
             # -R is then told repos are supported when they are not.
             requires_repos=s.requires_repos,
+            tags=list(s.tags),
         )
         for s in result.value
     ]
@@ -756,6 +782,7 @@ async def list_workflows_endpoint(
     total = await get_projection_mgr().workflow_list.count(
         workflow_type_filter=workflow_type,
         include_archived=include_archived,
+        search=search,
     )
     return WorkflowListResponse(
         # No slice here: `list_workflows` already applied limit/offset. Slicing
@@ -808,6 +835,8 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         repository_url=detail.repository_url,
         repos=list(detail.repos),
         requires_repos=detail.requires_repos,
+        tags=list(detail.tags),
+        default_eval_id=detail.default_eval_id,
     )
 
 

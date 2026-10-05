@@ -13,18 +13,23 @@ of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
+    SourceCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.checkout_verification import (
+    verify_checkout,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
+    PinnedCommitUnreachableError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
     require_codex_sandbox,
@@ -291,6 +296,14 @@ def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
     return {ENV_GH_REPO: primary[0]} if primary else {}
 
 
+def _cloned_pins(repos: Sequence[str], pinned_commits: Sequence[SourceCommit]) -> dict[str, str]:
+    """``owner/name`` -> pinned commit, for the pinned repositories this phase clones."""
+    cloned = set(_repo_full_names(repos))
+    return {
+        c.repository: c.sha for c in pinned_commits if c.sha is not None and c.repository in cloned
+    }
+
+
 class ProvisionResult:
     """Result of workspace provisioning."""
 
@@ -361,6 +374,8 @@ class WorkspaceProvisionHandler:
         completed_phase_ids: list[str] | None = None,
         phase_outputs: PhaseOutputCache | None = None,
         inputs: dict[str, object] | None = None,
+        pinned_commits: Sequence[SourceCommit] = (),
+        continued_branches: Mapping[str, str] | None = None,
     ) -> ProvisionResult:
         """Provision workspace for a phase.
 
@@ -376,6 +391,12 @@ class WorkspaceProvisionHandler:
                 deliverable for prompt substitution, and every file it wrote so
                 the previous phases' output TREES can be rebuilt (#988).
             inputs: Workflow execution inputs dict.
+            pinned_commits: The commits to check ``repos`` out at instead of
+                their default branches' heads - the run's recorded commits, a
+                resume's being its parent's (`StartPins.checkout_commits`, #1458).
+            continued_branches: ``owner/name`` -> the branch to check a pinned
+                repository out ON, at its head, for a phase that continues it
+                (`StartPins.checkout_for`, #1513).
         """
         assert todo.phase_id is not None
 
@@ -402,7 +423,21 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 phase_name=phase.name,
                 clone_repos=phase.clone_repos,
+                pinned_commits=pinned_commits,
+                continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
+            )
+            # Read back BEFORE anything else is staged and long before the agent
+            # is launched: a workspace not at its pins is refused here (#967).
+            checked_out = (
+                await verify_checkout(
+                    workspace,
+                    _cloned_pins(effective_repos, pinned_commits),
+                    continued_branches=continued_branches or {},
+                    phase_name=phase.name,
+                )
+                if phase.clone_repos
+                else ()
             )
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
@@ -422,6 +457,7 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 outputs.primary,
                 inputs,
+                checked_out,
             )
         except BaseException as exc:
             await workspace_cm.__aexit__(type(exc), exc, exc.__traceback__)
@@ -434,6 +470,8 @@ class WorkspaceProvisionHandler:
         *,
         phase_name: str,
         clone_repos: bool,
+        pinned_commits: Sequence[SourceCommit] = (),
+        continued_branches: Mapping[str, str] | None = None,
         include_codex_auth: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -451,11 +489,16 @@ class WorkspaceProvisionHandler:
         workspace ends up CONTAINING is the one thing that changes, which is
         why the synthetic context below is derived from it too.
         """
-        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
+        from syn_adapters.workspace_backends.service import (
+            PINNED_COMMIT_UNREACHABLE_EXIT_CODE,
+            SetupPhaseSecrets,
+        )
 
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             clone_repos=clone_repos,
+            pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
+            continued_branches=continued_branches,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
             ledger=workspace.issuance_ledger,
@@ -470,6 +513,10 @@ class WorkspaceProvisionHandler:
             )
             if setup_result.signal_death is not None:
                 detail = f"{detail}\n{setup_result.signal_death.describe()}"
+            if setup_result.exit_code == PINNED_COMMIT_UNREACHABLE_EXIT_CODE:
+                raise PinnedCommitUnreachableError(
+                    phase_name=phase_name, detail=detail, exit_code=setup_result.exit_code
+                )
             raise NonZeroExitError(detail, exit_code=setup_result.exit_code)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
@@ -599,6 +646,7 @@ class WorkspaceProvisionHandler:
         effective_repos: list[str],
         outputs: dict[str, str],
         inputs: dict[str, object] | None,
+        checked_out: Sequence[SourceCommit] = (),
     ) -> ProvisionResult:
         """Build prompt, CLI command, and return the ProvisionResult."""
         # repo_url for {{repo_url}} prompt substitution (backward compat — uses first repo)
@@ -635,6 +683,7 @@ class WorkspaceProvisionHandler:
             phase_id=todo.phase_id,
             workspace_id=workspace.workspace_id,
             session_id=session_id,
+            checked_out_commits=checked_out,
         )
         return ProvisionResult(
             workspace=workspace,

@@ -13,6 +13,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.postgres_text import pg_safe
+from syn_domain import agent_event_span
 
 if TYPE_CHECKING:
     import asyncpg
@@ -103,19 +104,26 @@ async def query_execution_events(
         List of event dicts
     """
     execution_id = pg_safe(execution_id)
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+        # Bounded to the days this execution has telemetry on, so the planner
+        # opens those chunks and no others (E2). Same rows, so the same LIMIT
+        # picks the same ones: see syn_domain.agent_event_span.
+        span = await agent_event_span.for_executions(conn, [execution_id])  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
         if event_type:
             rows = await conn.fetch(
                 """
                 SELECT time, event_type, session_id, execution_id, phase_id, data
                 FROM agent_events
                 WHERE execution_id = $1 AND event_type = $2
+                  AND time >= $4 AND time < $5
                 ORDER BY time DESC
                 LIMIT $3
                 """,
                 execution_id,
                 event_type,
                 limit,
+                span.lower,
+                span.upper,
             )
         else:
             rows = await conn.fetch(
@@ -123,11 +131,14 @@ async def query_execution_events(
                 SELECT time, event_type, session_id, execution_id, phase_id, data
                 FROM agent_events
                 WHERE execution_id = $1
+                  AND time >= $3 AND time < $4
                 ORDER BY time DESC
                 LIMIT $2
                 """,
                 execution_id,
                 limit,
+                span.lower,
+                span.upper,
             )
 
     return [

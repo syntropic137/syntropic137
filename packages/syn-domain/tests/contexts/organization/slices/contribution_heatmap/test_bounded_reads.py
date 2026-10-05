@@ -59,6 +59,13 @@ async def _statements_issued(*, filtered: bool) -> list[str]:
 
     conn = MagicMock()
     conn.fetch = AsyncMock(side_effect=_fetch)
+    conn.execute = AsyncMock()
+    # The query plans each statement inside one transaction (SET LOCAL).
+    conn.transaction = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=None), __aexit__=AsyncMock(return_value=False)
+        )
+    )
     pool = MagicMock()
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
     pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)

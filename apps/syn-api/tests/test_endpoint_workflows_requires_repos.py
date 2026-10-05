@@ -39,10 +39,11 @@ class _Summary:
     created_at: str | None = None
     runs_count: int = 0
     is_archived: bool = False
+    tags: tuple[str, ...] = ()
 
 
 async def _list(summaries: list[_Summary]):
-    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived):
+    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived, search):
         return Ok(summaries)
 
     mgr = MagicMock()
@@ -61,6 +62,7 @@ async def _list(summaries: list[_Summary]):
             page=1,
             page_size=20,
             order_by=None,
+            search=None,
         )
 
 
@@ -110,3 +112,36 @@ class TestTheFieldCannotBeOmittedAgain:
                 runs_count=0,
                 is_archived=False,
             )
+
+
+async def test_tags_are_reported_not_defaulted() -> None:
+    """The same omission would hide a workflow's tags behind the empty default (#967)."""
+    resp = await _list(
+        [_Summary(id="evals", name="evals", requires_repos=False, tags=("eval-a", "nightly"))]
+    )
+    assert resp.workflows[0].tags == ["eval-a", "nightly"]
+
+
+async def test_the_detail_endpoint_reports_tags_too() -> None:
+    """Detail copies field by field; a copy that skips `tags` empties them (#967)."""
+    from syn_api.routes.workflows.queries import get_workflow_endpoint
+    from syn_api.types import WorkflowDetail
+
+    detail = WorkflowDetail(
+        id="evals",
+        name="evals",
+        workflow_type="custom",
+        classification="standard",
+        tags=["eval-a", "nightly"],
+    )
+    with (
+        patch("syn_api.routes.workflows.queries.get_projection_mgr", return_value=MagicMock()),
+        patch("syn_api.prefix_resolver.resolve_or_raise", new=AsyncMock(return_value="evals")),
+        patch(
+            "syn_api.routes.workflows.queries.get_workflow",
+            new=AsyncMock(return_value=Ok(detail)),
+        ),
+    ):
+        resp = await get_workflow_endpoint("evals")
+
+    assert resp.tags == ["eval-a", "nightly"]

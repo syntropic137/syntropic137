@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -39,7 +41,7 @@ from syn_shared.agents import (
     require_executable_provider,
     require_runnable_sandbox,
 )
-from syn_shared.tools import require_supported_tools
+from syn_shared.tools import ToolName, require_supported_tools
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePort
@@ -223,6 +225,7 @@ def _phase_declares_anything(
     model: str | None,
     provider: str | None,
     allow_delegation: bool,
+    require_delegation: bool,
     allowed_tools: tuple[str, ...],
     sandbox: str | None,
 ) -> bool:
@@ -235,7 +238,39 @@ def _phase_declares_anything(
     `allowed_tools` a release. For `sandbox` the same bug would run a phase
     with authority it explicitly declined.
     """
-    return bool(model or provider or allow_delegation or allowed_tools or sandbox is not None)
+    return bool(
+        model
+        or provider
+        or allow_delegation
+        or require_delegation
+        or allowed_tools
+        or sandbox is not None
+    )
+
+
+def _grant_skill_invocation(
+    config: AgentConfiguration, skills: Sequence[ResolvedSkill]
+) -> AgentConfiguration:
+    """Grant the tool that invokes skills to every phase that declares skills.
+
+    `--tools` restricts AVAILABILITY (#964), so a phase that declared skills
+    and scoped its tools without naming `Skill` would have its skills
+    installed and the only way to invoke them withheld. The repo's
+    `sdlc-implement-v3` YAML is in that shape (#1269). Declaring a skill IS
+    asking for it to be usable, so the grant follows the declaration here, at
+    the execution boundary, rather than relying on each author to remember a
+    second line - and a stored template, which never sees the YAML validator,
+    is covered too. (This is not why production runs recorded zero `Skill`
+    calls: the deployed definition already granted it, and native transcripts
+    show agents invoke skills only when the task names them.)
+
+    An empty tool list is left alone: it means unrestricted, which already
+    includes `Skill`. Codex never reaches the append, because a codex phase
+    declaring tools is refused before this runs (ADR-069 section 3).
+    """
+    if not skills or not config.allowed_tools or ToolName.SKILL in config.allowed_tools:
+        return config
+    return replace(config, allowed_tools=(*config.allowed_tools, ToolName.SKILL))
 
 
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
@@ -257,7 +292,11 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
-    allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
+    require_delegation: bool = bool(getattr(phase, "require_delegation", False))
+    # A requirement implies the permission: a stored template never saw the
+    # YAML validator that insists on both, and a required delegate whose auth
+    # was not staged could only ever fail.
+    allow_delegation: bool = require_delegation or bool(getattr(phase, "allow_delegation", False))
     sandbox: str | None = getattr(phase, "sandbox", None)
     phase_id: str | None = getattr(phase, "phase_id", None)
     # Canonicalise here, not just in the YAML validator: a stored template
@@ -290,6 +329,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
         model=phase_model,
         provider=phase_provider,
         allow_delegation=allow_delegation,
+        require_delegation=require_delegation,
         allowed_tools=allowed_tools,
         sandbox=sandbox,
     ):
@@ -298,6 +338,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
         provider=resolved_provider,
         model=phase_model,
         allow_delegation=allow_delegation,
+        require_delegation=require_delegation,
         allowed_tools=allowed_tools,
         # `is not None`, NOT `or`: a stored phase carrying sandbox="" is
         # invalid input, and `or` would quietly widen it to the write-capable
@@ -402,6 +443,18 @@ class ExecuteWorkflowHandler:
             self._resolve_repos(command, merged_inputs, workflow) if workflow.requires_repos else []
         )
 
+        # #967: the launch snapshot. Read from the template NOW, so a later
+        # edit to the workflow's tags changes future runs and never this one.
+        # Raises (a ValueError) if the union exceeds the tag limit.
+        tags = workflow.tags.union(command.tags)
+
+        # #967: also a launch snapshot, taken by the dispatcher and carried on
+        # the command, so a retry joins the eval it was dispatched into.
+        launch_eval = self._launch_eval(command, workflow)
+        # A run in an eval checks out only what the eval froze; a repository
+        # outside that snapshot has no frozen commit, so the run is refused.
+        launch_eval.refuse_unpinned(repos)
+
         execution_id = (
             command.execution_id
             if command.execution_id and command.execution_id.startswith("exec-")
@@ -422,7 +475,11 @@ class ExecuteWorkflowHandler:
                 execution_id=execution_id,
                 repos=repos,
                 admitted=admitted,
-                source_commits=await source_commits_for(self._commit_resolver, repos),
+                source_commits=await source_commits_for(
+                    self._commit_resolver, repos, launch_eval.baseline
+                ),
+                tags=tags,
+                launch_eval=launch_eval,
             )
         except StreamAlreadyExistsError:
             logger.warning(
@@ -430,6 +487,27 @@ class ExecuteWorkflowHandler:
                 execution_id,
             )
             raise DuplicateExecutionError(execution_id) from None
+
+    @staticmethod
+    def _launch_eval(
+        command: ExecuteWorkflowCommand, workflow: WorkflowTemplateAggregate
+    ) -> LaunchEval:
+        """The eval the dispatcher resolved and admitted; never re-resolved here.
+
+        A command that carries none was built by a dispatcher that made no eval
+        decision. That is an ordinary run only if the workflow has no default
+        eval; otherwise it is refused, rather than silently run outside it.
+        """
+        if command.launch_eval is not None:
+            return command.launch_eval
+        if workflow.default_eval_id:
+            msg = (
+                f"Workflow {command.aggregate_id} defaults to eval "
+                f"{workflow.default_eval_id}, but this launch was dispatched without "
+                "a resolved eval (eval_admission.launch_eval_for)"
+            )
+            raise ValueError(msg)
+        return LaunchEval(None, EvalSelection.NONE)
 
     @staticmethod
     def _merge_inputs(
@@ -534,6 +612,7 @@ class ExecuteWorkflowHandler:
                 workflow_refs=workflow_skill_refs,
                 phase_refs=list(phase.skills),
             )
+            agent_config = _grant_skill_invocation(agent_config, resolved_skills)
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,

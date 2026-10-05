@@ -50,6 +50,23 @@ default to the selfhost VPS and can be overridden with `SYN_PIT_HOST` /
 `SYN_PIT_API`. It does not dispatch the final real-run check (section 5, step 5.3):
 do that yourself, and watch a PHASE reach `running`.
 
+**`stage` takes the deployed pins in either form.** A host installed from a
+release pins `syn-api` and `syn-gateway` **by digest**
+(`ghcr.io/syntropic137/syn-api@sha256:<64 hex>`, each to its own); a host a
+pit stop has already staged pins them by **tag** (`syn-api:v0.33.1`), possibly
+a different tag per service after a hotfix. Both are supported. Each service's
+`image:` line is replaced whole with the exact ref `ship` loaded,
+`ghcr.io/syntropic137/<image>:<tag>`, never edited in place - the shipped
+images are unpushed and have no digest - by `scripts/pit_stop_repoint.py`. The
+old file is kept beside it as `docker-compose.syntropic137.yaml.bak-<pin>`,
+where `<pin>` is the old `syn-api` tag (`bak-v0.33.1`) or the first 12 hex of
+its digest (`bak-sha256-bf783882d031`). Anything else - a variable pin, no pin,
+two `syn-api` lines - aborts `stage` before the host is touched. The new file
+is written beside the deployed one and checked against the staged sha256
+before anything else happens. Only then is the backup taken and the new file
+renamed into place, so a transfer cut short leaves the deployed compose as it
+was.
+
 The sections below remain the reference for what each stage does and why.
 
 ## 1. Drain check - first, last, and unskippable
@@ -356,6 +373,19 @@ being deployed (digests elided):
 [section 5, step 2](#step-2-repoint-the-tag-pins-to-the-new-version) needs it
 twice: to name the backup, and as the string it replaces.
 
+**A host installed from a release pins all six by digest, `syn-api` and
+`syn-gateway` included** - the release asset is written that way (v0.33.1,
+checked 2026-10-03):
+
+```
+    image: ghcr.io/syntropic137/syn-api@sha256:bf783882d031...
+    image: ghcr.io/syntropic137/syn-gateway@sha256:6b416d4a25dd...
+```
+
+`syn-api` and `syn-gateway` are still the two that move. Their pins are just
+two different digests rather than one shared tag, so step 2 rewrites each line
+on its own.
+
 A **digest**-pinned service does not move when you change `SYN_VERSION`, by
 definition - the reference names content, not a version. So only `syn-api` and
 `syn-gateway` need building and only those two lines need editing. Building the
@@ -406,7 +436,9 @@ the top.
 
 It carries hand-applied digest pins that exist nowhere else - not in this repo,
 not in the release assets. Name the backup after the tag it still contains, so
-whoever reaches for it later can tell what rolling back to it would get them:
+whoever reaches for it later can tell what rolling back to it would get them.
+For a digest pin, use `sha256-` and its first 12 hex (`.bak-sha256-bf783882d031`):
+`@` and `:` have no business in a file name.
 
 ```bash
 ssh root@<host> 'cd /root/.syntropic137 \
@@ -449,6 +481,21 @@ are the two lines that changed.
 
 Run them as separate commands: **`grep -c` exits non-zero when the count is
 `0`**, so chaining the first with `&&` aborts on exactly the answer you wanted.
+
+**If the pins are digests** ([section 4](#4-which-images-actually-need-to-move)),
+there is no shared old string to substitute: each service has its own digest.
+Replace each `image:` line whole with the tag you loaded - a locally built image
+has no registry digest, so a digest cannot name it:
+
+```bash
+ssh root@<host> 'cd /root/.syntropic137 \
+  && sed -i -E "s#^( *image: *)[^ ]*/syn-api@sha256:[0-9a-f]{64}#\1ghcr.io/syntropic137/syn-api:v0.28.0-beta.9#; \
+                s#^( *image: *)[^ ]*/syn-gateway@sha256:[0-9a-f]{64}#\1ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.9#" \
+       docker-compose.syntropic137.yaml'
+```
+
+and verify the same way, with `syn-\(api\|gateway\)@sha256` as the old count
+(want `0`) and the new tag as the new count (want `2`).
 
 If the deployed file pins with `${SYN_VERSION}` rather than a literal tag - the
 form the repo template ships - there is nothing to `sed`. Set `SYN_VERSION` in

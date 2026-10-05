@@ -241,13 +241,27 @@ export interface PhaseMetrics {
   artifact_count: number
 }
 
+/** Executions by status: one field per domain status, summing to every execution. */
+export interface ExecutionStatusCounts {
+  not_started: number
+  running: number
+  completed: number
+  failed: number
+  cancelled: number
+  interrupted: number
+}
+
 export interface MetricsResponse {
   total_workflows: number
   completed_workflows: number
   failed_workflows: number
+  execution_status_counts: ExecutionStatusCounts
   total_sessions: number
   total_input_tokens: number
   total_output_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
+  /** Input + output + cache creation + cache read. */
   total_tokens: number
   total_cost_usd: number
   total_artifacts: number
@@ -411,7 +425,31 @@ export interface PhaseExecutionDetail {
   model_display: string
   /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
+  /**
+   * The tools, skills and model this phase had when its execution STARTED,
+   * read from the run's own start event (#1454) - never the current template.
+   * Null says nothing by itself: `start_pins_status` says whether it was
+   * not recorded (a run from before #1454) or could not be read.
+   */
+  pinned_at_start?: PhaseStartConfig | null
+  /** Absent from a server that predates the field: treat as `unavailable`. */
+  start_pins_status?: StartPinsStatus
+  /** Why THIS phase failed, in the server's words; null unless it failed. */
+  error_message?: string | null
+  /**
+   * What the platform classified THIS phase's failure as (#1592). A phase
+   * carries its own, so a card never borrows the run's for a phase it was not
+   * about. Null on a phase that did not fail; absent from an older server.
+   */
+  failure_classification?: FailureClassification | null
+  /** What this phase SAID caused its failure - attribution only, never a colour. */
+  reported_failure_reason?: ReportedFailureReason | null
 }
+
+/** A phase's start config, aliased to the generated schema rather than restated. */
+export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
+/** Why a phase's start pins are or are not shown; only `not_recorded` reads as "not recorded". */
+export type StartPinsStatus = components['schemas']['PhaseExecutionInfo']['start_pins_status']
 
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
@@ -478,6 +516,11 @@ export interface ExecutionDetailResponse {
   cache_write_rate_display?: string | null
   // Workspace info (ADR-021)
   workspace: WorkspaceInfo | null
+  /**
+   * What this run was asked to do, verbatim (#1307). Null when it was
+   * dispatched with no task; absent from a server that predates the field.
+   */
+  task?: string | null
 }
 
 // =============================================================================

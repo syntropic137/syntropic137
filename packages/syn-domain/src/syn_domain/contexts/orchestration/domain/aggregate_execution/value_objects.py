@@ -9,8 +9,16 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
+# Runtime import: a pydantic field type of DelegationAttempt.
+from syn_domain.contexts.agent_sessions import DelegationOutcome  # noqa: TC001
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
@@ -25,6 +33,12 @@ from syn_shared.agents import (
     AgentProvider,
     resolve_phase_model,
 )
+from syn_shared.delegation import DELEGATION_TARGET_BY_PRIMARY, DelegationTarget
+
+# Re-exported for the WorkflowFailed event, which may import value objects and
+# nothing else: the kind lives in the shared kernel so the GitHub adapter can
+# raise it without importing orchestration (#1593).
+from syn_shared.upstream_failure import UpstreamFailureKind as UpstreamFailureKind
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -358,6 +372,66 @@ class SideEffectStatus(StrEnum):
         return max(present, key=rank.__getitem__) if present else None
 
 
+class ReviewVerdict(StrEnum):
+    """What a reviewing phase concluded about the change in front of it (PC-63).
+
+    THE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes
+    ``review_verdict`` in its TASK_RESULT block; the aggregate reads it when
+    the phase's artifacts are collected and chooses the next phase from it
+    (see `WorkflowExecutionAggregate.artifacts_collected`):
+
+    * ``certified`` ends the repair loop. Every phase before the workflow's
+      final phase is skipped, so a run that certifies in round 1 does not pay
+      for rounds 2 and 3.
+    * ``blocked`` - or no verdict at all - advances by order, which is the
+      next repair round, or the final phase once the rounds are spent.
+
+    The latest verdict a run reported is also how it ended: a run completed
+    on ``blocked`` completed with UNRESOLVED FINDINGS, and says so on
+    `WorkflowCompleted` rather than looking certified.
+
+    A missing or misspelled verdict is never read as ``certified``: skipping
+    review on a word the reader did not recognise is the one mistake here that
+    costs more than a repair round.
+    """
+
+    CERTIFIED = "certified"
+    """The review found nothing that blocks the change."""
+
+    BLOCKED = "blocked"
+    """The review found something that must be fixed before the change is usable."""
+
+    @classmethod
+    def from_stored(cls, value: object) -> ReviewVerdict | None:
+        """What a stored payload names, None when it names nothing known. Never raises."""
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value)
+        except ValueError:
+            return None
+
+    @classmethod
+    def from_reported(cls, value: object) -> ReviewVerdict | None:
+        """What a TASK_RESULT block named, None when it named nothing known.
+
+        Crosses the agent trust boundary, so it never raises; an unknown word
+        is logged so a verdict that quietly stops being read stays visible.
+        """
+        if value is None:
+            return None
+        matched = cls.from_stored(value)
+        if matched is None:
+            logger.warning(
+                "TASK_RESULT block named a review_verdict this reader does not know (%r). "
+                "It must be exactly one of %s. Recorded as no verdict, which never "
+                "skips a repair round.",
+                value,
+                [member.value for member in cls],
+            )
+        return matched
+
+
 class PhaseStatus(StrEnum):
     """Status of a single phase execution."""
 
@@ -466,6 +540,10 @@ class AgentConfiguration:
     # When true, both agent auths are staged so this phase's primary agent may
     # delegate one-shot to the other CLI. Default false = single-provider isolation.
     allow_delegation: bool = False
+    # When true, the phase MUST delegate: it completes only once a delegate to
+    # `required_delegate` reported success (#894). A permission alone is never
+    # gated - an agent that may delegate and does the work itself succeeded.
+    require_delegation: bool = False
 
     def __post_init__(self) -> None:
         """Resolve the per-provider model default.
@@ -476,6 +554,18 @@ class AgentConfiguration:
         resolved_model = resolve_phase_model(self.provider, self.model)
         if resolved_model != self.model:
             object.__setattr__(self, "model", resolved_model)
+
+    @property
+    def required_delegate(self) -> DelegationTarget | None:
+        """The harness this phase must have delegated to, None when not required.
+
+        Always the OTHER harness: a delegate is a cross-harness child, so the
+        provider alone decides where it goes. A provider with no delegation
+        target (a test-only one) has no delegate to require.
+        """
+        if not self.require_delegation or self.provider not in DELEGATION_TARGET_BY_PRIMARY:
+            return None
+        return DELEGATION_TARGET_BY_PRIMARY[AgentProvider(self.provider)]
 
 
 @dataclass(frozen=True)
@@ -649,6 +739,22 @@ class BranchObservation(BaseModel):
     and not something to fetch. Keeping the count here is what lets a client
     tell "this phase left nothing anywhere" from "this phase is holding work
     that is not on any remote" without reading prose."""
+
+    pull_request: int | None = None
+    """The PR open from this branch on the forge as the phase failed (#1513).
+
+    Read from the forge, not inferred, so a resume continues THIS PR and
+    never another one opened from the same branch since. ``None`` when none
+    was open or nobody could ask. Written only when set: every reader before
+    #1513 forbids extra fields, so an observation without a PR stays exactly
+    what a rollback can replay."""
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_pull_request(self, handler: SerializerFunctionWrapHandler) -> object:
+        payload = handler(self)
+        if isinstance(payload, dict) and payload.get("pull_request") is None:
+            payload.pop("pull_request", None)
+        return payload
 
     @property
     def remote_moved(self) -> bool:
@@ -982,6 +1088,26 @@ class SourceCommit(BaseModel):
     sha: str | None = None
 
 
+class EvalBaselinePin(BaseModel):
+    """One repository of the frozen baseline an eval run starts from (#967).
+
+    Copied from the eval at admission, once its baseline was frozen, so the run
+    records the exact commit it was launched against without reading the eval
+    again: a branch that moves later, or an eval read model that lags, changes
+    nothing here. Unlike `SourceCommit` the sha is never unknown - an eval
+    refuses a ref it could not pin.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: `owner/name`, the canonical slug of `RepositoryRef`.
+    repository: str
+    #: The branch, tag or sha a person asked for, kept for display.
+    requested_ref: str
+    #: The full commit sha it resolved to: what the run checks out.
+    commit_sha: str
+
+
 class ResumeOrigin(BaseModel):
     """Where a resumed execution came from (ADR-014 s7).
 
@@ -1009,3 +1135,88 @@ class ResumeOrigin(BaseModel):
     def owners(self) -> dict[str, str]:
         """Every inherited phase's owner, by phase id."""
         return {p.phase_id: self.owner_of(p) for p in self.inherited_phases}
+
+
+# Re-exported for `WorkflowExecutionStarted` (#1513): a domain event imports its
+# value objects from this module, and this one is past the file-size limit.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (  # noqa: E402
+    AbandonedBranch as AbandonedBranch,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (  # noqa: E402
+    ContinuedBranch as ContinuedBranch,
+)
+
+# --- Delegation failure (#894) -------------------------------------------
+#
+# Why a phase that declared delegation is recorded as not having delegated.
+# A value object rather than prose in ``error``: the reason and the delegates
+# the platform observed are what an operator acts on - a delegate that never
+# launched and a delegate that launched and failed are different incidents -
+# and a client cannot select between them by parsing a sentence. Carried from
+# the failure command through `WorkflowFailedEvent` to the execution detail
+# read model and its API response, unchanged at every hop.
+#
+# It is a platform-observed fact, never the agent's word, which is why it is a
+# field of its own and not a `ReportedFailureReason`. It lives here, not in a
+# module of its own, because `WorkflowFailedEvent` carries it and an event may
+# import value objects and nothing else from its aggregate (VSA).
+
+
+class DelegationFailureReason(StrEnum):
+    """Why a required delegation is counted as not having happened."""
+
+    NOT_ATTEMPTED = "not_attempted"
+    """The record was read and holds no delegation to the required harness."""
+    FAILED = "failed"
+    """Delegates to the required harness were launched and none succeeded."""
+    UNVERIFIABLE = "unverifiable"
+    """No record could be read, so success cannot be shown."""
+
+
+class DelegationAttempt(BaseModel):
+    """One delegate the phase's agent launched, as the platform observed it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    delegate_id: str
+    """The journal's id for this child invocation."""
+    target_harness: str
+    """Which harness the work was delegated TO (``claude``, ``codex``)."""
+    outcome: DelegationOutcome | None
+    """How it ended; None when it launched and never reported an end."""
+    exit_code: int | None = None
+    reason: str | None = None
+    """Why it could not launch, when the shim named a reason."""
+
+    def describe(self) -> str:
+        ended = self.outcome.value if self.outcome is not None else "never reported an outcome"
+        detail = [f"exit_code={self.exit_code}"] if self.exit_code is not None else []
+        if self.reason is not None:
+            detail.append(f"reason={self.reason}")
+        suffix = f" ({', '.join(detail)})" if detail else ""
+        return f"delegate {self.delegate_id} -> {self.target_harness}: {ended}{suffix}"
+
+
+class DelegationFailure(BaseModel):
+    """The typed account of a failed required delegation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: DelegationFailureReason
+    required_delegate: str | None = None
+    """The harness the phase declared it must delegate to. `None` only on an
+    account recorded before the declaration existed."""
+    attempts: tuple[DelegationAttempt, ...] = ()
+    """Every cross-harness delegate the record held, including any sent to a
+    harness other than `required_delegate`; empty for `unverifiable`."""
+    detail: str | None = None
+    """Why the record could not be read, for `unverifiable`."""
+
+    @classmethod
+    def from_stored(cls, value: object) -> DelegationFailure | None:
+        """The stored account, `None` for a failure that recorded none.
+
+        Every row and event written before #894 has no such key, and replays
+        as `None` rather than raising.
+        """
+        return None if value is None else cls.model_validate(value)

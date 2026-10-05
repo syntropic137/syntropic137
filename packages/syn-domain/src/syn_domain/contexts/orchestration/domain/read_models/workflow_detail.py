@@ -142,6 +142,10 @@ class PhaseDefinitionDetail:
     Security-relevant: it stages BOTH agent auths in the workspace, so a
     reader has to be able to see it. It was stored and unreadable."""
 
+    require_delegation: bool = False
+    """Whether the phase completes only once its delegate succeeded (#894).
+    Distinct from ``allow_delegation``, the permission."""
+
     clone_repos: bool = True
     """Whether the workflow's repos are checked out for this phase (#1187)."""
 
@@ -238,6 +242,12 @@ class WorkflowDetail:
     requires_repos: bool = True
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
+    tags: tuple[str, ...] = ()
+    """The template's tags, normalised and sorted (#967). Exported as ``tags:``."""
+
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Exported as ``default_eval_id:``."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
@@ -261,6 +271,7 @@ class WorkflowDetail:
                 # CLI -- goes through here, so the previous version fixed
                 # exactly half the path while five tests passed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                require_delegation=bool(p.get("require_delegation", False)),
                 # #1429. Read at BOTH construction sites on purpose: the
                 # comment above this one records that fixing only one left
                 # half the path broken while the tests passed.
@@ -301,6 +312,8 @@ class WorkflowDetail:
             repository_url=data.get("repository_url"),
             repos=tuple(data.get("repos", [])),
             requires_repos=data.get("requires_repos", True),
+            tags=tuple(data.get("tags") or ()),
+            default_eval_id=data.get("default_eval_id"),
         )
 
     @staticmethod
@@ -336,6 +349,7 @@ class WorkflowDetail:
                 # and served -- drops it. Adding the field above without this
                 # line changes nothing a caller can see.
                 "allow_delegation": p.allow_delegation,
+                "require_delegation": p.require_delegation,
                 # #1429, and the SAME seam this comment describes. The first
                 # attempt added these to the dataclass and to both constructor
                 # sites and stopped there, so the projection built a phase
@@ -377,4 +391,6 @@ class WorkflowDetail:
             "repository_url": self.repository_url,
             "repos": list(self.repos),
             "requires_repos": self.requires_repos,
+            "tags": list(self.tags),
+            "default_eval_id": self.default_eval_id,
         }

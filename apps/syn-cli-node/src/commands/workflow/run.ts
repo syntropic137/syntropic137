@@ -115,6 +115,20 @@ function displayRunPreview(
   }
 }
 
+/**
+ * Which eval the run will join (#967): the one named, none, or the workflow's
+ * default. The server decides; this only says what it will be asked.
+ */
+function printLaunchEval(evalId: string | undefined, noEval: boolean, workflowDefault: string | null): void {
+  if (evalId !== undefined) {
+    print(`  ${style(`Eval: ${evalId}`, DIM)}`);
+  } else if (noEval) {
+    print(`  ${style("Eval: none (ordinary run)", DIM)}`);
+  } else if (workflowDefault) {
+    print(`  ${style(`Eval: ${workflowDefault} (workflow default; --no-eval to skip)`, DIM)}`);
+  }
+}
+
 export const runCommand: CommandDef = {
   name: "run",
   description: "Execute a workflow",
@@ -123,6 +137,9 @@ export const runCommand: CommandDef = {
     input: { type: "string", short: "i", description: "Input variables as key=value", multiple: true },
     task: { type: "string", short: "t", description: "Primary task description ($ARGUMENTS)" },
     repo: { type: "string", short: "R", description: "Repository to pre-clone (repeatable). Accepts owner/repo, full GitHub URL, or syn repo-* ID.", multiple: true },
+    tag: { type: "string", description: "Tag for this run (repeatable), added to the workflow's own tags", multiple: true },
+    eval: { type: "string", description: "Eval this run joins, overriding the workflow's default eval" },
+    "no-eval": { type: "boolean", description: "Ordinary run: join no eval, even the workflow's default", default: false },
     "dry-run": { type: "boolean", short: "n", description: "Validate without executing", default: false },
     quiet: { type: "boolean", short: "q", description: "Minimal output", default: false },
   },
@@ -139,8 +156,18 @@ export const runCommand: CommandDef = {
     const task = parsed.values["task"] as string | undefined;
     const repoValues = parsed.values["repo"];
     const rawRepos: string[] = Array.isArray(repoValues) ? repoValues as string[] : repoValues ? [repoValues as string] : [];
+    const tagValues = parsed.values["tag"];
+    const tags: string[] = Array.isArray(tagValues) ? tagValues as string[] : tagValues ? [tagValues as string] : [];
+    const evalId = parsed.values["eval"] as string | undefined;
+    const noEval = parsed.values["no-eval"] === true;
     const dryRun = parsed.values["dry-run"] === true;
     const quiet = parsed.values["quiet"] === true;
+
+    if (evalId !== undefined && noEval) {
+      printError("--eval and --no-eval cannot be combined.");
+      printDim("Pass --eval <id> to choose the eval, or --no-eval for an ordinary run.");
+      throw new CLIError("Conflicting eval options", 1);
+    }
 
     // ADR-063: repositories are a typed channel, not smuggled via `--input`.
     // Fail loud at the CLI so users see the migration path immediately instead of
@@ -249,6 +276,7 @@ export const runCommand: CommandDef = {
 
     if (!quiet) {
       displayRunPreview(wf.name, wf.id, wf.phase_count, task, parsedInputs);
+      printLaunchEval(evalId, noEval, detail.default_eval_id ?? null);
     }
 
     if (dryRun) {
@@ -266,6 +294,9 @@ export const runCommand: CommandDef = {
           ),
           task: task ?? null,
           ...(repos.length > 0 ? { repos } : {}),
+          ...(tags.length > 0 ? { tags } : {}),
+          ...(evalId !== undefined ? { eval_id: evalId } : {}),
+          no_eval: noEval,
           provider: "claude",
         },
       }),

@@ -357,7 +357,7 @@ class TestTheLedgerIsGuardedAsInMemoryState:
         do with the guard. Patching what the guard actually reads is the only
         way to exercise it.
         """
-        import syn_adapters.in_memory as in_memory
+        import syn_shared.in_memory as in_memory
 
         class _ProductionSettings:
             uses_in_memory_stores = False

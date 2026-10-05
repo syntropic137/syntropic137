@@ -11,10 +11,15 @@ building one.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    continuation_candidates,
+    decide_continuation,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     StartResumeCommand,
 )
@@ -24,6 +29,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins imp
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+        LeftBranches,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         AdmittedResume,
         StartPins,
@@ -31,6 +39,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
         WorkflowExecutionStartedEvent,
     )
+
+logger = logging.getLogger(__name__)
 
 
 def refuse_resume_start(command: StartResumeCommand) -> str | None:
@@ -89,6 +99,7 @@ def resume_start_command(
     pins: StartPins,
     resumed: bool,
     admitted: AdmittedResume,
+    left: LeftBranches,
 ) -> StartResumeCommand:
     """The child's start, built from the parent's replayed stream alone.
 
@@ -98,6 +109,9 @@ def resume_start_command(
 
     Everything the child runs comes from here: the parent's inputs, its pinned
     phases and its commits. Nothing is read from the workflow template.
+
+    ``left`` is what the parent's failing phase left on origin; when the resume
+    resumes that phase, those branches are its continuation candidates (#1513).
     """
     if parent_execution_id is None or not resumed:
         msg = f"Execution {parent_execution_id} has not admitted a resume"
@@ -132,6 +146,7 @@ def resume_start_command(
             inherited_phases=inherited,
             resume_phase_id=resume_phase_id,
         ),
+        continuation_candidates=continuation_candidates(left, resume_phase_id),
     )
 
 
@@ -141,11 +156,26 @@ def resume_started_event(command: StartResumeCommand) -> WorkflowExecutionStarte
     The same event a fresh run starts with, so every read model that knows how
     to show a run knows how to show this one. Its phase list is the pinned
     snapshot's, not the template's, and `resumed_from` is what marks it a resume.
+
+    It also records which branches the resumed phase continues and which it
+    abandoned, decided here from the candidates and what the forge said about
+    them (#1513). An abandoned branch is a warning, logged and on the event.
     """
     from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
         WorkflowExecutionStartedEvent,
     )
 
+    continued, abandoned = decide_continuation(
+        command.continuation_candidates, command.remote_branches
+    )
+    for branch in abandoned:
+        logger.warning(
+            "Resume %s starts %s fresh instead of continuing %s: %s",
+            command.aggregate_id,
+            branch.repository,
+            branch.branch,
+            branch.reason,
+        )
     return WorkflowExecutionStartedEvent(
         workflow_id=command.workflow_id,
         execution_id=command.aggregate_id,
@@ -157,4 +187,6 @@ def resume_started_event(command: StartResumeCommand) -> WorkflowExecutionStarte
         pinned_phases=command.pinned_phases,
         source_commits=command.source_commits,
         resumed_from=command.resumed_from,
+        continued_branches=continued or None,
+        abandoned_branches=abandoned or None,
     )

@@ -9,10 +9,46 @@ CRITICAL: These tests should catch issues before they reach the UI.
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+
+#: One column of a fixture row: the event type, its time, or its JSON payload.
+type _Cell = str | datetime | Mapping[str, str | bool | int]
+
+
+def _connection_serving(rows: Sequence[Mapping[str, _Cell]]) -> MagicMock:
+    """A connection that answers the session-tools read with ``rows``.
+
+    Also answers what that read now issues around it (E2): the plan setting
+    ``agent_event_span.custom_plans`` runs, and the span lookup on the day
+    rollup, answered with the UTC days the rows fall on. The bounded read
+    itself returns the rows unfiltered; they all lie inside that span.
+    """
+    times = [row["time"] for row in rows if isinstance(row["time"], datetime)]
+    days = [t.astimezone(UTC).date() for t in times]
+
+    async def fetch(
+        query: str, *_args: object
+    ) -> Sequence[Mapping[str, _Cell]] | list[dict[str, date | None]]:
+        if "agent_event_day_rollup" in query:
+            span: dict[str, date | None] = {
+                "first_day": min(days, default=None),
+                "last_day": max(days, default=None),
+            }
+            return [span]
+        return rows
+
+    conn = MagicMock()
+    conn.fetch = AsyncMock(side_effect=fetch)
+    conn.execute = AsyncMock(return_value="SET")
+    return conn
 
 
 @pytest.mark.unit
@@ -56,8 +92,7 @@ class TestToolNameEnrichment:
         ]
 
         # Create mock pool and connection
-        mock_conn = MagicMock()
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn = _connection_serving(mock_rows)
 
         mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=AsyncMock())
@@ -112,8 +147,7 @@ class TestToolNameEnrichment:
             },
         ]
 
-        mock_conn = MagicMock()
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn = _connection_serving(mock_rows)
 
         mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=AsyncMock())

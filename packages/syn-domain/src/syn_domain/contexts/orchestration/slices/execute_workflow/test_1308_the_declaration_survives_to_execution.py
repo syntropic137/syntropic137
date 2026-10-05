@@ -104,6 +104,8 @@ async def _executable_phases(
             repos: list[RepositoryRef],
             admitted: object = None,
             source_commits: list[SourceCommit] | None = None,
+            tags: object = None,
+            launch_eval: object = None,
         ) -> WorkflowExecutionResult:
             del workflow_name, inputs, repos, admitted
             captured.extend(phases)

@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from syn_api.routes.executions.commands import (
+from syn_api.routes.executions.commands import _resolve_target_repo
+from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
-    _resolve_target_repo,
     _validate_repo_access,
 )
 
@@ -279,7 +279,7 @@ class TestRequiresReposPreflightGating:
     @pytest.mark.asyncio
     async def test_validate_all_repos_noop_on_empty_list(self) -> None:
         """_validate_all_repos_access with empty list should be a no-op."""
-        from syn_api.routes.executions.commands import _validate_all_repos_access
+        from syn_api.routes.executions.repo_access import _validate_all_repos_access
 
         # Should complete without error or any GitHub API calls
         await _validate_all_repos_access([])

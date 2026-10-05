@@ -12,6 +12,7 @@ from syn_shared.agents import (
     AgentProvider,
     resolve_phase_model,
 )
+from syn_shared.delegation import DELEGATION_TARGET_BY_PRIMARY, DelegationTarget
 
 
 class ExecutionStatus(StrEnum):
@@ -74,6 +75,10 @@ class AgentConfiguration:
     # When true, both agent auths are staged so this phase's primary agent may
     # delegate one-shot to the other CLI. Default false = single-provider isolation.
     allow_delegation: bool = False
+    # When true, the phase MUST delegate: it completes only once a delegate to
+    # `required_delegate` reported success (#894). A permission alone is never
+    # gated - an agent that may delegate and does the work itself succeeded.
+    require_delegation: bool = False
 
     def __post_init__(self) -> None:
         """Resolve the per-provider model default.
@@ -84,6 +89,18 @@ class AgentConfiguration:
         resolved_model = resolve_phase_model(self.provider, self.model)
         if resolved_model != self.model:
             object.__setattr__(self, "model", resolved_model)
+
+    @property
+    def required_delegate(self) -> DelegationTarget | None:
+        """The harness this phase must have delegated to, None when not required.
+
+        Always the OTHER harness: a delegate is a cross-harness child, so the
+        provider alone decides where it goes. A provider with no delegation
+        target (a test-only one) has no delegate to require.
+        """
+        if not self.require_delegation or self.provider not in DELEGATION_TARGET_BY_PRIMARY:
+            return None
+        return DELEGATION_TARGET_BY_PRIMARY[AgentProvider(self.provider)]
 
 
 @dataclass(frozen=True)

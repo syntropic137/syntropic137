@@ -46,7 +46,7 @@ from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFi
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
 )
-from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
+from syn_domain.contexts.orchestration import TagSet, WorkflowTemplateAggregate
 
 pytestmark = pytest.mark.unit
 
@@ -387,6 +387,9 @@ class _Request:
         default_factory=lambda: ["https://github.com/syntropic137/syntropic137"]
     )
     task: str | None = None
+    tags: TagSet = field(default_factory=TagSet)
+    eval_id: None = None
+    no_eval: bool = False
     provider: str = "claude"
 
 
@@ -430,6 +433,8 @@ class _HttpFixture:
         task: str | None,
         repos: list[object],
         admitted: AdmissionTicket | None = None,
+        tags: TagSet | None = None,
+        launch_eval: object = None,
     ) -> None:
         """Stand in for the background task's run of the execution.
 
@@ -437,7 +442,7 @@ class _HttpFixture:
         at ``journal.open()`` (#1387). Nothing before this point may end it:
         the route only QUEUED this coroutine.
         """
-        del workflow_id, inputs, task, repos
+        del workflow_id, inputs, task, repos, tags, launch_eval
         self.started.append(execution_id)
         if admitted is not None:
             admitted.mark_visible()

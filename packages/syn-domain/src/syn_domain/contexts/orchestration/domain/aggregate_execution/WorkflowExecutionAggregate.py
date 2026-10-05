@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Final
 
 from event_sourcing import (
@@ -17,6 +18,9 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    LeftBranches,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
@@ -32,11 +36,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartPhaseCommand,
     StartResumeCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
+    EvalMembership,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
+    ExecutionTags,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
-    ResumedEventShape,
-    classify_resumed_payload,
-    payload_of,
-    shape_of_resumed_payload,
+    resumed_event_applies,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
     completed_event,
@@ -56,12 +63,18 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
     resume_start_command,
     resume_started_event,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import (
+    ReviewRecord,
+    next_phase,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     AdmittedResume,
     ResumeOrigin,
     StartPins,
     read_admitted_forked_resume,
     read_admitted_resume,
+    read_left_branches,
+    read_source_commits,
     read_start_pins,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -70,23 +83,52 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FinishedAgentRun,
     PhaseDefinition,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
+    SourceCommit,
     StrandedDeliverable,
 )
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.aggregate_edits import (
+        AggregateEdit,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
+        AddExecutionTagsCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.AttachExecutionToEvalCommand import (
+        AttachExecutionToEvalCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.DetachExecutionFromEvalCommand import (
+        DetachExecutionFromEvalCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.RemoveExecutionTagsCommand import (
+        RemoveExecutionTagsCommand,
+    )
     from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
         AgentExecutionCompletedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
         ArtifactsCollectedForPhaseEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
+        ExecutionAttachedToEvalEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
+        ExecutionDetachedFromEvalEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
+        ExecutionTagsAddedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
+        ExecutionTagsRemovedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
         NextPhaseReadyEvent,
@@ -206,6 +248,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: Same restart hazard as `_recovered_phases`: reported when the agent
         #: finishes, needed when the phase completes.
         self._reported_side_effects: dict[str, SideEffectStatus | None] = {}
+        #: Review verdicts, which choose the next phase (PC-63).
+        self._reviews = ReviewRecord()
         #: Phases that completed, and what each one's collection stored. The
         #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
@@ -226,6 +270,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: What this run was started with, pinned so a resume of it runs the same
         #: thing (#1454, #1457). Never read back from the workflow template.
         self._pins = StartPins()
+        #: The branches the phase this run failed in left on origin (#1513).
+        self._left_branches = LeftBranches()
+        #: The tags it launched with and the tags it carries now (#967).
+        self._tags = ExecutionTags()
+        self._eval = EvalMembership()
+        #: The first workspace's verified checkout (#967); None until it is applied.
+        self._starting_checkout: list[SourceCommit] | None = None
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -307,15 +358,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         there is either nothing to recover or a deliverable already stored,
         and in both cases the honest answer is None.
         """
-        if self._status != ExecutionStatus.RUNNING:
-            return None
         execution_id = self.aggregate_id
-        if execution_id is None:
+        if self._status != ExecutionStatus.RUNNING or execution_id is None:
             return None
         phase_id = self._running_phase_id
-        if phase_id is None:
-            return None
-        run = self._finished_agent_runs.get(phase_id)
+        run = None if phase_id is None else self._finished_agent_runs.get(phase_id)
         if run is None:
             return None
         return StrandedDeliverable(
@@ -331,6 +378,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def status(self) -> ExecutionStatus:
         """Get execution status."""
         return self._status
+
+    @property
+    def review_verdict(self) -> ReviewVerdict | None:
+        """The last review verdict reported; `BLOCKED` on a completed run is unresolved findings."""
+        return self._reviews.latest
 
     @property
     def failure_classification(self) -> FailureClassification:
@@ -361,6 +413,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         return self._cancel_reason
 
     @property
+    def tags(self) -> ExecutionTags:
+        """The launch snapshot and the current tags (#967)."""
+        return self._tags
+
+    @property
+    def eval_membership(self) -> EvalMembership:
+        """The eval this run belongs to, how it joined, and what it launched into."""
+        return self._eval
+
+    @property
+    def starting_checkout(self) -> list[SourceCommit]:
+        """Each pinned repository's verified commit when the run's first workspace began."""
+        return self._starting_checkout or []
+
+    @property
     def start_pins(self) -> StartPins:
         """What this run pinned at start, including `resumed_from` for a resume."""
         return self._pins
@@ -379,6 +446,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             pins=self._pins,
             resumed=self._resumed,
             admitted=self._admitted_resume,
+            left=self._left_branches,
         )
 
     @command_handler("StartExecutionCommand")
@@ -416,7 +484,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             msg = f"Cannot complete execution in status {self._status}"
             raise ValueError(msg)
 
-        self._apply(completed_event(command, self._workflow_id or ""))
+        self._apply(completed_event(command, self._workflow_id or "", self._reviews.latest))
 
     @command_handler("FailExecutionCommand")
     def fail_execution(self, command: FailExecutionCommand) -> None:
@@ -562,6 +630,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             workspace_id=command.workspace_id,
             session_id=command.session_id,
             provisioned_at=datetime.now(UTC),
+            checked_out_commits=list(command.checked_out_commits) or None,
         )
         self._apply(event)
 
@@ -587,6 +656,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             output_tokens=command.output_tokens,
             last_agent_message=command.last_agent_message,
             reported_side_effects=command.reported_side_effects,
+            reported_review_verdict=command.reported_review_verdict,
         )
         self._apply(event)
 
@@ -595,9 +665,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Handle artifacts collected — aggregate decides if more phases exist."""
         from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
             ArtifactsCollectedForPhaseEvent,
-        )
-        from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
-            NextPhaseReadyEvent,
         )
 
         if self._status != ExecutionStatus.RUNNING:
@@ -617,27 +684,20 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
-        if self._phase_definitions:
-            current_order = self._phase_order_map.get(command.phase_id)
-            if current_order is not None:
-                next_phase = self._find_next_phase(current_order)
-                if next_phase is not None:
-                    next_event = NextPhaseReadyEvent(
-                        workflow_id=self._workflow_id or "",
-                        execution_id=command.aggregate_id,
-                        completed_phase_id=command.phase_id,
-                        next_phase_id=next_phase.phase_id,
-                        next_phase_order=next_phase.order,
-                        decided_at=datetime.now(UTC),
-                    )
-                    self._apply(next_event)
-
-    def _find_next_phase(self, current_order: int) -> PhaseDefinition | None:
-        """Find the next phase after the given order, or None if this was the last."""
-        for phase_def in self._phase_definitions:
-            if phase_def.order > current_order:
-                return phase_def
-        return None
+        # The phase's own verdict decides what runs next (PC-63).
+        decided = next_phase(
+            self._phase_definitions,
+            self._phase_order_map.get(command.phase_id),
+            self._reviews.of(command.phase_id),
+        )
+        if decided is not None:
+            self._apply(
+                decided.event(
+                    workflow_id=self._workflow_id or "",
+                    execution_id=command.aggregate_id,
+                    completed_phase_id=command.phase_id,
+                )
+            )
 
     @command_handler("CancelExecutionCommand")
     def cancel_execution(self, command: CancelExecutionCommand) -> None:
@@ -658,6 +718,35 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             reason=command.reason,
         )
         self._apply(event)
+
+    @command_handler("AddExecutionTagsCommand")
+    def add_tags(self, command: AddExecutionTagsCommand) -> None:
+        """Add tags to the current set. None new, no event."""
+        self._apply_edit(partial(self._tags.add, command.tags))
+
+    @command_handler("RemoveExecutionTagsCommand")
+    def remove_tags(self, command: RemoveExecutionTagsCommand) -> None:
+        """Remove tags from the current set. None present, no event."""
+        self._apply_edit(partial(self._tags.remove, command.tags))
+
+    @command_handler("AttachExecutionToEvalCommand")
+    def attach_to_eval(self, command: AttachExecutionToEvalCommand) -> None:
+        """Join an eval, in any status. Already a member, no event."""
+        self._apply_edit(partial(self._eval.attach, str(command.eval_id)))
+
+    @command_handler("DetachExecutionFromEvalCommand")
+    def detach_from_eval(self, command: DetachExecutionFromEvalCommand) -> None:
+        """Leave the eval. In none, no event; the launch record is kept."""
+        self._apply_edit(partial(self._eval.detach, str(command.eval_id)))
+
+    def _apply_edit(self, edit: AggregateEdit) -> None:
+        """Apply what a tag or eval edit decided on an existing run; None changed nothing."""
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        event = edit(execution_id=str(self.id), workflow_id=self._workflow_id or "")
+        if event is not None:
+            self._apply(event)
 
     @command_handler("InterruptExecutionCommand")
     def interrupt_execution(self, command: InterruptExecutionCommand) -> None:
@@ -708,9 +797,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             phase_definitions=self._phase_definitions,
             completed_phase_ids=self._completed_phase_ids,
             phase_artifact_ids=self._phase_artifact_ids,
-            phase_owners=self._inherited_owners(),
+            phase_owners=self._pins.inherited_owners(),
             started_phase_ids=self._phase_attempts,
             command=command,
+            repair_point=self._reviews.repair_point(self._phase_definitions),
         )
         if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
@@ -728,6 +818,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
         self._status = ExecutionStatus.RUNNING
         self._pins = read_start_pins(event)
+        self._tags = ExecutionTags.launched_with(evt(event, "tags") or [])
+        self._eval = EvalMembership.launched_into(evt(event, "eval_id"))
         if self._pins.resumed_from is not None:
             self._inherit(self._pins.resumed_from)
 
@@ -743,11 +835,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._completed_phase_ids.add(phase.phase_id)
             self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
         self._completed_phases = len(origin.inherited_phases)
-
-    def _inherited_owners(self) -> dict[str, str]:
-        """Who holds the artifacts of each phase this run inherited, by phase id."""
-        origin = self._pins.resumed_from
-        return {} if origin is None else origin.owners()
 
     @event_sourcing_handler("WorkflowCompleted")
     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:
@@ -778,6 +865,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._reported_failure_reason = ReportedFailureReason.from_stored(
             evt(event, "reported_failure_reason")
         )
+        self._left_branches = read_left_branches(self._pins, event)
 
     @event_sourcing_handler("PhaseStarted")
     def on_phase_started(self, event: PhaseStartedEvent) -> None:
@@ -827,6 +915,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:
         """Apply WorkspaceProvisionedForPhaseEvent."""
         self._current_phase_workspace_id = evt(event, "workspace_id")
+        if self._starting_checkout is None:
+            self._starting_checkout = read_source_commits(evt(event, "checked_out_commits"))
 
     @event_sourcing_handler("AgentExecutionCompleted")
     def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:
@@ -837,6 +927,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             # inherit the abandoned attempt's report.
             self._reported_side_effects[reported_for] = SideEffectStatus.from_stored(
                 evt(event, "reported_side_effects")
+            )
+            self._reviews.report(
+                reported_for, ReviewVerdict.from_stored(evt(event, "reported_review_verdict"))
             )
         said = evt(event, "last_agent_message")
         if not said:
@@ -865,6 +958,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # is also what makes `stranded_deliverable` answer None once the
         # output is safely stored.
         self._finished_agent_runs.pop(phase_id, None)
+        self._reviews.collect(phase_id)
 
     @event_sourcing_handler("NextPhaseReady")
     def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:
@@ -877,6 +971,26 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._status = ExecutionStatus.CANCELLED
         self._cancel_reason = event.reason
 
+    @event_sourcing_handler("ExecutionTagsAdded")
+    def on_execution_tags_added(self, event: ExecutionTagsAddedEvent) -> None:
+        """Apply ExecutionTagsAddedEvent. The launch snapshot is untouched."""
+        self._tags = self._tags.with_added(evt(event, "tags") or [])
+
+    @event_sourcing_handler("ExecutionTagsRemoved")
+    def on_execution_tags_removed(self, event: ExecutionTagsRemovedEvent) -> None:
+        """Apply ExecutionTagsRemovedEvent. The launch snapshot is untouched."""
+        self._tags = self._tags.with_removed(evt(event, "tags") or [])
+
+    @event_sourcing_handler("ExecutionAttachedToEval")
+    def on_attached_to_eval(self, event: ExecutionAttachedToEvalEvent) -> None:
+        """Apply ExecutionAttachedToEvalEvent."""
+        self._eval = self._eval.with_attached(evt(event, "eval_id"))
+
+    @event_sourcing_handler("ExecutionDetachedFromEval")
+    def on_detached_from_eval(self, _event: ExecutionDetachedFromEvalEvent) -> None:
+        """Apply ExecutionDetachedFromEvalEvent. The launch record stays."""
+        self._eval = self._eval.detached()
+
     @event_sourcing_handler("WorkflowInterrupted")
     def on_execution_interrupted(self, event: WorkflowInterruptedEvent) -> None:
         """Apply WorkflowInterruptedEvent."""
@@ -888,29 +1002,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Apply ExecutionResumedEvent - the parent's one resume is spent.
 
         Status is deliberately untouched: the parent stays the terminal run it
-        was, and only this fact about it is new.
-
-        THE SHAPE IS CHECKED HERE, not only in the event's validator. Under
-        ADR-023 the store catches a validation error and falls back to
-        `GenericDomainEvent` with the event type preserved, so a payload the
-        validator refused arrives here anyway and routes on its name. The
-        validator is the early warning; this is the gate.
+        was, and only this fact about it is new. The payload's shape is the
+        gate (`resumed_event_applies`), not only the event's validator.
         """
-        payload = payload_of(event)
-        shape = shape_of_resumed_payload(payload)
-        if shape is ResumedEventShape.PRE_RENAME_UNPAUSE:
-            # Not a resume at all: this recorded un-pausing a paused execution,
-            # which no longer exists. Applying it would spend the parent's one
-            # resume on a child nobody asked for and cannot be undone, so it is
-            # ignored - loudly, because a stream holding one needs migrating.
-            logger.warning(
-                "Ignoring a pre-rename ExecutionResumed (un-pause) on %s: it is not a resume",
-                self.id,
-                extra={"execution_id": self.id},
-            )
+        if not resumed_event_applies(event, self.id):
             return
-        if shape is ResumedEventShape.AMBIGUOUS:
-            classify_resumed_payload(payload)  # raises, with the reason
         self._resumed = True
         self._resume_execution_id = evt(event, "resume_execution_id")
         self._admitted_resume = read_admitted_resume(event)

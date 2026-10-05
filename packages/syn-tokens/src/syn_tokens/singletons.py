@@ -18,6 +18,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _redis_from_settings() -> Redis:
+    """A Redis client for ``settings.redis_url``. Connects lazily, on first use."""
+    from redis.asyncio import Redis as _Redis
+
+    from syn_shared.settings import get_settings
+
+    return _Redis.from_url(get_settings().redis_url)
+
+
+def _uses_in_memory_stores() -> bool:
+    from syn_shared.settings import get_settings
+
+    return get_settings().uses_in_memory_stores
+
+
 # ---------------------------------------------------------------------------
 # Spend tracker singleton
 # ---------------------------------------------------------------------------
@@ -27,7 +43,11 @@ _budget_store: BudgetStore | None = None
 
 
 def get_spend_tracker() -> SpendTracker:
-    """Get the singleton spend tracker. Uses in-memory store by default."""
+    """Get the singleton spend tracker.
+
+    Redis-backed unless ``settings.uses_in_memory_stores`` (ADR-060): the
+    in-memory store loses every budget on restart, so it is test/offline only.
+    """
     global _spend_tracker, _budget_store
 
     if _spend_tracker is not None:
@@ -36,10 +56,13 @@ def get_spend_tracker() -> SpendTracker:
     from syn_tokens.spend import SpendTracker as _ST
 
     if _budget_store is None:
-        _budget_store = InMemoryBudgetStore()
+        if _uses_in_memory_stores():
+            _budget_store = InMemoryBudgetStore()
+        else:
+            _budget_store = RedisBudgetStore(_redis_from_settings())
 
     _spend_tracker = _ST(_budget_store)
-    logger.info("Spend tracker initialized (in-memory)")
+    logger.info("Spend tracker initialized (%s)", type(_budget_store).__name__)
     return _spend_tracker
 
 
@@ -73,7 +96,11 @@ _token_store: TokenStore | None = None
 
 
 def get_token_vending_service() -> TokenVendingService:
-    """Get the singleton token vending service. Uses in-memory store by default."""
+    """Get the singleton token vending service.
+
+    Redis-backed unless ``settings.uses_in_memory_stores`` (ADR-060): the
+    in-memory store loses every vended token on restart, so it is test/offline only.
+    """
     global _token_vending_service, _token_store
 
     if _token_vending_service is not None:
@@ -82,10 +109,13 @@ def get_token_vending_service() -> TokenVendingService:
     from syn_tokens.vending import TokenVendingService as _TVS
 
     if _token_store is None:
-        _token_store = InMemoryTokenStore()
+        if _uses_in_memory_stores():
+            _token_store = InMemoryTokenStore()
+        else:
+            _token_store = RedisTokenStore(_redis_from_settings())
 
     _token_vending_service = _TVS(_token_store)
-    logger.info("Token vending service initialized (in-memory)")
+    logger.info("Token vending service initialized (%s)", type(_token_store).__name__)
     return _token_vending_service
 
 

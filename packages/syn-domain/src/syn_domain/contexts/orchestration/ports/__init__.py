@@ -44,11 +44,21 @@ from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
 from syn_domain.contexts.orchestration.ports.CodexRolloutPort import (
     CodexRolloutPort,
 )
+from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
+    DelegationAttempt,
+    DelegationEvidencePort,
+    DelegationEvidenceUnavailableError,
+    DelegationOutcome,
+)
 from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
     GlobalClaudePluginRegistryRepositoryPort,
 )
 from syn_domain.contexts.orchestration.ports.ObservabilityServicePort import (
     ObservabilityServicePort,
+)
+from syn_domain.contexts.orchestration.ports.RemoteBranchPort import (
+    RemoteBranchPort,
+    RemoteBranchReading,
 )
 from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
     SessionRepositoryPort,
@@ -73,8 +83,14 @@ __all__ = [
     "ClaudePluginRegistrationRepositoryPort",
     "ClaudePluginStoragePort",
     "CodexRolloutPort",
+    "DelegationAttempt",
+    "DelegationEvidencePort",
+    "DelegationEvidenceUnavailableError",
+    "DelegationOutcome",
     "GlobalClaudePluginRegistryRepositoryPort",
     "ObservabilityServicePort",
+    "RemoteBranchPort",
+    "RemoteBranchReading",
     "SessionRepositoryPort",
     "SourceCommitResolverPort",
     "StoredClaudePluginTree",

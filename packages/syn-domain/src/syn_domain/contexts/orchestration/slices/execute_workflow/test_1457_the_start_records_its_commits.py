@@ -77,6 +77,8 @@ class _Processor:
         repos: list[RepositoryRef],
         admitted: object = None,
         source_commits: list[SourceCommit] | None = None,
+        tags: object = None,
+        launch_eval: object = None,
     ) -> WorkflowExecutionResult:
         del workflow_name, phases, inputs, repos, admitted
         self.source_commits = source_commits

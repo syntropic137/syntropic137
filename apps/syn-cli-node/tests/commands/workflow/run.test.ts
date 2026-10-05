@@ -387,6 +387,103 @@ describe("workflow run commands", () => {
       expect(body.repos).toEqual(["acme/widgets"]);
     });
 
+    it("sends every --tag on the execute body (#967)", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [{ id: "wf-tagged-1", name: "W", workflow_type: "custom", phase_count: 1 }],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-tagged-1",
+            name: "W",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-003" }));
+
+      await runCommand.handler({
+        positionals: ["wf-tagged"],
+        values: { tag: ["nightly", "eval-a"] },
+      });
+
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.tags).toEqual(["nightly", "eval-a"]);
+    });
+
+    function mockEvalRun(defaultEvalId: string | null): void {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [{ id: "wf-eval-1", name: "W", workflow_type: "custom", phase_count: 1 }],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-eval-1",
+            name: "W",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+            default_eval_id: defaultEvalId,
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-004" }));
+    }
+
+    async function executeBody(): Promise<Record<string, unknown>> {
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      return JSON.parse(await executeReq.clone().text()) as Record<string, unknown>;
+    }
+
+    it("sends --eval as eval_id and shows it in the preview (#967)", async () => {
+      mockEvalRun("eval-default");
+
+      await runCommand.handler({ positionals: ["wf-eval"], values: { eval: "eval-a" } });
+
+      const body = await executeBody();
+      expect(body.eval_id).toBe("eval-a");
+      expect(body.no_eval).toBe(false);
+      expect(stdout()).toContain("Eval: eval-a");
+    });
+
+    it("sends --no-eval as no_eval and says the run is ordinary (#967)", async () => {
+      mockEvalRun("eval-default");
+
+      await runCommand.handler({ positionals: ["wf-eval"], values: { "no-eval": true } });
+
+      const body = await executeBody();
+      expect(body.no_eval).toBe(true);
+      expect(body).not.toHaveProperty("eval_id");
+      expect(stdout()).toContain("Eval: none (ordinary run)");
+    });
+
+    it("sends neither by default and names the workflow default (#967)", async () => {
+      mockEvalRun("eval-default");
+
+      await runCommand.handler({ positionals: ["wf-eval"], values: {} });
+
+      const body = await executeBody();
+      expect(body).not.toHaveProperty("eval_id");
+      expect(body.no_eval).toBe(false);
+      expect(stdout()).toContain("Eval: eval-default (workflow default; --no-eval to skip)");
+    });
+
+    it("refuses --eval with --no-eval without calling the API (#967)", async () => {
+      await expect(
+        runCommand.handler({ positionals: ["wf-eval"], values: { eval: "eval-a", "no-eval": true } }),
+      ).rejects.toThrow("Conflicting eval options");
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it("resolves mixed -R values: repo-* via lookup, owner/repo passthrough", async () => {
       mockFetch
         // 1) repo-abc lookup

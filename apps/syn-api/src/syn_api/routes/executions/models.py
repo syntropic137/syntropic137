@@ -10,11 +10,18 @@ from pydantic import BaseModel, Field, computed_field
 # Runtime import: Pydantic resolves the field annotations below, and
 # `PhaseActivityInfo` is also called at runtime as a field default.
 from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
-from syn_api.types import BranchObservationInfo, PhaseActivityInfo
+from syn_api.types import (
+    BranchObservationInfo,
+    PhaseActivityInfo,
+    PhaseStartConfig,
+    StartPinsStatus,
+)
 from syn_domain.contexts.orchestration import (
+    DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
     ResumeStartStatus,  # Pydantic resolves it at runtime
+    ReviewVerdict,
     SideEffectStatus,
 )
 from syn_shared.display import EM_DASH
@@ -87,6 +94,13 @@ class PhaseExecutionInfo(BaseModel):
     """What this phase's agent said happened to its external writes, ``None``
     when it said nothing. A report, never a measurement, and it never decides
     whether the phase completed."""
+    failure_classification: FailureClassification | None = None
+    """Why this phase failed - ``platform``, ``task``, ``correct_refusal`` or
+    ``unclassified`` - and ``None`` exactly when it did not fail. The same fact
+    as the execution's ``failure_classification``, at the phase it failed in."""
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What this phase's agent SAID caused its failure, ``None`` when it said
+    nothing. A report beside the classification, never a replacement for it."""
     model: ObservedModelId | None = None
     """The model the harness REPORTED for this phase, or null (ADR-067 D9).
 
@@ -145,6 +159,14 @@ class PhaseExecutionInfo(BaseModel):
     identical again. What no record claims is who moved a ref: git does not
     carry that, so this reports the two readings and stops.
     """
+    pinned_at_start: PhaseStartConfig | None = None
+    """The tools, skills and model this phase had when its execution started.
+
+    Null is never a guess from the workflow as it stands now; `start_pins_status`
+    says whether it is null because nothing was recorded or because the start
+    event could not be read.
+    """
+    start_pins_status: StartPinsStatus = "unavailable"
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, and against what budget (#1262).
@@ -261,6 +283,13 @@ class ExecutionDetailResponse(BaseModel):
     route actually returns, so a value that stops short of here never reaches
     a client.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -280,6 +309,9 @@ class ExecutionDetailResponse(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -288,6 +320,8 @@ class ExecutionDetailResponse(BaseModel):
     write-back was refused - grant the permission, do not re-run the work.
     """
     repos: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""
@@ -363,6 +397,8 @@ class ExecutionSummaryResponse(BaseModel):
     alone, which is the state #1392 was opened about.
     """
     repos: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     repos_display: str | None = None
 
 
