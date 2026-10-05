@@ -402,7 +402,11 @@ This includes a normal code, test, or design defect; a failing gate; and an
 environment limitation that prevents only part of verification, such as an
 unavailable database. Put each such item under a `BLOCKING` heading with the
 file and line or affected command, the root cause, the exact action required,
-and what would prove it closed. `success=true` means the verification report
+and what would prove it closed. The one exception is a check whose CI job is
+skipped by design for this PR, proven from the job's `if:` as the CI section
+above describes: it is never `BLOCKING`, even when this workspace also lacks
+what it needs, such as a database. List it under `Unverified by design` instead,
+and carry that heading into the PR body. `success=true` means the verification report
 was delivered so the `fix` phase can run; it does not mean the candidate was
 certified.
 

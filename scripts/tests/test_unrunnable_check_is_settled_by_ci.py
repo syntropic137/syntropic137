@@ -182,3 +182,27 @@ def test_the_skip_example_is_still_true_of_ci(sections: dict[tuple[str, str], st
     condition = re.sub(r"\s+", " ", job["if"])
     assert f"(github.event_name == 'pull_request' && {clause})" in condition, condition
     assert "base_ref == 'main'" not in condition
+
+
+def _installed_prompt(workflow: str, phase_name: str) -> str:
+    command = build_command_from_definition(
+        WorkflowDefinition.from_file(_WORKFLOWS / workflow / "workflow.yaml")
+    )
+    (phase,) = [p for p in command.phases if p.name == phase_name]
+    return phase.prompt_template or ""
+
+
+@pytest.mark.parametrize("key", _GATING_PHASES, ids=lambda k: f"{k[0]}:{k[1][:20]}")
+def test_no_other_instruction_blocks_a_job_skipped_by_design(key: tuple[str, str]) -> None:
+    # PR #1587 verify: the report-completion paragraph still sent "an unavailable
+    # database" to BLOCKING, so the skipped integration job had two outcomes.
+    prompt = _installed_prompt(*key)
+    start = prompt.find(_HEADING)
+    end = prompt.find("\n## ", start + len(_HEADING))
+    outside = prompt[:start] + prompt[end:]
+    for paragraph in re.split(r"\n\s*\n", outside):
+        flat = re.sub(r"\s+", " ", paragraph)
+        if "BLOCKING" in flat and "environment limitation" in flat:
+            assert "skipped by design for this PR" in flat, flat
+            assert "it is never `BLOCKING`" in flat, flat
+            assert "under `Unverified by design`" in flat, flat
