@@ -11,7 +11,8 @@ PROJECTION SIDE (handle_event): writes one notice per (execution, phase,
 
 PROCESSOR SIDE (process_pending): posts or edits the comment. Called ONLY for
   live events, never during catch-up replay. A notice with no PR yet asks the
-  forge on every pass and posts once one is open from the branch.
+  forge on every pass and posts once one is open from the branch; the
+  platform's clock tick guarantees a pass comes.
 
 Zero business logic: what landed where is decided by the failure event, and
 what the comment says by `QuarantineNotice`.
@@ -53,7 +54,20 @@ _WORKFLOW_FAILED = "WorkflowFailed"
 #: Every event that can mean a PR has since been opened from a branch a notice
 #: is waiting on: a later phase, a resume, a run finishing. Subscribed for the
 #: coordinator to run the processor side, which asks the forge again.
-_RECHECK_EVENTS = {"PhaseStarted", "PhaseCompleted", "WorkflowCompleted", "ExecutionResumed"}
+#:
+#: None of those is guaranteed to follow a failure: a PR opened by hand on a
+#: quiet system arrives as no event at all. So the platform's durable clock is
+#: subscribed too - the recovery clock appends one `InventoryReconciliationSweep`
+#: per interval to the event store - and is the wake that does not depend on
+#: anything else happening. Named by string: a tick carries no data this reads.
+_CLOCK_TICK = "InventoryReconciliationSweep"
+_RECHECK_EVENTS = {
+    "PhaseStarted",
+    "PhaseCompleted",
+    "WorkflowCompleted",
+    "ExecutionResumed",
+    _CLOCK_TICK,
+}
 
 
 class PullRequestCommenter(Protocol):

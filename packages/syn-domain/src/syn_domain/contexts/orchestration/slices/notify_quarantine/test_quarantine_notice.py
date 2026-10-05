@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import EventEnvelope, EventMetadata
+from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
+from event_sourcing.subscriptions.coordinator import SubscriptionCoordinator
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.agent_sessions import InventoryReconciliationSweepEvent
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     RemoteBranchReading,
 )
@@ -26,6 +30,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     QuarantineNoticeProcessManager,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 REF = "refs/syn/lost/exec-q1/implement"
 SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
@@ -172,3 +179,94 @@ async def test_a_pr_opening_long_after_the_failure_still_gets_the_notice() -> No
     forge.open_pr = 42
     assert await manager.process_pending() == 1
     assert commenter.posts == 1
+
+
+class _LiveStore:
+    """One history, fanned out live to the coordinator, as the gRPC feed is."""
+
+    def __init__(self) -> None:
+        self._events: list[EventEnvelope] = []
+        self._listeners: list[asyncio.Queue[EventEnvelope]] = []
+        self.subscribed = asyncio.Event()
+
+    def publish(self, event: DomainEvent, event_type: str) -> None:
+        nonce = len(self._events) + 1
+        envelope = EventEnvelope(
+            event=event,
+            metadata=EventMetadata(
+                aggregate_id=f"agg-{nonce}",
+                aggregate_type="Any",
+                aggregate_nonce=1,
+                event_type=event_type,
+                global_nonce=nonce,
+            ),
+        )
+        self._events.append(envelope)
+        for queue in self._listeners:
+            queue.put_nowait(envelope)
+
+    async def read_all(
+        self, from_global_nonce: int = 0, max_count: int = 100, forward: bool = True
+    ) -> tuple[list[EventEnvelope], bool, int]:
+        if not forward:
+            return list(reversed(self._events))[:max_count], True, 0
+        return self._events[max(from_global_nonce - 1, 0) :][:max_count], True, 0
+
+    async def subscribe(self, from_global_nonce: int) -> AsyncIterator[EventEnvelope]:
+        queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
+        self._listeners.append(queue)
+        self.subscribed.set()
+        try:
+            while True:
+                envelope = await queue.get()
+                if (envelope.metadata.global_nonce or 0) >= from_global_nonce:
+                    yield envelope
+        finally:
+            self._listeners.remove(queue)
+
+
+@pytest.mark.asyncio
+async def test_a_pr_opened_on_a_quiet_system_is_told_on_the_next_clock_tick() -> None:
+    """Through the real coordinator: nothing here calls `process_pending()`.
+
+    After the failure nothing in the run happens again - no phase, no resume -
+    so the only thing that can wake the notice is the platform's clock.
+    """
+    forge = _Forge()
+    manager, commenter = _manager(forge)
+    store = _LiveStore()
+    checkpoints = MemoryCheckpointStore()
+    coordinator = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=checkpoints, projections=[manager]
+    )
+    runner = asyncio.create_task(coordinator.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        store.publish(_failed(pull_request=None).event, "WorkflowFailed")
+        await asyncio.wait_for(_settled(coordinator, checkpoints, 1), 5)
+        assert commenter.posts == 0
+
+        forge.open_pr = 42
+        store.publish(InventoryReconciliationSweepEvent(observed_at=datetime.now(UTC)), _TICK)
+        await asyncio.wait_for(_settled(coordinator, checkpoints, 2), 5)
+        assert commenter.posts == 1
+    finally:
+        await coordinator.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+
+
+_TICK = "InventoryReconciliationSweep"
+
+
+async def _settled(
+    coordinator: SubscriptionCoordinator, checkpoints: MemoryCheckpointStore, nonce: int
+) -> None:
+    while True:
+        checkpoint = await checkpoints.get_checkpoint(
+            QuarantineNoticeProcessManager.PROJECTION_NAME
+        )
+        if checkpoint is not None and checkpoint.global_position >= nonce:
+            break
+        await asyncio.sleep(0)
+    await coordinator.wait_for_process_managers()
