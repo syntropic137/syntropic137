@@ -561,8 +561,8 @@ class QuarantinedWork:
     #: only copy of those changes when the second push fails too.
     dropped: DroppedWorkflows | None = None
     #: The commit ``pushed_ref`` was pushed at (#1547), so a reviewer can be
-    #: told exactly what to fetch. None when nothing landed, and when the
-    #: workflow-safe rescue (#1437) pushed a commit built after this one.
+    #: told exactly what to fetch. None when nothing landed; when the
+    #: workflow-safe rescue (#1437) landed, the rescue commit it pushed.
     commit: str | None = None
 
     def __post_init__(self) -> None:

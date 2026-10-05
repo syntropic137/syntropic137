@@ -816,7 +816,7 @@ def _record(
             ref,
             UNPUSHABLE_WORKFLOW_DIR,
         )
-        return replace(landed, commit=None, dropped=rescue.dropped)
+        return replace(landed, commit=rescue.commit, dropped=rescue.dropped)
     if rescue.second is not None:
         then = push_failure("the workflow-safe retry", rescue.second)
     else:

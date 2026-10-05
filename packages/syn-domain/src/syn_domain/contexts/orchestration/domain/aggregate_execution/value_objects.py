@@ -714,8 +714,8 @@ class QuarantinedRef(BaseModel):
     ref: str
     """The ``refs/syn/lost/<execution>/<phase>`` ref the work was pushed to."""
     commit: str | None
-    """The commit ``ref`` was pushed at; None when the workflow-safe rescue
-    pushed a later one (#1437), in which case the ref itself is the answer."""
+    """The commit ``ref`` was pushed at - the workflow-safe rescue commit when
+    that is what landed (#1437). None only for events from before it was set."""
     commit_count: int
     pull_request: int | None = None
     """The PR open from ``branch`` as the phase failed, when one was."""

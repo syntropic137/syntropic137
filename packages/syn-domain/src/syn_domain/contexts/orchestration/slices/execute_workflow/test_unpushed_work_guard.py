@@ -62,6 +62,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks im
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_notice import (
+    quarantined_refs,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
     _read_only_mount,
@@ -3152,6 +3155,21 @@ _STALE = ExecutionResult(
     stdout="",
     stderr=" ! [remote rejected] HEAD -> refs/syn/lost/x (cannot lock ref)\n",
 )
+
+
+async def test_a_rescued_ref_is_reported_at_the_sha_it_actually_holds(clone: _Clone) -> None:
+    """#1547: the PR is told the SHA to fetch, and after a workflow-safe rescue
+    that is the rescue commit - read back from the origin, through the same
+    converter the failure event is built with, not assumed."""
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    (ref,) = quarantined_refs(raised.value.quarantined, None, ["acme/" + clone.name])
+    assert ref.ref == _QUARANTINE_REF
+    assert ref.commit == clone.origin_refs()[_QUARANTINE_REF]
 
 
 class _RefusesTheSecondPush(_RenewsCredential):
