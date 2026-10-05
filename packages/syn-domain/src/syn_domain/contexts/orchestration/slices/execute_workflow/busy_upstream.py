@@ -16,8 +16,9 @@ Three ways to get this wrong, and they pull in different directions:
   - Retry too much. A second attempt at a login that is not valid, a prompt the
     provider refused, or a quota that resets next month will fail exactly the
     same way, having spent the phase's budget again. One loss becomes several.
-    So a reason qualifies only by being, IN FULL, one of the fixed strings the
-    stream processors normalise a busy upstream into - never by containing one.
+    So a reason qualifies only when `UpstreamFailureReader` names it a
+    TRANSIENT kind (capacity, rate limited) - never auth, never unrecognised,
+    and never by merely containing a busy-sounding phrase.
     `Rate limit reached; quota resets next month` contains "rate limit" and is
     permanent; `Invalid request: rate_limit must be positive` contains it and
     is about the request. Substring matching cannot tell any of them apart, and
@@ -47,45 +48,13 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
-    codex_fault_reason,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-    ApiErrorType,
-    api_error_label,
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UPSTREAM_FAILURES,
+    UpstreamFailureReader,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-
-#: The claude-side busy faults, each paired with the HTTP status the provider
-#: sends it with. Not spelled out as prose: `api_error_label` is where a fault
-#: gets its human wording, so asking it for the wording is the only way this
-#: list cannot disagree with the string a stream processor actually produced.
-_BUSY_API_ERRORS: tuple[tuple[ApiErrorType, str], ...] = (
-    (ApiErrorType.OVERLOADED, "529"),
-    (ApiErrorType.RATE_LIMIT, "429"),
-)
-
-#: The one sentence codex says about its own capacity.
-#:
-#: Unlike claude's, this is NOT normalised by the codex adapter: that adapter
-#: forwards whatever the CLI put in the event verbatim, through
-#: `codex_fault_reason`, and has no label registry to ask. So this literal is
-#: the sentence observed in #1303 and nothing stronger - codex does not promise
-#: to keep saying it. That makes the list narrow rather than loose, which is
-#: the right way for it to be wrong: a phrasing not on it fails on attempt one,
-#: exactly as every phase did before this module existed.
-_CODEX_AT_CAPACITY = "Selected model is at capacity. Please try a different model."
-
-#: Every reason that IS an upstream reporting its own capacity, spelled exactly
-#: as the stream processors spell it. Membership is by equality, not by
-#: containment - see the module docstring for what containment let through.
-_BUSY_UPSTREAM_REASONS: frozenset[str] = frozenset(
-    [api_error_label(error_type) for error_type, _ in _BUSY_API_ERRORS]
-    + [api_error_label(error_type, status) for error_type, status in _BUSY_API_ERRORS]
-    + [codex_fault_reason(_CODEX_AT_CAPACITY)]
-)
 
 #: The least time an attempt may be given and still be worth starting. Below
 #: this, launching the container and starting the harness is all the budget
@@ -106,11 +75,6 @@ _MIN_USEFUL_ATTEMPT_SECONDS: float = 30.0
 #: arithmetic right, and attempt one is dispatched on whatever budget the
 #: phase was configured with - see `PhaseAttempts.first_attempt`.
 _MIN_MEANINGFUL_TIMEOUT_SECONDS: int = 1
-
-
-def _upstream_was_busy(reason: str | None) -> bool:
-    """Whether ``reason`` is, in full, the upstream reporting its own capacity."""
-    return reason in _BUSY_UPSTREAM_REASONS
 
 
 @dataclass(frozen=True)
@@ -267,7 +231,11 @@ class PhaseAttempts:
             return False
         if self._attempt >= self._policy.max_attempts:
             return False
-        if not _upstream_was_busy(reason):
+        # Asked of the port, which owns recognising a busy upstream from a
+        # harness's words; what this module owns is that only a TRANSIENT kind
+        # is worth another attempt. Auth and anything unrecognised are final.
+        kind = self._policy.upstream.kind_of(reason)
+        if kind is None or not kind.is_transient:
             return False
         # The backoff is spent from the same deadline, so an attempt is only
         # affordable if paying for the wait still leaves it room to run.
@@ -308,6 +276,9 @@ class UpstreamRetryPolicy:
     #: tests, which is the only way to assert a 3600-second budget in
     #: milliseconds.
     clock: AttemptClock = AttemptClock()
+    #: What kind of upstream fault a failed attempt reported. The port, so the
+    #: recognising lives with the harness and not here (#1605).
+    upstream: UpstreamFailureReader = UPSTREAM_FAILURES
 
     def begin(self, *, timeout_seconds: float) -> PhaseAttempts:
         """Start this phase's clock. Call once, before the first attempt.

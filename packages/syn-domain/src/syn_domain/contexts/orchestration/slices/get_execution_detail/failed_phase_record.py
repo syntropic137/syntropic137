@@ -20,6 +20,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+    ReportedFailureReason,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -77,6 +82,17 @@ class FailedPhaseRecord:
     """
 
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """Why the run failed, stamped on the phase it failed IN.
+
+    The event classifies the execution, and an execution fails in exactly one
+    phase, so this is the same fact at the scope a reader opens first. Without
+    it a phase read `failed` beside an error string and nothing that said
+    whether to retry, rewrite the brief or call the operator.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The agent's own word about the cause, beside the classification and
+    never as it (#1392)."""
     observed_branches: list[object] | None = None
     """How this phase's branches stood when it died (#1200), as stored.
 
@@ -151,6 +167,12 @@ class FailedPhaseRecord:
         return cls(
             phase_id=_as_str(event_data.get("failed_phase_id")) or "",
             error_message=_as_str(event_data.get("error_message")),
+            failure_classification=FailureClassification.from_stored(
+                event_data.get("failure_classification")
+            ),
+            reported_failure_reason=ReportedFailureReason.from_stored(
+                event_data.get("reported_failure_reason")
+            ),
             observed_branches=observed if isinstance(observed, list) else None,
             artifact_ids=(
                 tuple(a for a in artifact_ids if isinstance(a, str))
@@ -176,6 +198,10 @@ class FailedPhaseRecord:
         """
         phase.status = "failed"
         phase.error_message = self.error_message
+        phase.failure_classification = self.failure_classification.value
+        phase.reported_failure_reason = (
+            None if self.reported_failure_reason is None else self.reported_failure_reason.value
+        )
         phase.observed_branches = self.observed_branches
         phase.input_tokens = self.input_tokens
         phase.output_tokens = self.output_tokens

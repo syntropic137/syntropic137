@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.orchestration import StartResumeHandler
+    from syn_domain.contexts.orchestration import LaunchEval, StartResumeHandler
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
@@ -941,8 +941,6 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
         # #1457: every start records the commit each repository was at, so a
         # resume of it can name the code its parent ran against.
         commit_resolver=GitHubSourceCommitResolver(get_github_client),
-        # #967: a launch into an eval is admitted by loading the Eval aggregate.
-        eval_repository=get_eval_repository(),
     )
 
 
@@ -981,7 +979,18 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         # SYN_OBSERVABILITY_DB_URL break dispatcher construction for every
         # deployment, resuming or not.
         resume_handler=_build_resume_handler,
+        launch_eval_for_workflow=_workflow_default_launch_eval,
     )
+
+
+async def _workflow_default_launch_eval(workflow_id: str) -> LaunchEval:
+    """The eval a trigger-dispatched run joins: its workflow's default, admitted (#967)."""
+    from syn_domain.contexts.orchestration import EvalChoice, WorkflowNotFoundError, launch_eval_for
+
+    workflow = await get_workflow_repository().get_by_id(workflow_id)
+    if workflow is None:
+        raise WorkflowNotFoundError(workflow_id)
+    return await launch_eval_for(get_eval_repository(), EvalChoice(), workflow.default_eval_id)
 
 
 class _NullSignalQueueAdapter:

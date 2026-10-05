@@ -1004,6 +1004,26 @@ class SourceCommit(BaseModel):
     sha: str | None = None
 
 
+class EvalBaselinePin(BaseModel):
+    """One repository of the frozen baseline an eval run starts from (#967).
+
+    Copied from the eval at admission, once its baseline was frozen, so the run
+    records the exact commit it was launched against without reading the eval
+    again: a branch that moves later, or an eval read model that lags, changes
+    nothing here. Unlike `SourceCommit` the sha is never unknown - an eval
+    refuses a ref it could not pin.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: `owner/name`, the canonical slug of `RepositoryRef`.
+    repository: str
+    #: The branch, tag or sha a person asked for, kept for display.
+    requested_ref: str
+    #: The full commit sha it resolved to: what the run checks out.
+    commit_sha: str
+
+
 class ResumeOrigin(BaseModel):
     """Where a resumed execution came from (ADR-014 s7).
 
