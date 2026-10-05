@@ -456,6 +456,9 @@ def create_coordinator_service(
     Returns:
         Configured CoordinatorSubscriptionService
     """
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.pull_request_commenter import GitHubPullRequestCommenter
+    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.projections.manager_registry import create_session_cost_projection
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
     from syn_adapters.subscriptions.projection_adapters import (
@@ -491,14 +494,8 @@ def create_coordinator_service(
         ResumeStarter,
         ResumeStartProcessManager,
     )
-    from syn_adapters.github.client import get_github_client
-    from syn_adapters.github.pull_request_commenter import GitHubPullRequestCommenter
-    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
-    )
-    from syn_domain.contexts.orchestration.slices.notify_quarantine import (
-        QuarantineNoticeProcessManager,
     )
     from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
         ExecutionCostProjection,
@@ -518,6 +515,9 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
     from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.projection import (
         GlobalClaudePluginsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_quarantine import (
+        QuarantineNoticeProcessManager,
     )
     from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
         ClaudePluginLockProjection,

@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (  # noqa: TC001 - runtime for Pydantic
     QuarantinedRef,
 )
 
