@@ -8,9 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts._shared.repository_ref import (
     RepositoryRef,  # noqa: TC001 - runtime field type
 )
-from syn_domain.contexts.orchestration._shared.eval_choice import LaunchEval
+from syn_domain.contexts.orchestration._shared.eval_choice import LaunchEval  # noqa: TC001
 from syn_domain.contexts.orchestration._shared.repository_baseline import (
-    RepositoryBaseline,  # noqa: TC001 - resolves LaunchEval.baseline at runtime
+    RepositoryBaseline,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 

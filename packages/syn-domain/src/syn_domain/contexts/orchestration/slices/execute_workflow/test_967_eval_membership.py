@@ -35,7 +35,7 @@ from syn_domain.contexts.orchestration._shared.eval_admission import (
     EvalUnavailableError,
     launch_eval_for,
 )
-from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, LaunchEval
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
         MaintenancePort,
     )
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
-    from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
+    from syn_domain.contexts.orchestration import ExecuteWorkflowHandler, LaunchEval
     from syn_domain.contexts.orchestration.slices.start_resume import (
         StartFailureReporter,
         StartResumeHandler,
@@ -147,6 +147,8 @@ def get_admission_gate() -> AdmissionGate:
 #: Builds a :class:`StartResumeHandler` on demand. See the constructor for why
 #: this is not simply the handler.
 ResumeHandlerFactory = Callable[[], Awaitable["StartResumeHandler"]]
+#: The eval a run of this workflow joins when its launch names none, admitted (#967).
+LaunchEvalResolver = Callable[[str], Awaitable["LaunchEval"]]
 
 
 class BackgroundWorkflowDispatcher:
@@ -164,6 +166,7 @@ class BackgroundWorkflowDispatcher:
         max_concurrent: int = 1,
         maintenance: AdmissionGate | None = None,
         resume_handler: StartResumeHandler | ResumeHandlerFactory | None = None,
+        launch_eval_for_workflow: LaunchEvalResolver | None = None,
     ) -> None:
         """`max_concurrent` defaults to 1 for the same reason the setting does.
 
@@ -176,6 +179,10 @@ class BackgroundWorkflowDispatcher:
         out come apart, so it needs the thing that can hold them together.
         """
         self._handler = handler
+        # #967: a trigger names no eval, so its run joins the workflow's
+        # default. Resolved once per dispatch, before the command is built, so
+        # the handler never re-resolves it. None: every run is ordinary.
+        self._launch_eval_for_workflow = launch_eval_for_workflow
         self._tasks: set[asyncio.Task[None]] = set()
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._maintenance = maintenance
@@ -408,6 +415,11 @@ class BackgroundWorkflowDispatcher:
                 repos=repos or [],
                 execution_id=execution_id or None,
                 task=task,
+                launch_eval=(
+                    None
+                    if self._launch_eval_for_workflow is None
+                    else await self._launch_eval_for_workflow(workflow_id)
+                ),
             )
             # #1387: carry the gate's answer in rather than asking again. This
             # runs after the caller was told the work started, so a second

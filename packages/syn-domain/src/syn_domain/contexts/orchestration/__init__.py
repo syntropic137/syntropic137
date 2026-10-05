@@ -26,9 +26,10 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
 )
 from syn_domain.contexts.orchestration._shared.eval_admission import (
     EvalUnavailableError,
+    launch_eval_for,
     open_eval,
 )
-from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, LaunchEval
 from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
     EvalMembershipResult,
 )
@@ -295,6 +296,7 @@ __all__ = [
     "InputDeclaration",
     "InvalidTagsError",
     "IsolationConfig",
+    "LaunchEval",
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
@@ -349,6 +351,7 @@ __all__ = [
     "build_command_from_definition",
     "inherited_outputs",
     "is_phase_id",
+    "launch_eval_for",
     "mint_wrapper_name",
     "open_eval",
     "read_record",
