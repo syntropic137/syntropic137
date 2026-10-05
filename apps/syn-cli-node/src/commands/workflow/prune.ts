@@ -66,6 +66,30 @@ export function pruneFlags(parsed: ParsedArgs): Pick<PruneOptions, "prune" | "ye
   return { prune: parsed.values["prune"] === true, yes: parsed.values["yes"] === true };
 }
 
+function hasTerminal(): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
+/**
+ * Refuse `--prune` without `--yes` when there is no terminal to confirm on.
+ *
+ * WHY before anything is written (issue #1588): `confirmArchive` can only
+ * discover this after the install has already upserted the new workflows, and
+ * throwing there left the server changed and the local record not. Called
+ * first, the same refusal costs nothing. It refuses even when nothing would
+ * turn out to need archiving: whether anything does is only known after the
+ * upsert, and a flag combination that cannot be honoured is wrong either way.
+ */
+export function refuseUnconfirmablePrune(flags: Pick<PruneOptions, "prune" | "yes">): void {
+  if (flags.prune && !flags.yes && !hasTerminal()) {
+    throw new CLIError(
+      "Refusing --prune without --yes: no terminal to confirm on. " +
+        "Pass --yes to archive without asking. Nothing was changed.",
+      1,
+    );
+  }
+}
+
 export function findInstallation(name: string): InstallationRecord | null {
   const registry = loadInstalled();
   for (const record of registry.installations) {
@@ -145,7 +169,7 @@ async function ownedByPackage(
 }
 
 async function confirmArchive(count: number): Promise<boolean> {
-  if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
+  if (!hasTerminal()) {
     throw new CLIError(
       `Refusing to archive ${count} workflow(s) without confirmation: no terminal to ask on. ` +
         "Pass --yes to archive them. Nothing was archived.",

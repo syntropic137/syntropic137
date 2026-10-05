@@ -27,7 +27,14 @@ import { removeTempDir } from "../../packages/git.js";
 import { resolveFromMarketplace } from "../../marketplace/client.js";
 import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
 import { postYaml } from "../../client/yaml-upload.js";
-import { findInstallation, pruneWorkflows, PRUNE_OPTIONS, pruneFlags } from "./prune.js";
+import {
+  findInstallation,
+  pruneWorkflows,
+  PRUNE_OPTIONS,
+  pruneFlags,
+  refuseUnconfirmablePrune,
+  type PruneResult,
+} from "./prune.js";
 import type { PostYamlOptions } from "../../client/yaml-upload.js";
 import { runSkillPreflight } from "../../packages/skill-preflight.js";
 
@@ -246,6 +253,8 @@ export const installCommand: CommandDef = {
     const ref = (parsed.values["ref"] as string | undefined) ?? "main";
     const dryRun = parsed.values["dry-run"] === true;
     const force = parsed.values["force"] === true;
+    const flags = pruneFlags(parsed);
+    refuseUnconfirmablePrune(flags);
 
     // Try marketplace first for bare names
     let packagePath: string;
@@ -321,24 +330,32 @@ export const installCommand: CommandDef = {
       // provenance decides, and archiving needs --prune (issue #1588).
       const priorRecord = findInstallation(pkgName);
       const liveIds = new Set(installedRefs.map((w) => w.id));
-      const prune = await pruneWorkflows(
-        (priorRecord?.workflows ?? []).filter((w) => !liveIds.has(w.id)),
-        { packageName: pkgName, ...pruneFlags(parsed) },
-      );
+      const dropped = (priorRecord?.workflows ?? []).filter((w) => !liveIds.has(w.id));
 
       // WHY retained and failed refs stay in the record (issue #822): a
       // workflow that is still live must stay tracked, or the next run has
-      // nothing to nominate it from.
-      recordInstallation({
-        packageName: pkgName,
-        packageVersion: pkgVersion,
-        source,
-        sourceRef: effectiveRef,
-        format: fmt,
-        workflows: [...installedRefs, ...prune.retained, ...prune.failed],
-        marketplaceSource,
-        gitSha,
-      });
+      // nothing to nominate it from. If the prune itself throws, the upsert
+      // above still happened, so it is recorded with every dropped workflow
+      // still tracked (issue #1588).
+      const record = (stillLive: InstalledWorkflowRef[]): void =>
+        recordInstallation({
+          packageName: pkgName,
+          packageVersion: pkgVersion,
+          source,
+          sourceRef: effectiveRef,
+          format: fmt,
+          workflows: [...installedRefs, ...stillLive],
+          marketplaceSource,
+          gitSha,
+        });
+      let prune: PruneResult;
+      try {
+        prune = await pruneWorkflows(dropped, { packageName: pkgName, ...flags });
+      } catch (err) {
+        record(dropped);
+        throw err;
+      }
+      record([...prune.retained, ...prune.failed]);
 
       if (prune.failed.length > 0) {
         printError(
