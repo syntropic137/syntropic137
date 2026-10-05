@@ -15,13 +15,19 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from event_sourcing import ConcurrencyConflictError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
     ensure_connected,
+    get_eval_repo,
     get_projection_mgr,
     get_workflow_repo,
+)
+from syn_api.routes.executions.repo_access import (
+    _parse_repo_from_url,
+    _validate_all_repos_access,
 )
 from syn_api.types import (
     Err,
@@ -34,11 +40,17 @@ from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
+    EvalChoice,
+    EvalId,
+    EvalUnavailableError,
+    LaunchEval,
+    RepositoryOutsideBaselineError,
     SkillError,
     SkillRef,
     TagSet,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
+    launch_eval_for,
     validate_phase_declarations,
 )
 from syn_shared.agents import (
@@ -58,20 +70,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# -- Repo Access Validation ---------------------------------------------------
-
-
-def _parse_repo_from_url(repo_url: str | None) -> str | None:
-    """Extract owner/repo from a GitHub URL, or None if not applicable."""
-    if not repo_url:
-        return None
-    normalized = repo_url.rstrip("/")
-    if "/" not in normalized:
-        return None
-    parts = normalized.split("/")
-    if len(parts) >= 2:
-        return f"{parts[-2]}/{parts[-1]}"
-    return None
+# -- Repo Resolution ----------------------------------------------------------
 
 
 def _resolve_target_repo(
@@ -106,17 +105,6 @@ def _resolve_target_repo(
         return None
 
     return _parse_repo_from_url(repo_url)
-
-
-def _build_auth_error_detail(repo_full_name: str, exc: Exception) -> str:
-    """Build a user-facing error detail for GitHub App auth failures."""
-    exc_message = str(exc)
-    if "not installed" in exc_message.lower():
-        return (
-            f"GitHub App not installed on repository: {repo_full_name}. "
-            "Install the GitHub App on this repository before running workflows."
-        )
-    return f"GitHub App authentication failed for {repo_full_name}: {exc_message}"
 
 
 def _apply_repo_substitution(repos: list[str], merged: dict[str, str]) -> list[str]:
@@ -168,38 +156,6 @@ def _get_preflight_repos(
     if fallback:
         return [f"https://github.com/{fallback}"]
     return []
-
-
-async def _validate_all_repos_access(repo_urls: list[str]) -> None:
-    """Pre-validate that the GitHub App can access all requested repositories."""
-    for url in repo_urls:
-        repo_full_name = _parse_repo_from_url(url)
-        if repo_full_name:
-            await _validate_repo_access(repo_full_name)
-
-
-async def _validate_repo_access(repo_full_name: str) -> None:
-    """Pre-validate that the GitHub App can access the target repository.
-
-    Raises HTTPException(422) if the App is not installed. Logs and
-    proceeds on transient errors (network, rate limit).
-    """
-    from syn_shared.settings.github import GitHubAppSettings
-
-    if not GitHubAppSettings().is_configured:
-        return
-
-    from syn_adapters.github.client import GitHubAuthError, get_github_client
-
-    try:
-        await get_github_client().get_installation_for_repo(repo_full_name)
-    except GitHubAuthError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=_build_auth_error_detail(repo_full_name, exc),
-        ) from exc
-    except Exception as exc:
-        logger.warning("Could not pre-validate repo access for %s: %s", repo_full_name, exc)
 
 
 def _merge_inputs(
@@ -307,6 +263,20 @@ class ExecuteWorkflowRequest(BaseModel):
             "Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422."
         ),
     )
+    eval_id: EvalId | None = Field(
+        default=None,
+        description=(
+            "The eval this run joins, overriding the workflow's default eval (#967). "
+            "404 if it does not exist, 409 if it is archived."
+        ),
+    )
+    no_eval: bool = Field(
+        default=False,
+        description=(
+            "Launch an ordinary run: join no eval, even if the workflow has a default "
+            "eval (#967). Cannot be combined with `eval_id` (422)."
+        ),
+    )
     provider: str = Field(
         default="claude",
         description=(
@@ -379,6 +349,7 @@ async def execute(
     repos: list[RepositoryRef] | None = None,
     admitted: AdmissionTicket | None = None,
     tags: TagSet | None = None,
+    launch_eval: LaunchEval | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -390,6 +361,9 @@ async def execute(
         tenant_id: Optional tenant ID for multi-tenant deployments.
         repos: Typed repository refs (ADR-063 anti-corruption layer).
         tags: Tags for this run, united with the workflow's at launch (#967).
+        launch_eval: The eval this run joins and the baseline it checks out,
+            already resolved and admitted (`launch_eval_for`, #967). Omitted,
+            the run is ordinary, and is refused if its workflow has a default.
         admitted: The ticket the admission gate issued for this execution
             (#1387). Omitting it is not a way to skip the gate - the handler
             checks the flag itself when no ticket arrives. It is how a caller
@@ -425,6 +399,7 @@ async def execute(
             execution_id=execution_id,
             task=task,
             tags=tags or TagSet(),
+            launch_eval=launch_eval,
         )
         result = await handler.handle(cmd, admitted=admitted)
     except WorkflowNotFoundError:
@@ -673,6 +648,32 @@ async def _admit_or_409() -> AsyncIterator[AdmissionTicket]:
         raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
 
 
+async def _launch_eval(
+    workflow: WorkflowTemplateAggregate, request: ExecuteWorkflowRequest
+) -> LaunchEval:
+    """The eval this launch joins, resolved and admitted ONCE, here, before dispatch.
+
+    The answer rides on the command, so the background task never re-resolves
+    it against a workflow default that may have changed since (#967), and a
+    missing (404) or archived (409) eval is an answer to the request rather
+    than a 200 followed by an execution that never starts.
+    """
+    if request.no_eval and request.eval_id is not None:
+        raise HTTPException(status_code=422, detail="Pass either eval_id or no_eval, not both")
+    choice = EvalChoice(eval_id=request.eval_id, ordinary=request.no_eval)
+    try:
+        return await launch_eval_for(get_eval_repo(), choice, workflow.default_eval_id)
+    except EvalUnavailableError as exc:
+        status = 404 if exc.missing else 409
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except ConcurrencyConflictError as exc:
+        # Lost the freeze to a baseline edit: the eval is not frozen at what
+        # this request read, so it starts nothing and the caller may retry.
+        raise HTTPException(
+            status_code=409, detail="The eval's baseline changed during this launch; retry"
+        ) from exc
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -762,7 +763,16 @@ async def execute_workflow_endpoint(
     # validation too, so a caller during a deploy is told the gate is shut
     # rather than being told its workflow does not exist.
     await _refuse_while_paused()
-    _, effective_inputs, typed_repos = await _validate_execution_request(workflow_id, request)
+    workflow, effective_inputs, typed_repos = await _validate_execution_request(
+        workflow_id, request
+    )
+    launch_eval = await _launch_eval(workflow, request)
+    try:
+        # The handler refuses this too; here it is a 422 rather than a 200
+        # followed by an execution that never starts.
+        launch_eval.refuse_unpinned(typed_repos)
+    except RepositoryOutsideBaselineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     # Bound by the `async with` below, and closed over like every other value
@@ -787,6 +797,7 @@ async def execute_workflow_endpoint(
                     repos=typed_repos,
                     admitted=admitted,
                     tags=request.tags,
+                    launch_eval=launch_eval,
                 )
                 if isinstance(result, Err):
                     logger.error(

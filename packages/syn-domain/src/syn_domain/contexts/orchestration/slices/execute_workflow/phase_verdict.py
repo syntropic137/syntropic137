@@ -221,6 +221,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
 )
 
@@ -312,6 +313,10 @@ class AgentVerdict:
     #: whose write-back was refused is a finished deliverable, and the refusal
     #: travels beside it instead of failing it. See `SideEffectStatus`.
     reported_side_effects: SideEffectStatus | None = None
+    #: What a reviewing phase concluded (PC-63). Never read by
+    #: `refuses_completion`: a review that BLOCKS is a review that finished,
+    #: and the aggregate - not this reader - decides what a block means.
+    reported_review_verdict: ReviewVerdict | None = None
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -363,6 +368,7 @@ class AgentVerdict:
             reported.said,
             reported_failure_reason=ReportedFailureReason.from_reported(reported.failure_reason),
             reported_side_effects=SideEffectStatus.from_reported(reported.side_effects),
+            reported_review_verdict=ReviewVerdict.from_reported(reported.review_verdict),
         )
 
     @classmethod
@@ -408,6 +414,7 @@ class AgentVerdict:
             via_status_alias=True,
             reported_failure_reason=ReportedFailureReason.from_reported(aliased.failure_reason),
             reported_side_effects=SideEffectStatus.from_reported(aliased.side_effects),
+            reported_review_verdict=ReviewVerdict.from_reported(aliased.review_verdict),
         )
 
     @property
@@ -639,6 +646,8 @@ class _ReportedResult(BaseModel):
     #: `object` for the same reason: a misspelled side-effect word must cost
     #: the word, never the verdict beside it.
     side_effects: object | None = None
+    #: `object` for the same reason, and a misspelling costs only the word.
+    review_verdict: object | None = None
 
     @property
     def said(self) -> str:
@@ -696,6 +705,7 @@ class _StatusAliasResult(BaseModel):
     #: as the contract model's.
     failure_reason: object | None = None
     side_effects: object | None = None
+    review_verdict: object | None = None
 
     @model_validator(mode="before")
     @classmethod

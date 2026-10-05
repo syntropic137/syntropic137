@@ -24,6 +24,19 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,
 )
+from syn_domain.contexts.orchestration._shared.eval_admission import (
+    EvalUnavailableError,
+    launch_eval_for,
+    open_eval,
+)
+from syn_domain.contexts.orchestration._shared.eval_choice import (
+    EvalChoice,
+    LaunchEval,
+    RepositoryOutsideBaselineError,
+)
+from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
+    EvalMembershipResult,
+)
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
 )
@@ -70,6 +83,7 @@ from syn_domain.contexts.orchestration.domain import (
     WorkflowTemplateAggregate,
     WorkspaceAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
     ResumeExecutionCommand,
@@ -78,11 +92,15 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
     refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationAttempt,
+    DelegationFailure,
+    DelegationFailureReason,
     ExecutablePhase,
     ExecutionStatus,
     FailureClassification,
     PhaseUsage,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
@@ -107,13 +125,16 @@ from syn_domain.contexts.orchestration.domain.commands import (
     AddExecutionTagsCommand,
     AddWorkflowTagsCommand,
     ArchiveWorkflowTemplateCommand,
+    AttachExecutionToEvalCommand,
     CreateWorkflowTemplateCommand,
     CreateWorkspaceCommand,
+    DetachExecutionFromEvalCommand,
     ExecuteCommandCommand,
     ExecuteWorkflowCommand,
     InjectTokensCommand,
     RemoveExecutionTagsCommand,
     RemoveWorkflowTagsCommand,
+    SetWorkflowDefaultEvalCommand,
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
@@ -124,8 +145,14 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
 )
+from syn_domain.contexts.orchestration.slices.attach_execution_to_eval import (
+    AttachExecutionToEvalHandler,
+)
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
     CreateWorkflowTemplateHandler,
+)
+from syn_domain.contexts.orchestration.slices.detach_execution_from_eval import (
+    DetachExecutionFromEvalHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     AGENT_LAUNCH_MARKER,
@@ -180,6 +207,9 @@ from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins impor
     GlobalClaudePluginEntry,
     GlobalClaudePluginNotFoundError,
 )
+from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
+    SetWorkflowDefaultEvalHandler,
+)
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
 )
@@ -225,6 +255,8 @@ __all__ = [
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    "AttachExecutionToEvalCommand",
+    "AttachExecutionToEvalHandler",
     # The clock a phase's retry budget is measured on (#1303)
     "AttemptClock",
     # Claude plugin types + errors (issue #726)
@@ -241,8 +273,17 @@ __all__ = [
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
     "CredentialRenewalFailedError",
+    "DelegationAttempt",
+    "DelegationFailure",
+    "DelegationFailureReason",
+    "DetachExecutionFromEvalCommand",
+    "DetachExecutionFromEvalHandler",
     # Errors
     "DuplicateExecutionError",
+    "EvalChoice",
+    "EvalId",
+    "EvalMembershipResult",
+    "EvalUnavailableError",
     # Value objects - execution
     "ExecutablePhase",
     "ExecuteCommandCommand",
@@ -266,6 +307,7 @@ __all__ = [
     "InputDeclaration",
     "InvalidTagsError",
     "IsolationConfig",
+    "LaunchEval",
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
@@ -276,6 +318,7 @@ __all__ = [
     "RemoveWorkflowTagsCommand",
     "RemoveWorkflowTagsHandler",
     "ReportedFailureReason",
+    "RepositoryOutsideBaselineError",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "ResumeExecutionCommand",
@@ -283,7 +326,10 @@ __all__ = [
     "ResumeStartRecord",
     "ResumeStartStatus",
     "ResumeStarter",
+    "ReviewVerdict",
     "SecurityPolicy",
+    "SetWorkflowDefaultEvalCommand",
+    "SetWorkflowDefaultEvalHandler",
     "SideEffectStatus",
     "SidecarConfig",
     "SkillError",
@@ -318,7 +364,9 @@ __all__ = [
     "build_command_from_definition",
     "inherited_outputs",
     "is_phase_id",
+    "launch_eval_for",
     "mint_wrapper_name",
+    "open_eval",
     "read_record",
     "refuse_resume_start",
     "render_workspace_prompt",

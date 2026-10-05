@@ -43,7 +43,7 @@ class _Summary:
 
 
 async def _list(summaries: list[_Summary]):
-    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived):
+    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived, search):
         return Ok(summaries)
 
     mgr = MagicMock()
@@ -62,6 +62,7 @@ async def _list(summaries: list[_Summary]):
             page=1,
             page_size=20,
             order_by=None,
+            search=None,
         )
 
 

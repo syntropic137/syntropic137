@@ -88,4 +88,5 @@ def build_command_from_definition(
         # them, mirroring the claude_plugins wiring above.
         skills=list(definition.skills),
         tags=definition.tags,
+        default_eval_id=definition.default_eval_id,
     )

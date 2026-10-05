@@ -36,6 +36,13 @@ def _make_mock_pool(rows: list[dict[str, object]]) -> MagicMock:
     """Create a mock asyncpg pool that returns the given rows."""
     conn = AsyncMock()
     conn.fetch = AsyncMock(return_value=[_FakeRow(r) for r in rows])
+    conn.execute = AsyncMock()
+    # The query plans each statement inside one transaction (SET LOCAL).
+    conn.transaction = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=None), __aexit__=AsyncMock(return_value=False)
+        )
+    )
 
     pool = MagicMock()
     pool.acquire = MagicMock(

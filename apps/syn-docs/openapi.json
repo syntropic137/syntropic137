@@ -85,6 +85,24 @@
               "title": "Order By"
             },
             "description": "Sort field (- prefix = descending)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on name or id, applied before paging",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match on name or id, applied before paging"
           }
         ],
         "responses": {
@@ -2072,6 +2090,161 @@
           },
           "422": {
             "description": "A tag is invalid, none was given, or the limit would be exceeded"
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/eval": {
+      "post": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Attach Execution To Eval Endpoint",
+        "description": "Attach an execution to an eval, in any status. Never copies the eval's baseline.",
+        "operationId": "attach_execution_to_eval_endpoint_executions__execution_id__eval_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachEvalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Detach Execution From Eval Endpoint",
+        "description": "Detach an execution from its eval. The launch record (`launched_eval_id`) is kept.",
+        "operationId": "detach_execution_from_eval_endpoint_executions__execution_id__eval_delete",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "eval_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The eval to detach from. Must be the eval the run belongs to, or none.",
+              "title": "Eval Id"
+            },
+            "description": "The eval to detach from. Must be the eval the run belongs to, or none."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/default-eval": {
+      "put": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Set Workflow Default Eval Endpoint",
+        "description": "Set or clear the eval a workflow's runs join when the launch names none.",
+        "operationId": "set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultEvalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDefaultEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workflow has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, or the id prefix matches more than one workflow"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
           }
         }
       }
@@ -4082,7 +4255,7 @@
           "github"
         ],
         "summary": "List Accessible Repos Endpoint",
-        "description": "List repositories accessible to the GitHub App.\n\nQueries all active installations and aggregates results when no\ninstallation_id is provided. The installation list is cached locally with\na 1-hour TTL: if empty or stale, it bootstraps automatically from the\nGitHub API without requiring a webhook URL. Stale data is kept as a\nfallback if the GitHub API is unreachable during refresh.",
+        "description": "List repositories accessible to the GitHub App.\n\nQueries all active installations and aggregates results when no\ninstallation_id is provided. The installation list is cached locally with\na 1-hour TTL: if empty or stale, it bootstraps automatically from the\nGitHub API without requiring a webhook URL. Stale data is kept as a\nfallback if the GitHub API is unreachable during refresh.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
         "operationId": "list_accessible_repos_endpoint_github_repos_get",
         "parameters": [
           {
@@ -7122,7 +7295,7 @@
     "/health": {
       "get": {
         "summary": "Health",
-        "description": "Health check endpoint with detailed subscription status.",
+        "description": "Health check endpoint with detailed subscription status.\n\nThis is the container's LIVENESS check (#1575): while the gate withholds\nthe API it answers 200 with the gate's phase - \"starting\", or \"failed\"\nin the moment between a late startup failure and the process exiting -\nwithout probing anything startup has not built. \"healthy\" is what\nreadiness waits for, so it is only ever said once the gate is ready.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -7588,6 +7761,21 @@
         ],
         "title": "AssignRepoToSystemRequest",
         "description": "Request body for assigning a repo to a system."
+      },
+      "AttachEvalRequest": {
+        "properties": {
+          "eval_id": {
+            "$ref": "#/components/schemas/EvalId",
+            "description": "The eval to attach to. It must exist and not be archived. Attaching to the eval the run already belongs to is a no-op; another eval needs a detach first."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eval_id"
+        ],
+        "title": "AttachEvalRequest",
+        "description": "The eval to attach an execution to (#967)."
       },
       "BodyAvailability": {
         "type": "string",
@@ -8991,6 +9179,124 @@
         "title": "DegradedReason",
         "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
       },
+      "DelegationAttempt": {
+        "properties": {
+          "delegate_id": {
+            "type": "string",
+            "title": "Delegate Id"
+          },
+          "target_harness": {
+            "type": "string",
+            "title": "Target Harness"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "delegate_id",
+          "target_harness",
+          "outcome"
+        ],
+        "title": "DelegationAttempt",
+        "description": "One delegate the phase's agent launched, as the platform observed it."
+      },
+      "DelegationFailure": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DelegationFailureReason"
+          },
+          "required_delegate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Delegate"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/DelegationAttempt"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "default": []
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "DelegationFailure",
+        "description": "The typed account of a failed required delegation."
+      },
+      "DelegationFailureReason": {
+        "type": "string",
+        "enum": [
+          "not_attempted",
+          "failed",
+          "unverifiable"
+        ],
+        "title": "DelegationFailureReason",
+        "description": "Why a required delegation is counted as not having happened."
+      },
+      "DelegationOutcome": {
+        "type": "string",
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "DelegationOutcome",
+        "description": "How a delegated run ended, in provider-neutral terms.\n\nWHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit\nstatus is shell-specific baggage. The native same-harness fan-out path\nreports a boolean success and has no process to exit; cancellation and\ntimeout have no natural integer either. Since these events are v1 and this\nrepo has no upcaster framework, encoding a shell assumption now would need\na v2 to undo."
+      },
       "DeleteWorkflowResponse": {
         "properties": {
           "workflow_id": {
@@ -9008,6 +9314,11 @@
           "status"
         ],
         "title": "DeleteWorkflowResponse"
+      },
+      "EvalId": {
+        "type": "string",
+        "title": "EvalId",
+        "description": "The identity of one eval, and the id of its stream."
       },
       "EventListResponse": {
         "properties": {
@@ -9208,6 +9519,23 @@
             "type": "array",
             "title": "Tags",
             "description": "Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422."
+          },
+          "eval_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The eval this run joins, overriding the workflow's default eval (#967). 404 if it does not exist, 409 if it is archived."
+          },
+          "no_eval": {
+            "type": "boolean",
+            "title": "No Eval",
+            "description": "Launch an ordinary run: join no eval, even if the workflow has a default eval (#967). Cannot be combined with `eval_id` (422).",
+            "default": false
           },
           "provider": {
             "type": "string",
@@ -9574,6 +9902,16 @@
             "$ref": "#/components/schemas/FailureClassification",
             "default": "unclassified"
           },
+          "delegation_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reported_failure_reason": {
             "anyOf": [
               {
@@ -9588,6 +9926,16 @@
             "type": "boolean",
             "title": "Deliverable Produced",
             "default": false
+          },
+          "review_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reported_side_effects": {
             "anyOf": [
@@ -9655,6 +10003,60 @@
           "total_tokens"
         ],
         "title": "ExecutionDetailResponse"
+      },
+      "ExecutionEvalResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Id"
+          },
+          "association_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "launched",
+                  "attached"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Association Kind"
+          },
+          "launched_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launched Eval Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "eval_id",
+          "association_kind",
+          "launched_eval_id"
+        ],
+        "title": "ExecutionEvalResponse",
+        "description": "An execution's eval membership after an edit, read from the aggregate (#967)."
       },
       "ExecutionHistoryResponse": {
         "properties": {
@@ -9856,6 +10258,44 @@
           "status"
         ],
         "title": "ExecutionRunSummary"
+      },
+      "ExecutionStatusCounts": {
+        "properties": {
+          "not_started": {
+            "type": "integer",
+            "title": "Not Started",
+            "default": 0
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running",
+            "default": 0
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "cancelled": {
+            "type": "integer",
+            "title": "Cancelled",
+            "default": 0
+          },
+          "interrupted": {
+            "type": "integer",
+            "title": "Interrupted",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExecutionStatusCounts",
+        "description": "How many executions are in each status, one field per status.\n\nThe fields are exactly the domain's ``ExecutionStatus`` values (a test pins\nthat), so every execution lands in exactly one field and the fields sum to\nthe number of executions. ``completed_workflows``/``failed_workflows``\nalone left cancelled, interrupted and running runs invisible on the\ndashboard. There is no ``paused``: that word was deleted from orchestration."
       },
       "ExecutionStatusResponse": {
         "properties": {
@@ -11472,11 +11912,27 @@
               }
             ],
             "title": "Installation Id"
+          },
+          "lookup": {
+            "$ref": "#/components/schemas/GitHubRepoLookup"
           }
         },
         "type": "object",
+        "required": [
+          "lookup"
+        ],
         "title": "GitHubRepoListResponse",
         "description": "List of repositories accessible to the GitHub App."
+      },
+      "GitHubRepoLookup": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "partial",
+          "unavailable"
+        ],
+        "title": "GitHubRepoLookup",
+        "description": "How much of the GitHub App's access a repo listing actually covers.\n\nOnly ``complete`` makes a repo's absence mean the App cannot reach it. A\n``partial`` listing still proves access for every repo it contains; an\n``unavailable`` one proves nothing."
       },
       "GitHubRepoResponse": {
         "properties": {
@@ -11719,7 +12175,7 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "'healthy' while the process is alive and accepting writes."
+            "description": "'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed."
           },
           "mode": {
             "type": "string",
@@ -12705,6 +13161,9 @@
             "title": "Failed Workflows",
             "default": 0
           },
+          "execution_status_counts": {
+            "$ref": "#/components/schemas/ExecutionStatusCounts"
+          },
           "total_sessions": {
             "type": "integer",
             "title": "Total Sessions",
@@ -13316,6 +13775,11 @@
             "title": "Allow Delegation",
             "default": false
           },
+          "require_delegation": {
+            "type": "boolean",
+            "title": "Require Delegation",
+            "default": false
+          },
           "clone_repos": {
             "type": "boolean",
             "title": "Clone Repos",
@@ -13504,6 +13968,26 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/SideEffectStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure_classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureClassification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
               },
               {
                 "type": "null"
@@ -14921,6 +15405,15 @@
         ],
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
+      },
+      "ReviewVerdict": {
+        "type": "string",
+        "enum": [
+          "certified",
+          "blocked"
+        ],
+        "title": "ReviewVerdict",
+        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for rounds 2 and 3.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
       },
       "RootResponse": {
         "properties": {
@@ -16514,6 +17007,28 @@
         ],
         "title": "SessionTokenMetrics",
         "description": "Token usage metrics for a session."
+      },
+      "SetDefaultEvalRequest": {
+        "properties": {
+          "eval_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The default eval, which must exist and not be archived. Null clears it. Runs already started keep the eval they launched into."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eval_id"
+        ],
+        "title": "SetDefaultEvalRequest",
+        "description": "The eval a workflow's runs join when the launch names none (#967)."
       },
       "SetMaintenanceModeRequest": {
         "properties": {
@@ -18713,6 +19228,32 @@
         ],
         "title": "ValidationError"
       },
+      "WorkflowDefaultEvalResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "default_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Eval Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "default_eval_id"
+        ],
+        "title": "WorkflowDefaultEvalResponse",
+        "description": "A workflow's default eval after an edit, read from the aggregate (#967)."
+      },
       "WorkflowListResponse": {
         "properties": {
           "workflows": {
@@ -18842,6 +19383,17 @@
             },
             "type": "array",
             "title": "Tags"
+          },
+          "default_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Eval Id"
           }
         },
         "type": "object",
@@ -19062,6 +19614,10 @@
     {
       "name": "costs",
       "description": "Track token costs per session and execution"
+    },
+    {
+      "name": "evals",
+      "description": ""
     },
     {
       "name": "events",

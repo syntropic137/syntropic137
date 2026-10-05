@@ -413,6 +413,14 @@ async def _forget_seeded_rows(conn: asyncpg.pool.PoolConnectionProxy) -> None:
         await conn.execute(
             "DELETE FROM agent_event_day_rollup WHERE session_id LIKE $1", f"{SESSION_PREFIX}%"
         )
+    # The usage rollup (E1) is filled by its own AFTER INSERT trigger, and the
+    # same session ids are re-seeded by the next test.
+    for table in ("agent_summary_usage", "agent_turn_usage_rollup"):
+        if await conn.fetchval("SELECT to_regclass($1) IS NOT NULL", table) is True:
+            await conn.execute(
+                f"DELETE FROM {table} WHERE session_id LIKE $1",
+                f"{SESSION_PREFIX}%",
+            )
 
 
 async def _seed_projections() -> tuple[FakeProjectionStore, RepoProjection]:

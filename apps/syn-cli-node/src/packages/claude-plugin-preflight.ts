@@ -144,10 +144,10 @@ async function isInLock(name: string, version: string): Promise<boolean> {
 }
 
 function tryParseYamlFile(file: string): unknown | null {
-  // WHY: non-workflow YAMLs may not parse cleanly with our minimal parser; we
+  // WHY: a non-workflow YAML in the scan may be malformed or not ours; we
   // surface a null sentinel so the orchestrator can skip without a try/catch.
   try {
-    return parseYaml(fs.readFileSync(file, "utf-8"));
+    return parseYaml(fs.readFileSync(file, "utf-8"), file);
   } catch {
     return null;
   }

@@ -45,10 +45,12 @@ from syn_adapters.github.client_jwt import (
 from syn_adapters.github.client_jwt import (
     JWT_ALGORITHM as JWT_ALGORITHM,
 )
+from syn_adapters.github.client_retry import RetryingTransport
 from syn_adapters.github.client_token import get_installation_token as _get_installation_token
 from syn_adapters.github.client_token import (
     revoke_installation_token as _revoke_installation_token,
 )
+from syn_shared.upstream_failure import UpstreamFailureError, UpstreamFailureKind
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -65,15 +67,38 @@ TOKEN_REFRESH_THRESHOLD_SECONDS = 10 * 60
 
 
 class GitHubAppError(Exception):
-    """Base exception for GitHub App errors."""
+    """Base exception for GitHub App errors.
 
-    pass
+    ``status_code`` is the HTTP status GitHub answered with, when the error is
+    an answer rather than a failure to ask, so callers can tell "no such
+    thing" (404) from "not allowed" (403) without parsing the message.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
-class GitHubAuthError(GitHubAppError):
-    """Authentication failed."""
+class GitHubAuthError(GitHubAppError, UpstreamFailureError):
+    """Authentication failed: an operator must fix the App's access (#1593)."""
 
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        UpstreamFailureError.__init__(self, message, upstream_kind=UpstreamFailureKind.AUTH)
+        self.status_code = status_code
+
+
+class GitHubUnavailableError(GitHubAppError, UpstreamFailureError):
+    """GitHub did not answer after every retry the request was allowed (#1593).
+
+    A dropped connection, a timeout or a 502/503/504 - transient, so the run
+    that hit it is resumable. Deliberately not a `GitHubAuthError`: nothing an
+    operator configures would have changed the outcome. The execution's
+    failure record says so through `upstream_kind`, not through this text.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        UpstreamFailureError.__init__(self, message, upstream_kind=UpstreamFailureKind.UNAVAILABLE)
+        self.status_code = status_code
 
 
 class GitHubRateLimitError(GitHubAppError):
@@ -129,11 +154,19 @@ class GitHubAppClient:
         response = await client.api_get("/repos/org/repo")
     """
 
-    def __init__(self, settings: GitHubAppSettings) -> None:
+    def __init__(
+        self,
+        settings: GitHubAppSettings,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         """Initialize the GitHub App client.
 
         Args:
             settings: GitHub App configuration from environment.
+            transport: What actually sends requests; the network by default.
+                Every request is retried on top of it while GitHub is
+                transiently unavailable (#1593).
 
         Raises:
             ValueError: If settings are not fully configured.
@@ -152,6 +185,7 @@ class GitHubAppClient:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
             timeout=30.0,
+            transport=RetryingTransport(transport or httpx.AsyncHTTPTransport()),
         )
 
     async def close(self) -> None:

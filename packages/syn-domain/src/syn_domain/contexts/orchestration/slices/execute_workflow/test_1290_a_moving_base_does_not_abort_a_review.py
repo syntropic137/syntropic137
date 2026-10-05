@@ -141,6 +141,7 @@ async def _prompt_reaching_execution(workflow: str, phase_id: str) -> str:
             admitted: object | None = None,
             source_commits: list[SourceCommit] | None = None,
             tags: object = None,
+            launch_eval: object = None,
         ) -> WorkflowExecutionResult:
             del workflow_name, inputs, repos, admitted
             captured.extend(phases)

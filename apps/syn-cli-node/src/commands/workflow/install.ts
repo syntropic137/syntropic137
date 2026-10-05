@@ -397,6 +397,13 @@ function printWorkflowSummary(workflows: ResolvedWorkflow[]): void {
     table.addRow(wf.name, wf.id, wf.workflow_type, String(wf.phases.length));
   }
   table.print();
+  // WHY the ids and not just the count (#1618): a parse that collapsed ten
+  // phases into four still printed a plausible number. The ids make a missing
+  // or garbled phase visible to whoever reads the dry run.
+  for (const wf of workflows) {
+    const ids = wf.phases.map((p) => (typeof p["id"] === "string" ? p["id"] : style("<no id>", "\x1b[31m")));
+    print(`  ${style(wf.id, BOLD)}: ${ids.join(" -> ")}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

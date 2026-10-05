@@ -636,33 +636,21 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
             ),
         },
     ),
+    # The dashboard totals card and the heatmap's usage read (#1253, E1) are no
+    # longer here: both read the trigger-maintained usage rollup, and the one
+    # remaining agent_events read on their behalf is the startup backfill below.
     **_declared(
-        f"{_DOMAIN}/agent_sessions/slices/canonical_totals/query_service.py",
+        f"{_ADAPTERS}/events/schema.py",
         {
-            "_SCOPED_EVENTS": _full_scan(
-                "The CTE behind the dashboard's all-time totals card. All-time by intent, so "
-                "no session pin is possible; narrowed by #1253 to the two event types that "
-                "carry tokens, which is what stopped it materialising the whole table's JSONB "
-                "into a work table. Its execution filter arrives through str.format, so this "
-                "gate reads the predicate without it."
-            ),
-            "_TOTALS_QUERY": _full_scan(
-                "The statement _SCOPED_EVENTS is composed into. The same text under a second "
-                "symbol, and therefore a second identity: the gate compares identities, so a "
-                "constant and the query built from it are both declared. One round-trip, not "
-                "two."
-            ),
-        },
-    ),
-    **_declared(
-        f"{_DOMAIN}/organization/slices/contribution_heatmap/TimescaleHeatmapQuery.py",
-        {
-            "_USAGE_QUERY": _full_scan(
-                "The contribution heatmap's usage read. session_id appears only as a join "
-                "key (w.session_id = a.session_id), which pins nothing the planner can use, "
-                "so this is discovered and declared like any other unpinned scan. This file "
-                "is #1253's subject and its cost is being addressed there; #1338 makes no "
-                "claim about it either way."
+            "usage_rollup_backfill_sql": _full_scan(
+                "Fills the usage rollup with the events its trigger did not see (events "
+                "minus trigger rows, one snapshot per INSERT). Runs at startup only, and "
+                "only when the rollup is not known complete (first deploy, an interrupted "
+                "backfill, or a trigger found dropped or disabled). At startup each batch "
+                "pins session_id = ANY($1), a segment discard; the hand-applied 007 renders "
+                "it with TRUE, a full scan, which is the bound declared here. It holds no "
+                "lock an insert waits on (#1558 r2). Never on an API read path.",
+                statements=2,
             ),
         },
     ),
@@ -810,7 +798,7 @@ def test_the_number_of_unpinned_statements_is_the_number_we_have_accepted() -> N
     the conversation.
     """
     unpinned = [scan for scan in _production_scans() if not scan.discards_segments]
-    assert len(unpinned) == 23, "\n" + "\n".join(
+    assert len(unpinned) == 22, "\n" + "\n".join(
         f"{scan.identity}: {scan.predicate}" for scan in unpinned
     )
 

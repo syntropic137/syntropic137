@@ -38,6 +38,9 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     expand_skill_entry,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import (  # noqa: TC001 - pydantic field type
+    EvalId,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
     PhaseDefinition,
@@ -279,6 +282,23 @@ class AgentYamlDefinition(BaseModel):
     -p`` or claude -> ``codex exec``). Headless providers only. Default false
     preserves single-provider isolation. See
     docs/superpowers/plans/2026-07-23-codex-claude-delegation.md."""
+
+    require_delegation: bool = False
+    """When true, the phase MUST delegate to the other harness: it completes
+    only once a delegate to that harness reported success, however the agent
+    itself exited (#894). ``allow_delegation`` alone is a permission and is
+    never gated. Requires ``allow_delegation: true``, which stages the auth the
+    delegate needs."""
+
+    @model_validator(mode="after")
+    def _require_delegation_needs_permission(self) -> AgentYamlDefinition:
+        if self.require_delegation and not self.allow_delegation:
+            msg = (
+                "agent.require_delegation needs agent.allow_delegation: true - a phase "
+                "cannot be required to delegate without the other harness's auth staged."
+            )
+            raise ValueError(msg)
+        return self
 
     @field_validator("provider", mode="before")
     @classmethod
@@ -575,6 +595,7 @@ class PhaseYamlDefinition(BaseModel):
         provider = self.agent.provider if self.agent else None
         agent_model = self.agent.model if self.agent else None
         allow_delegation = self.agent.allow_delegation if self.agent else False
+        require_delegation = self.agent.require_delegation if self.agent else False
         sandbox = (self.agent.sandbox if self.agent else None) or DEFAULT_PHASE_SANDBOX
         model = self.model or agent_model
 
@@ -596,6 +617,7 @@ class PhaseYamlDefinition(BaseModel):
             model=model,
             provider=provider,
             allow_delegation=allow_delegation,
+            require_delegation=require_delegation,
             sandbox=sandbox,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),
@@ -706,6 +728,11 @@ class WorkflowDefinition(BaseModel):
     # workflow. Validated by the shared TagSet so YAML, API and CLI agree.
     tags: TagSet = Field(default_factory=TagSet)
 
+    # The eval a run of this workflow joins when its launch names none (evals
+    # plan, #967). Resolved at dispatch, so changing it never reclassifies a
+    # run that already started. Checked against the event store, not here.
+    default_eval_id: EvalId | None = None
+
     @field_validator("skills", mode="before")
     @classmethod
     def _expand_skills(cls, value: object) -> object:
@@ -764,7 +791,7 @@ class WorkflowDefinition(BaseModel):
         because the declaration and the injection are keyed on different
         vocabularies:
 
-          - injection is keyed on PHASE IDs. `_wiring.py` substitutes
+          - injection is keyed on PHASE IDs. `_wiring_agent_command.py` substitutes
             `{{<phase-id>}}` and builds the context appendix per phase id.
           - declaration is keyed on ARTIFACT TYPES (`input_artifacts` ->
             `input_artifact_types`).

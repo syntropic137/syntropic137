@@ -8,17 +8,11 @@ import {
 import type { ValueType } from 'recharts/types/component/DefaultTooltipContent'
 import type { MetricsResponse } from '../../types'
 import { ChartTooltip } from '../../components'
-
-interface ChartDataItem {
-  [key: string]: unknown
-  name: string
-  value: number
-  fill: string
-}
+import { type ChartDataItem, statusSlices, tokenSegments } from './chartData'
 
 function ChartLegend({ items }: { items: ChartDataItem[] }) {
   return (
-    <div className="flex justify-center gap-6 -mt-4">
+    <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 -mt-4">
       {items.map((item) => (
         <div key={item.name} className="flex items-center gap-2">
           <div
@@ -80,16 +74,9 @@ interface DashboardChartsProps {
 }
 
 export function DashboardCharts({ metrics }: DashboardChartsProps) {
-  const tokenDistribution: ChartDataItem[] = metrics
-    ? [
-      { name: 'Input', value: metrics.total_input_tokens, fill: '#4D80FF' },
-      { name: 'Output', value: metrics.total_output_tokens, fill: '#5A8CFF' },
-    ]
-    : []
-
   return (
     <DonutChart
-      data={tokenDistribution}
+      data={metrics ? tokenSegments(metrics) : []}
       emptyMessage="No token data yet"
       tooltipFormatter={(value) => [Number(Array.isArray(value) ? value[0] : value ?? 0).toLocaleString(), 'tokens']}
     />
@@ -97,16 +84,9 @@ export function DashboardCharts({ metrics }: DashboardChartsProps) {
 }
 
 export function WorkflowStatusChart({ metrics }: DashboardChartsProps) {
-  const workflowStatusData: ChartDataItem[] = metrics
-    ? [
-      { name: 'Completed', value: metrics.completed_workflows, fill: '#22c55e' },
-      { name: 'Failed', value: metrics.failed_workflows, fill: '#ef4444' },
-    ].filter(d => d.value > 0)
-    : []
-
   return (
     <DonutChart
-      data={workflowStatusData}
+      data={metrics ? statusSlices(metrics.execution_status_counts) : []}
       emptyMessage="No workflow data yet"
     />
   )

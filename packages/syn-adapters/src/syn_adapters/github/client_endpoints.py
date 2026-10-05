@@ -98,23 +98,40 @@ async def update_webhook_config(
     return response.json()
 
 
+_MAX_INSTALLATION_PAGES = 50  # Safety cap: 50 pages * 100 = 5,000 installations
+
+
 async def list_installations(client: GitHubAppClient) -> list[dict]:
     """List all installations of this GitHub App.
 
+    GitHub pages this endpoint (30 per page by default), so every page is
+    followed through its ``Link: rel="next"`` header. The list is all of them
+    or an error: past the safety cap it raises rather than return a truncated
+    list a caller could mistake for complete.
+
     Returns:
         List of installation metadata.
+
+    Raises:
+        GitHubAppError: If more pages remain after the safety cap.
     """
+    from syn_adapters.github.client import GitHubAppError
     from syn_adapters.github.client_api import check_response
 
-    jwt_token = client._generate_jwt()
-
-    response = await client._http.get(
-        "/app/installations",
-        headers={"Authorization": f"Bearer {jwt_token}"},
+    headers = {"Authorization": f"Bearer {client._generate_jwt()}"}
+    installations: list[dict] = []
+    url = "/app/installations?per_page=100"
+    for _ in range(_MAX_INSTALLATION_PAGES):
+        response = await client._http.get(url, headers=headers)
+        check_response(response)
+        installations.extend(response.json())
+        next_url = response.links.get("next", {}).get("url")
+        if next_url is None:
+            return installations
+        url = next_url
+    raise GitHubAppError(
+        f"More than {_MAX_INSTALLATION_PAGES} pages of installations; refusing to truncate"
     )
-
-    check_response(response)
-    return response.json()
 
 
 async def list_accessible_repos(

@@ -1,7 +1,7 @@
 """A ``RevisionResolverPort`` answered from a table the test writes (#967).
 
-The real resolver is a later evals run; until then every consumer of the port
-is tested against this one, and so is the contract it has to keep.
+Every consumer of the port is tested against this one. The GitHub resolver,
+``syn_adapters.github.revision_resolver``, is tested against GitHub's answers.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
     UnresolvedReason,
     UnresolvedRevision,
 )
+from syn_shared.in_memory import assert_test_only
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -30,6 +31,9 @@ class FakeRevisionResolver:
     unavailable: set[str] = field(default_factory=set)
     #: Every ``(slug, ref)`` asked for, in order.
     asked: list[tuple[str, str]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        assert_test_only()
 
     async def resolve(self, repository: RepositoryRef, requested_ref: str, /) -> RevisionResolution:
         self.asked.append((repository.slug, requested_ref))
