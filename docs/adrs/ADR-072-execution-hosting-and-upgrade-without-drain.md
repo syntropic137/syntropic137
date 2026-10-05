@@ -175,7 +175,7 @@ turn as a state machine on the row:
 
 | Step | Action | Guard |
 |---|---|---|
-| `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, one UPDATE | `leased_until < now()` |
+| `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, `reconciler_epoch = <its epoch>`, one UPDATE | `leased_until < now()` and `writer_epoch <= <its epoch>` (D9) |
 | `fencing` → `reaped` | remove containers labelled `syn.host_id=<dead host>`, `syn.execution_id=<id>` | the reap reports complete (the existing `fully_reaped` rule in `reconciliation.py`); otherwise stay `fencing` and retry |
 | `reaped` → `interrupted` | two ordered steps, below | |
 
@@ -280,19 +280,24 @@ claim was traced:
 |---|---|---|
 | `get_pending(execution_id)` in the processor's drain loop | `execution_todo` | **Replaced** by a run-scoped fold (D8). An empty list is read as "done", so this one is critical. |
 | `inherited_outputs(...)` at the start of a resume | `artifact_list` | **Resumes only.** If it fails at claim, the row returns to `admitted` with `retry_at` backoff; after K attempts it fails with a reason naming the read model. Fresh starts do not call it. |
-| `ArtifactCollector` fallback for completed phases missing from the run's cache | `artifact_list` | **Reached within one fresh run**, for every completed phase that recorded no primary output and no files. `PhaseOutputCache.record` stores empty results nowhere (`processor_types.py:60-67`), so `_resolve_phase_outputs` sends that phase to the projection (`ArtifactCollector.py:352-358`). Not replaced. See the claim below. |
+| `ArtifactCollector` fallback for completed phases missing from the run's cache | `artifact_list` | **Conditional, and not reached by today's fresh producer.** `_resolve_phase_outputs` queries the projection only for a completed phase absent from the run's file cache (`ArtifactCollector.py:352-359`), and `PhaseOutputCache.record` leaves a phase absent only when its result is empty (`processor_types.py:60-67`). The fresh producer never records an empty result: `_deliverables` returns at least one deliverable or raises (`ArtifactCollector.py:668-714`), each becomes one `PhaseOutputFile` (`:604-635`), and `collect` records them (`phase_workspace.py:412-416`) before `COMPLETE_PHASE` adds the phase to `completed_phase_ids` (`WorkflowExecutionProcessor.py:511-522,899-913`). Not replaced. See the claim below. |
 | Cancel and inject signals | none (Redis signal queue) | unchanged |
 
 **The claim, in exactly these words:** a projection replay does not stall a
 **running fresh** execution's to-do list, which no longer reads a shared read
-model (D8). It does reach one read: a completed phase that left nothing in the
-run's `PhaseOutputCache` is resolved from `artifact_list`, and during a replay
-that projection can be behind, so the next phase can inherit fewer files from
-that phase than it produced. Phases whose output is in the cache are never
-affected. This design does not close that gap; closing it means recording an
-empty result as authoritative, which `PhaseOutputCache.record` deliberately
-does not do (`processor_types.py:61-63`), and is a change to that rule, not to
-hosting. A replay can also delay the **claim of a resume** until
+model (D8). Nor does it reach the `ArtifactCollector` fallback in a fresh run
+today: that fallback is conditional on a completed phase being absent from the
+run's `PhaseOutputCache`, and the producer invariant above means every phase a
+fresh run completes is in that cache. The guarantee rests on that invariant,
+not on the cache. If a future producer lets a phase complete with an empty
+result, the fallback becomes reachable, and its cost is latency or failure,
+not lost files: the phase produced nothing, so even a lagging `artifact_list`
+answers correctly with nothing, but a slow query delays the next phase's
+provision by its duration, and a query that raises propagates out of
+`inject_artifacts` uncaught (`ArtifactCollector.py:319-321,354-359`) and fails
+that provision. That producer change must decide this, by recording the empty
+result as authoritative (a change to `processor_types.py:61-63`) or by
+accepting the failure, and is not a hosting change. A replay can also delay the **claim of a resume** until
 `artifact_list` is readable. It never delays the claim of a fresh start,
 because discovery reads `execution_runs`.
 
@@ -352,7 +357,7 @@ row state:
 |---|---|
 | `opening`, `admitted`, `abandoned` | Raise, then append. An older executor no longer claims the row; it waits, visibly, as at admission. |
 | `claimed` | Allowed only if `:mine <= claimer_epoch`. Otherwise the raise matches no row and the append is refused with 409, naming both epochs: the running executor reloads its aggregate and could not read the event. Retry after that executor is upgraded or the run ends. |
-| `fencing`, `reaped` | Reconciliation claims these rows under the same rule as a run: it acts only on rows with `writer_epoch <=` its own epoch, so it never loads what it cannot read. |
+| `fencing`, `reaped` | Allowed only if `:mine <= reconciler_epoch`, the same rule as `claimed` with the reconciler in place of the run: the reconciler loads the stream and appends `WorkflowInterruptedEvent` from this state (D5). Otherwise the raise matches no row and the append is refused with 409, naming both epochs. The route returns that 409 to its caller unchanged, so `syn` shows it and no write is half-applied; retry once the row is `interrupted`, which takes one reconciliation turn when the reap succeeds. |
 | `done`, `interrupted`, or no row | No executor loads the stream again; no constraint. |
 
 Raise-then-append crosses the same two stores as D5 and is ordered the same
@@ -360,6 +365,15 @@ way: a crash between them leaves a raised epoch and no event, which can only
 delay a claim, never let an old executor mis-read. The raise and the claim are
 single UPDATEs on one row, so they serialise: a claim that wins is seen by the
 raise as `claimed`, and a raise that wins is seen by the claim as too new.
+Fencing serialises the same way, in both orders. If the raise wins, `claimed`
+→ `fencing` matches no row for a reconciler older than the new `writer_epoch`,
+and the row waits for a new enough executor to reconcile it. If fencing wins,
+the raise sees `fencing` and is held to `reconciler_epoch`, so a reconciler
+never loads an event it cannot read, between its fencing UPDATE and its row
+closure. Any later reconciliation turn on a `fencing` or `reaped` row, by the
+same executor or another, is guarded the same way: `writer_epoch <=` its own
+epoch, and it rewrites `reconciler_epoch` to that epoch. The implementation
+carries a transition test for each order.
 
 **Enforced in one place:** the repository every one of those routes gets from
 `get_workflow_execution_repository()`
