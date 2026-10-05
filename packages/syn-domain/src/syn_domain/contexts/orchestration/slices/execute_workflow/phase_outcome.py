@@ -596,9 +596,14 @@ class CancelledExecution:
         execution_id: str,
         *,
         started_at: DateTime,
+        recorded: bool = True,
         now: DateTime | None = None,
     ) -> WorkflowExecutionResult:
-        """The result the execution hands back to its caller."""
+        """The result the execution hands back to its caller.
+
+        Not ``recorded``: neither store took the landed refs, so the result
+        names them as unrecorded rather than reading as a handled cancel.
+        """
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -609,6 +614,7 @@ class CancelledExecution:
             artifact_ids=self.artifact_ids,
             metrics=ExecutionMetrics.from_results(self.phase_results),
             error_message=self.reason,
+            unrecorded_work=() if recorded else self.quarantined,
         )
 
 

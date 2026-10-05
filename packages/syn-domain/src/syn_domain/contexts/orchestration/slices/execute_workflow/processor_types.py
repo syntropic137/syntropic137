@@ -11,6 +11,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionMetrics,
     FailureClassification,
     PhaseResult,
+    QuarantinedRef,
     ReportedFailureReason,
 )
 from syn_domain.repository import Repository
@@ -166,3 +167,7 @@ class WorkflowExecutionResult:
     A caller dispatching a run synchronously is exactly the reader who wants
     both: what the platform recorded, and what its agent said about it.
     """
+    unrecorded_work: tuple[QuarantinedRef, ...] = ()
+    """A cancel's landed refs that neither the event store nor the owed store
+    took (#1547). Empty on every run whose work is on record: a cancel naming
+    refs here was NOT handled, and its PR has not been told yet."""

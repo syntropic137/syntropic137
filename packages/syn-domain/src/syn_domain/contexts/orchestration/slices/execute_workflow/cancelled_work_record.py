@@ -19,7 +19,16 @@ then OWED: written to a store of their own, keyed by execution and phase, and
 appended by the next `settle()` - which the processor runs at the start of
 every run, so a store that comes back, or a process that restarts, delivers
 them. Owed is removed only once the event is on the stream, so the fact is
-recoverable from one of the two places at every moment in between.
+recoverable from one of the two places at every moment in between. A delete
+that fails after the append leaves the row to be settled again, and the
+aggregate records a cancel's work once, so that second append adds nothing.
+
+When BOTH stores refuse, `record` says so and the processor's result carries
+the refs as `unrecorded_work`. The cancel is not reported as handled. The
+command is then held by this ledger, the last place left, and the next
+`settle()` tries the stream and then the owed store again. The ledger is
+process memory, so a restart before then loses what it holds. After that the
+refs exist only in the result and in the error log, and both name them.
 """
 
 from __future__ import annotations
@@ -82,31 +91,50 @@ class CancelledWorkLedger:
     def __init__(self, journal: ExecutionJournal, owed: ProjectionStore | None) -> None:
         self._journal = journal
         self._owed = owed
+        #: Refused by the stream AND the owed store; retried by `settle()`.
+        self._unrecorded: list[RecordCancelledWorkCommand] = []
 
     async def record(
         self, aggregate: WorkflowExecutionAggregate, command: RecordCancelledWorkCommand
-    ) -> None:
-        """Put the refs on the stream, or owe them to a later `settle()` when it refuses."""
-        if not await self._append(aggregate, command):
-            await self._owe(command)
+    ) -> bool:
+        """Put the refs on the stream, or owe them; False when neither store took them."""
+        if await self._append(aggregate, command) or await self._owe(command):
+            return True
+        self._unrecorded.append(command)
+        return False
 
     async def settle(self) -> int:
-        """Append every owed record the store now takes; the number appended."""
+        """Append every held and owed record the store now takes; the number appended."""
+        settled = await self._settle_unrecorded()
         if self._owed is None:
-            return 0
+            return settled
         try:
             rows = await self._owed.get_all(OWED_CANCELLED_WORK)
         except Exception:
             logger.exception("Could not read the owed quarantined work of cancelled executions")
-            return 0
-        settled = 0
+            return settled
         for row in rows:
             owed = OwedCancelledWork.model_validate(row)
             aggregate = await self._reload(owed.execution_id)
             if aggregate is None or not await self._append(aggregate, owed.as_command()):
                 continue
-            await self._owed.delete(OWED_CANCELLED_WORK, owed.key)
             settled += 1
+            try:
+                await self._owed.delete(OWED_CANCELLED_WORK, owed.key)
+            except Exception:
+                # Settled again next run; the aggregate makes that a no-op.
+                logger.exception("Could not clear the owed work of execution %s", owed.key)
+        return settled
+
+    async def _settle_unrecorded(self) -> int:
+        held, self._unrecorded = self._unrecorded, []
+        settled = 0
+        for command in held:
+            aggregate = await self._reload(command.aggregate_id)
+            if aggregate is not None and await self._append(aggregate, command):
+                settled += 1
+            elif not await self._owe(command):
+                self._unrecorded.append(command)
         return settled
 
     async def _append(
@@ -118,6 +146,11 @@ class CancelledWorkLedger:
                 break
             try:
                 target.record_cancelled_work(command)
+            except ValueError:
+                # The aggregate refused it, which is not "recorded": keep it owed.
+                logger.exception("Execution %s refused its cancelled work", command.aggregate_id)
+                return False
+            try:
                 await self._journal.append(target)
             except EventsNotRecordedError:
                 logger.warning(
@@ -146,7 +179,7 @@ class CancelledWorkLedger:
             logger.warning("Could not reload execution %s", execution_id, exc_info=True)
             return None
 
-    async def _owe(self, command: RecordCancelledWorkCommand) -> None:
+    async def _owe(self, command: RecordCancelledWorkCommand) -> bool:
         owed = OwedCancelledWork(
             execution_id=command.aggregate_id,
             phase_id=command.phase_id,
@@ -158,17 +191,18 @@ class CancelledWorkLedger:
                 raise RuntimeError("no store for owed cancelled work is wired")
             await self._owed.save(OWED_CANCELLED_WORK, owed.key, owed.model_dump(mode="json"))
         except Exception:
-            # The last place the refs are written down: both stores refused.
+            # Both stores refused. Only this process holds the refs now.
             logger.exception(
                 "The quarantined work of cancelled execution %s was NOT recorded and could "
-                "not be owed, so its PR will not be told. The refs exist: %s",
+                "not be owed; it is held until the next run in this process. The refs exist: %s",
                 command.aggregate_id,
                 refs,
             )
-            return
+            return False
         logger.error(
             "The event store refused the quarantined work of cancelled execution %s; it is "
             "owed and will be appended by the next run: %s",
             command.aggregate_id,
             refs,
         )
+        return True

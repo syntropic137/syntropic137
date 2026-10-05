@@ -213,6 +213,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
         self._reported_failure_reason: ReportedFailureReason | None = None
         self._cancel_reason: str | None = None
+        #: Whether this cancel's landed work is already on the stream (#1547).
+        self._cancelled_work_recorded = False
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
         self._current_phase_workspace_id: str | None = None
@@ -712,11 +714,16 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
     @command_handler("RecordCancelledWorkCommand")
     def record_cancelled_work(self, command: RecordCancelledWorkCommand) -> None:
-        """Record the work a cancelled phase's save landed. Nothing landed, no event."""
+        """Record the work a cancelled phase's save landed. Nothing landed, no event.
+
+        Already recorded, no event either: a recovery whose append reached the
+        store but whose owed row survived appends again, and the PR and every
+        other reader must still see ONE fact (#1547).
+        """
         if self._status != ExecutionStatus.CANCELLED:
             msg = f"Cannot record cancelled work in status {self._status}"
             raise ValueError(msg)
-        if command.quarantined:
+        if command.quarantined and not self._cancelled_work_recorded:
             self._apply(cancelled_work_event(command, self._workflow_id or ""))
 
     @command_handler("AddExecutionTagsCommand")
@@ -970,8 +977,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._cancel_reason = event.reason
 
     @event_sourcing_handler("CancelledWorkQuarantined")
-    def on_cancelled_work_quarantined(self, event: CancelledWorkQuarantinedEvent) -> None:
-        """Apply CancelledWorkQuarantinedEvent. A fact for the PR, no state of its own."""
+    def on_cancelled_work_quarantined(self, _event: CancelledWorkQuarantinedEvent) -> None:
+        """Apply CancelledWorkQuarantinedEvent. A fact for the PR, recorded once."""
+        self._cancelled_work_recorded = True
 
     @event_sourcing_handler("ExecutionTagsAdded")
     def on_execution_tags_added(self, event: ExecutionTagsAddedEvent) -> None:

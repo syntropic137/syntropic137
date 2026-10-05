@@ -3579,15 +3579,22 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
     assert landed.diffstat in body
 
 
-@pytest.mark.parametrize("store_refuses_the_cancel", [False, True])
+@pytest.mark.parametrize("failure", ["none", "refused", "both_refused", "delete_fails"])
 async def test_a_cancel_through_the_processor_tells_its_pr_once_from_the_stored_event(
-    clone: _Clone, store_refuses_the_cancel: bool
+    clone: _Clone, failure: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The whole cancel path, with nothing supplied that the processor should produce.
 
-    ``store_refuses_the_cancel``: the store refuses every append of what
-    landed, so the processor owes it; it recovers, and the processor's NEXT
-    run - another execution entirely - is what appends it.
+    ``refused``: the store refuses every append of what landed, so the
+    processor owes it; it recovers, and the processor's NEXT run - another
+    execution entirely - is what appends it.
+
+    ``both_refused``: the owed store refuses too. The result names the refs
+    as unrecorded instead of reading as a handled cancel, and the next run
+    still appends them once the event store recovers.
+
+    ``delete_fails``: the owed row survives the append that settled it, so a
+    later run settles it again. That must add no second fact.
 
     A real aggregate is started and cancelled on a real journal; the
     processor's own save lands the ref on the clone's origin; the processor
@@ -3660,7 +3667,11 @@ async def test_a_cancel_through_the_processor_tells_its_pr_once_from_the_stored_
         )
         await run.processor._journal.append(aggregate)
         assert stream.recorded("CancelledWorkQuarantined") == 0
-        stream.rejections = 99 if store_refuses_the_cancel else 0
+        stream.rejections = 0 if failure == "none" else 99
+        if failure == "both_refused":
+            monkeypatch.setattr(owed, "save", AsyncMock(side_effect=RuntimeError("down")))
+        if failure == "delete_fails":
+            monkeypatch.setattr(owed, "delete", AsyncMock(side_effect=RuntimeError("down")))
 
         result = await run.processor._cancel_execution(
             aggregate,
@@ -3675,11 +3686,18 @@ async def test_a_cancel_through_the_processor_tells_its_pr_once_from_the_stored_
 
         assert result.status == "cancelled"
         assert _QUARANTINE_REF in clone.origin_refs()
-        if store_refuses_the_cancel:
+        unrecorded = [ref.ref for ref in result.unrecorded_work]
+        assert unrecorded == ([_QUARANTINE_REF] if failure == "both_refused" else [])
+        if failure != "none":
             assert stream.recorded("CancelledWorkQuarantined") == 0
-            assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
+            owed_rows = 0 if failure == "both_refused" else 1
+            assert len(await owed.get_all(OWED_CANCELLED_WORK)) == owed_rows
             stream.rejections = 0
             await run.processor.run("wf-2", "Next", [], {}, "exec-next")
+        if failure == "delete_fails":
+            assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
+            monkeypatch.undo()
+            await run.processor.run("wf-3", "Later", [], {}, "exec-later")
         assert await owed.get_all(OWED_CANCELLED_WORK) == []
         assert stream.recorded("CancelledWorkQuarantined") == 1
         await asyncio.wait_for(_settled(coordinator, checkpoints, len(stream.history)), 5)

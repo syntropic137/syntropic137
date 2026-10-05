@@ -392,7 +392,7 @@ class _Stream:
 
     async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
         aggregate = WorkflowExecutionAggregate()
-        aggregate.rehydrate(self.history)
+        aggregate.rehydrate([e for e in self.history if e.metadata.aggregate_id == aggregate_id])
         return aggregate
 
     def recorded(self, event_type: str) -> int:
@@ -541,6 +541,20 @@ async def test_refs_the_store_refuses_to_the_retry_limit_are_owed_until_it_takes
         runner.cancel()
         await asyncio.gather(runner, return_exceptions=True)
     await _replay_posts_nothing(store, manager, commenter)
+
+
+@pytest.mark.asyncio
+async def test_work_the_aggregate_refuses_stays_owed_rather_than_counting_as_recorded() -> None:
+    """A refusal by the aggregate is not a projection hiccup: nothing reached the stream."""
+    stream = _Stream(_LiveStore())
+    owed = InMemoryProjectionStore()
+    ledger = CancelledWorkLedger(ExecutionJournal(stream, object()), owed)  # type: ignore[arg-type]
+
+    assert await ledger.record(WorkflowExecutionAggregate(), _LANDED)
+    assert await ledger.settle() == 0
+
+    assert stream.recorded("CancelledWorkQuarantined") == 0
+    assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
 
 
 async def _replay_posts_nothing(

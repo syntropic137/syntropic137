@@ -584,16 +584,15 @@ class WorkflowExecutionProcessor:
                 saved=saved,
                 repositories=[c.repository for c in aggregate.start_pins.source_commits],
             )
-            await self._cancelled_work.record(
-                aggregate, cancellation.as_command(execution_id, phase_id)
-            )
+            command = cancellation.as_command(execution_id, phase_id)
+            recorded = await self._cancelled_work.record(aggregate, command)
             try:
                 await runtime.report_cancelled(cancellation.reason)
             except Exception:
-                logger.exception(
-                    "Could not close the sessions of execution %s as cancelled", execution_id
-                )
-            return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
+                logger.exception("Could not close the cancelled sessions of %s", execution_id)
+            return cancellation.execution_result(
+                workflow_id, execution_id, started_at=started_at, recorded=recorded
+            )
         finally:
             await runtime.abandon_all("cancel")
 
