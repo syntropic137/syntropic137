@@ -63,6 +63,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
     resume_start_command,
     resume_started_event,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import (
+    next_phase,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     AdmittedResume,
     ResumeOrigin,
@@ -78,6 +81,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FinishedAgentRun,
     PhaseDefinition,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
     StrandedDeliverable,
 )
@@ -246,6 +250,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: Same restart hazard as `_recovered_phases`: reported when the agent
         #: finishes, needed when the phase completes.
         self._reported_side_effects: dict[str, SideEffectStatus | None] = {}
+        #: What each phase's latest agent run concluded as a review (PC-63).
+        #: Reported when the agent finishes, read when its artifacts are
+        #: collected to choose the next phase - see `review_rounds`.
+        self._reported_review_verdicts: dict[str, ReviewVerdict | None] = {}
+        #: The verdict of the last COMPLETED phase that reported one: how this
+        #: run stands, and what `WorkflowCompleted` records it ended on.
+        self._review_verdict: ReviewVerdict | None = None
         #: Phases that completed, and what each one's collection stored. The
         #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
@@ -378,6 +389,15 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         return self._status
 
     @property
+    def review_verdict(self) -> ReviewVerdict | None:
+        """The last review verdict a completed phase reported, or None (PC-63).
+
+        On a completed run, `BLOCKED` is a run that completed with unresolved
+        findings.
+        """
+        return self._review_verdict
+
+    @property
     def failure_classification(self) -> FailureClassification:
         """What kind of failure ended this run, for a run that failed (#1357).
 
@@ -472,7 +492,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             msg = f"Cannot complete execution in status {self._status}"
             raise ValueError(msg)
 
-        self._apply(completed_event(command, self._workflow_id or ""))
+        self._apply(completed_event(command, self._workflow_id or "", self._review_verdict))
 
     @command_handler("FailExecutionCommand")
     def fail_execution(self, command: FailExecutionCommand) -> None:
@@ -643,6 +663,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             output_tokens=command.output_tokens,
             last_agent_message=command.last_agent_message,
             reported_side_effects=command.reported_side_effects,
+            reported_review_verdict=command.reported_review_verdict,
         )
         self._apply(event)
 
@@ -673,27 +694,28 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
-        if self._phase_definitions:
-            current_order = self._phase_order_map.get(command.phase_id)
-            if current_order is not None:
-                next_phase = self._find_next_phase(current_order)
-                if next_phase is not None:
-                    next_event = NextPhaseReadyEvent(
-                        workflow_id=self._workflow_id or "",
-                        execution_id=command.aggregate_id,
-                        completed_phase_id=command.phase_id,
-                        next_phase_id=next_phase.phase_id,
-                        next_phase_order=next_phase.order,
-                        decided_at=datetime.now(UTC),
-                    )
-                    self._apply(next_event)
-
-    def _find_next_phase(self, current_order: int) -> PhaseDefinition | None:
-        """Find the next phase after the given order, or None if this was the last."""
-        for phase_def in self._phase_definitions:
-            if phase_def.order > current_order:
-                return phase_def
-        return None
+        current_order = self._phase_order_map.get(command.phase_id)
+        if current_order is None:
+            return
+        # The verdict this phase reported decides what runs next: a
+        # certification skips the repair rounds it made unnecessary (PC-63).
+        decided = next_phase(
+            self._phase_definitions,
+            current_order,
+            self._reported_review_verdicts.get(command.phase_id),
+        )
+        if decided is not None:
+            self._apply(
+                NextPhaseReadyEvent(
+                    workflow_id=self._workflow_id or "",
+                    execution_id=command.aggregate_id,
+                    completed_phase_id=command.phase_id,
+                    next_phase_id=decided.phase.phase_id,
+                    next_phase_order=decided.phase.order,
+                    decided_at=datetime.now(UTC),
+                    skipped_phase_ids=[p.phase_id for p in decided.skipped],
+                )
+            )
 
     @command_handler("CancelExecutionCommand")
     def cancel_execution(self, command: CancelExecutionCommand) -> None:
@@ -844,6 +866,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._total_tokens = evt(event, "total_tokens", 0)
         self._artifact_ids = list(evt(event, "artifact_ids", []))
         self._status = ExecutionStatus.COMPLETED
+        # What the run ended on, as recorded - absent on every completion
+        # written before PC-63, which keeps whatever the stream already said.
+        self._review_verdict = (
+            ReviewVerdict.from_stored(evt(event, "review_verdict")) or self._review_verdict
+        )
 
     @event_sourcing_handler("WorkflowFailed")
     def on_execution_failed(self, event: WorkflowFailedEvent) -> None:
@@ -926,6 +953,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._reported_side_effects[reported_for] = SideEffectStatus.from_stored(
                 evt(event, "reported_side_effects")
             )
+            self._reported_review_verdicts[reported_for] = ReviewVerdict.from_stored(
+                evt(event, "reported_review_verdict")
+            )
         said = evt(event, "last_agent_message")
         if not said:
             return
@@ -953,6 +983,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # is also what makes `stranded_deliverable` answer None once the
         # output is safely stored.
         self._finished_agent_runs.pop(phase_id, None)
+        verdict = self._reported_review_verdicts.get(phase_id)
+        if verdict is not None:
+            self._review_verdict = verdict
 
     @event_sourcing_handler("NextPhaseReady")
     def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:

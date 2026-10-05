@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         FailureClassification,
         PhaseDefinition,
         ReportedFailureReason,
+        ReviewVerdict,
         SideEffectStatus,
     )
 
@@ -360,6 +361,7 @@ class AgentExecutionCompletedCommand:
         cache_read_tokens: int = 0,
         last_agent_message: str | None = None,
         reported_side_effects: SideEffectStatus | None = None,
+        reported_review_verdict: ReviewVerdict | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -371,6 +373,7 @@ class AgentExecutionCompletedCommand:
         self.cache_read_tokens = cache_read_tokens
         self.last_agent_message = last_agent_message
         self.reported_side_effects = reported_side_effects
+        self.reported_review_verdict = reported_review_verdict
 
 
 class ArtifactsCollectedCommand:
