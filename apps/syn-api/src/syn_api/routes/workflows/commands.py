@@ -785,7 +785,8 @@ _ACCEPTED_YAML_CONTENT_TYPES = frozenset(
         # against the package directory), which it must serialize itself; it
         # has no YAML emitter, and hand-rolling one around arbitrary prompt
         # bodies is where emitters get subtly wrong. Accepting JSON costs this
-        # endpoint nothing and keeps the CLI dependency-free.
+        # endpoint nothing. The CLI parses YAML 1.1 like this endpoint does, held
+        # to it by scripts/tests/test_workflow_yaml_reference.py (#1618).
         "application/json",
     }
 )
