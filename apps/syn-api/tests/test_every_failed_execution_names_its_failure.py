@@ -25,6 +25,7 @@ import pytest
 from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
+    ReportedFailureReason,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     StartExecutionCommand,
@@ -85,6 +86,12 @@ _FAILURES: dict[str, BaseException] = {
         '"comments": "the brief names a module that does not exist"}\nTASK_RESULT_END'
     ),
     "exec-unreadable": _reported("TASK_RESULT: {success: probably not"),
+    # A readable report that says "I cannot tell": the one current-code shape
+    # that is DELIBERATELY unclassified (`classification_for_reported`).
+    "exec-unknown": _reported(
+        'TASK_RESULT: {"success": false, "failure_reason": "unknown", '
+        '"comments": "the run died and I cannot tell why"}\nTASK_RESULT_END'
+    ),
 }
 
 
@@ -174,9 +181,15 @@ async def test_a_failed_execution_carries_its_error_and_classification(
 
     assert detail.status == "failed"
     assert detail.error_message, f"{execution_id} failed with an empty error_message"
-    assert detail.failure_classification is not FailureClassification.UNCLASSIFIED, (
-        f"{execution_id} was produced by today's code and still reads unclassified"
+    assert isinstance(detail.failure_classification, FailureClassification), (
+        f"{execution_id} failed with no classification"
     )
+    # Unclassified is a classification only when the phase itself said it
+    # cannot tell; from anything else today's code must have decided.
+    if detail.failure_classification is FailureClassification.UNCLASSIFIED:
+        assert detail.reported_failure_reason is ReportedFailureReason.UNKNOWN, (
+            f"{execution_id} was produced by today's code and still reads unclassified"
+        )
 
 
 @pytest.mark.asyncio
@@ -195,6 +208,10 @@ async def test_the_failed_phase_carries_the_same_error_and_classification(
     (phase,) = detail.phases
     assert phase.status == "failed"
     assert phase.error_message, f"{execution_id}'s failed phase has no error_message"
+    assert phase.error_message == detail.error_message, (
+        f"{execution_id}: execution says {detail.error_message!r}, "
+        f"its failed phase says {phase.error_message!r}"
+    )
     assert phase.failure_classification is detail.failure_classification, (
         f"{execution_id}: execution says {detail.failure_classification!r}, "
         f"its failed phase says {phase.failure_classification!r}"
