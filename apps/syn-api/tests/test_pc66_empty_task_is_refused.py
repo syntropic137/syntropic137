@@ -203,7 +203,7 @@ class TestAWorkflowThatTakesNoTask:
 
 
 async def _store_predeclaration_workflow(
-    prompts: list[str], *, declarations: list[dict[str, object]] | None = None
+    prompts: list[str], *, declares_optional_task: bool = False
 ) -> str:
     """Store a definition as installs before PC-66 left it: phases, no ``task`` declaration.
 
@@ -218,7 +218,7 @@ async def _store_predeclaration_workflow(
         workflow_type="implementation",
         requires_repos=False,
         phases=[{"name": f"phase {i}", "prompt_template": p} for i, p in enumerate(prompts)],
-        input_declarations=declarations or [],
+        input_declarations=[{"name": "task", "required": False}] if declares_optional_task else [],
     )
     assert isinstance(result, Ok)
     return result.value.workflow_id
@@ -290,7 +290,7 @@ class TestAStoredDefinitionWithoutTheDeclaration:
         """A workflow that declares ``task`` optional means it, $ARGUMENTS or not."""
         workflow_id = await _store_predeclaration_workflow(
             ["Optional focus: $ARGUMENTS"],
-            declarations=[{"name": "task", "required": False}],
+            declares_optional_task=True,
         )
 
         response = await client.post(f"/workflows/{workflow_id}/execute", json={})
