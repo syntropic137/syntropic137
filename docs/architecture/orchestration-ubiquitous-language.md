@@ -145,6 +145,114 @@ Execution is then created and started by a background processor.
 An admitted Resume is not a started one. The two are separate facts, and a
 successful API response reports the first.
 
+## Executor
+
+The process role that runs Executions (`SYN_PROCESS_ROLE=executor`; `all`
+runs it beside the API in one process). It Claims admitted Executions from the
+Run Queue and runs each to a terminal status. The API process admits
+Executions and never runs one. Implemented by `ExecutionHost`. One host has a
+`host_id` and a generation (its image tag), recorded in `executor_hosts` and
+on every container it creates (`syn.host_id`, `syn.host_generation`).
+Specified in ADR-072.
+
+An Executor is a host, not an Execution: nothing about an Execution's stream
+says which Executor ran it.
+
+## Run Queue
+
+Where admitted Executions wait for an Executor: the `execution_runs` table,
+behind the `ExecutionRunQueue` port. It is infrastructure state, written at
+Admission, and never a projection, so a projection replay cannot hide admitted
+work from Executors.
+
+A run row moves `opening` -> `admitted` -> `claimed` -> `done`. Admission
+writes `opening` before the Execution's stream exists and `admitted` after, so
+a row stranded at `opening` is swept to `admitted` (stream present) or
+`abandoned`, with reason `start not recorded` (stream absent). An expired
+Lease goes `claimed` -> `fencing` -> `reaped` -> `interrupted` (see Fencing). A
+resume whose inherited artifacts cannot yet be read is deferred back to
+`admitted` with a `retry_at`. `RunCounts` is the number of rows in each state.
+
+A run row is not an Execution and its states are not Execution statuses.
+
+## Claim
+
+An Executor taking one admitted Execution from the Run Queue to run, and the
+`ClaimedRun` that results. Capacity and claim are one transaction: it locks the
+execution budget row (`execution_budget`), counts the slots in use (`claimed`,
+`fencing`, `reaped`) and, if one is free, takes the oldest claimable row. One
+budget, held in that row, bounds every start path on every host, so two
+generations can never enforce different numbers. Its value is measured from
+memory per running Execution, never a constant.
+
+An Executor claims only rows whose Event Epoch it can read, and never claims an
+expired Lease to run it.
+
+## Lease
+
+How long a Claim stays valid without renewal: `leased_until`, plus a
+`lease_token` bumped on every Claim and every Fencing. The holder renews every
+TTL/3 (90 s TTL, 30 s renewal). A renewal whose token was superseded raises
+`RunLeaseLost`, and the holder then cancels its own run.
+
+A Lease is not a lock on the Execution. The Execution's stream is what refuses
+a second writer; the Lease is what says which Executor is alive and holds the
+slot.
+
+## Fencing
+
+What happens to a Claim whose Lease expired: another Executor bumps the token
+(`fencing`), removes the dead host's containers for that Execution (`reaped`),
+then appends `WorkflowInterruptedEvent` and frees the slot (`interrupted`).
+`fence_expired` returns each one as a `FencedRun`: the Execution and the host
+that held it.
+
+An expired Lease is never claimed again to run. So an Execution runs at most
+once: never a second workspace, never an automatic re-run, and no automatic
+Resume after a host dies. An agent on a stalled host can still act until its
+container is removed. That effect belongs to the one run (ADR-072 D5).
+
+## Drain (of an executor)
+
+An Executor stops claiming, finishes the Executions it holds, then exits.
+Requested by setting `executor_hosts.draining`, which the host reads between
+Claims. It is a property of the host: no Execution is signalled, paused or
+moved, and admission stays open while it happens. Draining one generation
+while the next is already claiming is how Executors upgrade without waiting.
+
+**Not** the pit-stop drain, which closes admission and waits for the whole
+platform to have no running Execution (see "Admission pause" under Pause).
+"Drain" alone, in this context, means the Executor's.
+
+## Event Epoch
+
+The version of the orchestration events' shapes,
+`ORCHESTRATION_EVENT_EPOCH`. Admission records the epoch it wrote with as a run
+row's `writer_epoch`, and an Executor claims only rows whose `writer_epoch` is
+no higher than its own. So an older Executor never loads events it cannot read:
+newer work waits for a newer Executor. Changing an orchestration event's schema
+without bumping the epoch fails a fitness test.
+
+## Queued
+
+An admitted Execution that no Executor has Claimed yet. Its status is
+`running`: the aggregate is running from its start event, and waiting for a
+slot is infrastructure state, not a domain decision. The read path shows it as
+`queued: true`, derived from the Run Queue. `queued` is a flag, never one of an
+Execution's statuses. (#1310 plan section 8, decision 2: Option A, decided
+2026-10-05.)
+
+Until ADR-072's admission ships, a start waiting on the in-process budget has
+no stream at all, and #1574 reports it as a status of `queued` or `starting`.
+That window disappears once Admission opens the stream itself (ADR-072 D12).
+
+## Run-scoped to-do fold
+
+The to-do list one Executor uses for the one Execution it is running: a fresh
+`ExecutionTodoProjection` over a `RunTodoStore`, seeded from that Execution's
+own events at Claim and discarded with the run. The shared `execution_todo`
+projection feeds dashboards only. Nothing an Executor decides reads it.
+
 ## Eval
 
 An experiment: a Goal, measured by runs that all start from the same Repository
@@ -292,6 +400,11 @@ association was made after the fact.
   unchanged, permanently. The retired keys are listed in
   `_shared/retired_phase_fields.py`; rejecting them at authoring time is
   #1502. There is no replacement: every Phase may open and comment on a PR.
+- **Adopt / Reattach.** Reserved for #1310 Phase 3, no meaning assigned: a new
+  process taking over a phase that is still running after the process that
+  started it died. Not built, and deferred until an experiment shows it can be
+  (ADR-072). Until then, an Executor that loses an Execution mid-phase Fences
+  and interrupts it, and continuing it is a Resume.
 - **Branch.** Reserved, no meaning assigned. If a chat-style "branch from here"
   operation is ever wanted, this is where it gets defined.
 - **Retry.** A Phase attempt within one Execution (`PhaseRetryScheduled`), never
