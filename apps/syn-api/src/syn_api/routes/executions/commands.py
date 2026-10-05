@@ -408,6 +408,18 @@ async def execute(
         logger.exception("Workflow execution error for %s", workflow_id)
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
+    if result.unrecorded_work:
+        # #1547: neither store took what the cancel landed, so no event will
+        # ever tell its PR. That is not a handled cancel: fail, naming the refs.
+        refs = ", ".join(f"{q.repository} {q.ref} at {q.commit}" for q in result.unrecorded_work)
+        return Err(
+            WorkflowError.EXECUTION_FAILED,
+            message=(
+                f"Execution {result.execution_id} was cancelled but its quarantined work "
+                f"was NOT recorded and its PR has not been told: {refs}"
+            ),
+        )
+
     repo_urls = [r.https_url for r in (repos or [])]
     return Ok(
         ExecutionSummary(

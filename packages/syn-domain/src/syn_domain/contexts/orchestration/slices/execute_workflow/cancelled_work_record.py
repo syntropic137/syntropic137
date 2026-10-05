@@ -17,8 +17,9 @@ behind is not the PR's problem.
 A store that refuses every attempt is not the end of it either. The refs are
 then OWED: written to a store of their own, keyed by execution and phase, and
 appended by the next `settle()` - which the processor runs at the start of
-every run, so a store that comes back, or a process that restarts, delivers
-them. Owed is removed only once the event is on the stream, so the fact is
+every run, and the quarantine notice manager on every live pass and clock
+tick, so a store that comes back, or a process that restarts, delivers them
+with no later execution needed. Owed is removed only once the event is on the stream, so the fact is
 recoverable from one of the two places at every moment in between. A delete
 that fails after the append leaves the row to be settled again, and the
 aggregate records a cancel's work once, so that second append adds nothing.
@@ -27,8 +28,10 @@ When BOTH stores refuse, `record` says so and the processor's result carries
 the refs as `unrecorded_work`. The cancel is not reported as handled. The
 command is then held by this ledger, the last place left, and the next
 `settle()` tries the stream and then the owed store again. The ledger is
-process memory, so a restart before then loses what it holds. After that the
-refs exist only in the result and in the error log, and both name them.
+process memory, so a restart before then loses what it holds. That is why the
+API's `execute()` turns `unrecorded_work` into an `Err` naming every ref: with
+both stores refusing there is nowhere durable left to write, and the failure
+has to be loud rather than a normal cancelled result.
 """
 
 from __future__ import annotations
