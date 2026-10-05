@@ -588,6 +588,35 @@ async def test_an_unpushed_merge_commit_fails_the_phase_and_survives(clone: _Clo
     assert clone.origin_refs()[f"refs/heads/{_BRANCH}"] == branch_head_before
 
 
+async def test_a_merge_of_two_remote_branches_is_summarised_against_its_own_branch(
+    clone: _Clone,
+) -> None:
+    """The diffstat base is the branch the work tracks, not whichever remote tip came first.
+
+    A merge gives the unpushed history two remote ancestors, and `rev-list
+    --boundary` lists them in no order that says which one is the PR's. The
+    summary must include the merged-in work and leave out what the branch
+    already had on its remote.
+    """
+    clone.git("checkout", "-b", "other", "origin/main")
+    clone.commit("other.py", "on another remote branch\n")
+    clone.git("push", "origin", "other")
+    clone.git("checkout", _BRANCH)
+    clone.commit("already_pushed.py", "on the PR branch already\n")
+    clone.git("push", "origin", _BRANCH)
+    clone.git("merge", "--no-ff", "-m", "Merge origin/other", "origin/other")
+    clone.commit("work.py", "the phase wrote this\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    (landed,) = raised.value.quarantined
+    assert landed.diffstat is not None
+    assert "other.py" in landed.diffstat and "work.py" in landed.diffstat
+    assert "already_pushed.py" not in landed.diffstat
+    assert "2 files changed" in landed.diffstat
+
+
 async def test_a_plain_commit_that_was_never_pushed_is_saved_too(clone: _Clone) -> None:
     """The simpler half of (a): one ordinary commit, never pushed."""
     lost = clone.commit("stranded.py", "committed, never pushed\n")

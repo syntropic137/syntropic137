@@ -142,6 +142,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import (
     split_moved_gitlinks,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_diffstat import diffstat
 from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_rehearsal import (
     run_quarantine_rehearsal,
 )
@@ -198,11 +199,6 @@ _QUARANTINE_NAMESPACE: Final[str] = "refs/syn/lost"
 #: How long the quarantined work's diffstat may take, cancelled or not (#1547).
 #: Local git only, so seconds are plenty; past them the notice goes without it.
 _DIFFSTAT_SECONDS: Final[float] = 5.0
-#: The diffstat's line width and how many files it names before summarising.
-_DIFFSTAT_WIDTH: Final[int] = 100
-_DIFFSTAT_FILES: Final[int] = 20
-#: git's well-known empty tree: the base when no remote holds any ancestor.
-_EMPTY_TREE: Final[str] = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 #: How long the rescue push may go on being waited for AFTER the phase has
 #: been cancelled (#1396). A cancellation is a request to stop, so the salvage
@@ -785,40 +781,12 @@ async def _quarantine(
         return record, cancellation
     # After the push, never before it: the push is the point, and a summary is
     # not worth a second of it. Bounded like the push, for the same reason.
-    diffstat, cancelled_summarising = await _despite_cancellation(
-        _diffstat(workspace, repo, record.commit),
+    summary, cancelled_summarising = await _despite_cancellation(
+        diffstat(workspace, repo, record.commit, branch=work.branch),
         seconds=_DIFFSTAT_SECONDS,
         cut_off=lambda: None,
     )
-    return replace(record, diffstat=diffstat), cancellation or cancelled_summarising
-
-
-async def _diffstat(workspace: GitWorkspace, repo: str, commit: str) -> str | None:
-    """``git diff --stat`` of ``commit`` against the newest commit a remote has.
-
-    Local only - no remote is asked. The base is where the unpushed history
-    meets what a remote already holds; with none, the empty tree, so a
-    repository nothing was ever pushed from still shows everything. Never
-    raises: a summary that cannot be read is left out, not a lost ref.
-    """
-    try:
-        boundary = await git(
-            workspace, repo, "rev-list", "--boundary", commit, "--not", "--remotes"
-        )
-        bases = [line[1:] for line in boundary.split() if line.startswith("-")]
-        stat = await git(
-            workspace,
-            repo,
-            "diff",
-            f"--stat={_DIFFSTAT_WIDTH}",
-            f"--stat-count={_DIFFSTAT_FILES}",
-            bases[0] if bases else _EMPTY_TREE,
-            commit,
-        )
-    except Exception:
-        logger.warning("Could not summarise the quarantined work in %s", repo, exc_info=True)
-        return None
-    return stat.rstrip() or None
+    return replace(record, diffstat=summary), cancellation or cancelled_summarising
 
 
 def _record(
