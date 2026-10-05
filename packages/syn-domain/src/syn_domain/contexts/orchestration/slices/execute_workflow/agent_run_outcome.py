@@ -41,6 +41,10 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
     PhaseReportedFailureError,
+    UpstreamExitError,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UPSTREAM_FAILURES,
 )
 from syn_shared.display import format_exit_code
 
@@ -82,7 +86,13 @@ def phase_failure(result: AgentExecutionResult, *, phase_id: str) -> Exception |
         return None
 
     reason = _platform_reason(result, phase_id=phase_id, exit_code=exit_code)
-    return NonZeroExitError(reason, exit_code=exit_code)
+    # Capacity and auth are both platform failures and ask opposite things of
+    # an operator - wait, or fix the login - so the failure carries which
+    # (#1592), and `failed_phase_outcome` says it beside the reason (#1593).
+    upstream = UPSTREAM_FAILURES.kind_of(result.stream_result.error_reason)
+    if upstream is None:
+        return NonZeroExitError(reason, exit_code=exit_code)
+    return UpstreamExitError(reason, exit_code=exit_code, upstream_kind=upstream)
 
 
 def _ran_cleanly(result: AgentExecutionResult, *, exit_code: int) -> bool:

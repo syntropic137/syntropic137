@@ -434,7 +434,7 @@ class _HttpFixture:
         repos: list[object],
         admitted: AdmissionTicket | None = None,
         tags: TagSet | None = None,
-        eval_choice: object = None,
+        launch_eval: object = None,
     ) -> None:
         """Stand in for the background task's run of the execution.
 
@@ -442,7 +442,7 @@ class _HttpFixture:
         at ``journal.open()`` (#1387). Nothing before this point may end it:
         the route only QUEUED this coroutine.
         """
-        del workflow_id, inputs, task, repos, tags, eval_choice
+        del workflow_id, inputs, task, repos, tags, launch_eval
         self.started.append(execution_id)
         if admitted is not None:
             admitted.mark_visible()
