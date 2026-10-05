@@ -57,6 +57,7 @@ pytestmark = pytest.mark.unit
 
 WORKFLOW_ID = "wf-894"
 PHASE_ID = "implement"
+REQUIRED_DELEGATE = "codex"
 _STARTED_AT = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
 _FAILED_AT = datetime(2026, 10, 5, 9, 30, tzinfo=UTC)
 
@@ -97,7 +98,7 @@ async def _served_detail(
     monkeypatch: pytest.MonkeyPatch, execution_id: str, held: tuple[DelegationAttempt, ...]
 ) -> ExecutionDetailResponse:
     error = await delegation_failure(
-        _Journal(held), MagicMock(), phase_id=PHASE_ID, allow_delegation=True
+        _Journal(held), MagicMock(), phase_id=PHASE_ID, required_delegate=REQUIRED_DELEGATE
     )
     assert error is not None
     outcome = failed_phase_outcome(
@@ -159,6 +160,7 @@ async def test_failed_delegates_reach_the_api_with_reason_and_attempts(
 
     assert body["failure_classification"] == FailureClassification.PLATFORM.value
     assert body["delegation_failure"] == {
+        "required_delegate": REQUIRED_DELEGATE,
         "reason": DelegationFailureReason.FAILED.value,
         "attempts": [attempt.model_dump(mode="json") for attempt in _JOURNAL],
         "detail": None,
@@ -172,6 +174,7 @@ async def test_no_delegate_at_all_reaches_the_api_as_not_attempted(
     body = (await _served_detail(monkeypatch, "exec-894-none", ())).model_dump(mode="json")
 
     assert body["delegation_failure"] == {
+        "required_delegate": REQUIRED_DELEGATE,
         "reason": DelegationFailureReason.NOT_ATTEMPTED.value,
         "attempts": [],
         "detail": None,

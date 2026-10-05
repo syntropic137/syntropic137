@@ -65,7 +65,12 @@ def test_a_stored_delegation_failure_loads_and_reserialises_unchanged() -> None:
     assert [a.delegate_id for a in event.delegation_failure.attempts] == ["d-1", "d-2"]
     assert event.delegation_failure.attempts[0].outcome is DelegationOutcome.FAILED
     assert event.delegation_failure.attempts[1].reason == "binary missing"
-    assert event.model_dump(mode="json")["delegation_failure"] == _STORED_DELEGATION
+    # Written before `required_delegate` existed, so it loads as None and is
+    # re-serialised with that one key added; every stored key is unchanged.
+    assert event.model_dump(mode="json")["delegation_failure"] == {
+        **_STORED_DELEGATION,
+        "required_delegate": None,
+    }
 
 
 def test_an_unverifiable_delegation_failure_keeps_its_detail() -> None:
