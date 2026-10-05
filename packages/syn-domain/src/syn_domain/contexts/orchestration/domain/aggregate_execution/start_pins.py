@@ -201,13 +201,13 @@ def read_pinned_phases(raw: object) -> list[ExecutablePhase]:
 
 
 def read_source_commits(raw: object) -> list[SourceCommit]:
-    """The recorded source commits, or empty when absent or unreadable."""
+    """Recorded commits - a start's, or a provisioning's checkout - or empty when unreadable."""
     if not raw:
         return []
     try:
         return _SOURCE_COMMITS.validate_python(raw)
     except ValidationError:
-        logger.warning("Unreadable source_commits on a replayed start event; treating as absent")
+        logger.warning("Unreadable commits on a replayed event; treating as absent")
         return []
 
 

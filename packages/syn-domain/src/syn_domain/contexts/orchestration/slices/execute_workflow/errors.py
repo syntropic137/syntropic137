@@ -124,6 +124,44 @@ class PinnedCommitUnreachableError(NonZeroExitError):
         self.phase_name = phase_name
 
 
+@dataclass(frozen=True)
+class CheckoutMismatch:
+    """One repository whose working tree is not at the commit it was pinned to (#967)."""
+
+    #: `owner/name`, as the run's pin names it.
+    repository: str
+    pinned_sha: str
+    actual_sha: str
+
+
+class CheckoutMismatchError(RuntimeError):
+    """A provisioned workspace is not at the commits its run pinned (#967).
+
+    THE OTHER HALF OF `PinnedCommitUnreachableError`. That one is the setup
+    script refusing a pin it cannot reach; this one is the workspace, read back
+    after setup said it succeeded, standing somewhere else. Either way the
+    agent is never given the workspace: an eval's runs are comparable only if
+    each started from the baseline it froze, and a run that started anywhere
+    else would be scored as if it had not.
+
+    `mismatches` names every repository that disagreed, not only the first, so
+    one failure tells an operator the whole extent of it. Classified as the
+    platform's failure (`failure_account`): the pin was sound and the
+    provisioning did not honour it.
+    """
+
+    def __init__(self, *, phase_name: str, mismatches: tuple[CheckoutMismatch, ...]) -> None:
+        listed = "; ".join(
+            f"{m.repository} is at {m.actual_sha}, pinned to {m.pinned_sha}" for m in mismatches
+        )
+        super().__init__(
+            f"Phase '{phase_name}' will not be run: its workspace is not checked out "
+            f"at the commits this run is pinned to ({listed})."
+        )
+        self.phase_name = phase_name
+        self.mismatches = mismatches
+
+
 class ExitStatusUnavailableError(RuntimeError):
     """The agent's process ended and NOTHING observed what it exited with.
 

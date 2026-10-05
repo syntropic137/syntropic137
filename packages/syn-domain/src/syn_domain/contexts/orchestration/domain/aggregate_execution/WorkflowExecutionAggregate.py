@@ -70,6 +70,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins imp
     read_admitted_forked_resume,
     read_admitted_resume,
     read_left_branches,
+    read_source_commits,
     read_start_pins,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -79,6 +80,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseDefinition,
     ReportedFailureReason,
     SideEffectStatus,
+    SourceCommit,
     StrandedDeliverable,
 )
 from syn_shared.control import ControlSignalType
@@ -271,6 +273,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: The tags it launched with and the tags it carries now (#967).
         self._tags = ExecutionTags()
         self._eval = EvalMembership()
+        #: The first verified checkout, as the first workspace found it (#967).
+        self._starting_checkout: list[SourceCommit] = []
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -414,6 +418,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def eval_membership(self) -> EvalMembership:
         """The eval this run belongs to, how it joined, and what it launched into."""
         return self._eval
+
+    @property
+    def starting_checkout(self) -> list[SourceCommit]:
+        """Each pinned repository's verified commit when the run's first workspace began."""
+        return self._starting_checkout
 
     @property
     def start_pins(self) -> StartPins:
@@ -618,6 +627,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             workspace_id=command.workspace_id,
             session_id=command.session_id,
             provisioned_at=datetime.now(UTC),
+            checked_out_commits=list(command.checked_out_commits) or None,
         )
         self._apply(event)
 
@@ -915,6 +925,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:
         """Apply WorkspaceProvisionedForPhaseEvent."""
         self._current_phase_workspace_id = evt(event, "workspace_id")
+        if not self._starting_checkout:
+            self._starting_checkout = read_source_commits(evt(event, "checked_out_commits"))
 
     @event_sourcing_handler("AgentExecutionCompleted")
     def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:
