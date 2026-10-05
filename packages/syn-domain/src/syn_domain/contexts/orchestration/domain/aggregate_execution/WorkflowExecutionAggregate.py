@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Final
 
 from event_sourcing import (
@@ -66,7 +67,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds 
     ReviewRecord,
     next_phase,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.run_edits import RunEdits
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     AdmittedResume,
     ResumeOrigin,
@@ -91,17 +91,44 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.aggregate_edits import (
+        AggregateEdit,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
+        AddExecutionTagsCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.AttachExecutionToEvalCommand import (
+        AttachExecutionToEvalCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.DetachExecutionFromEvalCommand import (
+        DetachExecutionFromEvalCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.RemoveExecutionTagsCommand import (
+        RemoveExecutionTagsCommand,
+    )
     from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
         AgentExecutionCompletedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
         ArtifactsCollectedForPhaseEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
+        ExecutionAttachedToEvalEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
+        ExecutionDetachedFromEvalEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
+        ExecutionTagsAddedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
+        ExecutionTagsRemovedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
         NextPhaseReadyEvent,
@@ -149,8 +176,8 @@ logger = logging.getLogger(__name__)
 
 
 @aggregate("WorkflowExecution")
-class WorkflowExecutionAggregate(RunEdits, AggregateRoot["WorkflowExecutionStartedEvent"]):
-    """Aggregate for tracking workflow execution lifecycle; tag and eval edits are in `RunEdits`."""
+class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"]):
+    """Aggregate for tracking workflow execution lifecycle."""
 
     _aggregate_type: str
 
@@ -696,6 +723,35 @@ class WorkflowExecutionAggregate(RunEdits, AggregateRoot["WorkflowExecutionStart
         )
         self._apply(event)
 
+    @command_handler("AddExecutionTagsCommand")
+    def add_tags(self, command: AddExecutionTagsCommand) -> None:
+        """Add tags to the current set. None new, no event."""
+        self._apply_edit(partial(self._tags.add, command.tags))
+
+    @command_handler("RemoveExecutionTagsCommand")
+    def remove_tags(self, command: RemoveExecutionTagsCommand) -> None:
+        """Remove tags from the current set. None present, no event."""
+        self._apply_edit(partial(self._tags.remove, command.tags))
+
+    @command_handler("AttachExecutionToEvalCommand")
+    def attach_to_eval(self, command: AttachExecutionToEvalCommand) -> None:
+        """Join an eval, in any status. Already a member, no event."""
+        self._apply_edit(partial(self._eval.attach, str(command.eval_id)))
+
+    @command_handler("DetachExecutionFromEvalCommand")
+    def detach_from_eval(self, command: DetachExecutionFromEvalCommand) -> None:
+        """Leave the eval. In none, no event; the launch record is kept."""
+        self._apply_edit(partial(self._eval.detach, str(command.eval_id)))
+
+    def _apply_edit(self, edit: AggregateEdit) -> None:
+        """Apply what a tag or eval edit decided on an existing run; None changed nothing."""
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        event = edit(execution_id=str(self.id), workflow_id=self._workflow_id or "")
+        if event is not None:
+            self._apply(event)
+
     @command_handler("InterruptExecutionCommand")
     def interrupt_execution(self, command: InterruptExecutionCommand) -> None:
         """Handle InterruptExecutionCommand."""
@@ -745,7 +801,7 @@ class WorkflowExecutionAggregate(RunEdits, AggregateRoot["WorkflowExecutionStart
             phase_definitions=self._phase_definitions,
             completed_phase_ids=self._completed_phase_ids,
             phase_artifact_ids=self._phase_artifact_ids,
-            phase_owners=self._inherited_owners(),
+            phase_owners=self._pins.inherited_owners(),
             started_phase_ids=self._phase_attempts,
             command=command,
             repair_point=self._reviews.repair_point(self._phase_definitions),
@@ -783,11 +839,6 @@ class WorkflowExecutionAggregate(RunEdits, AggregateRoot["WorkflowExecutionStart
             self._completed_phase_ids.add(phase.phase_id)
             self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
         self._completed_phases = len(origin.inherited_phases)
-
-    def _inherited_owners(self) -> dict[str, str]:
-        """Who holds the artifacts of each phase this run inherited, by phase id."""
-        origin = self._pins.resumed_from
-        return {} if origin is None else origin.owners()
 
     @event_sourcing_handler("WorkflowCompleted")
     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:
@@ -923,6 +974,26 @@ class WorkflowExecutionAggregate(RunEdits, AggregateRoot["WorkflowExecutionStart
         self._completed_at = evt(event, "cancelled_at")
         self._status = ExecutionStatus.CANCELLED
         self._cancel_reason = event.reason
+
+    @event_sourcing_handler("ExecutionTagsAdded")
+    def on_execution_tags_added(self, event: ExecutionTagsAddedEvent) -> None:
+        """Apply ExecutionTagsAddedEvent. The launch snapshot is untouched."""
+        self._tags = self._tags.with_added(evt(event, "tags") or [])
+
+    @event_sourcing_handler("ExecutionTagsRemoved")
+    def on_execution_tags_removed(self, event: ExecutionTagsRemovedEvent) -> None:
+        """Apply ExecutionTagsRemovedEvent. The launch snapshot is untouched."""
+        self._tags = self._tags.with_removed(evt(event, "tags") or [])
+
+    @event_sourcing_handler("ExecutionAttachedToEval")
+    def on_attached_to_eval(self, event: ExecutionAttachedToEvalEvent) -> None:
+        """Apply ExecutionAttachedToEvalEvent."""
+        self._eval = self._eval.with_attached(evt(event, "eval_id"))
+
+    @event_sourcing_handler("ExecutionDetachedFromEval")
+    def on_detached_from_eval(self, _event: ExecutionDetachedFromEvalEvent) -> None:
+        """Apply ExecutionDetachedFromEvalEvent. The launch record stays."""
+        self._eval = self._eval.detached()
 
     @event_sourcing_handler("WorkflowInterrupted")
     def on_execution_interrupted(self, event: WorkflowInterruptedEvent) -> None:
