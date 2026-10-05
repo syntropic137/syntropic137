@@ -165,5 +165,6 @@ async def not_yet_started(
         total_tokens=0,
         review_verdict=None,
         delegation_failure=None,
+        quarantined_refs=[],
         start_queue=start_queue_info(position, record),
     )
