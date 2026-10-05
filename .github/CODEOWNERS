@@ -14,9 +14,12 @@
 /.github/                                                                       @NeuralEmpowerment
 
 # --- Supply chain: submodule sources/branches; local build, push, retag and
-# release-asset recipes in the justfile.
+# release-asset recipes, which live in just/release.just (imported by the root
+# justfile) so the rest of the justfile is not owned. The fitness test pins the
+# import and that no unowned file redefines a release recipe.
 /.gitmodules                                                                    @NeuralEmpowerment
-/justfile                                                                       @NeuralEmpowerment
+/just/release.just                                                              @NeuralEmpowerment
+/ci/fitness/infrastructure/test_release_recipes_are_owned.py                    @NeuralEmpowerment
 
 # --- Which images agents run, and how they are verified (settings AND code).
 /packages/syn-shared/src/syn_shared/settings/workspace_images.py                @NeuralEmpowerment
@@ -67,6 +70,12 @@
 # secret forwarding, published ports), the port/settings checks that guard
 # them, the gateway (auth, CSP, bind) and the tunnel ingress.
 /docker/docker-compose*.yaml                                                    @NeuralEmpowerment
+# Settings passthrough: GENERATED from the Settings classes into
+# docker/generated/api.env.yaml, deliberately not owned. The published compose
+# (matched above) inlines it and stays owned: its parity check runs from the
+# unowned justfile, so it is not an owned gate. Un-own it only once an owned
+# workflow step runs `generate_published_compose.py --check` directly.
+/ci/fitness/infrastructure/test_compose_env_forwarding.py                       @NeuralEmpowerment
 /docker/selfhost-entrypoint.sh                                                  @NeuralEmpowerment
 /scripts/no_public_ports.py                                                     @NeuralEmpowerment
 /scripts/no_public_ports.sh                                                     @NeuralEmpowerment

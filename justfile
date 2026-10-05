@@ -10,6 +10,9 @@
 
 set dotenv-load := true
 
+# Image build/push/retag/release-asset recipes (owner-reviewed; see CODEOWNERS).
+import 'just/release.just'
+
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"
@@ -1913,8 +1916,9 @@ docs-sync: check-env-example
         exit 1; \
     fi
 
-# Regenerate ALL derived artifacts: CLI docs, OpenAPI spec, API docs, CLI types.
-# Single command after changing any Pydantic model, API route, or CLI command.
+# Regenerate ALL derived artifacts: CLI docs, OpenAPI spec, API docs, CLI types,
+# .env.example and the compose settings passthrough (docker/generated/).
+# Single command after changing any Pydantic model, setting, API route, or CLI command.
 # Pipeline: CLI commands → CLI docs, FastAPI app → openapi.json → API docs MDX → CLI TS types
 codegen: docs-cli-gen
     @echo "📄 Extracting OpenAPI spec from FastAPI..."
@@ -1927,6 +1931,9 @@ codegen: docs-cli-gen
     cd apps/syn-dashboard-ui && pnpm run generate:types
     @echo "📄 Exporting plugin JSON schemas..."
     uv run python scripts/export_plugin_schemas.py
+    @echo "📄 Generating .env.example and the compose settings passthrough..."
+    just gen-env
+    just gen-compose
     @echo "✅ All generated artifacts up to date"
 
 # Build docs site (codegen + Next.js build, for deployment)
@@ -1989,20 +1996,22 @@ codex-auth-status:
 codex-auth-clip *flags:
     uv run python scripts/copy_codex_auth.py {{flags}}
 
-# Generate the compose forwarding block, then the published compose from it.
+# Generate the settings passthrough, then the published compose from it.
 #
-# Order matters: settings_forwarding.py rewrites the api environment in the
-# BASE file, and generate_published_compose.py merges that base with the
-# selfhost overlay. Reversed, the published file would be a release behind
-# every new setting -- which is the #1101 gap with an extra step.
+# settings_forwarding.py writes docker/generated/api.env.yaml from .env.example
+# (itself generated from the Settings classes), and the base api service
+# `extends` it, so a new setting never edits a compose file. Order matters:
+# generate_published_compose.py inlines that file into the standalone published
+# compose. Reversed, the published file would be a release behind every new
+# setting -- which is the #1101 gap with an extra step.
 gen-compose:
     uv run python scripts/settings_forwarding.py
     uv run python scripts/generate_published_compose.py
 
 # Check both compose artifacts are up to date (CI mode -- fails if stale).
 # The first check is why a setting added to a Settings class cannot ship
-# documented-but-inert: .env.example gains a line and so must the api
-# environment (#1101).
+# documented-but-inert: .env.example gains a line and so must the generated
+# passthrough (#1101).
 check-compose:
     uv run python scripts/settings_forwarding.py --check
     uv run python scripts/generate_published_compose.py --check
@@ -2441,102 +2450,10 @@ bump-version version:
 check-version:
     python3 scripts/workflows/bump_version.py --check
 
-registry := "ghcr.io/syntropic137"
+# Image build, push, retag and release-asset recipes live in just/release.just
+# (imported at the top of this file), so they can be owner-reviewed without
+# putting every other recipe behind CODEOWNERS.
 
-# Build and push core container images locally (skips event-store and agentic-workspace — use release-retag for those)
-release-local version:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🚀 Local release: {{version}}"
-    echo ""
-
-    # syn-api reports this as its commit on /version (#1473). A dirty tree is
-    # not the commit HEAD names, and stamping nothing would ship `commit: null`,
-    # so refuse before anything is logged in to or pushed.
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "❌ Working tree is dirty: commit or stash first, so syn-api's /version names the tree that shipped" >&2
-        exit 1
-    fi
-    build_commit="$(git rev-parse HEAD)"
-
-    # Login to GHCR
-    gh auth token | docker login ghcr.io -u syntropic137 --password-stdin
-    echo ""
-
-    # Ensure buildx builder exists
-    docker buildx inspect multiarch >/dev/null 2>&1 || docker buildx create --name multiarch
-    docker buildx use multiarch
-
-    # Images to build (order: fast first)
-    FAILED=()
-    for image in token-injector sidecar-proxy syn-collector syn-dashboard-ui syn-api syn-gateway; do
-        # build_args holds extra `--build-arg` flags and is expanded UNQUOTED on
-        # purpose: the values are literal tokens with no whitespace, and this
-        # stays correct on the bash 3.2 that ships with macOS, where an empty
-        # array under `set -u` does not.
-        build_args=""
-        case "$image" in
-            token-injector)   dockerfile="docker/token-injector/Dockerfile"; context="docker/token-injector" ;;
-            sidecar-proxy)    dockerfile="docker/sidecar-proxy/Dockerfile"; context="docker/sidecar-proxy" ;;
-            syn-collector)    dockerfile="packages/syn-collector/Dockerfile"; context="." ;;
-            syn-dashboard-ui) dockerfile="apps/syn-dashboard-ui/Dockerfile"; context="." ;;
-            syn-api)          dockerfile="infra/docker/images/syn-api/Dockerfile"; context="."
-                              # Also the Dockerfile default since #1216. Stated
-                              # here too so this recipe declares what it needs
-                              # rather than inheriting it silently - inheriting
-                              # it silently is the exact shape of the bug this
-                              # line closes.
-                              # SYN_BUILD_* are the image's identity on
-                              # /version, measured by the same fitness test.
-                              build_args="--build-arg INCLUDE_DOCKER_CLI=1 --build-arg SYN_BUILD_IMAGE_TAG={{version}} --build-arg SYN_BUILD_COMMIT=$build_commit" ;;
-            syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;
-        esac
-        echo "📦 Building $image..."
-        if docker buildx build $build_args --platform linux/amd64,linux/arm64 \
-            -f "$dockerfile" \
-            -t "{{registry}}/$image:{{version}}" \
-            --push "$context" \
-           && just verify-image-capabilities "$image" "{{registry}}/$image:{{version}}"; then
-            echo "✅ $image pushed and verified"
-        else
-            echo "❌ $image failed"
-            FAILED+=("$image")
-        fi
-        echo ""
-    done
-
-    # Summary
-    echo "=== Release Summary ==="
-    echo "Version: {{version}}"
-    echo "Registry: {{registry}}"
-    if [ ${#FAILED[@]} -eq 0 ]; then
-        echo "✅ All images pushed successfully"
-    else
-        echo "❌ Failed: ${FAILED[*]}"
-        exit 1
-    fi
-
-# Assert a built image actually HAS the binaries it cannot run without.
-#
-# Test the capability, not the flag. `just release-local` could pass every
-# build arg correctly and still ship an unusable image - a Dockerfile stage
-# that stops copying a binary forward, an upstream tarball that moves, a base
-# image that drops a package. Asserting "does the pushed artifact have docker"
-# survives all of those; asserting "did we pass --build-arg" only restates the
-# recipe above and goes stale with it.
-#
-# This exists because #1216 was invisible until an execution was attempted:
-# the API answered /health, served every list endpoint, and failed every
-# workflow at bootstrap having spent $0.00. smoke-test.yml already carried a
-# comment about "issues like INCLUDE_DOCKER_CLI not being passed" - the
-# knowledge lived next to a detector instead of next to the recipe that
-# causes the problem, so the local release path walked into it anyway.
-#
-#   image  short name from the release matrix (chooses the capability list)
-#   ref    full pullable reference to inspect
-#
-# Callable on its own, including from CI:
-#   just verify-image-capabilities syn-api ghcr.io/syntropic137/syn-api:v0.28.0
 # Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
 # Codifies docs/deployment/test-deploy.md (direct path). Not a release.
 #   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain
@@ -2551,91 +2468,3 @@ pit-stop version *flags:
     # them, so a --ref carrying a space arrives as two arguments.
     set -euo pipefail
     exec ./scripts/pit_stop.sh "$@"
-
-verify-image-capabilities image ref:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "{{image}}" in
-        # syn-api resolves every workspace image through `docker` and verifies
-        # its signature with `cosign` (syn_adapters/workspace_backends/
-        # image_verification.py). Both look the binary up with shutil.which and
-        # both fail closed, so either one missing means zero executions start.
-        syn-api)
-            required="docker cosign" ;;
-        syn-gateway|syn-collector|syn-dashboard-ui|sidecar-proxy|token-injector)
-            required="" ;;
-        # An unlisted image is not "needs nothing", it is "nobody decided yet".
-        # Failing here costs one line in this case statement; guessing costs
-        # another silent release.
-        *)
-            echo "❌ verify-image-capabilities: no capability list for '{{image}}'" >&2
-            echo "   Add one to this recipe before releasing that image." >&2
-            exit 1 ;;
-    esac
-
-    if [ -z "$required" ]; then
-        echo "🔍 {{image}}: no required binaries"
-        exit 0
-    fi
-
-    # Without this the loop below reports every binary as missing, and the
-    # message blames the image for the state of the host running the check.
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "❌ verify-image-capabilities needs docker to inspect {{ref}}," >&2
-        echo "   and docker is not on PATH here. Cannot verify {{image}}." >&2
-        exit 1
-    fi
-
-    echo "🔍 Verifying {{ref}} provides: $required"
-    missing=""
-    for bin in $required; do
-        if ! docker run --rm --entrypoint sh "{{ref}}" -c "command -v $bin" >/dev/null 2>&1; then
-            missing="$missing $bin"
-        fi
-    done
-
-    if [ -n "$missing" ]; then
-        echo "❌ {{ref}} is missing:$missing" >&2
-        echo "   This image cannot provision a workspace. Do not deploy it." >&2
-        echo "   Fix the build and re-push the same tag." >&2
-        exit 1
-    fi
-    echo "✅ {{image}}: $required present"
-
-# Re-tag an existing image version without rebuilding (e.g., event-store)
-release-retag image from to:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🏷️  Re-tagging {{registry}}/{{image}}:{{from}} → {{to}}"
-    gh auth token | docker login ghcr.io -u syntropic137 --password-stdin
-    docker buildx imagetools create \
-        "{{registry}}/{{image}}:{{from}}" \
-        --tag "{{registry}}/{{image}}:{{to}}"
-    echo "✅ Done"
-
-# Upload selfhost assets to a GitHub release
-release-assets version:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📎 Uploading selfhost assets to {{version}}"
-    gh release upload "{{version}}" \
-        docker/docker-compose.syntropic137.yaml \
-        docker/selfhost.env.example \
-        docker/selfhost-entrypoint.sh \
-        --repo syntropic137/syntropic137 --clobber
-    echo "✅ Assets uploaded"
-
-# Full local release: build images + re-tag event-store + upload assets
-# Usage: just release-local-full v0.17.1 v0.17.0
-#   version: the new tag to create
-#   from: existing tag to re-tag event-store/agentic-workspace from (they rarely change)
-release-local-full version from:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just release-local "{{version}}"
-    just release-retag event-store "{{from}}" "{{version}}"
-    just release-retag agentic-workspace "{{from}}" "{{version}}"
-    just release-assets "{{version}}"
-    echo ""
-    echo "🎉 Full release complete: {{version}}"
-    echo "   Test with: SYN_VERSION={{version}} docker compose -f docker/docker-compose.syntropic137.yaml pull"
