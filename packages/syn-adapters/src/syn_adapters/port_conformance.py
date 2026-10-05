@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
     from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
+    from syn_adapters.github.revision_resolver import GitHubRevisionResolver
     from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
     from syn_adapters.maintenance import (
         InMemoryMaintenanceAdapter,
@@ -230,6 +231,9 @@ if TYPE_CHECKING:
         ObservabilityServicePort,
     )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+    from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
+        RevisionResolverPort,
+    )
     from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
         SessionRepositoryPort,
     )
@@ -356,6 +360,7 @@ if TYPE_CHECKING:
         memory_pending: InMemoryPendingSHAStore,
         source_commits: GitHubSourceCommitResolver,
         remote_branches: GitHubRemoteBranchReader,
+        revisions: GitHubRevisionResolver,
     ) -> None:
         """GitHub ingestion and execution control.
 
@@ -367,6 +372,7 @@ if TYPE_CHECKING:
         _checks: GitHubChecksAPIPort = checks_client
         _source_commits: SourceCommitResolverPort = source_commits
         _remote_branches: RemoteBranchPort = remote_branches
+        _revisions: RevisionResolverPort = revisions
         _redis_dedup: DedupPort = redis_dedup
         _postgres_dedup: DedupPort = postgres_dedup
         _memory_dedup: DedupPort = memory_dedup

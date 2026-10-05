@@ -36,7 +36,7 @@ def check_response(response: httpx.Response) -> None:
 
     if response.status_code >= 400:
         msg = f"GitHub API error {response.status_code}: {response.text}"
-        raise GitHubAppError(msg)
+        raise GitHubAppError(msg, status_code=response.status_code)
 
 
 async def api_get(client: GitHubAppClient, path: str, installation_id: str | None = None) -> dict:

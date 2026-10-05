@@ -197,6 +197,13 @@ state of it. Each repository appears at most once in an Eval's Baseline.
 A Baseline is not a Pin. A Pin is what one Execution records about itself as it
 starts; a Baseline is what an Eval requires of every Execution it admits.
 
+The two meet at admission. An Execution launched into an Eval records the
+Eval's Frozen Baseline as `eval_baseline` on its `WorkflowExecutionStarted`,
+one `EvalBaselinePin` per repository: the Pin of the Baseline it was admitted
+against, read from the Eval aggregate once it is Frozen (after a lost freeze
+race, the winner's), never from a request or a read model. Empty for an Eval
+with no repositories; absent for a run in no Eval.
+
 ## Freeze
 
 Fix an Eval's Goal and Baseline, permanently. Admission freezes an Eval before
