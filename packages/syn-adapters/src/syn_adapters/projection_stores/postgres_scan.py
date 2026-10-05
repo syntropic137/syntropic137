@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 def build_scan_query(
     table_name: str,
     fields: Sequence[str],
-    filters: Mapping[str, str] | None,
+    filters: Mapping[str, str | Sequence[str]] | None,
     order_by: str | None,
     *,
     lean_ready: bool,
@@ -68,7 +68,7 @@ async def scan_fields(
     pool: asyncpg.Pool,
     table_name: str,
     fields: Sequence[str],
-    filters: Mapping[str, str] | None,
+    filters: Mapping[str, str | Sequence[str]] | None,
     order_by: str | None,
     *,
     lean_ready: bool,

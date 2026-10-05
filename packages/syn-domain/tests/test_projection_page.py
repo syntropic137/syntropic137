@@ -23,12 +23,13 @@ from syn_domain.contexts.orchestration.slices.list_evals.projection import EvalL
 from syn_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
 )
-from syn_domain.pagination import Page, ProjectionRecord
 from syn_domain.projection_page import PageQuery, StatusOf
-from syn_domain.projection_scan import JsonValue
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from syn_domain.pagination import Page, ProjectionRecord
+    from syn_domain.projection_scan import JsonValue
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
@@ -169,9 +170,7 @@ async def test_the_eval_page_is_one_store_query_and_one_tally_read_for_all_its_r
     assert [projection for projection, _ in store.queries] == ["evals"]
     _, query = store.queries[0]
     assert query.status == StatusOf.flag("archived", if_true="archived", if_false="active")
-    assert store.reads == [
-        "scan_fields workflow_executions {'eval_id': ['ev-a', 'ev-b', 'ev-c']}"
-    ]
+    assert store.reads == ["scan_fields workflow_executions {'eval_id': ['ev-a', 'ev-b', 'ev-c']}"]
     by_id = {row.record.eval_id: row for row in page.rows}
     assert [row.record.eval_id for row in page.rows] == ["ev-b", "ev-a", "ev-c"]
     assert by_id["ev-a"].run_count == 3

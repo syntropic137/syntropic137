@@ -201,7 +201,7 @@ class PostgresProjectionStore:
         projection: str,
         fields: Sequence[str],
         *,
-        filters: Mapping[str, str] | None = None,
+        filters: Mapping[str, str | Sequence[str]] | None = None,
         order_by: str | None = None,
     ) -> list[tuple[str, Mapping[str, JsonValue]]]:
         """Selected fields of every matching document (syn_domain.projection_scan)."""

@@ -59,7 +59,7 @@ class ProjectionFieldScan(Protocol):
         projection: str,
         fields: Sequence[str],
         *,
-        filters: Mapping[str, str] | None = None,
+        filters: Mapping[str, str | Sequence[str]] | None = None,
         order_by: str | None = None,
     ) -> list[tuple[str, Mapping[str, JsonValue]]]:
         """``(key, {field: value})`` per matching document, in ``order_by`` order.
@@ -109,7 +109,7 @@ async def paginate_projection[T](
     projection: str,
     *,
     fields: Collection[str],
-    filters: Mapping[str, str] | None,
+    filters: Mapping[str, str | Sequence[str]] | None,
     order_by: str | None,
     full_read: Callable[[], Awaitable[Iterable[ProjectionRecord]]],
     base_predicate: Callable[[ProjectionRecord], bool],
