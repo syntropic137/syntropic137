@@ -53,11 +53,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         CompletePhaseCommand,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
-        DelegationFailure,
-    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        DelegationFailure,
         PhaseResult,
         ReportedFailureReason,
     )

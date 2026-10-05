@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     DelegationFailureReason,
 )
 from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (

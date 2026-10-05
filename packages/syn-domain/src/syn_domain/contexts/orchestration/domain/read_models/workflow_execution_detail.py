@@ -8,11 +8,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
-    DelegationFailure,
-)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
     SideEffectStatus,

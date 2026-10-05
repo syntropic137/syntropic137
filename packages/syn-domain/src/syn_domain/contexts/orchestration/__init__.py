@@ -88,15 +88,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     ResumeExecutionCommand,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
-    DelegationAttempt,
-    DelegationFailure,
-    DelegationFailureReason,
-)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
     refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationAttempt,
+    DelegationFailure,
+    DelegationFailureReason,
     ExecutablePhase,
     ExecutionStatus,
     FailureClassification,

@@ -20,10 +20,8 @@ if TYPE_CHECKING:
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
-from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
-    DelegationFailure,
-)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
     SideEffectStatus,

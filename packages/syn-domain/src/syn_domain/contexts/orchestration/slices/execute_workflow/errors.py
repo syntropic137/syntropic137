@@ -8,12 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NamedTuple
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     DelegationAttempt,
     DelegationFailure,
     DelegationFailureReason,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
 from syn_shared.display import format_exit_code

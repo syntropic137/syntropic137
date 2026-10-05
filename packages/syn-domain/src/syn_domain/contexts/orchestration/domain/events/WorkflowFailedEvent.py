@@ -8,11 +8,9 @@ from event_sourcing import DomainEvent, event
 from pydantic import Field
 
 # Runtime import needed for the Pydantic field type (noqa: TC001)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
-    DelegationFailure,  # noqa: TC001
-)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
 )

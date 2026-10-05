@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Protocol
 # also what a failed phase records (`DelegationFailure`), so it lives with the
 # aggregate's value objects.
 from syn_domain.contexts.agent_sessions import DelegationOutcome
-from syn_domain.contexts.orchestration.domain.aggregate_execution.delegation_failure import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     DelegationAttempt,
 )
 
