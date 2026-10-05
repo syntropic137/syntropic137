@@ -40,10 +40,10 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     from syn_api._wiring import (
         get_claude_plugin_resolution_service,
         get_execution_processor,
-        get_maintenance_port,
         get_skill_resolution_service,
         get_workflow_repository,
     )
+    from syn_api._wiring_admission import get_maintenance_port
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
 
     processor = await get_execution_processor()
@@ -74,10 +74,10 @@ async def _build_resume_handler() -> StartResumeHandler:
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_api._wiring import (
         get_execution_processor,
-        get_maintenance_port,
         get_workflow_execution_repository,
         get_workflow_repository,
     )
+    from syn_api._wiring_admission import get_maintenance_port
     from syn_domain.contexts.orchestration import StartResumeHandler
 
     return StartResumeHandler(
