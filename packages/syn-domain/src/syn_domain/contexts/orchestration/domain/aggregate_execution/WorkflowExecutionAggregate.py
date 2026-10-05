@@ -363,15 +363,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         there is either nothing to recover or a deliverable already stored,
         and in both cases the honest answer is None.
         """
-        if self._status != ExecutionStatus.RUNNING:
-            return None
         execution_id = self.aggregate_id
-        if execution_id is None:
+        if self._status != ExecutionStatus.RUNNING or execution_id is None:
             return None
         phase_id = self._running_phase_id
-        if phase_id is None:
-            return None
-        run = self._finished_agent_runs.get(phase_id)
+        run = None if phase_id is None else self._finished_agent_runs.get(phase_id)
         if run is None:
             return None
         return StrandedDeliverable(
