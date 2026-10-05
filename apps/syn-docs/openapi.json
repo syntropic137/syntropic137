@@ -9698,7 +9698,7 @@
               }
             ],
             "title": "Task",
-            "description": "Primary task description -- substituted for $ARGUMENTS in phase prompts."
+            "description": "Primary task description -- substituted for $ARGUMENTS in phase prompts. Omit it to run without a task; an empty or whitespace-only task is rejected with 422 (PC-66)."
           },
           "repos": {
             "items": {

@@ -1516,6 +1516,13 @@
     "type": "implementation",
     "classification": "standard",
     "requires_repos": true,
+    "inputs": [
+      {
+        "name": "task",
+        "description": "The well-specified issue or change to implement",
+        "required": true
+      }
+    ],
     "skills": [
       "syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454",
       "syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454"

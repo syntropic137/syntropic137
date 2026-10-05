@@ -189,8 +189,10 @@ def _substitute_inputs(
         result = result.replace(f"{{{{{pid}}}}}", content[:2000])
 
     # Layer 2d: $ARGUMENTS substitution (ISS-211 CC command pattern)
+    from syn_domain.contexts.orchestration import TASK_PLACEHOLDER
+
     task = (inputs or {}).get("task", "")
-    result = result.replace("$ARGUMENTS", str(task))
+    result = result.replace(TASK_PLACEHOLDER, str(task))
 
     return result
 

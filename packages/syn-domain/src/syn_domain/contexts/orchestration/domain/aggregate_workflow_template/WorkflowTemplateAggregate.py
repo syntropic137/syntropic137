@@ -18,6 +18,9 @@ from event_sourcing import (
 )
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
+    required_input_declarations,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -279,6 +282,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def input_declarations(self) -> list[InputDeclaration]:
         """Get workflow input declarations."""
         return list(self._input_declarations)
+
+    @property
+    def required_input_declarations(self) -> list[InputDeclaration]:
+        """The declarations admission enforces, ``task`` included where a prompt implies it."""
+        return required_input_declarations(self._input_declarations, self._phases)
 
     @property
     def requires_repos(self) -> bool:
