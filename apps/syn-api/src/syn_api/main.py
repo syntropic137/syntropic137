@@ -38,6 +38,7 @@ from syn_api.routes import (
     webhooks_router,
     workflows_router,
 )
+from syn_api.startup_gate import StartupGate, StartupGateMiddleware
 from syn_api.strict_query import reject_unknown_query_params
 from syn_api.types import (
     BuildInfo,
@@ -58,13 +59,18 @@ logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager.
 
     On startup:
         - Validate credentials (fail-fast)
         - Connect to event store
         - Start subscription service for projection updates
+
+    Startup runs through the app's StartupGate (#1575): if it outlives the
+    gate's grace window, /health answers "starting" and every other route 503
+    until it finishes, so a long one-time migration is not a failed liveness
+    check. A failure inside the window still refuses to serve, as before.
 
     On shutdown:
         - Stop subscription service
@@ -74,16 +80,20 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("Starting Syntropic137 API...")
 
-    result = await lifecycle.startup()
-    if isinstance(result, Err):
-        logger.error("Startup failed: %s — refusing to serve traffic", result.message)
-        raise RuntimeError(f"Startup aborted: {result.message}")
+    async def start() -> None:
+        result = await lifecycle.startup()
+        if isinstance(result, Err):
+            logger.error("Startup failed: %s — refusing to serve traffic", result.message)
+            raise RuntimeError(f"Startup aborted: {result.message}")
+        logger.info("Startup complete (mode=%s)", result.value.get("mode", "full"))
 
-    logger.info("Startup complete (mode=%s)", result.value.get("mode", "full"))
+    gate: StartupGate = app.state.startup_gate
+    await gate.open(start)
 
     yield
 
     logger.info("Shutting down Syntropic137 API...")
+    await gate.close()
     await lifecycle.shutdown()
 
 
@@ -127,6 +137,9 @@ def create_app() -> FastAPI:
         dependencies=[Depends(reject_unknown_query_params)],
     )
 
+    gate = StartupGate()
+    app.state.startup_gate = gate
+
     # Add CORS middleware for frontend dev server
     app.add_middleware(
         CORSMiddleware,
@@ -157,6 +170,10 @@ def create_app() -> FastAPI:
 
         app.add_middleware(WebhookRecorderMiddleware)
         logger.info("Webhook recording enabled — saving to fixtures/webhooks/")
+
+    # Outermost: while a slow startup is in flight nothing behind it may run,
+    # and /health must answer without waiting on anything that startup builds.
+    app.add_middleware(StartupGateMiddleware, gate=gate)
 
     # ── API routers ────────────────────────────────────────────────────
     # No prefix here — versioning is handled at the routing layer (nginx).
@@ -231,8 +248,18 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> HealthResponse:
-        """Health check endpoint with detailed subscription status."""
+        """Health check endpoint with detailed subscription status.
+
+        This is the container's LIVENESS check (#1575): while the gate withholds
+        the API it answers 200 with the gate's phase - "starting", or "failed"
+        in the moment between a late startup failure and the process exiting -
+        without probing anything startup has not built. "healthy" is what
+        readiness waits for, so it is only ever said once the gate is ready.
+        """
         import syn_api.services.lifecycle as lifecycle
+
+        if gate.holding:
+            return HealthResponse(status=gate.phase, mode="degraded", build=get_build_info())
 
         result = await lifecycle.health_check()
         if isinstance(result, Ok):

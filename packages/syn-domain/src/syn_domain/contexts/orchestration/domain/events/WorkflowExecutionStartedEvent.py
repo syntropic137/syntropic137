@@ -12,6 +12,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     INHERITED_PHASE_OWNERS,
     AbandonedBranch,
     ContinuedBranch,
+    EvalBaselinePin,
     ExecutablePhase,
     ResumeOrigin,
     SourceCommit,
@@ -32,7 +33,7 @@ TASK_INPUT_KEY = "task"
 
 #: Fields a release before #1513 does not know: omitted when None.
 _WRITTEN_ONLY_WHEN_SET = frozenset(
-    {"continued_branches", "abandoned_branches", "eval_id", "eval_selection"}
+    {"continued_branches", "abandoned_branches", "eval_id", "eval_selection", "eval_baseline"}
 )
 
 
@@ -92,6 +93,12 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: choice to make. Both fields are written only when set, like the
     #: #1513 fields below, so an ordinary start reads as it always did.
     eval_selection: str | None = None
+
+    #: The eval's frozen baseline as this run was admitted to it (#967): every
+    #: repository, the ref asked for and the commit it pinned. Empty for an
+    #: eval with no repositories; None for a run in no eval and on events
+    #: written before the field existed. Written only when set.
+    eval_baseline: list[EvalBaselinePin] | None = None
 
     #: Set only on a resume: the parent, what it inherited and where it resumes
     #: (ADR-014 s7). The child's own record of "what was this a resume of".

@@ -14,6 +14,7 @@ import {
   Bell,
   Box,
   FileText,
+  FolderGit2,
   GitBranch,
   Lightbulb,
   LayoutDashboard,
@@ -25,6 +26,9 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
+import { useServerBuild, type ServerBuild } from '../hooks/useServerBuild'
+import { ServerVersion } from './ServerVersion'
+
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Workflows', href: '/workflows', icon: GitBranch },
@@ -32,6 +36,7 @@ const navigation = [
   { name: 'Sessions', href: '/sessions', icon: Activity },
   { name: 'Artifacts', href: '/artifacts', icon: FileText },
   { name: 'Triggers', href: '/triggers', icon: Bell },
+  { name: 'Repos', href: '/repos', icon: FolderGit2 },
   { name: 'Insights', href: '/insights', icon: BarChart3 },
 ]
 
@@ -76,9 +81,10 @@ function TeaserBanner() {
 
 interface SidebarProps {
   onNavigate: () => void
+  serverBuild: ServerBuild
 }
 
-function Sidebar({ onNavigate }: SidebarProps) {
+function Sidebar({ onNavigate, serverBuild }: SidebarProps) {
   return (
     <>
       <div className="flex h-14 items-center gap-3 border-b border-[var(--color-border)] px-4">
@@ -147,7 +153,7 @@ function Sidebar({ onNavigate }: SidebarProps) {
             <p className="truncate text-xs font-medium text-[var(--color-text-primary)]">
               Syntropic137
             </p>
-            <p className="truncate text-xs text-[var(--color-text-muted)]">v{__APP_VERSION__}</p>
+            <ServerVersion {...serverBuild} />
           </div>
         </div>
       </div>
@@ -158,6 +164,7 @@ function Sidebar({ onNavigate }: SidebarProps) {
 export function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const hamburgerRef = useRef<HTMLButtonElement>(null)
+  const serverBuild = useServerBuild()
 
   useEffect(() => {
     if (!drawerOpen) return
@@ -229,7 +236,7 @@ export function Layout() {
         >
           <X className="h-5 w-5" />
         </button>
-        <Sidebar onNavigate={closeDrawer} />
+        <Sidebar onNavigate={closeDrawer} serverBuild={serverBuild} />
       </aside>
 
       {/* Main content */}

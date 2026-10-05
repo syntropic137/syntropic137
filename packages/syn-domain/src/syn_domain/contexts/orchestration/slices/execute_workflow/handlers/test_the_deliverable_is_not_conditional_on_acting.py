@@ -101,7 +101,7 @@ async def _prompt_for(phase_id: str) -> str:
     """The prompt as the agent for `phase_id` actually receives it.
 
     Provisioned rather than rendered: `render_workspace_prompt` is two hops
-    from the agent, and `_wiring._build_workspace_prompt` has to read
+    from the agent, and `_wiring_agent_command._build_workspace_prompt` has to read
     `phase.clone_repos` and pick a rendering in between. A template that is
     correct and a caller that selects the wrong branch both look right from
     either end.

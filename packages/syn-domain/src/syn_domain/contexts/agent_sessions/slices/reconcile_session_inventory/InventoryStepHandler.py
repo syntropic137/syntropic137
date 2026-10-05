@@ -9,6 +9,7 @@ from syn_domain.contexts.agent_sessions.domain.commands.AdvanceInventoryReconcil
     AdvanceInventoryReconciliationCommand,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import PendingEvidence
+from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import InventoryStepOutcome
 from syn_domain.contexts.agent_sessions.ports.SessionInventoryWritePort import (
     InventoryPublicationConflict,
 )
@@ -45,12 +46,13 @@ class InventoryStepHandler:
         self._lease_seconds = lease_seconds
         self._outbox = outbox
 
-    async def handle(self, lease: InventoryJobLease) -> None:
+    async def handle(self, lease: InventoryJobLease) -> InventoryStepOutcome:
         aggregate = await self._repository.get_by_id(lease.job.job_id)
         if aggregate is None:
             raise ValueError("projected inventory job has no management stream")
         if aggregate.state != lease.job.state:
-            return  # Its newer management event has not reached this projection yet.
+            # Its newer management event has not reached this projection yet.
+            return InventoryStepOutcome.STALE
         try:
             command = await self._perform(lease)
         except EvidenceQuotaExceeded:
@@ -69,6 +71,7 @@ class InventoryStepHandler:
         await self._jobs.renew(lease, lease_seconds=self._lease_seconds)
         aggregate.advance(command)
         await self._repository.save(aggregate)
+        return InventoryStepOutcome.ADVANCED
 
     async def _perform(self, lease: InventoryJobLease) -> AdvanceInventoryReconciliationCommand:
         if lease.job.state.stage is ReconciliationStage.PENDING:

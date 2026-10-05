@@ -4255,7 +4255,7 @@
           "github"
         ],
         "summary": "List Accessible Repos Endpoint",
-        "description": "List repositories accessible to the GitHub App.\n\nQueries all active installations and aggregates results when no\ninstallation_id is provided. The installation list is cached locally with\na 1-hour TTL: if empty or stale, it bootstraps automatically from the\nGitHub API without requiring a webhook URL. Stale data is kept as a\nfallback if the GitHub API is unreachable during refresh.",
+        "description": "List repositories accessible to the GitHub App.\n\nQueries all active installations and aggregates results when no\ninstallation_id is provided. The installation list is cached locally with\na 1-hour TTL: if empty or stale, it bootstraps automatically from the\nGitHub API without requiring a webhook URL. Stale data is kept as a\nfallback if the GitHub API is unreachable during refresh.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
         "operationId": "list_accessible_repos_endpoint_github_repos_get",
         "parameters": [
           {
@@ -7295,7 +7295,7 @@
     "/health": {
       "get": {
         "summary": "Health",
-        "description": "Health check endpoint with detailed subscription status.",
+        "description": "Health check endpoint with detailed subscription status.\n\nThis is the container's LIVENESS check (#1575): while the gate withholds\nthe API it answers 200 with the gate's phase - \"starting\", or \"failed\"\nin the moment between a late startup failure and the process exiting -\nwithout probing anything startup has not built. \"healthy\" is what\nreadiness waits for, so it is only ever said once the gate is ready.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -7918,6 +7918,12 @@
             "title": "Commit",
             "description": "Git commit the image was built from, stamped at image build time. Null when the build did not stamp one."
           },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At",
+            "description": "When this API process started (UTC, ISO 8601): the moment the running deployment went live. Captured once per process, so it changes only when the process is replaced, which is what a redeploy does."
+          },
           "version_status": {
             "type": "string",
             "enum": [
@@ -7927,16 +7933,24 @@
             "title": "Version Status",
             "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.",
             "readOnly": true
+          },
+          "started_at_display": {
+            "type": "string",
+            "title": "Started At Display",
+            "description": "started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. Relative and local-time renderings are the client's to make from started_at.",
+            "readOnly": true
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "version",
-          "version_status"
+          "started_at",
+          "version_status",
+          "started_at_display"
         ],
         "title": "BuildInfo",
-        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply and\nonly ``/health`` reports."
+        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply,\nand when this process went live, which only the process can."
       },
       "CancelRequest": {
         "properties": {
@@ -9205,6 +9219,124 @@
         "title": "DegradedReason",
         "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
       },
+      "DelegationAttempt": {
+        "properties": {
+          "delegate_id": {
+            "type": "string",
+            "title": "Delegate Id"
+          },
+          "target_harness": {
+            "type": "string",
+            "title": "Target Harness"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "delegate_id",
+          "target_harness",
+          "outcome"
+        ],
+        "title": "DelegationAttempt",
+        "description": "One delegate the phase's agent launched, as the platform observed it."
+      },
+      "DelegationFailure": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DelegationFailureReason"
+          },
+          "required_delegate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Delegate"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/DelegationAttempt"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "default": []
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "DelegationFailure",
+        "description": "The typed account of a failed required delegation."
+      },
+      "DelegationFailureReason": {
+        "type": "string",
+        "enum": [
+          "not_attempted",
+          "failed",
+          "unverifiable"
+        ],
+        "title": "DelegationFailureReason",
+        "description": "Why a required delegation is counted as not having happened."
+      },
+      "DelegationOutcome": {
+        "type": "string",
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "DelegationOutcome",
+        "description": "How a delegated run ended, in provider-neutral terms.\n\nWHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit\nstatus is shell-specific baggage. The native same-harness fan-out path\nreports a boolean success and has no process to exit; cancellation and\ntimeout have no natural integer either. Since these events are v1 and this\nrepo has no upcaster framework, encoding a shell assumption now would need\na v2 to undo."
+      },
       "DeleteWorkflowResponse": {
         "properties": {
           "workflow_id": {
@@ -9810,6 +9942,16 @@
             "$ref": "#/components/schemas/FailureClassification",
             "default": "unclassified"
           },
+          "delegation_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reported_failure_reason": {
             "anyOf": [
               {
@@ -9824,6 +9966,16 @@
             "type": "boolean",
             "title": "Deliverable Produced",
             "default": false
+          },
+          "review_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reported_side_effects": {
             "anyOf": [
@@ -11800,11 +11952,27 @@
               }
             ],
             "title": "Installation Id"
+          },
+          "lookup": {
+            "$ref": "#/components/schemas/GitHubRepoLookup"
           }
         },
         "type": "object",
+        "required": [
+          "lookup"
+        ],
         "title": "GitHubRepoListResponse",
         "description": "List of repositories accessible to the GitHub App."
+      },
+      "GitHubRepoLookup": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "partial",
+          "unavailable"
+        ],
+        "title": "GitHubRepoLookup",
+        "description": "How much of the GitHub App's access a repo listing actually covers.\n\nOnly ``complete`` makes a repo's absence mean the App cannot reach it. A\n``partial`` listing still proves access for every repo it contains; an\n``unavailable`` one proves nothing."
       },
       "GitHubRepoResponse": {
         "properties": {
@@ -12047,7 +12215,7 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "'healthy' while the process is alive and accepting writes."
+            "description": "'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed."
           },
           "mode": {
             "type": "string",
@@ -13662,6 +13830,11 @@
             "title": "Allow Delegation",
             "default": false
           },
+          "require_delegation": {
+            "type": "boolean",
+            "title": "Require Delegation",
+            "default": false
+          },
           "clone_repos": {
             "type": "boolean",
             "title": "Clone Repos",
@@ -13850,6 +14023,26 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/SideEffectStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure_classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureClassification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
               },
               {
                 "type": "null"
@@ -15267,6 +15460,15 @@
         ],
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
+      },
+      "ReviewVerdict": {
+        "type": "string",
+        "enum": [
+          "certified",
+          "blocked"
+        ],
+        "title": "ReviewVerdict",
+        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for rounds 2 and 3.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
       },
       "RootResponse": {
         "properties": {

@@ -49,6 +49,15 @@ class SessionInventorySettings(BaseSettings):
         le=3600,
         description="Delay before retrying an interrupted inventory step.",
     )
+    park_safety_seconds: int = Field(
+        default=900,
+        ge=30,
+        le=86400,
+        description=(
+            "Longest a parked inventory job waits for the newer step that re-arms it "
+            "before it is offered again anyway, so a job is never parked forever."
+        ),
+    )
     max_jobs_per_tick: int = Field(
         default=2,
         ge=1,
