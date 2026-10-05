@@ -173,6 +173,52 @@ class FailureClassification(StrEnum):
             return cls.UNCLASSIFIED
 
 
+class UpstreamFailureKind(StrEnum):
+    """The upstream's own account of why it did not serve an attempt (#1592).
+
+    Here rather than beside its reader in `upstream_failure` because the
+    WorkflowFailed event stores it (#1593), and an event may not import a slice.
+    """
+
+    CAPACITY = "capacity"
+    """The model provider had no capacity for the request (overloaded, 529)."""
+
+    RATE_LIMITED = "rate_limited"
+    """The provider is throttling us (429)."""
+
+    AUTH = "auth"
+    """The provider refused our credentials or their permissions (401, 403)."""
+
+    UNAVAILABLE = "unavailable"
+    """The service did not answer: a dropped connection, a timeout, a 502/503/504
+    after every retry it was allowed (#1593)."""
+
+    UNKNOWN = "unknown"
+    """The harness reported a fault, and nothing recognised its kind."""
+
+    @property
+    def is_transient(self) -> bool:
+        """Whether another attempt may succeed with nothing changed: the phase is resumable."""
+        return self in (
+            UpstreamFailureKind.CAPACITY,
+            UpstreamFailureKind.RATE_LIMITED,
+            UpstreamFailureKind.UNAVAILABLE,
+        )
+
+    @property
+    def needs_operator(self) -> bool:
+        """Whether nothing will succeed until somebody fixes the platform's access."""
+        return self is UpstreamFailureKind.AUTH
+
+    def account(self) -> str:
+        """The sentence an operator reads beside the failure, saying what to do about it."""
+        if self.is_transient:
+            return f"Upstream failure: {self.value} - transient; the phase is resumable."
+        if self.needs_operator:
+            return f"Upstream failure: {self.value} - an operator must fix the credentials."
+        return f"Upstream failure: {self.value} - not recognised; read the reason above."
+
+
 class ReportedFailureReason(StrEnum):
     """What a phase says CAUSED the failure it is reporting (#1372).
 

@@ -157,4 +157,5 @@ def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFai
         # event is where the two stop being one frame's local variables and
         # start being the record every read model is built from.
         reported_failure_reason=command.reported_failure_reason,
+        upstream_failure_kind=command.upstream_failure_kind,
     )

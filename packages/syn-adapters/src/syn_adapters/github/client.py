@@ -50,6 +50,12 @@ from syn_adapters.github.client_token import get_installation_token as _get_inst
 from syn_adapters.github.client_token import (
     revoke_installation_token as _revoke_installation_token,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    UpstreamFailureKind,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UpstreamFailureError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -78,19 +84,26 @@ class GitHubAppError(Exception):
         self.status_code = status_code
 
 
-class GitHubAuthError(GitHubAppError):
-    """Authentication failed."""
+class GitHubAuthError(GitHubAppError, UpstreamFailureError):
+    """Authentication failed: an operator must fix the App's access (#1593)."""
 
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        UpstreamFailureError.__init__(self, message, upstream_kind=UpstreamFailureKind.AUTH)
+        self.status_code = status_code
 
 
-class GitHubUnavailableError(GitHubAppError):
+class GitHubUnavailableError(GitHubAppError, UpstreamFailureError):
     """GitHub did not answer after every retry the request was allowed (#1593).
 
     A dropped connection, a timeout or a 502/503/504 - transient, so the run
     that hit it is resumable. Deliberately not a `GitHubAuthError`: nothing an
-    operator configures would have changed the outcome.
+    operator configures would have changed the outcome. The execution's
+    failure record says so through `upstream_kind`, not through this text.
     """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        UpstreamFailureError.__init__(self, message, upstream_kind=UpstreamFailureKind.UNAVAILABLE)
+        self.status_code = status_code
 
 
 class GitHubRateLimitError(GitHubAppError):

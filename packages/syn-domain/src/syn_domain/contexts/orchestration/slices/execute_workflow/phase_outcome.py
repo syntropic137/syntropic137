@@ -57,6 +57,7 @@ if TYPE_CHECKING:
         BranchObservation,
         PhaseResult,
         ReportedFailureReason,
+        UpstreamFailureKind,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
         ObservedBranches,
@@ -131,6 +132,9 @@ class PhaseFailure:
     different evidence, and a record that fuses them lets a run choose the
     number it lands in. Both travel to every sink, so the operator reads the
     agent's own word and the tally never counts it."""
+    upstream_failure_kind: UpstreamFailureKind | None = None
+    """What kind of upstream fault this was, when a service such as GitHub
+    raised it (#1593): transient and resumable, or waiting on an operator."""
     observed_branches: tuple[BranchObservation, ...] | None = None
     """Branches read from git at failure time, `()` for "read, and none of them
     differs from how the phase found it", and None for "nothing could tell us".
@@ -199,6 +203,7 @@ class PhaseFailure:
             failed_phase_usage=self.usage,
             classification=self.classification,
             reported_failure_reason=self.reported_failure_reason,
+            upstream_failure_kind=self.upstream_failure_kind,
         )
 
     def execution_result(
@@ -295,13 +300,17 @@ def failed_phase_outcome(
     ended_at = now or datetime.now(UTC)
     reason = describe_exception(error)
     exit_code = exit_code_of(error)
+    account = failure_account(error)
+    if account.upstream is not None:
+        # The sentence #1592 gives a harness's upstream fault, for the same
+        # reader: an operator deciding between resuming and fixing access.
+        reason = f"{reason}\n{account.upstream.account()}"
     if saved is not None and saved.is_worth_reporting:
         reason = f"{reason}\n\n{describe_saved_work(saved)}"
     if observed is not None:
         reason = f"{reason}\n\n{describe_observed_branches(observed)}"
     kept = tuple(kept_artifact_ids)
     spent = usage or PhaseUsage()
-    account = failure_account(error)
     return PhaseFailure(
         reason=reason,
         error_type=type(error).__name__,
@@ -312,6 +321,7 @@ def failed_phase_outcome(
         # together so no sink can hold one without the other (#1392).
         classification=account.classification,
         reported_failure_reason=account.reported_reason,
+        upstream_failure_kind=account.upstream,
         observed_branches=observed.recorded if observed is not None else None,
         phase_id=phase_id,
         exit_code=exit_code,

@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UpstreamFailureError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
@@ -401,7 +404,18 @@ async def _lookup_installations(
             installation_id = await client.get_installation_for_repo(full_name)
             url_to_installation[url] = installation_id
             logger.debug("Resolved installation %s for repo %s", installation_id, full_name)
-        except Exception:
+        except Exception as exc:
+            # A lookup GitHub never answered says nothing about the installation,
+            # so it must not send an operator to change it (#1593).
+            if isinstance(exc, UpstreamFailureError) and exc.upstream_kind.is_transient:
+                logger.warning(
+                    "GitHub did not answer the installation lookup for %s: %s",
+                    full_name,
+                    exc,
+                )
+                if require_github:
+                    raise
+                continue
             if require_github:
                 logger.error(
                     "GitHub App not installed on repository: %s. "

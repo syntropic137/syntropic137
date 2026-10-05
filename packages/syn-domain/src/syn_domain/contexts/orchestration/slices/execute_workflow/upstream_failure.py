@@ -15,9 +15,19 @@ changes whenever a CLI does, and is not decided here.
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
+__all__ = [
+    "UPSTREAM_FAILURES",
+    "StreamReasonUpstreamFailureReader",
+    "UpstreamFailureError",
+    "UpstreamFailureKind",
+    "UpstreamFailureReader",
+]
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    UpstreamFailureKind,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
     codex_login_fault_reason,
@@ -32,38 +42,19 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-class UpstreamFailureKind(StrEnum):
-    """The upstream's own account of why it did not serve an attempt."""
+class UpstreamFailureError(Exception):
+    """A failure an upstream service reported, carrying its kind (#1593).
 
-    CAPACITY = "capacity"
-    """The model provider had no capacity for the request (overloaded, 529)."""
+    The port for every upstream that is not an agent harness - GitHub during
+    provisioning first. The adapter that talks to the service knows which kind
+    its failure was and raises a subclass saying so; `failure_account` reads
+    the kind off the exception and never off its message, so the domain
+    learns what the failure asks of an operator without learning the service.
+    """
 
-    RATE_LIMITED = "rate_limited"
-    """The provider is throttling us (429)."""
-
-    AUTH = "auth"
-    """The provider refused our credentials or their permissions (401, 403)."""
-
-    UNKNOWN = "unknown"
-    """The harness reported a fault, and nothing recognised its kind."""
-
-    @property
-    def is_transient(self) -> bool:
-        """Whether another attempt may succeed with nothing changed: the phase is resumable."""
-        return self in (UpstreamFailureKind.CAPACITY, UpstreamFailureKind.RATE_LIMITED)
-
-    @property
-    def needs_operator(self) -> bool:
-        """Whether nothing will succeed until somebody fixes the platform's access."""
-        return self is UpstreamFailureKind.AUTH
-
-    def account(self) -> str:
-        """The sentence an operator reads beside the failure, saying what to do about it."""
-        if self.is_transient:
-            return f"Upstream failure: {self.value} - transient; the phase is resumable."
-        if self.needs_operator:
-            return f"Upstream failure: {self.value} - an operator must fix the credentials."
-        return f"Upstream failure: {self.value} - not recognised; read the reason above."
+    def __init__(self, message: str, *, upstream_kind: UpstreamFailureKind) -> None:
+        super().__init__(message)
+        self.upstream_kind = upstream_kind
 
 
 class UpstreamFailureReader(Protocol):

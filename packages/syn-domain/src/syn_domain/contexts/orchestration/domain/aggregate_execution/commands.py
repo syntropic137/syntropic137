@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         PhaseDefinition,
         ReportedFailureReason,
         SideEffectStatus,
+        UpstreamFailureKind,
     )
 
 
@@ -151,6 +152,7 @@ class FailExecutionCommand:
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
+        upstream_failure_kind: UpstreamFailureKind | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -210,6 +212,11 @@ class FailExecutionCommand:
         #: the classification and never folded into it (#1392): an operator
         #: reads the agent's word, and no number is computed from it.
         self.reported_failure_reason = reported_failure_reason
+        #: What kind of upstream fault ended the run, when a service such as
+        #: GitHub raised it (#1593). Beside the classification like the field
+        #: above: `PLATFORM` either way, and this says whether a resume clears
+        #: it or an operator must act.
+        self.upstream_failure_kind = upstream_failure_kind
 
 
 class StartPhaseCommand:

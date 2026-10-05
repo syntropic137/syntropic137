@@ -8,7 +8,9 @@ workspace's credentials were written would pass a transport-only test.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -23,6 +25,10 @@ from syn_adapters.github.client_retry import RetryPolicy
 from syn_adapters.workspace_backends.service import setup_phase_secrets
 from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    UpstreamFailureKind,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import failure_account
 
 pytestmark = pytest.mark.unit
 
@@ -51,9 +57,12 @@ class _Network:
         if path == _LOOKUP:
             return httpx.Response(200, json={"id": 7})
         assert path == _MINT
+        # An hour from now, as GitHub issues them: a fixed timestamp goes stale
+        # and lets an already-expired credential pass for a provisioned one.
+        expires_at = datetime.now(UTC) + timedelta(hours=1)
         return httpx.Response(
             201,
-            json={"token": "ghs_minted", "expires_at": "2026-10-05T08:00:00Z"},
+            json={"token": "ghs_minted", "expires_at": expires_at.isoformat()},
         )
 
 
@@ -85,6 +94,15 @@ async def _provision() -> SetupPhaseSecrets:
     )
 
 
+def _assert_usable(secrets: SetupPhaseSecrets) -> None:
+    """Provisioned means a credential the workspace can still use, not merely one present."""
+    assert secrets.repo_tokens == {_REPO: "ghs_minted"}
+    assert secrets.issued
+    now = datetime.now(UTC)
+    for token in secrets.issued:
+        assert token.expires_at > now, f"issued an expired token: {token.expires_at}"
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("path", [_LOOKUP, _MINT])
 async def test_one_dropped_connection_still_provisions(network: _Network, path: str) -> None:
@@ -92,7 +110,7 @@ async def test_one_dropped_connection_still_provisions(network: _Network, path: 
 
     secrets = await _provision()
 
-    assert secrets.repo_tokens == {_REPO: "ghs_minted"}
+    _assert_usable(secrets)
     assert network.sent.count(path) == 2
 
 
@@ -107,22 +125,44 @@ async def test_a_transient_failure_on_the_mint_is_retried(
 
     secrets = await _provision()
 
-    assert secrets.repo_tokens == {_REPO: "ghs_minted"}
+    _assert_usable(secrets)
     assert network.sent.count(_MINT) == 3
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("path", [_LOOKUP, _MINT])
-async def test_three_drops_fail_as_transient_not_as_auth(network: _Network, path: str) -> None:
+async def test_three_drops_fail_as_transient_not_as_auth(
+    network: _Network, path: str, caplog: pytest.LogCaptureFixture
+) -> None:
     """Before #1593 a dropped mint surfaced as GitHubAuthError: an operator problem."""
     network.failures[path] = [_DROPPED, _DROPPED, _DROPPED]
 
-    with pytest.raises(GitHubUnavailableError) as raised:
+    with caplog.at_level(logging.WARNING), pytest.raises(GitHubUnavailableError) as raised:
         await _provision()
 
     assert not isinstance(raised.value, GitHubAuthError)
-    assert "Transient" in str(raised.value)
+    account = failure_account(raised.value)
+    assert account.upstream is UpstreamFailureKind.UNAVAILABLE
+    assert account.upstream.is_transient
+    assert not account.upstream.needs_operator
     assert network.sent.count(path) == 3
+    # Nothing an operator installs would have helped, so nothing says to.
+    assert "settings/installations" not in caplog.text
+    assert "not installed" not in caplog.text
+
+
+@pytest.mark.anyio
+async def test_a_401_on_the_mint_is_recorded_as_needing_an_operator(network: _Network) -> None:
+    network.failures[_MINT] = [401]
+
+    with pytest.raises(GitHubAuthError) as raised:
+        await _provision()
+
+    account = failure_account(raised.value)
+    assert account.upstream is UpstreamFailureKind.AUTH
+    assert account.upstream.needs_operator
+    assert not account.upstream.is_transient
+    assert network.sent.count(_MINT) == 1
 
 
 @pytest.mark.anyio

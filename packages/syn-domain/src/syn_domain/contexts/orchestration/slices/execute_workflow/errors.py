@@ -11,12 +11,16 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UpstreamFailureError,
+)
 from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
         ReportedFailureReason,
+        UpstreamFailureKind,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
         AgentVerdict,
@@ -372,6 +376,11 @@ class FailureAccount(NamedTuple):
     """What the AGENT SAID caused it, `None` when it said nothing this reader
     knows. An operator reads it; nothing counts it."""
 
+    upstream: UpstreamFailureKind | None = None
+    """What kind of upstream fault this was, when an upstream service raised
+    it (#1593): whether resuming is enough or an operator must act. Read off
+    the exception's type, never its text. `None` for every other failure."""
+
 
 def failure_account(error: BaseException) -> FailureAccount:
     """What kind of failure `error` is, and what its phase said about it (#1357, #1372).
@@ -399,6 +408,10 @@ def failure_account(error: BaseException) -> FailureAccount:
     """
     if isinstance(error, PhaseReportedFailureError):
         return FailureAccount(error.failure_classification, error.reported_failure_reason)
+    # Still `PLATFORM` - the work was never judged - but now saying which
+    # platform failure: one a resume clears, or one only an operator can (#1593).
+    if isinstance(error, UpstreamFailureError):
+        return FailureAccount(FailureClassification.PLATFORM, None, error.upstream_kind)
     return FailureAccount(FailureClassification.PLATFORM, None)
 
 
