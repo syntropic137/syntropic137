@@ -289,7 +289,7 @@ async def test_a_tally_projection_with_no_database_refuses_instead_of_pretending
 
 async def _start_the_store(*, skip_auto_create: bool, conn: _Conn) -> None:
     """Run ``AgentEventStore.initialize`` against the double, nothing stubbed but the pool."""
-    import asyncpg
+    from syn_adapters import postgres_pool
 
     store = AgentEventStore(
         "postgresql://double/observability",
@@ -299,12 +299,12 @@ async def _start_the_store(*, skip_auto_create: bool, conn: _Conn) -> None:
     async def _create_pool(*_args: object, **_kwargs: object) -> _Pool:
         return _Pool(conn)
 
-    original = asyncpg.create_pool
-    asyncpg.create_pool = cast("Any", _create_pool)
+    original = postgres_pool.create_pool
+    postgres_pool.create_pool = cast("Any", _create_pool)
     try:
         await store.initialize()
     finally:
-        asyncpg.create_pool = cast("Any", original)
+        postgres_pool.create_pool = cast("Any", original)
 
 
 @pytest.mark.parametrize("skip_auto_create", [True, False])

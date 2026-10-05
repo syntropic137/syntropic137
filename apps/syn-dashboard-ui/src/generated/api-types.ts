@@ -2938,6 +2938,33 @@ export interface components {
          * @enum {string}
          */
         CoverageState: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+        /**
+         * CpuThrottling
+         * @description CPU throttling of the process answering /health, since its cgroup was created.
+         */
+        CpuThrottling: {
+            /**
+             * Status
+             * @description 'measured' when cgroup v2 cpu.stat reported throttling counters; 'unknown' on cgroup v1, outside a container, or with no CPU limit set. Unknown is not zero: the counters are null, not 0.
+             * @enum {string}
+             */
+            status: "measured" | "unknown";
+            /**
+             * Nr Periods
+             * @description Scheduling periods in which this cgroup was runnable.
+             */
+            nr_periods?: number | null;
+            /**
+             * Nr Throttled
+             * @description Periods in which the cgroup hit its CPU limit and was held back. nr_throttled / nr_periods is the share of time the control plane was starved.
+             */
+            nr_throttled?: number | null;
+            /**
+             * Throttled Usec
+             * @description Total time spent throttled, in microseconds.
+             */
+            throttled_usec?: number | null;
+        };
         /** CreateArtifactRequest */
         CreateArtifactRequest: {
             /** Workflow Id */
@@ -3088,6 +3115,40 @@ export interface components {
             status: string;
             /** Warnings */
             warnings?: string[];
+        };
+        /**
+         * DbPoolHealth
+         * @description One Postgres connection pool in this API process, at the moment of asking (#1583).
+         *
+         *     ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+         *     requests are queueing for a connection rather than for the database itself.
+         */
+        DbPoolHealth: {
+            /**
+             * Name
+             * @description What the pool serves, e.g. 'projections' or 'agent_events'.
+             */
+            name: string;
+            /**
+             * Size
+             * @description Connections currently open.
+             */
+            size: number;
+            /**
+             * Max Size
+             * @description Most connections the pool will open.
+             */
+            max_size: number;
+            /**
+             * In Use
+             * @description Connections checked out right now.
+             */
+            in_use: number;
+            /**
+             * Waiting
+             * @description Callers blocked waiting for a connection right now.
+             */
+            waiting: number;
         };
         /**
          * DegradedReason
@@ -3459,6 +3520,8 @@ export interface components {
             failure_classification: components["schemas"]["FailureClassification"];
             delegation_failure?: components["schemas"]["DelegationFailure"] | null;
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /** Quarantined Refs */
+            quarantined_refs?: components["schemas"]["QuarantinedRef"][];
             /**
              * Deliverable Produced
              * @default false
@@ -4509,6 +4572,13 @@ export interface components {
              * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
              */
             warnings?: string[] | null;
+            /**
+             * Db Pools
+             * @description Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode.
+             */
+            db_pools?: components["schemas"]["DbPoolHealth"][] | null;
+            /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
+            cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -5091,6 +5161,8 @@ export interface components {
             elapsed_seconds?: number | null;
             /** Timeout Seconds */
             timeout_seconds?: number | null;
+            /** Deadline */
+            deadline?: string | null;
         };
         /**
          * PhaseDefinitionResponse
@@ -5438,6 +5510,32 @@ export interface components {
              * @default false
              */
             stalled: boolean;
+        };
+        /**
+         * QuarantinedRef
+         * @description Where one repository's unpushed work was saved when its phase ended (#1547).
+         *
+         *     The structured half of what `describe_saved_work` writes as prose into
+         *     `error_message`: only work that LANDED, because a ref that does not exist
+         *     is nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the
+         *     PR the run was working on can be told, by a ProcessManager rather than by
+         *     whoever happened to read the error.
+         */
+        QuarantinedRef: {
+            /** Repository */
+            repository: string;
+            /** Branch */
+            branch: string;
+            /** Ref */
+            ref: string;
+            /** Commit */
+            commit: string | null;
+            /** Commit Count */
+            commit_count: number;
+            /** Pull Request */
+            pull_request?: number | null;
+            /** Diffstat */
+            diffstat?: string | null;
         };
         /**
          * RegisterClaudePluginRequest

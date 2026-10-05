@@ -15,13 +15,21 @@ from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        CancelExecutionCommand,
         CompleteExecutionCommand,
         FailExecutionCommand,
+        RecordCancelledWorkCommand,
         StartExecutionCommand,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         EvalBaselinePin,
         ReviewVerdict,
+    )
+    from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+        CancelledWorkQuarantinedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+        ExecutionCancelledEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
@@ -146,6 +154,7 @@ def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFai
         # clean exit for a phase nobody watched (#1319).
         exit_code=command.exit_code,
         failed_phase_artifact_ids=list(command.failed_phase_artifact_ids),
+        quarantined_refs=list(command.quarantined),
         # Spread into four named fields HERE, once, rather than carried as
         # a nested object: every sibling `failed_phase_*` field on this
         # event is flat, and the projection that reads them reads flat
@@ -171,4 +180,36 @@ def failed_event(command: FailExecutionCommand, workflow_id: str) -> WorkflowFai
         # Typed, so a client selects on reason and delegate rather than
         # parsing `error` (#894).
         delegation_failure=command.delegation_failure,
+    )
+
+
+def cancelled_work_event(
+    command: RecordCancelledWorkCommand, workflow_id: str
+) -> CancelledWorkQuarantinedEvent:
+    """The `CancelledWorkQuarantined` a cancelled run records for the refs its save landed."""
+    from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+        CancelledWorkQuarantinedEvent,
+    )
+
+    return CancelledWorkQuarantinedEvent(
+        workflow_id=workflow_id,
+        execution_id=command.aggregate_id,
+        phase_id=command.phase_id,
+        quarantined_at=datetime.now(UTC),
+        quarantined_refs=list(command.quarantined),
+    )
+
+
+def cancelled_event(command: CancelExecutionCommand, workflow_id: str) -> ExecutionCancelledEvent:
+    """The `ExecutionCancelled` a cancelled run records."""
+    from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+        ExecutionCancelledEvent,
+    )
+
+    return ExecutionCancelledEvent(
+        workflow_id=workflow_id,
+        execution_id=command.aggregate_id,
+        phase_id=command.phase_id,
+        cancelled_at=datetime.now(UTC),
+        reason=command.reason,
     )

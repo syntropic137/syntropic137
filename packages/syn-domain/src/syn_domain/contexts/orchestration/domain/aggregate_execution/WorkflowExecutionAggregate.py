@@ -30,6 +30,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     InterruptExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
+    RecordCancelledWorkCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
@@ -46,6 +47,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_s
     resumed_event_applies,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
+    cancelled_event,
+    cancelled_work_event,
     completed_event,
     failed_event,
     started_event,
@@ -111,6 +114,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
         ArtifactsCollectedForPhaseEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
+        CancelledWorkQuarantinedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
         ExecutionAttachedToEvalEvent,
@@ -209,6 +215,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
         self._reported_failure_reason: ReportedFailureReason | None = None
         self._cancel_reason: str | None = None
+        #: Whether this cancel's landed work is already on the stream (#1547).
+        self._cancelled_work_recorded = False
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
         self._current_phase_workspace_id: str | None = None
@@ -702,22 +710,22 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("CancelExecutionCommand")
     def cancel_execution(self, command: CancelExecutionCommand) -> None:
         """Handle CancelExecutionCommand."""
-        from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
-            ExecutionCancelledEvent,
-        )
-
         if not self.accepts_control(ControlSignalType.CANCEL):
             msg = f"Cannot cancel execution in status {self._status}"
             raise ValueError(msg)
 
-        event = ExecutionCancelledEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            cancelled_at=datetime.now(UTC),
-            reason=command.reason,
-        )
-        self._apply(event)
+        self._apply(cancelled_event(command, self._workflow_id or ""))
+
+    @command_handler("RecordCancelledWorkCommand")
+    def record_cancelled_work(self, command: RecordCancelledWorkCommand) -> None:
+        """Record what a cancelled phase's save landed, as ONE fact for the PR (#1547).
+
+        No event when nothing landed, or when a recovery re-appends work already recorded."""
+        if self._status != ExecutionStatus.CANCELLED:
+            msg = f"Cannot record cancelled work in status {self._status}"
+            raise ValueError(msg)
+        if command.quarantined and not self._cancelled_work_recorded:
+            self._apply(cancelled_work_event(command, self._workflow_id or ""))
 
     @command_handler("AddExecutionTagsCommand")
     def add_tags(self, command: AddExecutionTagsCommand) -> None:
@@ -970,6 +978,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_at = evt(event, "cancelled_at")
         self._status = ExecutionStatus.CANCELLED
         self._cancel_reason = event.reason
+
+    @event_sourcing_handler("CancelledWorkQuarantined")
+    def on_cancelled_work_quarantined(self, _event: CancelledWorkQuarantinedEvent) -> None:
+        """Apply CancelledWorkQuarantinedEvent. A fact for the PR, recorded once."""
+        self._cancelled_work_recorded = True
 
     @event_sourcing_handler("ExecutionTagsAdded")
     def on_execution_tags_added(self, event: ExecutionTagsAddedEvent) -> None:

@@ -689,6 +689,14 @@ class QuarantinedWork:
     #: record AND an unrecoverable one, because the patch it carries is the
     #: only copy of those changes when the second push fails too.
     dropped: DroppedWorkflows | None = None
+    #: The commit ``pushed_ref`` was pushed at (#1547), so a reviewer can be
+    #: told exactly what to fetch. None when nothing landed; when the
+    #: workflow-safe rescue (#1437) landed, the rescue commit it pushed.
+    commit: str | None = None
+    #: What ``commit`` changes against the newest commit a remote had, as
+    #: ``git diff --stat`` prints it (#1547). None when nothing landed or it
+    #: could not be read inside its bound.
+    diffstat: str | None = None
 
     def __post_init__(self) -> None:
         if (self.pushed_ref is None) == (self.push_error is None):

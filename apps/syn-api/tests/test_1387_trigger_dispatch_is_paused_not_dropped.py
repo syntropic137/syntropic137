@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pytest
 from event_sourcing.core.event import EventEnvelope, EventMetadata
@@ -37,6 +38,9 @@ from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    WorkflowExecutionResult,
 )
 
 pytestmark = pytest.mark.unit
@@ -78,12 +82,21 @@ class _RecordingHandler:
     async def validate_stored_declarations(self, _workflow_id: str) -> None:
         return None
 
-    async def handle(self, command: object, *, admitted: AdmissionTicket | None = None) -> None:
+    async def handle(
+        self, command: object, *, admitted: AdmissionTicket | None = None
+    ) -> WorkflowExecutionResult:
         self.admitted.append(command)
         # The real handler reaches `journal.open()` through the processor and
         # the lease ends there (#1387); this double stands in for that.
         if admitted is not None:
             admitted.mark_visible()
+        # The dispatcher reads the result it is given (#1547), as it must.
+        return WorkflowExecutionResult(
+            workflow_id="wf",
+            execution_id="exec",
+            status="completed",
+            started_at=datetime(2026, 10, 5, tzinfo=UTC),
+        )
 
 
 class _Fixture:

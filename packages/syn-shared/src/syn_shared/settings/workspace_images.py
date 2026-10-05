@@ -506,16 +506,44 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  Previous pins, for the record: claude-cli 12a38b8a,
 #                  omni-agent d9395a2e, toolchain 16132cce, all from
 #                  agentic-workspace 7afde6b6 (v0.3.0).
+#
+#                  Previous pins, for the record: claude-cli 974979c9,
+#                  omni-agent e151bb91, toolchain 2f41b47c, all from
+#                  agentic-workspace 5ddd1074 (release PR #29).
+# AGENTIC-WORKSPACE BROWSER QA, 2026-10-04 (#1028). Taken from release-branch
+# run 37247289124 ("Release Workspace Images", push to release, success) of
+# agentic-workspace 121a9742 (release PR #35), the commit lib/agentic-workspace
+# pins. Re-verified here rather than trusted: `docker buildx imagetools
+# inspect --format '{{.Manifest.Digest}}'` of each manifest-version tag and
+# full commit tag returns exactly the INDEX digest below (OCI index, amd64 +
+# arm64), every image carries agentic.image.channel=release and revision
+# 121a9742, and `cosign verify` (v3.1.3) passes for each against the
+# release-images.yml@refs/heads/release identity with the GitHub Actions OIDC
+# issuer. The repo label stays agentic.repo.version=0.3.0. This release carries
+# AW #33: an offline headless Chromium (Playwright 1.63.0 CLI exact-pinned,
+# --only-shell headless shell revision 1243 + ffmpeg 1011, per-arch archives
+# sha256-verified before unpacking, explicit ~40 MiB apt list instead of
+# --with-deps) baked root-owned and read-only at
+# PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright, so an agent (uid 1000) can run
+# `npx --no-install playwright screenshot` with no network. No exporter,
+# session-store or harness CLI change (AW diff 5ddd1074..121a9742 touches only
+# the claude-cli / omni-agent Dockerfiles, the three manifests, the images
+# README and tests/integration/test_browser_qa.py).
+#
+# omni-agent       omni-agent manifest 1.14.0.
+# toolchain        toolchain manifest 1.5.0, built FROM omni dadf3288 in the
+#                  same run (label org.opencontainers.image.base.digest).
+# claude-cli       claude-cli manifest 2.2.0.
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:974979c99a8f98fcff491b466356ed31031ab31dd5f885aa8938eec831c673f5"
+            "sha256:e57e62576e42ef7daa1ec007b88d1c6d3437c860db871e91e8b05608f362c48a"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:e151bb91e93a6972879729d80261999c575d4b135ba44f3012c09566479f8670"
+            "sha256:dadf32880bae90f1a1155276606c169d5b1b3bf0000932afe8857836e836e7d3"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:2f41b47c35db1707458637e6bc19325e12a3b8daf0c8cda386c25cc772a8c15c"
+            "sha256:41d85bdb8d623b6005898f0f1595dc0ee3ff48bc02257eedeabcaee060e3ba5d"
         ),
     }
 )
@@ -646,4 +674,5 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8",  # f1647f93
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:e38b1a45b14e7b58040d7664a83e9f53191f24d9ea92462b4eeee829d3ad65f9",  # 70ca5fae
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:16132cce4470d9375dc2421780915e2d68ccaffb118a4479689e34f8cd20cd44",  # 546433c6
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:2f41b47c35db1707458637e6bc19325e12a3b8daf0c8cda386c25cc772a8c15c",  # 6fa4f281
 )
