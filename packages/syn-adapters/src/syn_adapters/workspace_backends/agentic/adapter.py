@@ -39,6 +39,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # raised/imported without depending on this Docker-specific module. Existing
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
+from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
 from syn_adapters.workspace_backends.host_security import host_security_failure
 from syn_adapters.workspace_backends.image_verification import verify_image_async
@@ -58,6 +59,7 @@ if TYPE_CHECKING:
         ExecutionResult,
         IsolationConfig,
         IsolationHandle,
+        WorkspaceUsage,
     )
     from syn_shared.settings.session_store import SessionStoreSettings
 
@@ -338,19 +340,27 @@ class AgenticIsolationAdapter:
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
         )
 
-    async def destroy(self, handle: IsolationHandle) -> None:
+    async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:
         """Destroy an isolated workspace.
 
         Args:
             handle: Handle from create()
+
+        Returns:
+            What the workspace consumed, from the provider's teardown report,
+            or None when the provider reported nothing.
         """
         workspace = self._workspaces.pop(handle.isolation_id, None)
         if workspace is None:
             logger.warning("Workspace not found: %s", handle.isolation_id)
-            return
+            return None
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
-        await self._provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        # `object`: the pinned provider returns None today and a
+        # `TeardownReport` once agentic-workspace ships it; the Protocol in
+        # `teardown_usage` is the contract, not the provider's annotation.
+        report: object = await self._provider.destroy(workspace)  # type: ignore[arg-type,func-returns-value]  # Workspace vs AgenticWorkspace adapter boundary
+        return usage_from_report(report)
 
     async def execute(
         self,
