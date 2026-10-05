@@ -43,6 +43,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    WorkflowExecutionResult,
+)
 from syn_domain.contexts.orchestration.slices.start_resume import ResumeStartProcessManager
 
 pytestmark = pytest.mark.unit
@@ -109,10 +112,19 @@ class _Handlers:
     async def validate_stored_declarations(self, _workflow_id: str) -> None:
         return None
 
-    async def handle(self, command: object, *, admitted: AdmissionTicket | None = None) -> None:
+    async def handle(
+        self, command: object, *, admitted: AdmissionTicket | None = None
+    ) -> WorkflowExecutionResult:
         self.executions.append(getattr(command, "execution_id", "") or "")
         if admitted is not None:
             admitted.mark_visible()
+        # The dispatcher reads the result it is given (#1547).
+        return WorkflowExecutionResult(
+            workflow_id="wf",
+            execution_id=getattr(command, "execution_id", "") or "",
+            status="completed",
+            started_at=datetime(2026, 10, 5, tzinfo=UTC),
+        )
 
     async def validate(self, _parent_execution_id: str) -> None:
         return None
