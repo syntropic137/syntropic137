@@ -13,8 +13,9 @@ from syn_domain.contexts.orchestration import WorkflowDefinition
 from syn_perf.loadtest import (
     HEAD_SHA_LINE,
     GatesWorkload,
+    MarkPullRequestReady,
     NoWorkload,
-    OpenPullRequest,
+    OpenDraftPullRequest,
     PushBranch,
     ReportOnly,
     ScriptedAgentProfile,
@@ -24,27 +25,21 @@ from syn_perf.loadtest import (
     VerifyRemoteBranch,
     head_sha_handed_over,
 )
+from syn_perf.loadtest.implement_v3_artifacts import IMPLEMENT_V3_ARTIFACTS
 
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
 _WORKFLOW = _REPO / "workflows/sdlc/implement-v3/workflow.yaml"
-_AFTER_PREMISE = [
-    "implement",
-    "verify",
-    "fix",
-    "reverify",
-    "fix_2",
-    "reverify_2",
-    "fix_3",
-    "reverify_3",
-    "finalize_pr",
-]
+_PHASES = [p.id for p in WorkflowDefinition.from_file(_WORKFLOW).phases]
+"""The workflow's phase ids in order, read from the YAML rather than listed."""
+_AFTER_PREMISE = _PHASES[1:]
 """Every phase that names the head it hands over, in workflow order."""
 _SCHEMA = _REPO / "packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.schema.json"
 _FIXTURE = "syntropic137/loadtest-fixture"
 _HEAD = "3b7f2bd49a4609f24a516bb4617aadbc1edf751e"
 _PUSHED_OVER = "0f0e0d0c0b0a09080706050403020100ffeeddcc"
+_PR_URL = f"https://github.com/{_FIXTURE}/pull/4217"
 
 
 @pytest.fixture(scope="module")
@@ -87,7 +82,7 @@ def test_side_effects_follow_the_implement_v3_phase_contracts(
 
     assert kinds == {
         "premise": ReportOnly,
-        "implement": PushBranch,
+        "implement": OpenDraftPullRequest,
         "verify": ReportOnly,
         "fix": PushBranch,
         "reverify": ReportOnly,
@@ -95,8 +90,31 @@ def test_side_effects_follow_the_implement_v3_phase_contracts(
         "reverify_2": ReportOnly,
         "fix_3": PushBranch,
         "reverify_3": ReportOnly,
-        "finalize_pr": OpenPullRequest,
+        "finalize_pr": MarkPullRequestReady,
     }
+
+
+def test_the_stubs_cover_exactly_the_workflows_phases(workflow: WorkflowDefinition) -> None:
+    """A phase added to, renamed in or removed from the workflow fails here first."""
+    assert list(IMPLEMENT_V3_ARTIFACTS) == [p.id for p in workflow.phases]
+    assert _AFTER_PREMISE[0] == "implement"
+    assert _AFTER_PREMISE[-1] == "finalize_pr"
+
+
+def test_a_stub_for_a_phase_the_workflow_no_longer_has_is_refused(
+    workflow: WorkflowDefinition,
+) -> None:
+    artifacts = {**IMPLEMENT_V3_ARTIFACTS, "fix_4": "Round: 4 of 3"}
+
+    with pytest.raises(ValueError, match=r"'extra': \['fix_4'\]"):
+        ScriptedAgentProfile.for_workflow(
+            workflow,
+            tier="node",
+            fixture_repo=_FIXTURE,
+            streams=_streams(workflow),
+            workload=NoWorkload(),
+            artifacts=artifacts,
+        )
 
 
 def test_side_effects_track_the_workflow_flags_not_the_phase_ids(
@@ -112,13 +130,31 @@ def test_side_effects_track_the_workflow_flags_not_the_phase_ids(
     assert isinstance(_profile(changed, "node").phases["implement"].side_effect, ReportOnly)
 
 
-def test_platform_tier_checks_the_branch_instead_of_opening_a_pr(
+def test_the_draft_is_opened_by_the_first_pushing_phase_whatever_its_id(
+    workflow: WorkflowDefinition,
+) -> None:
+    """Stop implement delivering, and the PR moves to the next phase that pushes."""
+    phases = [
+        p.model_copy(update={"delivers_repo_changes": False}) if p.id == "implement" else p
+        for p in workflow.phases
+    ]
+    profile = _profile(workflow.model_copy(update={"phases": phases}), "node")
+
+    assert isinstance(profile.phases["fix"].side_effect, OpenDraftPullRequest)
+    assert isinstance(profile.phases["fix_2"].side_effect, PushBranch)
+
+
+def test_platform_tier_checks_the_branch_instead_of_touching_a_pr(
     workflow: WorkflowDefinition,
 ) -> None:
     profile = _profile(workflow, "platform")
 
+    assert isinstance(profile.phases["implement"].side_effect, PushBranch)
     assert isinstance(profile.phases["finalize_pr"].side_effect, VerifyRemoteBranch)
-    assert not any(isinstance(p.side_effect, OpenPullRequest) for p in profile.phases.values())
+    assert not any(
+        isinstance(p.side_effect, OpenDraftPullRequest | MarkPullRequestReady)
+        for p in profile.phases.values()
+    )
 
 
 def test_gates_run_where_there_is_a_tree_and_nowhere_else(workflow: WorkflowDefinition) -> None:
@@ -197,13 +233,34 @@ def test_the_fixture_is_never_this_repository(workflow: WorkflowDefinition, repo
         )
 
 
-def test_a_hand_written_platform_profile_cannot_open_prs(workflow: WorkflowDefinition) -> None:
+def test_a_hand_written_platform_profile_cannot_touch_prs(workflow: WorkflowDefinition) -> None:
     payload = json.loads(_profile(workflow, "node").model_dump_json())
     payload["tier"] = "platform"
 
     with pytest.raises(
-        ValidationError, match=r"must not open pull requests \(phases \['finalize_pr'\]\)"
+        ValidationError,
+        match=r"must not touch pull requests \(phases \['finalize_pr', 'implement'\]\)",
     ):
+        ScriptedAgentProfile.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        pytest.param({"implement": {"kind": "push_branch"}}, id="ready-with-no-draft"),
+        pytest.param({"fix": {"kind": "open_draft_pull_request"}}, id="two-drafts"),
+        pytest.param({"premise": {"kind": "mark_pull_request_ready"}}, id="ready-before-draft"),
+    ],
+)
+def test_a_hand_written_node_profile_must_open_the_draft_before_marking_it_ready(
+    workflow: WorkflowDefinition, edit: dict[str, dict[str, str]]
+) -> None:
+    payload = json.loads(_profile(workflow, "node").model_dump_json())
+    for phase_id, side_effect in edit.items():
+        payload["phases"][phase_id]["side_effect"] = side_effect
+        payload["phases"][phase_id]["workload"] = {"kind": "none"}
+
+    with pytest.raises(ValidationError, match="exactly one phase opens the draft"):
         ScriptedAgentProfile.model_validate(payload)
 
 
@@ -263,14 +320,56 @@ def test_an_artifact_naming_a_field_the_stub_cannot_fill_is_refused() -> None:
 
 def test_rendered_artifacts_name_the_execution_and_its_branch(workflow: WorkflowDefinition) -> None:
     profile = _profile(workflow, "node")
-    rendered = {pid: profile.render_artifact(pid, "exec-7f3a", _HEAD) for pid in profile.phases}
+    rendered = {
+        pid: profile.render_artifact(pid, "exec-7f3a", _HEAD, _PR_URL) for pid in profile.phases
+    }
 
     assert all("exec-7f3a" in text and "{" not in text for text in rendered.values())
     for pid in _AFTER_PREMISE:
         assert "`loadtest/exec-7f3a`" in rendered[pid], pid
     assert rendered["reverify"].splitlines()[0] == "CERTIFIED"
-    assert rendered["finalize_pr"].splitlines()[0] == "READY"
+    assert rendered["finalize_pr"].splitlines()[:2] == ["READY", "Repair rounds: 1 of 3"]
     assert "## 1. Verdict: Confirmed" in rendered["premise"]
+
+
+def test_finalize_pr_marks_ready_the_draft_implement_recorded(
+    workflow: WorkflowDefinition,
+) -> None:
+    """implement records the draft's number and URL; finalize_pr names the same one."""
+    profile = _profile(workflow, "node")
+
+    implemented = profile.render_artifact("implement", "exec-7f3a", _HEAD, _PR_URL)
+    finalized = profile.render_artifact("finalize_pr", "exec-7f3a", _HEAD, _PR_URL)
+
+    assert f"#4217 {_PR_URL}" in implemented
+    assert f"PR: #4217 {_PR_URL}" in finalized.splitlines()
+
+
+@pytest.mark.parametrize(
+    "pr_url",
+    [
+        None,
+        "https://github.com/syntropic137/syntropic137/pull/4217",
+        f"https://github.com/{_FIXTURE}/pull/0",
+        f"https://github.com/{_FIXTURE}/issues/4217",
+    ],
+)
+@pytest.mark.parametrize("phase_id", ["implement", "finalize_pr"])
+def test_a_node_artifact_cannot_name_a_pr_off_the_fixture(
+    workflow: WorkflowDefinition, phase_id: str, pr_url: str | None
+) -> None:
+    with pytest.raises(ValueError, match=f"phase {phase_id} artifact names the pull request"):
+        _profile(workflow, "node").render_artifact(phase_id, "exec-7f3a", _HEAD, pr_url)
+
+
+def test_a_platform_artifact_says_no_pr_was_opened(workflow: WorkflowDefinition) -> None:
+    profile = _profile(workflow, "platform")
+
+    finalized = profile.render_artifact("finalize_pr", "exec-7f3a", _HEAD)
+
+    assert "PR: none (the platform tier opens no pull request)" in finalized.splitlines()
+    with pytest.raises(ValueError, match="platform tier opens no pull request"):
+        profile.render_artifact("implement", "exec-7f3a", _HEAD, _PR_URL)
 
 
 @pytest.mark.parametrize(
@@ -295,11 +394,16 @@ def test_every_pushing_phase_reports_the_file_its_side_effect_commits(
 ) -> None:
     """``PushBranch`` commits ``loadtest/<phase_id>.txt``; the report must name that file."""
     profile = _profile(workflow, "node")
-    pushing = [pid for pid, p in profile.phases.items() if isinstance(p.side_effect, PushBranch)]
+    pushing = [
+        pid
+        for pid, p in profile.phases.items()
+        if isinstance(p.side_effect, PushBranch | OpenDraftPullRequest)
+    ]
 
     assert pushing == ["implement", "fix", "fix_2", "fix_3"]
     for pid in pushing:
-        assert f"`loadtest/{pid}.txt`" in profile.render_artifact(pid, "exec-7f3a", _HEAD), pid
+        rendered = profile.render_artifact(pid, "exec-7f3a", _HEAD, _PR_URL)
+        assert f"`loadtest/{pid}.txt`" in rendered, pid
 
 
 # --- the schema agentic-workspace builds the stub image against -----------
@@ -334,19 +438,19 @@ def test_the_next_phase_receives_the_full_head_the_previous_one_wrote(
     workflow: WorkflowDefinition, writer: str, reader: str
 ) -> None:
     profile = _profile(workflow, "node")
-    handed = profile.render_artifact(writer, "exec-7f3a", _HEAD)
+    handed = profile.render_artifact(writer, "exec-7f3a", _HEAD, _PR_URL)
 
     head = head_sha_handed_over(handed, branch_head=_HEAD)
 
     assert head == _HEAD
-    assert f"`{_HEAD}`" in profile.render_artifact(reader, "exec-7f3a", head)
+    assert f"`{_HEAD}`" in profile.render_artifact(reader, "exec-7f3a", head, _PR_URL)
 
 
 @pytest.mark.parametrize(("writer", "reader"), _HANDOFFS)
 def test_a_branch_pushed_over_after_the_handoff_is_refused(
     workflow: WorkflowDefinition, writer: str, reader: str
 ) -> None:
-    handed = _profile(workflow, "node").render_artifact(writer, "exec-7f3a", _HEAD)
+    handed = _profile(workflow, "node").render_artifact(writer, "exec-7f3a", _HEAD, _PR_URL)
 
     with pytest.raises(ValueError, match=f"handed over {_HEAD} but the branch is at"):
         head_sha_handed_over(handed, branch_head=_PUSHED_OVER)
@@ -366,7 +470,7 @@ def test_a_phase_after_premise_cannot_write_its_artifact_without_a_full_head(
     workflow: WorkflowDefinition, phase_id: str, head_sha: str | None
 ) -> None:
     with pytest.raises(ValueError, match=f"phase {phase_id} artifact names the head"):
-        _profile(workflow, "node").render_artifact(phase_id, "exec-7f3a", head_sha)
+        _profile(workflow, "node").render_artifact(phase_id, "exec-7f3a", head_sha, _PR_URL)
 
 
 # --- every value the model accepts survives the env var -------------------

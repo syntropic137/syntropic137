@@ -14,8 +14,10 @@ validated, so neither can be undone after the fact):
 
 - **Side effects follow the workflow, not a list.** ``for_workflow`` derives
   each phase's side effect from the same ``WorkflowDefinition`` fields the
-  real execution path reads (``delivers_repo_changes``, ``clone_repos``), and
-  checks each recording against the phase's agent provider. A phase that
+  real execution path reads (``delivers_repo_changes``, ``clone_repos``) and
+  the phase order, and checks each recording against the phase's agent
+  provider. On the node tier that reproduces the real PR lifecycle: the first
+  pushing phase opens a draft, the phase with no tree marks it ready. A phase that
   changes its contract changes its stub with it.
 - **The fixture repository is never this one.** Implement and fix push a
   branch per execution; at 100 executions that must not land on
@@ -32,6 +34,7 @@ stack's workspace image (plan 6.3).
 
 from __future__ import annotations
 
+import re
 import string
 from collections.abc import Mapping  # noqa: TC003 - pydantic resolves the field type at runtime
 from types import MappingProxyType
@@ -67,7 +70,10 @@ _FORBIDDEN_FIXTURE_REPOS: Final = frozenset({"syntropic137/syntropic137"})
 #: The only fields an artifact template may name. Anything else is a typo the
 #: stub could not fill, so it is refused when the profile is built rather than
 #: when the hundredth workspace tries to render it.
-_ARTIFACT_FIELDS: Final = frozenset({"execution_id", "branch", "head_sha"})
+_ARTIFACT_FIELDS: Final = frozenset({"execution_id", "branch", "head_sha", "pull_request"})
+
+_NO_PULL_REQUEST: Final = "none (the platform tier opens no pull request)"
+"""What ``{pull_request}`` renders as on the platform tier."""
 
 # Same shape the workflow parser accepts for a phase id
 # (``PHASE_ID_PATTERN`` in syn_domain's workflow_definition).
@@ -153,20 +159,33 @@ class PushBranch(_Contract):
     kind: Literal["push_branch"] = "push_branch"
 
 
-class OpenPullRequest(_Contract):
-    """``gh pr create`` from the execution's branch on the fixture repo.
+class OpenDraftPullRequest(_Contract):
+    """Push exactly as ``PushBranch`` does, then ``gh pr create --draft`` from it.
 
-    Node tier only; the driver closes it afterwards. The phase has no
-    working tree (``clone_repos: false``).
+    Node tier only, and only the first phase that delivers repository changes:
+    the real implement phase opens a draft on its first push and records its
+    number and URL, and every later pushing phase lands on that same PR. The
+    driver closes it afterwards.
     """
 
-    kind: Literal["open_pull_request"] = "open_pull_request"
+    kind: Literal["open_draft_pull_request"] = "open_draft_pull_request"
+
+
+class MarkPullRequestReady(_Contract):
+    """``gh pr ready`` the draft an earlier phase opened on the fixture repo.
+
+    Node tier only. The real finalize_pr phase is the only one allowed to mark
+    the PR ready (#1197). The phase has no working tree (``clone_repos:
+    false``).
+    """
+
+    kind: Literal["mark_pull_request_ready"] = "mark_pull_request_ready"
 
 
 class VerifyRemoteBranch(_Contract):
     """``git ls-remote`` the execution's branch and fail if it is absent.
 
-    The platform-tier stand-in for opening a PR, so 100 executions do not
+    The platform-tier stand-in for the PR lifecycle, so 100 executions do not
     open 100 PRs. The phase has no working tree (``clone_repos: false``).
     """
 
@@ -174,11 +193,12 @@ class VerifyRemoteBranch(_Contract):
 
 
 SideEffect = Annotated[
-    ReportOnly | PushBranch | OpenPullRequest | VerifyRemoteBranch,
+    ReportOnly | PushBranch | OpenDraftPullRequest | MarkPullRequestReady | VerifyRemoteBranch,
     Field(discriminator="kind"),
 ]
 
-_NO_WORKING_TREE: Final = (OpenPullRequest, VerifyRemoteBranch)
+_NO_WORKING_TREE: Final = (MarkPullRequestReady, VerifyRemoteBranch)
+_TOUCHES_A_PR: Final = (OpenDraftPullRequest, MarkPullRequestReady)
 
 
 class ScriptedPhase(_Contract):
@@ -189,8 +209,8 @@ class ScriptedPhase(_Contract):
     side_effect: SideEffect
     artifact: str = Field(min_length=1)
     """Markdown written to ``artifacts/output/<phase_id>.md``. May name
-    ``{execution_id}``, ``{branch}`` and ``{head_sha}``; literal braces are
-    doubled."""
+    ``{execution_id}``, ``{branch}``, ``{head_sha}`` and ``{pull_request}``;
+    literal braces are doubled."""
 
     @model_validator(mode="after")
     def _consistent(self) -> ScriptedPhase:
@@ -234,25 +254,37 @@ class ScriptedAgentProfile(_Contract):
         if self.fixture_repo.lower() in _FORBIDDEN_FIXTURE_REPOS:
             msg = f"{self.fixture_repo} cannot be the load-test fixture repository"
             raise ValueError(msg)
+        side_effects = [phase.side_effect for phase in self.phases.values()]
         if self.tier == "platform":
-            opening = sorted(
+            touching = sorted(
                 phase_id
                 for phase_id, phase in self.phases.items()
-                if isinstance(phase.side_effect, OpenPullRequest)
+                if isinstance(phase.side_effect, _TOUCHES_A_PR)
             )
-            if opening:
+            if touching:
                 msg = (
-                    f"platform tier must not open pull requests (phases {opening}); "
-                    "use verify_remote_branch"
+                    f"platform tier must not touch pull requests (phases {touching}); "
+                    "use push_branch and verify_remote_branch"
                 )
                 raise ValueError(msg)
+        opened = [i for i, e in enumerate(side_effects) if isinstance(e, OpenDraftPullRequest)]
+        readied = [i for i, e in enumerate(side_effects) if isinstance(e, MarkPullRequestReady)]
+        if len(opened) > 1 or (readied and not (opened and opened[0] < readied[0])):
+            msg = "exactly one phase opens the draft pull request, before any phase marks it ready"
+            raise ValueError(msg)
         return self
 
     @staticmethod
     def branch(execution_id: str) -> str:
         return f"{LOADTEST_BRANCH_PREFIX}{execution_id}"
 
-    def render_artifact(self, phase_id: str, execution_id: str, head_sha: str | None = None) -> str:
+    def render_artifact(
+        self,
+        phase_id: str,
+        execution_id: str,
+        head_sha: str | None = None,
+        pr_url: str | None = None,
+    ) -> str:
         """The exact artifact text the stub writes for this phase and execution.
 
         ``head_sha`` is the full commit the execution's branch is at when the
@@ -260,16 +292,41 @@ class ScriptedAgentProfile(_Contract):
         (implement, fix) or checking out (verify, reverify), the ``git
         ls-remote`` result where there is no tree (finalize_pr). A template
         that names it will not render without a full 40-character SHA.
+
+        ``pr_url`` is the draft the node tier opened on the fixture repository;
+        ``{pull_request}`` renders as its number and URL. The platform tier
+        opens none, so it takes no URL and says so.
         """
         template = self.phases[phase_id].artifact
-        if "head_sha" in _named_fields(template) and not (
-            head_sha and FULL_SHA.fullmatch(head_sha)
-        ):
+        named = _named_fields(template)
+        if "head_sha" in named and not (head_sha and FULL_SHA.fullmatch(head_sha)):
             msg = f"phase {phase_id} artifact names the head; {head_sha!r} is not a full SHA"
             raise ValueError(msg)
         return template.format(
-            execution_id=execution_id, branch=self.branch(execution_id), head_sha=head_sha
+            execution_id=execution_id,
+            branch=self.branch(execution_id),
+            head_sha=head_sha,
+            pull_request=self._pull_request(phase_id, pr_url) if "pull_request" in named else None,
         )
+
+    def _pull_request(self, phase_id: str, pr_url: str | None) -> str:
+        if self.tier == "platform":
+            if pr_url is not None:
+                msg = f"phase {phase_id}: the platform tier opens no pull request, got {pr_url}"
+                raise ValueError(msg)
+            return _NO_PULL_REQUEST
+        on_fixture = re.fullmatch(
+            rf"https://github\.com/{re.escape(self.fixture_repo)}/pull/([1-9][0-9]*)",
+            pr_url or "",
+            re.IGNORECASE,
+        )
+        if not on_fixture:
+            msg = (
+                f"phase {phase_id} artifact names the pull request; {pr_url!r} is not "
+                f"a pull request on {self.fixture_repo}"
+            )
+            raise ValueError(msg)
+        return f"#{on_fixture[1]} {pr_url}"
 
     def to_env(self) -> dict[str, str]:
         return {self.ENV: self.model_dump_json()}
@@ -296,27 +353,33 @@ class ScriptedAgentProfile(_Contract):
     ) -> ScriptedAgentProfile:
         """Build the profile for every phase of ``workflow``.
 
-        The side effect is the real phase's contract: no working tree means
-        the phase delivers through the remote (a PR on the node tier, a branch
-        check on the platform tier); ``delivers_repo_changes`` means a pushed
-        branch; anything else leaves the tree clean. ``workload`` applies to
-        every phase that has a tree to work in. Each stream must replay the
-        harness the phase actually runs, and every phase needs both a stream
-        and an artifact - a missing one is an error, never a default.
+        The side effect is the real phase's contract: ``delivers_repo_changes``
+        means a pushed branch, and on the node tier the first such phase also
+        opens the draft PR; no working tree means the phase finishes through
+        the remote (marking that PR ready on the node tier, checking the branch
+        on the platform tier); anything else leaves the tree clean.
+        ``workload`` applies to every phase that has a tree to work in. Each
+        stream must replay the harness the phase actually runs, and the
+        streams and artifacts must cover exactly the workflow's phases - a
+        missing one is an error, never a default, and a leftover one is a stub
+        for a phase the workflow no longer has.
         """
-        missing = {
-            "streams": sorted(p.id for p in workflow.phases if p.id not in streams),
-            "artifacts": sorted(p.id for p in workflow.phases if p.id not in artifacts),
+        ids = {p.id for p in workflow.phases}
+        mismatched = {
+            name: {"missing": sorted(ids - set(given)), "extra": sorted(set(given) - ids)}
+            for name, given in (("streams", streams), ("artifacts", artifacts))
+            if set(given) != ids
         }
-        if any(missing.values()):
-            msg = f"workflow {workflow.id} phases without a stub: {missing}"
+        if mismatched:
+            msg = f"workflow {workflow.id} phases and stubs differ: {mismatched}"
             raise ValueError(msg)
 
+        first_push = next((p.id for p in workflow.phases if _pushes(p)), None)
         phases = {
             phase.id: ScriptedPhase(
                 stream=_stream_for(phase, streams[phase.id]),
                 workload=workload if phase.clone_repos else NoWorkload(),
-                side_effect=_side_effect_for(phase, tier),
+                side_effect=_side_effect_for(phase, tier, opens_the_pr=phase.id == first_push),
                 artifact=artifacts[phase.id],
             )
             for phase in workflow.phases
@@ -335,11 +398,16 @@ def _stream_for(phase: PhaseYamlDefinition, stream: ScriptedStream) -> ScriptedS
     return stream
 
 
+def _pushes(phase: PhaseYamlDefinition) -> bool:
+    return phase.clone_repos and phase.delivers_repo_changes
+
+
 def _side_effect_for(
-    phase: PhaseYamlDefinition, tier: Literal["platform", "node"]
-) -> ReportOnly | PushBranch | OpenPullRequest | VerifyRemoteBranch:
+    phase: PhaseYamlDefinition, tier: Literal["platform", "node"], *, opens_the_pr: bool
+) -> ReportOnly | PushBranch | OpenDraftPullRequest | MarkPullRequestReady | VerifyRemoteBranch:
+    node = tier == "node"
     if not phase.clone_repos:
-        return OpenPullRequest() if tier == "node" else VerifyRemoteBranch()
-    if phase.delivers_repo_changes:
-        return PushBranch()
+        return MarkPullRequestReady() if node else VerifyRemoteBranch()
+    if _pushes(phase):
+        return OpenDraftPullRequest() if node and opens_the_pr else PushBranch()
     return ReportOnly()

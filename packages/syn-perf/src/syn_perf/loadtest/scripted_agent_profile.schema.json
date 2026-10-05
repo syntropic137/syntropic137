@@ -14,6 +14,20 @@
       "title": "GatesWorkload",
       "type": "object"
     },
+    "MarkPullRequestReady": {
+      "additionalProperties": false,
+      "description": "``gh pr ready`` the draft an earlier phase opened on the fixture repo.\n\nNode tier only. The real finalize_pr phase is the only one allowed to mark\nthe PR ready (#1197). The phase has no working tree (``clone_repos:\nfalse``).",
+      "properties": {
+        "kind": {
+          "const": "mark_pull_request_ready",
+          "default": "mark_pull_request_ready",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "MarkPullRequestReady",
+      "type": "object"
+    },
     "NoWorkload": {
       "additionalProperties": false,
       "properties": {
@@ -27,18 +41,18 @@
       "title": "NoWorkload",
       "type": "object"
     },
-    "OpenPullRequest": {
+    "OpenDraftPullRequest": {
       "additionalProperties": false,
-      "description": "``gh pr create`` from the execution's branch on the fixture repo.\n\nNode tier only; the driver closes it afterwards. The phase has no\nworking tree (``clone_repos: false``).",
+      "description": "Push exactly as ``PushBranch`` does, then ``gh pr create --draft`` from it.\n\nNode tier only, and only the first phase that delivers repository changes:\nthe real implement phase opens a draft on its first push and records its\nnumber and URL, and every later pushing phase lands on that same PR. The\ndriver closes it afterwards.",
       "properties": {
         "kind": {
-          "const": "open_pull_request",
-          "default": "open_pull_request",
+          "const": "open_draft_pull_request",
+          "default": "open_draft_pull_request",
           "title": "Kind",
           "type": "string"
         }
       },
-      "title": "OpenPullRequest",
+      "title": "OpenDraftPullRequest",
       "type": "object"
     },
     "PushBranch": {
@@ -81,7 +95,8 @@
         "side_effect": {
           "discriminator": {
             "mapping": {
-              "open_pull_request": "#/$defs/OpenPullRequest",
+              "mark_pull_request_ready": "#/$defs/MarkPullRequestReady",
+              "open_draft_pull_request": "#/$defs/OpenDraftPullRequest",
               "push_branch": "#/$defs/PushBranch",
               "report_only": "#/$defs/ReportOnly",
               "verify_remote_branch": "#/$defs/VerifyRemoteBranch"
@@ -96,7 +111,10 @@
               "$ref": "#/$defs/PushBranch"
             },
             {
-              "$ref": "#/$defs/OpenPullRequest"
+              "$ref": "#/$defs/OpenDraftPullRequest"
+            },
+            {
+              "$ref": "#/$defs/MarkPullRequestReady"
             },
             {
               "$ref": "#/$defs/VerifyRemoteBranch"
@@ -212,7 +230,7 @@
     },
     "VerifyRemoteBranch": {
       "additionalProperties": false,
-      "description": "``git ls-remote`` the execution's branch and fail if it is absent.\n\nThe platform-tier stand-in for opening a PR, so 100 executions do not\nopen 100 PRs. The phase has no working tree (``clone_repos: false``).",
+      "description": "``git ls-remote`` the execution's branch and fail if it is absent.\n\nThe platform-tier stand-in for the PR lifecycle, so 100 executions do not\nopen 100 PRs. The phase has no working tree (``clone_repos: false``).",
       "properties": {
         "kind": {
           "const": "verify_remote_branch",
