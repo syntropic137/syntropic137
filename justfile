@@ -1141,16 +1141,19 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 # Fast: first the APS thresholds agents most often fail (max-loc-file,
 # max-cyclomatic) measured for Python without Rust or topology
 # (check-complexity-thresholds, seconds), then the static checks. No Rust and
-# no topology, so it finishes in under a minute. What `preflight-agent-fast` runs.
-_preflight_agent_fast_steps := "check-complexity-thresholds check-agent-docs check-docs-content check-ci-parity lint format-check check-no-public-ports check-compose check-test-debt check-env-example validate-domain-events check-plugin-schemas check-workflows check-openapi-drift check-untyped-dicts fitness-cross-context"
-# Slow: the full APS fitness-check (fitness-agent), the rest of
-# preflight-portable and the full `pytest ci/fitness` suite. fitness-agent needs
+# no topology, so it finishes in under a minute; the slowest static checks
+# (plugin schemas, workflows, openapi drift) wait for the slow half for the same
+# reason. What `preflight-agent-fast` runs.
+_preflight_agent_fast_steps := "check-complexity-thresholds check-agent-docs check-docs-content check-ci-parity lint format-check check-no-public-ports check-compose check-test-debt check-env-example validate-domain-events check-untyped-dicts fitness-cross-context"
+# Slow: those three static checks, the full APS fitness-check (fitness-agent),
+# the rest of preflight-portable and the full `pytest ci/fitness` suite.
+# fitness-agent needs
 # the Rust aps binary, so in the full gate `aps-prewarm` builds it in the
 # background from the first second and fitness-agent waits on that build's exit
 # status: on a cold workspace the build overlaps the fast steps.
 # test_ci_and_preflight_agree.py fails if fast + slow ever stops covering
 # preflight-portable, fitness-agent and fitness-invariants-agent.
-_preflight_agent_slow_steps := "fitness-agent typecheck check-test-markers fitness-invariants-agent"
+_preflight_agent_slow_steps := "check-plugin-schemas check-workflows check-openapi-drift fitness-agent typecheck check-test-markers fitness-invariants-agent"
 _preflight_agent_prewarm := "--prewarm aps-prewarm:fitness-agent"
 
 # Builds the aps binary (installing stable Rust if needed) and checks nothing:
