@@ -49,13 +49,20 @@ if TYPE_CHECKING:
 
 
 class EventsNotRecordedError(RuntimeError):
-    """The event store refused the write, so the events are NOT durable.
+    """The event store did not acknowledge the write, so the events may NOT be durable.
 
     THE ONE THING A CALLER ON A TEARDOWN PATH HAS TO KNOW (#1319). `append` is
     two steps - the store, then this run's local to-do list - and they fail for
-    opposite reasons. A store that rejected the write means the events do not
-    exist and nothing downstream will ever see them; a projection that blew up
-    afterwards means they DO exist and only the read model is behind.
+    opposite reasons. A save that was not acknowledged means the events cannot
+    be counted on and nothing downstream will see them projected; a projection
+    that blew up afterwards means they DO exist and only the read model is
+    behind.
+
+    Not acknowledged is not the same as not written. Only a
+    `ConcurrencyConflictError` cause proves the store wrote nothing; any other
+    cause, such as an `EventStoreError` from an RPC that failed after the store
+    committed, leaves it unknown, and a caller that must know reloads the
+    stream (ADR-072 D5).
 
     A failing phase must be reaped either way, because a container nobody
     removes is a leaked one - but only the first case has lost the account of
@@ -90,9 +97,10 @@ class ExecutionJournal:
         """Record whatever the aggregate has decided since it was last saved.
 
         Raises:
-            EventsNotRecordedError: the store rejected the write and the events
-                are not durable. ANY OTHER exception means they are - the
-                projection is the only thing that failed.
+            EventsNotRecordedError: the store did not acknowledge the write,
+                so the events may not be durable; `__cause__` is the
+                repository's exception. ANY OTHER exception means they are -
+                the projection is the only thing that failed.
 
         `open` deliberately does not wrap: its `StreamAlreadyExistsError` is a
         domain answer ("this run already started") that callers act on, not a

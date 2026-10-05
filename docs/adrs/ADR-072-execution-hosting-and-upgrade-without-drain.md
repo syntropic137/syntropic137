@@ -186,12 +186,18 @@ atomic one:
 1. **Append first.** Load the aggregate and append `WorkflowInterruptedEvent`
    through `ExecutionJournal.append`. If the stream already ends in a terminal
    event, the aggregate rejects the command and nothing is appended.
-   `append` reports every rejected store write the same way: it raises
-   `EventsNotRecordedError`, with the repository's exception as its
-   `__cause__`, and nothing was written. When that cause is a
-   `ConcurrencyConflictError`, another writer advanced the stream: reload and
-   decide again whether to append or only close. Any other cause leaves the
-   row `reaped`, and the next reconciliation turn retries from step 1.
+   `append` reports every save it did not see acknowledged the same way: it
+   raises `EventsNotRecordedError`, with the repository's exception as its
+   `__cause__`. Only one cause says what the store did. A
+   `ConcurrencyConflictError` means another writer advanced the stream, so
+   this append lost the version race and wrote nothing: reload and decide
+   again whether to append or only close. Any other cause, such as an
+   `EventStoreError` from an RPC that failed after `Append` was sent, reports
+   a lost acknowledgment, not an absent write: the store may have committed
+   the event before the response was lost, so the reconciler assumes neither.
+   It leaves the row `reaped`, and the next reconciliation turn reloads the
+   stream before deciding anything. A stream that is already terminal gets no
+   second interruption, only the row closure in step 2.
 2. **Then close the row** with `close_interrupted`, guarded on the row's
    current `lease_token`. Only this releases the slot.
 

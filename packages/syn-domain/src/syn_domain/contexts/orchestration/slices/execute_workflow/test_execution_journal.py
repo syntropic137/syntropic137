@@ -22,11 +22,15 @@ from pathlib import Path
 from typing import TypedDict
 
 import pytest
-from event_sourcing import ConcurrencyConflictError
+from event_sourcing import ConcurrencyConflictError, DomainEvent, EventEnvelope, EventStoreError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    InterruptExecutionCommand,
     StartExecutionCommand,
     StartPhaseCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutionStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     WorkflowExecutionAggregate,
@@ -251,3 +255,105 @@ def test_adr_072_d5_names_only_exceptions_the_code_raises() -> None:
     named = set(re.findall(r"`(\w+Error)`", section))
     assert {"EventsNotRecordedError", "ConcurrencyConflictError"} <= named
     assert named <= _defined_exception_names(), named - _defined_exception_names()
+
+
+class _CommitThenErrorRepository:
+    """A store that commits the append and then loses the response.
+
+    The gRPC client raises `EventStoreError` for any non-ABORTED RPC failure
+    after `Append` was sent, and the server may already have committed by then.
+    The stream is kept here so a reload sees what was really written.
+    """
+
+    def __init__(self) -> None:
+        self.stream: list[EventEnvelope[DomainEvent]] = []
+        self.lose_next_ack = False
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        self.stream.extend(aggregate.get_uncommitted_events())
+        aggregate.mark_events_as_committed()
+        if self.lose_next_ack:
+            self.lose_next_ack = False
+            raise EventStoreError("Failed to append events: connection reset")
+
+    async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
+        await self.save(aggregate)
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.rehydrate(list(self.stream))
+        return aggregate
+
+
+async def _interrupt_per_adr_072_d5(
+    repository: _CommitThenErrorRepository, journal: ExecutionJournal, lost: list[BaseException]
+) -> bool:
+    """One reconciliation turn of D5's step 1; True only when step 2 may close the row.
+
+    Reload and ask the aggregate to interrupt; a terminal stream refuses and
+    nothing is appended. On `EventsNotRecordedError` the row stays reaped and
+    the turn records the cause, assuming nothing about what the store did.
+    """
+    aggregate = await repository.get_by_id(EXECUTION_ID)
+    assert aggregate is not None
+    try:
+        aggregate._handle_command(  # pyright: ignore[reportPrivateUsage]
+            InterruptExecutionCommand(execution_id=EXECUTION_ID, phase_id="phase-a")
+        )
+    except ValueError:
+        pass
+    else:
+        try:
+            await journal.append(aggregate)
+        except EventsNotRecordedError as err:
+            assert err.__cause__ is not None
+            lost.append(err.__cause__)
+            return False
+    return aggregate.status is ExecutionStatus.INTERRUPTED
+
+
+@pytest.mark.unit
+async def test_a_lost_acknowledgment_is_not_proof_that_nothing_was_written() -> None:
+    """ADR-072 D5: reload after an unacknowledged save, never re-append blind.
+
+    The save commits and then reports an error. The wrapper is the same one a
+    refused write raises, but the interruption is already in the stream. The
+    next turn must find it there, append nothing, and only then free the slot.
+    """
+    repository = _CommitThenErrorRepository()
+    journal = ExecutionJournal(repository, _RecordingProjection([]))
+    await journal.open(_running_aggregate())
+    repository.lose_next_ack = True
+    lost: list[BaseException] = []
+
+    assert not await _interrupt_per_adr_072_d5(repository, journal, lost), (
+        "an unacknowledged save must not free the slot"
+    )
+    assert [type(cause) for cause in lost] == [EventStoreError]
+
+    may_close = await _interrupt_per_adr_072_d5(repository, journal, lost)
+
+    interruptions = [
+        e for e in repository.stream if type(e.event).__name__ == "WorkflowInterruptedEvent"
+    ]
+    assert len(interruptions) == 1, "the interruption was written once, before the ack was lost"
+    assert may_close, "the slot is freed once a reload shows the stream terminal"
+
+
+_NO_WRITE = re.compile(
+    r"nothing (?:was |is )?(?:written|appended)|wrote nothing|writes nothing|not durable"
+)
+
+
+@pytest.mark.unit
+def test_adr_072_d5_claims_no_write_only_for_a_version_conflict() -> None:
+    """Only a `ConcurrencyConflictError` cause proves the store wrote nothing.
+
+    D5 once said every `EventsNotRecordedError` meant nothing was written. An
+    RPC can fail after the store commits, and a reconciler that believed the
+    ADR would append a second interruption instead of reloading.
+    """
+    prose = " ".join(_adr_072_d5().split())
+    for sentence in re.split(r"(?<=\.)\s+", prose):
+        if "`EventsNotRecordedError`" in sentence and _NO_WRITE.search(sentence):
+            assert "`ConcurrencyConflictError`" in sentence, sentence
