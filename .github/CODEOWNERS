@@ -67,12 +67,10 @@
 # them, the gateway (auth, CSP, bind) and the tunnel ingress.
 /docker/docker-compose*.yaml                                                    @NeuralEmpowerment
 # Settings passthrough: GENERATED from the Settings classes into
-# docker/generated/api.env.yaml (deliberately not owned) and inlined into the
-# published compose, so a new setting changes no owned file. The generator and
-# its check are owned; the published file is generated from owned inputs and
-# `just check-compose` fails if it differs, so it is un-owned here (an entry
-# with no owner) for the same reason.
-/docker/docker-compose.syntropic137.yaml
+# docker/generated/api.env.yaml, deliberately not owned. The published compose
+# (matched above) inlines it and stays owned: its parity check runs from the
+# unowned justfile, so it is not an owned gate. Un-own it only once an owned
+# workflow step runs `generate_published_compose.py --check` directly.
 /ci/fitness/infrastructure/test_compose_env_forwarding.py                       @NeuralEmpowerment
 /docker/selfhost-entrypoint.sh                                                  @NeuralEmpowerment
 /scripts/no_public_ports.py                                                     @NeuralEmpowerment
