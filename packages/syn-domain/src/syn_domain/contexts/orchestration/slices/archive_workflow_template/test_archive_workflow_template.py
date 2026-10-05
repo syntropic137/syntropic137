@@ -80,6 +80,7 @@ class FakeExecutionSummary:
     """Minimal execution summary for testing."""
 
     status: str
+    workflow_execution_id: str = "exec-legacy"
 
 
 class InMemoryExecutionProjection:
@@ -94,6 +95,13 @@ class InMemoryExecutionProjection:
     def seed(self, workflow_id: str, statuses: list[str]) -> None:
         """Seed executions for a workflow."""
         self._executions[workflow_id] = [FakeExecutionSummary(status=s) for s in statuses]
+
+
+class NoExecutions:
+    """Execution lookup with no execution streams at all."""
+
+    async def get_by_id(self, aggregate_id: str) -> FakeExecutionSummary | None:
+        return None
 
 
 # === Aggregate Tests ===
@@ -160,7 +168,9 @@ class TestArchiveWorkflowTemplateHandler:
         repo.seed(_create_aggregate())
         projection = InMemoryExecutionProjection()
 
-        handler = ArchiveWorkflowTemplateHandler(repository=repo, execution_projection=projection)
+        handler = ArchiveWorkflowTemplateHandler(
+            repository=repo, execution_projection=projection, executions=NoExecutions()
+        )
         command = ArchiveWorkflowTemplateCommand(workflow_id="wf-test-123")
         result = await handler.handle(command)
 
@@ -175,7 +185,9 @@ class TestArchiveWorkflowTemplateHandler:
         projection = InMemoryExecutionProjection()
         projection.seed("wf-test-123", ["running"])
 
-        handler = ArchiveWorkflowTemplateHandler(repository=repo, execution_projection=projection)
+        handler = ArchiveWorkflowTemplateHandler(
+            repository=repo, execution_projection=projection, executions=NoExecutions()
+        )
         command = ArchiveWorkflowTemplateCommand(workflow_id="wf-test-123")
         result = await handler.handle(command)
 
@@ -191,7 +203,9 @@ class TestArchiveWorkflowTemplateHandler:
         projection = InMemoryExecutionProjection()
         projection.seed("wf-test-123", ["not_started"])
 
-        handler = ArchiveWorkflowTemplateHandler(repository=repo, execution_projection=projection)
+        handler = ArchiveWorkflowTemplateHandler(
+            repository=repo, execution_projection=projection, executions=NoExecutions()
+        )
         command = ArchiveWorkflowTemplateCommand(workflow_id="wf-test-123")
         result = await handler.handle(command)
 
@@ -206,7 +220,9 @@ class TestArchiveWorkflowTemplateHandler:
         projection = InMemoryExecutionProjection()
         projection.seed("wf-test-123", ["completed", "failed", "cancelled"])
 
-        handler = ArchiveWorkflowTemplateHandler(repository=repo, execution_projection=projection)
+        handler = ArchiveWorkflowTemplateHandler(
+            repository=repo, execution_projection=projection, executions=NoExecutions()
+        )
         command = ArchiveWorkflowTemplateCommand(workflow_id="wf-test-123")
         result = await handler.handle(command)
 
@@ -219,7 +235,9 @@ class TestArchiveWorkflowTemplateHandler:
         repo = InMemoryWorkflowRepository()
         projection = InMemoryExecutionProjection()
 
-        handler = ArchiveWorkflowTemplateHandler(repository=repo, execution_projection=projection)
+        handler = ArchiveWorkflowTemplateHandler(
+            repository=repo, execution_projection=projection, executions=NoExecutions()
+        )
         command = ArchiveWorkflowTemplateCommand(workflow_id="nonexistent")
         result = await handler.handle(command)
 

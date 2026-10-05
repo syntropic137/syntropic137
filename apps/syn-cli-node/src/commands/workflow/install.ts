@@ -27,7 +27,14 @@ import { removeTempDir } from "../../packages/git.js";
 import { resolveFromMarketplace } from "../../marketplace/client.js";
 import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
 import { postYaml } from "../../client/yaml-upload.js";
-import { findInstallation, pruneWorkflows } from "./prune.js";
+import {
+  findInstallation,
+  pruneWorkflows,
+  PRUNE_OPTIONS,
+  pruneFlags,
+  refuseUnconfirmablePrune,
+  type PruneResult,
+} from "./prune.js";
 import type { PostYamlOptions } from "../../client/yaml-upload.js";
 import { runSkillPreflight } from "../../packages/skill-preflight.js";
 
@@ -119,6 +126,8 @@ export interface InstallProvenance {
   version?: string;
   sourceDigest?: string | null;
   force?: boolean;
+  /** Package name recorded on each workflow; prune reads it back (#1588). */
+  packageName?: string;
 }
 
 
@@ -141,6 +150,7 @@ function provenanceOptions(provenance: InstallProvenance): Partial<PostYamlOptio
   if (provenance.version !== undefined) options.version = provenance.version;
   if (provenance.sourceDigest) options.sourceDigest = provenance.sourceDigest;
   if (provenance.force === true) options.force = true;
+  if (provenance.packageName) options.packageName = provenance.packageName;
   return options;
 }
 
@@ -231,6 +241,7 @@ export const installCommand: CommandDef = {
       description: "Reinstall a version that is already installed, overwriting it",
       default: false,
     },
+    ...PRUNE_OPTIONS,
   },
   handler: async (parsed: ParsedArgs) => {
     const source = parsed.positionals[0];
@@ -242,6 +253,8 @@ export const installCommand: CommandDef = {
     const ref = (parsed.values["ref"] as string | undefined) ?? "main";
     const dryRun = parsed.values["dry-run"] === true;
     const force = parsed.values["force"] === true;
+    const flags = pruneFlags(parsed);
+    refuseUnconfirmablePrune(flags);
 
     // Try marketplace first for bare names
     let packagePath: string;
@@ -302,6 +315,7 @@ export const installCommand: CommandDef = {
         version: pkgVersion,
         sourceDigest: gitSha,
         force,
+        packageName: pkgName,
       });
 
       if (installedRefs.length === 0) {
@@ -309,56 +323,50 @@ export const installCommand: CommandDef = {
         throw new CLIError("Install failed", 1);
       }
 
-      // WHY install prunes too (issue #822): a newer-version install now
-      // succeeds as an upsert and replaces the registry record. Without this,
-      // a workflow the new version dropped stays live on the server while its
-      // ref disappears from the registry, so nothing local names it any more.
-      // Before install became an upsert this was unreachable, because the
-      // second install just failed.
+      // WHY install looks for dropped workflows (issue #822): a newer-version
+      // install succeeds as an upsert and replaces the registry record, so a
+      // workflow the new version dropped would stay live with nothing local
+      // naming it. Local history only nominates candidates; the server's
+      // provenance decides, and archiving needs --prune (issue #1588).
       const priorRecord = findInstallation(pkgName);
-      if (priorRecord !== null) {
-        const liveIds = new Set(installedRefs.map((w) => w.id));
-        const orphans = priorRecord.workflows.filter((w) => !liveIds.has(w.id));
-        if (orphans.length > 0) {
-          print(`\n${style("Removing workflows no longer in the package...", BOLD)}`);
-          const prune = await pruneWorkflows(orphans);
-          // WHY this records the failures and exits non-zero, matching update
-          // (issue #822): printing a warning and then writing a record that
-          // contains only installedRefs drops the still-live workflows from
-          // the registry, which is the orphan this prune exists to prevent.
-          if (prune.failed.length > 0) {
-            recordInstallation({
-              packageName: pkgName,
-              packageVersion: pkgVersion,
-              source,
-              sourceRef: effectiveRef,
-              format: fmt,
-              workflows: [...installedRefs, ...prune.failed],
-              marketplaceSource,
-              gitSha,
-            });
-            printError(
-              `Installed, but ${prune.failed.length} workflow(s) from the previous version ` +
-                "could not be archived and remain active: " +
-                `${prune.failed.map((w) => w.name).join(", ")}. ` +
-                "They are still tracked. Re-run install, or remove them with " +
-                "`syn workflow delete`.",
-            );
-            throw new CLIError("Partial install", 1);
-          }
-        }
-      }
+      const liveIds = new Set(installedRefs.map((w) => w.id));
+      const dropped = (priorRecord?.workflows ?? []).filter((w) => !liveIds.has(w.id));
 
-      recordInstallation({
-        packageName: pkgName,
-        packageVersion: pkgVersion,
-        source,
-        sourceRef: effectiveRef,
-        format: fmt,
-        workflows: installedRefs,
-        marketplaceSource,
-        gitSha,
-      });
+      // WHY retained and failed refs stay in the record (issue #822): a
+      // workflow that is still live must stay tracked, or the next run has
+      // nothing to nominate it from. If the prune itself throws, the upsert
+      // above still happened, so it is recorded with every dropped workflow
+      // still tracked (issue #1588).
+      const record = (stillLive: InstalledWorkflowRef[]): void =>
+        recordInstallation({
+          packageName: pkgName,
+          packageVersion: pkgVersion,
+          source,
+          sourceRef: effectiveRef,
+          format: fmt,
+          workflows: [...installedRefs, ...stillLive],
+          marketplaceSource,
+          gitSha,
+        });
+      let prune: PruneResult;
+      try {
+        prune = await pruneWorkflows(dropped, { packageName: pkgName, ...flags });
+      } catch (err) {
+        record(dropped);
+        throw err;
+      }
+      record([...prune.retained, ...prune.failed]);
+
+      if (prune.failed.length > 0) {
+        printError(
+          `Installed, but ${prune.failed.length} workflow(s) from the previous version ` +
+            "could not be archived and remain active: " +
+            `${prune.failed.map((w) => w.name).join(", ")}. ` +
+            "They are still tracked. Re-run install with --prune, or remove them with " +
+            "`syn workflow delete`.",
+        );
+        throw new CLIError("Partial install", 1);
+      }
 
       printSuccess(`\nInstalled ${installedRefs.length} workflow(s) from ${source}`);
     } finally {

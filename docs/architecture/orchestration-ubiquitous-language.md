@@ -360,6 +360,19 @@ and Evals alike. An archived Eval refuses every edit and refuses to be Frozen.
 It stays readable, and its history and runs stay intact. Archiving an archived Eval
 succeeds and records nothing.
 
+A Workflow template is never archived while it has an active Execution. That is
+decided from the template's own stream, not from a read model: every launch is
+recorded there first (see Launch), so an archive and a launch racing each other
+cannot both succeed (#1588).
+
+## Launch
+
+Starting an Execution of a Workflow template. Recorded on the TEMPLATE's stream
+as `WorkflowTemplateExecutionLaunched`, before the Execution's own stream exists,
+and refused if the template is Archived. A launch whose Execution stream never
+appears stops counting as active after a grace period (`LAUNCH_GRACE`), so a
+dispatch that died before starting cannot block an archive forever.
+
 ## Default Eval
 
 The Eval a Workflow's runs join when the launch names none: `default_eval_id`

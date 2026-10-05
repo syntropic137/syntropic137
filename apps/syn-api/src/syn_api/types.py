@@ -141,6 +141,7 @@ class WorkflowError(StrEnum):
     INVALID_INPUT = "invalid_input"
     EXECUTION_FAILED = "execution_failed"
     HAS_ACTIVE_EXECUTIONS = "has_active_executions"
+    PACKAGE_MISMATCH = "package_mismatch"
     NOT_IMPLEMENTED = "not_implemented"
 
 
@@ -583,7 +584,9 @@ class WorkflowDetail(BaseModel):
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     default_eval_id: str | None = None
     """The eval a launch naming none joins (#967). Future runs only."""
-    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None when it was not
+    installed from a package or predates install provenance."""
 
 
 class ExecutionSummary(BaseModel):

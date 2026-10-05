@@ -24,6 +24,7 @@ from syn_domain.contexts.orchestration.slices.start_resume.value_objects import 
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePort
+    from syn_domain.contexts.orchestration._shared.template_launch import TemplateLaunches
     from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
         RemoteBranchReading,
     )
@@ -58,6 +59,7 @@ class StartResumeHandler:
         execution_repository: WorkflowExecutionRepositoryPort,
         maintenance: MaintenancePort | None = None,
         remote_branches: RemoteBranchPort | None = None,
+        launches: TemplateLaunches | None = None,
     ) -> None:
         self._processor = processor
         self._executions = execution_repository
@@ -68,6 +70,9 @@ class StartResumeHandler:
         # Optional for the same reason as on ExecuteWorkflowHandler (#1387):
         # a fixture admits nothing. Production passes it.
         self._maintenance = maintenance
+        # #1588: a resumed child is a launch of its template like any other,
+        # so archive must see it before the child's stream exists.
+        self._launches = launches
 
     async def handle(
         self,
@@ -102,6 +107,11 @@ class StartResumeHandler:
         # start, so a branch deleted or force-pushed since is abandoned with a
         # recorded reason instead of reused stale.
         command.remote_branches = await self._read_remote_branches(command)
+        # #1588: on the template's stream before the child's own stream exists,
+        # as ExecuteWorkflowHandler does. Raises TemplateArchivedError if the
+        # template was archived since the parent ran.
+        if self._launches is not None:
+            await self._launches.record(command.workflow_id, command.aggregate_id)
         try:
             return await self._processor.run_resume(command, repos=repos, admitted=admitted)
         except StreamAlreadyExistsError:
