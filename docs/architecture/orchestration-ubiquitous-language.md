@@ -120,6 +120,16 @@ code the original ran on. A pinned commit no branch or tag of origin still
 reaches refuses the Phase; it is never swapped for the branch's head.
 (#1458, ADR-058.)
 
+## Starting Checkout
+
+The commit each pinned repository was actually found at once a Phase's
+workspace was provisioned, read back from the workspace rather than taken from
+the request, and verified against its pin before the agent is given the
+workspace. A repository not at its pin is a Checkout Mismatch and refuses the
+Phase. A Continued Branch is read and recorded but not compared, since its head
+may legitimately be past the pin. Recorded on every Phase's provisioning; the
+Execution's Starting Checkout is the first one recorded. (#967.)
+
 ## Continued Branch
 
 A branch a Resume Phase picks up rather than starting over: one the original's
