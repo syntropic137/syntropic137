@@ -9223,6 +9223,17 @@
           "reason": {
             "$ref": "#/components/schemas/DelegationFailureReason"
           },
+          "required_delegate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Delegate"
+          },
           "attempts": {
             "items": {
               "$ref": "#/components/schemas/DelegationAttempt"
@@ -13738,6 +13749,11 @@
           "allow_delegation": {
             "type": "boolean",
             "title": "Allow Delegation",
+            "default": false
+          },
+          "require_delegation": {
+            "type": "boolean",
+            "title": "Require Delegation",
             "default": false
           },
           "clone_repos": {

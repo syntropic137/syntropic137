@@ -3107,6 +3107,8 @@ export interface components {
          */
         DelegationFailure: {
             reason: components["schemas"]["DelegationFailureReason"];
+            /** Required Delegate */
+            required_delegate?: string | null;
             /**
              * Attempts
              * @default []
@@ -5124,6 +5126,11 @@ export interface components {
              * @default false
              */
             allow_delegation: boolean;
+            /**
+             * Require Delegation
+             * @default false
+             */
+            require_delegation: boolean;
             /**
              * Clone Repos
              * @default true
