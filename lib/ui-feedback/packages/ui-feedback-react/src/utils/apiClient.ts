@@ -35,17 +35,11 @@ function classifyNetworkError(message: string, originalError?: Error): NetworkEr
 }
 
 /**
- * Wrapper for fetch that provides better error messages for network failures.
+ * How long a request may take, headers and body together, before it fails.
+ * Without a bound a stalled response leaves its caller waiting forever, and a
+ * caller that shows a spinner shows it forever (the "Loading feedback..." bug).
  */
-export async function safeFetch(url: string, options?: RequestInit): Promise<Response> {
-  try {
-    return await fetch(url, options);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    const originalError = err instanceof Error ? err : undefined;
-    throw classifyNetworkError(message, originalError);
-  }
-}
+export const REQUEST_TIMEOUT_MS = 15_000;
 
 function getErrorMessage(status: number, statusText: string): string {
   if (status === 404) return 'Feedback endpoint not found. Check API URL configuration.';
@@ -54,7 +48,7 @@ function getErrorMessage(status: number, statusText: string): string {
   return `API error: ${status} ${statusText}`;
 }
 
-export async function handleResponse<T>(response: Response): Promise<T> {
+async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let body: unknown;
     try {
@@ -70,4 +64,26 @@ export async function handleResponse<T>(response: Response): Promise<T> {
   }
 
   return response.json();
+}
+
+/**
+ * Fetch `url` and parse the response, failing with a NetworkError if the whole
+ * exchange, body included, has not finished within `timeoutMs`.
+ */
+export async function request<T>(url: string, options?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await handleResponse<T>(response);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    if (controller.signal.aborted) {
+      throw new NetworkError(`Feedback API did not respond within ${timeoutMs / 1000}s`, err instanceof Error ? err : undefined);
+    }
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    throw classifyNetworkError(message, err instanceof Error ? err : undefined);
+  } finally {
+    clearTimeout(timer);
+  }
 }

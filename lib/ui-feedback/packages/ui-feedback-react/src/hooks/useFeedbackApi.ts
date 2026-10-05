@@ -12,7 +12,9 @@ import type {
   FeedbackUpdate,
   MediaUpload,
 } from '../types';
-import { handleResponse, safeFetch } from '../utils/apiClient';
+import { request } from '../utils/apiClient';
+
+const UPLOAD_TIMEOUT_MS = 120_000;
 
 export interface UseFeedbackApiOptions {
   apiUrl: string;
@@ -62,44 +64,39 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
 
   const createFeedback = useCallback(
     async (data: FeedbackCreate) => {
-      const response = await safeFetch(`${baseUrl}/feedback`, {
+      return request<FeedbackItem>(`${baseUrl}/feedback`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
       });
-      return handleResponse<FeedbackItem>(response);
     },
     [baseUrl],
   );
 
   const getFeedback = useCallback(
     async (id: string) => {
-      const response = await safeFetch(`${baseUrl}/feedback/${id}`);
-      return handleResponse<FeedbackItemWithMedia>(response);
+      return request<FeedbackItemWithMedia>(`${baseUrl}/feedback/${id}`);
     },
     [baseUrl],
   );
 
   const listFeedback = useCallback(
     async (params: ListFeedbackParams = {}) => {
-      const response = await safeFetch(buildListUrl(baseUrl, params));
-      return handleResponse<FeedbackList>(response);
+      return request<FeedbackList>(buildListUrl(baseUrl, params));
     },
     [baseUrl],
   );
 
   const updateFeedback = useCallback(
     async (id: string, data: FeedbackUpdate) => {
-      const response = await safeFetch(`${baseUrl}/feedback/${id}`, {
+      return request<FeedbackItem>(`${baseUrl}/feedback/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
       });
-      return handleResponse<FeedbackItem>(response);
     },
     [baseUrl],
   );
 
   const deleteFeedback = useCallback(
     async (id: string) => {
-      const response = await safeFetch(`${baseUrl}/feedback/${id}`, { method: 'DELETE' });
-      await handleResponse<void>(response);
+      await request<void>(`${baseUrl}/feedback/${id}`, { method: 'DELETE' });
     },
     [baseUrl],
   );
@@ -109,8 +106,8 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
       const formData = new FormData();
       formData.append('file', media.blob, media.fileName || 'file');
       formData.append('media_type', media.mediaType);
-      const response = await safeFetch(`${baseUrl}/feedback/${feedbackId}/media`, { method: 'POST', body: formData });
-      await handleResponse<void>(response);
+      // Uploads carry a screenshot or recording, so they get longer than a read.
+      await request<void>(`${baseUrl}/feedback/${feedbackId}/media`, { method: 'POST', body: formData }, UPLOAD_TIMEOUT_MS);
     },
     [baseUrl],
   );
@@ -122,8 +119,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
 
   const deleteMedia = useCallback(
     async (feedbackId: string, mediaId: string) => {
-      const response = await safeFetch(`${baseUrl}/feedback/${feedbackId}/media/${mediaId}`, { method: 'DELETE' });
-      await handleResponse<void>(response);
+      await request<void>(`${baseUrl}/feedback/${feedbackId}/media/${mediaId}`, { method: 'DELETE' });
     },
     [baseUrl],
   );
@@ -131,8 +127,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
   const getStats = useCallback(
     async (appName?: string) => {
       const url = appName ? `${baseUrl}/feedback/stats?app=${encodeURIComponent(appName)}` : `${baseUrl}/feedback/stats`;
-      const response = await safeFetch(url);
-      return handleResponse<FeedbackStats>(response);
+      return request<FeedbackStats>(url);
     },
     [baseUrl],
   );
