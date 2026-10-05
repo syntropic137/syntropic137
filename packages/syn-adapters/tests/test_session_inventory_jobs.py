@@ -118,6 +118,32 @@ async def test_new_projected_step_invalidates_old_claim_and_ignores_stale_replay
     assert current.job == publishing
 
 
+async def test_parked_job_waits_for_a_newer_step_and_a_superseded_lease_cannot_park_it(
+    db_pool: asyncpg.Pool,
+    job: InventoryJob,
+) -> None:
+    store = PostgresSessionInventoryJobs(db_pool)
+    stale = await store.claim(lease_seconds=60)
+    assert stale is not None
+    await store.park(stale, safety_seconds=900)
+    # No timed retry: a replay of the same step does not re-arm it either (#1528).
+    await store.project(job)
+    assert await store.claim(lease_seconds=60) is None
+    publishing = job.model_copy(
+        update={
+            "global_position": 2,
+            "state": job.state.model_copy(
+                update={"stage": ReconciliationStage.PUBLISHING, "revision": "r1"}
+            ),
+        }
+    )
+    await store.project(publishing)
+    await store.park(stale, safety_seconds=900)
+    rearmed = await store.claim(lease_seconds=60)
+    assert rearmed is not None
+    assert rearmed.job == publishing
+
+
 async def test_publication_checks_lease_and_inventory_head_in_one_transaction(
     db_pool: asyncpg.Pool,
     job: InventoryJob,

@@ -9,7 +9,7 @@ Status: proposed implementation plan. Date: 2026-09-29.
 | Tags on workflows and executions (prerequisite) | merged | #1526, #1541 |
 | 1. Typed contracts, 2. Eval aggregate | merged | #1539 |
 | 3. Workflow/execution metadata (default eval, attach/detach) | merged | #1562 |
-| 4. Pinned launch integration | part A in review (ref resolver, freeze, resolved eval context, frozen SHAs fed to checkout) | #1591 |
+| 4. Pinned launch integration | part A merged (ref resolver, freeze, resolved eval context, frozen SHAs fed to checkout); part B in review (each pinned repo's HEAD read back after provisioning, mismatch fails setup with `CheckoutMismatchError` before the agent, verified commits recorded on `WorkspaceProvisionedForPhase.checked_out_commits`) | #1591, #1615 |
 | 5. Projections and wiring | not started | |
 | 6. API and CLI | not started | |
 | 7. Dashboard and docs | not started | |

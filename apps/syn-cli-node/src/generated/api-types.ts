@@ -2539,8 +2539,8 @@ export interface components {
          *     twenty releases behind the installed package.
          *
          *     The release and its status come from ``_NamesTheRunningRelease``. What this
-         *     model adds is the two build-time stamps, which only an image can supply and
-         *     only ``/health`` reports.
+         *     model adds is the two build-time stamps, which only an image can supply,
+         *     and when this process went live, which only the process can.
          */
         BuildInfo: {
             /**
@@ -2559,11 +2559,22 @@ export interface components {
              */
             commit?: string | null;
             /**
+             * Started At
+             * Format: date-time
+             * @description When this API process started (UTC, ISO 8601): the moment the running deployment went live. Captured once per process, so it changes only when the process is replaced, which is what a redeploy does.
+             */
+            started_at: string;
+            /**
              * Version Status
              * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
              * @enum {string}
              */
             readonly version_status: "installed" | "unavailable";
+            /**
+             * Started At Display
+             * @description started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. Relative and local-time renderings are the client's to make from started_at.
+             */
+            readonly started_at_display: string;
         };
         /**
          * CancelRequest
@@ -3113,6 +3124,56 @@ export interface components {
          * @enum {string}
          */
         DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
+        /**
+         * DelegationAttempt
+         * @description One delegate the phase's agent launched, as the platform observed it.
+         */
+        DelegationAttempt: {
+            /** Delegate Id */
+            delegate_id: string;
+            /** Target Harness */
+            target_harness: string;
+            outcome: components["schemas"]["DelegationOutcome"] | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * DelegationFailure
+         * @description The typed account of a failed required delegation.
+         */
+        DelegationFailure: {
+            reason: components["schemas"]["DelegationFailureReason"];
+            /** Required Delegate */
+            required_delegate?: string | null;
+            /**
+             * Attempts
+             * @default []
+             */
+            attempts: components["schemas"]["DelegationAttempt"][];
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * DelegationFailureReason
+         * @description Why a required delegation is counted as not having happened.
+         * @enum {string}
+         */
+        DelegationFailureReason: "not_attempted" | "failed" | "unverifiable";
+        /**
+         * DelegationOutcome
+         * @description How a delegated run ended, in provider-neutral terms.
+         *
+         *     WHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit
+         *     status is shell-specific baggage. The native same-harness fan-out path
+         *     reports a boolean success and has no process to exit; cancellation and
+         *     timeout have no natural integer either. Since these events are v1 and this
+         *     repo has no upcaster framework, encoding a shell assumption now would need
+         *     a v2 to undo.
+         * @enum {string}
+         */
+        DelegationOutcome: "succeeded" | "failed" | "cancelled" | "timed_out";
         /** DeleteWorkflowResponse */
         DeleteWorkflowResponse: {
             /** Workflow Id */
@@ -3423,12 +3484,14 @@ export interface components {
             error_message?: string | null;
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
+            delegation_failure?: components["schemas"]["DelegationFailure"] | null;
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /**
              * Deliverable Produced
              * @default false
              */
             deliverable_produced: boolean;
+            review_verdict?: components["schemas"]["ReviewVerdict"] | null;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Repos */
             repos?: string[];
@@ -5133,6 +5196,11 @@ export interface components {
              */
             allow_delegation: boolean;
             /**
+             * Require Delegation
+             * @default false
+             */
+            require_delegation: boolean;
+            /**
              * Clone Repos
              * @default true
              */
@@ -5209,6 +5277,8 @@ export interface components {
              */
             deliverable_recovered: boolean;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
+            failure_classification?: components["schemas"]["FailureClassification"] | null;
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Model */
             model?: string | null;
             /** Requested Model */
@@ -6079,6 +6149,31 @@ export interface components {
             /** Dispatched At */
             dispatched_at?: string | null;
         };
+        /**
+         * ReviewVerdict
+         * @description What a reviewing phase concluded about the change in front of it (PC-63).
+         *
+         *     THE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes
+         *     ``review_verdict`` in its TASK_RESULT block; the aggregate reads it when
+         *     the phase's artifacts are collected and chooses the next phase from it
+         *     (see `WorkflowExecutionAggregate.artifacts_collected`):
+         *
+         *     * ``certified`` ends the repair loop. Every phase before the workflow's
+         *       final phase is skipped, so a run that certifies in round 1 does not pay
+         *       for rounds 2 and 3.
+         *     * ``blocked`` - or no verdict at all - advances by order, which is the
+         *       next repair round, or the final phase once the rounds are spent.
+         *
+         *     The latest verdict a run reported is also how it ended: a run completed
+         *     on ``blocked`` completed with UNRESOLVED FINDINGS, and says so on
+         *     `WorkflowCompleted` rather than looking certified.
+         *
+         *     A missing or misspelled verdict is never read as ``certified``: skipping
+         *     review on a word the reader did not recognise is the one mistake here that
+         *     costs more than a repair round.
+         * @enum {string}
+         */
+        ReviewVerdict: "certified" | "blocked";
         /**
          * RootResponse
          * @description Payload of ``GET /`` — what this API is, and which build is serving it.

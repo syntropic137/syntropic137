@@ -19,7 +19,15 @@ verification input is missing, and stop without changing or pushing anything.
 You have no findings to act on, and a fix phase that guesses at what
 verification might have said edits a certified branch at nobody's request.
 
+## Which round this is
+
+**Round 1 of 3.** This workflow repairs in up to three rounds (`fix`, `fix_2`,
+`fix_3`, each followed by its own re-verification). In round 1 the verdict you
+act on is `artifacts/input/verify/verify.md`, as above. Write `Round: 1 of 3` as
+the first line of your report.
+
 ## If verification certified the change, stop
+
 
 Your first job is to decide whether there is any work here at all.
 
@@ -38,7 +46,8 @@ Say plainly in your report which it was, because the phase after you reads it.
 
 **You are in a fresh workspace with a fresh clone of the default branch.** The
 branch you are about to repair is not here yet. Read the branch name and the
-full verified SHA from `verify.md`, then run:
+full verified SHA from `verify.md` - or, when the round section above names a
+different SHA as the verified one, that SHA - then run:
 
 ```
 git fetch origin <branch>
@@ -140,12 +149,14 @@ becomes remote red.
 under `artifacts/output/` FAILS.** Write the file before you finish, including
 when the answer is "nothing to do".
 
-1. **What verification found** - one line per defect.
-2. **What you changed** for each, with `file:line`, or why you did not.
-3. **The mutation** for each test you touched, and the failure it produced.
-4. **The identity the next phase checks out**: the branch, the full first-pass
+1. **`Round: N of 3`** as the first line, from the section above, and which
+   report you took as the latest verdict.
+2. **What verification found** - one line per defect.
+3. **What you changed** for each, with `file:line`, or why you did not.
+4. **The mutation** for each test you touched, and the failure it produced.
+5. **The identity the next phase checks out**: the branch, the full first-pass
    verified SHA, and the full SHA you pushed - or, if you changed nothing, say
    so explicitly and give the verified SHA as the unchanged head. Full SHAs,
    not abbreviations: the next phase compares them against `git rev-parse`.
-5. **Anything you disagreed with**, and the evidence.
-6. **One line** on any different problem you noticed and did not touch.
+6. **Anything you disagreed with**, and the evidence.
+7. **One line** on any different problem you noticed and did not touch.
