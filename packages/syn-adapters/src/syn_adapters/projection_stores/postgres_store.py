@@ -15,7 +15,7 @@ from syn_adapters import postgres_pool
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.record_match import holds
 from syn_domain.pagination import ProjectionRecord
-from syn_domain.projection_scan import JsonValue
+from syn_domain.projection_scan import Decide, JsonValue, SqlPage, SqlPageRequest
 from syn_shared.settings import get_settings
 
 
@@ -74,6 +74,9 @@ class PostgresProjectionStore:
 
         if await ensure_lean_column(pool, projection, table_name):
             self._lean_tables.add(projection)
+        from syn_adapters.projection_stores.postgres_page import ensure_list_indexes
+
+        await ensure_list_indexes(pool, projection, table_name)
 
     async def _ensure_state_table(self) -> None:
         """Ensure the projection_states table exists."""
@@ -224,6 +227,21 @@ class PostgresProjectionStore:
 
         await self._ensure_table(projection)
         return await get_many(await self._get_pool(), self._table_name(projection), keys)
+
+    async def page_in_sql(
+        self, projection: str, request: SqlPageRequest, decide: Decide
+    ) -> SqlPage:
+        """One list page, its total and its facets, in one snapshot (projection_scan)."""
+        from syn_adapters.projection_stores.postgres_page import page_in_sql
+
+        await self._ensure_table(projection)
+        return await page_in_sql(
+            await self._get_pool(),
+            self._table_name(projection),
+            request,
+            decide,
+            lean_ready=projection in self._lean_tables,
+        )
 
     async def count(self, projection: str, filters: dict[str, str] | None = None) -> int:
         """Count records with the same filter semantics `query` uses."""
