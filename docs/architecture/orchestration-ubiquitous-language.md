@@ -126,9 +126,11 @@ The commit each pinned repository was actually found at once a Phase's
 workspace was provisioned, read back from the workspace rather than taken from
 the request, and verified against its pin before the agent is given the
 workspace. A repository not at its pin is a Checkout Mismatch and refuses the
-Phase. A Continued Branch is read and recorded but not compared, since its head
-may legitimately be past the pin. Recorded on every Phase's provisioning; the
-Execution's Starting Checkout is the first one recorded. (#967.)
+Phase. A Continued Branch is held to its branch instead of its pin, since its
+head may legitimately be past the pin: it must be at origin's fetched head of
+that branch, and that head must contain the pin, or it too is a Checkout
+Mismatch. Recorded on every Phase's provisioning; the Execution's Starting
+Checkout is the first provisioning's, even when that one recorded none. (#967.)
 
 ## Continued Branch
 
