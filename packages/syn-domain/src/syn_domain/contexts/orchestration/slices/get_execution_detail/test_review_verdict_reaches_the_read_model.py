@@ -25,7 +25,7 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
 pytestmark = pytest.mark.unit
 
 
-def _completed(verdict: ReviewVerdict | None) -> dict[str, object]:
+def _completed(verdict: ReviewVerdict | None) -> WorkflowCompletedEvent:
     return WorkflowCompletedEvent(
         workflow_id="wf",
         execution_id="exec-1",
@@ -38,7 +38,7 @@ def _completed(verdict: ReviewVerdict | None) -> dict[str, object]:
         total_duration_seconds=1.0,
         artifact_ids=[],
         review_verdict=verdict,
-    ).model_dump(mode="json")
+    )
 
 
 async def _ended_on(verdict: ReviewVerdict | None) -> ReviewVerdict | None:
@@ -46,7 +46,7 @@ async def _ended_on(verdict: ReviewVerdict | None) -> ReviewVerdict | None:
     await projection.on_workflow_execution_started(
         {"execution_id": "exec-1", "workflow_id": "wf", "workflow_name": "wf", "phases": []}
     )
-    await projection.on_workflow_completed(_completed(verdict))
+    await projection.on_workflow_completed(_completed(verdict).model_dump(mode="json"))
     detail = await projection.get_by_id("exec-1")
     assert detail is not None
     assert detail.status == "completed"
