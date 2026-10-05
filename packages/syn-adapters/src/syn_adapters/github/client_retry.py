@@ -10,7 +10,7 @@ This sits under every request `GitHubAppClient` sends, so no call site decides
 anything about retrying. What it decides:
 
 - WHAT IS TRANSIENT: a connection that dropped, could not be made, or failed
-  or timed out reading or writing, and a 502, 503 or 504. Never a 4xx - those are GitHub's answer
+  or timed out reading or writing - the response body included - and a 502, 503 or 504. Never a 4xx - those are GitHub's answer
   about the request, and asking again gets the same answer.
 - WHAT MAY BE SENT AGAIN: an idempotent method after any transient failure.
   Any other request only after a failure that proves GitHub never received
@@ -112,14 +112,14 @@ class RetryingTransport(httpx.AsyncBaseTransport):
                 await self._sleep(self._policy.delay_after(attempt - 1))
             try:
                 response = await self._inner.handle_async_request(request)
+                if response.status_code not in _TRANSIENT_STATUSES:
+                    return await _buffered(response)
             except (*_UNSENT_ERRORS, *_AMBIGUOUS_ERRORS) as exc:
                 failure = f"{type(exc).__name__}: {exc}"
                 last_error = exc
                 status_code = None
                 unsent = isinstance(exc, _UNSENT_ERRORS)
             else:
-                if response.status_code not in _TRANSIENT_STATUSES:
-                    return response
                 await response.aclose()
                 failure = f"HTTP {response.status_code}"
                 last_error = None
@@ -135,3 +135,18 @@ class RetryingTransport(httpx.AsyncBaseTransport):
 
     async def aclose(self) -> None:
         await self._inner.aclose()
+
+
+async def _buffered(response: httpx.Response) -> httpx.Response:
+    """Read the whole body here, so a body that breaks off fails inside the retry boundary.
+
+    The inner transport returns once the headers arrive; httpx reads the body
+    later, outside `handle_async_request`. A connection that drops mid-body
+    would otherwise escape as a raw `ReadError` after one attempt (#1611).
+    httpx serves a response whose body is already read from what it read.
+    """
+    try:
+        await response.aread()
+    finally:
+        await response.aclose()
+    return response

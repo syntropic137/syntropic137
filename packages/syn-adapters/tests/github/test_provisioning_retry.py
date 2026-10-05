@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -28,6 +29,9 @@ from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPha
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import failure_account
 from syn_shared.upstream_failure import UpstreamFailureKind
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
 pytestmark = pytest.mark.unit
 
 _REPO = "https://github.com/org/repo-a"
@@ -36,14 +40,34 @@ _MINT = "/app/installations/7/access_tokens"
 _DROPPED = httpx.RemoteProtocolError("Server disconnected without sending a response.")
 
 
+@dataclass(frozen=True)
+class _TruncatedBody:
+    """GitHub answered with this status, then the connection broke mid-body.
+
+    The headers arrive, so the transport returns; the failure comes only when
+    httpx reads the body (#1611).
+    """
+
+    status: int
+
+
+class _BreaksOffStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b'{"tok'
+        raise httpx.ReadError("body truncated")
+
+
+type _Failure = Exception | int | _TruncatedBody
+
+
 @dataclass
 class _Network:
     """GitHub behind a flaky network: each path fails as scripted, then answers."""
 
-    failures: dict[str, list[Exception | int]] = field(default_factory=dict)
+    failures: dict[str, list[_Failure]] = field(default_factory=dict)
     #: Failures that happen AFTER GitHub acted: the token is minted, then the
     #: response is lost on its way back.
-    lost_responses: dict[str, list[Exception | int]] = field(default_factory=dict)
+    lost_responses: dict[str, list[_Failure]] = field(default_factory=dict)
     sent: list[str] = field(default_factory=list)
     #: Every token GitHub issued, whether or not its holder ever heard of it.
     minted: list[str] = field(default_factory=list)
@@ -70,9 +94,11 @@ class _Network:
         )
 
     @staticmethod
-    def _fail(failure: Exception | int) -> httpx.Response:
+    def _fail(failure: _Failure) -> httpx.Response:
         if isinstance(failure, Exception):
             raise failure
+        if isinstance(failure, _TruncatedBody):
+            return httpx.Response(failure.status, stream=_BreaksOffStream())
         return httpx.Response(failure, json={"message": "scripted"})
 
 
@@ -127,13 +153,15 @@ _AMBIGUOUS = [
     502,
     503,
     504,
+    _TruncatedBody(200),
+    _TruncatedBody(201),
 ]
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("failure", _UNSENT + _AMBIGUOUS)
 async def test_a_transient_failure_on_the_lookup_is_retried(
-    network: _Network, failure: Exception | int
+    network: _Network, failure: _Failure
 ) -> None:
     network.failures[_LOOKUP] = [failure, failure]
 
@@ -160,7 +188,7 @@ async def test_a_mint_that_never_reached_github_is_retried(
 @pytest.mark.anyio
 @pytest.mark.parametrize("lost", _AMBIGUOUS)
 async def test_github_minted_but_the_response_dropped_mints_no_second_token(
-    network: _Network, lost: Exception | int
+    network: _Network, lost: _Failure
 ) -> None:
     """A retry here would mint a token nobody holds, live for an hour, that no ledger revokes.
 
@@ -181,12 +209,17 @@ async def test_github_minted_but_the_response_dropped_mints_no_second_token(
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     ("path", "failure", "sends"),
-    [(_LOOKUP, _DROPPED, 3), (_MINT, httpx.ConnectError("refused"), 3), (_MINT, _DROPPED, 1)],
+    [
+        (_LOOKUP, _DROPPED, 3),
+        (_LOOKUP, _TruncatedBody(200), 3),
+        (_MINT, httpx.ConnectError("refused"), 3),
+        (_MINT, _DROPPED, 1),
+    ],
 )
 async def test_an_exhausted_retry_fails_as_transient_not_as_auth(
     network: _Network,
     path: str,
-    failure: Exception,
+    failure: _Failure,
     sends: int,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -237,6 +270,18 @@ async def test_a_4xx_is_never_retried(network: _Network, status: int) -> None:
 async def test_a_post_whose_response_dropped_is_sent_once(network: _Network) -> None:
     """GitHub may already have acted on it: a second comment is a second comment."""
     network.failures["/repos/org/repo-a/issues"] = [_DROPPED]
+    client = GitHubAppClient(_Settings(), transport=httpx.MockTransport(network.handle))  # type: ignore[arg-type]
+
+    with pytest.raises(GitHubUnavailableError):
+        await client._http.post("/repos/org/repo-a/issues", json={"title": "x"})
+
+    assert network.sent == ["/repos/org/repo-a/issues"]
+
+
+@pytest.mark.anyio
+async def test_a_post_whose_body_broke_off_is_sent_once(network: _Network) -> None:
+    """The headers came back, so GitHub acted: the read error must not resend it."""
+    network.failures["/repos/org/repo-a/issues"] = [_TruncatedBody(201)]
     client = GitHubAppClient(_Settings(), transport=httpx.MockTransport(network.handle))  # type: ignore[arg-type]
 
     with pytest.raises(GitHubUnavailableError):
