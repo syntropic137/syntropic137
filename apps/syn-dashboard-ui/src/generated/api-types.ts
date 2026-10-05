@@ -3117,6 +3117,40 @@ export interface components {
             warnings?: string[];
         };
         /**
+         * DbPoolHealth
+         * @description One Postgres connection pool in this API process, at the moment of asking (#1583).
+         *
+         *     ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+         *     requests are queueing for a connection rather than for the database itself.
+         */
+        DbPoolHealth: {
+            /**
+             * Name
+             * @description What the pool serves, e.g. 'projections' or 'agent_events'.
+             */
+            name: string;
+            /**
+             * Size
+             * @description Connections currently open.
+             */
+            size: number;
+            /**
+             * Max Size
+             * @description Most connections the pool will open.
+             */
+            max_size: number;
+            /**
+             * In Use
+             * @description Connections checked out right now.
+             */
+            in_use: number;
+            /**
+             * Waiting
+             * @description Callers blocked waiting for a connection right now.
+             */
+            waiting: number;
+        };
+        /**
          * DegradedReason
          * @description Reasons the API may enter degraded mode.
          *
@@ -4536,6 +4570,11 @@ export interface components {
              * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
              */
             warnings?: string[] | null;
+            /**
+             * Db Pools
+             * @description Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode.
+             */
+            db_pools?: components["schemas"]["DbPoolHealth"][] | null;
             /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
             cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
         };

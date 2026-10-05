@@ -1,6 +1,7 @@
-"""Per-instance /health probes that need none of the lifecycle's state.
+"""Per-instance probes that /health reports and that need no lifecycle state.
 
-Kept out of ``lifecycle`` so health assembly there stays a list of calls.
+Kept apart from ``lifecycle`` so ``health_check`` there only assembles the
+response; each probe here answers one question and never raises.
 """
 
 from __future__ import annotations
