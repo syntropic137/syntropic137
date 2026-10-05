@@ -25,8 +25,8 @@ from urllib.parse import quote
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from syn_domain.contexts.orchestration._shared.repository_baseline import FULL_COMMIT_SHA
 from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
+    FULL_COMMIT_SHA,
     ResolvedRevision,
     RevisionResolution,
     RevisionResolverPort,
