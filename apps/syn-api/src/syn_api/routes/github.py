@@ -214,7 +214,8 @@ async def _aggregate_all_installations(
     return repos, lookup
 
 
-_revalidation: asyncio.Task[object] | None = None
+_Listing = tuple[list[GitHubRepoResponse], GitHubRepoLookup]
+_revalidation: asyncio.Task[_Listing] | None = None
 
 
 def _revalidate_in_background(client: _RepoLister, cache: RepoListingCache) -> None:
@@ -226,7 +227,7 @@ def _revalidate_in_background(client: _RepoLister, cache: RepoListingCache) -> N
     _revalidation.add_done_callback(_log_revalidation_failure)
 
 
-def _log_revalidation_failure(task: asyncio.Task[object]) -> None:
+def _log_revalidation_failure(task: asyncio.Task[_Listing]) -> None:
     if not task.cancelled() and task.exception() is not None:
         logger.warning("GitHub repo listing refresh failed", exc_info=task.exception())
 
