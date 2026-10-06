@@ -53,7 +53,7 @@ def _reset_storage() -> Iterator[None]:
 @pytest.fixture
 def resolver(monkeypatch: pytest.MonkeyPatch) -> FakeRevisionResolver:
     fake = FakeRevisionResolver(shas={("acme/app", "main"): SHA})
-    monkeypatch.setattr("syn_api.routes.evals.revision_resolver", lambda: fake)
+    monkeypatch.setattr("syn_api.routes.evals.get_revision_resolver", lambda: fake)
     return fake
 
 

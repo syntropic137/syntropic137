@@ -29,8 +29,6 @@ from typing import TYPE_CHECKING, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
-from syn_adapters.github.client import get_github_client
-from syn_adapters.github.revision_resolver import GitHubRevisionResolver
 from syn_adapters.projection_stores.prefix_match import format_ambiguous_error, resolve_by_prefix
 from syn_api._wiring import (
     ensure_connected,
@@ -41,6 +39,7 @@ from syn_api._wiring import (
     get_workflow_repo,
     sync_published_events_to_projections,
 )
+from syn_api._wiring_evals import get_revision_resolver
 from syn_api.list_query import MAX_PAGE_SIZE
 from syn_api.routes.executions.models import ExecutionListResponse
 from syn_api.routes.executions.queries import list_executions_endpoint
@@ -75,9 +74,6 @@ from syn_domain.contexts.orchestration import (
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import EvalMembershipResult
     from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
-    from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
-        RevisionResolverPort,
-    )
 
 router = APIRouter(tags=["evals"])
 
@@ -244,11 +240,6 @@ def _response(record: EvalRecord, run_count: int, tally: dict[str, int]) -> Eval
     )
 
 
-def revision_resolver() -> RevisionResolverPort:
-    """Pins baseline refs through the GitHub App. A test replaces this function."""
-    return GitHubRevisionResolver(get_github_client)
-
-
 def _baseline_requests(body: CreateEvalRequest) -> list[BaselineRequest]:
     try:
         return [
@@ -280,7 +271,7 @@ async def create_eval_endpoint(body: CreateEvalRequest) -> EvalCreatedResponse:
     await ensure_connected()
     eval_id = EvalId.new()
     repository = get_eval_repo()
-    handler = CreateEvalHandler(repository, revision_resolver(), get_publisher())
+    handler = CreateEvalHandler(repository, get_revision_resolver(), get_publisher())
     result = await handler.handle(
         eval_id=eval_id,
         name=body.name,
@@ -346,8 +337,10 @@ async def list_evals_endpoint(
 @router.get("/evals/{eval_id}", response_model=EvalResponse, responses=_EVAL_RESPONSES)
 async def get_eval_endpoint(eval_id: str) -> EvalResponse:
     """One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`."""
-    eval_id = str(_eval_id(eval_id))
+    from syn_api.prefix_resolver import resolve_or_raise
+
     await ensure_connected()
+    eval_id = await resolve_or_raise(get_projection_mgr().store, "evals", eval_id, "Eval")
     detail = await get_projection_mgr().eval_list.detail(eval_id, limit=0)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")

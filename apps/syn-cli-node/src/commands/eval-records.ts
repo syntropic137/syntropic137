@@ -23,7 +23,7 @@ type EvalBaselineRepoRequest = components["schemas"]["EvalBaselineRepoRequest"];
 type EvalBaselineRepo = components["schemas"]["EvalBaselineRepoResponse"];
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
 
-const evalIdArg = [{ name: "eval-id", description: "The eval (exact id)", required: true }] as const;
+const evalIdArg = [{ name: "eval-id", description: "The eval", required: true }] as const;
 
 function strings(value: unknown): string[] {
   if (Array.isArray(value)) return value as string[];
