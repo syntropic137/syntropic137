@@ -353,14 +353,13 @@ that is a failed screenshot, not a picture of the page. Name each file
 `/workspace/artifacts/output/`, the only place the platform collects; never
 commit them.
 
-**The PNG files do not survive the handoff to the next phase.** Artifact
-collection is text-only today and stores any non-UTF-8 file corrupted, without
-an error (#990), so the copies a later phase finds under `artifacts/input/`
-will not open. The judgement therefore has to be made HERE, in this workspace,
-on the files you just wrote, and it reaches the next phase and the PR as the
-`## Screenshots` table below - which is why every row says in words what the
-image shows. Do not defer looking to a later phase, and do not cite a PNG
-from `artifacts/input/` as evidence.
+**The PNG files reach the next phase byte-for-byte.** Artifact collection
+keeps binary files intact (#990, fixed in #1652), so a later phase finds them
+under `artifacts/input/<phase-id>/`, can check each starts with the PNG magic
+bytes `89 50 4e 47`, and can open it. The judgement is still made HERE, in this
+workspace, on the files you just wrote: the PR body is built from the
+`## Screenshots` table below, not from the files, which is why every row says
+in words what the image shows. Do not defer looking to a later phase.
 
 **Then open every PNG and look at it.** You can read image files. A screenshot
 nobody looked at is the same as no screenshot. For each one judge: is the
