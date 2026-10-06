@@ -5529,6 +5529,8 @@ export interface components {
              * @default 300
              */
             timeout_seconds: number;
+            /** Max Cost Usd */
+            max_cost_usd?: number | null;
             /** Allowed Tools */
             allowed_tools?: string[];
             /** Argument Hint */

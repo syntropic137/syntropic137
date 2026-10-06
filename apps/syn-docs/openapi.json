@@ -14684,6 +14684,17 @@
             "title": "Timeout Seconds",
             "default": 300
           },
+          "max_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Cost Usd"
+          },
           "allowed_tools": {
             "items": {
               "type": "string"
