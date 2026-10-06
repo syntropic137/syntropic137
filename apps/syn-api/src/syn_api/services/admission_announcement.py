@@ -9,6 +9,8 @@ reasons, not a step in the startup sequence's own logic.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 
 from syn_api._wiring_admission import get_admission_gate
@@ -49,3 +51,58 @@ async def announce_admission_if_open() -> None:
             "Could not announce that admission is open at startup; triggers "
             "paused by a deploy wait for the next subscribed event (#1387)"
         )
+
+
+#: How often a disk refusal is re-checked for recovery (#1560). Bounds how long
+#: parked work waits after space is freed; a stat() per tick costs nothing.
+DISK_RECOVERY_INTERVAL_SECONDS = 30.0
+
+_disk_recovery_task: asyncio.Task[None] | None = None
+
+
+async def announce_when_disk_recovers(
+    interval_seconds: float = DISK_RECOVERY_INTERVAL_SECONDS,
+) -> None:
+    """Re-announce "admission is open" once a full disk has room again (#1560).
+
+    The disk counterpart of clearing maintenance mode. A trigger or resume
+    refused for a full disk is parked, and space coming back is not an event,
+    so without this nothing wakes it on a quiet system. The gate decides
+    whether there is anything to announce; this only supplies the clock.
+
+    A failure is logged and retried on the next tick: the gate keeps its hold
+    when the announcement does not land.
+    """
+    gate = get_admission_gate()
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            if await gate.announce_if_disk_recovered():
+                logger.info("Disk space recovered; announced that admission is open (#1560)")
+        except Exception:
+            logger.exception(
+                "Could not announce that admission is open after disk recovery; "
+                "retrying in %ss (#1560)",
+                interval_seconds,
+            )
+
+
+def start_disk_recovery_watch() -> None:
+    """Start the watch, once. Called after subscriptions are live."""
+    global _disk_recovery_task
+    if _disk_recovery_task is not None and not _disk_recovery_task.done():
+        return
+    _disk_recovery_task = asyncio.create_task(
+        announce_when_disk_recovers(), name="disk-recovery-announcer"
+    )
+
+
+async def stop_disk_recovery_watch() -> None:
+    """Stop the watch; a no-op if never started."""
+    global _disk_recovery_task
+    task, _disk_recovery_task = _disk_recovery_task, None
+    if task is None:
+        return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task

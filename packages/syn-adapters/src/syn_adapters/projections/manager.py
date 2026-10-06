@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail import (
 from syn_domain.contexts.orchestration.slices.get_workflow_detail import (
     WorkflowDetailProjection,
 )
+from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
 from syn_domain.contexts.orchestration.slices.list_executions import (
     WorkflowExecutionListProjection,
 )
@@ -192,6 +193,12 @@ class ProjectionManager:
         """Get the workflow execution detail projection."""
         self._ensure_initialized()
         return self._projections["workflow_execution_detail"]
+
+    @property
+    def eval_list(self) -> EvalListProjection:
+        """Get the eval list and detail projection (#967)."""
+        self._ensure_initialized()
+        return self._projections["evals"]
 
     # Backward compatibility aliases
     @property

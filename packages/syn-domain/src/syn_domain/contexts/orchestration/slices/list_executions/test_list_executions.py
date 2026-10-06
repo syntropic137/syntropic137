@@ -165,53 +165,59 @@ class TestWorkflowExecutionListProjection:
         assert saved_data["error_message"] == "Agent timeout"
 
     @pytest.mark.asyncio
-    async def test_get_by_workflow_id(self, mock_store: AsyncMock) -> None:
+    async def test_get_by_workflow_id(self) -> None:
         """Test that get_by_workflow_id filters and sorts executions."""
+        from event_sourcing.stores.memory_projection import MemoryProjectionStore
+
         from syn_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
-        mock_store.get_all = AsyncMock(
-            return_value=[
-                {
-                    "execution_id": "exec-1",
-                    "workflow_id": "workflow-1",
-                    "workflow_name": "Test Workflow",
-                    "status": "completed",
-                    "started_at": "2024-12-04T09:00:00Z",
-                    "completed_at": "2024-12-04T09:30:00Z",
-                    "completed_phases": 3,
-                    "total_phases": 3,
-                    "total_tokens": 3000,
-                    "total_cost_usd": "0.20",
-                },
-                {
-                    "execution_id": "exec-2",
-                    "workflow_id": "workflow-1",
-                    "workflow_name": "Test Workflow",
-                    "status": "completed",
-                    "started_at": "2024-12-04T10:00:00Z",
-                    "completed_at": "2024-12-04T10:30:00Z",
-                    "completed_phases": 3,
-                    "total_phases": 3,
-                    "total_tokens": 4000,
-                    "total_cost_usd": "0.25",
-                },
-                {
-                    "execution_id": "exec-3",
-                    "workflow_id": "workflow-2",  # Different workflow
-                    "workflow_name": "Other Workflow",
-                    "status": "completed",
-                    "started_at": "2024-12-04T11:00:00Z",
-                    "completed_phases": 2,
-                    "total_phases": 2,
-                    "total_tokens": 2000,
-                    "total_cost_usd": "0.15",
-                },
-            ]
-        )
+        # A real store, so the filter is exercised wherever it runs (#1558):
+        # a mock would only replay whatever this test told it to return.
+        store = MemoryProjectionStore()
+        for record in [
+            {
+                "execution_id": "exec-1",
+                "workflow_id": "workflow-1",
+                "workflow_name": "Test Workflow",
+                "status": "completed",
+                "started_at": "2024-12-04T09:00:00Z",
+                "completed_at": "2024-12-04T09:30:00Z",
+                "completed_phases": 3,
+                "total_phases": 3,
+                "total_tokens": 3000,
+                "total_cost_usd": "0.20",
+            },
+            {
+                "execution_id": "exec-2",
+                "workflow_id": "workflow-1",
+                "workflow_name": "Test Workflow",
+                "status": "completed",
+                "started_at": "2024-12-04T10:00:00Z",
+                "completed_at": "2024-12-04T10:30:00Z",
+                "completed_phases": 3,
+                "total_phases": 3,
+                "total_tokens": 4000,
+                "total_cost_usd": "0.25",
+            },
+            {
+                "execution_id": "exec-3",
+                "workflow_id": "workflow-2",  # Different workflow
+                "workflow_name": "Other Workflow",
+                "status": "completed",
+                "started_at": "2024-12-04T11:00:00Z",
+                "completed_phases": 2,
+                "total_phases": 2,
+                "total_tokens": 2000,
+                "total_cost_usd": "0.15",
+            },
+        ]:
+            await store.save(
+                WorkflowExecutionListProjection.PROJECTION_NAME, record["execution_id"], record
+            )
 
-        projection = WorkflowExecutionListProjection(mock_store)
+        projection = WorkflowExecutionListProjection(store)
         executions = await projection.get_by_workflow_id("workflow-1")
 
         # Should only return workflow-1 executions

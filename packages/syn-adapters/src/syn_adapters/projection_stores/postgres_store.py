@@ -4,6 +4,7 @@ This implementation persists projection data to PostgreSQL,
 using per-projection tables for isolation and testability.
 """
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -11,10 +12,13 @@ from typing import Any
 import asyncpg
 from pydantic import BaseModel
 
+from syn_adapters import postgres_pool
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.record_match import holds
-from syn_domain.pagination import ProjectionRecord
-from syn_domain.projection_scan import JsonValue
+from syn_domain.pagination import Page, ProjectionRecord
+from syn_domain.projection_count import GroupKey
+from syn_domain.projection_page import PageQuery
+from syn_domain.projection_scan import Decide, JsonValue, SqlPage, SqlPageRequest
 from syn_shared.settings import get_settings
 
 
@@ -41,6 +45,9 @@ class PostgresProjectionStore:
         self._initialized_tables: set[str] = set()
         # Tables whose lean column (lean_documents) is ready for list scans.
         self._lean_tables: set[str] = set()
+        # Background list-index builds (postgres_page), held so they are not
+        # collected mid-flight and can be cancelled on close.
+        self._index_builds: set[asyncio.Task[None]] = set()
 
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create the connection pool."""
@@ -52,8 +59,9 @@ class PostgresProjectionStore:
                     "SYN_OBSERVABILITY_DB_URL must be configured. Set it in your .env file."
                 )
             database_url = str(settings.syn_observability_db_url)
-            self._pool = await asyncpg.create_pool(
+            self._pool = await postgres_pool.create_pool(
                 database_url,
+                name="projections",
                 min_size=2,
                 max_size=10,
             )
@@ -72,6 +80,17 @@ class PostgresProjectionStore:
 
         if await ensure_lean_column(pool, projection, table_name):
             self._lean_tables.add(projection)
+        from syn_adapters.projection_stores.postgres_page import (
+            LIST_FILTER_INDEXES,
+            ensure_list_indexes,
+        )
+
+        if projection in LIST_FILTER_INDEXES:
+            # In the background: a CONCURRENTLY build waits out every open
+            # transaction on the table, and no request should wait with it.
+            build = asyncio.create_task(ensure_list_indexes(pool, projection, table_name))
+            self._index_builds.add(build)
+            build.add_done_callback(self._index_builds.discard)
 
     async def _ensure_state_table(self) -> None:
         """Ensure the projection_states table exists."""
@@ -200,7 +219,7 @@ class PostgresProjectionStore:
         projection: str,
         fields: Sequence[str],
         *,
-        filters: Mapping[str, str] | None = None,
+        filters: Mapping[str, str | Sequence[str]] | None = None,
         order_by: str | None = None,
     ) -> list[tuple[str, Mapping[str, JsonValue]]]:
         """Selected fields of every matching document (syn_domain.projection_scan)."""
@@ -216,12 +235,58 @@ class PostgresProjectionStore:
             lean_ready=projection in self._lean_tables,
         )
 
+    async def count_by(
+        self,
+        projection: str,
+        fields: Sequence[str],
+        *,
+        filters: Mapping[str, str | Sequence[str]] | None = None,
+    ) -> list[tuple[GroupKey, int]]:
+        """Matching documents counted per group of ``fields`` (syn_domain.projection_count)."""
+        from syn_adapters.projection_stores.postgres_scan import count_by
+
+        await self._ensure_table(projection)
+        return await count_by(
+            await self._get_pool(),
+            self._table_name(projection),
+            fields,
+            filters,
+            lean_ready=projection in self._lean_tables,
+        )
+
+    async def page_keys(self, projection: str, query: PageQuery) -> Page[str]:
+        """One page of keys, its total and facets, in one query (syn_domain.projection_page)."""
+        from syn_adapters.projection_stores.postgres_page_keys import page_keys
+
+        await self._ensure_table(projection)
+        return await page_keys(
+            await self._get_pool(),
+            self._table_name(projection),
+            query,
+            lean_ready=projection in self._lean_tables,
+        )
+
     async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
         """The whole documents stored under ``keys``, by key."""
         from syn_adapters.projection_stores.postgres_scan import get_many
 
         await self._ensure_table(projection)
         return await get_many(await self._get_pool(), self._table_name(projection), keys)
+
+    async def page_in_sql(
+        self, projection: str, request: SqlPageRequest, decide: Decide
+    ) -> SqlPage:
+        """One list page, its total and its facets, in one snapshot (projection_scan)."""
+        from syn_adapters.projection_stores.postgres_page import page_in_sql
+
+        await self._ensure_table(projection)
+        return await page_in_sql(
+            await self._get_pool(),
+            self._table_name(projection),
+            request,
+            decide,
+            lean_ready=projection in self._lean_tables,
+        )
 
     async def count(self, projection: str, filters: dict[str, str] | None = None) -> int:
         """Count records with the same filter semantics `query` uses."""
@@ -319,6 +384,11 @@ class PostgresProjectionStore:
 
     async def close(self) -> None:
         """Close the connection pool."""
+        for build in list(self._index_builds):
+            # A cancelled build leaves an INVALID index; the next start rebuilds it.
+            build.cancel()
+        if self._index_builds:
+            await asyncio.gather(*self._index_builds, return_exceptions=True)
         if self._pool:
             await self._pool.close()
             self._pool = None

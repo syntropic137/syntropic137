@@ -17,9 +17,17 @@ from syn_domain import agent_event_span
 from syn_domain.agent_event_span import EventSpan
 from syn_domain.pagination import Page, ProjectionRecord, matches_search, paginate
 from syn_domain.projection_scan import (
+    Decide,
     JsonValue,
+    ListShape,
+    RowDecision,
     ScannedRecord,
+    SqlPage,
+    SqlPageRequest,
     UndeclaredFieldError,
+    UnjudgedRow,
+    WindowPlacement,
+    page_projection,
     paginate_projection,
 )
 
@@ -159,3 +167,62 @@ async def test_no_ids_asks_nothing() -> None:
     conn = _RollupConn(None, None)
     assert await agent_event_span.for_sessions(conn, []) == EventSpan.unbounded()
     assert conn.calls == 0
+
+
+SHAPE = ListShape(timestamp_field="at", facet_field="status", search_fields=("id",))
+
+
+async def _shaped(store: object, *, search: str | None = "s1") -> Page[str]:
+    async def full_read() -> list[dict[str, JsonValue]]:
+        return DOCS
+
+    return await page_projection(
+        store,
+        "p",
+        shape=SHAPE,
+        filters=None,
+        search=search,
+        statuses=["ok"],
+        after=None,
+        before=None,
+        full_read=full_read,
+        to_row=lambda r: f"{r['id']}:{len(str(r['body']))}",
+        offset=0,
+        limit=3,
+    )
+
+
+async def test_a_shaped_page_without_sql_is_paginate() -> None:
+    assert await _shaped(object()) == _expected()
+    assert await _shaped(_ScanningStore(DOCS)) == _expected()
+
+
+class _SqlStore:
+    """Hands every row to ``decide``, as Postgres does for rows it cannot judge."""
+
+    def __init__(self) -> None:
+        self.request: SqlPageRequest | None = None
+        self.decisions: list[RowDecision] = []
+
+    async def page_in_sql(
+        self, projection: str, request: SqlPageRequest, decide: Decide
+    ) -> SqlPage:
+        self.request = request
+        self.decisions = decide(
+            [UnjudgedRow(str(d["id"]), {f: d.get(f) for f in SHAPE.fields}) for d in DOCS]
+        )
+        return SqlPage(rows=[DOCS[0]], total=1, status_counts={"ok": 1}, excluded_undated=0)
+
+
+async def test_rows_sql_cannot_judge_are_judged_by_paginates_own_predicates() -> None:
+    store = _SqlStore()
+    page = await _shaped(store, search="S1")
+    assert page == Page(rows=["s0:0"], total=1, status_counts={"ok": 1})
+    assert store.request is not None
+    assert store.request.needle == "s1"
+    assert store.request.statuses == frozenset({"ok"})
+    by_key = {d.key: d for d in store.decisions}
+    assert by_key["s1"].matched and by_key["s10"].matched and not by_key["s2"].matched
+    assert by_key["s3"].facet == "bad"
+    assert by_key["s3"].sort_key == "2026-10-04"
+    assert all(d.placement is WindowPlacement.INSIDE for d in store.decisions)

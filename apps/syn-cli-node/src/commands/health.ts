@@ -49,6 +49,19 @@ function readModelLines(subscription: Record<string, unknown>): string[] {
     );
   }
 
+  // #1545: a read model at the head that skipped a start. Lag cannot show it,
+  // and unlike a stall it is not stuck, it is wrong, so name the executions.
+  const unapplied = subscription["unapplied_starts"];
+  const dropped = Array.isArray(unapplied) ? (unapplied as Record<string, unknown>[]) : [];
+  if (dropped.length > 0) {
+    const named = dropped
+      .map((entry) => `${String(entry["execution_id"])} in ${projectionName(entry)}`)
+      .join(", ");
+    lines.push(
+      `  Read models skipped execution starts: ${named}. This will NOT clear on its own — see docs/runbooks/repair-dropped-execution-start.md.`,
+    );
+  }
+
   return lines;
 }
 

@@ -476,6 +476,7 @@ def tracked_files(root: Path) -> tuple[list[Path], list[Path]]:
             "infra/**/*.yaml",
             "scripts/*.sh",
             "justfile",
+            "just/*.just",
         ],
         cwd=root,
         capture_output=True,
@@ -491,7 +492,7 @@ def tracked_files(root: Path) -> tuple[list[Path], list[Path]]:
     paths = [Path(name) for name in listed.stdout.split() if (root / name).is_file()]
     paths = [p for p in paths if FIXTURE_DIR not in p.parents]
     compose = [p for p in paths if p.suffix in (".yml", ".yaml")]
-    shell = [p for p in paths if p.suffix == ".sh" or p.name == "justfile"]
+    shell = [p for p in paths if p.suffix in (".sh", ".just") or p.name == "justfile"]
     return compose, shell
 
 

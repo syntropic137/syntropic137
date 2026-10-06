@@ -500,6 +500,7 @@ class TestProcessorCancellation:
 
         started_at = datetime.now(UTC)
         result = await processor._cancel_execution(
+            aggregate=MagicMock(),
             execution_id="exec-cancel",
             workflow_id="wf-cancel",
             phase_results=[],
@@ -558,6 +559,7 @@ class TestProcessorCancellation:
         processor._runtimes.of("exec-cancel")._workspace_cms["phase-b"] = healthy_cm
 
         result = await processor._cancel_execution(
+            aggregate=MagicMock(),
             execution_id="exec-cancel",
             workflow_id="wf-cancel",
             phase_results=[],

@@ -17,6 +17,7 @@ See ADR-021, ADR-023, ADR-024.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -218,17 +219,9 @@ class WorkspaceService:
             if environment:
                 merged_env = dict(cfg.environment)
                 merged_env.update(environment)
-                cfg = WorkspaceServiceConfig(
-                    backend=cfg.backend,
-                    image=cfg.image,
-                    memory_limit_mb=cfg.memory_limit_mb,
-                    cpu_limit_cores=cfg.cpu_limit_cores,
-                    timeout_seconds=cfg.timeout_seconds,
-                    allowed_hosts=cfg.allowed_hosts,
-                    default_token_ttl=cfg.default_token_ttl,
-                    capabilities=cfg.capabilities,
-                    environment=merged_env,
-                )
+                # replace(), not a field-by-field copy: a copy silently drops
+                # any field added later.
+                cfg = dataclasses.replace(cfg, environment=merged_env)
         else:
             cfg = WorkspaceServiceConfig(environment=environment or {})
 
