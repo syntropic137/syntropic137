@@ -25,6 +25,8 @@ from syn_domain.contexts.orchestration.slices.get_workflow_detail.projection imp
     WorkflowDetailProjection,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def memory_store() -> InMemoryProjectionStore:

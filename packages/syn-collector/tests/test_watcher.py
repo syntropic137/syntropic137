@@ -9,6 +9,8 @@ from syn_collector.events.types import EventType
 from syn_collector.watcher.hooks import HookWatcher
 from syn_collector.watcher.transcript import TranscriptWatcher
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestHookWatcher:

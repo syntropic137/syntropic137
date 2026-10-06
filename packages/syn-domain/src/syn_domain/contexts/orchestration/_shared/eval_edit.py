@@ -49,7 +49,8 @@ async def edit_eval(
     this command was asked to make it. Omit it to let every conflict through.
     """
     aggregate = await repository.get_by_id(eval_id)
-    if aggregate is None:
+    # Loaded but not ``exists``: another aggregate's stream at this id (#1557).
+    if aggregate is None or not aggregate.exists:
         return None
     try:
         decide(aggregate)

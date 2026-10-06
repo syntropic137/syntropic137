@@ -42,6 +42,8 @@ from syn_api.types import (
     RegisterClaudePluginRequest,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class _TestManifest(TypedDict):
     """Minimal manifest shape used by test fixtures."""

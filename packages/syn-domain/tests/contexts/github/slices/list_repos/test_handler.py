@@ -13,6 +13,8 @@ from syn_domain.contexts.github.slices.list_repos.handler import (
     ListAccessibleReposHandler,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_repo(idx: int, *, private: bool = False, default_branch: str = "main") -> dict:
     """Create a raw GitHub API repo dict."""

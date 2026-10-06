@@ -32,6 +32,8 @@ from syn_adapters.projections.session_tools import ToolOperation as AdaptersTool
 from syn_api.routes.sessions import OperationInfo
 from syn_api.types import ToolOperation as ApiToolOperation
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

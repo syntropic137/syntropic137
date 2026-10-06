@@ -4,7 +4,8 @@ Subscribes to `ExecutionRequested` and starts the execution each admitted
 direct start names, using the Processor To-Do List pattern shared with resume
 starts (`_shared/start_todo.py`).
 
-PROJECTION SIDE (handle_event): writes a `pending` record. Pure, replay-safe.
+PROJECTION SIDE (handle_event): writes a `pending` record, and a terminal
+`withdrawn` one when the request is withdrawn (#1650). Pure, replay-safe.
 PROCESSOR SIDE (process_pending): offers each owed record to the starter. Live
 only. A start the route already queued in this process is held, and is not
 offered again; after a restart nothing is held, and every request still owed
@@ -28,6 +29,7 @@ from event_sourcing import (
 )
 
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
+from syn_domain.contexts.orchestration._shared.start_record import read_start_record
 from syn_domain.contexts.orchestration._shared.start_todo import (
     ConditionalProjectionStore,
     StartFailureReporter,
@@ -43,10 +45,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _EXECUTION_REQUESTED = "ExecutionRequested"
+_EXECUTION_REQUEST_WITHDRAWN = "ExecutionRequestWithdrawn"
 _EXECUTION_STARTED = "WorkflowExecutionStarted"
 _ADMISSION_OPEN = AdmissionOpenEvent.event_type
 
-_SUBSCRIBED_EVENTS = {_EXECUTION_REQUESTED, _EXECUTION_STARTED, _ADMISSION_OPEN}
+_SUBSCRIBED_EVENTS = {
+    _EXECUTION_REQUESTED,
+    _EXECUTION_REQUEST_WITHDRAWN,
+    _EXECUTION_STARTED,
+    _ADMISSION_OPEN,
+}
 
 
 class ExecutionRequestStarter(Protocol):
@@ -102,6 +110,8 @@ class ExecutionRequestStartProcessManager(StartToDoProcessManager[ExecutionReque
         try:
             if event_type == _EXECUTION_REQUESTED:
                 await self._record_request(envelope.event)
+            elif event_type == _EXECUTION_REQUEST_WITHDRAWN:
+                await self._record_withdrawal(envelope.event)
             elif event_type == _EXECUTION_STARTED:
                 execution_id = getattr(envelope.event, "execution_id", None)
                 if execution_id:
@@ -140,6 +150,40 @@ class ExecutionRequestStartProcessManager(StartToDoProcessManager[ExecutionReque
             recorded_at=requested_at if isinstance(requested_at, datetime) else datetime.now(UTC),
         )
         await self._store.save_if(self.PROJECTION_NAME, record.key, record, expected=None)
+
+    async def _record_withdrawal(self, event: DomainEvent) -> None:
+        """Settle the record `withdrawn`, so no pass offers it again (#1650).
+
+        Over whatever it held short of `started`: a withdrawal landing on a
+        `dispatched` record is the in-flight case, and the starter reads the
+        request again once it has a slot, so that start does not run either.
+        """
+        if self._store is None:
+            return
+        execution_id = getattr(event, "execution_id", None)
+        workflow_id = getattr(event, "workflow_id", None)
+        withdrawn_at = getattr(event, "withdrawn_at", None)
+        if not execution_id or not workflow_id:
+            return
+        row = await self._store.get(self.PROJECTION_NAME, str(execution_id))
+        current = read_start_record(ExecutionRequestStartRecord, row) if row is not None else None
+        if current is None:
+            current = ExecutionRequestStartRecord(
+                execution_id=str(execution_id),
+                workflow_id=str(workflow_id),
+                recorded_at=withdrawn_at
+                if isinstance(withdrawn_at, datetime)
+                else datetime.now(UTC),
+            )
+        reason = getattr(event, "reason", None)
+        await self._save(
+            current.model_copy(
+                update={
+                    "status": "withdrawn",
+                    "status_reason": None if reason is None else str(reason),
+                }
+            )
+        )
 
     async def process_pending(self) -> int:
         """PROCESSOR SIDE: offer each owed start. Live-only, idempotent.

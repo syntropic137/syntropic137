@@ -111,6 +111,7 @@ async def _listed(tag: list[str] | None) -> dict[str, list[str]]:
         started_before=None,
         q=None,
         tag=tag,
+        eval_id=None,
         page=1,
         page_size=50,
     )

@@ -54,6 +54,15 @@ pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / "workflows" / "sdlc" / "implement-v3" / "workflow.yaml"
+
+#: Every workflow that runs these repair rounds, by id. sdlc-reverify-pr-v1 is
+#: implement-v3's verification half on an existing PR (#1634), with copies of
+#: the same prompts that test_reverify_pr_workflow.py holds byte-equal, so
+#: tests that read prompt FILES read implement-v3's and cover both.
+_ROUND_WORKFLOWS = {
+    "sdlc-implement-v3": _WORKFLOW,
+    "sdlc-reverify-pr-v1": _REPO_ROOT / "workflows" / "sdlc" / "reverify-pr" / "workflow.yaml",
+}
 _FINALIZE = _WORKFLOW.parent / "phases" / "finalize_pr.md"
 
 # The bound the task set: one round plus at most two extra. Raising it is a
@@ -61,11 +70,13 @@ _FINALIZE = _WORKFLOW.parent / "phases" / "finalize_pr.md"
 _ROUNDS = 3
 
 
-@pytest.fixture(scope="module")
-def installed() -> tuple[list[PhaseDefinition], dict[str, str]]:
+@pytest.fixture(scope="module", params=list(_ROUND_WORKFLOWS))
+def installed(request: pytest.FixtureRequest) -> tuple[list[PhaseDefinition], dict[str, str]]:
     """The phase order and prompts exactly as `POST /workflows` installs them."""
-    command = build_command_from_definition(WorkflowDefinition.from_file(_WORKFLOW))
-    assert command.aggregate_id == "sdlc-implement-v3"
+    command = build_command_from_definition(
+        WorkflowDefinition.from_file(_ROUND_WORKFLOWS[request.param])
+    )
+    assert command.aggregate_id == request.param
     phases = [
         PhaseDefinition(phase_id=p.phase_id, name=p.name, order=p.order)
         for p in sorted(command.phases, key=lambda p: p.order)

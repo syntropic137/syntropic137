@@ -11,6 +11,8 @@ from syn_domain.contexts.github.slices.get_installation.projection import (
     InstallationProjection,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Fake store (mirrors FakeProjectionStore in organization slices conftest)
 # ---------------------------------------------------------------------------

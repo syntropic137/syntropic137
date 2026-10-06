@@ -21,6 +21,8 @@ from syn_adapters.subscriptions.service import (
     EventSubscriptionService,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class MockTestEnvironmentError(Exception):
     """Raised when a mock is used outside of test environment."""

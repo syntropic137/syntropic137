@@ -24,6 +24,8 @@ from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
 )
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
+pytestmark = pytest.mark.unit
+
 
 class InMemoryDedup:
     """In-memory dedup for test isolation."""

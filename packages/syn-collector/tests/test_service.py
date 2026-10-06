@@ -10,6 +10,8 @@ from syn_collector.collector.service import create_app
 from syn_collector.collector.store import InMemoryObservabilityStore
 from syn_collector.events.types import CollectedEvent, EventBatch, EventType
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def test_client() -> TestClient:

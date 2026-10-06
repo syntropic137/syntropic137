@@ -324,6 +324,7 @@ async def _load_execution_list_data(
     started_before: datetime | None = None,
     search: str | None = None,
     tags: TagSet | None = None,
+    eval_id: str | None = None,
 ) -> tuple[Page[WorkflowExecutionSummary], dict[str, int], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
@@ -348,6 +349,7 @@ async def _load_execution_list_data(
             started_before=started_before,
             search=search,
             tags=tags,
+            eval_id=eval_id,
             offset=offset,
             limit=limit,
         )
@@ -662,6 +664,13 @@ async def list_executions_endpoint(
             "Normalised like stored tags; an invalid tag is rejected with 422."
         ),
     ),
+    eval_id: str | None = Query(
+        None,
+        description=(
+            "Keep only executions currently in this eval: an eval's runs (#967). "
+            "Matched exactly, never as a prefix."
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
@@ -683,6 +692,7 @@ async def list_executions_endpoint(
         started_before=started_before,
         search=q,
         tags=tags,
+        eval_id=eval_id,
     )
     return ExecutionListResponse(
         executions=[

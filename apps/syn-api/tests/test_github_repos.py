@@ -10,6 +10,8 @@ import pytest
 from syn_api.routes.github import list_accessible_repos
 from syn_api.types import Err, GitHubError, GitHubRepoLookup, Ok
 
+pytestmark = pytest.mark.unit
+
 
 def _make_repo(idx: int, *, private: bool = False) -> dict:
     """Create a raw GitHub API repo dict."""

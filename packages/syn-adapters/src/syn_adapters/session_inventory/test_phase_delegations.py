@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
 from agentic_isolation.child_journal import ChildCall, ChildIntent
 
 from syn_adapters.session_inventory.phase_delegations import delegation_attempt
 from syn_domain.contexts.orchestration.ports import DelegationOutcome
+
+pytestmark = pytest.mark.unit
 
 
 def _intent(target: str | None, status: str | None, exit_code: int | None = None, **kw: object):

@@ -48,6 +48,8 @@ const cancelCommand: CommandDef = {
     );
     print(style(`Cancel signal sent for execution ${id}`, GREEN));
     print(`  State: ${data.state}`);
+    // #1650: a queued start is withdrawn, not signalled; the message says which.
+    if (data.message) print(`  Message: ${data.message}`);
   },
 };
 

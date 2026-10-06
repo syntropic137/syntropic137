@@ -163,6 +163,7 @@ class MockSessionRepository:
                 self.sessions[cmd.aggregate_id] = session
 
 
+@pytest.mark.unit
 class TestSessionPersistence:
     """Tests verifying session aggregate persistence."""
 
@@ -276,6 +277,7 @@ class TestSessionPersistence:
         assert last_cmd.error_message == "Container crashed"
 
 
+@pytest.mark.unit
 class TestAnalyticsEventHandling:
     """Tests for analytics event parsing and logging."""
 
@@ -341,6 +343,7 @@ class TestAnalyticsEventHandling:
         assert total_output == 175
 
 
+@pytest.mark.unit
 class TestContainerExecutionIntegration:
     """Integration tests for container execution flow."""
 
