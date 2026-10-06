@@ -187,6 +187,25 @@ class PhaseOutputFile:
     content: str | bytes
 
 
+def primary_text(files: list[PhaseOutputFile]) -> str | None:
+    """The text that stands for a phase's output, or None if it has none.
+
+    The first file with text content, because every source puts the primary
+    deliverable at the head: the projection sorts by ``_injection_rank``, which
+    ranks the explicitly-flagged primary first (#997), and the live path
+    collects in the order it flagged. Choosing by any other rule would recreate
+    the disagreement #1149 removed, one layer down - which is why the flat
+    alias and a resume's inherited primary both ask this one function.
+
+    Empty content is not a deliverable - `CreateArtifactCommand` rejects it and
+    every other reader skips it, so a legacy or corrupt row cannot become the
+    primary. Nor is a binary file (#990): the primary is read as the phase's
+    text, and a screenshot reaches the next phase through the tree at its own
+    path instead.
+    """
+    return next((f.content for f in files if isinstance(f.content, str) and f.content), None)
+
+
 @dataclass(frozen=True)
 class AgentIdentity:
     """Who produced a phase's output: the harness that ran, and the model it

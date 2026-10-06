@@ -21,6 +21,7 @@ from syn_domain.contexts.artifacts import (
     ContentType,
     PhaseOutputFile,
 )
+from syn_domain.contexts.artifacts._shared.value_objects import primary_text
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
     DescribeWork,
@@ -423,30 +424,12 @@ class ArtifactCollector:
             body = produced_file.content
             out.append((path, body.encode() if isinstance(body, str) else body))
 
-        primary = cls._primary_deliverable(produced)
+        primary = primary_text(produced)
         alias = cls._flat_alias_path(phase_id)
         if primary is not None and alias not in seen:
             seen.add(alias)
             out.append((alias, primary.encode()))
         return out
-
-    @staticmethod
-    def _primary_deliverable(produced: list[PhaseOutputFile]) -> str | None:
-        """The one file that stands for the phase, or None if it produced none.
-
-        The head of the list, because both sources put the primary
-        deliverable there: the projection sorts by ``_injection_rank``, which
-        ranks the explicitly-flagged primary first (#997), and the live path
-        collects in the order it flagged. Choosing here by any other rule
-        would recreate the disagreement #1149 removed, one layer down.
-
-        Empty content is not a deliverable - `CreateArtifactCommand` rejects
-        it and every other reader skips it, so a legacy or corrupt row cannot
-        become the alias. Nor is a binary file (#990): the alias is read as
-        the phase's text, and a screenshot reaches the next phase through the
-        tree at its own path instead.
-        """
-        return next((f.content for f in produced if isinstance(f.content, str) and f.content), None)
 
     @staticmethod
     def _tree_path(phase_id: str, source_path: str) -> str | None:
