@@ -95,6 +95,16 @@ describe("CLI YAML loader agrees with the PyYAML reference", () => {
       "finalize_pr",
     ]);
   });
+
+  it("reads reverify-pr as nine phases", () => {
+    const rel = "workflows/sdlc/reverify-pr/workflow.yaml";
+    const document = parseYaml(fs.readFileSync(path.join(REPO_ROOT, rel), "utf-8"), rel);
+    expect(phasesOf(document).map((p) => p.id)).toEqual([
+      "prepare", "verify",
+      "fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3",
+      "finalize_pr",
+    ]);
+  });
 });
 
 const UPLOAD_FIXTURE = path.join(import.meta.dirname, "../fixtures/workflow-upload-bodies.json");
@@ -175,7 +185,10 @@ describe("CLI package loader agrees with the PyYAML reference", () => {
   });
 });
 
-describe("implement-v3 install upload", () => {
+describe.each([
+  ["implement-v3", "ten"],
+  ["reverify-pr", "nine"],
+])("%s install upload", (pkg, count) => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -183,7 +196,7 @@ describe("implement-v3 install upload", () => {
 
   // The hop after the parser: what `syn workflow install` actually POSTs.
   // The Python half pins that the server stores every phase of such a body.
-  it("uploads all ten phases, in order, to /workflows/from-yaml", async () => {
+  it(`uploads all ${count} phases, in order, to /workflows/from-yaml`, async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "x", name: "x", status: "created" }), {
         status: 201,
@@ -193,13 +206,14 @@ describe("implement-v3 install upload", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(process.stdout, "write").mockReturnValue(true);
 
-    const { workflows } = resolvePackage(path.join(REPO_ROOT, "workflows/sdlc/implement-v3"));
+    const { workflows } = resolvePackage(path.join(REPO_ROOT, `workflows/sdlc/${pkg}`));
     await installWorkflowsViaApi(workflows);
 
     const init = fetchMock.mock.calls[0]![1] as RequestInit;
     expect(String(fetchMock.mock.calls[0]![0])).toContain("/workflows/from-yaml");
     const uploaded = JSON.parse(Buffer.from(init.body as Uint8Array).toString("utf-8")) as unknown;
-    const expected = reference.files["workflows/sdlc/implement-v3/workflow.yaml"]!.phases;
+    const expected = reference.files[`workflows/sdlc/${pkg}/workflow.yaml`]!.phases;
+    expect(expected).not.toHaveLength(0);
     expect(phasesOf(uploaded).map(({ id, order, model }) => ({ id, order, model }))).toEqual(
       expected.map(({ id, order, model }) => ({ id, order, model })),
     );
