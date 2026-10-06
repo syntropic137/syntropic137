@@ -408,6 +408,7 @@ class AgentExecutionHandler:
                 # read inside the container's lifetime - by collection time the
                 # workspace is torn down and the only copy is gone.
                 rollout=workspace,
+                cost_limit=cost_limit,
             )
         return EventStreamProcessor(
             tokens=tokens,

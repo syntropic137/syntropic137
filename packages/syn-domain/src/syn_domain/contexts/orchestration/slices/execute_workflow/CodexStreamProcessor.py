@@ -95,6 +95,9 @@ if TYPE_CHECKING:
 
     from syn_adapters.control import ExecutionController
     from syn_domain.contexts.orchestration.ports import CodexRolloutPort
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
         TokenAccumulator,
     )
@@ -416,8 +419,11 @@ class CodexStreamProcessor:
         session_id: str,
         agent_model: str | None,
         rollout: CodexRolloutPort | None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> None:
         self._tokens = tokens
+        self._cost_limit = cost_limit
+        self._cost_limit_reason: str | None = None
         #: Where the model comes from when the stream does not name one, which
         #: so far is every codex run there has ever been (#1284). Stated by
         #: every caller and given no default on purpose: `None` here means
@@ -523,6 +529,18 @@ class CodexStreamProcessor:
 
             await self._process_line(line)
 
+            # Same check as the claude path (#1376). Codex reports usage only
+            # on `turn.completed`, so the limit is seen per codex turn, not
+            # per model call - coarser, and stated rather than hidden.
+            over = self._cost_limit.exceeded() if self._cost_limit is not None else None
+            if over is not None:
+                logger.warning("Phase %s %s - interrupting the agent", self._phase_id, over)
+                self._cost_limit_reason = over
+                await workspace.interrupt()
+                interrupt_requested = True
+                interrupt_reason = over
+                break
+
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream
             # writes it: every fault the parser can see is held as a candidate
@@ -617,6 +635,7 @@ class CodexStreamProcessor:
             # asked - and the codex phase is the OTHER half of every
             # cross-model claim this platform makes (#1284).
             announced_model=self._announced_model,
+            cost_limit_reason=self._cost_limit_reason,
         )
 
     async def _name_the_model_from_disk(self) -> None:
@@ -1035,3 +1054,14 @@ class CodexStreamProcessor:
         )
         # Held, not written: see `held_token_rows`.
         self._held_rows.hold(turn_usage)
+        if self._cost_limit is not None:
+            # Priced by the same rule `_estimate_cost` applies to the totals.
+            self._cost_limit.record_turn(
+                RecordedModel(
+                    observed=self._announced_model, requested=self._agent_model
+                ).pricing_model,
+                turn_usage.fresh_input,
+                turn_usage.billable_output,
+                0,
+                turn_usage.cache_read,
+            )
