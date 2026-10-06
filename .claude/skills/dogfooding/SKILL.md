@@ -165,7 +165,7 @@ any `PINNED_DIGESTS` bump; these are properties of an image, not of the platform
 | Docker daemon | **absent** - no root, cannot start `dockerd` |
 | `check-default-workspace-image`, `check-pinned-image-channels` | fail, both need Docker |
 | full e2e container stack | not possible, same reason |
-| Playwright / headless Chromium | baked in since toolchain 1.5.0 (AW #33): Playwright 1.63.0 + headless shell, offline, `npx --no-install playwright screenshot`; a repo pinning another Playwright version will not find its browser. Not yet re-measured in a live workspace (#1028) |
+| Playwright / headless Chromium | baked in since toolchain 1.5.0 (AW #33): Playwright 1.63.0 + headless shell, offline, `npx --no-install playwright screenshot`; a repo pinning another Playwright version will not find its browser. Measured in a live workspace 2026-10-06 (#1028): launches with no install; `apps/syn-dashboard-ui/scripts/screenshot.mjs` screenshots the built dashboard |
 
 Ladders up by letting a task be scoped to what the workspace can finish, instead of
 discovering the limit after paying for the run.
