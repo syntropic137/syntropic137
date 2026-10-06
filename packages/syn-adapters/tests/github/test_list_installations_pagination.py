@@ -10,6 +10,8 @@ import pytest
 from syn_adapters.github.client import GitHubAppError
 from syn_adapters.github.client_endpoints import list_installations
 
+pytestmark = pytest.mark.unit
+
 _API = "https://api.github.com"
 
 

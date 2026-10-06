@@ -15,6 +15,8 @@ from syn_collector.events.ids import (
     generate_user_prompt_event_id,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestGenerateEventId:

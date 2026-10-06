@@ -25,6 +25,8 @@ from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
 from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from syn_domain.contexts.github.ports import ChecksAPIResult
 

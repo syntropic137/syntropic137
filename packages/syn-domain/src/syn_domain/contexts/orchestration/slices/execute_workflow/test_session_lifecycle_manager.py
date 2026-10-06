@@ -19,6 +19,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
 )
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
+pytestmark = pytest.mark.unit
+
 
 def _make_manager(
     repo: AsyncMock | None = None,

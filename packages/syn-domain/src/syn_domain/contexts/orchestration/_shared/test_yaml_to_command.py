@@ -29,6 +29,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowType,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _minimal_definition(**overrides: object) -> WorkflowDefinition:
     data: Mapping[str, object] = {
