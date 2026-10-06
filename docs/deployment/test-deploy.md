@@ -47,8 +47,38 @@ run, so stage as soon as the content is merged; the swap is one `compose up`
 once the drain clears. The drain is the speed limit, because recreating the API
 destroys in-flight work (#1381). It needs `SYN_API_PASSWORD`; the host and API
 default to the selfhost VPS and can be overridden with `SYN_PIT_HOST` /
-`SYN_PIT_API`. It does not dispatch the final real-run check (section 5, step 5.3):
-do that yourself, and watch a PHASE reach `running`.
+`SYN_PIT_API`.
+
+**It proves a real execution starts before it says DONE (#1641).** beta.8 and
+beta.9 passed every other check here while no execution could start - every
+direct start was dropped as a duplicate - and beta.8 sat live and broken for
+~3h because this last check was manual. So once admission is reopened, the pit
+stop dispatches the probe workflow `telemetry-lag-probe-v1`
+(`workflows/probes/telemetry-lag`, one phase, no repo) and polls
+`GET /executions/{id}` until a phase in `.phases[].status` reports `running` or
+`completed`. Then it cancels the probe and reads the cancel back, because a
+probe still in flight is in-flight work to the next pit stop's drain.
+
+- **It is not free.** No token-free runner exists yet (the
+  `ScriptedAgentProfile` contract from #1609 has no driver), so the probe is a
+  real `sonnet` agent in a real workspace. It is cancelled the moment a phase
+  is running, so it costs workspace startup plus the first agent turns, not the
+  ~2 minute heartbeat it would otherwise run.
+- **The workflow must be installed on the host** (once:
+  `syn workflow install workflows/probes/telemetry-lag`). A dispatch that is
+  refused fails the pit stop and says so.
+- **On failure it exits non-zero and never prints DONE**: the probe was not
+  seen to start within `SYN_PIT_PROBE_TIMEOUT` (default 600s), or it ended
+  (`failed`, `cancelled`, `interrupted`, a `failed` phase) without a phase
+  running, or it could not be dispatched, or its cancel did not land within
+  `SYN_PIT_PROBE_CANCEL_TIMEOUT` (default 300s). The message names the execution
+  id and its last status, and prints the rollback command. **Nothing is rolled
+  back automatically, and admission stays OPEN**: other users' work is not
+  blocked by a failed probe. Decide, then roll back by hand.
+- **`--skip-probe`** is for emergencies only. It is logged loudly, the DONE
+  line says `PROBE SKIPPED`, and the check is yours again: dispatch one real
+  workflow and watch a PHASE reach `running` (section 5, step 5.3).
+- `SYN_PIT_PROBE_WORKFLOW` names a different probe workflow.
 
 **`stage` takes the deployed pins in either form.** A host installed from a
 release pins `syn-api` and `syn-gateway` **by digest**
