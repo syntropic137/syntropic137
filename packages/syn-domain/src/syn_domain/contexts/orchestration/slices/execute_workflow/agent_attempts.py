@@ -40,6 +40,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
     ObservabilityCollector,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+    PhaseCostLimit,
+)
 from syn_shared.agents import runner_for_provider
 from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE, ENV_SYN_PHASE_TIMEOUT_SECONDS
 
@@ -191,6 +194,10 @@ async def run_phase_agent(
     # handed the handler a timeout of 0 - which the workspace provider reads
     # as NO timeout. Holding the granted value is what makes that unreachable:
     # there is no budget arithmetic here to get wrong.
+    # ONE cost limit for the phase, for the same reason as the deadline above:
+    # every attempt spends from it, so a retry cannot reset what was spent
+    # (#1376). None when the phase declared no `max_cost_usd`.
+    cost_limit = PhaseCostLimit(phase.max_cost_usd) if phase.max_cost_usd is not None else None
     grant = attempts.first_attempt()
     while True:
         async with registered_attempt(launch.session_manager, runner) as invocation:
@@ -205,6 +212,7 @@ async def run_phase_agent(
                 collector=collector,
                 runner=runner,
                 on_launch=observer_for(launch.session_manager),
+                cost_limit=cost_limit,
             )
         if launch.session_manager is not None:
             await launch.session_manager.finish_invocation(
