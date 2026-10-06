@@ -54,17 +54,22 @@ export function toGitCommit(time: string, eventType: string, payload: unknown): 
   if (eventType !== 'git_commit') return null
   const data = record(payload)
   const git = record(data.git)
-  const sha = text(data.commit_hash, git.sha, data.sha)
+  // Legacy rows spread facts over the top level and `context`; the backend's
+  // reader (GitFacts._from_legacy in session_tools_converters.py) takes the sha
+  // from sha / context.sha / commit_hash / merge_sha. Read the same spellings,
+  // or a real legacy commit silently disappears from the card.
+  const ctx = record(data.context)
+  const sha = text(data.commit_hash, git.sha, data.sha, ctx.sha, data.merge_sha)
   if (!sha) return null
   return {
     time,
     event_type: eventType,
     data: {
       commit_hash: sha,
-      message: text(data.message, git.message, data.commit_message),
+      message: text(data.message, git.message, data.commit_message, ctx.message, data.message_preview),
       author: text(data.author, git.author),
-      repository: text(data.repository, git.repo, data.repo),
-      branch: text(data.branch, git.branch),
+      repository: text(data.repository, git.repo, data.repo, ctx.repo),
+      branch: text(data.branch, git.branch, ctx.branch),
       url: text(data.url),
       timestamp: text(data.timestamp),
     },

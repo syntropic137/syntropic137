@@ -42,6 +42,13 @@ const RECENT = [
     event_type: 'git_commit',
     data: { sha: 'cafebabe1111', commit_message: 'legacy agent commit' },
   },
+  {
+    // Legacy shape with the sha only under `context` (the backend's
+    // GitFacts._from_legacy reads context.sha); review of #1668.
+    time: '2026-10-06T07:00:00Z',
+    event_type: 'git_commit',
+    data: { context: { sha: 'deadbeef2222', message: 'context-only legacy commit', branch: 'main' } },
+  },
 ]
 
 beforeEach(() => {
@@ -68,6 +75,8 @@ describe('EventFeed', () => {
     expect(screen.getByText('feedfac')).toBeTruthy()
     expect(screen.getByText('cafebab')).toBeTruthy()
     expect(screen.getByText('legacy agent commit')).toBeTruthy()
+    expect(screen.getByText('deadbee')).toBeTruthy()
+    expect(screen.getByText('context-only legacy commit')).toBeTruthy()
     expect(screen.queryByText(/\?\?\?/)).toBeNull()
   })
 
