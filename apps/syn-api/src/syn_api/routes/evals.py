@@ -1,4 +1,13 @@
-"""Put an execution in an eval, take it out, and set a workflow's default eval (#967).
+"""Evals: create, list, show, archive, their runs, and membership edits (#967).
+
+``POST /evals`` mints the eval id on the server. A caller-chosen id could equal
+another aggregate's id, and the event store keys a stream by aggregate id alone
+(#1557), so the eval would share that aggregate's stream. Every write answers
+with a receipt read from the Eval aggregate; the list and detail routes read the
+eval projection, which may not show a just-created eval for a moment.
+
+``GET /evals/{id}/runs`` is the execution list filtered by eval, the same rows
+``GET /executions?eval_id=`` returns, so the two views cannot disagree.
 
 ``POST /executions/{id}/eval`` attaches a run to an eval after the fact, in any
 status; it records ``association_kind = attached`` and never copies a baseline.
@@ -15,11 +24,13 @@ after the edit, and an eval id is used exactly as typed, never prefix-expanded.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
+from syn_adapters.github.client import get_github_client
+from syn_adapters.github.revision_resolver import GitHubRevisionResolver
 from syn_adapters.projection_stores.prefix_match import format_ambiguous_error, resolve_by_prefix
 from syn_api._wiring import (
     ensure_connected,
@@ -30,25 +41,40 @@ from syn_api._wiring import (
     get_workflow_repo,
     sync_published_events_to_projections,
 )
+from syn_api.list_query import MAX_PAGE_SIZE
+from syn_api.routes.executions.models import ExecutionListResponse
+from syn_api.routes.executions.queries import list_executions_endpoint
 from syn_api.types import (
     AttachEvalRequest,
+    CreateEvalRequest,
+    EvalArchivedResponse,
+    EvalBaselineRepoResponse,
+    EvalCreatedResponse,
+    EvalListResponse,
+    EvalResponse,
     ExecutionEvalResponse,
     SetDefaultEvalRequest,
     WorkflowDefaultEvalResponse,
 )
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
+    ArchiveEvalHandler,
     AttachExecutionToEvalCommand,
     AttachExecutionToEvalHandler,
+    BaselineRequest,
+    CreateEvalHandler,
     DetachExecutionFromEvalCommand,
     DetachExecutionFromEvalHandler,
     EvalId,
     EvalUnavailableError,
+    Goal,
     SetWorkflowDefaultEvalCommand,
     SetWorkflowDefaultEvalHandler,
 )
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import EvalMembershipResult
+    from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
 
 router = APIRouter(tags=["evals"])
 
@@ -181,3 +207,187 @@ async def set_workflow_default_eval_endpoint(
     await sync_published_events_to_projections()
     default_eval_id = str(body.eval_id) if body.eval_id is not None else None
     return WorkflowDefaultEvalResponse(workflow_id=workflow_id, default_eval_id=default_eval_id)
+
+
+_EVAL_RESPONSES: dict[int | str, dict[str, str]] = {
+    404: {
+        "description": "No eval has this id in the eval read model (it may still be catching up)"
+    },
+    422: {"description": "The eval id is not a valid eval id"},
+}
+
+
+def _response(record: EvalRecord, run_count: int, tally: dict[str, int]) -> EvalResponse:
+    return EvalResponse(
+        eval_id=record.eval_id,
+        name=record.name,
+        goal=record.goal,
+        starting_workflow_id=record.starting_workflow_id,
+        baseline_repos=[
+            EvalBaselineRepoResponse(
+                repository=f"{repo.owner}/{repo.name}",
+                requested_ref=repo.requested_ref,
+                commit_sha=repo.commit_sha,
+            )
+            for repo in record.baseline_repos
+        ],
+        tags=list(record.tags),
+        frozen=record.frozen,
+        archived=record.archived,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        run_count=run_count,
+        run_status_counts=tally,
+    )
+
+
+def _baseline_requests(body: CreateEvalRequest) -> list[BaselineRequest]:
+    try:
+        return [
+            BaselineRequest(
+                repository=RepositoryRef.from_slug(repo.repository),
+                requested_ref=repo.requested_ref,
+            )
+            for repo in body.baseline_repos
+        ]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/evals",
+    response_model=EvalCreatedResponse,
+    status_code=201,
+    responses={
+        422: {"description": "The request is invalid, or a baseline ref could not be resolved"},
+    },
+)
+async def create_eval_endpoint(body: CreateEvalRequest) -> EvalCreatedResponse:
+    """Create an eval, pinning each baseline ref to a commit SHA. The id is minted here."""
+    baseline = _baseline_requests(body)
+    try:
+        goal = Goal(body.goal)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
+    await ensure_connected()
+    eval_id = EvalId.new()
+    repository = get_eval_repo()
+    handler = CreateEvalHandler(
+        repository, GitHubRevisionResolver(get_github_client), get_publisher()
+    )
+    result = await handler.handle(
+        eval_id=eval_id,
+        name=body.name,
+        goal=goal,
+        baseline=baseline,
+        tags=body.tags,
+        starting_workflow_id=body.starting_workflow_id,
+    )
+    if not result.success:
+        raise HTTPException(status_code=422, detail=result.error)
+    await sync_published_events_to_projections()
+    # The receipt is the aggregate as the store holds it, not the eval projection,
+    # which may not have applied EvalCreated yet.
+    created = await repository.get_by_id(str(eval_id))
+    if created is None or created.name is None or created.goal is None:
+        msg = f"eval {eval_id} was saved but cannot be loaded"
+        raise RuntimeError(msg)
+    return EvalCreatedResponse(
+        eval_id=str(eval_id),
+        name=created.name,
+        goal=str(created.goal),
+        starting_workflow_id=created.starting_workflow_id,
+        baseline_repos=[
+            EvalBaselineRepoResponse(
+                repository=repo.repository.slug,
+                requested_ref=repo.requested_ref,
+                commit_sha=repo.commit_sha,
+            )
+            for repo in created.baseline_repos
+        ],
+        tags=list(created.tags),
+    )
+
+
+@router.get("/evals", response_model=EvalListResponse)
+async def list_evals_endpoint(
+    status: Literal["active", "archived"] | None = Query(
+        None, description="Keep only active or only archived evals. Both when omitted."
+    ),
+    q: str | None = Query(None, description="Case-insensitive match on id, name and goal"),
+    tag: list[str] | None = Query(None, description="Keep evals carrying this tag; repeat for AND"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
+) -> EvalListResponse:
+    """List evals, newest first, each with its run count and status tally."""
+    await ensure_connected()
+    result = await get_projection_mgr().eval_list.page(
+        statuses=[status] if status else None,
+        search=q,
+        tags=tag,
+        offset=(page - 1) * page_size,
+        limit=page_size,
+    )
+    return EvalListResponse(
+        evals=[_response(row.record, row.run_count, row.run_status_counts) for row in result.rows],
+        total=result.total,
+        page=page,
+        page_size=page_size,
+        status_counts=result.status_counts,
+    )
+
+
+@router.get("/evals/{eval_id}", response_model=EvalResponse, responses=_EVAL_RESPONSES)
+async def get_eval_endpoint(eval_id: str) -> EvalResponse:
+    """One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`."""
+    eval_id = str(_eval_id(eval_id))
+    await ensure_connected()
+    detail = await get_projection_mgr().eval_list.detail(eval_id, limit=0)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")
+    return _response(detail.record, detail.runs.total, detail.runs.status_counts)
+
+
+@router.get(
+    "/evals/{eval_id}/runs", response_model=ExecutionListResponse, responses=_EVAL_RESPONSES
+)
+async def list_eval_runs_endpoint(
+    eval_id: str,
+    statuses: str | None = Query(None, description="Comma-separated execution statuses (OR'd)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
+) -> ExecutionListResponse:
+    """The executions currently in an eval: the execution list, filtered by eval.
+
+    An eval with no runs, or one the read model has not caught up with, is an
+    empty page rather than a 404.
+    """
+    return await list_executions_endpoint(
+        status=None,
+        statuses=statuses,
+        started_after=None,
+        started_before=None,
+        q=None,
+        tag=None,
+        eval_id=str(_eval_id(eval_id)),
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post(
+    "/evals/{eval_id}/archive",
+    response_model=EvalArchivedResponse,
+    responses={404: {"description": "No eval has this id"}, 422: _EVAL_RESPONSES[422]},
+)
+async def archive_eval_endpoint(eval_id: str) -> EvalArchivedResponse:
+    """Archive an eval: it stays readable with its runs, and admits no new ones. Idempotent."""
+    archive = _eval_id(eval_id)
+    await ensure_connected()
+    result = await ArchiveEvalHandler(get_eval_repo(), get_publisher()).handle(eval_id=archive)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Eval not found: {archive}")
+    if not result.success:
+        raise HTTPException(status_code=409, detail=result.error)
+    await sync_published_events_to_projections()
+    return EvalArchivedResponse(eval_id=str(archive), archived=True)

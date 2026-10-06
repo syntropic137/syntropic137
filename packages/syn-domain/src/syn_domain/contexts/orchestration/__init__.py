@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration._shared.eval_choice import (
 from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
     EvalMembershipResult,
 )
+from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
 )
@@ -88,7 +89,7 @@ from syn_domain.contexts.orchestration.domain import (
     WorkflowTemplateAggregate,
     WorkspaceAggregate,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId
+from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId, Goal
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
     ResumeExecutionCommand,
@@ -167,11 +168,17 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
+from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
+    ArchiveEvalHandler,
+)
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
 )
 from syn_domain.contexts.orchestration.slices.attach_execution_to_eval import (
     AttachExecutionToEvalHandler,
+)
+from syn_domain.contexts.orchestration.slices.create_eval.CreateEvalHandler import (
+    CreateEvalHandler,
 )
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
     CreateWorkflowTemplateHandler,
@@ -300,6 +307,7 @@ __all__ = [
     "AgentExecutionResult",
     # A phase's own verdict on itself - the type of `StreamResult.verdict` (#1256)
     "AgentVerdict",
+    "ArchiveEvalHandler",
     # Commands
     "ArchiveWorkflowTemplateCommand",
     # Handlers
@@ -308,6 +316,7 @@ __all__ = [
     "AttachExecutionToEvalHandler",
     # The clock a phase's retry budget is measured on (#1303)
     "AttemptClock",
+    "BaselineRequest",
     # Claude plugin types + errors (issue #726)
     "CancelledWorkLedger",
     "ClaudePluginError",
@@ -319,6 +328,7 @@ __all__ = [
     "ClaudePluginNotRegistered",
     "ClaudePluginRef",
     "ClaudePluginVersionHashMismatch",
+    "CreateEvalHandler",
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
@@ -356,6 +366,7 @@ __all__ = [
     "FailureClassification",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
+    "Goal",
     # Aggregates
     "HandlerResult",
     "ImageManifest",

@@ -921,6 +921,100 @@ class WorkflowDefaultEvalResponse(BaseModel):
     default_eval_id: str | None
 
 
+class EvalBaselineRepoRequest(BaseModel):
+    """One repository of a new eval's Baseline, before its ref is pinned (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str = Field(description="The repository, as an `owner/name` slug.")
+    requested_ref: str = Field(
+        min_length=1,
+        description=(
+            "A branch, tag or commit. Resolved once, at create, to a full commit SHA; "
+            "every run starts from that SHA even after the branch or tag moves."
+        ),
+    )
+
+
+class CreateEvalRequest(BaseModel):
+    """A new eval (#967). The server mints its id; see `EvalCreatedResponse`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    goal: str = Field(min_length=1, description="What the eval sets out to measure.")
+    starting_workflow_id: str | None = Field(
+        default=None, min_length=1, description="The workflow a run uses when it names none."
+    )
+    baseline_repos: list[EvalBaselineRepoRequest] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class EvalBaselineRepoResponse(BaseModel):
+    """One repository of an eval's Baseline: the ref asked for and the SHA it pinned to."""
+
+    repository: str
+    """The repository, as an `owner/name` slug."""
+    requested_ref: str
+    commit_sha: str
+
+
+class EvalCreatedResponse(BaseModel):
+    """The receipt for a create, read from the Eval aggregate, never a projection (#967).
+
+    The eval list and `GET /evals/{eval_id}` are read models and may not show
+    the eval for a moment after this returns. That is lag, not a failed create:
+    `eval_id` is authoritative from here on.
+    """
+
+    eval_id: str
+    name: str
+    goal: str
+    starting_workflow_id: str | None
+    baseline_repos: list[EvalBaselineRepoResponse]
+    """Each ref the request named, with the commit SHA it resolved to."""
+    tags: list[str]
+
+
+class EvalArchivedResponse(BaseModel):
+    """The receipt for an archive, read from the Eval aggregate (#967)."""
+
+    eval_id: str
+    archived: bool
+
+
+class EvalResponse(BaseModel):
+    """An eval as the eval read model holds it, with its run tally (#967)."""
+
+    eval_id: str
+    name: str
+    goal: str
+    starting_workflow_id: str | None
+    baseline_repos: list[EvalBaselineRepoResponse]
+    tags: list[str]
+    frozen: bool
+    """True once a run was admitted: the goal and Baseline can no longer change."""
+    archived: bool
+    created_at: str | None
+    updated_at: str | None
+    run_count: int
+    """Executions currently in the eval. A detached run is not counted."""
+    run_status_counts: dict[str, int]
+    """Those executions tallied by execution status."""
+
+
+class EvalListResponse(BaseModel):
+    """One page of evals, newest first (#967)."""
+
+    evals: list[EvalResponse]
+    total: int
+    """Evals matching every filter, before paging."""
+    page: int
+    page_size: int
+    status_counts: dict[str, int]
+    """Matching evals tallied as `active` / `archived`, ignoring the status filter."""
+
+
 # ---------------------------------------------------------------------------
 # Organization models
 # ---------------------------------------------------------------------------
