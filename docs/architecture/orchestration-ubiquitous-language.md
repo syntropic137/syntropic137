@@ -304,6 +304,12 @@ restart, or when the route's own task never ran - so an accepted start is
 never lost while it queues. Resume starts work the same way, from the
 parent's `ExecutionResumed`; both use one start to-do list (#1557).
 
+Its stream id is `request-<execution id>` (`execution_request_id`), never the
+execution id itself. The event store keys a stream by aggregate id alone, not
+by type and id, so a request at the execution's id would BE the execution's
+stream, and the start's NoStream write would refuse the run as a duplicate.
+That shipped once and stopped every direct start (v0.33.2-beta.8, beta.9).
+
 ## Eval
 
 An experiment: a Goal, measured by runs that all start from the same Repository
