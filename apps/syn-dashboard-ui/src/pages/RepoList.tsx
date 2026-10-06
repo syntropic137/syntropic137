@@ -100,7 +100,7 @@ export function RepoList() {
         <Card>
           <EmptyState
             icon={FolderGit2}
-            title="No repositories connected"
+            title="No repositories attached"
             description="Register one with `syn repo register --url owner/repo`, then install the GitHub App on it so workflows can act on it."
           />
         </Card>
