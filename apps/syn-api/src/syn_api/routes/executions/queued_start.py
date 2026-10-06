@@ -105,8 +105,9 @@ async def _from_the_request_stream(execution_id: str) -> ExecutionRequestStartRe
     if not execution_id.startswith("exec-"):
         return None
     from syn_adapters.storage.repositories import get_execution_request_repository
+    from syn_domain.contexts.orchestration import execution_request_id
 
-    request = await get_execution_request_repository().get_by_id(execution_id)
+    request = await get_execution_request_repository().get_by_id(execution_request_id(execution_id))
     if request is None or request.workflow_id is None or request.requested_at is None:
         return None
     return ExecutionRequestStartRecord(

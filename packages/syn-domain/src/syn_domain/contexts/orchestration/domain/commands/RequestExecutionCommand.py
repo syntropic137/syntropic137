@@ -13,6 +13,9 @@ from syn_domain.contexts.orchestration._shared.repository_baseline import (
     RepositoryBaseline,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration.domain.aggregate_execution_request.value_objects import (
+    execution_request_id,
+)
 
 
 @command("RequestExecution", "Records an admitted direct start before it runs")
@@ -34,7 +37,8 @@ class RequestExecutionCommand(BaseModel):
 
     @property
     def aggregate_id(self) -> str:
-        return self.execution_id
+        """The request's own id, never ``execution_id``: one id is one stream."""
+        return execution_request_id(self.execution_id)
 
 
 # As `ExecuteWorkflowCommand`: `LaunchEval.baseline` names `RepositoryBaseline`
