@@ -46,6 +46,7 @@ from .models import (
     PhaseOperationInfo,
 )
 from .phase_activity import summarize_phase_activity
+from .phase_skill_use import summarize_skill_use
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -334,6 +335,9 @@ async def _map_phase_detail(
         # status says whether that is "not recorded" or "could not read".
         pinned_at_start=pinned,
         start_pins_status=pins_status,
+        # From the same two inputs, before `ops` loses its None: an unread
+        # timeline must report "unavailable", not "declared, never invoked".
+        skill_use=summarize_skill_use(pinned, ops),
         operations=ops or [],
         # Summarised here, where `ops` are still the projection dataclasses
         # that know how to identify a call. One hop later they are the API
@@ -408,6 +412,8 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         # Forwarded whole, None included: null is "not recorded" (#1454).
         pinned_at_start=phase.pinned_at_start,
         start_pins_status=phase.start_pins_status,
+        # Forwarded whole: this is the hop that drops fields (#891, #1176).
+        skill_use=phase.skill_use,
         operations=operations,
         # Same model, forwarded whole rather than rebuilt field by field -
         # this constructor is the hop that has dropped a field twice (#891,

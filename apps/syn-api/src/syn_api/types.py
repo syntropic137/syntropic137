@@ -1278,6 +1278,53 @@ class PhaseStartConfig(BaseModel):
     skills: list[PinnedSkillInfo] = Field(default_factory=list)
 
 
+SkillUseStatus = Literal["observed", "not_observable", "unavailable"]
+"""Whether a phase's skill USE could be read (#1269).
+
+``observed``: a claude phase whose timeline was read, so ``invoked`` is a
+measurement and an empty list means no skill was invoked. ``not_observable``:
+the harness has no Skill tool (codex), so skills land as context and their use
+leaves no signal - ``invoked`` is empty because nothing CAN be seen, never
+because nothing was used. ``unavailable``: the start pins or the timeline could
+not be read on this request, so nothing is known either way."""
+
+
+class InvokedSkillInfo(BaseModel):
+    """One skill the agent invoked through the Skill tool, and how often (#1269)."""
+
+    name: str
+    count: int
+    """Calls, not timeline rows: a call's start and completion fold to one."""
+
+
+class PhaseSkillUseInfo(BaseModel):
+    """Which declared skills this phase actually used (#1269).
+
+    Declaring a skill installs it; only an invocation shows the agent reached
+    for it. This is the fact that tells the two apart, per phase.
+    """
+
+    status: SkillUseStatus = "unavailable"
+    declared: list[str] = Field(default_factory=list)
+    """Skill names from `pinned_at_start.skills` - what the execution STARTED
+    with, never the template as it stands now."""
+    invoked: list[InvokedSkillInfo] = Field(default_factory=list)
+    """Meaningful only when `status` is ``observed``. May name a skill that was
+    not declared: one installed some other way is still a skill the agent used."""
+
+    @computed_field(
+        description="Declared skills with no observed invocation. Empty unless "
+        "status is 'observed': an unobservable use is not a non-use."
+    )
+    @property
+    def declared_not_invoked(self) -> list[str]:
+        """Derived, never passed in, so it cannot contradict the two lists."""
+        if self.status != "observed":
+            return []
+        used = {s.name for s in self.invoked}
+        return [name for name in self.declared if name not in used]
+
+
 class BranchObservationInfo(BaseModel):
     """One branch of a failed phase's workspace, as git had it (#1200).
 
@@ -1578,6 +1625,8 @@ class PhaseExecution(BaseModel):
     start_pins_status: StartPinsStatus = "unavailable"
     """Why `pinned_at_start` is or is not set. Defaults to ``unavailable``: a
     constructor that never read the start event must not claim it was empty."""
+    skill_use: PhaseSkillUseInfo = Field(default_factory=PhaseSkillUseInfo)
+    """Skills declared against skills invoked, for this phase (#1269)."""
     operations: list[ToolOperation] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, summarised from `operations`

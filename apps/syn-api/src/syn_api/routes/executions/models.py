@@ -14,6 +14,7 @@ from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
     PhaseActivityInfo,
+    PhaseSkillUseInfo,
     PhaseStartConfig,
     StartPinsStatus,
 )
@@ -170,6 +171,9 @@ class PhaseExecutionInfo(BaseModel):
     event could not be read.
     """
     start_pins_status: StartPinsStatus = "unavailable"
+    skill_use: PhaseSkillUseInfo = Field(default_factory=PhaseSkillUseInfo)
+    """Which declared skills this phase invoked, and whether that is knowable
+    at all: codex phases report ``not_observable``, never zero (#1269)."""
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, and against what budget (#1262).
