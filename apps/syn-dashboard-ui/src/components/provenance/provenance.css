@@ -83,3 +83,13 @@
   padding: 0;
   list-style: none;
 }
+
+/* Phone: a 40px tap target. */
+@media (max-width: 768px) {
+  .provenance-copy {
+    top: 0.5rem;
+    right: 0.5rem;
+    min-height: 40px;
+    min-width: 40px;
+  }
+}

@@ -41,7 +41,9 @@ function ReposPanel({ repos }: { repos: string[] }) {
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[var(--color-accent)] hover:underline"
+                // A repo name has no break opportunity of its own; without
+                // break-all one long name scrolls the whole page on a phone.
+                className="break-all text-[var(--color-accent)] hover:underline"
                 title={url}
               >
                 {name}

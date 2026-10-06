@@ -28,13 +28,26 @@ vi.mock('../../../hooks/useActivityStream', () => ({
   useActivityStream: vi.fn(() => ({ connected: true, lastEventAt: null })),
 }))
 
-/** No break opportunity before the comma: the shape that widened the column. */
-const LONG_REPOS =
-  'syntropic137-extremely-long-organisation-name/agentic-workspace-isolation-providers-and-harness-adapters, syntropic137/event-sourcing-platform'
+/**
+ * A repository slug `RepositoryRef.parse` accepts, with no break opportunity in
+ * its name, beside a second repo. Verification measured this shape scrolling
+ * the detail page to 483px at 411px.
+ */
+const LONG_REPO = `syntropic137/${'r'.repeat(90)}`
+const REPOS = [LONG_REPO, 'syntropic137/event-sourcing-platform']
+
+/**
+ * `repos_display` exactly as the API builds it: `format_repos`
+ * (syn_shared/display/formatters.py) gives the first repo's name and `+N`.
+ */
+const LONG_REPOS = `${'r'.repeat(90)} +1`
 
 serveListEndpoint({
   path: '/api/v1/executions',
-  collection: [{ ...EXECUTIONS[0], repos_display: LONG_REPOS }, ...EXECUTIONS.slice(1)],
+  collection: [
+    { ...EXECUTIONS[0], repos: REPOS, repos_display: LONG_REPOS },
+    ...EXECUTIONS.slice(1),
+  ],
   matchesSearch: matchesExecutionSearch,
 })
 
