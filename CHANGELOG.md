@@ -1,10 +1,13 @@
 # Changelog
 
-What changed on `main`, newest release first. Generated from merged pull requests (title and number); read a PR for the full story.
+All notable changes to this project are documented in this file.
 
-## Unreleased (since v0.33.1, 2026-10-03)
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Features
+## [Unreleased]
+
+### Added
 
 - feat(orchestration): per-phase max_cost_usd cost limit (#1376) (#1654)
 - feat(workflows): verify phases screenshot UI changes instead of asking a human (#1648)
@@ -37,7 +40,33 @@ What changed on `main`, newest release first. Generated from merged pull request
 - feat: tags on workflows and executions (#967) (#1526)
 - feat(orchestration): provision a resume at its parent's recorded commits (#1458) (#1525)
 
-### Fixes
+### Changed
+
+- docs(skills): learning-loop - turn runs, failures and escaped bugs into evals (#1659)
+- docs(skills): orchestrating tick - resume first (#1670)
+- chore(workflows): run premise, prepare and finalize on Opus 5.5 (#1666)
+- docs(skills): orchestrating skill - purpose, operating loop, lessons (#1660)
+- docs(retro): 2026-10-06 merge-down and the dropped start (#1657)
+- test: run every unmarked test in CI and make the marker ratchet zero-tolerance (#1428) (#1646)
+- test(session-inventory): assert acquisition fence, not journal max (#1639) (#1643)
+- perf(E2): page /sessions and /artifacts in one SQL statement (fix red main latency gate) (#1636)
+- chore(images): pin agentic-workspace browser QA release (#1028) (#1594)
+- chore(codeowners): own trust boundaries, not ordinary code (#1595)
+- docs(plans): evals and execution tags plan (#967), with a progress table (#1610)
+- docs(north-star): correct #865 (fixed in Sept); 100 needs more nodes (#1604)
+- docs: north star - 20 concurrent now, 100 next, 1,000 production (#1601)
+- docs(retro): 2026-10-04 dogfood orchestrator day, with a scorecard (#1599)
+- perf(E2): executions, sessions and artifacts read in milliseconds (#1580)
+- chore: bump syntropic137-claude-plugin to 0a2fced3 (closes #1501) (#1572)
+- perf(E1): /metrics and heatmap read a usage rollup, plus a latency gate (#1558)
+- chore(lib): bump syntropic137-skills to the completed migration (#1565)
+- chore(lib): add syntropic137-skills as a submodule (#1533)
+- ci(security): OSV scan was scanning nothing; bump to v2.3.8 + scan nested lockfile (#1535)
+- chore(security): click 8.3.3, esbuild 0.28.1, record braces (no fix) (#1531)
+- chore(release): bump to 0.33.1 (#1523)
+- chore(images): pin agentic-workspace degradable session store (#1276) (#1517)
+
+### Fixed
 
 - fix(pit-stop): precheck the probe workflow before building; keep the API password off argv (#1656)
 - fix(artifacts): keep binary artifacts byte-for-byte through collection, handoff and API (#990) (#1652)
@@ -71,35 +100,9 @@ What changed on `main`, newest release first. Generated from merged pull request
 
 - security(deps): clear katex and source-map-js advisories, ignore unfixable sprintf-js (#1638)
 
-### Engineering
+## [0.33.1] - 2026-10-03
 
-- chore(workflows): run premise, prepare and finalize on Opus 5.5 (#1666)
-- test: run every unmarked test in CI and make the marker ratchet zero-tolerance (#1428) (#1646)
-- test(session-inventory): assert acquisition fence, not journal max (#1639) (#1643)
-- perf(E2): page /sessions and /artifacts in one SQL statement (fix red main latency gate) (#1636)
-- chore(images): pin agentic-workspace browser QA release (#1028) (#1594)
-- chore(codeowners): own trust boundaries, not ordinary code (#1595)
-- perf(E2): executions, sessions and artifacts read in milliseconds (#1580)
-- chore: bump syntropic137-claude-plugin to 0a2fced3 (closes #1501) (#1572)
-- perf(E1): /metrics and heatmap read a usage rollup, plus a latency gate (#1558)
-- chore(lib): bump syntropic137-skills to the completed migration (#1565)
-- chore(lib): add syntropic137-skills as a submodule (#1533)
-- ci(security): OSV scan was scanning nothing; bump to v2.3.8 + scan nested lockfile (#1535)
-- chore(security): click 8.3.3, esbuild 0.28.1, record braces (no fix) (#1531)
-- chore(release): bump to 0.33.1 (#1523)
-- chore(images): pin agentic-workspace degradable session store (#1276) (#1517)
+See the [v0.33.1 release notes](https://github.com/syntropic137/syntropic137/releases/tag/v0.33.1). Earlier versions: [GitHub releases](https://github.com/syntropic137/syntropic137/releases).
 
-### Docs
-
-- docs(skills): learning-loop - turn runs, failures and escaped bugs into evals (#1659)
-- docs(skills): orchestrating tick - resume first (#1670)
-- docs(skills): orchestrating skill - purpose, operating loop, lessons (#1660)
-- docs(retro): 2026-10-06 merge-down and the dropped start (#1657)
-- docs(plans): evals and execution tags plan (#967), with a progress table (#1610)
-- docs(north-star): correct #865 (fixed in Sept); 100 needs more nodes (#1604)
-- docs: north star - 20 concurrent now, 100 next, 1,000 production (#1601)
-- docs(retro): 2026-10-04 dogfood orchestrator day, with a scorecard (#1599)
-
-## v0.33.1 and earlier
-
-See the [GitHub releases](https://github.com/syntropic137/syntropic137/releases).
+[unreleased]: https://github.com/syntropic137/syntropic137/compare/v0.33.1...HEAD
+[0.33.1]: https://github.com/syntropic137/syntropic137/releases/tag/v0.33.1
