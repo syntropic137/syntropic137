@@ -17,6 +17,8 @@ from syn_domain.contexts.orchestration.slices.list_executions.projection import 
     WorkflowExecutionListProjection,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_store() -> MagicMock:
     """Create a mock projection store."""

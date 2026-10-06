@@ -9,6 +9,8 @@ from syn_domain.contexts.orchestration._shared.tool_tokens import (
     ToolTokens,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestToolTokens:

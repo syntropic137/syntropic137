@@ -17,6 +17,8 @@ from syn_collector.events.types import (
     EventType,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestEventTypes:

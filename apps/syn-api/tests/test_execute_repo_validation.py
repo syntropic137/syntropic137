@@ -11,6 +11,11 @@ from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
     _validate_repo_access,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
+    required_input_declarations,
+)
+
+pytestmark = pytest.mark.unit
 
 # -- _parse_repo_from_url tests -----------------------------------------------
 
@@ -216,6 +221,13 @@ class TestRequiresReposPreflightGating:
         wf._repository_url = repo_url
         wf.requires_repos = requires_repos
         wf.input_declarations = input_declarations or []
+        # Admission reads required_input_declarations, not input_declarations
+        # (PC-66). Derive it the way the aggregate does: on a bare MagicMock the
+        # attribute auto-vivifies, iterates as empty, and every missing-input
+        # check passes vacuously.
+        wf.required_input_declarations = required_input_declarations(
+            wf.input_declarations, phases=[]
+        )
         wf.repos = repos or []
         return wf
 

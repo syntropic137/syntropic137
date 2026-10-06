@@ -10,6 +10,8 @@ from syn_shared.logging import (
     get_logger,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestLogConfig:

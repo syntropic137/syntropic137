@@ -27,6 +27,8 @@ from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWor
 )
 from syn_shared.agents import PhaseModelDefaults
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
 

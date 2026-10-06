@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-import time
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NoReturn
@@ -46,6 +46,8 @@ from syn_shared.settings.workspace_images import (
     WorkspaceImageProvider,
 )
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -55,6 +57,9 @@ if TYPE_CHECKING:
     )
 
 MODULE = "syn_adapters.workspace_backends.image_verification"
+
+#: Loop turns the verification canary must see while cosign is in flight.
+_LOOP_TURNS = 10
 
 PINNED_REF = (
     "ghcr.io/agentparadise/agentic-workspace-buildfloor@sha256:"
@@ -691,7 +696,8 @@ class TestUnverifiedImageDoesNotRun:
         the verification failure must still come back out of the await.
         """
         adapter, spy = self._adapter_with_spy(PINNED_REF)
-        verify_seconds = 0.25
+        verify_timeout_seconds = 5.0
+        loop_turned = threading.Event()
         done = asyncio.Event()
 
         async def provision() -> BaseException | None:
@@ -709,12 +715,18 @@ class TestUnverifiedImageDoesNotRun:
             while not done.is_set():
                 await asyncio.sleep(0.01)
                 ticks += 1
+                if ticks >= _LOOP_TURNS:
+                    loop_turned.set()
             return ticks
 
         def slow_cosign(command: list[str], **_kwargs: object) -> FakeCompleted:
             if len(command) > 1 and command[1] == "version":
                 return FakeCompleted(0, stdout=COSIGN_VERSION_JSON)
-            time.sleep(verify_seconds)
+            # Return only once the loop has demonstrably kept turning. A
+            # wall-clock sleep made the tick count a function of machine load
+            # (9 of a needed 10 under pytest-xdist). If cosign runs on the loop
+            # thread the ticker never runs, this wait times out, and ticks is 0.
+            loop_turned.wait(timeout=verify_timeout_seconds)
             return FakeCompleted(1, stderr="no matching signatures")
 
         with (
@@ -728,4 +740,6 @@ class TestUnverifiedImageDoesNotRun:
         )
         assert spy.created == []
         # A blocked loop takes no turns at all during the verification window.
-        assert ticks >= 10, f"the event loop was blocked during verification ({ticks} ticks)"
+        assert ticks >= _LOOP_TURNS, (
+            f"the event loop was blocked during verification ({ticks} ticks)"
+        )

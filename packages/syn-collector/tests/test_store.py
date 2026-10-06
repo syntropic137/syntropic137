@@ -14,6 +14,8 @@ from syn_collector.collector.store import (
 )
 from syn_collector.events.types import CollectedEvent, EventType
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def sample_event() -> CollectedEvent:
