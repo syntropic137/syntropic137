@@ -437,6 +437,40 @@ chose it. `attached`: it was Attached afterwards. A run Detached and then
 Attached again, even to the same Eval, is `attached`, because the current
 association was made after the fact.
 
+## Workspace Resource Usage
+
+What one Phase's workspace consumed, measured once as it is torn down: CPU
+time, CPU throttling, memory peak, OOM kills, the workspace's disk size, network
+bytes, and the paths its delete could not remove (`WorkspaceUsage`). The
+workspace provider measures it; the Phase that held the workspace records it,
+as one `workspace_resource_usage` observation under that Phase's session.
+
+It is telemetry (Lane 2), never domain state: no event, no aggregate, and a
+failed measurement or write never fails a Phase. Each field is independently
+unknown rather than zero when its read failed. A Phase retried after a failed
+attempt held one workspace per attempt, so it has one usage per attempt. It
+exists to size the platform against `docs/north-star.md`.
+
+## Scripted Agent
+
+What runs in a Phase's workspace in place of the agent CLI during a load test
+(#1310): it replays a recorded session and performs the Phase's real side
+effect without spending a token. It is production code with its own contract,
+not a test double, which is why it is not called a stub, fake or mock. The
+contract lives in `syn_perf.loadtest.scripted_agent_profile`:
+
+- **Scripted Agent Profile** (`ScriptedAgentProfile`) - one load-test run's
+  instructions, keyed by Phase id, sent to every workspace as the single
+  `SYN_SCRIPTED_AGENT_PROFILE` environment variable. Read-only once validated.
+- **Scripted Phase** (`ScriptedPhase`) - what the Scripted Agent does in one
+  Phase: the stream it replays, the workload it burns, the side effect it
+  performs and the artifact it writes.
+- **Scripted Stream** (`ScriptedStream`) - the recorded session a Scripted
+  Phase replays, its harness and CLI version, and the pacing.
+
+The workspace image that carries a Scripted Agent is still called the stub
+image in agentic-workspace; that names the image, not these models.
+
 ## Words we do not use
 
 - **Lock** (an Eval). The word is Freeze. "Lock" already means the skill and

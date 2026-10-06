@@ -51,6 +51,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
+    record_workspace_usage,
     remember_leader_native_id,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
@@ -557,6 +558,9 @@ class PhaseRuntime:
 
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
+        await record_workspace_usage(
+            self._writer, workspace, session_id=session_id, phase_id=phase_id
+        )
 
     async def abandon_phase(self, execution_id: str, phase_id: str, *, reason: str) -> None:
         """Release one failed attempt while retaining its authoritative usage."""
@@ -588,6 +592,9 @@ class PhaseRuntime:
         self._leader_native_ids.pop((execution_id, phase_id), None)
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
+        await record_workspace_usage(
+            self._writer, workspace, session_id=session_id, phase_id=phase_id
+        )
 
     # ── when the execution ends ───────────────────────────────────────────
 

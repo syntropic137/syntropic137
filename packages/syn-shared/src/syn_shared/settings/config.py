@@ -140,20 +140,6 @@ class Settings(BaseSettings):
         ),
     ] = None
 
-    database_pool_size: int = Field(
-        default=5,
-        ge=1,
-        le=100,
-        description="Database connection pool size. Increase for high-traffic production.",
-    )
-
-    database_pool_overflow: int = Field(
-        default=10,
-        ge=0,
-        le=50,
-        description="Max overflow connections beyond pool_size for burst traffic.",
-    )
-
     # =========================================================================
     # EVENT STORE (gRPC) - See ADR-007: Event Store Integration
     # =========================================================================

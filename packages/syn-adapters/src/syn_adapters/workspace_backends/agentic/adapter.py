@@ -39,6 +39,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # raised/imported without depending on this Docker-specific module. Existing
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
+from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
 from syn_adapters.workspace_backends.host_security import host_security_failure
 from syn_adapters.workspace_backends.image_verification import verify_image_async
@@ -58,6 +59,7 @@ if TYPE_CHECKING:
         ExecutionResult,
         IsolationConfig,
         IsolationHandle,
+        WorkspaceUsage,
     )
     from syn_shared.settings.session_store import SessionStoreSettings
 
@@ -121,6 +123,22 @@ def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
         if not resolved.get(key):
             resolved[key] = value
     return resolved
+
+
+def _container_labels(config: IsolationConfig) -> dict[str, str]:
+    """Docker labels that let an operator count live containers by owner.
+
+    A workspace provisioned outside a phase has no phase, so it gets no
+    `syn.phase_id` label rather than an empty one: `--filter label=syn.phase_id`
+    must match only containers that really belong to a phase.
+    """
+    labels = {
+        "syn.execution_id": config.execution_id,
+        "syn.workspace_id": config.workspace_id,
+    }
+    if config.phase_id:
+        labels["syn.phase_id"] = config.phase_id
+    return labels
 
 
 class AgenticIsolationAdapter:
@@ -251,7 +269,7 @@ class AgenticIsolationAdapter:
         Returns:
             IsolationHandle for subsequent operations
         """
-        from agentic_isolation import WorkspaceConfig
+        from agentic_isolation import ResourceLimits, WorkspaceConfig
 
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             IsolationHandle,
@@ -294,11 +312,12 @@ class AgenticIsolationAdapter:
             working_dir="/workspace",
             environment=environment,
             mounts=capture_mounts,
-            labels={
-                "syn.execution_id": config.execution_id,
-                "syn.workspace_id": config.workspace_id,
-            },
+            labels=_container_labels(config),
             security=self._security,
+            limits=ResourceLimits(
+                cpu=f"{config.security_policy.cpu_limit_cores:g}",
+                memory=f"{config.security_policy.memory_limit_mb}m",
+            ),
         )
 
         # Create workspace via provider — wrap so docker/network failures surface
@@ -338,19 +357,28 @@ class AgenticIsolationAdapter:
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
         )
 
-    async def destroy(self, handle: IsolationHandle) -> None:
+    async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:
         """Destroy an isolated workspace.
 
         Args:
             handle: Handle from create()
+
+        Returns:
+            What the workspace consumed, from the provider's teardown report,
+            or None when the provider reported nothing.
         """
         workspace = self._workspaces.pop(handle.isolation_id, None)
         if workspace is None:
             logger.warning("Workspace not found: %s", handle.isolation_id)
-            return
+            return None
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
-        await self._provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        # `object`: the pinned provider is annotated `-> None`, so pyright
+        # cannot check its report against `TeardownReportLike` yet; a field
+        # mismatch is logged at runtime by `usage_from_report` instead. Once
+        # agentic-workspace types `destroy` against the Protocol, drop this.
+        report: object = await self._provider.destroy(workspace)  # type: ignore[arg-type,func-returns-value]  # Workspace vs AgenticWorkspace adapter boundary
+        return usage_from_report(report)
 
     async def execute(
         self,

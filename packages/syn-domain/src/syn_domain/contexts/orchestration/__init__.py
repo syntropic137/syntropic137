@@ -134,6 +134,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationConfig,
     SecurityPolicy,
     SidecarConfig,
+    WorkspaceUsage,
 )
 from syn_domain.contexts.orchestration.domain.commands import (
     AddExecutionTagsCommand,
@@ -426,6 +427,7 @@ __all__ = [
     "WorkflowType",
     "WorkspaceAggregate",
     "WorkspaceDirRemover",
+    "WorkspaceUsage",
     "announce_as",
     "build_command_from_definition",
     "guard_orphaned_workspace",

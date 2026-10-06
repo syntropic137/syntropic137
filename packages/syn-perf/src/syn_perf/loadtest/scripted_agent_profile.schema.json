@@ -1,0 +1,296 @@
+{
+  "$defs": {
+    "GatesWorkload": {
+      "additionalProperties": false,
+      "description": "Run ``just preflight-agent`` in the cloned repository - the real gates.",
+      "properties": {
+        "kind": {
+          "const": "gates",
+          "default": "gates",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "GatesWorkload",
+      "type": "object"
+    },
+    "MarkPullRequestReady": {
+      "additionalProperties": false,
+      "description": "``gh pr ready`` the draft an earlier phase opened on the fixture repo.\n\nNode tier only. The real finalize_pr phase is the only one allowed to mark\nthe PR ready (#1197). The phase has no working tree (``clone_repos:\nfalse``).",
+      "properties": {
+        "kind": {
+          "const": "mark_pull_request_ready",
+          "default": "mark_pull_request_ready",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "MarkPullRequestReady",
+      "type": "object"
+    },
+    "NoWorkload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "none",
+          "default": "none",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "NoWorkload",
+      "type": "object"
+    },
+    "OpenDraftPullRequest": {
+      "additionalProperties": false,
+      "description": "Push exactly as ``PushBranch`` does, then ``gh pr create --draft`` from it.\n\nNode tier only, and only the first phase that delivers repository changes:\nthe real implement phase opens a draft on its first push and records its\nnumber and URL, and every later pushing phase lands on that same PR. The\ndriver closes it afterwards.",
+      "properties": {
+        "kind": {
+          "const": "open_draft_pull_request",
+          "default": "open_draft_pull_request",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "OpenDraftPullRequest",
+      "type": "object"
+    },
+    "PushBranch": {
+      "additionalProperties": false,
+      "description": "Commit one deterministic file and push ``loadtest/<execution_id>``.\n\nThe file is ``loadtest/<phase_id>.txt`` holding ``<execution_id>\n<phase_id>``, committed on top of the branch if an earlier phase already\npushed it, so implement and fix both land on one branch as they do for\nreal. The artifact names the branch.",
+      "properties": {
+        "kind": {
+          "const": "push_branch",
+          "default": "push_branch",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "PushBranch",
+      "type": "object"
+    },
+    "ReportOnly": {
+      "additionalProperties": false,
+      "description": "Write the artifact and leave the working tree exactly as cloned.\n\nThe real phase declares ``delivers_repo_changes: false``, which does not\nyet exempt a dirty tree from the unpushed-work guard (nothing mounts the\nrepository read-only, ``unpushed_work_guard.py``), so a stub that left a\nfile behind would fail where the real phase passes.",
+      "properties": {
+        "kind": {
+          "const": "report_only",
+          "default": "report_only",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "ReportOnly",
+      "type": "object"
+    },
+    "ScriptedPhase": {
+      "additionalProperties": false,
+      "description": "Everything the stub does in one phase.",
+      "properties": {
+        "artifact": {
+          "minLength": 1,
+          "title": "Artifact",
+          "type": "string"
+        },
+        "review_verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "certified",
+                "blocked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Verdict"
+        },
+        "side_effect": {
+          "discriminator": {
+            "mapping": {
+              "mark_pull_request_ready": "#/$defs/MarkPullRequestReady",
+              "open_draft_pull_request": "#/$defs/OpenDraftPullRequest",
+              "push_branch": "#/$defs/PushBranch",
+              "report_only": "#/$defs/ReportOnly",
+              "verify_remote_branch": "#/$defs/VerifyRemoteBranch"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReportOnly"
+            },
+            {
+              "$ref": "#/$defs/PushBranch"
+            },
+            {
+              "$ref": "#/$defs/OpenDraftPullRequest"
+            },
+            {
+              "$ref": "#/$defs/MarkPullRequestReady"
+            },
+            {
+              "$ref": "#/$defs/VerifyRemoteBranch"
+            }
+          ],
+          "title": "Side Effect"
+        },
+        "stream": {
+          "$ref": "#/$defs/ScriptedStream"
+        },
+        "workload": {
+          "discriminator": {
+            "mapping": {
+              "gates": "#/$defs/GatesWorkload",
+              "none": "#/$defs/NoWorkload",
+              "synthetic": "#/$defs/SyntheticWorkload"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NoWorkload"
+            },
+            {
+              "$ref": "#/$defs/SyntheticWorkload"
+            },
+            {
+              "$ref": "#/$defs/GatesWorkload"
+            }
+          ],
+          "title": "Workload"
+        }
+      },
+      "required": [
+        "stream",
+        "workload",
+        "side_effect",
+        "artifact"
+      ],
+      "title": "ScriptedPhase",
+      "type": "object"
+    },
+    "ScriptedStream": {
+      "additionalProperties": false,
+      "description": "The recorded session a phase replays, and how fast.\n\nThe harness decides the format - ``claude`` replays stream-json, ``codex``\nreplays JSONL - so it is not declared twice. ``cli_version`` is the\nversion the recording was captured from; the driver refuses a run whose\npinned image carries a different one (plan section 8), because a stream\nfrom another CLI version exercises a parser production no longer runs.",
+      "properties": {
+        "cli_version": {
+          "minLength": 1,
+          "title": "Cli Version",
+          "type": "string"
+        },
+        "harness": {
+          "enum": [
+            "claude",
+            "codex"
+          ],
+          "title": "Harness",
+          "type": "string"
+        },
+        "pacing_factor": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Pacing Factor",
+          "type": "number"
+        },
+        "recording": {
+          "minLength": 1,
+          "title": "Recording",
+          "type": "string"
+        }
+      },
+      "required": [
+        "harness",
+        "recording",
+        "cli_version"
+      ],
+      "title": "ScriptedStream",
+      "type": "object"
+    },
+    "SyntheticWorkload": {
+      "additionalProperties": false,
+      "description": "Burn this much CPU, hold this much memory, write this much disk.\n\nDisk goes outside the repository or to an ignored path, so a phase that\nmust leave its tree clean still does.",
+      "properties": {
+        "cpu_seconds": {
+          "minimum": 0,
+          "title": "Cpu Seconds",
+          "type": "number"
+        },
+        "disk_bytes": {
+          "minimum": 0,
+          "title": "Disk Bytes",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "synthetic",
+          "default": "synthetic",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mem_bytes": {
+          "minimum": 0,
+          "title": "Mem Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cpu_seconds",
+        "mem_bytes",
+        "disk_bytes"
+      ],
+      "title": "SyntheticWorkload",
+      "type": "object"
+    },
+    "VerifyRemoteBranch": {
+      "additionalProperties": false,
+      "description": "``git ls-remote`` the execution's branch and fail if it is absent.\n\nThe platform-tier stand-in for the PR lifecycle, so 100 executions do not\nopen 100 PRs. The phase has no working tree (``clone_repos: false``).",
+      "properties": {
+        "kind": {
+          "const": "verify_remote_branch",
+          "default": "verify_remote_branch",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "VerifyRemoteBranch",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One load-test run's instructions to the stub agent, per phase id.",
+  "properties": {
+    "fixture_repo": {
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "title": "Fixture Repo",
+      "type": "string"
+    },
+    "phases": {
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+          "$ref": "#/$defs/ScriptedPhase"
+        }
+      },
+      "title": "Phases",
+      "type": "object"
+    },
+    "tier": {
+      "enum": [
+        "platform",
+        "node"
+      ],
+      "title": "Tier",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tier",
+    "fixture_repo",
+    "phases"
+  ],
+  "title": "ScriptedAgentProfile",
+  "type": "object"
+}

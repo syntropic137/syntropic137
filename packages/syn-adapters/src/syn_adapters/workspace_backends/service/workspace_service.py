@@ -37,6 +37,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationBackendType,
     TokenType,
 )
+from syn_shared.settings.workspace import (
+    DEFAULT_WORKSPACE_CPU_LIMIT,
+    DEFAULT_WORKSPACE_MEMORY_LIMIT_MB,
+)
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
@@ -61,6 +65,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
         WorkspaceAggregate,
     )
+    from syn_shared.settings.workspace import WorkspaceSettings
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +100,8 @@ class WorkspaceServiceConfig:
 
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
     image: str = DEFAULT_WORKSPACE_IMAGE
-    memory_limit_mb: int = 2048  # 2GB - Claude CLI needs more memory
-    cpu_limit_cores: float = 2.0  # Allow more CPU for agent work
+    memory_limit_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
+    cpu_limit_cores: float = DEFAULT_WORKSPACE_CPU_LIMIT
     timeout_seconds: int = 3600  # 1 hour
     allowed_hosts: tuple[str, ...] = (
         "api.anthropic.com",
@@ -106,6 +111,15 @@ class WorkspaceServiceConfig:
     default_token_ttl: int = 300  # 5 minutes
     capabilities: tuple[CapabilityType, ...] = (CapabilityType.NETWORK,)
     environment: dict[str, str] = field(default_factory=dict)  # Non-sensitive env vars
+
+    @classmethod
+    def from_settings(cls, settings: WorkspaceSettings) -> WorkspaceServiceConfig:
+        """The configuration an operator asked for via SYN_WORKSPACE_*."""
+        return cls(
+            image=settings.docker_image,
+            memory_limit_mb=settings.memory_limit_mb,
+            cpu_limit_cores=settings.cpu_limit,
+        )
 
 
 class WorkspaceService:
@@ -497,7 +511,7 @@ class WorkspaceService:
             # quarantine push: nothing left in the container needs a token (#725).
             if workspace is not None:
                 await workspace.revoke_issued_credentials()
-            await cleanup_workspace(
+            usage = await cleanup_workspace(
                 self,
                 aggregate,
                 workspace_id,
@@ -505,4 +519,9 @@ class WorkspaceService:
                 isolation_handle=isolation_handle,
                 sidecar_handle=sidecar_handle,
                 inject_tokens=inject_tokens,
+                phase_id=phase_id,
             )
+            # Handed back on the object every caller still holds after
+            # `__aexit__`, so the frame that knows the session can record it.
+            if workspace is not None:
+                workspace.teardown_usage = usage

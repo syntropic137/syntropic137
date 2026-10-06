@@ -79,6 +79,10 @@ OTLP_LOG = "otlp_log"
 # credential expired and no renewal succeeded before it did.
 GIT_CREDENTIAL_LAPSED = "git_credential_lapsed"
 
+# Capacity telemetry (#1310), produced by Syn137 itself: what a phase
+# workspace consumed, measured at teardown.
+WORKSPACE_RESOURCE_USAGE = "workspace_resource_usage"
+
 # Type-safe literal union (like TypeScript)
 # MUST match the constants above and agentic_isolation.EventType
 EventType = Literal[
@@ -122,6 +126,8 @@ EventType = Literal[
     "session_capture",
     # Credential lifecycle (#725), produced by Syn137 for the same gating reason.
     "git_credential_lapsed",
+    # Capacity telemetry (#1310), produced by Syn137 for the same gating reason.
+    "workspace_resource_usage",
 ]
 
 # Runtime validation set (auto-generated from Literal)
@@ -167,6 +173,7 @@ __all__ = [
     "TOOL_EXECUTION_STARTED",
     "USER_PROMPT_SUBMITTED",
     "VALID_EVENT_TYPES",
+    "WORKSPACE_RESOURCE_USAGE",
     "EventType",
     "is_valid_event_type",
 ]
