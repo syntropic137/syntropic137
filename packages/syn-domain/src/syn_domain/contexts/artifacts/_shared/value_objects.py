@@ -101,24 +101,9 @@ class ContentType(StrEnum):
         round: an extension alone cannot make valid text binary, and a ``.md``
         holding PNG bytes is still a PNG.
         """
-        if b"\x00" not in data:
-            try:
-                data.decode("utf-8")
-            except UnicodeDecodeError:
-                pass
-            else:
-                return cls.TEXT_MARKDOWN
-        for signature, content_type in _BINARY_SIGNATURES:
-            if data.startswith(signature):
-                if content_type is cls.IMAGE_WEBP and data[8:12] != b"WEBP":
-                    continue
-                return content_type
-        if source_path is not None:
-            extension = source_path.rsplit(".", 1)[-1].lower() if "." in source_path else ""
-            by_extension = _BINARY_EXTENSIONS.get(extension)
-            if by_extension is not None:
-                return by_extension
-        return cls.APPLICATION_OCTET_STREAM
+        if _is_text(data):
+            return cls.TEXT_MARKDOWN
+        return _by_signature(data) or _by_extension(source_path) or cls.APPLICATION_OCTET_STREAM
 
 
 _BINARY_CONTENT_TYPES: frozenset[ContentType] = frozenset(
@@ -137,7 +122,6 @@ _BINARY_SIGNATURES: tuple[tuple[bytes, ContentType], ...] = (
     (b"\xff\xd8\xff", ContentType.IMAGE_JPEG),
     (b"GIF87a", ContentType.IMAGE_GIF),
     (b"GIF89a", ContentType.IMAGE_GIF),
-    (b"RIFF", ContentType.IMAGE_WEBP),  # confirmed by "WEBP" at offset 8
     (b"%PDF-", ContentType.APPLICATION_PDF),
 )
 
@@ -149,6 +133,29 @@ _BINARY_EXTENSIONS: dict[str, ContentType] = {
     "webp": ContentType.IMAGE_WEBP,
     "pdf": ContentType.APPLICATION_PDF,
 }
+
+
+def _is_text(data: bytes) -> bool:
+    """Valid UTF-8 with no NUL byte: what every artifact was before #990."""
+    if b"\x00" in data:
+        return False
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def _by_signature(data: bytes) -> ContentType | None:
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return ContentType.IMAGE_WEBP
+    return next((ct for sig, ct in _BINARY_SIGNATURES if data.startswith(sig)), None)
+
+
+def _by_extension(source_path: str | None) -> ContentType | None:
+    if source_path is None or "." not in source_path:
+        return None
+    return _BINARY_EXTENSIONS.get(source_path.rsplit(".", 1)[-1].lower())
 
 
 def compute_content_hash(content: str | bytes) -> str:
