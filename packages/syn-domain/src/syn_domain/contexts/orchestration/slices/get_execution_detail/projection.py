@@ -342,7 +342,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         status = SideEffectStatus.from_stored(event_data.get("reported_side_effects"))
         phase["reported_side_effects"] = None if status is None else status.value
 
-    async def on_agent_execution_completed(self, event_data: dict) -> None:
+    async def on_agent_execution_completed(self, event_data: AgentExecutionCompletedEvent) -> None:
         """Record which agent PRODUCED the phase's result (PC-83).
 
         A phase whose provider was at capacity or out of quota re-runs once on
