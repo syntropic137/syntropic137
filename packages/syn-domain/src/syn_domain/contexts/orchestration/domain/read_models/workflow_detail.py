@@ -8,14 +8,14 @@ For execution details, see WorkflowExecutionDetail.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    FallbackAgent,
+    stored_fallback_agent,
+)
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
     WorkflowFields,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-    FallbackAgent,
-    stored_fallback_agent,
 )
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
