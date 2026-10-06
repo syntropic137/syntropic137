@@ -89,4 +89,4 @@ def _too_large(error: BaseException) -> bool:
     status code is on the cause, not on the error itself.
     """
     cause = error.__cause__
-    return isinstance(cause, grpc.RpcError) and cause.code() == grpc.StatusCode.RESOURCE_EXHAUSTED  # type: ignore[attr-defined]  # grpc.RpcError declares no code(); every client-side RpcError is a grpc.Call that does
+    return isinstance(cause, grpc.RpcError) and cause.code() == grpc.StatusCode.RESOURCE_EXHAUSTED

@@ -22,8 +22,8 @@ from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
-from syn_adapters.subscriptions.paged_read import OversizedEventError
 from syn_adapters.subscriptions import unapplied_starts
+from syn_adapters.subscriptions.paged_read import OversizedEventError
 from syn_adapters.subscriptions.unapplied_starts import (
     UnappliedStart,
     UnappliedStartDetector,
@@ -611,9 +611,7 @@ async def test_a_page_over_the_transport_byte_limit_is_read_in_smaller_pages() -
     dropped_at = 1_000 + _FAT_IDS.index(_FAT_DROPPED)
     await _project([listing, detail], checkpoints, _FAT_STORE, drop=dropped_at)
     store = _ByteLimitedStore(_FAT_STORE, max_bytes=110_000)
-    detector = UnappliedStartDetector(
-        store, checkpoints, (listing, detail), is_settled=_settled
-    )
+    detector = UnappliedStartDetector(store, checkpoints, (listing, detail), is_settled=_settled)
 
     await detector.check()
     report = await detector.check()
@@ -633,9 +631,7 @@ async def test_a_single_event_over_the_limit_is_named_not_skipped() -> None:
     detail = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
     await _project([listing, detail], checkpoints, _FAT_STORE, drop=None)
     store = _ByteLimitedStore(_FAT_STORE, max_bytes=10_000)  # below one event
-    detector = UnappliedStartDetector(
-        store, checkpoints, (listing, detail), is_settled=_settled
-    )
+    detector = UnappliedStartDetector(store, checkpoints, (listing, detail), is_settled=_settled)
 
     with pytest.raises(OversizedEventError) as raised:
         await detector.check()
