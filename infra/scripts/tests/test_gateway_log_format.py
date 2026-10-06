@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _GATEWAY_IMAGE = _REPO_ROOT / "infra" / "docker" / "images" / "gateway"
 _FORMAT_NAME = "syn_timed"

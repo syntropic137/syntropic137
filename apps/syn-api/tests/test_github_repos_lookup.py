@@ -29,6 +29,8 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 from syn_api.routes.github import router
 from syn_api.types import GitHubRepoListResponse, GitHubRepoLookup
 
+pytestmark = pytest.mark.unit
+
 FIXTURE = Path(__file__).parent / "fixtures" / "github_repos_lookup.json"
 
 _PROJECTION = (

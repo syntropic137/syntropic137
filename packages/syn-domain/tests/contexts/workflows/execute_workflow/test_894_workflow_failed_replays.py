@@ -39,6 +39,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome imp
 )
 from syn_shared.upstream_failure import UpstreamFailureError
 
+pytestmark = pytest.mark.unit
+
 _BASE = {
     "workflow_id": "wf-894",
     "execution_id": "exec-894",

@@ -37,6 +37,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     WorkflowExecutionAggregate,
 )
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 

@@ -6,6 +6,8 @@ import pytest
 
 from syn_adapters.events.buffer import EventBuffer, parse_jsonl_events
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestEventBuffer:
