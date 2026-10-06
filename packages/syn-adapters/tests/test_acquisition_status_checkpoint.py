@@ -134,7 +134,6 @@ async def test_concurrent_observations_keep_highest_sequence_fence(db_pool):
     )
 
 
-
 async def test_same_state_newer_sequence_moves_fence_without_journal_batch(db_pool):
     """The ordering behind #1639: a healthy 24 locks first, then a healthy 30."""
     journal = PostgresSessionEvidence(db_pool)
