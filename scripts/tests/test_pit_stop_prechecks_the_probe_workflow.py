@@ -195,12 +195,18 @@ def _password_stayed_secret(run: _Run, state: _Api) -> None:
     assert state.auths == {"Basic " + base64.b64encode(f"admin:{_PASSWORD}".encode()).decode()}
 
 
+# Both modes that dispatch the probe. --swap-only is the one that gates and
+# drains production after an earlier --stage-only, so it must refuse first too.
+_PROBING_MODES = pytest.mark.parametrize("flags", [(), ("--swap-only",)], ids=["all", "swap-only"])
+
+
+@_PROBING_MODES
 def test_an_archived_probe_workflow_stops_the_pit_stop_before_anything(
-    tmp_path: Path, fake_api: tuple[_Api, str]
+    tmp_path: Path, fake_api: tuple[_Api, str], flags: tuple[str, ...]
 ) -> None:
     state, api = fake_api
     state.workflows = [_summary(_PROBE, archived=True)]
-    run = _run(tmp_path, api)
+    run = _run(tmp_path, api, *flags)
     _refused_before_anything(run, state)
     assert f"the probe workflow {_PROBE} is archived on {api}" in run.proc.stderr
     assert _INSTALL in run.proc.stderr
@@ -210,14 +216,15 @@ def test_an_archived_probe_workflow_stops_the_pit_stop_before_anything(
     _password_stayed_secret(run, state)
 
 
+@_PROBING_MODES
 def test_a_missing_probe_workflow_stops_the_pit_stop_before_anything(
-    tmp_path: Path, fake_api: tuple[_Api, str]
+    tmp_path: Path, fake_api: tuple[_Api, str], flags: tuple[str, ...]
 ) -> None:
     """``search`` is a substring match, so an active workflow whose id merely
     CONTAINS the probe's is not the probe."""
     state, api = fake_api
     state.workflows = [_summary(f"{_PROBE}0", archived=False)]
-    run = _run(tmp_path, api)
+    run = _run(tmp_path, api, *flags)
     _refused_before_anything(run, state)
     assert f"the probe workflow {_PROBE} is missing on {api}" in run.proc.stderr
     assert _INSTALL in run.proc.stderr
