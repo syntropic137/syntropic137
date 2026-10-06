@@ -786,6 +786,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/artifacts/{artifact_id}/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact Raw Endpoint
+         * @description Get artifact content as stored, byte-for-byte, under its own content type.
+         *
+         *     The way to fetch a binary artifact - a screenshot, a PDF - which has no
+         *     text form for the JSON endpoints to carry (#990). Text artifacts are
+         *     served the same way, as their UTF-8 bytes.
+         */
+        get: operations["get_artifact_raw_endpoint_artifacts__artifact_id__raw_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/artifacts/{artifact_id}/upload": {
         parameters: {
             query?: never;
@@ -10145,6 +10169,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArtifactContentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artifact_raw_endpoint_artifacts__artifact_id__raw_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
                 };
             };
             /** @description Validation Error */

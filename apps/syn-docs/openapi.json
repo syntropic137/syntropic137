@@ -3006,6 +3006,45 @@
         }
       }
     },
+    "/artifacts/{artifact_id}/raw": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Artifact Raw Endpoint",
+        "description": "Get artifact content as stored, byte-for-byte, under its own content type.\n\nThe way to fetch a binary artifact - a screenshot, a PDF - which has no\ntext form for the JSON endpoints to carry (#990). Text artifacts are\nserved the same way, as their UTF-8 bytes.",
+        "operationId": "get_artifact_raw_endpoint_artifacts__artifact_id__raw_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/artifacts/{artifact_id}/upload": {
       "post": {
         "tags": [
