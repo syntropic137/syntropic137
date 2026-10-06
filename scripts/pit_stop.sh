@@ -65,8 +65,25 @@ die() {
 }
 run() { if [ "$DRY" = 1 ]; then printf '   (dry-run) %s\n' "$*"; else "$@"; fi; }
 remote() { ssh -o ConnectTimeout=15 "$HOST" "$@"; }
+# Every request to the API goes through here. The credential travels as a curl
+# config on stdin, never as an argument: `-u admin:<password>` sits in curl's
+# argv, readable by any user on this machine through `ps` for the whole call
+# (PC-85). Only the literal $SYN_API_PASSWORD in a PRINTED command remains.
+# printf is a builtin, so the password is in no process's argv. A quoted config
+# value treats \ and " as escapes, so both are escaped first.
+api_curl() {
+    # A line break would end the config line and curl echoes the rest of the
+    # line in its parse error, i.e. the password reaches stderr. Refuse it
+    # without ever printing the value.
+    case "$SYN_API_PASSWORD" in
+        *$'\n'*|*$'\r'*) die "SYN_API_PASSWORD contains a line break; refusing to pass it to curl (value not shown)" ;;
+    esac
+    local pw="${SYN_API_PASSWORD//\\/\\\\}"
+    pw="${pw//\"/\\\"}"
+    printf 'user = "admin:%s"\n' "$pw" | curl -K - -fsS "$@"
+}
 # $3, when given, caps the call below the default 90s (the probe's deadlines).
-api() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m "${3:-90}" "$API$1" -o "$2"; }
+api() { api_curl -m "${3:-90}" "$API$1" -o "$2"; }
 
 # DELIBERATELY NOT "last flag wins". `--stage-only --swap-only` would resolve
 # to whichever came last, so an invocation that asked only to STAGE could
@@ -165,7 +182,7 @@ PY
 # the deploy does, not something the swap does implicitly.
 maintenance() {  # $1: true|false, $2: reason
     if [ "$DRY" = 1 ]; then printf '   (dry-run) PUT /maintenance active=%s\n' "$1"; return 0; fi
-    curl -fsS -u "admin:${SYN_API_PASSWORD}" -m 30 -X PUT "$API/maintenance" \
+    api_curl -m 30 -X PUT "$API/maintenance" \
         -H 'Content-Type: application/json' \
         -d "{\"active\": $1, \"reason\": \"$2\", \"actor\": \"pit_stop.sh\"}" \
         -o "$TMP/maintenance.json" || return 1
@@ -179,6 +196,41 @@ print(f"   maintenance: active={mode['active']} reason={mode['reason']!r}")
 sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
 GATE
 }
+
+# The probe's workflow is installed and ACTIVE, asked before anything is built
+# (PC-87). beta.11 built, shipped, gated, drained for 40 minutes, swapped and
+# verified, and only then was refused at dispatch: "Workflow
+# telemetry-lag-probe-v1 is archived and cannot launch executions". Read-only:
+# it touches neither the deployment nor the admission gate.
+#
+# Through the LIST, not GET /workflows/{id}: only the list's summary carries
+# is_archived, and `search` matches ids by substring, so the id is matched
+# exactly here. It does not install the workflow itself: reinstalling is what
+# reactivates an archived template, which would quietly undo an archive someone
+# made on purpose, and the `syn` CLI it needs is not otherwise a dependency.
+probe_workflow_ready() {
+    api "/workflows?search=$PROBE_WORKFLOW&include_archived=true&page_size=100" "$TMP/probe_workflow.json" \
+        || die "could not read the probe workflow $PROBE_WORKFLOW from $API/workflows. Nothing was built or gated."
+    local verdict
+    verdict="$(python3 - "$TMP/probe_workflow.json" "$PROBE_WORKFLOW" <<'WF'
+import json, sys
+found = [w for w in json.load(open(sys.argv[1]))["workflows"] if w.get("id") == sys.argv[2]]
+print("missing" if not found else "archived" if found[0].get("is_archived") else "active")
+WF
+)" || die "could not read the probe workflow $PROBE_WORKFLOW from $API/workflows. Nothing was built or gated."
+    echo "   probe workflow $PROBE_WORKFLOW: $verdict"
+    if [ "$verdict" != active ]; then
+        die "the probe workflow $PROBE_WORKFLOW is $verdict on $API, so the probe after the swap could not launch. Nothing was built or gated. Install it (an install also reactivates an archived one):
+   SYN_API_URL=$API SYN_API_USER=admin SYN_API_PASSWORD=\$SYN_API_PASSWORD syn workflow install workflows/probes/telemetry-lag
+or, in an emergency only, re-run with --skip-probe."
+    fi
+}
+
+# Only when this run will dispatch the probe: --stage-only never does.
+if [ "$SKIP_PROBE" = 0 ] && [ "$MODE" != "stage" ]; then
+    step "precheck: the probe workflow $PROBE_WORKFLOW is installed and active"
+    probe_workflow_ready
+fi
 
 step "precheck: free space on the data volume"
 disk_space
@@ -395,7 +447,7 @@ maintenance false "" || die "$TAG is live but the clear did not complete; retry 
 # the pit stop dispatches one real run and declares nothing until a PHASE of it
 # is seen `running`. AFTER the ungate, deliberately: the probe goes through the
 # same admission as everyone else's work, and a failed probe never re-closes it.
-api_post() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m "${4:-90}" -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
+api_post() { api_curl -m "${4:-90}" -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
 
 # The probe's bounds are DEADLINES on a monotonic clock, not counters of sleeps:
 # a counter that adds 10 per poll let one slow GET after another stretch a 600s
