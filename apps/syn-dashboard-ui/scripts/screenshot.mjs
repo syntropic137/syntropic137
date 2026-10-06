@@ -27,8 +27,10 @@ function parseArgs(argv) {
   let viewport = DEFAULT_VIEWPORT
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--viewport') {
-      const match = /^(\d+)x(\d+)$/.exec(argv[++i] ?? '')
-      if (!match) fail(`--viewport expects WxH, e.g. 1440x900\n${USAGE}`)
+      // Zero is rejected here: Chromium either hangs on it or silently renders a
+      // degenerate page (0x0 has produced a 32x480 PNG), neither a UI check.
+      const match = /^([1-9]\d*)x([1-9]\d*)$/.exec(argv[++i] ?? '')
+      if (!match) fail(`--viewport expects positive WxH, e.g. 1440x900\n${USAGE}`)
       viewport = { width: Number(match[1]), height: Number(match[2]) }
     } else {
       positional.push(argv[i])
@@ -69,6 +71,12 @@ try {
     `screenshot: ${out} ${width}x${height} ${png.length} bytes, ` +
       `HTTP ${response?.status() ?? 'n/a'}, title ${JSON.stringify(await page.title())}`,
   )
+  // goto() resolves for HTTP errors too. Keep the screenshot as a diagnostic,
+  // but a missing route must not pass as a verified one.
+  if (response && !response.ok()) {
+    console.error(`screenshot: ${url} returned HTTP ${response.status()}`)
+    process.exitCode = 1
+  }
 } finally {
   await browser.close()
 }

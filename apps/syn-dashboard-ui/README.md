@@ -85,7 +85,9 @@ node scripts/screenshot.mjs http://localhost:4173/executions out.png --viewport 
 ```
 
 It prints the PNG's real dimensions and byte size, the HTTP status and the page
-title, and exits non-zero on bad arguments or a failed navigation.
+title. It exits 2 on bad arguments (including a zero viewport dimension) and 1
+when the page answers with an HTTP error status (the PNG is still written, as a
+diagnostic), so a verify phase can gate on the exit code.
 
 - **No project dependency.** It loads the globally installed `playwright`. The
   agent workspace image (toolchain 1.5.0 and later, agentic-workspace #33)
