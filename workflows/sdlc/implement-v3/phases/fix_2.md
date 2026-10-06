@@ -2,6 +2,8 @@
 
 $ARGUMENTS
 
+**Skills:** before you change code for a finding, invoke the matching one with the Skill tool: `architecture`, `types`, `error-handling` or `principles-and-patterns`.
+
 Read `artifacts/input/verify/verify.md` first. It is the output of an
 independent verification pass over the branch you are about to change. If that
 file is absent, fall back to the temporary compatibility alias

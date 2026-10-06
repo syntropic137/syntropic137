@@ -2,6 +2,8 @@
 
 $ARGUMENTS
 
+**Skills:** before deciding the premise holds, invoke `purpose-and-scope` with the Skill tool to test what the task is for, and `architecture` or `principles-and-patterns` when the premise rests on where code belongs.
+
 You have one job. The task above asserts things about the code - that a function
 behaves a certain way, that a field is dropped, that a fix is missing, that a
 regression happened. **Find out whether those assertions are true.**

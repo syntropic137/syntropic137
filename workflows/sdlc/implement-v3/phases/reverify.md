@@ -2,6 +2,8 @@
 
 $ARGUMENTS
 
+**Skills:** `testing`, `error-handling`, `security` and `architecture` are installed in this workspace as context, because codex has no Skill tool. Read and apply them when you judge whether each fix closed its finding.
+
 ## Which round this is
 
 **Round 1 of 3.** This prompt re-verifies after each of up to three fix

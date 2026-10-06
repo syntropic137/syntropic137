@@ -2,6 +2,8 @@
 
 $ARGUMENTS
 
+**Skills:** before writing the PR description and release notes, invoke `documentation` with the Skill tool, and `purpose-and-scope` when you decide whether the PR delivers what the task asked.
+
 The final verification report is **the last round's that ran**. A round
 whose predecessor certified never runs: the engine skips straight here, so a
 run certified in round 1 has no `reverify_2` or `reverify_3` input at all, and
