@@ -33,6 +33,7 @@ import pytest
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.artifact_storage.memory import InMemoryArtifactStorage
 from syn_api.routes.artifacts import get_artifact, get_artifact_raw_endpoint
+from syn_api.types import Ok
 from syn_domain.contexts.artifacts import UNREPORTED_AGENT, ContentType
 from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
     ArtifactAggregate,
@@ -49,14 +50,13 @@ from syn_domain.contexts.artifacts.slices.list_artifacts.projection import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
-from syn_api.types import Ok
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 pytestmark = pytest.mark.unit
 
-MARKDOWN = "# Findings\n\nUnicode stays exact: café, 日本語, emoji 🎉, and a ‘quote’.\n".encode()
+MARKDOWN = "# Findings\n\nUnicode stays exact: café, 日本語, emoji 🎉, and naïve résumé.\n".encode()
 MD_PATH = "artifacts/output/findings.md"
 PNG_PATH = "artifacts/output/screenshots/home.png"
 
@@ -102,7 +102,7 @@ class _Workspace:
     async def inject_files(self, files: list[tuple[str, bytes]]) -> None:
         self.injected.extend(files)
 
-    async def collect_files(self, patterns: list[str]) -> list[tuple[str, bytes]]:  # noqa: ARG002
+    async def collect_files(self, patterns: list[str]) -> list[tuple[str, bytes]]:
         return self.collected
 
 
@@ -172,7 +172,9 @@ def api_wired_to() -> Iterator[list[_World]]:
     with (
         patch("syn_api.routes.artifacts.ensure_connected", new=AsyncMock()),
         patch("syn_api.routes.artifacts.get_projection_mgr", side_effect=mgr),
-        patch("syn_api.prefix_resolver.resolve_or_raise", new=AsyncMock(side_effect=lambda *a: a[2])),
+        patch(
+            "syn_api.prefix_resolver.resolve_or_raise", new=AsyncMock(side_effect=lambda *a: a[2])
+        ),
         patch(
             "syn_adapters.storage.artifact_storage.get_artifact_storage",
             side_effect=storage,

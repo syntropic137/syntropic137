@@ -22,12 +22,11 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
-        ArtifactContentStoragePort,
-    )
-
     from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
         ArtifactSummary,
+    )
+    from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
+        ArtifactContentStoragePort,
     )
 
 
@@ -311,7 +310,11 @@ class ArtifactQueryService:
 
         for artifact in artifacts:
             phase_id = artifact.phase_id
-            if phase_id is None or phase_id not in completed_phase_ids or not _has_content(artifact):
+            if (
+                phase_id is None
+                or phase_id not in completed_phase_ids
+                or not _has_content(artifact)
+            ):
                 continue
             by_phase.setdefault(phase_id, []).append(artifact)
 
