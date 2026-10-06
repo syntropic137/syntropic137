@@ -52,6 +52,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +344,7 @@ class AgentExecutionHandler:
         collector: ObservabilityCollector | None = None,
         runner: AgentRunner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> AgentExecutionResult:
         """Run agent in workspace and stream output.
 
@@ -369,6 +373,7 @@ class AgentExecutionHandler:
             tokens=tokens,
             subagents=subagents,
             on_launch=on_launch,
+            cost_limit=cost_limit,
         )
 
     def _select_stream_processor(
@@ -382,6 +387,7 @@ class AgentExecutionHandler:
         session_id: str,
         agent_model: str | None,
         collector: ObservabilityCollector | None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> EventStreamProcessor | CodexStreamProcessor:
         """Pick the codex or claude stream processor for a headless phase."""
         assert todo.phase_id is not None
@@ -414,6 +420,7 @@ class AgentExecutionHandler:
             workspace_id=getattr(workspace, "id", None),
             agent_model=agent_model,
             collector=collector,
+            cost_limit=cost_limit,
         )
 
     async def _run_headless(
@@ -431,6 +438,7 @@ class AgentExecutionHandler:
         tokens: TokenAccumulator,
         subagents: SubagentTracker,
         on_launch: AgentLaunchObserver | None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> AgentExecutionResult:
         """Stream a headless (claude -p / codex exec) phase and build its result."""
         assert todo.phase_id is not None
@@ -443,6 +451,7 @@ class AgentExecutionHandler:
             session_id=session_id,
             agent_model=agent_model,
             collector=collector,
+            cost_limit=cost_limit,
         )
 
         # The launch fact is settled AFTER the stream, not while it runs: the
