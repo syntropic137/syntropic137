@@ -130,9 +130,7 @@ def _runnable_sandbox(declared: object, phase_id: object) -> str:
 
 def _fallback_agent(declared: object) -> FallbackAgent | None:
     """The phase's ``fallback_agent``, held to the YAML's rules, or None (PC-83)."""
-    from syn_domain.contexts.orchestration._shared.workflow_definition import (
-        FallbackAgentYamlDefinition,
-    )
+    from syn_domain.contexts.orchestration import FallbackAgentYamlDefinition
 
     if declared is None:
         return None
