@@ -53,6 +53,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+    raise_if_stopped_on_cost,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
     completion_failure,
 )
@@ -783,6 +786,12 @@ class WorkflowExecutionProcessor:
                 started_at=launch.started_at,
             )
             runtime.record_agent_run(todo.phase_id, execution_id=todo.execution_id, result=result)
+
+            # BEFORE the cancel branch: a cost stop is also an interrupt, but
+            # nobody cancelled anything. Raised, so it reaches the aggregate as
+            # a failed phase - resumable, like one killed at its timeout -
+            # through the same path that keeps what the phase wrote (#1376).
+            raise_if_stopped_on_cost(todo.phase_id, result.stream_result.cost_limit_reason)
 
             if result.stream_result.interrupt_requested:
                 kept = True

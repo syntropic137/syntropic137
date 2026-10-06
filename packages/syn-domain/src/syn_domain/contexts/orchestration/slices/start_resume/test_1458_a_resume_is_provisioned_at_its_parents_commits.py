@@ -100,6 +100,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import Runner
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -227,6 +230,7 @@ class _ReadsItsSetup:
         collector: ObservabilityCollector | None = None,
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> AgentExecutionResult:
         ((_, script),) = await workspace.collect_files([".setup/setup.sh"])
         self.scripts[todo.phase_id or ""] = script.decode()

@@ -201,6 +201,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         agent_type=p.agent_type,
         prompt_template=p.prompt_template,
         timeout_seconds=p.timeout_seconds or 300,
+        max_cost_usd=p.max_cost_usd,
         allowed_tools=list(p.allowed_tools),
         argument_hint=p.argument_hint,
         model=p.model,
@@ -570,6 +571,8 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # declares nothing", which reinstalls differently again.
     if phase.timeout_seconds is not None:
         lines.append(f"    timeout_seconds: {phase.timeout_seconds}")
+    if phase.max_cost_usd is not None:
+        lines.append(f"    max_cost_usd: {phase.max_cost_usd}")
     # EXPORT PRESERVES WHAT THE SCHEMA CAN EXPRESS, even when the loader would
     # refuse it (#1039). Omitting a refused declaration LAUNDERS it: a stored
     # `execution_type: human_in_loop` phase, dropped on export, reinstalls as

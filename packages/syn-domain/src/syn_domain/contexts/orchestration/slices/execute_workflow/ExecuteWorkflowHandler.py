@@ -639,6 +639,7 @@ class ExecuteWorkflowHandler:
                     # before anything could act on it (#1167).
                     output_artifact_types=tuple(phase.output_artifact_types),
                     timeout_seconds=phase.timeout_seconds,
+                    max_cost_usd=phase.max_cost_usd,
                     clone_repos=phase.clone_repos,
                     # Dropping this would put the unpushed-work gate back to
                     # guessing what an uncommitted change means, which is

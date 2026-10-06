@@ -71,6 +71,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import Runner
     from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
         GitWorkspace,
@@ -124,6 +127,7 @@ class _RecordingAgent(FakeAgentExecutionHandler):
         collector: ObservabilityCollector | None = None,
         runner: Runner | None = None,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> AgentExecutionResult:
         found = await workspace.collect_files(patterns=["artifacts/input/**/*"])
         self.injected.append({path: body.decode() for path, body in found})

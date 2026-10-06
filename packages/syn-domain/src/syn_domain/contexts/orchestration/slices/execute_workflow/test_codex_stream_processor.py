@@ -652,3 +652,55 @@ async def test_codex_own_failure_reason_outranks_an_echoed_line() -> None:
     result = await processor.process_stream(_lines(rec), _NoopWorkspace())
 
     assert result.error_reason == "codex reported: stream disconnected before completion"
+
+
+@pytest.mark.asyncio
+async def test_a_codex_phase_is_stopped_at_its_cost_limit() -> None:
+    """#1376: the limit holds on the codex path too, per codex turn.
+
+    Codex names no model on its stream, so the turn is priced as the requested
+    model - the same rule `_estimate_cost` applies to the run's totals.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
+
+    class _SpyWorkspace:
+        last_stream_exit_code = 0
+
+        def __init__(self) -> None:
+            self.interrupted = False
+
+        async def interrupt(self) -> bool:
+            self.interrupted = True
+            return True
+
+    turn = json.dumps(
+        {"type": "turn.completed", "usage": {"input_tokens": 2_000_000, "output_tokens": 0}}
+    )
+
+    async def _turns() -> AsyncIterator[str]:
+        for _ in range(3):
+            yield '{"type":"turn.started"}'
+            yield turn
+
+    processor = CodexStreamProcessor(
+        tokens=TokenAccumulator(),
+        collector=_RecordingCollector(),
+        controller=None,
+        execution_id="exec-1",
+        phase_id="p1",
+        session_id="s1",
+        agent_model="gpt-5.6",
+        rollout=None,
+        cost_limit=PhaseCostLimit(0.01),
+    )
+    workspace = _SpyWorkspace()
+
+    result = await processor.process_stream(_turns(), workspace)
+
+    assert workspace.interrupted is True
+    assert result.interrupt_requested is True
+    assert result.line_count == 2, "stopped on the first turn that crossed the limit"
+    assert result.cost_limit_reason is not None
+    assert result.cost_limit_reason.startswith("cost limit USD 0.01 exceeded at USD ")

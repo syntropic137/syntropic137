@@ -52,6 +52,7 @@ from syn_shared.agents import (
     DEFAULT_PHASE_SANDBOX,
     REMOVED_INTERACTIVE_PROVIDER,
     AgentProvider,
+    require_enforceable_cost_limit,
     require_runnable_sandbox,
 )
 from syn_shared.tools import require_supported_tools
@@ -360,6 +361,14 @@ class PhaseYamlDefinition(BaseModel):
     prompt_file: str | None = None
     max_tokens: int | None = None
     timeout_seconds: int | None = None
+    max_cost_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    """Stop the phase once its agent has spent more than this, in USD (#1376).
+
+    `timeout_seconds` bounds time, and a phase fanning out to parallel
+    subagents turns a time bound into an unbounded cost. Checked against the
+    priced per-turn usage while the phase runs; crossing it fails the phase,
+    which stays resumable like a timed-out one. Refused at install unless
+    positive and finite, so `0`, a negative or `.inf` cannot read as a limit."""
     allowed_tools: list[str] = Field(default_factory=list)
 
     clone_repos: bool = True
@@ -531,6 +540,14 @@ class PhaseYamlDefinition(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def validate_cost_limit_is_enforceable(self) -> PhaseYamlDefinition:
+        """Refuse ``max_cost_usd`` on a provider that cannot be stopped by it (#1376)."""
+        require_enforceable_cost_limit(
+            self.agent.provider if self.agent else None, self.max_cost_usd, phase_id=self.id
+        )
+        return self
+
+    @model_validator(mode="after")
     def validate_tool_policy_is_supported_by_provider(self) -> PhaseYamlDefinition:
         """Codex has no tool vocabulary, so refuse the combination here (#1009).
 
@@ -610,6 +627,7 @@ class PhaseYamlDefinition(BaseModel):
             prompt_template=self.prompt_template,
             max_tokens=self.max_tokens,
             timeout_seconds=self.timeout_seconds,
+            max_cost_usd=self.max_cost_usd,
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
             delivers_repo_changes=self.delivers_repo_changes,
