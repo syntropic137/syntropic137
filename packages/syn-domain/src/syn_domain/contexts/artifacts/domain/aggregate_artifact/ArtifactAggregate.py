@@ -218,9 +218,25 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         # Generate ID if not provided
         artifact_id = command.aggregate_id or str(uuid4())
 
-        # Compute content hash and size
+        content_type = command.content_type or ContentType.TEXT_MARKDOWN
+        if isinstance(command.content, bytes) != content_type.is_binary:
+            msg = f"Content of type {content_type} must be {'bytes' if content_type.is_binary else 'str'}"
+            raise ValueError(msg)
+        # Binary bytes live in object storage only (ADR-012, #990): Lane 1
+        # records that the file exists, its hash and its size, never the file.
+        if isinstance(command.content, bytes) and command.storage_uri is None:
+            msg = "Binary artifact content must be in object storage (storage_uri)"
+            raise ValueError(msg)
+
+        # Hash and size are of the BYTES (#990); for text that is its UTF-8
+        # encoding, exactly as before, so existing hashes still verify.
         content_hash = compute_content_hash(command.content)
-        size_bytes = len(command.content.encode("utf-8"))
+        size_bytes = (
+            len(command.content)
+            if isinstance(command.content, bytes)
+            else len(command.content.encode("utf-8"))
+        )
+        event_content = "" if isinstance(command.content, bytes) else command.content
 
         # Initialize aggregate
         self._initialize(artifact_id)
@@ -233,8 +249,8 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
             execution_id=command.execution_id,  # Link to execution run
             session_id=command.session_id,
             artifact_type=command.artifact_type,
-            content_type=command.content_type or ContentType.TEXT_MARKDOWN,
-            content=command.content,
+            content_type=content_type,
+            content=event_content,
             content_hash=content_hash,
             size_bytes=size_bytes,
             title=command.title,

@@ -15,7 +15,12 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
-from syn_domain.contexts.artifacts import AgentIdentity, ArtifactType, PhaseOutputFile
+from syn_domain.contexts.artifacts import (
+    AgentIdentity,
+    ArtifactType,
+    ContentType,
+    PhaseOutputFile,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
     DescribeWork,
@@ -202,8 +207,11 @@ class _Deliverable:
     """
 
     source_path: str
-    content: str
+    content: str | bytes
     title: str
+    #: Binary content arrives as ``bytes`` under a binary type (#990); text
+    #: keeps the type every collected file had before.
+    content_type: ContentType = ContentType.TEXT_MARKDOWN
     #: How this one arrived. The storage loop still cannot treat a recovered
     #: deliverable differently - it never reads this - but the caller has to
     #: report the fact, and the alternative was re-deriving it from the title
@@ -240,6 +248,21 @@ _IGNORED_DIRECTORY_SEGMENTS: Final[frozenset[str]] = frozenset(
         ".pytest_cache",
     }
 )
+
+
+def _as_collected(artifact_path: str, data: bytes) -> tuple[str | bytes, ContentType]:
+    """A collected file's content in the form it is stored in, and its type.
+
+    Text is decoded strictly - ``ContentType.of`` has already established it
+    IS valid UTF-8, so the decode is exact and re-encoding returns the same
+    bytes. Anything else stays bytes. Before #990 every file went through
+    ``decode("utf-8", errors="replace")``, which turned a 32,776-byte PNG into
+    12,517 U+FFFD sequences without raising.
+    """
+    content_type = ContentType.of(data, artifact_path)
+    if content_type.is_binary:
+        return data, content_type
+    return data.decode("utf-8"), content_type
 
 
 def _is_collectable(artifact_path: str) -> bool:
@@ -397,7 +420,8 @@ class ArtifactCollector:
             if path in seen:
                 continue
             seen.add(path)
-            out.append((path, produced_file.content.encode()))
+            body = produced_file.content
+            out.append((path, body.encode() if isinstance(body, str) else body))
 
         primary = cls._primary_deliverable(produced)
         alias = cls._flat_alias_path(phase_id)
@@ -418,9 +442,11 @@ class ArtifactCollector:
 
         Empty content is not a deliverable - `CreateArtifactCommand` rejects
         it and every other reader skips it, so a legacy or corrupt row cannot
-        become the alias.
+        become the alias. Nor is a binary file (#990): the alias is read as
+        the phase's text, and a screenshot reaches the next phase through the
+        tree at its own path instead.
         """
-        return next((f.content for f in produced if f.content), None)
+        return next((f.content for f in produced if isinstance(f.content, str) and f.content), None)
 
     @staticmethod
     def _tree_path(phase_id: str, source_path: str) -> str | None:
@@ -611,6 +637,7 @@ class ArtifactCollector:
                 session_id=session_id,
                 artifact_type=artifact_type,
                 content=deliverable.content,
+                content_type=deliverable.content_type,
                 title=deliverable.title,
                 source_path=deliverable.source_path,
                 agent=agent,
@@ -625,7 +652,7 @@ class ArtifactCollector:
                     content=deliverable.content,
                 )
             )
-            if first_content is None:
+            if first_content is None and isinstance(deliverable.content, str):
                 first_content = deliverable.content
 
         return CollectedArtifacts(
@@ -690,11 +717,16 @@ class ArtifactCollector:
 
         deliverables: list[_Deliverable] = []
         for artifact_path, artifact_content in artifacts:
-            content_str = artifact_content.decode("utf-8", errors="replace")
+            content, content_type = _as_collected(artifact_path, artifact_content)
             title = f"{phase_name}: {artifact_path}"
-            if is_storable(content_str):
+            if is_storable(content):
                 deliverables.append(
-                    _Deliverable(source_path=artifact_path, content=content_str, title=title)
+                    _Deliverable(
+                        source_path=artifact_path,
+                        content=content,
+                        title=title,
+                        content_type=content_type,
+                    )
                 )
                 continue
             recovered = recover_deliverable(
@@ -776,8 +808,8 @@ class ArtifactCollector:
             artifact_ids: list[str] = []
             for artifact_path, artifact_content in partial_artifacts:
                 artifact_id = str(uuid4())
-                content_str = artifact_content.decode("utf-8", errors="replace")
-                if not is_storable(content_str):
+                content, content_type = _as_collected(artifact_path, artifact_content)
+                if not is_storable(content):
                     # SKIPPED, not recovered and not raised. This is the same
                     # empty-file shape as #1195, but on the interrupt path the
                     # outcome is already decided by the interrupt: there is no
@@ -799,7 +831,8 @@ class ArtifactCollector:
                     execution_id=execution_id,
                     session_id=session_id,
                     artifact_type=artifact_type,
-                    content=content_str,
+                    content=content,
+                    content_type=content_type,
                     title=outcome.title(phase_name=phase_name, source_path=artifact_path),
                     source_path=artifact_path,
                     # Only the first, for the reason the happy path gives: the
@@ -850,11 +883,12 @@ class ArtifactCollector:
         execution_id: str,
         session_id: str,
         artifact_type: str,
-        content: str,
+        content: str | bytes,
         title: str,
         agent: AgentIdentity,
         source_path: str | None = None,
         is_primary_deliverable: bool = True,
+        content_type: ContentType = ContentType.TEXT_MARKDOWN,
     ) -> None:
         """Create and save an artifact with two-tier storage (ADR-012).
 
@@ -885,7 +919,11 @@ class ArtifactCollector:
         # know how a backend establishes readability, only that a returned URI
         # can be read. A backend that cannot confirm it raises
         # ArtifactStorageError, and we leave storage_uri None - the artifact is
-        # still whole, because the event embeds the content either way.
+        # still whole, because the event embeds TEXT content either way.
+        #
+        # BINARY content is not embedded (#990): its bytes are in object
+        # storage or nowhere, so a binary artifact with no readable upload is
+        # refused by the aggregate rather than stored as a hash of nothing.
         #
         # ONLY that exception. A bare `except Exception` here would swallow our
         # own bugs - a bad keyword argument to upload() would read as a backend
@@ -897,11 +935,11 @@ class ArtifactCollector:
             try:
                 result = await self._content_storage.upload(
                     artifact_id=artifact_id,
-                    content=content.encode("utf-8"),
+                    content=content.encode("utf-8") if isinstance(content, str) else content,
                     workflow_id=workflow_id,
                     phase_id=phase_id,
                     execution_id=execution_id,
-                    content_type="text/markdown",
+                    content_type=content_type.value,
                     metadata={
                         "session_id": session_id,
                         "artifact_type": artifact_type,
@@ -932,6 +970,7 @@ class ArtifactCollector:
             execution_id=execution_id,
             session_id=session_id,
             artifact_type=artifact_type_enum,
+            content_type=content_type,
             content=content,
             title=title,
             source_path=source_path,
