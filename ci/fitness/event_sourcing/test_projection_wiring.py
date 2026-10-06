@@ -82,6 +82,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.orchestration.slices.get_workflow_detail import (
         WorkflowDetailProjection,
     )
+    from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
     from syn_domain.contexts.orchestration.slices.list_executions import (
         WorkflowExecutionListProjection,
     )
@@ -129,6 +130,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         WorkflowDetailProjection(dummy),
         WorkflowExecutionListProjection(dummy),
         WorkflowExecutionDetailProjection(dummy),
+        EvalListProjection(dummy),
         DashboardMetricsProjection(dummy),
         # Orchestration — phase metrics and execution todo
         WorkflowPhaseMetricsProjection(dummy),
@@ -175,7 +177,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 29
+_EXPECTED_COUNT = 30  # +EvalListProjection (#967)
 
 
 # ---------------------------------------------------------------------------

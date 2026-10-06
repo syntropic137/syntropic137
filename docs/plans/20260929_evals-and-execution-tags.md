@@ -9,8 +9,8 @@ Status: proposed implementation plan. Date: 2026-09-29.
 | Tags on workflows and executions (prerequisite) | merged | #1526, #1541 |
 | 1. Typed contracts, 2. Eval aggregate | merged | #1539 |
 | 3. Workflow/execution metadata (default eval, attach/detach) | merged | #1562 |
-| 4. Pinned launch integration | part A merged (ref resolver, freeze, resolved eval context, frozen SHAs fed to checkout); part B in review (each pinned repo's HEAD read back after provisioning, mismatch fails setup with `CheckoutMismatchError` before the agent, verified commits recorded on `WorkspaceProvisionedForPhase.checked_out_commits`) | #1591, #1615 |
-| 5. Projections and wiring | not started | |
+| 4. Pinned launch integration | merged: part A (ref resolver, freeze, resolved eval context, frozen SHAs fed to checkout); part B (each pinned repo's HEAD read back after provisioning, mismatch fails setup with `CheckoutMismatchError` before the agent, verified commits recorded on `WorkspaceProvisionedForPhase.checked_out_commits`) | #1591, #1615 |
+| 5. Projections and wiring | in review: `EvalListProjection` (`slices/list_evals`, v1) serves the eval list (run count and status tally) and eval detail (Baseline repos and SHAs, a page of member executions); the execution list (v7 -> v8) records `eval_id`/`association_kind` and filters by eval id (in the store query) and by tag. Eval runs ARE that filtered execution list, so `EvalDetailProjection`/`EvalRunsProjection` were not built as separate stores | #1620 |
 | 6. API and CLI | not started | |
 | 7. Dashboard and docs | not started | |
 | 8. Integration acceptance | not started | |

@@ -105,6 +105,12 @@ class WorkflowExecutionSummary:
     """The tags it launched with (#967), never edited: workflow tags united with
     the request's at launch."""
 
+    eval_id: str | None = None
+    """The Eval this execution belongs to now (#967); None in none or once detached."""
+
+    association_kind: str | None = None
+    """How it joined ``eval_id``: ``launched`` or ``attached``; None in no Eval."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionSummary":
         """Create from dictionary data.
@@ -145,6 +151,8 @@ class WorkflowExecutionSummary:
             repos=tuple(data.get("repos", [])),
             tags=tuple(data.get("tags") or ()),
             inherited_tags=tuple(data.get("inherited_tags") or ()),
+            eval_id=data.get("eval_id"),
+            association_kind=data.get("association_kind"),
         )
 
     @staticmethod
@@ -182,4 +190,6 @@ class WorkflowExecutionSummary:
             "repos": list(self.repos),
             "tags": list(self.tags),
             "inherited_tags": list(self.inherited_tags),
+            "eval_id": self.eval_id,
+            "association_kind": self.association_kind,
         }
