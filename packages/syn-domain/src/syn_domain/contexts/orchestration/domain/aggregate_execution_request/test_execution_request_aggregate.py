@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionAlreadyRequestedError,
     ExecutionRequestAggregate,
+    execution_request_id,
 )
 from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
     RequestExecutionCommand,
@@ -68,7 +69,7 @@ async def test_a_stored_request_reads_back_the_eval_it_was_accepted_into(
     request.request(_command(launch))
     await repo.save_new(request)
 
-    loaded = await repo.get_by_id("exec-1557req")
+    loaded = await repo.get_by_id(execution_request_id("exec-1557req"))
 
     assert loaded is not None
     assert loaded.workflow_id == "wf-1557"
@@ -86,3 +87,17 @@ def test_an_execution_id_is_requested_once() -> None:
     request.request(_command(LaunchEval(None, EvalSelection.NONE)))
     with pytest.raises(ExecutionAlreadyRequestedError):
         request.request(_command(LaunchEval(None, EvalSelection.NONE)))
+
+
+def test_a_request_never_takes_its_executions_id() -> None:
+    """The event store keys a stream by aggregate id alone, whatever its type.
+
+    A request at the execution's id became version 1 of that execution's
+    stream on the server, and every direct start was then refused as a
+    duplicate (v0.33.2-beta.8/beta.9).
+    """
+    request = ExecutionRequestAggregate()
+    request.request(_command(LaunchEval(None, EvalSelection.NONE)))
+
+    assert request.id == execution_request_id("exec-1557req")
+    assert request.id != "exec-1557req"

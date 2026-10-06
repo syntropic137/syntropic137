@@ -7,9 +7,16 @@ admitted. Written before the caller is told 200, so an accepted start that is
 still waiting for an execution-budget slot survives a restart: the
 `ExecutionRequestStartProcessManager` starts it from this record.
 
-Its own stream, keyed by the execution id it names, and never the
+Its own stream, at `execution_request_id(execution_id)`, and never the
 execution's: the execution stream still opens with NoStream when the start
 runs, which is what refuses a second start of the same request.
+
+Never the execution id itself. The event store keys a stream by aggregate id
+alone (`events` is keyed `(tenant_id, aggregate_id, aggregate_nonce)`; the
+aggregate type is not part of a stream's identity), so a request saved at the
+execution's id IS version 1 of `WorkflowExecution-<id>`, the start's NoStream
+write conflicts, and the run is dropped as a duplicate dispatch. That shipped
+in #1574 and stopped every direct start on v0.33.2-beta.8 and beta.9.
 """
 
 from __future__ import annotations

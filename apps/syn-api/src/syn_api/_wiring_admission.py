@@ -455,7 +455,9 @@ class BackgroundWorkflowDispatcher:
         if self._requests is None:
             msg = "This dispatcher was built without an execution request repository"
             raise RuntimeError(msg)
-        request = await self._requests.get_by_id(execution_id)
+        from syn_domain.contexts.orchestration import execution_request_id
+
+        request = await self._requests.get_by_id(execution_request_id(execution_id))
         if request is None or request.workflow_id is None:
             msg = f"No execution request {execution_id}"
             raise ValueError(msg)
