@@ -63,6 +63,9 @@ from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand 
 from syn_domain.contexts.orchestration.domain.commands.UpdateWorkflowTemplateCommand import (
     UpdateWorkflowTemplateCommand,
 )
+from syn_domain.contexts.orchestration.domain.commands.WithdrawExecutionRequestCommand import (
+    WithdrawExecutionRequestCommand,
+)
 
 __all__ = [
     "AddExecutionTagsCommand",
@@ -85,4 +88,5 @@ __all__ = [
     "TerminateWorkspaceCommand",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowTemplateCommand",
+    "WithdrawExecutionRequestCommand",
 ]

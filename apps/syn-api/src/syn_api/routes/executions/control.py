@@ -198,10 +198,41 @@ async def cancel_execution_endpoint(
     execution_id: str,
     request: CancelRequest | None = None,
 ) -> ControlResponse:
-    """Cancel a running execution."""
-    execution_id = await _resolve_execution_id(execution_id)
-    result = await cancel(execution_id, reason=request.reason if request else None)
+    """Cancel an execution, or withdraw a start still queued for one (#1650)."""
+    reason = request.reason if request else None
+    try:
+        resolved = await _resolve_execution_id(execution_id)
+    except HTTPException as not_found:
+        if not_found.status_code != 404:
+            raise
+        withdrawn = await _withdraw_queued(execution_id, reason)
+        if withdrawn is None:
+            raise
+        return withdrawn
+    result = await cancel(resolved, reason=reason)
     return await _handle_control_result(result, "cancel")
+
+
+async def _withdraw_queued(execution_id: str, reason: str | None) -> ControlResponse | None:
+    """Withdraw an accepted start with no execution yet; None if there is none.
+
+    A queued start has no `workflow_execution_details` row, which is what made
+    cancelling it a 404. Its request is withdrawn instead: durably, so neither
+    the task waiting for a slot nor a restart starts it.
+    """
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.routes.executions.direct_start import withdraw_execution_request
+    from syn_api.routes.executions.queued_start import queued_execution_id
+
+    full_id = await queued_execution_id(get_projection_mgr(), execution_id)
+    if full_id is None or not await withdraw_execution_request(full_id, reason):
+        return None
+    return ControlResponse(
+        success=True,
+        execution_id=full_id,
+        state="cancelled",
+        message="Withdrawn before it started: it will not run",
+    )
 
 
 @router.post("/executions/{execution_id}/inject", response_model=ControlResponse)

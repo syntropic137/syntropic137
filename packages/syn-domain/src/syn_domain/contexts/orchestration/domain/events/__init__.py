@@ -36,6 +36,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEv
 from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
     ExecutionRequestedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionRequestWithdrawnEvent import (
+    ExecutionRequestWithdrawnEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
 )
@@ -131,6 +134,7 @@ __all__ = [
     "ExecutionAttachedToEvalEvent",
     "ExecutionCancelledEvent",
     "ExecutionDetachedFromEvalEvent",
+    "ExecutionRequestWithdrawnEvent",
     "ExecutionRequestedEvent",
     "ExecutionResumedEvent",
     "ExecutionTagsAddedEvent",

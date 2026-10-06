@@ -69,6 +69,9 @@ async def _request_record(
 
 
 def _status(position: StartPosition | None, record: ExecutionRequestStartRecord | None) -> str:
+    if record is not None and record.status == "withdrawn":
+        # #1650: whatever the budget still holds, it gives back without starting.
+        return "cancelled"
     if position is not None:
         return "queued" if position.queued else "starting"
     assert record is not None
@@ -114,7 +117,20 @@ async def _from_the_request_stream(execution_id: str) -> ExecutionRequestStartRe
         execution_id=execution_id,
         workflow_id=request.workflow_id,
         recorded_at=request.requested_at,
+        status="withdrawn" if request.withdrawn else "pending",
     )
+
+
+async def queued_execution_id(mgr: ProjectionManager, execution_id: str) -> str | None:
+    """The full id of an accepted start that has no execution yet, or None (#1650).
+
+    None too once its record says it started: the execution exists, and only
+    its read model is behind.
+    """
+    found = await _find(mgr.store, execution_id)
+    if found is None or (found[2] is not None and found[2].status == "started"):
+        return None
+    return found[0]
 
 
 async def not_yet_started(
@@ -138,6 +154,7 @@ async def not_yet_started(
     if position is None and record is None:
         return None
     failed = position is None and record is not None and record.status == "failed"
+    withdrawn = record is not None and record.status == "withdrawn"
     reason = record.status_reason if record is not None else None
     return ExecutionDetailResponse(
         workflow_execution_id=full_id,
@@ -152,7 +169,7 @@ async def not_yet_started(
         total_phases=0,
         completed_phases=0,
         artifact_ids=[],
-        error_message=reason if failed else None,
+        error_message=reason if failed or withdrawn else None,
         failure_classification=FailureClassification.UNCLASSIFIED,
         reported_failure_reason=None,
         repos=[],
