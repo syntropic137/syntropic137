@@ -515,6 +515,13 @@ class PhaseRefResponse(BaseModel):
     """The shorthand spelling when the stored row held a bare string."""
 
 
+class FallbackAgentResponse(BaseModel):
+    """The agent a phase is re-run on when its own provider cannot serve it (PC-83)."""
+
+    provider: str
+    model: str | None = None
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -554,6 +561,9 @@ class PhaseDefinitionResponse(BaseModel):
     # The obligation beside the permission (#894): a phase declaring it fails
     # unless its delegate succeeded.
     require_delegation: bool = False
+    # PC-83: re-run once on this agent after capacity outlived the retries, or
+    # a spent quota. None when the phase declared no fallback.
+    fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
     sandbox: str = DEFAULT_PHASE_SANDBOX

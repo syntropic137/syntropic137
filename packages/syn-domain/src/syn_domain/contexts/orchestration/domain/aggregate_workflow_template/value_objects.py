@@ -121,6 +121,13 @@ class FallbackAgent(BaseModel):
     """Model for the fallback run; None resolves to the provider's default."""
 
 
+def stored_fallback_agent(stored: object) -> FallbackAgent | None:
+    """A phase's fallback agent as a projection stored it, or None when it declared none."""
+    if stored is None:
+        return None
+    return FallbackAgent.model_validate(stored)
+
+
 class PhaseDefinition(BaseModel):
     """Definition of a workflow phase.
 

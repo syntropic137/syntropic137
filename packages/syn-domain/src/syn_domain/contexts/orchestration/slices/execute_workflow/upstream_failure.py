@@ -83,7 +83,7 @@ def _codex_quota_reset(message: str) -> datetime | None:
     if match is None:
         return None
     try:
-        stamp = datetime.strptime(  # noqa: DTZ007 - zone attached below
+        stamp = datetime.strptime(
             "{month} {day} {year} {hour}:{minute} {ampm}".format(**match.groupdict()),
             "%b %d %Y %I:%M %p",
         )
