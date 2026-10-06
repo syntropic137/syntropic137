@@ -65,7 +65,8 @@ die() {
 }
 run() { if [ "$DRY" = 1 ]; then printf '   (dry-run) %s\n' "$*"; else "$@"; fi; }
 remote() { ssh -o ConnectTimeout=15 "$HOST" "$@"; }
-api() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m 90 "$API$1" -o "$2"; }
+# $3, when given, caps the call below the default 90s (the probe's deadlines).
+api() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m "${3:-90}" "$API$1" -o "$2"; }
 
 # DELIBERATELY NOT "last flag wins". `--stage-only --swap-only` would resolve
 # to whichever came last, so an invocation that asked only to STAGE could
@@ -394,40 +395,85 @@ maintenance false "" || die "$TAG is live but the clear did not complete; retry 
 # the pit stop dispatches one real run and declares nothing until a PHASE of it
 # is seen `running`. AFTER the ungate, deliberately: the probe goes through the
 # same admission as everyone else's work, and a failed probe never re-closes it.
-api_post() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m 90 -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
+api_post() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m "${4:-90}" -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
 
-# What one GET /executions/{id} says about the start path: prints a status line
-# and returns 0 started (a phase is running or completed), 1 not yet, 2 never
-# will (the run ended, or a phase failed, without one running).
-probe_verdict() {
+# The probe's bounds are DEADLINES on a monotonic clock, not counters of sleeps:
+# a counter that adds 10 per poll let one slow GET after another stretch a 600s
+# bound past 90 minutes. Every HTTP call is capped to what is left.
+mono_now() { python3 -c 'import time; print(int(time.monotonic()))'; }
+left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
+    local l=$(( $1 - $(mono_now) ))
+    if [ "$l" -gt 90 ]; then l=90; fi
+    if [ "$l" -lt 0 ]; then l=0; fi
+    echo "$l"
+}
+nap() {  # $1: deadline; sleep the poll interval, never past the deadline
+    local t
+    t="$(left "$1")"
+    if [ "$t" -gt 10 ]; then t=10; fi
+    if [ "$t" -gt 0 ]; then sleep "$t"; fi
+}
+
+# THE one reading of GET /executions/{id} for the probe; the wait and the
+# settle below both act on it, so they cannot disagree about what a status
+# means. Prints a status line and returns:
+#   0 STARTED   a phase is running or completed, and the run is still live
+#   1 PENDING   queued, starting, or a phase not yet running
+#   2 FAILED    the run failed or was interrupted, or a phase failed - at ANY
+#               point, including after a phase ran: that is not a clean stop
+#   3 ENDED     completed or cancelled AFTER a phase ran or completed
+#   4 STOPPED   completed or cancelled with no phase ever running
+probe_classify() {
     python3 - "$1" <<'PROBE'
 import json, sys
 d = json.load(open(sys.argv[1]))
 phases = [f"{p.get('phase_id')}={p.get('status')}" for p in d.get("phases") or []]
 print(f"status={d.get('status')} phases=[{', '.join(phases)}]")
 statuses = [p.get("status") for p in d.get("phases") or []]
-if any(s in ("running", "completed") for s in statuses):
-    sys.exit(0)
-if d.get("status") in ("completed", "failed", "cancelled", "interrupted") or "failed" in statuses:
+started = any(s in ("running", "completed") for s in statuses)
+if d.get("status") in ("failed", "interrupted") or "failed" in statuses:
     sys.exit(2)
-sys.exit(1)
+if d.get("status") in ("completed", "cancelled"):
+    sys.exit(3 if started else 4)
+sys.exit(0 if started else 1)
 PROBE
 }
 
+# One read of the probe: sets PROBE_CLASS (as above, or 1 when the GET itself
+# failed, which is what a start dropped before it existed looks like) and,
+# when there was an answer, PROBE_LAST.
+probe_read() {  # $1: execution id, $2: deadline
+    local t
+    PROBE_CLASS=1
+    t="$(left "$2")"; [ "$t" -gt 0 ] || return 0
+    if api "/executions/$1" "$TMP/probe_detail.json" "$t" 2>/dev/null; then
+        if PROBE_LAST="$(probe_classify "$TMP/probe_detail.json")"; then PROBE_CLASS=0; else PROBE_CLASS=$?; fi
+    fi
+}
+
 # Leave the probe TERMINAL. A probe still in flight is in-flight work to the
-# next pit stop's drain, which would wait on it. Returns 0 only once GET says so.
+# next pit stop's drain, which would wait on it. The cancel is SENT AGAIN on
+# every read until GET shows a terminal status: an accepted start still queued
+# for capacity has no execution yet, so POST /cancel answers 404 for it, and
+# only a later attempt can stop it once it starts. Returns 0 on a clean stop,
+# 2 when the run FAILED instead, 1 when the deadline passed with it still live.
 probe_settle() {  # $1: execution id
-    local waited=0 status=""
-    api_post "/executions/$1/cancel" '{"reason": "pit stop probe: the start path is proven"}' "$TMP/probe_cancel.json" 2>/dev/null \
-        || echo "   cancel was refused (it may already be terminal); reading it back"
+    local deadline t
+    deadline=$(( $(mono_now) + PROBE_CANCEL_TIMEOUT ))
     while :; do
-        if api "/executions/$1" "$TMP/probe_detail.json" 2>/dev/null; then
-            status="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("status"))' "$TMP/probe_detail.json")"
-            printf '   [+%ss] probe %s: status=%s\n' "$waited" "$1" "$status"
-            case "$status" in completed|failed|cancelled|interrupted) return 0 ;; esac
+        t="$(left "$deadline")"
+        if [ "$t" -gt 0 ]; then
+            api_post "/executions/$1/cancel" '{"reason": "pit stop probe: the start path is proven"}' "$TMP/probe_cancel.json" "$t" 2>/dev/null \
+                || echo "   cancel not accepted yet (still queued, or already terminal); reading it back"
         fi
-        [ "$waited" -ge "$PROBE_CANCEL_TIMEOUT" ] && return 1
-        sleep 10; waited=$((waited + 10))
+        probe_read "$1" "$deadline"
+        printf '   probe %s: %s\n' "$1" "$PROBE_LAST"
+        case "$PROBE_CLASS" in
+            3|4) return 0 ;;
+            2) return 2 ;;
+        esac
+        [ "$(left "$deadline")" -gt 0 ] || return 1
+        nap "$deadline"
     done
 }
 
@@ -445,37 +491,44 @@ else
     RECOVERY="$TAG is LIVE and admission is OPEN, deliberately: in-flight work from other users is not held hostage to a failed probe. Nothing was rolled back. To roll back by hand:
    $rollback"
     step "probe: dispatching $PROBE_WORKFLOW; waiting up to ${PROBE_TIMEOUT}s for a PHASE to reach running"
+    probe_deadline=$(( $(mono_now) + PROBE_TIMEOUT ))
     api_post "/workflows/$PROBE_WORKFLOW/execute" \
         "{\"task\": \"pit stop $TAG start-path probe: cancelled once a phase is running\", \"tags\": [\"pit-stop-probe\"], \"no_eval\": true}" \
-        "$TMP/probe.json" \
+        "$TMP/probe.json" "$(left "$probe_deadline")" \
         || die "could not dispatch the probe $PROBE_WORKFLOW (not installed on this host? syn workflow install workflows/probes/telemetry-lag)"
     PROBE_ID="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["execution_id"])' "$TMP/probe.json")" \
         || die "the probe dispatch answered without an execution_id"
     RECOVERY="$RECOVERY
 Inspect the probe: curl -fsS -u admin:\$SYN_API_PASSWORD $API/executions/$PROBE_ID"
-    waited=0; last="not found by GET /executions/$PROBE_ID (a start dropped before it existed looks exactly like this)"
+    PROBE_LAST="not found by GET /executions/$PROBE_ID (a start dropped before it existed looks exactly like this)"
     while :; do
-        verdict=1
-        if api "/executions/$PROBE_ID" "$TMP/probe_detail.json" 2>/dev/null; then
-            if last="$(probe_verdict "$TMP/probe_detail.json")"; then verdict=0; else verdict=$?; fi
-        fi
-        printf '   [+%ss] probe %s: %s\n' "$waited" "$PROBE_ID" "$last"
-        if [ "$verdict" = 0 ]; then break; fi
-        if [ "$verdict" = 2 ]; then
-            die "probe $PROBE_ID ended without a phase reaching running. Last status: $last"
-        fi
-        if [ "$waited" -ge "$PROBE_TIMEOUT" ]; then
+        probe_read "$PROBE_ID" "$probe_deadline"
+        printf '   probe %s: %s\n' "$PROBE_ID" "$PROBE_LAST"
+        case "$PROBE_CLASS" in
+            0|3) break ;;
+            2|4) die "probe $PROBE_ID ended without a phase reaching running. Last status: $PROBE_LAST" ;;
+        esac
+        if [ "$(left "$probe_deadline")" = 0 ]; then
             # Still cancelled, so the next drain does not wait on a run that never started.
-            probe_settle "$PROBE_ID" || echo "   WARNING: probe $PROBE_ID is not terminal; cancel it by hand or the next drain waits on it" >&2
-            die "probe $PROBE_ID did not reach a running phase within ${PROBE_TIMEOUT}s. Last status: $last"
+            timed_out="$PROBE_LAST"
+            settled=0; probe_settle "$PROBE_ID" || settled=$?
+            [ "$settled" != 1 ] \
+                || echo "   WARNING: probe $PROBE_ID is not terminal (last: $PROBE_LAST). A start still QUEUED cannot be cancelled until it starts: watch it and POST $API/executions/$PROBE_ID/cancel once it runs, or the next drain waits on it" >&2
+            die "probe $PROBE_ID did not reach a running phase within ${PROBE_TIMEOUT}s. Last status: $timed_out"
         fi
-        sleep 10; waited=$((waited + 10))
+        nap "$probe_deadline"
     done
     # Not token-free: this is a real agent on a real model, so it is stopped as
     # soon as it has proven the start, and the stop is read back, not assumed.
-    step "probe: a phase is running; cancelling $PROBE_ID"
-    probe_settle "$PROBE_ID" \
-        || die "the start path works, but probe $PROBE_ID is not terminal after ${PROBE_CANCEL_TIMEOUT}s: cancel it by hand (POST $API/executions/$PROBE_ID/cancel) or the next drain waits on it"
+    if [ "$PROBE_CLASS" = 0 ]; then
+        step "probe: a phase is running; cancelling $PROBE_ID"
+        settled=0; probe_settle "$PROBE_ID" || settled=$?
+        if [ "$settled" = 2 ]; then
+            die "probe $PROBE_ID FAILED after a phase ran: the run did not stop cleanly. Last status: $PROBE_LAST"
+        fi
+        [ "$settled" = 0 ] \
+            || die "the start path works, but probe $PROBE_ID is not terminal after ${PROBE_CANCEL_TIMEOUT}s (last: $PROBE_LAST): cancel it by hand (POST $API/executions/$PROBE_ID/cancel) or the next drain waits on it"
+    fi
     PROBE_LINE=" Probe $PROBE_ID reached a running phase and was stopped."
 fi
 

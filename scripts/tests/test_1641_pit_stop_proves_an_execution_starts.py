@@ -18,8 +18,9 @@ import json
 import os
 import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,12 +40,22 @@ _PROBE_ID = "exec-probe0000001"
 @dataclass
 class _Host:
     """What the fake API answers. ``details`` are successive GET bodies for the
-    probe, the last repeating; None is a 404. Once a cancel lands, GET answers
-    ``cancelled``."""
+    probe, the last repeating; None is a 404. Once the first cancel request
+    arrives, GET answers from ``after_cancel`` instead, when it is given. Once a
+    cancel lands, GET answers ``cancelled``.
+
+    Cancel answers 404 while the probe has no execution yet - a 404 or a
+    ``queued`` body - because syn-api's cancel resolves only the execution
+    read model, where an accepted start still waiting for capacity has no row.
+    """
 
     details: list[dict[str, object] | None]
+    after_cancel: list[dict[str, object] | None] | None = None
     dispatch_status: int = 200
     cancel_lands: bool = True
+    get_delay: float = 0.0
+    current: dict[str, object] | None = None
+    cancel_seen: bool = False
     requests: list[tuple[str, str, bytes]] = field(default_factory=list)
     auths: set[str] = field(default_factory=set)
     gets: int = 0
@@ -90,6 +101,12 @@ def host() -> Iterator[tuple[_Host, str]]:
                     return
                 self._answer(200, {"execution_id": _PROBE_ID, "workflow_id": "x"})
             elif self.path == f"/api/v1/executions/{_PROBE_ID}/cancel":
+                if not state.cancel_seen and state.after_cancel is not None:
+                    state.details, state.gets = state.after_cancel, 0
+                state.cancel_seen = True
+                if state.current is None or state.current.get("status") == "queued":
+                    self._answer(404, {"detail": "Execution not found"})
+                    return
                 state.cancelled = state.cancel_lands
                 self._answer(200, {"success": True, "execution_id": _PROBE_ID})
             else:
@@ -97,6 +114,7 @@ def host() -> Iterator[tuple[_Host, str]]:
 
         def do_GET(self) -> None:
             self._record()
+            time.sleep(state.get_delay)
             if self.path != f"/api/v1/executions/{_PROBE_ID}":
                 self._answer(404, {"detail": "unknown"})
                 return
@@ -105,6 +123,7 @@ def host() -> Iterator[tuple[_Host, str]]:
                 return
             body = state.details[min(state.gets, len(state.details) - 1)]
             state.gets += 1
+            state.current = body
             if body is None:
                 self._answer(404, {"detail": "Execution not found"})
             else:
@@ -113,7 +132,8 @@ def host() -> Iterator[tuple[_Host, str]]:
         def log_message(self, *args: object) -> None:
             pass
 
-    server = HTTPServer(("127.0.0.1", 0), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield state, f"http://127.0.0.1:{server.server_port}/api/v1"
@@ -141,14 +161,19 @@ def _definition(name: str) -> str:
 
 
 def _run(
-    tmp: Path, api: str, *, skip_probe: bool = False, probe_timeout: int = 30
+    tmp: Path,
+    api: str,
+    *,
+    skip_probe: bool = False,
+    probe_timeout: int = 3,
+    cancel_timeout: int = 3,
 ) -> subprocess.CompletedProcess[str]:
     preamble = f"""
 set -euo pipefail
 TAG=v0.40.0-beta.1; VERSION=0.40.0-beta.1; DRY=0; SKIP_PROBE={int(skip_probe)}
 HOST=fake-host; API={api}; COMPOSE_DIR=/root/.syntropic137; COMPOSE=docker-compose.syntropic137.yaml
 BAK=v0.39.0; TMP={tmp}; RECOVERY=""; T0=$(date +%s)
-PROBE_WORKFLOW=telemetry-lag-probe-v1; PROBE_TIMEOUT={probe_timeout}; PROBE_CANCEL_TIMEOUT=20
+PROBE_WORKFLOW=telemetry-lag-probe-v1; PROBE_TIMEOUT={probe_timeout}; PROBE_CANCEL_TIMEOUT={cancel_timeout}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{
     printf 'PIT STOP ABORTED: %s\\n' "$*" >&2
@@ -178,8 +203,12 @@ def _dispatched(state: _Host) -> bool:
     return ("POST", "/workflows/telemetry-lag-probe-v1/execute") in _calls(state)
 
 
+def _cancel_requests(state: _Host) -> int:
+    return _calls(state).count(("POST", f"/executions/{_PROBE_ID}/cancel"))
+
+
 def _cancelled(state: _Host) -> bool:
-    return ("POST", f"/executions/{_PROBE_ID}/cancel") in _calls(state)
+    return _cancel_requests(state) > 0
 
 
 def _admission_never_reclosed(state: _Host) -> bool:
@@ -242,16 +271,68 @@ def test_a_phase_that_already_completed_counts_as_started(
 def test_a_probe_still_queued_at_the_deadline_fails_without_done(
     tmp_path: Path, host: tuple[_Host, str]
 ) -> None:
+    """syn-api's shape for an accepted start waiting for capacity: ``queued``
+    with no phases, and a cancel that 404s until it starts. It starts during
+    the settle, and the RE-SENT cancel stops it before the script exits."""
     state, api = host
-    state.details = [_detail("running", "pending")]
-    proc = _run(tmp_path, api, probe_timeout=30)
+    state.details = [_detail("queued")]
+    state.after_cancel = [_detail("queued"), _detail("queued"), _detail("running", "running")]
+    proc = _run(tmp_path, api, probe_timeout=2, cancel_timeout=30)
     _failed_loudly(proc)
-    assert "did not reach a running phase within 30s" in proc.stderr
-    assert "Last status: status=running phases=[heartbeat=pending]" in proc.stderr
-    # Even a probe that never started is stopped, so the next drain does not wait on it.
-    assert _cancelled(state)
+    assert "did not reach a running phase within 2s" in proc.stderr
+    assert "Last status: status=queued phases=[]" in proc.stderr
+    # Refused while queued, sent again, and landed once it started: terminal.
+    assert _cancel_requests(state) >= 3
+    assert state.cancelled
+    assert "status=cancelled" in proc.stdout
+    assert "WARNING" not in proc.stderr
     assert _admission_never_reclosed(state)
     _no_secret_leaked(proc)
+
+
+def test_a_probe_queued_past_both_deadlines_says_it_is_still_live(
+    tmp_path: Path, host: tuple[_Host, str]
+) -> None:
+    state, api = host
+    state.details = [_detail("queued")]
+    proc = _run(tmp_path, api, probe_timeout=1, cancel_timeout=1)
+    _failed_loudly(proc)
+    assert not state.cancelled
+    assert f"WARNING: probe {_PROBE_ID} is not terminal" in proc.stderr
+    assert "still QUEUED cannot be cancelled until it starts" in proc.stderr
+
+
+@pytest.mark.parametrize("ending", ["failed", "interrupted"])
+def test_a_probe_that_fails_after_a_phase_ran_is_not_done(
+    tmp_path: Path, host: tuple[_Host, str], ending: str
+) -> None:
+    """A phase was seen running, then the run FAILED rather than stopping:
+    a failure is not the clean stop the pit stop asked for."""
+    state, api = host
+    state.details = [_detail("running", "running")]
+    state.after_cancel = [_detail(ending, ending)]
+    state.cancel_lands = False
+    proc = _run(tmp_path, api)
+    _failed_loudly(proc)
+    assert f"probe {_PROBE_ID} FAILED after a phase ran" in proc.stderr
+    assert f"Last status: status={ending} phases=[heartbeat={ending}]" in proc.stderr
+    assert _admission_never_reclosed(state)
+
+
+def test_slow_answers_cannot_stretch_the_probe_past_its_deadlines(
+    tmp_path: Path, host: tuple[_Host, str]
+) -> None:
+    """The bounds are wall-clock deadlines, and every request is capped to what
+    is left of them: a GET that takes 20s may not hold a 2s probe for 20s."""
+    state, api = host
+    state.details = [_detail("queued")]
+    state.get_delay = 20.0
+    began = time.monotonic()
+    proc = _run(tmp_path, api, probe_timeout=2, cancel_timeout=2)
+    elapsed = time.monotonic() - began
+    _failed_loudly(proc)
+    # 2s + 2s of deadline, plus whole-second rounding and process start-up.
+    assert elapsed < 10, f"took {elapsed:.1f}s against 4s of deadlines"
 
 
 def test_a_start_dropped_before_it_existed_fails_without_done(
@@ -307,7 +388,7 @@ def test_a_probe_whose_cancel_never_lands_is_not_done(
     proc = _run(tmp_path, api)
     assert proc.returncode != 0
     assert "PIT STOP DONE" not in proc.stdout
-    assert f"the start path works, but probe {_PROBE_ID} is not terminal after 20s" in proc.stderr
+    assert f"the start path works, but probe {_PROBE_ID} is not terminal after 3s" in proc.stderr
 
 
 def test_skip_probe_dispatches_nothing_and_says_so_loudly(
