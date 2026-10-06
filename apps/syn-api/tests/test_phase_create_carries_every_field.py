@@ -76,8 +76,11 @@ _EVERY_FIELD: Mapping[str, object] = {
     # "unsaved deliverable" into "build-tool side effect" (#1308).
     "delivers_repo_changes": False,
     "argument_hint": "[task]",
-    "model": "gpt-5.6-sol",
-    "provider": "codex",
+    "model": "claude-opus-5-5",
+    # NOT the default (None). Claude, not codex: a codex phase cannot carry
+    # the `max_cost_usd` above, because codex reports usage only when its run
+    # has ended and the create path refuses the pair (#1376).
+    "provider": "claude",
     "allow_delegation": True,
     "require_delegation": True,
     # NOT the default ("full-access"), so only the caller's value arriving
@@ -143,8 +146,8 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # nobody has thought about must keep the gate (#1308).
     assert phase.delivers_repo_changes is False
     assert phase.argument_hint == "[task]"
-    assert phase.model == "gpt-5.6-sol"
-    assert phase.provider == "codex"
+    assert phase.model == "claude-opus-5-5"
+    assert phase.provider == "claude"
     assert phase.allow_delegation is True
     assert phase.require_delegation is True
     assert phase.sandbox == "workspace-write"
@@ -311,3 +314,17 @@ class TestMultiNameSkillsExpand:
         )
 
         assert [s.skill_name for s in phase.skills] == ["one-skill"]
+
+
+def test_a_cost_limit_on_a_codex_phase_is_refused_at_create() -> None:
+    """#1376: the API create path never passes the YAML validator, so it refuses too."""
+    phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "codex"}}
+
+    with pytest.raises(ValueError, match="max_cost_usd on provider 'codex'"):
+        _build_phase_defs([phase])
+
+
+def test_a_cost_limit_on_a_claude_phase_is_kept_at_create() -> None:
+    phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "claude"}}
+
+    assert _build_phase_defs([phase])[0].max_cost_usd == 12.5

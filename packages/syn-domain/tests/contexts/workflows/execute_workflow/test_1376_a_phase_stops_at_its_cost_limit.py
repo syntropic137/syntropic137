@@ -126,6 +126,19 @@ class TestTheYamlValidatesTheLimit:
 
         assert definition.max_cost_usd == 12.5
 
+    def test_a_limit_on_a_codex_phase_is_refused_at_install(self) -> None:
+        """`codex exec` reports usage once, when its run has ended: nothing to stop."""
+        with pytest.raises(ValidationError, match="max_cost_usd on provider 'codex'"):
+            self._phase(max_cost_usd=12.5, agent={"provider": "codex"})
+
+    def test_a_limit_on_a_claude_phase_is_accepted(self) -> None:
+        definition = self._phase(max_cost_usd=12.5, agent={"provider": "claude"}).to_domain()
+
+        assert definition.max_cost_usd == 12.5
+
+    def test_a_codex_phase_without_a_limit_is_accepted(self) -> None:
+        assert self._phase(agent={"provider": "codex"}).to_domain().max_cost_usd is None
+
     def test_the_limit_survives_the_workflow_read_model_round_trip(self) -> None:
         """`to_dict` is what is stored and `from_dict` what every reader uses."""
         definition = self._phase(max_cost_usd=12.5).to_domain()

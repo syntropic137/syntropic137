@@ -52,6 +52,7 @@ from syn_shared.agents import (
     DEFAULT_PHASE_SANDBOX,
     REMOVED_INTERACTIVE_PROVIDER,
     AgentProvider,
+    require_enforceable_cost_limit,
     require_runnable_sandbox,
 )
 from syn_shared.tools import require_supported_tools
@@ -536,6 +537,14 @@ class PhaseYamlDefinition(BaseModel):
         phases were paid for.
         """
         require_runnable_sandbox(self.agent.sandbox if self.agent else None, phase_id=self.id)
+        return self
+
+    @model_validator(mode="after")
+    def validate_cost_limit_is_enforceable(self) -> PhaseYamlDefinition:
+        """Refuse ``max_cost_usd`` on a provider that cannot be stopped by it (#1376)."""
+        require_enforceable_cost_limit(
+            self.agent.provider if self.agent else None, self.max_cost_usd, phase_id=self.id
+        )
         return self
 
     @model_validator(mode="after")

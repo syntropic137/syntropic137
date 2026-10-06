@@ -518,9 +518,11 @@ class CodexStreamProcessor:
 
         await self._process_line(line)
 
-        # Same check as the claude path (#1376). Codex reports usage only
-        # on `turn.completed`, so the limit is seen per codex turn, not
-        # per model call - coarser, and stated rather than hidden.
+        # Same check as the claude path (#1376), as a backstop only. `codex
+        # exec` reports usage on ONE `turn.completed`, when the run has
+        # ended, so this can never stop a codex agent mid-run - which is why
+        # `require_enforceable_cost_limit` refuses `max_cost_usd` on a codex
+        # phase at install, and a codex phase does not reach here with one.
         over = limit_exceeded(self._cost_limit)
         if over is None:
             return False, None

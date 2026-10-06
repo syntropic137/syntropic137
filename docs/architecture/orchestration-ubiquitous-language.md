@@ -62,7 +62,9 @@ execution's cost is built from), and one limit covers every attempt of the
 Phase. Crossing it fails the Phase with `cost limit USD X exceeded at USD Y`: a
 failure, not a cancel, so the Execution is resumable like one whose Phase hit
 its deadline. Checked per turn, not reserved before each call, so turns already
-in flight can land above it. Not a separate budget from the
+in flight can land above it. Claude only: `codex exec` reports usage once, when
+its run has ended, so a limit on a codex Phase could never stop it and is
+refused at install. Not a separate budget from the
 [Execution Budget](#execution-budget), which counts concurrent Executions, not
 money.
 
