@@ -300,6 +300,7 @@ class TestPhaseCompletedE2EFlow:
         assert saved_data["total_output_tokens"] == 3000
 
 
+@pytest.mark.unit
 class TestEventStoreIntegration:
     """Test event store integration for PhaseCompleted events.
 

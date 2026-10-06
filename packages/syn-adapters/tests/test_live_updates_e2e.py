@@ -688,6 +688,7 @@ class TestLiveUpdatesE2E:
 # ============================================================================
 
 
+@pytest.mark.unit
 class TestLiveUpdatesPerformance:
     """Performance and stress tests for live update system."""
 

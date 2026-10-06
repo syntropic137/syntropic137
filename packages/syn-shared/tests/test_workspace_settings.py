@@ -51,6 +51,7 @@ class TestIsolationBackend:
         assert len(IsolationBackend) == 5
 
 
+@pytest.mark.unit
 class TestCloudProvider:
     """Test CloudProvider enum."""
 
@@ -60,6 +61,7 @@ class TestCloudProvider:
         assert CloudProvider.MODAL == "modal"
 
 
+@pytest.mark.unit
 class TestWorkspaceSecuritySettings:
     """Test WorkspaceSecuritySettings class."""
 
@@ -116,6 +118,7 @@ class TestWorkspaceSecuritySettings:
             assert security.get_allowed_hosts_list() == []
 
 
+@pytest.mark.unit
 class TestWorkspaceSettings:
     """Test WorkspaceSettings class."""
 
@@ -175,6 +178,7 @@ class TestWorkspaceSettings:
             assert settings.cpu_limit == 1.5
 
 
+@pytest.mark.unit
 class TestGetDefaultIsolationBackend:
     """Test get_default_isolation_backend function."""
 
@@ -301,6 +305,7 @@ class TestWorkspaceImages:
             assert settings.docker_image == "my-registry/custom-image:v1"
 
 
+@pytest.mark.unit
 class TestSettingsWorkspaceIntegration:
     """Test workspace settings integration with main Settings class.
 
@@ -339,6 +344,7 @@ class TestSettingsWorkspaceIntegration:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestGitIdentitySettings:
     """Test GitIdentitySettings class."""
 
@@ -439,6 +445,7 @@ class TestGitIdentitySettings:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestContainerLoggingSettings:
     """Test ContainerLoggingSettings class."""
 
@@ -524,6 +531,7 @@ class TestContainerLoggingSettings:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestGitIdentityResolver:
     """Test GitIdentityResolver class."""
 

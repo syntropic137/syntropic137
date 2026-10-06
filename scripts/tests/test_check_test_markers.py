@@ -175,6 +175,29 @@ class TestBudgetSemantics:
 
 
 @pytest.mark.unit
+class TestUnmarkedIsZeroTolerance:
+    """#1428: every test reaches a CI job, so the unmarked budget is 0, not a ratchet.
+
+    A non-zero budget lets new unmarked modules land as long as they fit in the
+    slack, which is how 742 tests came to run nowhere. Pinning the committed
+    value here makes raising it a deliberate test edit, not a one-line TOML bump.
+    """
+
+    def test_committed_unmarked_budget_is_zero(self) -> None:
+        import tomllib
+
+        config = tomllib.loads(
+            (Path(__file__).resolve().parents[2] / "fitness-exceptions.toml").read_text()
+        )
+        assert config["test-markers"]["unmarked"]["value"] == 0
+
+    def test_one_unmarked_test_fails_the_gate(self) -> None:
+        budgets = evaluate({"unmarked": {"value": 0, "issue": "#1428"}}, unmarked=1, xfails=0)
+        assert budgets[0].exceeded
+        assert "FAIL" in budgets[0].render()
+
+
+@pytest.mark.unit
 class TestCollectionErrorsAreNotAnImprovement:
     """A census pytest could not finish measuring is not a census.
 
