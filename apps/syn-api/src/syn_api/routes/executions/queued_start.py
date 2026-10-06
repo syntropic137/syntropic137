@@ -80,6 +80,16 @@ def _status(position: StartPosition | None, record: ExecutionRequestStartRecord 
     return "failed" if record.status == "failed" else "starting"
 
 
+def _error_message(
+    position: StartPosition | None, record: ExecutionRequestStartRecord | None
+) -> str | None:
+    """Why it did not start: a settled failure, or the reason it was withdrawn."""
+    if record is None:
+        return None
+    settled = record.status == "withdrawn" or (position is None and record.status == "failed")
+    return record.status_reason if settled else None
+
+
 async def _find(
     store: ProjectionStoreProtocol, execution_id: str
 ) -> tuple[str, str, ExecutionRequestStartRecord | None] | None:
@@ -153,9 +163,6 @@ async def not_yet_started(
     position = budget.position(full_id)
     if position is None and record is None:
         return None
-    failed = position is None and record is not None and record.status == "failed"
-    withdrawn = record is not None and record.status == "withdrawn"
-    reason = record.status_reason if record is not None else None
     return ExecutionDetailResponse(
         workflow_execution_id=full_id,
         workflow_id=workflow_id,
@@ -169,7 +176,7 @@ async def not_yet_started(
         total_phases=0,
         completed_phases=0,
         artifact_ids=[],
-        error_message=reason if failed or withdrawn else None,
+        error_message=_error_message(position, record),
         failure_classification=FailureClassification.UNCLASSIFIED,
         reported_failure_reason=None,
         repos=[],
