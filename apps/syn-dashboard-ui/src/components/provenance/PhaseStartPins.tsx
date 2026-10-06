@@ -1,4 +1,5 @@
 import type { PhaseStartConfig, StartPinsStatus } from '../../types'
+import { SkillRefList } from '../SkillRefList'
 import './provenance.css'
 
 /**
@@ -67,18 +68,16 @@ export function PhaseStartPins({
         </dd>
         <dt>Skills</dt>
         <dd>
-          {skills.length === 0 ? (
-            'none'
-          ) : (
-            <ul>
-              {skills.map((s) => (
-                <li key={`${s.name}@${s.resolved_sha}`} title={`${s.source_url} @ ${s.resolved_sha}`}>
-                  <code>{s.name}</code> <span className="provenance-muted">{s.version}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <SkillRefList skills={skills} />
         </dd>
+        <dt>Skill use</dt>
+        {/*
+          TODO(#1269): which declared skills the agent actually invoked. The
+          execution API does not report it yet (PR #1674 adds `skill_use`);
+          once it is in the generated types, render it here by its status.
+          Until then this says so, never "not used".
+        */}
+        <dd>use not recorded yet</dd>
       </dl>
     </details>
   )

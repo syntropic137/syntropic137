@@ -3,6 +3,7 @@ import { GitBranch } from 'lucide-react'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import { PhaseModelBadge } from '../../components/PhaseModelBadge'
+import { SkillRefList } from '../../components/SkillRefList'
 import { providerLabel } from '../../constants/agentProviders'
 import type { PhaseDefinition, PhaseMetrics } from '../../types'
 import { formatCostWithCoverage } from '../../utils/formatters'
@@ -72,6 +73,10 @@ function PhaseCard({
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-muted)]">
         <span>{providerLabel(phase.provider ?? phase.agent_type)}</span>
         <PhaseModelBadge model={phase.model} modelDisplay={phase.model_display} />
+      </div>
+      <div className="mt-2 text-xs" data-testid="phase-skills">
+        <span className="text-[var(--color-text-secondary)]">Skills</span>
+        <SkillRefList skills={phase.skills ?? []} />
       </div>
       {phaseMetric && <PhaseMetricLine metric={phaseMetric} />}
     </div>

@@ -127,4 +127,43 @@ describe('workflow Phase Pipeline card', () => {
     expect(screen.getByText('$0.1324')).toBeTruthy()
     expect(screen.queryByText(/so far/)).toBeNull()
   })
+
+  it('lists each declared skill with its repo, short SHA and a link to that version', () => {
+    const sha = '7e48aad9c7186bb03b8b0df899f56b7cd3b2a454'
+    render(
+      <PhasePipeline
+        phases={[
+          {
+            ...PLAN,
+            skills: [
+              {
+                name: 'architecture',
+                source_url: 'https://github.com/syntropic137/software-leverage-points',
+                version: sha,
+                name_overridden: false,
+                raw: null,
+              },
+              { name: null, source_url: null, version: null, name_overridden: false, raw: './skills/repo-conventions' },
+            ],
+          },
+        ]}
+        phaseMetrics={undefined}
+      />,
+    )
+    const [pinned, local] = screen.getAllByTestId('skill-ref')
+    expect(pinned.textContent).toContain('architecture')
+    expect(pinned.textContent).toContain('syntropic137/software-leverage-points')
+    expect(pinned.textContent).toContain('7e48aad')
+    expect(pinned.textContent).not.toContain(sha)
+    expect(screen.getByRole('link', { name: 'Source of architecture at 7e48aad' }).getAttribute('href')).toBe(
+      `https://github.com/syntropic137/software-leverage-points/tree/${sha}`,
+    )
+    expect(local.textContent).toContain('./skills/repo-conventions')
+    expect(local.textContent).toContain('local to the workflow')
+  })
+
+  it('says a phase declares no skills rather than leaving it blank', () => {
+    render(<PhasePipeline phases={[PLAN]} phaseMetrics={undefined} />)
+    expect(screen.getByTestId('phase-skills').textContent).toBe('Skillsnone')
+  })
 })

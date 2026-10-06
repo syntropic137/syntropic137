@@ -87,7 +87,23 @@ describe('PhaseStartPins', () => {
     expect(text).toContain('Bash(git log:*)')
     expect(text).toContain('architecture')
     expect(text).toContain('v2.3.1')
-    expect(text).not.toContain('not recorded')
+    expect(text).not.toContain('Start config: not recorded')
+  })
+
+  it('shows and links the SHA a skill resolved to at start, not just its tag', () => {
+    render(<PhaseStartPins pins={PINS} status="recorded" />)
+    const skill = screen.getByTestId('skill-ref')
+    expect(skill.textContent).toContain('syntropic137/software-leverage-points')
+    expect(skill.textContent).toContain('9f1c0de4')
+    expect(screen.getByRole('link', { name: 'Source of architecture at 9f1c0de4', hidden: true }).getAttribute('href')).toBe(
+      'https://github.com/syntropic137/software-leverage-points/tree/9f1c0de4',
+    )
+  })
+
+  it('says skill use is not recorded yet, never that a declared skill went unused', () => {
+    const { container } = render(<PhaseStartPins pins={PINS} status="recorded" />)
+    expect(container.textContent).toContain('use not recorded yet')
+    expect(container.textContent).not.toMatch(/not used|unused|invoked/i)
   })
 
   it('says "not recorded" for a run from before #1454, and guesses nothing', () => {
