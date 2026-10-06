@@ -71,8 +71,18 @@ probe still in flight is in-flight work to the next pit stop's drain.
   seen to start within `SYN_PIT_PROBE_TIMEOUT` (default 600s), or it ended
   (`failed`, `cancelled`, `interrupted`, a `failed` phase) without a phase
   running, or it could not be dispatched, or its cancel did not land within
-  `SYN_PIT_PROBE_CANCEL_TIMEOUT` (default 300s). The message names the execution
-  id and its last status, and prints the rollback command. **Nothing is rolled
+  `SYN_PIT_PROBE_CANCEL_TIMEOUT` (default 300s), or it FAILED or was
+  interrupted after a phase ran (a failure is not the clean stop asked for).
+  The message names the execution id and its last status, and prints the
+  rollback command.
+- **Both bounds are wall-clock deadlines.** Every request is capped to the time
+  left, so slow answers cannot stretch a 600s probe into an hour and a half.
+- **The cancel is re-sent until GET shows a terminal status.** A start still
+  `queued` for capacity has no execution yet, and `POST /executions/{id}/cancel`
+  answers 404 for it until it starts; there is no cancel for an accepted start
+  that has not started. If it is still queued when the cancel deadline passes,
+  the failure says it is live: cancel it by hand once it runs, or the next pit
+  stop's drain waits on it. **Nothing is rolled
   back automatically, and admission stays OPEN**: other users' work is not
   blocked by a failed probe. Decide, then roll back by hand.
 - **`--skip-probe`** is for emergencies only. It is logged loudly, the DONE
