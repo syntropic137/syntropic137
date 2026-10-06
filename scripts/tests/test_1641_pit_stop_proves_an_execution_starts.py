@@ -191,6 +191,7 @@ die() {{
     exit 1
 }}
 sleep() {{ :; }}
+{_definition("api_curl")}
 {_definition("api")}
 {_definition("maintenance")}
 """
@@ -346,7 +347,10 @@ def test_a_cancel_accepted_but_never_terminal_fails_with_the_cleanup_command(
     state, api = host
     state.details = probe
     state.cancel_lands = False
-    proc = _run(tmp_path, api, probe_timeout=1, cancel_timeout=1)
+    # The cancel deadline is whole seconds on a monotonic clock: at 1s, a read
+    # that crosses a second boundary leaves none for the cancel, and the
+    # `running` case failed intermittently without one being sent.
+    proc = _run(tmp_path, api, probe_timeout=1, cancel_timeout=3)
     assert proc.returncode != 0
     assert "PIT STOP DONE" not in proc.stdout + proc.stderr
     assert _cancelled(state)
