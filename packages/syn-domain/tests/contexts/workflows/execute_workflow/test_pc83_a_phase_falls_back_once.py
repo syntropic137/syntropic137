@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
 )
@@ -29,15 +30,14 @@ from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEven
 from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
 )
+from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
+    WorkflowExecutionDetail,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     UpstreamRetryPolicy,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
-)
-from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
-    WorkflowExecutionDetail,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
