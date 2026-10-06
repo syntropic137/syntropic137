@@ -74,6 +74,9 @@ from syn_domain.contexts.orchestration import (
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import EvalMembershipResult
+    from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
+        RevisionResolverPort,
+    )
     from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
 
 router = APIRouter(tags=["evals"])
@@ -241,6 +244,11 @@ def _response(record: EvalRecord, run_count: int, tally: dict[str, int]) -> Eval
     )
 
 
+def revision_resolver() -> RevisionResolverPort:
+    """Pins baseline refs through the GitHub App. A test replaces this function."""
+    return GitHubRevisionResolver(get_github_client)
+
+
 def _baseline_requests(body: CreateEvalRequest) -> list[BaselineRequest]:
     try:
         return [
@@ -272,9 +280,7 @@ async def create_eval_endpoint(body: CreateEvalRequest) -> EvalCreatedResponse:
     await ensure_connected()
     eval_id = EvalId.new()
     repository = get_eval_repo()
-    handler = CreateEvalHandler(
-        repository, GitHubRevisionResolver(get_github_client), get_publisher()
-    )
+    handler = CreateEvalHandler(repository, revision_resolver(), get_publisher())
     result = await handler.handle(
         eval_id=eval_id,
         name=body.name,
