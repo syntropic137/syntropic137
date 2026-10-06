@@ -83,7 +83,7 @@ phases:
       - Write
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     skills:
       - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
@@ -312,7 +312,7 @@ phases:
       - Write
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     skills:
       - syntropic137/software-leverage-points/documentation@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
