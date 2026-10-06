@@ -159,6 +159,28 @@ the outcome:
   the question. Report the check as not run, name it, and never claim CI passed
   it.
 
+## A UI change carries its screenshots to the head you certify
+
+If the change touches `apps/syn-dashboard-ui/` or another UI app, `verify.md`
+must have a `## Screenshots` section: screenshots of every affected route at
+1280x800 and 390x844, each looked at and judged, as its "A UI change is
+verified by looking at it" section requires. If it has none, that is a blocking
+defect the first pass should have caught, and it stays open until a pass takes
+them.
+
+If the fix touched UI files, re-take the screenshots for the routes it affects
+with the recipe in `verify.md`'s section (build, serve, then
+`node /workspace/repos/syntropic137/apps/syn-dashboard-ui/scripts/screenshot.mjs <url> /workspace/artifacts/output/<route>-<viewport>.png --viewport <WxH>`,
+the same absolute path for `apps/syn-docs/`, which has no script of its own),
+open each PNG and look at it. If it did not, the first pass's screenshots still
+describe the candidate. Their PNGs are under `artifacts/input/<phase-id>/`
+byte-for-byte (#990, fixed in #1652): check each starts with `89 50 4e 47` and
+opens before relying on it, but the table is still what reaches the PR.
+
+Either way, copy the `## Screenshots` section into your report, replacing each
+row you re-took, so that it describes the SHA you certify. `finalize_pr` reads
+your report, not `verify.md`, and carries that section into the PR body.
+
 ## Be specific about what would make it deliverable
 
 If you find a blocking defect, the next fix round - or, in round 3, whoever
@@ -207,6 +229,8 @@ under `artifacts/output/` FAILS.** Write the file before you finish.
 5. **The mutation evidence** for tests the fix touched, and whether you believe
    it.
 6. If BLOCKED: **what would close it**, file and line and assertion.
+7. **`## Screenshots`**, if the change touches a UI app: the table from
+   `verify.md`, with the rows you re-took replaced, as the section above says.
 
 ## Report the verdict to the engine, not only in prose
 

@@ -58,6 +58,8 @@ The description must contain:
 - each mutation that was run and what it killed
 - what was deliberately not done, and why
 - anything that could not be verified
+- the `## Screenshots` section from `reverify.md`, row for row, when the
+  change touches a UI app
 
 Write it for a reviewer who will not read the diff first. Lead with what the
 change claims, then the evidence for that claim.

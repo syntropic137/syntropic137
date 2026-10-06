@@ -75,6 +75,8 @@ both SHAs, and stop.
    - each mutation that was run and what it killed
    - what was deliberately not done, and why
    - anything that could not be verified
+   - the `## Screenshots` section from `reverify.md`, row for row, when the
+     change touches a UI app
    - a `## Release notes` section: user-facing, a few lines. The release gate
      uses the PR body as the release description, so this is the changelog.
    - the issue references the task names (`Closes #N` / `Refs #N`)
