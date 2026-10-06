@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -195,9 +196,17 @@ sleep() {{ :; }}
 {_definition("api")}
 {_definition("maintenance")}
 """
+    # The real curl behind a recorder of its argv: what `ps` would have shown (PC-85).
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir()
+    curl = shutil.which("curl")
+    assert curl, "these tests drive the real curl"
+    recorder = bin_dir / "curl"
+    recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {tmp}/curl_argv\nexec {curl} "$@"\n')
+    recorder.chmod(0o755)
     return subprocess.run(
         ["bash", "-c", preamble + _tail(), str(_SCRIPT)],
-        env={"PATH": os.environ["PATH"], "SYN_API_PASSWORD": _PASSWORD},
+        env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "SYN_API_PASSWORD": _PASSWORD},
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -283,6 +292,11 @@ def test_a_probe_that_reaches_running_is_cancelled_and_the_pit_stop_is_done(
     assert "status=cancelled phases=[heartbeat=cancelled]" in proc.stdout
     assert state.auths == {"Basic " + base64.b64encode(f"admin:{_PASSWORD}".encode()).decode()}
     _no_secret_leaked(proc)
+    # The gate, the dispatch, the reads and the cancel: no command line carried it.
+    argv = (tmp_path / "curl_argv").read_text()
+    assert "-X PUT" in argv
+    assert "-X POST" in argv
+    assert _PASSWORD not in argv
 
 
 def test_a_phase_that_already_completed_counts_as_started(
