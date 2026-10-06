@@ -1,9 +1,9 @@
 /**
  * Repos page — composition only.
  *
- * Which repositories the platform knows about, which system owns each, and
- * whether each is attached to a GitHub App installation. Read-only: repos are
- * registered from the CLI or by the App, not from here.
+ * The connected repositories (registered, or reachable by the GitHub App),
+ * which system owns each, and whether each is attached to a GitHub App
+ * installation. Read-only: repos are registered from the CLI, not from here.
  *
  * No link to a repo's executions: `/executions` has no repository filter to
  * link to, and inventing one is a separate change.
@@ -41,7 +41,7 @@ function RepoTable({ repos }: { repos: RepoRow[] }) {
         </thead>
         <tbody>
           {repos.map((repo) => (
-            <tr key={repo.repoId} className="border-b border-[var(--color-border)] last:border-0">
+            <tr key={repo.key} className="border-b border-[var(--color-border)] last:border-0">
               <td className="px-4 py-2 text-[var(--color-text-primary)]">
                 <span className="inline-flex items-center gap-1.5">
                   {repo.fullName}
@@ -51,7 +51,14 @@ function RepoTable({ repos }: { repos: RepoRow[] }) {
                 </span>
               </td>
               <td className="px-4 py-2 text-[var(--color-text-secondary)]">
-                {repo.system ?? <span className="text-[var(--color-text-muted)]">None</span>}
+                {repo.system ??
+                  (repo.registered ? (
+                    <span className="text-[var(--color-text-muted)]">None</span>
+                  ) : (
+                    <span className={MUTED_BADGE} title="Reachable by the GitHub App; not registered with `syn repo register`">
+                      Not registered
+                    </span>
+                  ))}
               </td>
               <td className="px-4 py-2">
                 <AttachedBadge attachment={repo.attachment} />
@@ -72,7 +79,10 @@ export function RepoList() {
       <div>
         <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Repos</h1>
         <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-          Repositories registered with the platform
+          Repositories registered with the platform or reachable by the GitHub App
+          {state.kind === 'ready' && state.repos.length > 0 && (
+            <span className="text-[var(--color-text-muted)]"> · {state.repos.length} connected</span>
+          )}
         </p>
       </div>
 
@@ -90,7 +100,7 @@ export function RepoList() {
         <Card>
           <EmptyState
             icon={FolderGit2}
-            title="No repositories attached"
+            title="No repositories connected"
             description="Register one with `syn repo register --url owner/repo`, then install the GitHub App on it so workflows can act on it."
           />
         </Card>
