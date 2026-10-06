@@ -217,6 +217,24 @@ code the original ran on. A pinned commit no branch or tag of origin still
 reaches refuses the Phase; it is never swapped for the branch's head.
 (#1458, ADR-058.)
 
+## Declared Skill / Invoked Skill
+
+A **Declared Skill** is one a Phase names in its `skills:`. The platform
+installs it into the Phase's workspace and, for a claude Phase that scopes its
+tools, grants the `Skill` tool so it can be invoked (#1269). The declared set
+read back is the Phase's Pin, never the Workflow as it stands now.
+
+An **Invoked Skill** is a declared or installed skill the agent actually called,
+counted per call. Declaring is not using: a Phase can be given a skill and never
+reach for it, and `phases[].skill_use.declared_not_invoked` names those.
+
+The two harnesses differ and the difference is reported, not hidden. Claude
+invokes a skill through its `Skill` tool, so the call is on the timeline and
+skill use is **observed**. Codex has no `Skill` tool: its skills arrive as
+context and their use leaves no signal, so a codex Phase reports skill use
+**not observable**, never zero invocations. **Unavailable** means the Pin or the
+timeline could not be read, so nothing is known either way.
+
 ## Starting Checkout
 
 The commit each pinned repository was actually found at once a Phase's
