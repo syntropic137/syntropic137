@@ -626,6 +626,10 @@ class PhaseYamlDefinition(BaseModel):
             raise ValueError(msg)
         return self
 
+    def _fallback_agent_domain(self) -> FallbackAgent | None:
+        """The declared fallback_agent as a domain value, or None when absent."""
+        return self.fallback_agent.to_domain() if self.fallback_agent else None
+
     def to_domain(self) -> PhaseDefinition:
         """Convert to domain PhaseDefinition.
 
@@ -670,7 +674,7 @@ class PhaseYamlDefinition(BaseModel):
             provider=provider,
             allow_delegation=allow_delegation,
             require_delegation=require_delegation,
-            fallback_agent=self.fallback_agent.to_domain() if self.fallback_agent else None,
+            fallback_agent=self._fallback_agent_domain(),
             sandbox=sandbox,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),
