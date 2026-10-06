@@ -4264,6 +4264,16 @@ export interface components {
             last_seen: string;
         };
         /**
+         * FallbackAgentResponse
+         * @description The agent a phase is re-run on when its own provider cannot serve it (PC-83).
+         */
+        FallbackAgentResponse: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
+        };
+        /**
          * FeatureDisabledDetail
          * @description Why a flag-gated route refuses to run.
          */
@@ -5550,6 +5560,7 @@ export interface components {
              * @default false
              */
             require_delegation: boolean;
+            fallback_agent?: components["schemas"]["FallbackAgentResponse"] | null;
             /**
              * Clone Repos
              * @default true
