@@ -55,6 +55,16 @@ _EXIT_NO_TESTS_COLLECTED = 5
 _COLLECTED_PATTERN = re.compile(r"(\d+)\s*/\s*(\d+) tests collected")
 _COLLECTED_FALLBACK = re.compile(r"(\d+) tests collected")
 
+#: The markers CI selects on: ``pytest -m unit`` and ``pytest -m integration``
+#: in ``.github/workflows/ci.yml``. No job runs ``-m e2e``, so ``e2e`` is a
+#: label, not a selector - excluding it here once hid 11 tests that ran nowhere
+#: (#1428). Add a marker only when a CI job starts selecting it.
+CI_SELECTED_MARKERS: tuple[str, ...] = ("unit", "integration")
+
+#: Every test no CI job selects, derived from the selectors above so the two
+#: cannot drift apart.
+UNMARKED_SELECTOR = " and ".join(f"not {marker}" for marker in CI_SELECTED_MARKERS)
+
 
 def is_excluded(path: Path | str) -> bool:
     """True when a path lies under a directory that is not first-party source.
@@ -182,7 +192,7 @@ def main() -> int:
     config = tomllib.loads(Path("fitness-exceptions.toml").read_text()).get("test-markers", {})
 
     total = collect_census()
-    unmarked = collect_census("-m", "not unit and not integration and not e2e")
+    unmarked = collect_census("-m", UNMARKED_SELECTOR)
     xfails = count_xfail_markers(root)
 
     budgets = evaluate(config, unmarked, xfails)

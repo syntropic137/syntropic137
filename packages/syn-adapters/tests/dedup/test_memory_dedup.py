@@ -6,6 +6,8 @@ import pytest
 
 from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
 
+pytestmark = pytest.mark.unit
+
 
 class TestInMemoryDedup:
     @pytest.mark.asyncio

@@ -129,6 +129,7 @@ class TestExecutionValueObjects:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestWorkflowExecutionResult:
     """Tests for WorkflowExecutionResult."""
 
@@ -162,6 +163,7 @@ class TestWorkflowExecutionResult:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestWorkflowNotFoundError:
     """Tests for WorkflowNotFoundError."""
 
@@ -171,6 +173,7 @@ class TestWorkflowNotFoundError:
         assert "wf-123" in str(err)
 
 
+@pytest.mark.unit
 class TestWorkflowInterruptedError:
     """Tests for WorkflowInterruptedError."""
 

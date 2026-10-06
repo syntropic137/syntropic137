@@ -11,6 +11,8 @@ from syn_api.routes.webhooks.acknowledgments import (
     _post_trigger_acknowledgments,
 )
 
+pytestmark = pytest.mark.unit
+
 # --- _extract_pr_number ---
 
 

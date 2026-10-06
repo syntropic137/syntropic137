@@ -695,6 +695,8 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_summary impor
     SubagentRecord,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestSubagentRecord:

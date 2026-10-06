@@ -8,6 +8,8 @@ from pathlib import PurePosixPath
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestWorkspacePathConstants:

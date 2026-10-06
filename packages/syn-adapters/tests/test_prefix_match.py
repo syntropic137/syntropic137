@@ -18,6 +18,8 @@ from syn_adapters.projection_stores.prefix_match import (
     resolve_by_prefix,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def reset_store() -> None:

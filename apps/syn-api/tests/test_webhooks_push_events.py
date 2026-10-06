@@ -8,6 +8,8 @@ import pytest
 
 from syn_api.routes.webhooks.push_events import _build_commit_data, _record_push_commits
 
+pytestmark = pytest.mark.unit
+
 # --- _build_commit_data ---
 
 

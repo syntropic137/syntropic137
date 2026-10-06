@@ -32,6 +32,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
     TokenAccumulator,
 )
 
+pytestmark = pytest.mark.unit
+
 _FIXTURES_DIR = Path(__file__).resolve().parents[6] / "tests" / "fixtures" / "codex"
 
 

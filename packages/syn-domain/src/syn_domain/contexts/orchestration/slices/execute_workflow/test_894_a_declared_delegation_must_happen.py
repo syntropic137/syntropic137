@@ -33,6 +33,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation 
     delegation_failure,
 )
 
+pytestmark = pytest.mark.unit
+
 _WORKSPACE = MagicMock()
 
 
