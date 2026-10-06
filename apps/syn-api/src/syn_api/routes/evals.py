@@ -74,10 +74,10 @@ from syn_domain.contexts.orchestration import (
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import EvalMembershipResult
+    from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
     from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
         RevisionResolverPort,
     )
-    from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
 
 router = APIRouter(tags=["evals"])
 
