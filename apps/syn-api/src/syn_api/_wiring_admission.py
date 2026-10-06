@@ -223,6 +223,24 @@ class ExecutionRequests(Protocol):
     async def get_by_id(self, aggregate_id: str) -> ExecutionRequestAggregate | None: ...
 
 
+async def request_withdrawn(requests: ExecutionRequests, execution_id: str) -> bool:
+    """Whether this direct start was withdrawn while it waited (#1650).
+
+    Asked by BOTH direct start paths - the route's queued task and the request
+    ProcessManager's - once the start holds its budget slot and immediately
+    before it starts: the wait for a slot is where a withdrawal lands. The
+    caller's `held` block then ends, so a withdrawn start gives its slot (and
+    its admission lease) straight back.
+    """
+    from syn_domain.contexts.orchestration import execution_request_id
+
+    request = await requests.get_by_id(execution_request_id(execution_id))
+    if request is None or not request.withdrawn:
+        return False
+    logger.info("Not starting %s: its request was withdrawn while it waited", execution_id)
+    return True
+
+
 class BackgroundWorkflowDispatcher:
     """Bridges WorkflowDispatchProjection → ExecuteWorkflowHandler.
 
@@ -461,6 +479,10 @@ class BackgroundWorkflowDispatcher:
         if request is None or request.workflow_id is None:
             msg = f"No execution request {execution_id}"
             raise ValueError(msg)
+        if request.withdrawn:
+            # Its record is settled `withdrawn` by the event itself (#1650).
+            logger.info("Not starting %s: its request was withdrawn", execution_id)
+            return None
         from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
 
         command = ExecuteWorkflowCommand(
@@ -528,6 +550,10 @@ class BackgroundWorkflowDispatcher:
 
         with carrying(admitted):
             async with self._budget.held(claim):
+                if self._requests is not None and await request_withdrawn(
+                    self._requests, claim.execution_id
+                ):
+                    return
                 try:
                     await self._handler.handle(command, admitted=admitted)
                 except DuplicateExecutionError:

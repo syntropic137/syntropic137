@@ -215,7 +215,8 @@ class ExecutionStartQueueInfo(BaseModel):
     start_status: StartStatus | None = None
     """The durable request record's status, for a direct start (#1557):
     ``pending``, ``paused``, ``retryable`` and ``dispatched`` are still owed a
-    start; ``failed`` is settled, with ``status_reason``."""
+    start; ``failed`` is settled, with ``status_reason``; ``withdrawn`` was
+    cancelled before it started (#1650) and never starts."""
     status_reason: str | None = None
     """Why the last attempt at a direct start did not start it, if one failed."""
     running: int

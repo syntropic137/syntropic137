@@ -43,8 +43,14 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
         RequestExecutionCommand,
     )
+    from syn_domain.contexts.orchestration.domain.commands.WithdrawExecutionRequestCommand import (
+        WithdrawExecutionRequestCommand,
+    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
         ExecutionRequestedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionRequestWithdrawnEvent import (
+        ExecutionRequestWithdrawnEvent,
     )
 
 
@@ -53,6 +59,13 @@ class ExecutionAlreadyRequestedError(ValueError):
 
     def __init__(self, execution_id: str) -> None:
         super().__init__(f"Execution {execution_id} was already requested")
+
+
+class ExecutionRequestNotFoundError(ValueError):
+    """Only a recorded request can be withdrawn."""
+
+    def __init__(self, execution_id: str) -> None:
+        super().__init__(f"No execution request {execution_id}")
 
 
 @aggregate("ExecutionRequest")
@@ -71,6 +84,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
         self._requested_at: datetime | None = None
         self._eval_choice: EvalChoice = EvalChoice()
         self._launch_eval: LaunchEval | None = None
+        self._withdrawn = False
 
     def get_aggregate_type(self) -> str:
         return self._aggregate_type
@@ -98,6 +112,11 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
     @property
     def tags(self) -> TagSet:
         return self._tags
+
+    @property
+    def withdrawn(self) -> bool:
+        """Withdrawn before it started (#1650): its start must never run."""
+        return self._withdrawn
 
     @property
     def launch_eval(self) -> LaunchEval | None:
@@ -139,6 +158,35 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
                 requested_at=datetime.now(UTC),
             )
         )
+
+    @command_handler("WithdrawExecutionRequestCommand")
+    def withdraw(self, command: WithdrawExecutionRequestCommand) -> None:
+        """Withdraw the request so nothing ever starts it (#1650). Idempotent.
+
+        Decides only about the REQUEST. Whether its execution already started
+        is the caller's to know: a started execution is cancelled instead.
+        """
+        from syn_domain.contexts.orchestration.domain.events.ExecutionRequestWithdrawnEvent import (
+            ExecutionRequestWithdrawnEvent,
+        )
+
+        if self.id is None or self._workflow_id is None:
+            raise ExecutionRequestNotFoundError(command.execution_id)
+        if self._withdrawn:
+            return
+        self._apply(
+            ExecutionRequestWithdrawnEvent(
+                execution_id=command.execution_id,
+                workflow_id=self._workflow_id,
+                reason=command.reason,
+                withdrawn_at=datetime.now(UTC),
+            )
+        )
+
+    @event_sourcing_handler("ExecutionRequestWithdrawn")
+    def on_execution_request_withdrawn(self, event: ExecutionRequestWithdrawnEvent) -> None:
+        del event
+        self._withdrawn = True
 
     @event_sourcing_handler("ExecutionRequested")
     def on_execution_requested(self, event: ExecutionRequestedEvent) -> None:

@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 logger = logging.getLogger(__name__)
 
-StartStatus = Literal["pending", "paused", "retryable", "dispatched", "started", "failed"]
+StartStatus = Literal[
+    "pending", "paused", "retryable", "dispatched", "started", "failed", "withdrawn"
+]
 
 
 class StartRecord(BaseModel):

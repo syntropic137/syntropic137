@@ -15,10 +15,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionAlreadyRequestedError,
     ExecutionRequestAggregate,
+    ExecutionRequestNotFoundError,
     execution_request_id,
 )
 from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
     RequestExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.WithdrawExecutionRequestCommand import (
+    WithdrawExecutionRequestCommand,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -101,3 +105,48 @@ def test_a_request_never_takes_its_executions_id() -> None:
 
     assert request.id == execution_request_id("exec-1557req")
     assert request.id != "exec-1557req"
+
+
+async def test_a_withdrawn_request_reads_back_withdrawn_from_its_own_stream() -> None:
+    """#1650: durable, at `request-<id>`, so a restart reads it withdrawn too."""
+    client = MemoryEventStoreClient()
+    repo = RepositoryAdapter(
+        EventStoreRepository(
+            client,
+            ExecutionRequestAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+            "ExecutionRequest",
+        )
+    )
+    request = ExecutionRequestAggregate()
+    request.request(_command(LaunchEval(None, EvalSelection.NONE)))
+    await repo.save_new(request)
+    stored = await repo.get_by_id(execution_request_id("exec-1557req"))
+    assert stored is not None
+    assert stored.withdrawn is False
+
+    stored.withdraw(WithdrawExecutionRequestCommand(execution_id="exec-1557req", reason="r"))
+    await repo.save(stored)
+
+    loaded = await repo.get_by_id(execution_request_id("exec-1557req"))
+    assert loaded is not None
+    assert loaded.withdrawn is True
+    assert loaded.workflow_id == "wf-1557"
+
+
+def test_withdrawing_twice_records_one_withdrawal() -> None:
+    request = ExecutionRequestAggregate()
+    request.request(_command(LaunchEval(None, EvalSelection.NONE)))
+    withdraw = WithdrawExecutionRequestCommand(execution_id="exec-1557req")
+
+    request.withdraw(withdraw)
+    request.withdraw(withdraw)
+
+    types = [e.event.event_type for e in request.get_uncommitted_events()]
+    assert types == ["ExecutionRequested", "ExecutionRequestWithdrawn"]
+
+
+def test_only_a_recorded_request_can_be_withdrawn() -> None:
+    with pytest.raises(ExecutionRequestNotFoundError):
+        ExecutionRequestAggregate().withdraw(
+            WithdrawExecutionRequestCommand(execution_id="exec-nobody")
+        )

@@ -12,7 +12,7 @@ import logging
 import weakref
 from typing import TYPE_CHECKING
 
-from syn_api._wiring_admission import get_execution_budget
+from syn_api._wiring_admission import get_execution_budget, request_withdrawn
 from syn_api.execution_budget import StartAlreadyClaimedError, StartPath
 from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 
@@ -51,6 +51,28 @@ async def record_execution_request(
         raise
 
 
+async def withdraw_execution_request(execution_id: str, reason: str | None) -> bool:
+    """Withdraw the request of a start that has no execution yet (#1650).
+
+    False when there is no request to withdraw. Durable before it returns: a
+    start waiting for a slot reads it once granted and does not run, and after
+    a restart the request's start to-do record is `withdrawn` and never offered.
+    """
+    from syn_adapters.storage.repositories import get_execution_request_repository
+    from syn_domain.contexts.orchestration import (
+        WithdrawExecutionRequestCommand,
+        execution_request_id,
+    )
+
+    requests = get_execution_request_repository()
+    request = await requests.get_by_id(execution_request_id(execution_id))
+    if request is None or request.workflow_id is None:
+        return False
+    request.withdraw(WithdrawExecutionRequestCommand(execution_id=execution_id, reason=reason))
+    await requests.save(request)
+    return True
+
+
 def queue_direct_start(
     background_tasks: BackgroundTasks,
     *,
@@ -83,6 +105,13 @@ def queue_direct_start(
         with carrying(admitted):
             try:
                 async with budget.held(claim):
+                    from syn_adapters.storage.repositories import (
+                        get_execution_request_repository,
+                    )
+
+                    # #1650: withdrawn while it waited for the slot.
+                    if await request_withdrawn(get_execution_request_repository(), execution_id):
+                        return
                     await start()
             except Exception:
                 logger.exception(

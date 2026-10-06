@@ -88,14 +88,14 @@ class ConditionalProjectionStore(ProjectionStore, Protocol):
 
 
 def _may_replace(current: str, proposed: str) -> bool:
-    """`started` and `failed` are conclusions no later write may walk backwards.
+    """`started`, `failed` and `withdrawn` are conclusions no later write may walk backwards.
 
     `started` replaces anything and nothing replaces it: the execution's stream
-    exists. `failed` yields only to that fact.
+    exists. `failed` and `withdrawn` (#1650) yield only to that fact.
     """
     if current == "started":
         return False
-    if current == "failed":
+    if current in ("failed", "withdrawn"):
         return proposed == "started"
     return True
 
