@@ -1,7 +1,7 @@
 """A spent quota is its own kind, is never retried, and says when it ends (PC-83).
 
-The codex sentence is the one observed on 2026-10-06, verbatim as the task
-recorded it (the task elided the middle of it with "..."). No claude quota
+The codex sentence is the one observed on 2026-10-06, byte for byte as the
+task recorded it. No claude quota
 message exists in this repo, agentic-workspace or any fixture, so none is
 pinned here and claude quota text reads as it did before.
 """
@@ -26,7 +26,10 @@ from syn_domain.testing.fake_clock import FakeClock
 
 pytestmark = pytest.mark.unit
 
-CODEX_QUOTA = "You've hit your usage limit ... try again at Oct 9th, 2026 9:10 PM"
+CODEX_QUOTA = (
+    "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to "
+    "purchase more credits or try again at Oct 9th, 2026 9:10 PM."
+)
 CODEX_CAPACITY = "Selected model is at capacity. Please try a different model."
 
 
@@ -66,7 +69,7 @@ def test_capacity_is_still_capacity() -> None:
     "reason",
     [
         # An agent quoting codex in its own words is not codex's fault line.
-        "agent wrote: You've hit your usage limit ... try again at Oct 9th, 2026 9:10 PM",
+        f"agent wrote: {CODEX_QUOTA}",
         "Rate limit reached; quota resets next month",
     ],
 )
