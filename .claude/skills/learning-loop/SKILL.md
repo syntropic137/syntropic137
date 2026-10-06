@@ -78,7 +78,10 @@ measure any future verifier.
 Record the event at the time it happens, with its identifiers:
 
 - **execution id** (`syn execution show <id>`), and the phase that failed;
-- **commit SHA** the run checked out or the PR head it certified;
+- **commit SHA** the run checked out, read from that execution's own record:
+  its `git_checkout` event, `checked_out_commits` on
+  `WorkspaceProvisionedForPhase`, or the SHA its verify artifact names. A PR's
+  current head is not this: a fix round moves the head after verification;
 - **what was observed**, as pasted output (log line, exit code, error text),
   not paraphrase;
 - **what was expected.**
@@ -154,7 +157,7 @@ Seed cases, from the [2026-10-06 retro](../../../docs/retrospectives/2026-10-06-
 
 The three parents are merges of `origin/main` into the PR branch, which is the
 head verification was handed. All four passed their own verification against
-an in-memory double. The eval
+a test double or fixture that did not behave like the real backend or CLI. The eval
 asks whether a verifier will catch them now.
 
 **A recurring failure class becomes an issue with a test or fitness function.**
@@ -277,9 +280,16 @@ All of these have been observed here.
 
 - **`syn execution show <id>` and `syn execution list`.** These give the stored
   phase state, cost and failure for a run.
-- **`gh pr view <n> --json headRefOid,mergeCommit` and `git log --grep`.** These
-  give the commit a PR actually certified. PR numbers and issue numbers differ
-  (#1649 fixed issue #967), so look both up.
+- **The execution's stored checkout, not the PR's current head.** The commit a
+  run certified is the one in its own record: the `git_checkout` event in its
+  stream, `checked_out_commits` on `WorkspaceProvisionedForPhase` (#1615), or
+  the exact SHA in its verify artifact. `gh pr view <n> --json headRefOid`
+  gives the head as it is now, which a later fix round moves, so use it only
+  when you are verifying the current head. `mergeCommit` is the merge, not
+  anything a verifier saw.
+- **`git log --grep`** finds the fix commit for an escaped bug, so its parent
+  can be the eval's pinned commit. PR numbers and issue numbers differ (#1649
+  fixed issue #967), so look both up.
 - **The execution's event stream and phase artifacts.** These show what the
   agent did and reported, as opposed to the run's status.
 

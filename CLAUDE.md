@@ -31,6 +31,8 @@ Syntropic137 - orchestrates AI agent execution in isolated Docker workspaces and
 
 **North star:** 20 concurrent executions now, 100 as soon as possible, 1,000 for production. Judge every design against it: read [docs/north-star.md](docs/north-star.md).
 
+**Purpose:** scale quality development - reach the quality bar first, then make the same bar cheaper and faster. Orchestrating or dogfooding the platform: read [.claude/skills/orchestrating/SKILL.md](.claude/skills/orchestrating/SKILL.md).
+
 The end goal: a `gh`-style CLI (`syn`) that integrates with Claude Code and OpenClaw for agentic workflow automation.
 
 ## Architecture
@@ -350,8 +352,6 @@ Goal: manual testing finds zero bugs - everything caught by automated tests.
 Test fixtures auto-detect infrastructure: env vars > test-stack (port 15432) > testcontainers.
 
 **In-memory adapters and test doubles in production code:** they must refuse to construct outside test/offline, and a fitness test enforces it for the classes it can see. Mocks inside test files are out of scope. Read [ADR-060 s5](docs/adrs/ADR-060-restart-safe-trigger-deduplication.md#5-inmemoryadapter-base-class-production-guard) before adding one.
-
-**Escaped bugs and recurring failures** become eval cases, tests or fitness functions, never notes: [learning-loop skill](.claude/skills/learning-loop/SKILL.md).
 
 ## Event Sourcing Architecture
 
