@@ -3,7 +3,7 @@
  *
  * Renders a floating button and handles the feedback flow:
  * 1. Click button -> Enter feedback mode (or view tickets)
- * 2. Click on page -> Capture location context
+ * 2. Click or tap on page -> Capture location context
  * 3. Open modal -> Fill in feedback
  * 4. Submit -> Send to API
  */
@@ -41,7 +41,7 @@ export function FeedbackWidget() {
     openFeedbackMode, closeFeedbackMode, openModal, locationContext,
   } = useFeedback();
 
-  const { captureFromEvent, captureFromElement } = useElementInfo();
+  const { captureFromElement } = useElementInfo();
   const api = useFeedbackApi({ apiUrl: config.apiUrl });
   const { position, isDragging, handleMouseDown, buttonRef } = useDragPosition();
   const hoverHighlight = useHoverHighlight(isFeedbackMode);
@@ -65,7 +65,7 @@ export function FeedbackWidget() {
     });
   }, [openModal]);
 
-  useFeedbackModeClick({ isFeedbackMode, captureFromEvent, captureFromElement, openModal, openQuickFeedback });
+  useFeedbackModeClick({ isFeedbackMode, captureFromElement, openModal, openQuickFeedback });
   useClickOutside(buttonRef, () => setShowMenu(false), showMenu);
 
   useEffect(() => {

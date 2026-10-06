@@ -15,7 +15,7 @@ import { ScreenshotUploader } from './ScreenshotUploader';
 import { VoiceRecorder } from './VoiceRecorder';
 
 export function FeedbackModal() {
-  const { isOpen, locationContext, closeModal, addMedia, removeMedia, pendingMedia, submitFeedback } = useFeedback();
+  const { isOpen, locationContext, openFeedbackMode, closeModal, addMedia, removeMedia, pendingMedia, submitFeedback } = useFeedback();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const form = useFeedbackForm({ locationContext, addMedia, submitFeedback, closeModal });
@@ -36,6 +36,14 @@ export function FeedbackModal() {
         </div>
 
         <div className="ui-feedback-modal-body">
+          {locationContext.elementLabel && (
+            <div className="ui-feedback-pinned-to">
+              <span className="ui-feedback-pinned-to-label">
+                Pinned to <code>{locationContext.elementLabel}</code>
+              </span>
+              <button type="button" className="ui-feedback-btn ui-feedback-btn--secondary" onClick={openFeedbackMode}>Re-pick</button>
+            </div>
+          )}
           <div className="ui-feedback-badge-row">
             <BadgeDropdown options={FEEDBACK_TYPES} value={form.feedbackType} onChange={(v) => form.setFeedbackType(v as FeedbackType)} className="ui-feedback-badge--type" hotkey="1" />
             <BadgeDropdown options={PRIORITIES} value={form.priority} onChange={(v) => form.setPriority(v as Priority)} className="ui-feedback-badge--priority" hotkey="2" />
