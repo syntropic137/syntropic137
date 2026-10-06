@@ -1026,7 +1026,7 @@
           "control"
         ],
         "summary": "Cancel Execution Endpoint",
-        "description": "Cancel a running execution.",
+        "description": "Cancel an execution, or withdraw a start still queued for one (#1650).",
         "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -10503,7 +10503,8 @@
                   "retryable",
                   "dispatched",
                   "started",
-                  "failed"
+                  "failed",
+                  "withdrawn"
                 ]
               },
               {
@@ -15769,7 +15770,8 @@
               "retryable",
               "dispatched",
               "started",
-              "failed"
+              "failed",
+              "withdrawn"
             ],
             "title": "Status"
           },

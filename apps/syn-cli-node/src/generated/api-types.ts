@@ -312,7 +312,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel Execution Endpoint
-         * @description Cancel a running execution.
+         * @description Cancel an execution, or withdraw a start still queued for one (#1650).
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -3716,7 +3716,7 @@ export interface components {
              */
             held: boolean;
             /** Start Status */
-            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed") | null;
+            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed" | "withdrawn") | null;
             /** Status Reason */
             status_reason?: string | null;
             /** Running */
@@ -6290,7 +6290,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "pending" | "paused" | "retryable" | "dispatched" | "started" | "failed";
+            status: "pending" | "paused" | "retryable" | "dispatched" | "started" | "failed" | "withdrawn";
             /** Status Reason */
             status_reason?: string | null;
             /**
