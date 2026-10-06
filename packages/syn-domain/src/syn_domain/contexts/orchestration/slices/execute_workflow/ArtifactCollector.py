@@ -20,8 +20,8 @@ from syn_domain.contexts.artifacts import (
     ArtifactType,
     ContentType,
     PhaseOutputFile,
+    primary_text,
 )
-from syn_domain.contexts.artifacts._shared.value_objects import primary_text
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
     DescribeWork,

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.artifacts._shared.value_objects import primary_text
+from syn_domain.contexts.artifacts import primary_text
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )

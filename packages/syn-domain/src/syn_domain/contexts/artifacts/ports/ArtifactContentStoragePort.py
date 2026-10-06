@@ -30,17 +30,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
-
-class ArtifactStorageError(Exception):
-    """An artifact's content could not be stored or retrieved.
-
-    The port's failure contract, declared here so callers can name it. Without
-    it the only honest catch at a call site is ``except Exception``, which also
-    swallows the caller's own bugs - a typo in a keyword argument reads exactly
-    like a backend outage and degrades just as quietly. Implementations raise
-    this or a subclass for every failure that is the storage's, and let
-    everything else through.
-    """
+# The port's failure contract. Defined in `_shared` so the domain can name it
+# too (#990); re-exported here, where every adapter already imports it from.
+from syn_domain.contexts.artifacts._shared.errors import (
+    ArtifactStorageError as ArtifactStorageError,
+)
 
 
 @dataclass(frozen=True)

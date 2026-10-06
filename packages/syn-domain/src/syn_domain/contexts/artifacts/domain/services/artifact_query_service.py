@@ -12,8 +12,8 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from syn_domain.contexts.artifacts._shared.errors import ArtifactStorageError
 from syn_domain.contexts.artifacts._shared.value_objects import ContentType, PhaseOutputFile
-from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import ArtifactStorageError
 
 logger = logging.getLogger(__name__)
 
