@@ -37,6 +37,8 @@ _WORKFLOWS = Path(__file__).resolve().parents[2] / "workflows"
 _GATING_PHASES = [
     ("sdlc/implement-v3", "Verify the change independently"),
     ("sdlc/implement-v3", "Confirm the fix closed what verification found"),
+    ("sdlc/reverify-pr", "Verify the change independently"),
+    ("sdlc/reverify-pr", "Confirm the fix closed what verification found"),
     ("sdlc/implement", "Verify the change independently"),
     ("sdlc/implement", "Confirm the fix closed what verification found"),
     ("custom/bake-opus", "Verify the change independently"),

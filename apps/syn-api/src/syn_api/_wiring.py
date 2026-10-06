@@ -226,7 +226,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     conversation_storage = await get_conversation_storage()
 
     manager = get_projection_manager()
-    artifact_query = ArtifactQueryService(manager.artifact_list)
+    artifact_query = ArtifactQueryService(manager.artifact_list, content_storage=artifact_storage)
 
     from syn_adapters.github.client import get_github_client
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader

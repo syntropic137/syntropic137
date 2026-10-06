@@ -56,7 +56,7 @@ class ArtifactListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "artifact_summaries"
-    VERSION = 6  # Added agent_provider/agent_model to the read model (#1284)
+    VERSION = 7  # Added content_type and storage_uri to the read model (#990)
 
     def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
@@ -101,6 +101,11 @@ class ArtifactListProjection(AutoDispatchProjection):
             size_bytes=size_bytes,
             content=content,
             content_hash=event_data.get("content_hash"),
+            # Says whether `content` IS the artifact or the bytes are in object
+            # storage only (#990). Every event carries it; v1-v6 always text.
+            content_type=event_data.get("content_type"),
+            # Where the bytes are (#990); the id alone does not locate them.
+            storage_uri=event_data.get("storage_uri"),
             source_path=event_data.get("source_path"),  # v5 event field (#988)
             # v6 event fields (#1284). Absent on every pre-v6 event, and no
             # upcaster runs, so None here IS the record that nothing was

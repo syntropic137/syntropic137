@@ -116,6 +116,8 @@ set -euo pipefail
 TAG=v0.33.2-beta.5; VERSION=0.33.2-beta.5; DRY=0; HOST=fake-host; API={api_url}
 COMPOSE_DIR=/root/.syntropic137; COMPOSE=docker-compose.syntropic137.yaml; TMP={tmp}
 API_READY_TIMEOUT={timeout}; RECOVERY=""; T0=$(date +%s)
+# The probe after the ungate has its own tests (test_1641_...); these stop at DONE.
+SKIP_PROBE=1; PROBE_WORKFLOW=telemetry-lag-probe-v1; PROBE_TIMEOUT=600; PROBE_CANCEL_TIMEOUT=300
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{
     printf 'PIT STOP ABORTED: %s\\n' "$*" >&2
