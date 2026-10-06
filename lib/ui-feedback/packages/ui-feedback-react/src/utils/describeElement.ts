@@ -22,9 +22,16 @@ function truncate(text: string): string {
   return collapsed.length > MAX_TEXT ? `${collapsed.slice(0, MAX_TEXT - 1)}…` : collapsed;
 }
 
-export function describeElement(el: Element, componentName?: string | null): string {
+function describeOne(el: Element): string {
   const tag = el.tagName.toLowerCase();
   const text = truncate(accessibleText(el));
-  const base = text ? `${tag} "${text}"` : tag;
+  return text ? `${tag} "${text}"` : tag;
+}
+
+export function describeElement(el: Element, componentName?: string | null): string {
+  // A tap on an icon lands on an inner <path>/<svg>, whose tag says nothing;
+  // name the HTML element that owns the icon instead (e.g. its button).
+  const iconOwner = el instanceof SVGElement ? el.closest('svg')?.parentElement : null;
+  const base = iconOwner ? `icon in ${describeOne(iconOwner)}` : describeOne(el);
   return componentName ? `${base} · <${componentName}>` : base;
 }

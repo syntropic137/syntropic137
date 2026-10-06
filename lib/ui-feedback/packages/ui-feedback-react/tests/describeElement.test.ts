@@ -28,4 +28,10 @@ describe('describeElement', () => {
   it('appends the component name when known', () => {
     expect(describeElement(el('<span>running</span>'), 'ExecutionRow')).toBe('span "running" · <ExecutionRow>');
   });
+
+  it('names the owner of an icon instead of its inner svg path', () => {
+    const button = el('<button aria-label="Open navigation"><svg><path d="M0 0"></path></svg></button>');
+    expect(describeElement(button.querySelector('path')!, 'Menu')).toBe('icon in button "Open navigation" · <Menu>');
+    expect(describeElement(button.querySelector('svg')!)).toBe('icon in button "Open navigation"');
+  });
 });
