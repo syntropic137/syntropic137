@@ -72,6 +72,12 @@ remote() { ssh -o ConnectTimeout=15 "$HOST" "$@"; }
 # printf is a builtin, so the password is in no process's argv. A quoted config
 # value treats \ and " as escapes, so both are escaped first.
 api_curl() {
+    # A line break would end the config line and curl echoes the rest of the
+    # line in its parse error, i.e. the password reaches stderr. Refuse it
+    # without ever printing the value.
+    case "$SYN_API_PASSWORD" in
+        *$'\n'*|*$'\r'*) die "SYN_API_PASSWORD contains a line break; refusing to pass it to curl (value not shown)" ;;
+    esac
     local pw="${SYN_API_PASSWORD//\\/\\\\}"
     pw="${pw//\"/\\\"}"
     printf 'user = "admin:%s"\n' "$pw" | curl -K - -fsS "$@"

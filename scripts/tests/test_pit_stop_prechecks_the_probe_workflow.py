@@ -133,7 +133,7 @@ class _Run:
     touched: list[str]
 
 
-def _run(tmp: Path, api: str, *flags: str) -> _Run:
+def _run(tmp: Path, api: str, *flags: str, password: str = _PASSWORD) -> _Run:
     """The real script, end to end. ``touched`` lists every docker, ssh, just
     or git (other than locating the repository) the script tried to run."""
     bin_dir = tmp / "bin"
@@ -157,7 +157,7 @@ def _run(tmp: Path, api: str, *flags: str) -> _Run:
         ["bash", str(_SCRIPT), "0.40.0-beta.1", *flags],
         env={
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
-            "SYN_API_PASSWORD": _PASSWORD,
+            "SYN_API_PASSWORD": password,
             "SYN_PIT_API": api,
             "SYN_PIT_HOST": "fake-host",
         },
@@ -255,6 +255,24 @@ def test_an_active_probe_workflow_lets_the_pit_stop_go_on(
     assert "probe workflow" not in run.proc.stderr
     assert all(method == "GET" for method, _ in state.requests)
     _password_stayed_secret(run, state)
+
+
+@pytest.mark.parametrize("brk", ["\n", "\r"], ids=["lf", "cr"])
+def test_a_password_with_a_line_break_is_refused_without_reaching_any_output(
+    tmp_path: Path, fake_api: tuple[_Api, str], brk: str
+) -> None:
+    """A line break would end curl's config line, and curl echoes the rest of
+    that line in its parse error: the tail of the password reached stderr
+    (found in review of #1656, reproduced with a synthetic password)."""
+    state, api = fake_api
+    state.workflows = [_summary(_PROBE, archived=False)]
+    run = _run(tmp_path, api, "--dry-run", password=f"head-part{brk}visible-secret-tail")
+    assert run.proc.returncode == 1
+    assert "contains a line break" in run.proc.stderr
+    out = run.proc.stdout + run.proc.stderr
+    assert "visible-secret-tail" not in out
+    assert "head-part" not in out
+    assert state.requests == []
 
 
 @pytest.mark.parametrize("flag", ["--skip-probe", "--stage-only"])
