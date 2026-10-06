@@ -44,7 +44,7 @@ class EvalUnavailableError(ValueError):
 async def open_eval(repository: Repository[EvalAggregate], eval_id: str) -> EvalAggregate:
     """Load the eval from its stream and refuse one that cannot take runs."""
     aggregate = await repository.get_by_id(eval_id)
-    if aggregate is None or aggregate.id is None:
+    if aggregate is None or not aggregate.exists:
         raise EvalUnavailableError(eval_id, missing=True)
     if aggregate.is_archived:
         raise EvalUnavailableError(eval_id, missing=False)
