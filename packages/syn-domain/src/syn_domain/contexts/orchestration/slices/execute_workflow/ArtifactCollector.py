@@ -737,7 +737,11 @@ class ArtifactCollector:
                 artifact_path,
             )
             deliverables.append(_Deliverable.of(recovered))
-        return deliverables
+        # Text before binary, otherwise in collection order: the head is
+        # flagged the Primary Deliverable, and a screenshot that the glob
+        # happened to list first must not take the flag from the phase's
+        # report (#990). Stable, so text keeps the order it was collected in.
+        return sorted(deliverables, key=lambda d: isinstance(d.content, bytes))
 
     async def collect_from_unfinished_phase(
         self,
@@ -784,9 +788,12 @@ class ArtifactCollector:
             # only the other site would leave every such run sweeping junk
             # (issue #919).
             partial_collected = await workspace.collect_files(patterns=[_OUTPUT_GLOB])
-            partial_artifacts = [
-                (path, body) for path, body in partial_collected if _is_collectable(path)
-            ]
+            # Text first, as on the happy path: the first one stored is
+            # flagged the Primary Deliverable, never a screenshot (#990).
+            partial_artifacts = sorted(
+                ((path, body) for path, body in partial_collected if _is_collectable(path)),
+                key=lambda item: ContentType.of(item[1], item[0]).is_binary,
+            )
             artifact_type = _primary_type(output_artifact_types)
             artifact_ids: list[str] = []
             for artifact_path, artifact_content in partial_artifacts:

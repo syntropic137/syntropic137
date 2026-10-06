@@ -26,16 +26,27 @@ import json
 import struct
 import zlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from event_sourcing.client.grpc_client import GrpcEventStoreClient
+from event_sourcing.proto.eventstore.v1 import eventstore_pb2
 
+from syn_adapters.object_storage.protocol import ObjectNotFoundError, UploadResult
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.artifact_storage.memory import InMemoryArtifactStorage
+from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
 from syn_api.routes.artifacts import get_artifact, get_artifact_raw_endpoint
 from syn_api.types import Ok
-from syn_domain.contexts.artifacts import UNREPORTED_AGENT, ContentType
+from syn_domain.contexts.artifacts import (
+    UNREPORTED_AGENT,
+    ArtifactType,
+    ContentType,
+    CreateArtifactCommand,
+    compute_content_hash,
+)
 from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
     ArtifactAggregate,
 )
@@ -50,10 +61,18 @@ from syn_domain.contexts.artifacts.slices.list_artifacts.projection import (
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
+    UnfinishedPhase,
 )
+from syn_domain.storable_text import pg_safe
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
+        ArtifactContentStoragePort,
+    )
+
+RECORDED = Path(__file__).parent / "fixtures" / "recorded_artifact_created"
 
 pytestmark = pytest.mark.unit
 
@@ -125,15 +144,15 @@ class _ExecutionContext:
 
 @dataclass(frozen=True)
 class _World:
-    storage: InMemoryArtifactStorage
+    storage: ArtifactContentStoragePort
     projection: ArtifactListProjection
     ids: dict[str, str]  # source_path -> artifact id
     collector: ArtifactCollector
 
 
-async def _collect() -> _World:
+async def _collect(storage: ArtifactContentStoragePort | None = None) -> _World:
     """Run the real collector and project what it emitted, as the subscription does."""
-    storage = InMemoryArtifactStorage()
+    storage = storage or InMemoryArtifactStorage()
     repo = _Repo()
     collector = ArtifactCollector(repo, storage, None)  # type: ignore[arg-type]
     await collector.collect_from_workspace(
@@ -167,7 +186,7 @@ def api_wired_to() -> Iterator[list[_World]]:
     def mgr() -> object:
         return type("Mgr", (), {"artifact_list": holder[0].projection, "store": None})()
 
-    async def storage() -> InMemoryArtifactStorage:
+    async def storage() -> ArtifactContentStoragePort:
         return holder[0].storage
 
     with (
@@ -290,8 +309,6 @@ class TestHandoffToTheNextPhase:
 
 
 class TestHistoricalEventsStillReplay:
-    #: An ArtifactCreated payload in the exact v6 shape (every field v6
-    #: declared, as `model_dump()` writes it), from before binary types existed.
     #: An ArtifactCreated payload in the exact v6 shape, serialized as the
     #: store holds it (every field v6 declared), from before binary types existed.
     V6_JSON = (
@@ -337,3 +354,228 @@ class TestHistoricalEventsStillReplay:
             "exec-old", ["plan"]
         )
         assert [f.content for f in files["plan"]] == ["# Plan\nstep one"]
+
+
+def _replayed(payload: bytes) -> ArtifactCreatedEvent:
+    """Deserialize stored bytes exactly as a replay does: the ESP client's own path.
+
+    `_proto_to_envelope` falls back to `GenericDomainEvent` when the concrete
+    model refuses a payload, silently. So the assertion that matters is the
+    TYPE: a historical event that no longer validates would still "replay",
+    into a shape no handler reads.
+    """
+    data = eventstore_pb2.EventData(
+        meta=eventstore_pb2.EventMetadata(
+            event_id="e-recorded",
+            aggregate_id="a-recorded",
+            aggregate_type="Artifact",
+            aggregate_nonce=1,
+            event_type="ArtifactCreated",
+            event_version=1,
+            content_type="application/json",
+        ),
+        payload=payload,
+    )
+    envelope = GrpcEventStoreClient()._proto_to_envelope(data)
+    event = envelope.event
+    assert isinstance(event, ArtifactCreatedEvent), type(event).__name__
+    return event
+
+
+class TestRecordedEventsStillReplay:
+    """Payloads copied byte-for-byte from a real store, not written for the test.
+
+    Provenance: the dev event store (`events.payload`, `event_version` 1),
+    global nonces 861 (2026-08-28, a text artifact) and 46 (2026-07-25, a
+    `.pyc` an agent wrote, stored as U+FFFD text by the pre-#990 decode).
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "name", ["v1-text-2026-08-28.json", "v1-binary-decoded-as-text-2026-07-25.json"]
+    )
+    async def test_recorded_payload_replays_through_aggregate_projection_and_api(
+        self, name: str, api_wired_to: list[_World]
+    ) -> None:
+        payload = (RECORDED / name).read_bytes()
+        event = _replayed(payload)
+        # Pre-#990 events are all text, and stay text: nothing re-reads them.
+        assert event.content_type is ContentType.TEXT_MARKDOWN
+        assert event.content
+
+        aggregate = ArtifactAggregate()
+        aggregate.on_artifact_created(event)
+        assert aggregate.content == event.content
+
+        projection = ArtifactListProjection(InMemoryProjectionStore())
+        await projection.on_artifact_created(event.model_dump())
+        row = await projection.get_by_id(event.artifact_id)
+        assert row is not None
+        # The projection store makes NUL storable, as PostgreSQL JSONB needs;
+        # pre-#990 that was all the handling a decoded binary file ever got.
+        assert row.content == pg_safe(event.content)
+        assert row.content_type == "text/markdown"
+        # The stored hash still verifies under the new hashing: sha256 of the
+        # text's UTF-8 - for the mangled .pyc, of the U+FFFD text it became.
+        assert compute_content_hash(event.content) == event.content_hash
+
+        # Served from the read model when object storage has nothing for it.
+        api_wired_to.append(
+            _World(
+                storage=InMemoryArtifactStorage(),
+                projection=projection,
+                ids={},
+                collector=ArtifactCollector(_Repo(), None, None),  # type: ignore[arg-type]
+            )
+        )
+        response = await get_artifact_raw_endpoint(event.artifact_id)
+        assert bytes(response.body) == row.content.encode("utf-8")
+
+
+class TestPrimaryDeliverableIsNeverAScreenshot:
+    """The head of a phase's output is flagged primary; glob order is arbitrary."""
+
+    @pytest.mark.asyncio
+    async def test_completed_phase_flags_the_text_even_when_the_png_is_listed_first(
+        self,
+    ) -> None:
+        repo = _Repo()
+        collector = ArtifactCollector(repo, InMemoryArtifactStorage(), None)  # type: ignore[arg-type]
+        await collector.collect_from_workspace(
+            workspace=_Workspace(collected=[(PNG_PATH, PNG), (MD_PATH, MARKDOWN)]),  # type: ignore[arg-type]
+            workflow_id="wf-990",
+            phase_id="verify",
+            execution_id="exec-990",
+            session_id="s-990",
+            phase_name="Verify",
+            output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+        )
+        assert _primary_flags(repo) == {MD_PATH: True, PNG_PATH: False}
+
+    @pytest.mark.asyncio
+    async def test_unfinished_phase_flags_the_text_even_when_the_png_is_listed_first(
+        self,
+    ) -> None:
+        repo = _Repo()
+        collector = ArtifactCollector(repo, InMemoryArtifactStorage(), None)  # type: ignore[arg-type]
+        await collector.collect_from_unfinished_phase(
+            workspace=_Workspace(collected=[(PNG_PATH, PNG), (MD_PATH, MARKDOWN)]),  # type: ignore[arg-type]
+            workflow_id="wf-990",
+            phase_id="verify",
+            execution_id="exec-990",
+            session_id="s-990",
+            phase_name="Verify",
+            output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
+        )
+        assert _primary_flags(repo) == {MD_PATH: True, PNG_PATH: False}
+
+
+def _primary_flags(repo: _Repo) -> dict[str, bool]:
+    flags: dict[str, bool] = {}
+    for aggregate in repo.saved:
+        for envelope in aggregate.get_uncommitted_events():
+            event = envelope.event
+            assert isinstance(event, ArtifactCreatedEvent)
+            assert event.source_path is not None
+            flags[event.source_path] = event.is_primary_deliverable
+    return flags
+
+
+class TestBinaryBytesNeverEnterTheEventStore:
+    """The aggregate refuses every shape that would put bytes in Lane 1 or lose them."""
+
+    @staticmethod
+    def _command(
+        content: str | bytes, content_type: ContentType, storage_uri: str | None
+    ) -> CreateArtifactCommand:
+        return CreateArtifactCommand(
+            workflow_id="wf-990",
+            phase_id="verify",
+            artifact_type=ArtifactType.OTHER,
+            content_type=content_type,
+            content=content,
+            storage_uri=storage_uri,
+        )
+
+    @pytest.mark.parametrize(
+        ("content", "content_type", "storage_uri", "refusal"),
+        [
+            (PNG, ContentType.IMAGE_PNG, None, "object storage"),
+            (PNG, ContentType.TEXT_MARKDOWN, "s3://b/k", "must be str"),
+            ("# text", ContentType.IMAGE_PNG, "s3://b/k", "must be bytes"),
+        ],
+        ids=["png-without-storage", "bytes-as-text", "text-as-png"],
+    )
+    def test_refused(
+        self, content: str | bytes, content_type: ContentType, storage_uri: str | None, refusal: str
+    ) -> None:
+        with pytest.raises(ValueError, match=refusal):
+            ArtifactAggregate().create_artifact(self._command(content, content_type, storage_uri))
+
+    @pytest.mark.asyncio
+    async def test_no_object_storage_fails_loudly_instead_of_mangling(self) -> None:
+        repo = _Repo()
+        collector = ArtifactCollector(repo, None, None)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="object storage"):
+            await collector.collect_from_workspace(
+                workspace=_Workspace(collected=[(PNG_PATH, PNG)]),  # type: ignore[arg-type]
+                workflow_id="wf-990",
+                phase_id="verify",
+                execution_id="exec-990",
+                session_id="s-990",
+                phase_name="Verify",
+                output_artifact_types=("markdown",),
+                agent=UNREPORTED_AGENT,
+            )
+        assert repo.saved == []
+
+
+@dataclass
+class _KeyedObjectStore:
+    """An S3 bucket as `MinioArtifactStorage` sees it: bytes by full object key.
+
+    The in-memory artifact storage keys by artifact id alone, which is what hid
+    the defect this pins: MinIO keys an upload by workflow and execution too,
+    so a read by id alone found nothing and every binary artifact 404'd.
+    """
+
+    _bucket_name: str = "syn-artifacts"
+    objects: dict[str, bytes] = field(default_factory=dict)
+
+    async def upload(
+        self, key: str, content: bytes, *, content_type: str, metadata: dict[str, str]
+    ) -> UploadResult:
+        self.objects[key] = content
+        return UploadResult(key=key, size_bytes=len(content))
+
+    async def download(self, key: str) -> bytes:
+        if key not in self.objects:
+            raise ObjectNotFoundError(key)
+        return self.objects[key]
+
+
+class TestMinioKeyLayout:
+    """The real MinIO artifact adapter, over a bucket keyed the way MinIO keys it."""
+
+    @staticmethod
+    def _storage() -> MinioArtifactStorage:
+        return MinioArtifactStorage(_KeyedObjectStore())  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_api_serves_both_files_byte_for_byte(self, api_wired_to: list[_World]) -> None:
+        world = await _collect(self._storage())
+        api_wired_to.append(world)
+        for path, original in ((MD_PATH, MARKDOWN), (PNG_PATH, PNG)):
+            response = await get_artifact_raw_endpoint(world.ids[path])
+            assert _sha(bytes(response.body)) == _sha(original), path
+
+    @pytest.mark.asyncio
+    async def test_restart_handoff_reads_the_png_from_where_it_was_uploaded(self) -> None:
+        world = await _collect(self._storage())
+        query = ArtifactQueryService(world.projection, content_storage=world.storage)
+        files = await query.get_files_for_phase_injection("exec-990", ["verify"])
+        by_path = {f.source_path: f.content for f in files["verify"]}
+        assert by_path[PNG_PATH] == PNG

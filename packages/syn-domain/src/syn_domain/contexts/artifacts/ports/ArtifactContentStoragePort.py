@@ -120,11 +120,15 @@ class ArtifactContentStoragePort(Protocol):
         """
         ...
 
-    async def download(self, artifact_id: str) -> bytes:
+    async def download(self, artifact_id: str, *, storage_uri: str | None = None) -> bytes:
         """Download artifact content from storage.
 
         Args:
             artifact_id: The artifact ID to download
+            storage_uri: Where ``upload`` said it put the content, if the
+                caller has it. Authoritative when given: a backend whose
+                location depends on more than the id (MinIO keys by workflow
+                and execution) cannot find the object from the id alone (#990).
 
         Returns:
             Raw bytes of the artifact content

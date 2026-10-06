@@ -157,14 +157,16 @@ class MinioArtifactStorage:
             metadata={"key": result.key, "etag": result.etag, **s3_metadata},
         )
 
-    async def download(self, artifact_id: str) -> bytes:
+    async def download(self, artifact_id: str, *, storage_uri: str | None = None) -> bytes:
         """Download artifact content from MinIO.
 
-        Note: This searches for the artifact key. For faster lookups,
-        store the full key in the aggregate's storage_uri field.
+        ``storage_uri`` is where ``upload`` put it, and is the only way to
+        find an object uploaded with a workflow or execution id: the key
+        includes them, and the id alone builds a different key (#990). Without
+        it, the id-only key is tried, which is where an upload with neither
+        (the API upload endpoint) lands.
         """
-        # Simple key lookup (assumes artifact_id is unique)
-        key = self._build_key(artifact_id)
+        key = (parse_s3_key(storage_uri) if storage_uri else None) or self._build_key(artifact_id)
 
         try:
             return await self._storage.download(key)

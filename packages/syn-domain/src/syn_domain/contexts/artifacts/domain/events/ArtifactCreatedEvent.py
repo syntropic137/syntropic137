@@ -44,9 +44,10 @@ class ArtifactCreatedEvent(DomainEvent):
     payload is a valid v7 payload with the meaning it always had (text, inline
     content), so the upcast from v6 is the identity and none is written: a
     function that returned its argument would be ceremony, and would claim a
-    shape change that did not happen. ``test_artifact_binary_content.py``
-    replays a recorded v6 payload through the aggregate and the projection to
-    hold that. Binary files collected BEFORE v7 were decoded with
+    shape change that did not happen.
+    ``apps/syn-api/tests/test_990_binary_artifacts_round_trip.py`` holds that:
+    it replays a v6-shaped payload, and payloads recorded from a real store,
+    through the ESP client's deserializer, the aggregate and the projection. Binary files collected BEFORE v7 were decoded with
     ``errors="replace"`` and stored as text; those bytes are gone, the stored
     hash matches the mangled text, and no upcaster can restore them.
     NOTE the version string here is

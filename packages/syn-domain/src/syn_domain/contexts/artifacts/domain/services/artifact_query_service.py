@@ -223,7 +223,7 @@ class ArtifactQueryService:
             )
             return None
         try:
-            return await self._content_storage.download(row.id)
+            return await self._content_storage.download(row.id, storage_uri=row.storage_uri)
         except ArtifactStorageError as err:
             logger.warning(
                 "Binary artifact %s (%s) not handed forward: %s", row.id, row.source_path, err

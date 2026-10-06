@@ -273,7 +273,10 @@ def _is_binary_type(content_type: str | None) -> bool:
 
 
 async def _load_artifact_content(
-    artifact_id: str, fallback_content: str | None, content_type: str | None
+    artifact_id: str,
+    fallback_content: str | None,
+    content_type: str | None,
+    storage_uri: str | None = None,
 ) -> _ArtifactBody | None:
     """The artifact's bytes from object storage, falling back to the read model.
 
@@ -287,7 +290,8 @@ async def _load_artifact_content(
         from syn_adapters.storage.artifact_storage import get_artifact_storage
 
         storage = await get_artifact_storage()
-        return _ArtifactBody(data=await storage.download(artifact_id), content_type=resolved_type)
+        data = await storage.download(artifact_id, storage_uri=storage_uri)
+        return _ArtifactBody(data=data, content_type=resolved_type)
     except Exception:
         logger.exception("Failed to load artifact content for %s", artifact_id)
 
@@ -304,7 +308,9 @@ async def get_artifact_bytes(artifact_id: str) -> Result[_ArtifactBody, Artifact
         artifact = await get_projection_mgr().artifact_list.get_by_id(artifact_id)
         if artifact is None:
             return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
-        body = await _load_artifact_content(artifact_id, artifact.content, artifact.content_type)
+        body = await _load_artifact_content(
+            artifact_id, artifact.content, artifact.content_type, artifact.storage_uri
+        )
         if body is None:
             return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} has no content")
         return Ok(body)
@@ -352,7 +358,7 @@ async def get_artifact(
             # A binary body has no text form, so `content` stays None and the
             # bytes are served by GET /artifacts/{id}/raw (#990).
             body = await _load_artifact_content(
-                artifact_id, artifact.content, artifact.content_type
+                artifact_id, artifact.content, artifact.content_type, artifact.storage_uri
             )
             if body is not None:
                 content = body.text
