@@ -103,7 +103,7 @@ class _Recorder:
         self,
         session_id: str,
         observation_type: ObservationType | str,
-        data: Mapping[str, object],
+        data: object,
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,

@@ -29,8 +29,7 @@ from syn_shared.events import TOOL_EXECUTION_STARTED
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from syn_adapters.projections.session_tools import ToolOperation
-    from syn_api.types import PhaseStartConfig
+    from syn_api.types import PhaseStartConfig, ToolOperation
 
 #: The claude tool that invokes a skill, as the stream names it.
 SKILL_TOOL_NAME = "Skill"
