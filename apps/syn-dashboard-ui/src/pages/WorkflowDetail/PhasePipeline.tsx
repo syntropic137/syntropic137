@@ -75,7 +75,7 @@ function PhaseCard({
         <PhaseModelBadge model={phase.model} modelDisplay={phase.model_display} />
       </div>
       <div className="mt-2 text-xs" data-testid="phase-skills">
-        <span className="text-[var(--color-text-secondary)]">Skills</span>
+        <span className="block text-[var(--color-text-secondary)]">Skills</span>
         <SkillRefList skills={phase.skills ?? []} />
       </div>
       {phaseMetric && <PhaseMetricLine metric={phaseMetric} />}

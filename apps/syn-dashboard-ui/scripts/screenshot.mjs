@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // Full-page screenshot of a URL with headless Chromium.
 //
-//   node scripts/screenshot.mjs <url> <out.png> [--viewport WxH]
+//   node scripts/screenshot.mjs <url> <out.png> [--viewport WxH] [--fixtures <file.json>] [--expand]
+//
+// --fixtures answers API calls from a JSON file instead of a server, so a page
+// can be shot with data where no API is reachable. The file maps a request
+// pathname ("/api/v1/workflows/wf-1") to the JSON body to return; any other
+// /api/ request gets a 404, as an unknown resource would. --expand opens every
+// <details> before the shot, so collapsed content can be seen.
 //
 // Uses the Playwright that is installed globally, NOT a project dependency:
 // the agent workspace image bakes Playwright 1.63.0 together with its matching
@@ -10,11 +16,11 @@
 // See README.md "Screenshots for UI verification".
 
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const USAGE = 'usage: screenshot.mjs <url> <out.png> [--viewport WxH]'
+const USAGE = 'usage: screenshot.mjs <url> <out.png> [--viewport WxH] [--fixtures <file.json>] [--expand]'
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 }
 
 function fail(message) {
@@ -25,6 +31,8 @@ function fail(message) {
 function parseArgs(argv) {
   const positional = []
   let viewport = DEFAULT_VIEWPORT
+  let fixtures = null
+  let expand = false
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--viewport') {
       // Zero is rejected here: Chromium either hangs on it or silently renders a
@@ -32,13 +40,19 @@ function parseArgs(argv) {
       const match = /^([1-9]\d*)x([1-9]\d*)$/.exec(argv[++i] ?? '')
       if (!match) fail(`--viewport expects positive WxH, e.g. 1440x900\n${USAGE}`)
       viewport = { width: Number(match[1]), height: Number(match[2]) }
+    } else if (argv[i] === '--expand') {
+      expand = true
+    } else if (argv[i] === '--fixtures') {
+      const file = argv[++i]
+      if (!file) fail(`--fixtures expects a JSON file\n${USAGE}`)
+      fixtures = JSON.parse(readFileSync(file, 'utf8'))
     } else {
       positional.push(argv[i])
     }
   }
   if (positional.length !== 2) fail(USAGE)
   const [url, out] = positional
-  return { url, out, viewport }
+  return { url, out, viewport, fixtures, expand }
 }
 
 async function loadGlobalPlaywright() {
@@ -53,16 +67,28 @@ async function loadGlobalPlaywright() {
   return import(pathToFileURL(entry).href)
 }
 
-const { url, out, viewport } = parseArgs(process.argv.slice(2))
+const { url, out, viewport, fixtures, expand } = parseArgs(process.argv.slice(2))
 const { chromium } = await loadGlobalPlaywright()
 
 const browser = await chromium.launch()
 try {
   const page = await browser.newPage({ viewport })
+  if (fixtures) {
+    await page.route('**/api/**', (route) => {
+      const { pathname } = new URL(route.request().url())
+      const body = fixtures[pathname]
+      return body === undefined
+        ? route.fulfill({ status: 404, json: { detail: `no fixture for ${pathname}` } })
+        : route.fulfill({ status: 200, json: body })
+    })
+  }
   // The dashboard polls its API; with no API reachable the network never goes
   // idle, so wait for the load event and give the app a moment to render.
   const response = await page.goto(url, { waitUntil: 'load' })
   await page.waitForTimeout(1500)
+  if (expand) {
+    await page.evaluate(() => document.querySelectorAll('details').forEach((d) => { d.open = true }))
+  }
   const png = await page.screenshot({ path: out, fullPage: true })
   // Width and height are big-endian u32s in the PNG IHDR chunk.
   const width = png.readUInt32BE(16)
