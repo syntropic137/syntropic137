@@ -13,6 +13,8 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     _parse_timestamp,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class MockProjectionStore:
     """Mock projection store for testing."""

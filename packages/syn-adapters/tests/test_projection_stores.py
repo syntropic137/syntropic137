@@ -19,6 +19,8 @@ from syn_adapters.projection_stores import (
     reset_projection_store,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def reset_store():

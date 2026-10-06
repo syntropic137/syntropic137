@@ -14,6 +14,8 @@ from syn_adapters.artifacts import (
 )
 from syn_adapters.artifacts.bundle import ArtifactType
 
+pytestmark = pytest.mark.unit
+
 # ============================================================================
 # Test ArtifactMetadata
 # ============================================================================

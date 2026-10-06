@@ -13,6 +13,8 @@ from syn_domain.contexts.github._shared.value_objects import (
     RepositoryPermission,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestInstallationId:

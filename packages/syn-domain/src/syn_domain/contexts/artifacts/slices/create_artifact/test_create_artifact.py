@@ -10,6 +10,8 @@ from syn_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import 
 
 from .CreateArtifactHandler import CreateArtifactHandler
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 def test_handler_exists() -> None:

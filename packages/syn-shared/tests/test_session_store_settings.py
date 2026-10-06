@@ -36,6 +36,8 @@ from syn_shared.settings.session_store import (
     SessionStoreSettings,
 )
 
+pytestmark = pytest.mark.unit
+
 # The repo root is three parents up from packages/syn-shared/tests/<file>.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 

@@ -9,6 +9,8 @@ from syn_domain.contexts.agent_sessions.slices.token_metrics import (
     TokenMetricsProjection,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def memory_store() -> InMemoryProjectionStore:

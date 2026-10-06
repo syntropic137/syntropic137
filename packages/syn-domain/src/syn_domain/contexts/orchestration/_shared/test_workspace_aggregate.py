@@ -172,6 +172,7 @@ class TestCreateWorkspace:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestIsolationStarted:
     """Tests for recording isolation started."""
 
@@ -215,6 +216,7 @@ class TestIsolationStarted:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestInjectTokens:
     """Tests for InjectTokensCommand handling."""
 
@@ -284,6 +286,7 @@ class TestInjectTokens:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestExecuteCommand:
     """Tests for ExecuteCommandCommand handling."""
 
@@ -411,6 +414,7 @@ class TestExecuteCommand:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestTerminateWorkspace:
     """Tests for TerminateWorkspaceCommand handling."""
 
@@ -489,6 +493,7 @@ class TestTerminateWorkspace:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestRecordError:
     """Tests for error recording."""
 
@@ -520,6 +525,7 @@ class TestRecordError:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestAggregateProperties:
     """Tests for aggregate properties and computed values."""
 
@@ -567,6 +573,7 @@ class TestAggregateProperties:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestEventSourcing:
     """Tests for event sourcing behavior."""
 
