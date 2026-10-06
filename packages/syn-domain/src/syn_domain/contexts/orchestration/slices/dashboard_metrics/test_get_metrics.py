@@ -22,6 +22,8 @@ from syn_domain.contexts.orchestration.slices.dashboard_metrics.projection impor
     DashboardMetricsProjection,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def memory_store() -> InMemoryProjectionStore:

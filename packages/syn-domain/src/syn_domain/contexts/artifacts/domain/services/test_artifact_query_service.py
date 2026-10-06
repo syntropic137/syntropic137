@@ -12,6 +12,8 @@ from syn_domain.contexts.artifacts.domain.services.artifact_query_service import
     ArtifactQueryServiceProtocol,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestArtifactQueryServiceProtocol:

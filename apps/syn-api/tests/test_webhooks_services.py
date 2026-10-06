@@ -16,6 +16,8 @@ from syn_api.routes.webhooks.services import (
 )
 from syn_api.types import Err, Ok
 
+pytestmark = pytest.mark.unit
+
 
 @dataclass
 class FakeInstallation:

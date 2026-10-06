@@ -310,6 +310,31 @@ by type and id, so a request at the execution's id would BE the execution's
 stream, and the start's NoStream write would refuse the run as a duplicate.
 That shipped once and stopped every direct start (v0.33.2-beta.8, beta.9).
 
+## Withdraw
+
+What cancelling a Queued Start does to its Execution Request (#1650):
+`WithdrawExecutionRequest` -> `ExecutionRequestWithdrawn`, on the request's own
+stream. A Queued Start has no Execution to cancel, so `cancel` on one withdraws
+its request instead; on an Execution that exists, `cancel` is the Execution's
+own and unchanged. Withdrawing twice records one withdrawal.
+
+Withdraw decides about the request only. It does not know whether the
+Execution started, and does not need to: both direct start paths read the
+request again once they hold an Execution Budget slot, immediately before the
+start, and a withdrawn one gives the slot straight back. A start already past
+that read when the withdrawal lands still starts, and its own
+`WorkflowExecutionStarted` outranks the withdrawal on the to-do list; that run
+is cancelled as any other.
+
+## Withdrawn
+
+A request start to-do record's terminal status after `ExecutionRequestWithdrawn`.
+Never offered again, and no later write walks it back to owed: it yields only
+to `started`, as `failed` does. Rebuilt from the events alone on a restart, so a
+withdrawn request is never started by a new process. The API reports a Queued
+Start whose request is withdrawn as `cancelled`. Not an Execution status, for
+the same reason `queued` is not: there is no Execution.
+
 ## Eval
 
 An experiment: a Goal, measured by runs that all start from the same Repository

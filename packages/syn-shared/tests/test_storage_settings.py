@@ -54,6 +54,7 @@ class TestStorageSettings:
         assert settings.max_file_size_mb == 25
 
 
+@pytest.mark.unit
 class TestStorageProvider:
     """Tests for StorageProvider enum."""
 

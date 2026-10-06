@@ -403,3 +403,68 @@ class TestEventSubscriptionService:
         await subscription_service.stop()
 
         assert not subscription_service.is_running
+
+
+class _PageLimitedEventStore(MockEventStoreClient):
+    """Refuses any page over `max_events` the way the gRPC client refuses a
+    ReadAll reply over its byte limit (#1640). The mock envelopes carry no
+    payload, so the page length stands in for its size."""
+
+    def __init__(self, max_events: int) -> None:
+        super().__init__()
+        self.max_events = max_events
+        self.refused = 0
+
+    async def read_all(
+        self,
+        from_global_nonce: int = 0,
+        max_count: int = 100,
+        forward: bool = True,
+    ) -> tuple[list[MockEventEnvelope], bool, int]:
+        import grpc
+        from event_sourcing.core.errors import EventStoreError
+
+        page, is_end, next_from = await super().read_all(from_global_nonce, max_count, forward)
+        if len(page) > self.max_events:
+            self.refused += 1
+            cause = grpc.aio.AioRpcError(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                grpc.aio.Metadata(),
+                grpc.aio.Metadata(),
+                details="Received message larger than max (12365475 vs. 4194304)",
+            )
+            error = EventStoreError(f"Failed to read all events: {cause}")
+            error.__cause__ = cause  # the client raises it `from` the RpcError
+            raise error
+        return page, is_end, next_from
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_catchup_reads_every_event_when_a_page_is_too_large_for_the_transport(
+    projection_manager: MockProjectionManager,
+    projection_store: MockProjectionStore,
+) -> None:
+    """#1640: the legacy catch-up pages by count like `unapplied_starts` did."""
+    event_store = _PageLimitedEventStore(max_events=3)
+    event_store.events = [
+        MockEventEnvelope("SessionStarted", n, {"id": f"s-{n}"}) for n in range(1, 26)
+    ]
+    service = EventSubscriptionService(
+        event_store_client=event_store,  # type: ignore
+        projection_manager=projection_manager,  # type: ignore
+        projection_store=projection_store,  # type: ignore
+        batch_size=10,
+        position_save_interval=1,
+    )
+
+    await service.start()
+    try:
+        await service.wait_until_caught_up(timeout=5.0)
+    finally:
+        await service.stop()
+
+    assert event_store.refused > 0
+    assert [data["id"] for _, data in projection_manager.dispatched_events] == [
+        f"s-{n}" for n in range(1, 26)
+    ]

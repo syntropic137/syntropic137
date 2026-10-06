@@ -13,6 +13,8 @@ from syn_api.routes.webhooks.handlers import (
     _handle_installation_event,
 )
 
+pytestmark = pytest.mark.unit
+
 # --- _handle_installation_event ---
 
 

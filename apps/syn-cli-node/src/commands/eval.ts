@@ -1,5 +1,6 @@
 /**
- * `syn eval attach|detach <execution-id> <eval-id>` (#967).
+ * `syn eval attach|detach <execution-id> <eval-id>` (#967), and the group that
+ * also holds `create|list|show|runs|archive` (eval-records.ts).
  *
  * Membership lives on the execution: a run belongs to at most one eval. Attach
  * works in any status and never copies the eval's baseline; attaching to the
@@ -14,6 +15,7 @@ import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printDim, printError } from "../output/console.js";
 import { style, GREEN } from "../output/ansi.js";
+import { evalRecordCommands } from "./eval-records.js";
 
 type ExecutionEvalResponse = components["schemas"]["ExecutionEvalResponse"];
 
@@ -74,5 +76,6 @@ const detachCommand: CommandDef = {
   },
 };
 
-export const evalGroup = new CommandGroup("eval", "Put executions in evals and take them out");
+export const evalGroup = new CommandGroup("eval", "Create evals, read their runs, and put executions in them");
+for (const command of evalRecordCommands) evalGroup.command(command);
 evalGroup.command(attachCommand).command(detachCommand);

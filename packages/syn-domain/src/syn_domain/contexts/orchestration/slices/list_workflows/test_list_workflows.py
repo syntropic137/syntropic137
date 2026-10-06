@@ -22,6 +22,8 @@ from syn_domain.contexts.orchestration.slices.list_workflows import (
     WorkflowListProjection,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def store() -> InMemoryProjectionStore:

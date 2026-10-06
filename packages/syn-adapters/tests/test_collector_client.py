@@ -19,6 +19,8 @@ from syn_adapters.collector.client import (
     generate_tool_event_id,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class MockTestEnvironmentError(Exception):
     """Raised when tests run outside test environment."""

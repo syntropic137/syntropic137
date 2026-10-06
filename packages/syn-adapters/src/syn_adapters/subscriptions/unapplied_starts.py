@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from syn_adapters.subscriptions.paged_read import PageReader, ReadsAllEvents
 from syn_domain.contexts.orchestration import WorkflowExecutionStartedEvent
 
 if TYPE_CHECKING:
@@ -68,6 +69,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Events asked for per page. A page the transport refuses as too large is
+#: re-read smaller (`PageReader`), so this is a ceiling, not a promise (#1640).
 _PAGE_SIZE: Final[int] = 500
 #: Execution ids per read-model query.
 LOOKUP_BATCH_SIZE: Final[int] = 500
@@ -77,15 +80,6 @@ SAFETY_WINDOW: Final[int] = 1_000
 MAX_EVENTS_PER_CHECK: Final[int] = 20_000
 #: How often the watch checks. Bounds detection latency.
 CHECK_INTERVAL_SECONDS: Final[float] = 300.0
-
-
-class _ReadsAllEvents(Protocol):
-    async def read_all(
-        self,
-        from_global_nonce: int = 0,
-        max_count: int = 100,
-        forward: bool = True,
-    ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]: ...
 
 
 @runtime_checkable
@@ -147,7 +141,7 @@ class UnappliedStartDetector:
 
     def __init__(
         self,
-        event_store: _ReadsAllEvents,
+        event_store: ReadsAllEvents,
         checkpoint_store: ProjectionCheckpointStore,
         projections: Sequence[AppliesExecutionStarts],
         *,
@@ -212,13 +206,12 @@ class UnappliedStartDetector:
         # re-read every check and bounded by its own size, so it can never use
         # up the budget and stop the mark from advancing.
         budget = self._max_events
+        pages = PageReader(self._event_store, page_size=_PAGE_SIZE)
         while position <= through:
             if budget <= 0:
                 # Out of budget: judged only as far as was read.
                 return _Window(starts=starts, read_through=last_read)
-            events, is_end, next_position = await self._event_store.read_all(
-                from_global_nonce=position, max_count=min(_PAGE_SIZE, budget), forward=True
-            )
+            events, is_end, next_position = await pages.read(position, limit=budget)
             page_last, past_mark = self._absorb(events, through, starts)
             last_read = max(last_read, page_last)
             budget -= past_mark

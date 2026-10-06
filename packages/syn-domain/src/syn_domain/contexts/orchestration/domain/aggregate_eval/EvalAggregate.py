@@ -207,6 +207,16 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
         return None if self.id is None else EvalId.recorded(str(self.id))
 
     @property
+    def exists(self) -> bool:
+        """Whether this stream recorded an ``EvalCreated``.
+
+        Not ``id is not None``: the event store keys a stream by aggregate id
+        alone (#1557), so loading an eval at another aggregate's id rehydrates
+        that aggregate's events, sets ``id``, and records no eval at all.
+        """
+        return self._created_at is not None
+
+    @property
     def name(self) -> str | None:
         return self._name
 
@@ -327,7 +337,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
             EvalFrozenEvent,
         )
 
-        if self.id is None:
+        if not self.exists:
             raise EvalNotCreatedError
         if self._is_archived:
             raise EvalArchivedError(str(self.id), "frozen")
@@ -342,7 +352,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
             EvalArchivedEvent,
         )
 
-        if self.id is None:
+        if not self.exists:
             raise EvalNotCreatedError
         if self._is_archived:
             return
@@ -355,7 +365,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
         )
 
     def _require_open(self, action: str) -> None:
-        if self.id is None:
+        if not self.exists:
             raise EvalNotCreatedError
         if self._is_archived:
             raise EvalArchivedError(str(self.id), action)

@@ -312,7 +312,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel Execution Endpoint
-         * @description Cancel a running execution.
+         * @description Cancel an execution, or withdraw a start still queued for one (#1650).
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -656,6 +656,93 @@ export interface paths {
          */
         put: operations["set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Evals Endpoint
+         * @description List evals, newest first, each with its run count and status tally.
+         */
+        get: operations["list_evals_endpoint_evals_get"];
+        put?: never;
+        /**
+         * Create Eval Endpoint
+         * @description Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.
+         */
+        post: operations["create_eval_endpoint_evals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Endpoint
+         * @description One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`.
+         */
+        get: operations["get_eval_endpoint_evals__eval_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Eval Runs Endpoint
+         * @description The executions currently in an eval: the execution list, filtered by eval.
+         *
+         *     An eval with no runs, or one the read model has not caught up with, is an
+         *     empty page rather than a 404.
+         */
+        get: operations["list_eval_runs_endpoint_evals__eval_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Eval Endpoint
+         * @description Archive an eval: it stays readable with its runs, and admits no new ones. Idempotent.
+         */
+        post: operations["archive_eval_endpoint_evals__eval_id__archive_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3008,6 +3095,28 @@ export interface components {
             status: string;
         };
         /**
+         * CreateEvalRequest
+         * @description A new eval (#967). The server mints its id; see `EvalCreatedResponse`.
+         */
+        CreateEvalRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Goal
+             * @description What the eval sets out to measure.
+             */
+            goal: string;
+            /**
+             * Starting Workflow Id
+             * @description The workflow a run uses when it names none.
+             */
+            starting_workflow_id?: string | null;
+            /** Baseline Repos */
+            baseline_repos?: components["schemas"]["EvalBaselineRepoRequest"][];
+            /** Tags */
+            tags?: string[];
+        };
+        /**
          * CreateOrganizationRequest
          * @description Request body for creating a new organization.
          */
@@ -3264,10 +3373,120 @@ export interface components {
             refuse_admission_below_percent: number;
         };
         /**
+         * EvalArchivedResponse
+         * @description The receipt for an archive, read from the Eval aggregate (#967).
+         */
+        EvalArchivedResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Archived */
+            archived: boolean;
+        };
+        /**
+         * EvalBaselineRepoRequest
+         * @description One repository of a new eval's Baseline, before its ref is pinned (#967).
+         */
+        EvalBaselineRepoRequest: {
+            /**
+             * Repository
+             * @description The repository, as an `owner/name` slug.
+             */
+            repository: string;
+            /**
+             * Requested Ref
+             * @description A branch, tag or commit. Resolved once, at create, to a full commit SHA; every run starts from that SHA even after the branch or tag moves.
+             */
+            requested_ref: string;
+        };
+        /**
+         * EvalBaselineRepoResponse
+         * @description One repository of an eval's Baseline: the ref asked for and the SHA it pinned to.
+         */
+        EvalBaselineRepoResponse: {
+            /** Repository */
+            repository: string;
+            /** Requested Ref */
+            requested_ref: string;
+            /** Commit Sha */
+            commit_sha: string;
+        };
+        /**
+         * EvalCreatedResponse
+         * @description The receipt for a create, read from the Eval aggregate, never a projection (#967).
+         *
+         *     The eval list and `GET /evals/{eval_id}` are read models and may not show
+         *     the eval for a moment after this returns. That is lag, not a failed create:
+         *     `eval_id` is authoritative from here on.
+         */
+        EvalCreatedResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+        };
+        /**
          * EvalId
          * @description The identity of one eval, and the id of its stream.
          */
         EvalId: string;
+        /**
+         * EvalListResponse
+         * @description One page of evals, newest first (#967).
+         */
+        EvalListResponse: {
+            /** Evals */
+            evals: components["schemas"]["EvalResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Status Counts */
+            status_counts: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * EvalResponse
+         * @description An eval as the eval read model holds it, with its run tally (#967).
+         */
+        EvalResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+            /** Frozen */
+            frozen: boolean;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Run Count */
+            run_count: number;
+            /** Run Status Counts */
+            run_status_counts: {
+                [key: string]: number;
+            };
+        };
         /**
          * EventListResponse
          * @description List of events response.
@@ -3716,7 +3935,7 @@ export interface components {
              */
             held: boolean;
             /** Start Status */
-            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed") | null;
+            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed" | "withdrawn") | null;
             /** Status Reason */
             status_reason?: string | null;
             /** Running */
@@ -6290,7 +6509,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "pending" | "paused" | "retryable" | "dispatched" | "started" | "failed";
+            status: "pending" | "paused" | "retryable" | "dispatched" | "started" | "failed" | "withdrawn";
             /** Status Reason */
             status_reason?: string | null;
             /**
@@ -8872,6 +9091,8 @@ export interface operations {
                 q?: string | null;
                 /** @description Keep only executions carrying this tag. Repeat to require several (AND). Normalised like stored tags; an invalid tag is rejected with 422. */
                 tag?: string[] | null;
+                /** @description Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix. */
+                eval_id?: string | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -9841,6 +10062,188 @@ export interface operations {
             };
             /** @description The eval is archived, or the id prefix matches more than one workflow */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_evals_endpoint_evals_get: {
+        parameters: {
+            query?: {
+                /** @description Keep only active or only archived evals. Both when omitted. */
+                status?: ("active" | "archived") | null;
+                /** @description Case-insensitive match on id, name and goal */
+                q?: string | null;
+                /** @description Keep evals carrying this tag; repeat for AND */
+                tag?: string[] | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_eval_endpoint_evals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalCreatedResponse"];
+                };
+            };
+            /** @description The request is invalid, or a baseline ref could not be resolved */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_eval_endpoint_evals__eval_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_eval_runs_endpoint_evals__eval_id__runs_get: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated execution statuses (OR'd) */
+                statuses?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionListResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    archive_eval_endpoint_evals__eval_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalArchivedResponse"];
+                };
+            };
+            /** @description No eval has this id */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -21,6 +21,8 @@ from syn_domain.contexts.agent_sessions import (
     TokenMetrics,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestTokenMetrics:

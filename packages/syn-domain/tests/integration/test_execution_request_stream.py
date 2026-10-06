@@ -111,3 +111,50 @@ class TestARequestDoesNotOccupyItsExecutionsStream:
 
         with pytest.raises(StreamAlreadyExistsError):
             await workflow_execution_repository.save_new(_started(shared_id))
+
+
+class TestAWithdrawalLivesOnTheRequestsOwnStream:
+    async def test_it_round_trips_and_leaves_the_executions_id_free(
+        self,
+        repository_factory: RepositoryFactory,
+        workflow_execution_repository: EventStoreRepository[WorkflowExecutionAggregate],
+        unique_execution_id: str,
+    ) -> None:
+        """#1650: `ExecutionRequestWithdrawn` is stored, reloaded, and is not the execution's."""
+        from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
+        from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
+            ExecutionRequestAggregate,
+            execution_request_id,
+        )
+        from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
+            RequestExecutionCommand,
+        )
+        from syn_domain.contexts.orchestration.domain.commands.WithdrawExecutionRequestCommand import (
+            WithdrawExecutionRequestCommand,
+        )
+
+        execution_id = f"exec-{unique_execution_id}"
+        requests = repository_factory.create_repository(
+            ExecutionRequestAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+            "ExecutionRequest",
+        )
+        request = ExecutionRequestAggregate()
+        request.request(
+            RequestExecutionCommand(
+                execution_id=execution_id,
+                workflow_id="wf-request-stream",
+                launch_eval=LaunchEval(None, EvalSelection.NONE),
+            )
+        )
+        await requests.save_new(request)
+        loaded = await requests.load(execution_request_id(execution_id))
+        assert loaded is not None
+        loaded.withdraw(WithdrawExecutionRequestCommand(execution_id=execution_id, reason="r"))
+        await requests.save(loaded)
+
+        reloaded = await requests.load(execution_request_id(execution_id))
+        assert reloaded is not None
+        assert reloaded.withdrawn
+        assert reloaded.version == 2
+        # The execution's own id is untouched by either request event.
+        assert await workflow_execution_repository.load(execution_id) is None
