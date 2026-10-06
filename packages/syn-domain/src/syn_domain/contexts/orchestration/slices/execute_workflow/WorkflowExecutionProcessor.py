@@ -54,7 +54,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversatio
     record_phase_conversation,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
-    PhaseCostLimitExceededError,
+    raise_if_stopped_on_cost,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
     completion_failure,
@@ -791,10 +791,7 @@ class WorkflowExecutionProcessor:
             # nobody cancelled anything. Raised, so it reaches the aggregate as
             # a failed phase - resumable, like one killed at its timeout -
             # through the same path that keeps what the phase wrote (#1376).
-            if result.stream_result.cost_limit_reason is not None:
-                raise PhaseCostLimitExceededError(
-                    todo.phase_id, result.stream_result.cost_limit_reason
-                )
+            raise_if_stopped_on_cost(todo.phase_id, result.stream_result.cost_limit_reason)
 
             if result.stream_result.interrupt_requested:
                 kept = True

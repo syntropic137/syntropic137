@@ -68,6 +68,30 @@ class PhaseCostLimit:
         return f"cost limit USD {self._limit:.2f} exceeded at USD {self._spent:.2f}"
 
 
+def spend(
+    limit: PhaseCostLimit | None,
+    model: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation: int = 0,
+    cache_read: int = 0,
+) -> None:
+    """Record a turn against `limit`, if the phase declared one."""
+    if limit is not None:
+        limit.record_turn(model, input_tokens, output_tokens, cache_creation, cache_read)
+
+
+def limit_exceeded(limit: PhaseCostLimit | None) -> str | None:
+    """Why the phase must stop, or None - always None for a phase with no limit."""
+    return limit.exceeded() if limit is not None else None
+
+
+def raise_if_stopped_on_cost(phase_id: str, reason: str | None) -> None:
+    """Turn a cost stop reported by the stream into the phase's failure."""
+    if reason is not None:
+        raise PhaseCostLimitExceededError(phase_id, reason)
+
+
 class PhaseCostLimitExceededError(Exception):
     """A phase was stopped because it spent past its `max_cost_usd` (#1376).
 

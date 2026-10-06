@@ -31,6 +31,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScan
 from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser import (
     HookEventParser,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+    limit_exceeded,
+    spend,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
     VerdictReader,
@@ -571,7 +575,7 @@ class EventStreamProcessor:
 
     async def _stop_if_over_cost_limit(self, workspace: InterruptibleWorkspace) -> _LineOutcome:
         """Interrupt the agent once the phase has spent past its limit (#1376)."""
-        reason = self._cost_limit.exceeded() if self._cost_limit is not None else None
+        reason = limit_exceeded(self._cost_limit)
         if reason is None:
             return _LineOutcome(action=_LineAction.CONTINUE)
         logger.warning("Phase %s %s - interrupting the agent", self._phase_id, reason)
@@ -811,10 +815,14 @@ class EventStreamProcessor:
                 cache_read,
                 model=turn_model,
             )
-            if self._cost_limit is not None:
-                self._cost_limit.record_turn(
-                    turn_model, input_tokens, output_tokens, cache_creation, cache_read
-                )
+            spend(
+                self._cost_limit,
+                turn_model,
+                input_tokens,
+                output_tokens,
+                cache_creation,
+                cache_read,
+            )
             logger.info(
                 "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
                 input_tokens,

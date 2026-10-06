@@ -72,6 +72,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     api_error_label,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.held_token_rows import HeldTokenRows
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+    limit_exceeded,
+    spend,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     VerdictReader,
 )
@@ -503,6 +507,28 @@ class CodexStreamProcessor:
         finally:
             await self._held_rows.flush(self._announced_model, raise_errors=False)
 
+    async def _step(
+        self, line: str, line_count: int, workspace: InterruptibleWorkspace
+    ) -> tuple[bool, str | None]:
+        """Process one line; ``(True, reason)`` when the agent was interrupted."""
+        poll = await self._cancel_poller.check(line_count)
+        if poll.should_interrupt:
+            await workspace.interrupt()
+            return True, poll.reason
+
+        await self._process_line(line)
+
+        # Same check as the claude path (#1376). Codex reports usage only
+        # on `turn.completed`, so the limit is seen per codex turn, not
+        # per model call - coarser, and stated rather than hidden.
+        over = limit_exceeded(self._cost_limit)
+        if over is None:
+            return False, None
+        logger.warning("Phase %s %s - interrupting the agent", self._phase_id, over)
+        self._cost_limit_reason = over
+        await workspace.interrupt()
+        return True, over
+
     async def _process_stream(
         self,
         stream: AsyncIterator[str],
@@ -520,25 +546,8 @@ class CodexStreamProcessor:
             if line.strip():
                 conversation_lines.append(line)
 
-            poll = await self._cancel_poller.check(line_count)
-            if poll.should_interrupt:
-                await workspace.interrupt()
-                interrupt_requested = True
-                interrupt_reason = poll.reason
-                break
-
-            await self._process_line(line)
-
-            # Same check as the claude path (#1376). Codex reports usage only
-            # on `turn.completed`, so the limit is seen per codex turn, not
-            # per model call - coarser, and stated rather than hidden.
-            over = self._cost_limit.exceeded() if self._cost_limit is not None else None
-            if over is not None:
-                logger.warning("Phase %s %s - interrupting the agent", self._phase_id, over)
-                self._cost_limit_reason = over
-                await workspace.interrupt()
-                interrupt_requested = True
-                interrupt_reason = over
+            interrupt_requested, interrupt_reason = await self._step(line, line_count, workspace)
+            if interrupt_requested:
                 break
 
         if not self._totals.saw_terminal_turn:
@@ -1054,14 +1063,14 @@ class CodexStreamProcessor:
         )
         # Held, not written: see `held_token_rows`.
         self._held_rows.hold(turn_usage)
-        if self._cost_limit is not None:
-            # Priced by the same rule `_estimate_cost` applies to the totals.
-            self._cost_limit.record_turn(
-                RecordedModel(
-                    observed=self._announced_model, requested=self._agent_model
-                ).pricing_model,
-                turn_usage.fresh_input,
-                turn_usage.billable_output,
-                0,
-                turn_usage.cache_read,
-            )
+        # Priced by the same rule `_estimate_cost` applies to the totals.
+        spend(
+            self._cost_limit,
+            RecordedModel(
+                observed=self._announced_model, requested=self._agent_model
+            ).pricing_model,
+            turn_usage.fresh_input,
+            turn_usage.billable_output,
+            0,
+            turn_usage.cache_read,
+        )
