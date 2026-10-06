@@ -71,6 +71,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         AgentHandlerProtocol,
         Runner,
@@ -112,6 +115,7 @@ class _RecordedAttempt:
     collector: ObservabilityCollector | None
     workspace: ManagedWorkspace
     agent_env: dict[str, str]
+    cost_limit: PhaseCostLimit | None
 
 
 @dataclass
@@ -145,6 +149,7 @@ class _RecordingHandler:
         collector: ObservabilityCollector | None = None,
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> AgentExecutionResult:
         self.attempts.append(
             _RecordedAttempt(
@@ -154,6 +159,7 @@ class _RecordingHandler:
                 collector=collector,
                 workspace=workspace,
                 agent_env=agent_env.copy(),
+                cost_limit=cost_limit,
             )
         )
         if self.clock is not None and self.takes_seconds:
@@ -401,6 +407,31 @@ class TestWhatIsBuiltOncePerPhaseAndNotOncePerAttempt:
         assert len(handler.attempts) == 2
         assert [a.session_id for a in handler.attempts] == ["sess-1", "sess-1"]
         assert all(a.workspace is launch.workspace for a in handler.attempts)
+
+    async def test_every_attempt_spends_from_the_same_cost_limit(self) -> None:
+        """A retry must not get a fresh budget (#1376).
+
+        What attempt one spent before the upstream turned it away is still
+        spent. A limit built per attempt would let a phase retried twice cost
+        three times its `max_cost_usd`, which is the overspend the limit exists
+        to stop.
+        """
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+
+        await _run(handler, phase=replace(_phase(), max_cost_usd=5.0))
+
+        first = handler.attempts[0].cost_limit
+        assert first is not None
+        assert len(handler.attempts) == 3
+        assert all(attempt.cost_limit is first for attempt in handler.attempts)
 
 
 class TestTheProviderChoosesTheParser:

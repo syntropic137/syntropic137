@@ -171,6 +171,40 @@ def require_runnable_sandbox(sandbox: object, *, phase_id: str | None = None) ->
     raise UnrunnablePhaseSandboxError(sandbox, phase_id=phase_id)
 
 
+class UnenforceableCostLimitError(ValueError):
+    """A phase declares ``max_cost_usd`` on a provider that cannot be stopped by it."""
+
+    def __init__(self, provider: object, *, phase_id: str | None = None) -> None:
+        self.provider = provider
+        self.phase_id = phase_id
+        where = f"Phase {phase_id!r}" if phase_id else "This phase"
+        super().__init__(
+            f"{where} declares max_cost_usd on provider {str(provider)!r}, which reports "
+            "token usage only once, when the whole run has ended, so there is no point "
+            "mid-run at which the limit could stop the agent: it would be accepted and "
+            f"never bound anything (#1376). Remove max_cost_usd, or run this phase on "
+            f"'{AgentProvider.CLAUDE}'."
+        )
+
+
+def require_enforceable_cost_limit(
+    provider: object, max_cost_usd: float | None, *, phase_id: str | None = None
+) -> None:
+    """Raise if ``max_cost_usd`` is declared on a provider that cannot honour it (#1376).
+
+    A cost limit stops the agent on the turn its priced usage crosses the
+    limit, which needs usage reported WHILE the run is going. ``claude -p``
+    reports it per model call. ``codex exec`` reports it on a single
+    ``turn.completed`` at the end of the run, so on codex the "stop" would
+    land after all the money was spent and only turn a finished phase into a
+    failed one. Refused at authoring, the same shape as ``allowed_tools`` on
+    codex (#1009), rather than accepted and silently inert.
+    """
+    if max_cost_usd is None or provider != AgentProvider.CODEX:
+        return
+    raise UnenforceableCostLimitError(provider, phase_id=phase_id)
+
+
 class UnsupportedAgentProviderError(ValueError):
     """A phase names a provider that cannot be executed.
 

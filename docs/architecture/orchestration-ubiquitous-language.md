@@ -52,6 +52,22 @@ NOT the Phase's start plus it. The agent is told the same deadline as
 Phase is provisioned again and gets a new one. It is derived, never recorded as
 its own event: the facts it is made of are already events.
 
+## Phase Cost Limit
+
+The most a Phase may spend, in USD, before its agent is stopped (`max_cost_usd`,
+#1376). The cost-axis twin of the timeout: a Phase fanning out to parallel
+subagents turns a time bound into an unbounded cost. Spend is the per-turn
+usage on the agent's own stream, priced by `price_tokens` (the same pricing the
+execution's cost is built from), and one limit covers every attempt of the
+Phase. Crossing it fails the Phase with `cost limit USD X exceeded at USD Y`: a
+failure, not a cancel, so the Execution is resumable like one whose Phase hit
+its deadline. Checked per turn, not reserved before each call, so turns already
+in flight can land above it. Claude only: `codex exec` reports usage once, when
+its run has ended, so a limit on a codex Phase could never stop it and is
+refused at install. Not a separate budget from the
+[Execution Budget](#execution-budget), which counts concurrent Executions, not
+money.
+
 ## Review Verdict
 
 What a reviewing Phase concluded about the change in front of it: `certified`

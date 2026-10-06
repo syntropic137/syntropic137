@@ -11,7 +11,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX, require_runnable_sandbox
+from syn_shared.agents import (
+    DEFAULT_PHASE_SANDBOX,
+    require_enforceable_cost_limit,
+    require_runnable_sandbox,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -127,7 +131,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
     from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
     if phases:
-        return [
+        defs = [
             PhaseDefinition(
                 phase_id=p.get("phase_id", str(uuid4())),
                 name=p["name"],
@@ -139,6 +143,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 prompt_template=p.get("prompt_template"),
                 max_tokens=p.get("max_tokens"),
                 timeout_seconds=p.get("timeout_seconds"),
+                max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=p.get("allowed_tools", []),
                 # Dropping this silently reinstates the clone for a phase
                 # installed through the API that declared it did not need one
@@ -178,6 +183,10 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
             )
             for i, p in enumerate(phases)
         ]
+        # The YAML refuses this too; a phase created here never passes it (#1376).
+        for d in defs:
+            require_enforceable_cost_limit(d.provider, d.max_cost_usd, phase_id=d.phase_id)
+        return defs
     return [
         PhaseDefinition(
             phase_id=str(uuid4()),

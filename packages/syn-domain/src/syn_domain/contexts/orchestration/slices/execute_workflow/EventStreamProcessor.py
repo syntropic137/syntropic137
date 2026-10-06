@@ -31,6 +31,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScan
 from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser import (
     HookEventParser,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+    limit_exceeded,
+    spend,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
     VerdictReader,
@@ -52,6 +56,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
         SubagentTracker,
@@ -342,6 +349,11 @@ class StreamResult:
     #: than guessed (#788) - and it is also what a stream cut off before its
     #: first announcement leaves behind.
     announced_model: str | None = None
+    #: Why the platform stopped this run for spending past the phase's
+    #: `max_cost_usd`, or None if it did not (#1376). Set together with
+    #: `interrupt_requested`, which is what makes the attempt settled and the
+    #: missing exit status expected; this is what tells it apart from a cancel.
+    cost_limit_reason: str | None = None
 
 
 def _model_under_message(message: object) -> object:
@@ -392,8 +404,11 @@ class EventStreamProcessor:
         workspace_id: str | None,
         agent_model: str | None,
         collector: ObservabilityCollector | None = None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> None:
         self._tokens = tokens
+        self._cost_limit = cost_limit
+        self._cost_limit_reason: str | None = None
         self._subagents = subagents
         self._execution_id = execution_id
         self._phase_id = phase_id
@@ -528,6 +543,7 @@ class EventStreamProcessor:
             leader_native_session_id=self._leader_native_session_id,
             last_agent_message=self._last_agent_message,
             announced_model=self._announced_model,
+            cost_limit_reason=self._cost_limit_reason,
         )
 
     async def _process_line(
@@ -555,7 +571,19 @@ class EventStreamProcessor:
             return _LineOutcome(action=_LineAction.CONTINUE)
 
         await self._process_cli_event(line)
-        return _LineOutcome(action=_LineAction.CONTINUE)
+        return await self._stop_if_over_cost_limit(workspace)
+
+    async def _stop_if_over_cost_limit(self, workspace: InterruptibleWorkspace) -> _LineOutcome:
+        """Interrupt the agent once the phase has spent past its limit (#1376)."""
+        reason = limit_exceeded(self._cost_limit)
+        if reason is None:
+            return _LineOutcome(action=_LineAction.CONTINUE)
+        logger.warning("Phase %s %s - interrupting the agent", self._phase_id, reason)
+        self._cost_limit_reason = reason
+        await workspace.interrupt()
+        return _LineOutcome(
+            action=_LineAction.BREAK, interrupt_requested=True, interrupt_reason=reason
+        )
 
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
         """Process a single hook event: validate, enrich, record, track subagents."""
@@ -779,12 +807,21 @@ class EventStreamProcessor:
             self._tokens.record(input_tokens, output_tokens, cache_creation, cache_read)
             # The model THIS message names, not the session's: a subagent turn
             # on another model is priced as that model, not as the leader.
+            turn_model = announced_model_from(message.get("model"))
             await self._collector.record_token_usage(
                 input_tokens,
                 output_tokens,
                 cache_creation,
                 cache_read,
-                model=announced_model_from(message.get("model")),
+                model=turn_model,
+            )
+            spend(
+                self._cost_limit,
+                turn_model,
+                input_tokens,
+                output_tokens,
+                cache_creation,
+                cache_read,
             )
             logger.info(
                 "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",

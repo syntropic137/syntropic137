@@ -143,6 +143,12 @@ class PhaseDefinition(BaseModel):
 
     max_tokens: int | None = None
     timeout_seconds: int | None = None
+    max_cost_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    """The most this phase may spend, in USD, before it is stopped (#1376).
+
+    The cost-axis twin of ``timeout_seconds``: None leaves the phase unbounded
+    by cost. Positive and finite, here as well as in the YAML, because a
+    template can be created without passing through the YAML."""
     allowed_tools: list[str] = Field(default_factory=list)
     """Tools allowed during this phase execution."""
 

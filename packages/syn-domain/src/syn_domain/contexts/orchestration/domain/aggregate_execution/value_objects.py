@@ -1074,6 +1074,11 @@ class ExecutablePhase:
     # Timeout for this phase (can override agent config)
     timeout_seconds: int | None = None
 
+    # The most this phase may spend, in USD, before the platform stops it
+    # (#1376). None is unbounded. Pinned with the rest of the phase, so a
+    # resume runs under the limit the original run was started with.
+    max_cost_usd: float | None = None
+
     # Whether this phase's workspace gets the repos checked out (#1187).
     # Provisioning was phase-blind: the only opt-out was workflow-level
     # `requires_repos: false`, which applies to every phase at once. Carried
