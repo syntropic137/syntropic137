@@ -125,6 +125,22 @@ def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
     return resolved
 
 
+def _container_labels(config: IsolationConfig) -> dict[str, str]:
+    """Docker labels that let an operator count live containers by owner.
+
+    A workspace provisioned outside a phase has no phase, so it gets no
+    `syn.phase_id` label rather than an empty one: `--filter label=syn.phase_id`
+    must match only containers that really belong to a phase.
+    """
+    labels = {
+        "syn.execution_id": config.execution_id,
+        "syn.workspace_id": config.workspace_id,
+    }
+    if config.phase_id:
+        labels["syn.phase_id"] = config.phase_id
+    return labels
+
+
 class AgenticIsolationAdapter:
     """Implements IsolationBackendPort using agentic_isolation.
 
@@ -253,7 +269,7 @@ class AgenticIsolationAdapter:
         Returns:
             IsolationHandle for subsequent operations
         """
-        from agentic_isolation import WorkspaceConfig
+        from agentic_isolation import ResourceLimits, WorkspaceConfig
 
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             IsolationHandle,
@@ -296,11 +312,12 @@ class AgenticIsolationAdapter:
             working_dir="/workspace",
             environment=environment,
             mounts=capture_mounts,
-            labels={
-                "syn.execution_id": config.execution_id,
-                "syn.workspace_id": config.workspace_id,
-            },
+            labels=_container_labels(config),
             security=self._security,
+            limits=ResourceLimits(
+                cpu=f"{config.security_policy.cpu_limit_cores:g}",
+                memory=f"{config.security_policy.memory_limit_mb}m",
+            ),
         )
 
         # Create workspace via provider — wrap so docker/network failures surface
