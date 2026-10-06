@@ -92,6 +92,11 @@ def phase_failure(result: AgentExecutionResult, *, phase_id: str) -> Exception |
     quota = UPSTREAM_FAILURES.quota_of(result.stream_result.error_reason)
     if quota is not None:
         reason = f"{quota.account()}. {reason}"
+    # The fallback failed too (PC-83). Its failure classifies the phase - it is
+    # the run that ended it - and the primary's leads, because it is why there
+    # was a fallback run at all.
+    if result.primary_failure is not None:
+        reason = f"{result.primary_failure}\nThen the fallback agent failed: {reason}"
     # Capacity and auth are both platform failures and ask opposite things of
     # an operator - wait, or fix the login - so the failure carries which
     # (#1592), and `failed_phase_outcome` says it beside the reason (#1593).
