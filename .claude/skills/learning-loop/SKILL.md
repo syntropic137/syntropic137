@@ -147,12 +147,14 @@ Seed cases, from the [2026-10-06 retro](../../../docs/retrospectives/2026-10-06-
 
 | Case | Commit to verify | Expected finding |
 |---|---|---|
-| #1574 (fixed by #1641) | #1574's head as merged (merge df7a99db1) | `ExecutionRequest` keyed by the execution's own id shares the execution's stream in a store keyed by aggregate id alone, so every direct start is dropped as a duplicate |
-| #1649 | parent of bd302d76 on #1649's branch | an execution id is accepted as an eval id; archive writes into the execution's stream |
-| #1652 | parent of 721a8014c on #1652's branch | binary artifact reads use the artifact id, but MinIO keys by workflow, execution and artifact, so every binary read returns 404 |
-| #1654 | parent of 4dae285b2 on #1654's branch | `codex exec` reports usage once, after the run, so the per-phase cost limit can never stop a Codex phase |
+| #1574 (fixed by #1641) | `aab6e95b`, #1574's head as merged (merge df7a99db1) | `ExecutionRequest` keyed by the execution's own id shares the execution's stream in a store keyed by aggregate id alone, so every direct start is dropped as a duplicate |
+| #1649 | `7047b1c3`, the parent of fix bd302d76 | an execution id is accepted as an eval id; archive writes into the execution's stream |
+| #1652 | `b2f680f0`, the parent of fix 721a8014c | binary artifact reads use the artifact id, but MinIO keys by workflow, execution and artifact, so every binary read returns 404 |
+| #1654 | `123b2520`, the parent of fix 4dae285b2 | `codex exec` reports usage once, after the run, so the per-phase cost limit can never stop a Codex phase |
 
-All four passed their own verification against an in-memory double. The eval
+The three parents are merges of `origin/main` into the PR branch, which is the
+head verification was handed. All four passed their own verification against
+an in-memory double. The eval
 asks whether a verifier will catch them now.
 
 **A recurring failure class becomes an issue with a test or fitness function.**
