@@ -227,6 +227,11 @@ async def _withdraw_queued(execution_id: str, reason: str | None) -> ControlResp
     full_id = await queued_execution_id(get_projection_mgr(), execution_id)
     if full_id is None or not await withdraw_execution_request(full_id, reason):
         return None
+    # Both projections asked above lag the execution's stream. A run that
+    # started before the withdrawal landed is cancelled as any started run is,
+    # never reported as one that "will not run" (#1650 verification).
+    if await get_controller().get_state(full_id) is not None:
+        return await _handle_control_result(await cancel(full_id, reason=reason), "cancel")
     return ControlResponse(
         success=True,
         execution_id=full_id,

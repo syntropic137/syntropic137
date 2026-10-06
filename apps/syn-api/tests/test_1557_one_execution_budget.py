@@ -40,6 +40,8 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 import syn_adapters.storage.repositories as repositories
 import syn_api._wiring as wiring
 import syn_api._wiring_admission as admission
+from syn_adapters.control import ExecutionController
+from syn_adapters.control.adapters.memory import InMemorySignalQueueAdapter
 from syn_adapters.control.commands import CancelExecution, ControlResult
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
@@ -433,6 +435,10 @@ class _World:
         monkeypatch.setattr(commands, "ensure_connected", _nothing)
         monkeypatch.setattr(wiring, "get_execute_workflow_handler", self._handler)
         monkeypatch.setattr(repositories, "get_execution_request_repository", lambda: self.requests)
+        # Cancel asks the REAL controller, over these execution streams (#1650).
+        self.signals = InMemorySignalQueueAdapter()
+        controller = ExecutionController(self.executions, self.signals)  # type: ignore[arg-type]
+        monkeypatch.setattr(control, "get_controller", lambda: controller)
 
         async def _validated(
             workflow_id: str, request: ExecuteWorkflowRequest
@@ -1254,3 +1260,25 @@ class TestCancellingAStartedExecutionIsUnchanged:
         assert _withdrawals(world, execution_id) == 0
         await _release_everything(world)
         assert world.agent.entered == [execution_id]
+
+    async def test_a_started_run_its_read_model_has_not_caught_up_on_is_cancelled_not_withdrawn(
+        self, world: _World
+    ) -> None:
+        """Its stream exists; `workflow_execution_details` and the to-do list lag it.
+
+        The 404 fallback must not answer "it will not run" for a run that is
+        running: the request is withdrawn (harmless), and the execution itself
+        is cancelled through its aggregate, as any started run is.
+        """
+        execution_id = await world.post_execute()
+        await world.agent.until(lambda: execution_id in world.agent.inside)
+        assert execution_id in world.executions.streams
+
+        response = await _cancel(execution_id)
+
+        assert (response.execution_id, response.state) == (execution_id, "running")
+        assert response.message == "Cancel signal queued"
+        signal = await world.signals.dequeue(execution_id)
+        assert signal is not None
+        assert signal.reason == _REASON
+        await _release_everything(world)
