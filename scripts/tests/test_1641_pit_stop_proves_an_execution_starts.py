@@ -126,7 +126,9 @@ def host() -> Iterator[tuple[_Host, str]]:
                 return
             if state.cancelled:
                 # A withdrawn start never had a phase (queued_start.py, #1650).
-                ended = _detail("cancelled") if state.withdrawn else _detail("cancelled", "cancelled")
+                ended = (
+                    _detail("cancelled") if state.withdrawn else _detail("cancelled", "cancelled")
+                )
                 self._answer(200, ended)
                 return
             body = state.details[min(state.gets, len(state.details) - 1)]
@@ -264,7 +266,10 @@ def test_a_probe_that_reaches_running_is_cancelled_and_the_pit_stop_is_done(
     proc = _run(tmp_path, api)
     assert proc.returncode == 0, proc.stderr
     assert "PIT STOP DONE: v0.40.0-beta.1 live in" in proc.stdout
-    assert f"Probe {_PROBE_ID} reached a running phase and was stopped (terminal, verified by GET)." in proc.stdout
+    assert (
+        f"Probe {_PROBE_ID} reached a running phase and was stopped (terminal, verified by GET)."
+        in proc.stdout
+    )
     assert "heartbeat=running" in proc.stdout
     # The probe went through the open gate, and was left terminal for the next drain.
     calls = _calls(state)
