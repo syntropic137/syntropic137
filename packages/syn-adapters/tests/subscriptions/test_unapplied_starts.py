@@ -15,12 +15,15 @@ import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import grpc
 import pytest
+from event_sourcing.core.errors import EventStoreError
 from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_adapters.subscriptions import unapplied_starts
+from syn_adapters.subscriptions.paged_read import OversizedEventError
 from syn_adapters.subscriptions.unapplied_starts import (
     UnappliedStart,
     UnappliedStartDetector,
@@ -544,3 +547,96 @@ async def test_applied_starts_reads_by_primary_key_never_by_json_filter() -> Non
     for store in (list_store, detail_store):
         assert store.get_many_calls == 1
         assert store.query_calls == 0
+
+
+# --- #1640: a page is bounded by the transport in BYTES, not by count -------
+
+
+def _resource_exhausted(size: int, limit: int) -> EventStoreError:
+    """Exactly what `GrpcEventStoreClient.read_all` raises for an oversize reply."""
+    cause = grpc.aio.AioRpcError(
+        grpc.StatusCode.RESOURCE_EXHAUSTED,
+        grpc.aio.Metadata(),
+        grpc.aio.Metadata(),
+        details=f"Received message larger than max ({size} vs. {limit})",
+    )
+    wrapped = EventStoreError(f"Failed to read all events: {cause}")
+    wrapped.__cause__ = cause  # the client raises it `from` the RpcError
+    return wrapped
+
+
+class _ByteLimitedStore(_ListStore):
+    """`read_all` that refuses any page whose payload exceeds `max_bytes`, as the
+    gRPC client refuses a ReadAll reply over its receive limit (4 MiB default).
+
+    The count asked for is irrelevant to the transport; only the bytes are."""
+
+    def __init__(self, events: Sequence[EventEnvelope[DomainEvent]], *, max_bytes: int) -> None:
+        super().__init__(events)
+        self.max_bytes = max_bytes
+        self.refused = 0
+
+    async def read_all(
+        self, from_global_nonce: int = 0, max_count: int = 100, forward: bool = True
+    ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]:
+        page, is_end, next_from = await super().read_all(from_global_nonce, max_count, forward)
+        size = sum(len(envelope.model_dump_json()) for envelope in page)
+        if size > self.max_bytes:
+            self.refused += 1
+            raise _resource_exhausted(size, self.max_bytes)
+        return page, is_end, next_from
+
+
+def _fat_started(execution_id: str) -> WorkflowExecutionStartedEvent:
+    # ~25 KB per start, the size #1640 measured on the selfhost store.
+    return _started(execution_id).model_copy(update={"inputs": {"task": "x" * 25_000}})
+
+
+_FAT_IDS = [f"exec-{i:012x}" for i in range(60)]
+_FAT_STORE = [_envelope(_fat_started(eid), 1_000 + i, eid) for i, eid in enumerate(_FAT_IDS)]
+_FAT_DROPPED = _FAT_IDS[47]
+#: 500 -> 250 -> ... -> 1: the refusals one scan can pay before giving up on an event.
+_PAGE_SIZE_HALVINGS = 8
+
+
+@pytest.mark.asyncio
+async def test_a_page_over_the_transport_byte_limit_is_read_in_smaller_pages() -> None:
+    """#1640: 500 events of ~25 KB came to 12.4 MB, over the 4 MiB client
+    limit, and the check failed every interval. Here ~4 events fit and the
+    first page asked for does not: the check must still read every event and
+    find the dropped start, which sits well past the first refused page."""
+    checkpoints = MemoryCheckpointStore()
+    listing = WorkflowExecutionListProjection(InMemoryProjectionStore())
+    detail = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
+    dropped_at = 1_000 + _FAT_IDS.index(_FAT_DROPPED)
+    await _project([listing, detail], checkpoints, _FAT_STORE, drop=dropped_at)
+    store = _ByteLimitedStore(_FAT_STORE, max_bytes=110_000)
+    detector = UnappliedStartDetector(store, checkpoints, (listing, detail), is_settled=_settled)
+
+    await detector.check()
+    report = await detector.check()
+
+    assert store.refused > 0  # the hazard was actually exercised
+    assert _pairs(report) == {(LIST, _FAT_DROPPED), (DETAIL, _FAT_DROPPED)}
+    assert report is not None and report.scanned_through == _FAT_STORE[-1].metadata.global_nonce
+
+
+@pytest.mark.asyncio
+async def test_a_single_event_over_the_limit_is_named_not_skipped() -> None:
+    """No page size can carry an event larger than the transport limit. The
+    check must not step over it (it could be the dropped start) and must say
+    where it is stuck, so the watch logs something an operator can act on."""
+    checkpoints = MemoryCheckpointStore()
+    listing = WorkflowExecutionListProjection(InMemoryProjectionStore())
+    detail = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
+    await _project([listing, detail], checkpoints, _FAT_STORE, drop=None)
+    store = _ByteLimitedStore(_FAT_STORE, max_bytes=10_000)  # below one event
+    detector = UnappliedStartDetector(store, checkpoints, (listing, detail), is_settled=_settled)
+
+    with pytest.raises(OversizedEventError) as raised:
+        await detector.check()
+
+    # A first scan reads from the start of the store; the event is the first one after it.
+    assert raised.value.from_global_nonce == 1
+    assert "at or after global nonce 1 " in str(raised.value)
+    assert store.refused == 1 + _PAGE_SIZE_HALVINGS
