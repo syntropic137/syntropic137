@@ -64,6 +64,7 @@ _EVERY_FIELD: Mapping[str, object] = {
     "prompt_template": "do the thing",
     "max_tokens": 1234,
     "timeout_seconds": 2400,
+    "max_cost_usd": 12.5,
     "allowed_tools": ["Read", "Grep"],
     # NOT the default. True is the default, so asserting it would pass with
     # the mapping deleted -- the same tautology the execution_type and
@@ -131,6 +132,7 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.prompt_template == "do the thing"
     assert phase.max_tokens == 1234
     assert phase.timeout_seconds == 2400
+    assert phase.max_cost_usd == 12.5
     assert phase.allowed_tools == ["Read", "Grep"]
     # False cannot be produced by any fallback here: the domain field, the
     # `p.get` default and `PhaseYamlDefinition` all default to True, so only

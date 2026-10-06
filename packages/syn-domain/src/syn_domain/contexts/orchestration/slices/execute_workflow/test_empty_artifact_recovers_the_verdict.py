@@ -558,6 +558,7 @@ class TestTheVerdictSurvivesEveryHop:
         # The invocation is now durably registered, so its outcome is recorded:
         # these are read for it and must be real values, not truthy mocks.
         agent_result.stream_result.leader_native_session_id = None
+        agent_result.stream_result.cost_limit_reason = None
         agent_result.launch_failed = False
         agent_result.command = AgentExecutionCompletedCommand(
             execution_id="exec-0bac0e1ed2b2",
