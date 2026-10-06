@@ -327,24 +327,47 @@ affects - a changed page, and every page that renders a changed component -
 at both viewports:
 
 ```
-cd apps/syn-dashboard-ui
+REPO=/workspace/repos/syntropic137
+SHOT="$REPO/apps/syn-dashboard-ui/scripts/screenshot.mjs"
+
+# apps/syn-dashboard-ui
+cd "$REPO/apps/syn-dashboard-ui"
 pnpm install --frozen-lockfile && pnpm build
 pnpm preview --port 4173 --strictPort &
-node scripts/screenshot.mjs http://localhost:4173/<route> \
+URL=http://localhost:4173
+
+# apps/syn-docs instead (Next.js; `next start` exits if the port is taken)
+cd "$REPO/apps/syn-docs"
+pnpm install --frozen-lockfile && pnpm build
+pnpm start -p 4174 &
+URL=http://localhost:4174
+
+# then, for each affected <route>, from any directory:
+node "$SHOT" "$URL/<route>" \
   /workspace/artifacts/output/<route>-1280x800.png --viewport 1280x800
-node scripts/screenshot.mjs http://localhost:4173/<route> \
+node "$SHOT" "$URL/<route>" \
   /workspace/artifacts/output/<route>-390x844.png --viewport 390x844
 ```
 
-For `apps/syn-docs/` the same holds with `pnpm build && pnpm start -p <port>`.
-`scripts/screenshot.mjs` uses the Playwright and headless Chromium baked into
-this image, so nothing needs installing; its README section ("Screenshots for
+There is one screenshot script and it lives in the dashboard app; `syn-docs`
+has none, so always call it by the absolute path above, never as a relative
+`scripts/screenshot.mjs`. `$SHOT` uses the Playwright and headless Chromium baked into
+this image, so nothing needs installing; `apps/syn-dashboard-ui/README.md` ("Screenshots for
 UI verification") says what it prints. It exits 1 on an HTTP error status, and
 that is a failed screenshot, not a picture of the page. Name each file
 `<route>-<viewport>.png`, with `root` for `/` and `-` for each further `/`
 (`executions-1280x800.png`, `executions-abc-390x844.png`). Write them to
 `/workspace/artifacts/output/`, the only place the platform collects; never
 commit them.
+
+**The PNG files do not survive the handoff to the next phase.** Artifact
+collection is text-only today and stores any non-UTF-8 file corrupted, without
+an error (#990), so the copies a later phase finds under `artifacts/input/`
+will not open. The judgement therefore has to be made HERE, in this workspace,
+on the files you just wrote, and it reaches the next phase and the PR as the
+`## Screenshots` table below - which is why every row says in words what the
+image shows. Do not defer looking to a later phase, and do not cite a PNG
+from `artifacts/input/` as evidence.
 
 **Then open every PNG and look at it.** You can read image files. A screenshot
 nobody looked at is the same as no screenshot. For each one judge: is the

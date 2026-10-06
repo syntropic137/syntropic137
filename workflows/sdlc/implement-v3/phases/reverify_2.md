@@ -169,10 +169,12 @@ defect the first pass should have caught, and it stays open until a pass takes
 them.
 
 If the fix touched UI files, re-take the screenshots for the routes it affects
-the same way (`pnpm build`, `pnpm preview --port 4173 --strictPort`,
-`node scripts/screenshot.mjs <url> /workspace/artifacts/output/<route>-<viewport>.png --viewport <WxH>`),
+with the recipe in `verify.md`'s section (build, serve, then
+`node /workspace/repos/syntropic137/apps/syn-dashboard-ui/scripts/screenshot.mjs <url> /workspace/artifacts/output/<route>-<viewport>.png --viewport <WxH>`,
+the same absolute path for `apps/syn-docs/`, which has no script of its own),
 open each PNG and look at it. If it did not, the first pass's screenshots still
-describe the candidate.
+describe the candidate - through its table, not its files: the PNGs under
+`artifacts/input/` arrive corrupted (#990) and will not open.
 
 Either way, copy the `## Screenshots` section into your report, replacing each
 row you re-took, so that it describes the SHA you certify. `finalize_pr` reads
