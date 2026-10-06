@@ -92,9 +92,20 @@ fitness functions, eval cases. The next run is better because of the last one.
    stop dispatching while more than 8 agent PRs are open; land first. At least
    20% of dispatches go to tech debt and UI feedback (`GET /feedback?status=open`).
 
-6. **Never block on a question.** Make the conventional choice, log it under
-   HUMAN REVIEW in the scratchpad with your default, and keep working. A single
-   unanswered question once idled the platform for a whole day.
+6. **Nothing the orchestrator does may block the loop.** That rules out three
+   kinds of wait:
+   - **A question for the owner.** Make the conventional choice, log it under
+     HUMAN REVIEW in the scratchpad with your default, and keep working. A
+     single unanswered question once idled the platform for a whole day.
+   - **A command that waits for input.** Use the non-interactive form
+     (`syn control cancel --force`, `codex exec ... < /dev/null`).
+   - **A foreground wait of unknown length.** Run CI watches, pit stops and
+     subagents in the background with a bound, and act when they notify; never
+     poll with `sleep`. A tick only fires while the orchestrator is idle, so a
+     stuck foreground command stops the whole loop.
+
+   Friction goes to `papercuts.md`, orchestrator friction to the scratchpad log,
+   and owner decisions to HUMAN REVIEW. None of the three is waited on.
 
 7. **Name the trap in every task prompt.** Agents satisfy every stated
    requirement and fail on the hop nobody described. Each prompt names the prior
