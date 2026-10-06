@@ -307,6 +307,63 @@ something, confirm the recording is durable rather than in-memory - an event
 constructed and never persisted has shipped here before, and every unit test
 passed.
 
+## A UI change is verified by looking at it
+
+If the diff touches `apps/syn-dashboard-ui/` or another UI app (today
+`apps/syn-docs/`), you verify it with screenshots, not by reading JSX. The
+owner's rule is that a UI PR does not come back to a human to be looked at; you
+are the one who looks. **A UI change verified without screenshots is
+BLOCKING**, however good the code reads.
+
+Build and serve the production build, then screenshot every route the diff
+affects - a changed page, and every page that renders a changed component -
+at both viewports:
+
+```
+cd apps/syn-dashboard-ui
+pnpm install --frozen-lockfile && pnpm build
+pnpm preview --port 4173 --strictPort &
+node scripts/screenshot.mjs http://localhost:4173/<route> \
+  /workspace/artifacts/output/<route>-1280x800.png --viewport 1280x800
+node scripts/screenshot.mjs http://localhost:4173/<route> \
+  /workspace/artifacts/output/<route>-390x844.png --viewport 390x844
+```
+
+For `apps/syn-docs/` the same holds with `pnpm build && pnpm start -p <port>`.
+`scripts/screenshot.mjs` uses the Playwright and headless Chromium baked into
+this image, so nothing needs installing; its README section ("Screenshots for
+UI verification") says what it prints. It exits 1 on an HTTP error status, and
+that is a failed screenshot, not a picture of the page. Name each file
+`<route>-<viewport>.png`, with `root` for `/` and `-` for each further `/`
+(`executions-1280x800.png`, `executions-abc-390x844.png`). Write them to
+`/workspace/artifacts/output/`, the only place the platform collects; never
+commit them.
+
+**Then open every PNG and look at it.** You can read image files. A screenshot
+nobody looked at is the same as no screenshot. For each one judge: is the
+layout broken, does anything overflow or force horizontal scroll at phone
+width, is an element the change was meant to add or move missing, is the page
+showing an error state where the change should render.
+
+**No API is reachable here, and the dashboard has no fixture or mock-data mode**
+(#1647), so pages render their shell - navigation, header, filters, page chrome
+- with the data area in its loading state. That is expected and is not a
+defect. Do not build a mock layer to get around it. Screenshot what renders and
+judge only what the PR changed: a change to layout, navigation, filters or
+anything else in the shell is fully checkable; a change that only shows with
+data (a table row, a chart, a cost figure) is not, so name it under
+`Unverified by design` with the reason, rather than certifying a loading
+spinner as proof of it.
+
+Put a `## Screenshots` section in your report with one row per image:
+
+| Path | Viewport | What it shows | Verdict |
+|---|---|---|---|
+
+with the screenshot script's output line for each. `finalize_pr` carries that
+section into the PR body, so a reviewer sees what was looked at without
+opening anything.
+
 ## Write to `artifacts/output/verify.md`
 
 **This phase declares a markdown output artifact, so a run that writes
