@@ -73,16 +73,26 @@ probe still in flight is in-flight work to the next pit stop's drain.
   running, or it could not be dispatched, or its cancel did not land within
   `SYN_PIT_PROBE_CANCEL_TIMEOUT` (default 300s), or it FAILED or was
   interrupted after a phase ran (a failure is not the clean stop asked for).
-  The message names the execution id and its last status, and prints the
-  rollback command.
+  The message names the execution id and its last status, says whether the
+  probe was verified terminal, and prints the rollback command.
 - **Both bounds are wall-clock deadlines.** Every request is capped to the time
   left, so slow answers cannot stretch a 600s probe into an hour and a half.
-- **The cancel is re-sent until GET shows a terminal status.** A start still
-  `queued` for capacity has no execution yet, and `POST /executions/{id}/cancel`
-  answers 404 for it until it starts; there is no cancel for an accepted start
-  that has not started. If it is still queued when the cancel deadline passes,
-  the failure says it is live: cancel it by hand once it runs, or the next pit
-  stop's drain waits on it. **Nothing is rolled
+- **The probe is left terminal, and that is VERIFIED, not assumed.** Whether
+  it ran or not, the pit stop cancels it and reads `GET /executions/{id}` back
+  until it shows `cancelled`, `completed`, `failed` or `interrupted`, within
+  `SYN_PIT_PROBE_CANCEL_TIMEOUT`. A probe still in flight is in-flight work to
+  the next pit stop's drain. A start still `queued` for capacity is
+  **withdrawn** by the same cancel (#1650): it never runs, and GET reports it
+  `cancelled` with no phases. A probe that was withdrawn is still a FAILED pit
+  stop: it never ran, so nothing proved the start path. The cancel is re-sent
+  on every read that is not terminal, because a withdrawal can lose the race
+  with its own start (#1650's known limit), and only a later cancel stops the
+  run that results. An accepted cancel (200) is not proof.
+- **If it cannot be seen terminal**, the pit stop exits non-zero, says
+  `PROBE <id> MAY STILL BE LIVE`, and prints the exact command that stops it:
+  `curl -fsS -u "admin:$SYN_API_PASSWORD" -X POST <api>/executions/<id>/cancel`
+  (or `syn control cancel <id>`). Run it, then check the execution shows
+  `cancelled` before the next pit stop. **Nothing is rolled
   back automatically, and admission stays OPEN**: other users' work is not
   blocked by a failed probe. Decide, then roll back by hand.
 - **`--skip-probe`** is for emergencies only. It is logged loudly, the DONE

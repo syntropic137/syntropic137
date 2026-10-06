@@ -419,10 +419,12 @@ nap() {  # $1: deadline; sleep the poll interval, never past the deadline
 # means. Prints a status line and returns:
 #   0 STARTED   a phase is running or completed, and the run is still live
 #   1 PENDING   queued, starting, or a phase not yet running
-#   2 FAILED    the run failed or was interrupted, or a phase failed - at ANY
-#               point, including after a phase ran: that is not a clean stop
-#   3 ENDED     completed or cancelled AFTER a phase ran or completed
-#   4 STOPPED   completed or cancelled with no phase ever running
+#   2 FAILED    the run failed or was interrupted - at ANY point, including
+#               after a phase ran: that is not a clean stop. TERMINAL.
+#   3 ENDED     completed or cancelled AFTER a phase ran or completed. TERMINAL.
+#   4 STOPPED   completed or cancelled with no phase ever running, which is
+#               also how a queued start that was withdrawn reads (#1650). TERMINAL.
+#   5 FAILING   a phase failed, but the run itself is not terminal yet
 probe_classify() {
     python3 - "$1" <<'PROBE'
 import json, sys
@@ -431,50 +433,78 @@ phases = [f"{p.get('phase_id')}={p.get('status')}" for p in d.get("phases") or [
 print(f"status={d.get('status')} phases=[{', '.join(phases)}]")
 statuses = [p.get("status") for p in d.get("phases") or []]
 started = any(s in ("running", "completed") for s in statuses)
-if d.get("status") in ("failed", "interrupted") or "failed" in statuses:
+if d.get("status") in ("failed", "interrupted"):
     sys.exit(2)
 if d.get("status") in ("completed", "cancelled"):
     sys.exit(3 if started else 4)
+if "failed" in statuses:
+    sys.exit(5)
 sys.exit(0 if started else 1)
 PROBE
 }
 
 # One read of the probe: sets PROBE_CLASS (as above, or 1 when the GET itself
-# failed, which is what a start dropped before it existed looks like) and,
-# when there was an answer, PROBE_LAST.
+# failed, which is what a start dropped before it existed looks like) and
+# PROBE_LAST, which says which of the two it was.
 probe_read() {  # $1: execution id, $2: deadline
     local t
     PROBE_CLASS=1
     t="$(left "$2")"; [ "$t" -gt 0 ] || return 0
     if api "/executions/$1" "$TMP/probe_detail.json" "$t" 2>/dev/null; then
         if PROBE_LAST="$(probe_classify "$TMP/probe_detail.json")"; then PROBE_CLASS=0; else PROBE_CLASS=$?; fi
+    else
+        PROBE_LAST="not found by GET /executions/$1, or no answer in time (a start dropped before it existed looks exactly like this)"
     fi
 }
 
-# Leave the probe TERMINAL. A probe still in flight is in-flight work to the
-# next pit stop's drain, which would wait on it. The cancel is SENT AGAIN on
-# every read until GET shows a terminal status: an accepted start still queued
-# for capacity has no execution yet, so POST /cancel answers 404 for it, and
-# only a later attempt can stop it once it starts. Returns 0 on a clean stop,
-# 2 when the run FAILED instead, 1 when the deadline passed with it still live.
+# Leave the probe TERMINAL, and say so only once GET has SHOWN it terminal: a
+# probe still in flight is in-flight work to the next pit stop's drain, which
+# would wait on it. An accepted cancel is not proof - it is read back. Since
+# #1650 the cancel withdraws a start still queued for capacity, so a probe
+# that never started is stopped too. The cancel is re-sent on every read that
+# is not terminal: a withdrawal that loses the race with its own start
+# (#1650's known limit) leaves a live run that only a later cancel stops.
+# Returns 0 once GET shows completed/cancelled, 2 once it shows failed or
+# interrupted, 1 when the deadline passed with no terminal status SEEN.
 probe_settle() {  # $1: execution id
     local deadline t
     deadline=$(( $(mono_now) + PROBE_CANCEL_TIMEOUT ))
     while :; do
-        t="$(left "$deadline")"
-        if [ "$t" -gt 0 ]; then
-            api_post "/executions/$1/cancel" '{"reason": "pit stop probe: the start path is proven"}' "$TMP/probe_cancel.json" "$t" 2>/dev/null \
-                || echo "   cancel not accepted yet (still queued, or already terminal); reading it back"
-        fi
         probe_read "$1" "$deadline"
         printf '   probe %s: %s\n' "$1" "$PROBE_LAST"
         case "$PROBE_CLASS" in
             3|4) return 0 ;;
             2) return 2 ;;
         esac
-        [ "$(left "$deadline")" -gt 0 ] || return 1
+        t="$(left "$deadline")"
+        [ "$t" -gt 0 ] || return 1
+        api_post "/executions/$1/cancel" '{"reason": "pit stop probe: stopping it before the pit stop exits"}' "$TMP/probe_cancel.json" "$t" 2>/dev/null \
+            || echo "   cancel not accepted; reading it back"
         nap "$deadline"
     done
+}
+
+# A probe that may still be live is never left without the exact command that
+# stops it. $SYN_API_PASSWORD stays a literal here: it is for the operator's
+# shell to expand, and is never expanded into a log.
+probe_cleanup() {  # $1: execution id
+    # shellcheck disable=SC2016  # the literal $SYN_API_PASSWORD is the point
+    printf 'curl -fsS -u "admin:$SYN_API_PASSWORD" -X POST %s/executions/%s/cancel' "$API" "$1"
+}
+
+# The pit stop has failed because of the probe. Settle it first, so the next
+# drain does not wait on it, then die. When the settle could not SEE it
+# terminal, the failure says it is still live and how to stop it.
+probe_abort() {  # $1: why
+    local settled=0
+    probe_settle "$PROBE_ID" || settled=$?
+    if [ "$settled" = 1 ]; then
+        die "$1
+PROBE $PROBE_ID MAY STILL BE LIVE: not seen terminal within ${PROBE_CANCEL_TIMEOUT}s of cancelling (last: $PROBE_LAST). The next pit stop's drain will wait on it. Stop it, then check GET /executions/$PROBE_ID shows cancelled:
+   $(probe_cleanup "$PROBE_ID")"
+    fi
+    die "$1
+Probe $PROBE_ID is terminal, verified by GET: $PROBE_LAST"
 }
 
 PROBE_LINE=""
@@ -500,21 +530,17 @@ else
         || die "the probe dispatch answered without an execution_id"
     RECOVERY="$RECOVERY
 Inspect the probe: curl -fsS -u admin:\$SYN_API_PASSWORD $API/executions/$PROBE_ID"
-    PROBE_LAST="not found by GET /executions/$PROBE_ID (a start dropped before it existed looks exactly like this)"
     while :; do
         probe_read "$PROBE_ID" "$probe_deadline"
         printf '   probe %s: %s\n' "$PROBE_ID" "$PROBE_LAST"
         case "$PROBE_CLASS" in
             0|3) break ;;
-            2|4) die "probe $PROBE_ID ended without a phase reaching running. Last status: $PROBE_LAST" ;;
+            2|4|5) probe_abort "probe $PROBE_ID ended without a phase reaching running. Last status: $PROBE_LAST" ;;
         esac
         if [ "$(left "$probe_deadline")" = 0 ]; then
-            # Still cancelled, so the next drain does not wait on a run that never started.
-            timed_out="$PROBE_LAST"
-            settled=0; probe_settle "$PROBE_ID" || settled=$?
-            [ "$settled" != 1 ] \
-                || echo "   WARNING: probe $PROBE_ID is not terminal (last: $PROBE_LAST). A start still QUEUED cannot be cancelled until it starts: watch it and POST $API/executions/$PROBE_ID/cancel once it runs, or the next drain waits on it" >&2
-            die "probe $PROBE_ID did not reach a running phase within ${PROBE_TIMEOUT}s. Last status: $timed_out"
+            # Withdrawn or cancelled and SEEN terminal, so the next drain does
+            # not wait on it; a FAILURE either way, because it never ran.
+            probe_abort "probe $PROBE_ID did not reach a running phase within ${PROBE_TIMEOUT}s. Last status: $PROBE_LAST"
         fi
         nap "$probe_deadline"
     done
@@ -527,9 +553,10 @@ Inspect the probe: curl -fsS -u admin:\$SYN_API_PASSWORD $API/executions/$PROBE_
             die "probe $PROBE_ID FAILED after a phase ran: the run did not stop cleanly. Last status: $PROBE_LAST"
         fi
         [ "$settled" = 0 ] \
-            || die "the start path works, but probe $PROBE_ID is not terminal after ${PROBE_CANCEL_TIMEOUT}s (last: $PROBE_LAST): cancel it by hand (POST $API/executions/$PROBE_ID/cancel) or the next drain waits on it"
+            || die "the start path works, but probe $PROBE_ID is not terminal after ${PROBE_CANCEL_TIMEOUT}s (last: $PROBE_LAST). PROBE $PROBE_ID MAY STILL BE LIVE, and the next pit stop's drain will wait on it. Stop it, then check GET /executions/$PROBE_ID shows cancelled:
+   $(probe_cleanup "$PROBE_ID")"
     fi
-    PROBE_LINE=" Probe $PROBE_ID reached a running phase and was stopped."
+    PROBE_LINE=" Probe $PROBE_ID reached a running phase and was stopped (terminal, verified by GET)."
 fi
 
 if [ "$DRY" = 1 ]; then

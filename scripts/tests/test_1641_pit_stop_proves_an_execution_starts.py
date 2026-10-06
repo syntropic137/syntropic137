@@ -41,12 +41,13 @@ _PROBE_ID = "exec-probe0000001"
 class _Host:
     """What the fake API answers. ``details`` are successive GET bodies for the
     probe, the last repeating; None is a 404. Once the first cancel request
-    arrives, GET answers from ``after_cancel`` instead, when it is given. Once a
-    cancel lands, GET answers ``cancelled``.
+    arrives, GET answers from ``after_cancel`` instead, when it is given.
 
-    Cancel answers 404 while the probe has no execution yet - a 404 or a
-    ``queued`` body - because syn-api's cancel resolves only the execution
-    read model, where an accepted start still waiting for capacity has no row.
+    Cancel answers the way syn-api does since #1650 (PR #1651): 404 for an id
+    GET does not know; for a start still ``queued`` it WITHDRAWS the request,
+    answers 200 ``state=cancelled``, and GET then reports ``cancelled`` with no
+    phases; for a started run it cancels it, and GET reports ``cancelled``.
+    ``cancel_lands=False`` is a cancel that answers 200 and changes nothing.
     """
 
     details: list[dict[str, object] | None]
@@ -60,6 +61,7 @@ class _Host:
     auths: set[str] = field(default_factory=set)
     gets: int = 0
     cancelled: bool = False
+    withdrawn: bool = False
 
 
 def _detail(status: str, *phases: str) -> dict[str, object]:
@@ -104,11 +106,15 @@ def host() -> Iterator[tuple[_Host, str]]:
                 if not state.cancel_seen and state.after_cancel is not None:
                     state.details, state.gets = state.after_cancel, 0
                 state.cancel_seen = True
-                if state.current is None or state.current.get("status") == "queued":
+                if state.current is None:
                     self._answer(404, {"detail": "Execution not found"})
                     return
-                state.cancelled = state.cancel_lands
-                self._answer(200, {"success": True, "execution_id": _PROBE_ID})
+                if state.cancel_lands:
+                    state.cancelled = True
+                    state.withdrawn = state.current.get("status") == "queued"
+                self._answer(
+                    200, {"success": True, "execution_id": _PROBE_ID, "state": "cancelled"}
+                )
             else:
                 self._answer(404, {"detail": "unknown"})
 
@@ -119,7 +125,9 @@ def host() -> Iterator[tuple[_Host, str]]:
                 self._answer(404, {"detail": "unknown"})
                 return
             if state.cancelled:
-                self._answer(200, _detail("cancelled", "cancelled"))
+                # A withdrawn start never had a phase (queued_start.py, #1650).
+                ended = _detail("cancelled") if state.withdrawn else _detail("cancelled", "cancelled")
+                self._answer(200, ended)
                 return
             body = state.details[min(state.gets, len(state.details) - 1)]
             state.gets += 1
@@ -232,6 +240,17 @@ def _no_secret_leaked(proc: subprocess.CompletedProcess[str]) -> None:
     assert _PASSWORD not in proc.stdout + proc.stderr
 
 
+_CLEANUP = 'curl -fsS -u "admin:$SYN_API_PASSWORD" -X POST {api}/executions/{id}/cancel'
+
+
+def _verified_terminal_after_cancel(state: _Host) -> bool:
+    """The last cancel was READ BACK: a GET of the probe came after it."""
+    calls = _calls(state)
+    cancel = ("POST", f"/executions/{_PROBE_ID}/cancel")
+    last = max(i for i, call in enumerate(calls) if call == cancel)
+    return ("GET", f"/executions/{_PROBE_ID}") in calls[last + 1 :]
+
+
 def test_a_probe_that_reaches_running_is_cancelled_and_the_pit_stop_is_done(
     tmp_path: Path, host: tuple[_Host, str]
 ) -> None:
@@ -245,7 +264,7 @@ def test_a_probe_that_reaches_running_is_cancelled_and_the_pit_stop_is_done(
     proc = _run(tmp_path, api)
     assert proc.returncode == 0, proc.stderr
     assert "PIT STOP DONE: v0.40.0-beta.1 live in" in proc.stdout
-    assert f"Probe {_PROBE_ID} reached a running phase and was stopped." in proc.stdout
+    assert f"Probe {_PROBE_ID} reached a running phase and was stopped (terminal, verified by GET)." in proc.stdout
     assert "heartbeat=running" in proc.stdout
     # The probe went through the open gate, and was left terminal for the next drain.
     calls = _calls(state)
@@ -253,7 +272,9 @@ def test_a_probe_that_reaches_running_is_cancelled_and_the_pit_stop_is_done(
         ("POST", "/workflows/telemetry-lag-probe-v1/execute")
     )
     assert _cancelled(state)
-    assert "status=cancelled" in proc.stdout
+    assert state.cancelled
+    assert _verified_terminal_after_cancel(state)
+    assert "status=cancelled phases=[heartbeat=cancelled]" in proc.stdout
     assert state.auths == {"Basic " + base64.b64encode(f"admin:{_PASSWORD}".encode()).decode()}
     _no_secret_leaked(proc)
 
@@ -268,38 +289,53 @@ def test_a_phase_that_already_completed_counts_as_started(
     assert "PIT STOP DONE" in proc.stdout
 
 
-def test_a_probe_still_queued_at_the_deadline_fails_without_done(
+def test_a_probe_queued_past_both_deadlines_is_withdrawn_verified_and_still_fails(
     tmp_path: Path, host: tuple[_Host, str]
 ) -> None:
     """syn-api's shape for an accepted start waiting for capacity: ``queued``
-    with no phases, and a cancel that 404s until it starts. It starts during
-    the settle, and the RE-SENT cancel stops it before the script exits."""
+    with no phases. Since #1650 the cancel withdraws it, and the pit stop reads
+    the withdrawal back as ``cancelled`` before it exits. It still FAILS: the
+    probe never ran, so nothing proved the start path."""
     state, api = host
     state.details = [_detail("queued")]
-    state.after_cancel = [_detail("queued"), _detail("queued"), _detail("running", "running")]
-    proc = _run(tmp_path, api, probe_timeout=2, cancel_timeout=30)
+    proc = _run(tmp_path, api, probe_timeout=1, cancel_timeout=3)
     _failed_loudly(proc)
-    assert "did not reach a running phase within 2s" in proc.stderr
+    assert "did not reach a running phase within 1s" in proc.stderr
     assert "Last status: status=queued phases=[]" in proc.stderr
-    # Refused while queued, sent again, and landed once it started: terminal.
-    assert _cancel_requests(state) >= 3
-    assert state.cancelled
-    assert "status=cancelled" in proc.stdout
-    assert "WARNING" not in proc.stderr
+    assert state.withdrawn
+    assert _verified_terminal_after_cancel(state)
+    assert f"Probe {_PROBE_ID} is terminal, verified by GET: status=cancelled phases=[]" in (
+        proc.stderr
+    )
+    assert "MAY STILL BE LIVE" not in proc.stderr
     assert _admission_never_reclosed(state)
     _no_secret_leaked(proc)
 
 
-def test_a_probe_queued_past_both_deadlines_says_it_is_still_live(
-    tmp_path: Path, host: tuple[_Host, str]
+@pytest.mark.parametrize(
+    "probe",
+    [[_detail("queued")], [_detail("running", "running")]],
+    ids=["queued", "running"],
+)
+def test_a_cancel_accepted_but_never_terminal_fails_with_the_cleanup_command(
+    tmp_path: Path, host: tuple[_Host, str], probe: list[dict[str, object] | None]
 ) -> None:
+    """An accepted cancel is not proof. Whether the probe was still queued or
+    already running, a cancel that answers 200 while GET never shows it
+    terminal fails the pit stop, and names the exact command that stops it."""
     state, api = host
-    state.details = [_detail("queued")]
+    state.details = probe
+    state.cancel_lands = False
     proc = _run(tmp_path, api, probe_timeout=1, cancel_timeout=1)
-    _failed_loudly(proc)
+    assert proc.returncode != 0
+    assert "PIT STOP DONE" not in proc.stdout + proc.stderr
+    assert _cancelled(state)
     assert not state.cancelled
-    assert f"WARNING: probe {_PROBE_ID} is not terminal" in proc.stderr
-    assert "still QUEUED cannot be cancelled until it starts" in proc.stderr
+    assert f"PROBE {_PROBE_ID} MAY STILL BE LIVE" in proc.stderr
+    assert _CLEANUP.format(api=api, id=_PROBE_ID) in proc.stderr
+    assert "admission is OPEN" in proc.stderr
+    assert _admission_never_reclosed(state)
+    _no_secret_leaked(proc)
 
 
 @pytest.mark.parametrize("ending", ["failed", "interrupted"])
@@ -345,7 +381,8 @@ def test_a_start_dropped_before_it_existed_fails_without_done(
     proc = _run(tmp_path, api)
     _failed_loudly(proc)
     assert "not found by GET" in proc.stderr
-    assert "is not terminal" in proc.stderr
+    assert f"PROBE {_PROBE_ID} MAY STILL BE LIVE" in proc.stderr
+    assert _CLEANUP.format(api=api, id=_PROBE_ID) in proc.stderr
 
 
 @pytest.mark.parametrize(
@@ -389,6 +426,7 @@ def test_a_probe_whose_cancel_never_lands_is_not_done(
     assert proc.returncode != 0
     assert "PIT STOP DONE" not in proc.stdout
     assert f"the start path works, but probe {_PROBE_ID} is not terminal after 3s" in proc.stderr
+    assert _CLEANUP.format(api=api, id=_PROBE_ID) in proc.stderr
 
 
 def test_skip_probe_dispatches_nothing_and_says_so_loudly(
