@@ -185,14 +185,14 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
 }) {
   const showControl = !!executionId && CONTROLLABLE_STATUSES.has(execution.status)
   return (
-    <div className="flex justify-between items-start">
-      <div>
+    <div className="flex flex-wrap justify-between items-start gap-4">
+      <div className="min-w-0">
         <div className="flex items-start gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
             <Play className="h-6 w-6 text-emerald-400" />
           </div>
-          <div>
-            <div className="flex items-center gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Execution</h1>
               <StatusBadge
                 status={execution.status}
@@ -201,9 +201,9 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
                 pulse={execution.status === 'running'}
               />
             </div>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
-            <div className="mt-2 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
-              <span className="font-mono">{execution.workflow_execution_id}</span>
+            <p className="mt-1 break-words text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
+              <span className="break-all font-mono">{execution.workflow_execution_id}</span>
               <span>&bull;</span>
               <span>Duration: {formatDurationFromRange(execution.started_at, execution.completed_at, now)}</span>
             </div>

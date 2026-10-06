@@ -28,6 +28,7 @@ export { DispatchedTask } from './provenance/DispatchedTask'
 export { PhaseStartPins } from './provenance/PhaseStartPins'
 export { ModelBreakdown, type ModelBreakdownProps } from './ModelBreakdown'
 export {
+  CardMetric,
   ResourceCardList,
   ResourceTable,
   type ColumnDef,
