@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import socket
-from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
@@ -31,6 +31,9 @@ from syn_adapters.storage.artifact_storage.memory import InMemoryArtifactStorage
 from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
 from syn_domain.contexts.artifacts.ports import ArtifactStorageError
 from syn_shared.testing import ENV_TEST_MINIO_URL, TEST_STACK_PORTS
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 ArtifactStorage = InMemoryArtifactStorage | MinioArtifactStorage
 
