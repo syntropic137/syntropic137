@@ -449,6 +449,10 @@ PROBE
 probe_read() {  # $1: execution id, $2: deadline
     local t
     PROBE_CLASS=1
+    # Set before the deadline check: a deadline already passed when this is
+    # first called (a slow host) must still leave PROBE_LAST set, or every
+    # message naming it dies on `set -u` instead of reporting the probe.
+    PROBE_LAST="${PROBE_LAST:-no status read before the deadline}"
     t="$(left "$2")"; [ "$t" -gt 0 ] || return 0
     if api "/executions/$1" "$TMP/probe_detail.json" "$t" 2>/dev/null; then
         if PROBE_LAST="$(probe_classify "$TMP/probe_detail.json")"; then PROBE_CLASS=0; else PROBE_CLASS=$?; fi

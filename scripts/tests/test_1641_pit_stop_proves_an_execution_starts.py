@@ -317,6 +317,21 @@ def test_a_probe_queued_past_both_deadlines_is_withdrawn_verified_and_still_fail
     _no_secret_leaked(proc)
 
 
+def test_a_deadline_passed_before_the_first_read_still_reports_the_probe(
+    tmp_path: Path, host: tuple[_Host, str]
+) -> None:
+    """On a slow host the probe's deadline can pass before its first read.
+    main CI (0e2a9d996) hit it: ``PROBE_LAST: unbound variable`` killed the
+    script under ``set -u`` instead of naming the probe."""
+    state, api = host
+    state.details = [_detail("queued")]
+    proc = _run(tmp_path, api, probe_timeout=0, cancel_timeout=0)
+    assert "unbound variable" not in proc.stderr
+    _failed_loudly(proc)
+    assert "no status read before the deadline" in proc.stderr
+    _no_secret_leaked(proc)
+
+
 @pytest.mark.parametrize(
     "probe",
     [[_detail("queued")], [_detail("running", "running")]],
