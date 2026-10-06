@@ -22,6 +22,7 @@ what it was before, including its hash.
 from __future__ import annotations
 
 import hashlib
+import json
 import struct
 import zlib
 from dataclasses import dataclass, field
@@ -291,31 +292,25 @@ class TestHandoffToTheNextPhase:
 class TestHistoricalEventsStillReplay:
     #: An ArtifactCreated payload in the exact v6 shape (every field v6
     #: declared, as `model_dump()` writes it), from before binary types existed.
-    V6_PAYLOAD: dict[str, object] = {  # noqa: RUF012
-        "artifact_id": "art-v6",
-        "workflow_id": "wf-old",
-        "phase_id": "plan",
-        "execution_id": "exec-old",
-        "session_id": "s-old",
-        "artifact_type": "markdown",
-        "content_type": "text/markdown",
-        "content": "# Plan\nstep one",
-        "content_hash": hashlib.sha256(b"# Plan\nstep one").hexdigest(),
-        "size_bytes": len(b"# Plan\nstep one"),
-        "title": "Plan: artifacts/output/plan.md",
-        "storage_uri": None,
-        "is_primary_deliverable": True,
-        "derived_from": [],
-        "metadata": {},
-        "source_path": "artifacts/output/plan.md",
-        "agent_provider": "claude",
-        "agent_model": "claude-opus-5-5",
-        "created_at": "2026-09-30T12:00:00+00:00",
-    }
+    #: An ArtifactCreated payload in the exact v6 shape, serialized as the
+    #: store holds it (every field v6 declared), from before binary types existed.
+    V6_JSON = (
+        '{"artifact_id": "art-v6", "workflow_id": "wf-old", '
+        '"phase_id": "plan", "execution_id": "exec-old", '
+        '"session_id": "s-old", "artifact_type": "markdown", '
+        '"content_type": "text/markdown", "content": "# Plan\\nstep one", '
+        '"content_hash": "93df2525f1aae66e705a937c18d1f99f108f87636f5a82352676d8647531d27d", '
+        '"size_bytes": 15, "title": "Plan: artifacts/output/plan.md", '
+        '"storage_uri": null, "is_primary_deliverable": true, '
+        '"derived_from": [], "metadata": {}, '
+        '"source_path": "artifacts/output/plan.md", '
+        '"agent_provider": "claude", "agent_model": "claude-opus-5-5", '
+        '"created_at": "2026-09-30T12:00:00+00:00"}'
+    )
 
     @pytest.mark.asyncio
     async def test_v6_payload_replays_into_aggregate_and_projection(self) -> None:
-        event = ArtifactCreatedEvent.model_validate(self.V6_PAYLOAD)
+        event = ArtifactCreatedEvent.model_validate_json(self.V6_JSON)
         assert event.content_type is ContentType.TEXT_MARKDOWN
         assert not event.content_type.is_binary
 
@@ -324,20 +319,20 @@ class TestHistoricalEventsStillReplay:
         assert aggregate.content == "# Plan\nstep one"
 
         projection = ArtifactListProjection(InMemoryProjectionStore())
-        await projection.on_artifact_created(dict(self.V6_PAYLOAD))
+        await projection.on_artifact_created(json.loads(self.V6_JSON))
         row = await projection.get_by_id("art-v6")
         assert row is not None
         assert row.content == "# Plan\nstep one"
-        assert row.content_hash == self.V6_PAYLOAD["content_hash"]
+        assert row.content_hash == hashlib.sha256(b"# Plan\nstep one").hexdigest()
 
     @pytest.mark.asyncio
     async def test_a_row_projected_before_content_type_was_kept_is_text(self) -> None:
         """Rows from read-model v6 have no content_type; they are handed on as text."""
         store = InMemoryProjectionStore()
         projection = ArtifactListProjection(store)
-        await projection.on_artifact_created(
-            {k: v for k, v in self.V6_PAYLOAD.items() if k != "content_type"}
-        )
+        payload = json.loads(self.V6_JSON)
+        del payload["content_type"]
+        await projection.on_artifact_created(payload)
         files = await ArtifactQueryService(projection).get_files_for_phase_injection(
             "exec-old", ["plan"]
         )
