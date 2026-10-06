@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.model_identity import cost_by_observed_model
@@ -54,6 +55,7 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
+from .queued_start import not_yet_started, start_queue_info
 from .start_config import load_start_configs
 
 if TYPE_CHECKING:
@@ -454,6 +456,9 @@ async def get(
             error_message=detail.error_message,
             failure_classification=detail.failure_classification,
             reported_failure_reason=detail.reported_failure_reason,
+            quarantined_refs=list(detail.quarantined_refs),
+            review_verdict=detail.review_verdict,
+            delegation_failure=detail.delegation_failure,
             deliverable_produced=detail.deliverable_produced,
             reported_side_effects=detail.reported_side_effects,
             repos=list(detail.repos),
@@ -569,6 +574,9 @@ async def get_detail(
             error_message=detail.error_message,
             failure_classification=detail.failure_classification,
             reported_failure_reason=detail.reported_failure_reason,
+            quarantined_refs=list(detail.quarantined_refs),
+            review_verdict=detail.review_verdict,
+            delegation_failure=detail.delegation_failure,
             deliverable_produced=detail.deliverable_produced,
             reported_side_effects=detail.reported_side_effects,
             repos=list(detail.repos),
@@ -712,6 +720,34 @@ def _models_run(phases: list[PhaseExecutionInfo]) -> set[str]:
     return models
 
 
+async def _detail_or_queued(
+    mgr: ProjectionManager, execution_id: str
+) -> tuple[ExecutionDetailFull, str] | ExecutionDetailResponse:
+    """The stored detail and its full id, or the queued start it still is (#1557).
+
+    A 404 from either lookup falls back to the execution budget before it is
+    raised: an accepted start waiting for a slot has no record yet.
+    """
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    try:
+        full_id = await resolve_or_raise(
+            mgr.store, "workflow_execution_details", execution_id, "Execution"
+        )
+    except HTTPException as exc:
+        queued = await not_yet_started(mgr, execution_id) if exc.status_code == 404 else None
+        if queued is None:
+            raise
+        return queued
+    result = await get_detail(full_id)
+    if isinstance(result, Ok):
+        return result.value, full_id
+    queued = await not_yet_started(mgr, full_id)
+    if queued is None:
+        raise HTTPException(status_code=404, detail=f"Execution {full_id} not found")
+    return queued
+
+
 async def _resume_start_of(
     store: ProjectionStoreProtocol, execution_id: str
 ) -> ResumeStartInfo | None:
@@ -731,6 +767,7 @@ async def _resume_start_of(
         max_attempts=MAX_START_ATTEMPTS,
         recorded_at=record.recorded_at,
         dispatched_at=record.dispatched_at,
+        start_queue=start_queue_info(get_execution_budget().resume_of(execution_id)),
     )
 
 
@@ -738,16 +775,12 @@ async def _resume_start_of(
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
     from syn_api._wiring import get_projection_mgr
-    from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    execution_id = await resolve_or_raise(
-        mgr.store, "workflow_execution_details", execution_id, "Execution"
-    )
-    result = await get_detail(execution_id)
-    if isinstance(result, Err):
-        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
-    detail = result.value
+    found = await _detail_or_queued(mgr, execution_id)
+    if isinstance(found, ExecutionDetailResponse):
+        return found
+    detail, execution_id = found
     phases = [_map_phase_to_response(p) for p in detail.phases or []]
     total_input = sum(p.input_tokens for p in detail.phases or [])
     total_output = sum(p.output_tokens for p in detail.phases or [])
@@ -781,6 +814,9 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         error_message=detail.error_message,
         failure_classification=detail.failure_classification,
         reported_failure_reason=detail.reported_failure_reason,
+        quarantined_refs=list(detail.quarantined_refs),
+        review_verdict=detail.review_verdict,
+        delegation_failure=detail.delegation_failure,
         deliverable_produced=detail.deliverable_produced,
         reported_side_effects=detail.reported_side_effects,
         repos=list(detail.repos),

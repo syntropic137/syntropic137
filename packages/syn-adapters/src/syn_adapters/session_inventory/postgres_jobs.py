@@ -128,6 +128,23 @@ class PostgresSessionInventoryJobs:
                 retry_seconds,
             )
 
+    async def park(self, lease: InventoryJobLease, *, safety_seconds: int) -> None:
+        # claim() skips the row until project() resets retry_at for a newer
+        # step, or until the safety delay passes: a parked job is never parked
+        # forever. A newer step bumps lease_token, so a superseded lease
+        # matches no row and cannot park the re-armed job.
+        if safety_seconds < 1:
+            raise ValueError("park safety delay must be positive")
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE session_inventory_jobs SET leased_until='-infinity',
+                retry_at=now()+make_interval(secs=>$3)
+                WHERE job_id=$1 AND lease_token=$2""",
+                lease.job.job_id,
+                lease.token,
+                safety_seconds,
+            )
+
     async def publish(self, lease: InventoryJobLease) -> None:
         request = lease.job.state.request
         async with self._pool.acquire() as conn, conn.transaction():

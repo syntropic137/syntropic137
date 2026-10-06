@@ -12,17 +12,29 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Mapping
-    from datetime import datetime
+    from collections.abc import Sequence
 
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration._shared.execution_list_reads import (
+    WORKFLOW_EXECUTIONS,
+    ExecutionListReads,
+)
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
+    AssociationKind,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
+    ExecutionAttachedToEvalEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionDetachedFromEvalEvent import (
+    ExecutionDetachedFromEvalEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
     ExecutionTagsAddedEvent,
@@ -33,24 +45,10 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
-from syn_domain.pagination import Page, matches_search
-from syn_domain.projection_scan import paginate_projection
-
-#: Every field ``page``'s predicates read - the filters, the facet, the window
-#: and the search. ``paginate_projection`` scans only these for the whole
-#: collection and reads whole documents for the page alone (E2). A predicate
-#: that reads a field missing here raises rather than matching on None.
-_PAGE_FIELDS = (
-    "workflow_execution_id",
-    "workflow_id",
-    "workflow_name",
-    "status",
-    "started_at",
-    "tags",
-)
+from syn_domain.projection_scan import read_by_keys
 
 
-class WorkflowExecutionListProjection(AutoDispatchProjection):
+class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection):
     """Builds workflow execution list read model from events.
 
     This projection maintains execution summaries for listing runs
@@ -58,10 +56,12 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
 
     Uses AutoDispatchProjection: define on_<snake_case_event> methods to
     subscribe and handle events — no separate subscription set needed.
+    The paged and tallied reads come from ExecutionListReads, which list_evals
+    shares.
     """
 
-    PROJECTION_NAME = "workflow_executions"
-    VERSION = 7  # v7: tags and inherited_tags (#967)
+    PROJECTION_NAME = WORKFLOW_EXECUTIONS
+    VERSION = 8  # v8: eval_id and association_kind (#967)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -102,6 +102,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         )
 
         launched_with = TagSet.recorded(event_data.get("tags") or []).values
+        eval_id = event_data.get("eval_id")
 
         summary = WorkflowExecutionSummary(
             workflow_execution_id=execution_id,
@@ -122,6 +123,8 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             repos=repos,
             tags=launched_with,
             inherited_tags=launched_with,
+            eval_id=eval_id,
+            association_kind=AssociationKind.LAUNCHED.value if eval_id else None,
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 
@@ -275,6 +278,27 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         event = ExecutionTagsRemovedEvent.model_validate(event_data)
         await self._edit_tags(event.execution_id, event.tags, added=False)
 
+    async def on_execution_attached_to_eval(self, event_data: ExecutionAttachedToEvalEvent) -> None:
+        """Handle ExecutionAttachedToEval (#967): the run is now an attached member."""
+        event = ExecutionAttachedToEvalEvent.model_validate(event_data)
+        await self._set_membership(event.execution_id, event.eval_id, AssociationKind.ATTACHED)
+
+    async def on_execution_detached_from_eval(
+        self, event_data: ExecutionDetachedFromEvalEvent
+    ) -> None:
+        """Handle ExecutionDetachedFromEval (#967): the run is in no Eval."""
+        event = ExecutionDetachedFromEvalEvent.model_validate(event_data)
+        await self._set_membership(event.execution_id, None, None)
+
+    async def _set_membership(
+        self, execution_id: str, eval_id: str | None, kind: AssociationKind | None
+    ) -> None:
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["eval_id"] = eval_id
+            existing["association_kind"] = None if kind is None else kind.value
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
     async def _edit_tags(self, execution_id: str, tags: list[str], *, added: bool) -> None:
         if not execution_id:
             return
@@ -293,17 +317,30 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         Returns:
             List of execution summaries for this workflow.
         """
-        all_data = await self._store.get_all(self.PROJECTION_NAME)
-        executions = []
-
-        # get_all returns a list, not a dict
-        for data in all_data:
-            if data.get("workflow_id") == workflow_id:
-                executions.append(WorkflowExecutionSummary.from_dict(data))
+        # Filtered in the store, not here. Reading every execution and keeping
+        # one workflow's decoded the whole history on each call, and
+        # /metrics?workflow_id= makes two: the E1 latency gate's p95 was
+        # 309-422ms on CI against a 300ms budget for exactly that reason.
+        rows = await self._store.query(self.PROJECTION_NAME, filters={"workflow_id": workflow_id})
+        executions = [WorkflowExecutionSummary.from_dict(data) for data in rows]
 
         # Sort by started_at descending (most recent first)
         executions.sort(key=lambda e: e.started_at or "", reverse=True)
         return executions
+
+    async def applied_starts(self, execution_ids: Sequence[str]) -> set[str]:
+        """Which of ``execution_ids`` this read model applied the start of, in one query.
+
+        A row alone does not prove it: the #598 fallback in `on_workflow_failed`
+        creates a row for a failure whose start was never seen, with no
+        `started_at`. That is the shape a dropped start leaves behind (#1545),
+        so a start counts as applied only when `started_at` is set. The document
+        key is the execution id, so this is a primary-key read, not a JSON filter.
+        """
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, execution_ids)
+        return {
+            key for key, document in documents.items() if document.get("started_at") is not None
+        }
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
         """Get a specific execution by ID.
@@ -318,64 +355,6 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         if data:
             return WorkflowExecutionSummary.from_dict(data)
         return None
-
-    async def page(
-        self,
-        *,
-        statuses: Collection[str] | None = None,
-        started_after: datetime | None = None,
-        started_before: datetime | None = None,
-        search: str | None = None,
-        tags: Collection[str] | None = None,
-        offset: int = 0,
-        limit: int | None = None,
-    ) -> Page[WorkflowExecutionSummary]:
-        """One page of executions, with the total and status facets it came from.
-
-        `total` used to come from a store-level `COUNT(*)` while the rows were
-        filtered in Python (#1119). The two spelled the same predicate twice and
-        agreed only by luck: adding the time window here would have left `total`
-        counting the whole collection, so a 24-hour view reported the size of
-        all history. Rows, total and facets now come from one filtered
-        sequence and cannot drift.
-
-        `search` matches case-insensitively against the execution id, the
-        workflow id and the workflow name.
-
-        `tags` keeps only executions carrying EVERY tag given (AND), matched
-        against their current tags (#967). Pass them normalised: this compares
-        exactly, so the caller validates through `TagSet` first.
-        """
-        required = frozenset(tags or ())
-
-        def base(record: Mapping[str, object]) -> bool:
-            stored = record.get("tags")
-            if required and not (isinstance(stored, list) and required.issubset(stored)):
-                return False
-            return matches_search(
-                search,
-                record.get("workflow_execution_id"),
-                record.get("workflow_id"),
-                record.get("workflow_name"),
-            )
-
-        return await paginate_projection(
-            self._store,
-            self.PROJECTION_NAME,
-            fields=_PAGE_FIELDS,
-            filters=None,
-            order_by=None,
-            full_read=lambda: self._store.get_all(self.PROJECTION_NAME),
-            base_predicate=base,
-            status_of=lambda r: str(r.get("status") or ""),
-            statuses=statuses,
-            timestamp_of=lambda r: r.get("started_at"),
-            after=started_after,
-            before=started_before,
-            to_row=lambda record: WorkflowExecutionSummary.from_dict(dict(record)),
-            offset=offset,
-            limit=limit,
-        )
 
     async def get_all(
         self,

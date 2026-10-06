@@ -181,15 +181,46 @@ class InfraSettings(BaseSettings):
     # =========================================================================
 
     api_memory_limit: str = Field(default="512m", description="API memory limit.")
-    api_cpu_limit: str = Field(default="0.5", description="API CPU limit.")
+    api_cpu_limit: str = Field(
+        default="2.0",
+        description=(
+            "API CPU limit, in cores. The API serves HTTP, runs every projection"
+            " and orchestrates every execution, so it must not be capped below"
+            " the work it dispatches (#1600: at 0.5 a /sessions read took 55 s"
+            " with 9 runs on 16 cores). A limit is a ceiling, not a"
+            " reservation: on a 16-core host API + Postgres at the defaults can"
+            " use 4 cores, and workspaces (2 each) contend for the rest. When"
+            " they oversubscribe the host, CONTROL_PLANE_CPU_SHARES decides who"
+            " wins. Hosts above 16 cores can raise this with the run count."
+        ),
+    )
 
     ui_memory_limit: str = Field(default="256m", description="UI (nginx) memory limit.")
     ui_cpu_limit: str = Field(default="0.25", description="UI (nginx) CPU limit.")
 
     postgres_memory_limit: str = Field(default="1g", description="PostgreSQL memory limit.")
-    postgres_cpu_limit: str = Field(default="1.0", description="PostgreSQL CPU limit.")
+    postgres_cpu_limit: str = Field(
+        default="2.0",
+        description=(
+            "PostgreSQL CPU limit, in cores. Every read and projection write goes"
+            " through it, so it is sized with the API, not with the sidecars."
+            " Raise both together on hosts with more than 16 cores."
+        ),
+    )
 
     event_store_memory_limit: str = Field(default="512m", description="Event Store memory limit.")
+
+    control_plane_cpu_shares: int = Field(
+        default=4096,
+        description=(
+            "CPU weight (docker cpu_shares) of the control plane: api,"
+            " timescaledb, event-store and gateway. Agent workspaces run at"
+            " Docker's default of 1024, so under contention the control plane"
+            " gets 4x a workspace's share of the host. A limit caps a"
+            " container; this decides who wins when the limits together exceed"
+            " the host's cores, which they do once workspaces x 2 > cores."
+        ),
+    )
 
     collector_memory_limit: str = Field(default="256m", description="Collector memory limit.")
     collector_cpu_limit: str = Field(default="0.25", description="Collector CPU limit.")

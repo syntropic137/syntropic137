@@ -109,6 +109,9 @@ class WorkflowResponse(BaseModel):
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     default_eval_id: str | None = None
     """The eval a launch naming none joins (#967). Future runs only."""
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None when it was not
+    installed from a package or predates install provenance."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -206,6 +209,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         model_display=format_phase_model_definition(resolution),
         provider=p.provider,
         allow_delegation=p.allow_delegation,
+        require_delegation=p.require_delegation,
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
         sandbox=p.sandbox,
@@ -297,6 +301,7 @@ async def get_workflow(
             requires_repos=detail.requires_repos,
             tags=list(detail.tags),
             default_eval_id=detail.default_eval_id,
+            package_name=detail.package_name,
         )
     )
 
@@ -473,6 +478,8 @@ def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
         entries.append(f"      model: {_yaml_quote(phase.model)}")
     if phase.allow_delegation:
         entries.append("      allow_delegation: true")
+    if phase.require_delegation:
+        entries.append("      require_delegation: true")
     # #1429. `sandbox` is an `agent.` field in the authoring schema, not a
     # top-level one, so it round-trips here. Emitted only when it differs from
     # the loader default: writing the default back would turn "inherits" into
@@ -834,6 +841,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         requires_repos=detail.requires_repos,
         tags=list(detail.tags),
         default_eval_id=detail.default_eval_id,
+        package_name=detail.package_name,
     )
 
 

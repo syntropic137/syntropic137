@@ -1,0 +1,16 @@
+name: list-evals
+type: query
+projection: EvalListProjection
+returns: Page[EvalSummary]
+
+subscribes_to:
+  - EvalCreatedEvent
+  - EvalUpdatedEvent
+  - EvalFrozenEvent
+  - EvalArchivedEvent
+
+description: >
+  Query slice for the eval list (with each Eval's run count and status tally)
+  and eval detail (Baseline repositories and SHAs, plus a page of member
+  executions). Run facts are read from the execution list filtered by eval_id,
+  never copied into this read model.

@@ -4,19 +4,27 @@ Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
 at the API boundary from the execution_cost projection.
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from pydantic import ValidationError
+
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    DelegationFailure,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     TASK_INPUT_KEY,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -86,6 +94,14 @@ class PhaseExecutionDetail:
     one of the three reaches no reader.
     """
 
+    provisioned_at: datetime | str | None = None
+    """When this phase's workspace was ready, and so when its clock started.
+
+    The phase's deadline is this plus ``timeout_seconds`` (#1546), not
+    ``started_at`` plus it: the phase starts before its workspace is
+    provisioned. ``None`` until the workspace is ready.
+    """
+
     error_message: str | None = None
     """Error message if phase failed."""
 
@@ -130,6 +146,18 @@ class PhaseExecutionDetail:
     them.
     """
 
+    failure_classification: FailureClassification | None = None
+    """Why this phase failed; ``None`` exactly when it did not fail.
+
+    A failed phase always carries a member - `unclassified` when the record
+    predates the field - so "failed" never reaches a reader without the one
+    word that says whether to retry, rewrite the brief or call the operator.
+    """
+
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What this phase's agent said caused its failure, beside the
+    classification and never as it (#1392)."""
+
     @staticmethod
     def _to_iso_string(value: datetime | str | None) -> str | None:
         """Convert datetime or string to ISO string."""
@@ -157,6 +185,7 @@ class PhaseExecutionDetail:
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
             "timeout_seconds": self.timeout_seconds,
+            "provisioned_at": self._to_iso_string(self.provisioned_at),
             "error_message": self.error_message,
             "deliverable_recovered": self.deliverable_recovered,
             "reported_side_effects": (
@@ -168,6 +197,12 @@ class PhaseExecutionDetail:
                 else [w.model_dump() for w in self.observed_branches]
             ),
             "exit_code": self.exit_code,
+            "failure_classification": (
+                None if self.failure_classification is None else self.failure_classification.value
+            ),
+            "reported_failure_reason": (
+                None if self.reported_failure_reason is None else self.reported_failure_reason.value
+            ),
         }
 
     @classmethod
@@ -178,11 +213,12 @@ class PhaseExecutionDetail:
         """
         # Support both new and legacy naming for backward compatibility
         phase_id = data.get("workflow_phase_id") or data.get("phase_id", "")
+        status = data.get("status", "pending")
 
         return cls(
             workflow_phase_id=phase_id,
             name=data.get("name", ""),
-            status=data.get("status", "pending"),
+            status=status,
             session_id=data.get("session_id"),
             agent_session_id=data.get("agent_session_id"),
             artifact_id=data.get("artifact_id"),
@@ -195,11 +231,20 @@ class PhaseExecutionDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             timeout_seconds=data.get("timeout_seconds"),
+            provisioned_at=data.get("provisioned_at"),
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=SideEffectStatus.from_stored(data.get("reported_side_effects")),
             observed_branches=_observed_branches(data.get("observed_branches")),
             exit_code=_exit_code(data.get("exit_code")),
+            failure_classification=(
+                FailureClassification.from_stored(data.get("failure_classification"))
+                if status == "failed"
+                else None
+            ),
+            reported_failure_reason=ReportedFailureReason.from_stored(
+                data.get("reported_failure_reason")
+            ),
         )
 
 
@@ -276,6 +321,14 @@ class WorkflowExecutionDetail:
     the UI can fix a total that was already wrong when it was summed.
     """
 
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported, recorded on completion (PC-63).
+
+    On a `completed` run, `blocked` means COMPLETED WITH UNRESOLVED FINDINGS:
+    every round ran and the last review still refused the change. None for a
+    run that reviewed nothing, and for every completion predating the field.
+    """
+
     reported_failure_reason: ReportedFailureReason | None = None
     """What the failing phase SAID caused it (#1372), `None` when it said nothing.
 
@@ -286,6 +339,18 @@ class WorkflowExecutionDetail:
     is the first thing worth knowing about a failed run - and no total counts
     it.
     """
+
+    quarantined_refs: tuple[QuarantinedRef, ...] = ()
+    """Where the failed phase's unpushed work landed, one per repository (#1547).
+
+    Empty for a run that quarantined nothing, and for every failure recorded
+    before the field existed: the refs were prose in `error_message` then.
+    """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894), `None` for every
+    other failure. A platform observation: its reason and the attempts the
+    child journal held, typed, so a client never parses `error_message` for
+    them."""
 
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
@@ -380,6 +445,9 @@ class WorkflowExecutionDetail:
             reported_failure_reason=ReportedFailureReason.from_stored(
                 data.get("reported_failure_reason")
             ),
+            quarantined_refs=read_quarantined_refs(data.get("quarantined_refs")),
+            review_verdict=ReviewVerdict.from_stored(data.get("review_verdict")),
+            delegation_failure=DelegationFailure.from_stored(data.get("delegation_failure")),
             repos=tuple(data.get("repos", [])),
             inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
             tags=tuple(data.get("tags") or ()),
@@ -418,6 +486,13 @@ class WorkflowExecutionDetail:
             "reported_failure_reason": (
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
+            "quarantined_refs": [r.model_dump(mode="json") for r in self.quarantined_refs],
+            "review_verdict": None if self.review_verdict is None else self.review_verdict.value,
+            "delegation_failure": (
+                None
+                if self.delegation_failure is None
+                else self.delegation_failure.model_dump(mode="json")
+            ),
             "repos": list(self.repos),
             "inputs": dict(self.inputs),
             "tags": list(self.tags),
@@ -451,3 +526,18 @@ def _observed_branches(stored: object) -> tuple[BranchObservation, ...] | None:
     if not isinstance(stored, list):
         return None
     return tuple(BranchObservation.model_validate(entry) for entry in stored)
+
+
+def read_quarantined_refs(raw: object) -> tuple[QuarantinedRef, ...]:
+    """Stored quarantine refs as typed refs; an unreadable row reads as none (#1547).
+
+    Logged rather than raised, for the reason every `from_stored` here exists:
+    one bad row must not strand the whole read model.
+    """
+    if not isinstance(raw, list):
+        return ()
+    try:
+        return tuple(QuarantinedRef.model_validate(r) for r in raw)
+    except ValidationError:
+        logger.warning("Unreadable quarantined_refs on an execution detail; treating as none")
+        return ()

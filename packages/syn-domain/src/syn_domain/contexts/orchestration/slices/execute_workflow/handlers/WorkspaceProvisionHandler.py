@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.checkout_verification import (
+    verify_checkout,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
     PinnedCommitUnreachableError,
@@ -44,6 +47,7 @@ from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CLAUDE_SESSION_ID,
     ENV_GH_REPO,
+    ENV_SYN_PHASE_DEADLINE,
 )
 from syn_shared.process_exit import describe_process_failure
 
@@ -184,6 +188,12 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
 
 
+_DEADLINE_NOTICE = (
+    f"This phase is killed at ${ENV_SYN_PHASE_DEADLINE} (ISO 8601 UTC; read it with "
+    f"`echo ${ENV_SYN_PHASE_DEADLINE}`). Only pushed work survives: commit and push before then."
+)
+
+
 async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
     """Build agent environment for workspace execution.
 
@@ -291,6 +301,14 @@ def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
     """
     primary = _repo_full_names(repos[:1])
     return {ENV_GH_REPO: primary[0]} if primary else {}
+
+
+def _cloned_pins(repos: Sequence[str], pinned_commits: Sequence[SourceCommit]) -> dict[str, str]:
+    """``owner/name`` -> pinned commit, for the pinned repositories this phase clones."""
+    cloned = set(_repo_full_names(repos))
+    return {
+        c.repository: c.sha for c in pinned_commits if c.sha is not None and c.repository in cloned
+    }
 
 
 class ProvisionResult:
@@ -416,6 +434,18 @@ class WorkspaceProvisionHandler:
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
             )
+            # Read back BEFORE anything else is staged and long before the agent
+            # is launched: a workspace not at its pins is refused here (#967).
+            checked_out = (
+                await verify_checkout(
+                    workspace,
+                    _cloned_pins(effective_repos, pinned_commits),
+                    continued_branches=continued_branches or {},
+                    phase_name=phase.name,
+                )
+                if phase.clone_repos
+                else ()
+            )
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
             await self._install_baked_delegation_skill(workspace, phase)
@@ -434,6 +464,7 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 outputs.primary,
                 inputs,
+                checked_out,
             )
         except BaseException as exc:
             await workspace_cm.__aexit__(type(exc), exc, exc.__traceback__)
@@ -622,6 +653,7 @@ class WorkspaceProvisionHandler:
         effective_repos: list[str],
         outputs: dict[str, str],
         inputs: dict[str, object] | None,
+        checked_out: Sequence[SourceCommit] = (),
     ) -> ProvisionResult:
         """Build prompt, CLI command, and return the ProvisionResult."""
         # repo_url for {{repo_url}} prompt substitution (backward compat — uses first repo)
@@ -658,6 +690,7 @@ class WorkspaceProvisionHandler:
             phase_id=todo.phase_id,
             workspace_id=workspace.workspace_id,
             session_id=session_id,
+            checked_out_commits=checked_out,
         )
         return ProvisionResult(
             workspace=workspace,
@@ -805,4 +838,8 @@ class WorkspaceProvisionHandler:
             name = WorkspaceProvisionHandler._repo_name(url)
             lines.append(f"@/workspace/repos/{name}/AGENTS.md")
             lines.append(f"@/workspace/repos/{name}/CLAUDE.md")
+        # A pointer, not a time (#1546). This file is written before the
+        # phase's clock starts, so a timestamp here would disagree with the
+        # one the agent is killed on; the env var is set from that clock.
+        lines.append(_DEADLINE_NOTICE)
         return "\n".join(lines) + "\n"

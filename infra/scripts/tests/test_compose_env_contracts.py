@@ -29,7 +29,10 @@ listed only two of the five variables the feature reads.
 
 So this module is written per CONTRACT rather than per feature. Adding a new
 group to ``_CONTRACTS`` gets it every check below. The fix in every case is the
-same: declare it once in ``docker-compose.yaml``, which every stack layers on.
+same: declare it once in the base, which every stack layers on. Since the
+passthrough became generated, that means adding the setting to its Settings
+class and running ``just codegen``: docker/generated/api.env.yaml, which the
+base api service ``extends``, gains it.
 When a feature gains a variable, extend its existing contract too.
 """
 
@@ -43,6 +46,16 @@ import pytest
 
 _DOCKER_DIR = Path(__file__).resolve().parents[3] / "docker"
 _BASE = _DOCKER_DIR / "docker-compose.yaml"
+#: The base api service `extends` this generated passthrough
+#: (scripts/settings_forwarding.py), so together they are what every stack
+#: layers on. ci/fitness/infrastructure/test_compose_env_forwarding.py pins
+#: that the reference exists.
+_GENERATED = _DOCKER_DIR / "generated" / "api.env.yaml"
+
+
+def _base_text() -> str:
+    """The base api declarations: the base file plus the file it extends."""
+    return _BASE.read_text() + "\n" + _GENERATED.read_text()
 
 
 @dataclass(frozen=True)
@@ -117,7 +130,7 @@ class TestBaseDeclaresEveryContract:
 
     @pytest.mark.parametrize(("contract", "var"), _ALL_VARS, ids=lambda p: _var_id(p))
     def test_base_declares(self, contract: EnvContract, var: str) -> None:
-        text = _BASE.read_text()
+        text = _base_text()
         assert var in text, (
             f"{_BASE.name} does not pass {var} to the api service. Every stack "
             f"layers on this file, so removing it breaks {contract.name} "
@@ -129,7 +142,7 @@ class TestBaseDeclaresEveryContract:
         self, contract: EnvContract, var: str
     ) -> None:
         """It must interpolate from the environment, not carry a literal."""
-        text = _BASE.read_text()
+        text = _base_text()
         assert re.search(rf"^\s+{var}:\s*(?:\$\{{{var}:-\}})?\s*$", text, re.M), (
             f"{var} in {_BASE.name} must be a bare Compose pass-through or "
             f"`${{{var}:-}}`, so the value comes from the resolved environment "
@@ -195,7 +208,7 @@ class TestOverlaysDoNotShadowItAway:
 @pytest.mark.parametrize("contract", _CONTRACTS, ids=lambda c: c.name)
 def test_no_api_stack_is_silently_missing_a_contract(contract: EnvContract) -> None:
     """The whole point, stated once per contract."""
-    base_text = _BASE.read_text()
+    base_text = _base_text()
     base_ok = all(v in base_text for v in contract.variables)
 
     uncovered: list[str] = []

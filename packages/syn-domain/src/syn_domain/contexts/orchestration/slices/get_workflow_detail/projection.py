@@ -166,6 +166,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                require_delegation=bool(p.get("require_delegation", False)),
                 # #1429. The sibling site in read_models/workflow_detail.py
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.
@@ -209,6 +210,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             requires_repos=event_data.get("requires_repos", True),
             tags=TagSet.recorded(event_data.get("tags") or []).values,
             default_eval_id=event_data.get("default_eval_id"),
+            package_name=event_data.get("package_name"),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 

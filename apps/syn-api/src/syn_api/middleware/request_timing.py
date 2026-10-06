@@ -9,17 +9,30 @@ JSON endpoint); those are separate, larger pieces of work (see #1070).
 
 Lane 2 (observability) only, per the Two-Lane Architecture rule: this data
 never touches the event store or any aggregate, and is lost on restart.
+
+SLOW REQUESTS ARE ALSO LOGGED (#1583), one line each, so a stall can be
+attributed from the logs alone: was the API slow, and was it waiting for a
+database connection? Only requests at or over
+``slow_request_log_threshold_ms`` are logged - a line per request would bury
+everything else - and the line carries the method, the route TEMPLATE, the
+status and two durations, never the raw path, query string, headers or body:
+ids, tokens and credentials all pass through here.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 from threading import Lock
 from typing import TYPE_CHECKING
 
+from syn_adapters.postgres_pool import tally_pool_wait
+
 if TYPE_CHECKING:
-    from starlette.types import ASGIApp, Receive, Scope, Send
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_WINDOW_SIZE = 500
 
@@ -97,12 +110,37 @@ def _route_template(scope: Scope) -> str:
     return path if isinstance(path, str) else str(scope.get("path", ""))
 
 
-class RequestTimingMiddleware:
-    """ASGI middleware that records wall-clock duration per route template."""
+#: What a slow-request line names when no route matched. The raw path is never
+#: logged, so an unmatched path carrying an id or a token cannot leak through.
+UNMATCHED_ROUTE = "<unmatched>"
 
-    def __init__(self, app: ASGIApp, aggregator: RequestTimingAggregator | None = None) -> None:
+
+def _logged_route(scope: Scope) -> str:
+    route = scope.get("route")
+    path = route.path if route is not None else None
+    return path if isinstance(path, str) else UNMATCHED_ROUTE
+
+
+class RequestTimingMiddleware:
+    """ASGI middleware that times every request and logs the slow ones.
+
+    Every request's wall-clock duration is recorded per route template in the
+    aggregator. A request whose response STARTED at least
+    ``slow_request_ms`` after it arrived is also logged. Time to response start
+    rather than to the last byte, so a long-lived stream (SSE) that answered
+    promptly is not reported as slow when it eventually closes.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        slow_request_ms: int,
+        aggregator: RequestTimingAggregator | None = None,
+    ) -> None:
         self.app = app
         self._aggregator = aggregator if aggregator is not None else request_timing_aggregator
+        self._slow_request_ms = slow_request_ms
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -110,8 +148,38 @@ class RequestTimingMiddleware:
             return
 
         start = time.perf_counter()
-        try:
-            await self.app(scope, receive, send)
-        finally:
-            duration_ms = (time.perf_counter() - start) * 1000
-            self._aggregator.record(_route_template(scope), duration_ms)
+        responded_at: float | None = None
+        status: int | None = None
+
+        async def send_noting_response_start(message: Message) -> None:
+            nonlocal responded_at, status
+            if message["type"] == "http.response.start":
+                responded_at = time.perf_counter()
+                status = message["status"]
+            await send(message)
+
+        with tally_pool_wait() as pool_wait:
+            try:
+                await self.app(scope, receive, send_noting_response_start)
+            except Exception:
+                # An unhandled exception propagates past this middleware to
+                # Starlette's ServerErrorMiddleware, which answers 500. Record
+                # the status the client will see; the exception still raises.
+                if status is None:
+                    status = 500
+                raise
+            finally:
+                end = time.perf_counter()
+                self._aggregator.record(_route_template(scope), (end - start) * 1000)
+                # No response started means the handler raised or the client
+                # went away: the whole time was spent without an answer.
+                duration_ms = ((responded_at or end) - start) * 1000
+                if duration_ms >= self._slow_request_ms:
+                    logger.warning(
+                        "slow request method=%s route=%s status=%s duration_ms=%d pool_wait_ms=%d",
+                        scope["method"],
+                        _logged_route(scope),
+                        status if status is not None else "-",
+                        duration_ms,
+                        pool_wait.wait_ms,
+                    )

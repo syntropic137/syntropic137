@@ -187,6 +187,63 @@ describe("execution commands", () => {
         expect(rows.find((r) => r.includes("review"))).toMatch(/not reported\s*$/);
       });
 
+      it("names why a failed execution and its failed phase failed", async () => {
+        const out = await show({
+          status: "failed",
+          error_message: "agent exited with code 124",
+          failure_classification: "platform",
+          reported_failure_reason: null,
+          phases: [
+            phase({ name: "research", status: "completed" }),
+            phase({
+              name: "implement",
+              status: "failed",
+              error_message: "agent exited with code 124",
+              failure_classification: "platform",
+              reported_failure_reason: null,
+            }),
+          ],
+        });
+        expect(out).toContain("  Failure:      platform\n");
+        expect(out).toContain("  Error:        agent exited with code 124\n");
+        expect(out).toContain("  ✗ implement: platform\n    agent exited with code 124\n");
+        expect(out).not.toContain("✗ research");
+      });
+
+      it("shows the agent's reported reason beside the classification, never as it", async () => {
+        const out = await show({
+          status: "failed",
+          error_message: "Phase implement reported failure",
+          failure_classification: "correct_refusal",
+          reported_failure_reason: "task",
+          phases: [
+            phase({
+              name: "implement",
+              status: "failed",
+              error_message: "Phase implement reported failure",
+              failure_classification: "correct_refusal",
+              reported_failure_reason: "task",
+            }),
+          ],
+        });
+        expect(out).toContain("  Failure:      correct_refusal (agent reported: task)\n");
+        expect(out).toContain("  ✗ implement: correct_refusal (agent reported: task)\n");
+      });
+
+      it("says so when a failed phase recorded no error text", async () => {
+        const out = await show({
+          status: "failed",
+          failure_classification: "unclassified",
+          phases: [phase({ name: "implement", status: "failed", error_message: null })],
+        });
+        expect(out).toContain("  ✗ implement: unclassified\n    no error recorded\n");
+      });
+
+      it("prints no Failure line for a run that did not fail", async () => {
+        const out = await show({ status: "completed", failure_classification: "unclassified" });
+        expect(out).not.toContain("Failure:");
+      });
+
       it("marks a phase whose deliverable was recovered, and only that phase", async () => {
         const out = await show({
           phases: [
@@ -214,6 +271,59 @@ describe("execution commands", () => {
       expect(out).toContain("failed");
       expect(out).toContain("3/3");
       expect(out).toContain("artifact art-1 not found");
+    });
+
+    it("prints a queued execution with its place in the budget (#1557)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        status: "queued",
+        start_queue: {
+          path: "direct", position: 2, running: 4, waiting: 3, limit: 4,
+          queued_at: "2026-01-01T00:00:00Z", position_display: "queued 2 of 3 (4/4 running)",
+        },
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      const out = stdout();
+      expect(out).toContain("queued");
+      expect(out).toContain("Queue:");
+      expect(out).toContain("queued 2 of 3 (4/4 running) via direct");
+    });
+
+    it("prints a resume start waiting for a slot, not just dispatched (#1557)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        resume_start: {
+          status: "dispatched", status_reason: null, attempts: 0, max_attempts: 3,
+          recorded_at: "2026-01-01T00:00:00Z", dispatched_at: "2026-01-01T00:00:01Z",
+          start_queue: {
+            path: "resume", position: 1, running: 1, waiting: 5, limit: 1,
+            queued_at: "2026-01-01T00:00:01Z", position_display: "queued 1 of 5 (1/1 running)",
+          },
+        },
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      expect(stdout()).toContain("queued 1 of 5 (1/1 running) via resume");
+    });
+
+    it("prints a durable direct start no process holds yet, after a restart (#1557)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        status: "queued",
+        start_queue: {
+          path: "direct", position: null, held: false, running: 0, waiting: 0, limit: 4,
+          start_status: "pending", status_reason: null,
+          queued_at: "2026-01-01T00:00:00Z", position_display: "recorded, pending (0/4 running)",
+        },
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      expect(stdout()).toContain("recorded, pending (0/4 running) via direct");
+    });
+
+    it("prints no queue line for an execution that exists", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ...detail, start_queue: null }))
+        .mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      expect(stdout()).not.toContain("Queue:");
     });
 
     it("prints no resume start for an execution that was never resumed", async () => {

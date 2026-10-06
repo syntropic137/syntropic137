@@ -216,7 +216,7 @@
           "workflows"
         ],
         "summary": "Archive (soft-delete) a workflow template",
-        "description": "Archive (soft-delete) a workflow template.\n\nArchived templates are excluded from listing by default but remain\naccessible via `GET /workflows/{id}` and with `?include_archived=true`.",
+        "description": "Archive (soft-delete) a workflow template.\n\nArchived templates are excluded from listing by default but remain\naccessible via `GET /workflows/{id}` and with `?include_archived=true`.\n\n``expected_package_name`` makes the archive conditional on the current\naggregate still attributing the workflow to that package (#1588). A prune\npicks candidates from `GET /workflows/{id}`, a read model that can lag;\nthis check is made against the aggregate at the moment of archive, so a\nworkflow reinstalled by another package is refused with 409 however stale\nthat read was.",
         "operationId": "delete_workflow_endpoint_workflows__workflow_id__delete",
         "parameters": [
           {
@@ -226,6 +226,22 @@
             "schema": {
               "type": "string",
               "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "expected_package_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected Package Name"
             }
           }
         ],
@@ -244,7 +260,7 @@
             "description": "Workflow template not found"
           },
           "409": {
-            "description": "Conflict; workflow has active executions or is already archived"
+            "description": "Conflict; workflow has active executions, is already archived, or is not attributed to expected_package_name"
           },
           "422": {
             "description": "Validation Error",
@@ -514,7 +530,7 @@
           "workflows"
         ],
         "summary": "Create Workflow From Yaml Endpoint",
-        "description": "Create a workflow template by uploading raw YAML.\n\nThe CLI (`syn workflow create --from <file>`) POSTs the file bytes\nhere. Every semantic field (name, classification, repository,\nphases, inputs, requires_repos) comes from the YAML itself.\n\nQuery-string ``name`` and ``workflow_id`` are optional overrides\nintended for scripted bulk installation (e.g. renaming a template\non install). They are *not* a second source of truth for fields\nthat live in the YAML.\n\n``version``, ``source_digest`` and ``force`` carry install provenance\nand policy (issue #822). ``syn workflow install`` supplies the package\nversion and the resolved commit SHA; reinstalling a matching version is\nrefused with 409 unless ``force`` is set, and a matching version that\nresolves to a different digest is refused regardless of how it looks,\nbecause that is the signature of a republished version.",
+        "description": "Create a workflow template by uploading raw YAML.\n\nThe CLI (`syn workflow create --from <file>`) POSTs the file bytes\nhere. Every semantic field (name, classification, repository,\nphases, inputs, requires_repos) comes from the YAML itself.\n\nQuery-string ``name`` and ``workflow_id`` are optional overrides\nintended for scripted bulk installation (e.g. renaming a template\non install). They are *not* a second source of truth for fields\nthat live in the YAML.\n\n``version``, ``source_digest`` and ``force`` carry install provenance\nand policy (issue #822). ``syn workflow install`` supplies the package\nversion and the resolved commit SHA; reinstalling a matching version is\nrefused with 409 unless ``force`` is set, and a matching version that\nresolves to a different digest is refused regardless of how it looks,\nbecause that is the signature of a republished version.\n\n``package_name`` records which package installed the definition (#1588).\nIt is read back on ``GET /workflows/{id}`` so ``syn workflow install\n--prune`` archives only what the server attributes to that package.",
         "operationId": "create_workflow_from_yaml_endpoint_workflows_from_yaml_post",
         "parameters": [
           {
@@ -579,6 +595,22 @@
                 }
               ],
               "title": "Source Digest"
+            }
+          },
+          {
+            "name": "package_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Package Name"
             }
           },
           {
@@ -7918,6 +7950,12 @@
             "title": "Commit",
             "description": "Git commit the image was built from, stamped at image build time. Null when the build did not stamp one."
           },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At",
+            "description": "When this API process started (UTC, ISO 8601): the moment the running deployment went live. Captured once per process, so it changes only when the process is replaced, which is what a redeploy does."
+          },
           "version_status": {
             "type": "string",
             "enum": [
@@ -7927,16 +7965,24 @@
             "title": "Version Status",
             "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.",
             "readOnly": true
+          },
+          "started_at_display": {
+            "type": "string",
+            "title": "Started At Display",
+            "description": "started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. Relative and local-time renderings are the client's to make from started_at.",
+            "readOnly": true
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "version",
-          "version_status"
+          "started_at",
+          "version_status",
+          "started_at_display"
         ],
         "title": "BuildInfo",
-        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply and\nonly ``/health`` reports."
+        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply,\nand when this process went live, which only the process can."
       },
       "CancelRequest": {
         "properties": {
@@ -8811,6 +8857,62 @@
         ],
         "title": "CoverageState"
       },
+      "CpuThrottling": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "measured",
+              "unknown"
+            ],
+            "title": "Status",
+            "description": "'measured' when cgroup v2 cpu.stat reported throttling counters; 'unknown' on cgroup v1, outside a container, or with no CPU limit set. Unknown is not zero: the counters are null, not 0."
+          },
+          "nr_periods": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nr Periods",
+            "description": "Scheduling periods in which this cgroup was runnable."
+          },
+          "nr_throttled": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nr Throttled",
+            "description": "Periods in which the cgroup hit its CPU limit and was held back. nr_throttled / nr_periods is the share of time the control plane was starved."
+          },
+          "throttled_usec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Throttled Usec",
+            "description": "Total time spent throttled, in microseconds."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "CpuThrottling",
+        "description": "CPU throttling of the process answering /health, since its cgroup was created."
+      },
       "CreateArtifactRequest": {
         "properties": {
           "workflow_id": {
@@ -9146,6 +9248,46 @@
         ],
         "title": "CreateWorkflowResponse"
       },
+      "DbPoolHealth": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "What the pool serves, e.g. 'projections' or 'agent_events'."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Connections currently open."
+          },
+          "max_size": {
+            "type": "integer",
+            "title": "Max Size",
+            "description": "Most connections the pool will open."
+          },
+          "in_use": {
+            "type": "integer",
+            "title": "In Use",
+            "description": "Connections checked out right now."
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting",
+            "description": "Callers blocked waiting for a connection right now."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "max_size",
+          "in_use",
+          "waiting"
+        ],
+        "title": "DbPoolHealth",
+        "description": "One Postgres connection pool in this API process, at the moment of asking (#1583).\n\n``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means\nrequests are queueing for a connection rather than for the database itself."
+      },
       "DegradedReason": {
         "type": "string",
         "enum": [
@@ -9157,13 +9299,133 @@
           "subscription_coordinator",
           "projection_catchup",
           "projection_stalled",
+          "projection_dropped_event",
           "event_poller",
           "check_run_poller",
           "anthropic_api_key",
-          "github_app"
+          "github_app",
+          "disk_space"
         ],
         "title": "DegradedReason",
         "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
+      },
+      "DelegationAttempt": {
+        "properties": {
+          "delegate_id": {
+            "type": "string",
+            "title": "Delegate Id"
+          },
+          "target_harness": {
+            "type": "string",
+            "title": "Target Harness"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "delegate_id",
+          "target_harness",
+          "outcome"
+        ],
+        "title": "DelegationAttempt",
+        "description": "One delegate the phase's agent launched, as the platform observed it."
+      },
+      "DelegationFailure": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DelegationFailureReason"
+          },
+          "required_delegate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Delegate"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/DelegationAttempt"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "default": []
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "DelegationFailure",
+        "description": "The typed account of a failed required delegation."
+      },
+      "DelegationFailureReason": {
+        "type": "string",
+        "enum": [
+          "not_attempted",
+          "failed",
+          "unverifiable"
+        ],
+        "title": "DelegationFailureReason",
+        "description": "Why a required delegation is counted as not having happened."
+      },
+      "DelegationOutcome": {
+        "type": "string",
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "DelegationOutcome",
+        "description": "How a delegated run ended, in provider-neutral terms.\n\nWHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit\nstatus is shell-specific baggage. The native same-harness fan-out path\nreports a boolean success and has no process to exit; cancellation and\ntimeout have no natural integer either. Since these events are v1 and this\nrepo has no upcaster framework, encoding a shell assumption now would need\na v2 to undo."
       },
       "DeleteWorkflowResponse": {
         "properties": {
@@ -9182,6 +9444,72 @@
           "status"
         ],
         "title": "DeleteWorkflowResponse"
+      },
+      "DiskSpaceHealth": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Directory whose filesystem was measured."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unmeasurable",
+              "low",
+              "critical"
+            ],
+            "title": "State",
+            "description": "'low' degrades /health; 'critical' also refuses new executions."
+          },
+          "free_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Percent",
+            "description": "Percent free; null when unmeasurable."
+          },
+          "free_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Bytes",
+            "description": "Bytes available; null when unmeasurable."
+          },
+          "degraded_below_percent": {
+            "type": "number",
+            "title": "Degraded Below Percent",
+            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT."
+          },
+          "refuse_admission_below_percent": {
+            "type": "number",
+            "title": "Refuse Admission Below Percent",
+            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "state",
+          "free_percent",
+          "free_bytes",
+          "degraded_below_percent",
+          "refuse_admission_below_percent"
+        ],
+        "title": "DiskSpaceHealth",
+        "description": "Free space on the workspace volume, as /health reports it (#1560)."
       },
       "EvalId": {
         "type": "string",
@@ -9370,7 +9698,7 @@
               }
             ],
             "title": "Task",
-            "description": "Primary task description -- substituted for $ARGUMENTS in phase prompts."
+            "description": "Primary task description -- substituted for $ARGUMENTS in phase prompts. Omit it to run without a task; an empty or whitespace-only task is rejected with 422 (PC-66)."
           },
           "repos": {
             "items": {
@@ -9770,6 +10098,16 @@
             "$ref": "#/components/schemas/FailureClassification",
             "default": "unclassified"
           },
+          "delegation_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reported_failure_reason": {
             "anyOf": [
               {
@@ -9780,10 +10118,27 @@
               }
             ]
           },
+          "quarantined_refs": {
+            "items": {
+              "$ref": "#/components/schemas/QuarantinedRef"
+            },
+            "type": "array",
+            "title": "Quarantined Refs"
+          },
           "deliverable_produced": {
             "type": "boolean",
             "title": "Deliverable Produced",
             "default": false
+          },
+          "review_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reported_side_effects": {
             "anyOf": [
@@ -9831,6 +10186,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ResumeStartInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
               },
               {
                 "type": "null"
@@ -10106,6 +10471,94 @@
           "status"
         ],
         "title": "ExecutionRunSummary"
+      },
+      "ExecutionStartQueueInfo": {
+        "properties": {
+          "path": {
+            "$ref": "#/components/schemas/StartPath"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "held": {
+            "type": "boolean",
+            "title": "Held",
+            "default": true
+          },
+          "start_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "paused",
+                  "retryable",
+                  "dispatched",
+                  "started",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Status"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running"
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          },
+          "position_display": {
+            "type": "string",
+            "title": "Position Display",
+            "description": "Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "position",
+          "running",
+          "waiting",
+          "limit",
+          "queued_at",
+          "position_display"
+        ],
+        "title": "ExecutionStartQueueInfo",
+        "description": "Where a start stands in the execution budget, before its execution exists (#1557).\n\nEvery start path - direct, trigger and resume - claims one of\n``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits\nhere, first come first served, and has no execution record yet; this is\nwhat it shows instead of a 404."
       },
       "ExecutionStatusCounts": {
         "properties": {
@@ -12085,6 +12538,43 @@
             ],
             "title": "Warnings",
             "description": "Human-readable notes that need attention but do not degrade the instance. Omitted when there are none."
+          },
+          "disk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskSpaceHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free space on the workspace volume (#1560). Omitted only when the probe itself could not be built."
+          },
+          "db_pools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DbPoolHealth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Pools",
+            "description": "Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode."
+          },
+          "cpu_throttling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CpuThrottling"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API."
           }
         },
         "additionalProperties": false,
@@ -13493,6 +13983,18 @@
               }
             ],
             "title": "Timeout Seconds"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
           }
         },
         "type": "object",
@@ -13621,6 +14123,11 @@
           "allow_delegation": {
             "type": "boolean",
             "title": "Allow Delegation",
+            "default": false
+          },
+          "require_delegation": {
+            "type": "boolean",
+            "title": "Require Delegation",
             "default": false
           },
           "clone_repos": {
@@ -13811,6 +14318,26 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/SideEffectStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure_classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureClassification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
               },
               {
                 "type": "null"
@@ -14282,6 +14809,70 @@
         ],
         "title": "ProjectionLag",
         "description": "One projection's distance from the head of the event store."
+      },
+      "QuarantinedRef": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "commit_count": {
+            "type": "integer",
+            "title": "Commit Count"
+          },
+          "pull_request": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request"
+          },
+          "diffstat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diffstat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repository",
+          "branch",
+          "ref",
+          "commit",
+          "commit_count"
+        ],
+        "title": "QuarantinedRef",
+        "description": "Where one repository's unpushed work was saved when its phase ended (#1547).\n\nThe structured half of what `describe_saved_work` writes as prose into\n`error_message`: only work that LANDED, because a ref that does not exist\nis nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the\nPR the run was working on can be told, by a ProcessManager rather than by\nwhoever happened to read the error."
       },
       "RegisterClaudePluginRequest": {
         "properties": {
@@ -15218,6 +15809,16 @@
               }
             ],
             "title": "Dispatched At"
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -15228,6 +15829,15 @@
         ],
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
+      },
+      "ReviewVerdict": {
+        "type": "string",
+        "enum": [
+          "certified",
+          "blocked"
+        ],
+        "title": "ReviewVerdict",
+        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for rounds 2 and 3.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
       },
       "RootResponse": {
         "properties": {
@@ -17091,6 +17701,16 @@
         "title": "SkillStorageStatsResponse",
         "description": "Size of the content-addressed skill store.\n\nSkill storage grows monotonically: registration is keyed by content hash\nand nothing removes old trees (skills-distribution spec D6, eviction is\ndeliberately not implemented). This endpoint exists so that decision stays\na measured one rather than an assumption."
       },
+      "StartPath": {
+        "type": "string",
+        "enum": [
+          "direct",
+          "trigger",
+          "resume"
+        ],
+        "title": "StartPath",
+        "description": "Which entrance an execution start came through."
+      },
       "StateResponse": {
         "properties": {
           "execution_id": {
@@ -17173,12 +17793,13 @@
             "enum": [
               "healthy",
               "degraded",
+              "dropped_events",
               "stalled",
               "catching_up",
               "unknown"
             ],
             "title": "Status",
-            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed."
+            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed."
           },
           "running": {
             "anyOf": [
@@ -17291,6 +17912,21 @@
             ],
             "title": "Lagging Projections",
             "description": "Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable."
+          },
+          "unapplied_starts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UnappliedStart"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unapplied Starts",
+            "description": "Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured."
           }
         },
         "additionalProperties": false,
@@ -18668,6 +19304,34 @@
         "title": "TypeCount",
         "description": "Count of items by type."
       },
+      "UnappliedStart": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Read model that skipped the start."
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id",
+            "description": "Execution whose WorkflowExecutionStarted it skipped."
+          },
+          "global_nonce": {
+            "type": "integer",
+            "title": "Global Nonce",
+            "description": "Store position of that start event."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "execution_id",
+          "global_nonce"
+        ],
+        "title": "UnappliedStart",
+        "description": "One execution whose start a projection skipped past. Published on /health as is."
+      },
       "UpdateArtifactRequest": {
         "properties": {
           "title": {
@@ -19208,6 +19872,17 @@
               }
             ],
             "title": "Default Eval Id"
+          },
+          "package_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Name"
           }
         },
         "type": "object",

@@ -20,9 +20,11 @@ from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
     refuse_resume_start,
 )
+from syn_domain.contexts.orchestration.slices.start_resume.value_objects import ResumeChild
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePort
+    from syn_domain.contexts.orchestration._shared.template_launch import TemplateLaunches
     from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
         RemoteBranchReading,
     )
@@ -57,6 +59,7 @@ class StartResumeHandler:
         execution_repository: WorkflowExecutionRepositoryPort,
         maintenance: MaintenancePort | None = None,
         remote_branches: RemoteBranchPort | None = None,
+        launches: TemplateLaunches | None = None,
     ) -> None:
         self._processor = processor
         self._executions = execution_repository
@@ -67,6 +70,9 @@ class StartResumeHandler:
         # Optional for the same reason as on ExecuteWorkflowHandler (#1387):
         # a fixture admits nothing. Production passes it.
         self._maintenance = maintenance
+        # #1588: a resumed child is a launch of its template like any other,
+        # so archive must see it before the child's stream exists.
+        self._launches = launches
 
     async def handle(
         self,
@@ -101,6 +107,11 @@ class StartResumeHandler:
         # start, so a branch deleted or force-pushed since is abandoned with a
         # recorded reason instead of reused stale.
         command.remote_branches = await self._read_remote_branches(command)
+        # #1588: on the template's stream before the child's own stream exists,
+        # as ExecuteWorkflowHandler does. Raises TemplateArchivedError if the
+        # template was archived since the parent ran.
+        if self._launches is not None:
+            await self._launches.record(command.workflow_id, command.aggregate_id)
         try:
             return await self._processor.run_resume(command, repos=repos, admitted=admitted)
         except StreamAlreadyExistsError:
@@ -109,12 +120,15 @@ class StartResumeHandler:
             )
             return None
 
-    async def validate(self, parent_execution_id: str) -> None:
+    async def validate(self, parent_execution_id: str) -> ResumeChild:
         """Raise now if the child of ``parent_execution_id`` could not start.
 
         For the dispatcher to call BEFORE it spawns the start (#1039's rule):
         once the start is a background task a refusal can reach nobody, and
         the to-do list would record as started a child that never was.
+
+        Returns the child it would start, so the start can be queued under the
+        child's own id and shown as `queued` while it waits (#1557).
         """
         command = await self._command_for(parent_execution_id)
         refusal = refuse_resume_start(command)
@@ -124,10 +138,11 @@ class StartResumeHandler:
         # docstring above. `inherited_outputs` also runs inside the background
         # start, before the child's stream opens, and a raise there now reaches
         # the to-do list through the dispatcher's `on_failure` (#1463) - but only
-        # after a task was spent and a start was queued behind the semaphore
+        # after a task was spent and a start was queued for an execution-budget slot
         # (codex review of #1459). Resolving it here means a vanished artifact is
         # refused before anything is dispatched.
         await self._processor.resolve_inheritance(command.resumed_from)
+        return ResumeChild(execution_id=command.aggregate_id, workflow_id=command.workflow_id)
 
     async def _read_remote_branches(self, command: StartResumeCommand) -> list[RemoteBranchReading]:
         """What the forge says about each branch the child could continue."""

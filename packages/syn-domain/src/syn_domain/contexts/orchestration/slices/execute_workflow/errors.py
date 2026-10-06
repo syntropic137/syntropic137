@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationAttempt,
+    DelegationFailure,
+    DelegationFailureReason,
     FailureClassification,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UpstreamFailureError,
 )
 from syn_shared.display import format_exit_code
 
@@ -22,6 +28,7 @@ if TYPE_CHECKING:
         AgentVerdict,
     )
     from syn_shared.diagnostics import SignalDeath
+    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 def describe_exception(error: BaseException) -> str:
@@ -98,6 +105,25 @@ class NonZeroExitError(RuntimeError):
         self.exit_code = exit_code
 
 
+class UpstreamExitError(NonZeroExitError, UpstreamFailureError):
+    """An agent run that exited non-zero on an upstream fault its harness named (#1592, #1593).
+
+    Both things at once, because both are true and both are read: the exit
+    status by `exit_code_of`, the kind by `failure_account`. Raised in place of
+    a plain `NonZeroExitError` - including after the phase's capacity retries
+    run out - so a busy provider is RECORDED as one on the WorkflowFailed event,
+    not only described in its message.
+    """
+
+    def __init__(self, message: str, *, exit_code: int, upstream_kind: UpstreamFailureKind) -> None:
+        # Not `super().__init__`: in this class's MRO, `NonZeroExitError`'s
+        # `super()` resolves to `UpstreamFailureError`, whose `upstream_kind` is
+        # keyword-only and would be missing, so construction raised TypeError.
+        RuntimeError.__init__(self, message)
+        self.exit_code = exit_code
+        self.upstream_kind = upstream_kind
+
+
 class PinnedCommitUnreachableError(NonZeroExitError):
     """A repository cannot be checked out at the commit its run pinned it to (#1458).
 
@@ -122,6 +148,53 @@ class PinnedCommitUnreachableError(NonZeroExitError):
             exit_code=exit_code,
         )
         self.phase_name = phase_name
+
+
+@dataclass(frozen=True)
+class CheckoutMismatch:
+    """One repository whose working tree is not where it was asked to be (#967)."""
+
+    #: `owner/name`, as the run's pin names it.
+    repository: str
+    pinned_sha: str
+    actual_sha: str
+    #: The branch it continues (#1513), which it is held to instead of its pin.
+    branch: str | None = None
+
+    def describe(self) -> str:
+        """The disagreement, in the terms the repository was held to."""
+        if self.branch is None:
+            return f"{self.repository} is at {self.actual_sha}, pinned to {self.pinned_sha}"
+        return (
+            f"{self.repository} is at {self.actual_sha}, not on {self.branch} at the head of"
+            f" origin/{self.branch} containing its pin {self.pinned_sha}"
+        )
+
+
+class CheckoutMismatchError(RuntimeError):
+    """A provisioned workspace is not at the commits its run pinned (#967).
+
+    THE OTHER HALF OF `PinnedCommitUnreachableError`. That one is the setup
+    script refusing a pin it cannot reach; this one is the workspace, read back
+    after setup said it succeeded, standing somewhere else. Either way the
+    agent is never given the workspace: an eval's runs are comparable only if
+    each started from the baseline it froze, and a run that started anywhere
+    else would be scored as if it had not.
+
+    `mismatches` names every repository that disagreed, not only the first, so
+    one failure tells an operator the whole extent of it. Classified as the
+    platform's failure (`failure_account`): the pin was sound and the
+    provisioning did not honour it.
+    """
+
+    def __init__(self, *, phase_name: str, mismatches: tuple[CheckoutMismatch, ...]) -> None:
+        listed = "; ".join(m.describe() for m in mismatches)
+        super().__init__(
+            f"Phase '{phase_name}' will not be run: its workspace is not checked out "
+            f"at the commits this run is pinned to ({listed})."
+        )
+        self.phase_name = phase_name
+        self.mismatches = mismatches
 
 
 class ExitStatusUnavailableError(RuntimeError):
@@ -372,6 +445,52 @@ class FailureAccount(NamedTuple):
     """What the AGENT SAID caused it, `None` when it said nothing this reader
     knows. An operator reads it; nothing counts it."""
 
+    upstream: UpstreamFailureKind | None = None
+    """What kind of upstream fault this was, when an upstream service raised
+    it (#1593): whether resuming is enough or an operator must act. Read off
+    the exception's type, never its text. `None` for every other failure."""
+
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for
+    every failure that is not a failed delegation."""
+
+
+class DelegationFailedError(RuntimeError):
+    """A phase that required a delegate did not delegate successfully (#894)."""
+
+    def __init__(
+        self,
+        *,
+        phase_id: str,
+        required_delegate: str,
+        reason: DelegationFailureReason,
+        attempts: tuple[DelegationAttempt, ...] = (),
+        detail: str | None = None,
+    ) -> None:
+        self.phase_id = phase_id
+        #: The typed account every sink records (`failure_account`); the
+        #: message below is its rendering for `error`, never its source.
+        self.delegation_failure = DelegationFailure(
+            required_delegate=required_delegate, reason=reason, attempts=attempts, detail=detail
+        )
+        lines = [
+            f"Required delegation to {required_delegate} failed for phase {phase_id} "
+            f"({reason.value}): " + _summary(reason, required_delegate, detail)
+        ]
+        lines.extend(f"  - {attempt.describe()}" for attempt in attempts)
+        super().__init__("\n".join(lines))
+
+
+def _summary(reason: DelegationFailureReason, required_delegate: str, detail: str | None) -> str:
+    if reason is DelegationFailureReason.NOT_ATTEMPTED:
+        return (
+            f"the phase declared require_delegation but no delegate to "
+            f"{required_delegate} was launched."
+        )
+    if reason is DelegationFailureReason.FAILED:
+        return f"every delegate to {required_delegate} failed or never finished."
+    return "the delegation record could not be read" + (f": {detail}" if detail else ".")
+
 
 def failure_account(error: BaseException) -> FailureAccount:
     """What kind of failure `error` is, and what its phase said about it (#1357, #1372).
@@ -399,6 +518,16 @@ def failure_account(error: BaseException) -> FailureAccount:
     """
     if isinstance(error, PhaseReportedFailureError):
         return FailureAccount(error.failure_classification, error.reported_failure_reason)
+    # Still `PLATFORM` - the work was never judged - but now saying which
+    # platform failure: one a resume clears, or one only an operator can (#1593).
+    if isinstance(error, UpstreamFailureError):
+        return FailureAccount(FailureClassification.PLATFORM, None, upstream=error.upstream_kind)
+    if isinstance(error, DelegationFailedError):
+        # Still `PLATFORM`: the platform observed it, the agent claimed nothing.
+        # What it adds is the typed account of which delegate failed (#894).
+        return FailureAccount(
+            FailureClassification.PLATFORM, None, delegation_failure=error.delegation_failure
+        )
     return FailureAccount(FailureClassification.PLATFORM, None)
 
 
@@ -560,6 +689,14 @@ class QuarantinedWork:
     #: record AND an unrecoverable one, because the patch it carries is the
     #: only copy of those changes when the second push fails too.
     dropped: DroppedWorkflows | None = None
+    #: The commit ``pushed_ref`` was pushed at (#1547), so a reviewer can be
+    #: told exactly what to fetch. None when nothing landed; when the
+    #: workflow-safe rescue (#1437) landed, the rescue commit it pushed.
+    commit: str | None = None
+    #: What ``commit`` changes against the newest commit a remote had, as
+    #: ``git diff --stat`` prints it (#1547). None when nothing landed or it
+    #: could not be read inside its bound.
+    diffstat: str | None = None
 
     def __post_init__(self) -> None:
         if (self.pushed_ref is None) == (self.push_error is None):

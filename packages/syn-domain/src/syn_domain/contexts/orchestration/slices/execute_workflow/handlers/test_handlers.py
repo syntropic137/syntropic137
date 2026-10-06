@@ -873,6 +873,19 @@ class TestWorkspaceProvisionHandler:
         assert "@/workspace/repos/repo-a/AGENTS.md" in context
         assert "@/workspace/repos/repo-a/CLAUDE.md" in context
 
+    def test_generate_workspace_context_points_at_the_phase_deadline(self) -> None:
+        """#1546: the instructions name the env var the deadline is set in, once."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+        from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE
+
+        context = WorkspaceProvisionHandler._generate_workspace_context(
+            ["https://github.com/org/repo-a", "https://github.com/org/repo-b"]
+        )
+        assert context.count(f"${ENV_SYN_PHASE_DEADLINE}") == 2
+        assert context.count("This phase is killed at") == 1
+
     def test_generate_workspace_context_multi_repo(self) -> None:
         """Two repos produce four @-import lines (AGENTS + CLAUDE per repo)."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (

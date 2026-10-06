@@ -50,6 +50,9 @@ from syn_domain.contexts.orchestration import TagSet, WorkflowTemplateAggregate
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    WorkflowExecutionResult,
+)
 from syn_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
 )
@@ -137,7 +140,9 @@ class _StreamOpeningHandler:
     async def validate_stored_declarations(self, _workflow_id: str) -> None:
         return None
 
-    async def handle(self, command: object, *, admitted: AdmissionTicket | None = None) -> None:
+    async def handle(
+        self, command: object, *, admitted: AdmissionTicket | None = None
+    ) -> WorkflowExecutionResult:
         self.reached.set()
         await self.may_open_the_stream.wait()
         execution_id = getattr(command, "execution_id", "") or ""
@@ -147,6 +152,13 @@ class _StreamOpeningHandler:
         self.appended.append(_a_start_event(execution_id))
         if admitted is not None:
             admitted.mark_visible()
+        # Both callers read the result they are given (#1547), as they must.
+        return WorkflowExecutionResult(
+            workflow_id="wf",
+            execution_id=execution_id,
+            status="completed",
+            started_at=datetime(2026, 10, 5, tzinfo=UTC),
+        )
 
 
 class TestATriggeredExecutionQueuedBehindTheSemaphore:
@@ -361,9 +373,9 @@ class _DelayedExecution:
         repos: list[object],
         admitted: AdmissionTicket | None = None,
         tags: TagSet | None = None,
-        eval_choice: object = None,
+        launch_eval: object = None,
     ) -> None:
-        del workflow_id, inputs, task, repos, tags, eval_choice
+        del workflow_id, inputs, task, repos, tags, launch_eval
         self.reached.set()
         await self.may_open_the_stream.wait()
         self.opened.append(execution_id)

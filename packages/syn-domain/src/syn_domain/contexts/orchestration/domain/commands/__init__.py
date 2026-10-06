@@ -48,6 +48,9 @@ from syn_domain.contexts.orchestration.domain.commands.RemoveGlobalClaudePluginC
 from syn_domain.contexts.orchestration.domain.commands.RemoveWorkflowTagsCommand import (
     RemoveWorkflowTagsCommand,
 )
+from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
+    RequestExecutionCommand,
+)
 from syn_domain.contexts.orchestration.domain.commands.SetWorkflowDefaultEvalCommand import (
     SetWorkflowDefaultEvalCommand,
 )
@@ -77,6 +80,7 @@ __all__ = [
     "RemoveExecutionTagsCommand",
     "RemoveGlobalClaudePluginCommand",
     "RemoveWorkflowTagsCommand",
+    "RequestExecutionCommand",
     "SetWorkflowDefaultEvalCommand",
     "TerminateWorkspaceCommand",
     "UpdatePhasePromptCommand",

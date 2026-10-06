@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseYaml } from "../../src/packages/yaml.js";
+import { parseYaml, YamlParseError } from "../../src/packages/yaml.js";
 
 describe("parseYaml", () => {
   it("parses simple key-value map", () => {
@@ -42,15 +42,15 @@ describe("parseYaml", () => {
   });
 
   it("parses multiline literal string (|)", () => {
-    const yaml = "prompt: |\n  Line one\n  Line two\n  Line three";
+    const yaml = "prompt: |\n  Line one\n  Line two\n  Line three\nnext: 1\n";
     const result = parseYaml(yaml) as Record<string, unknown>;
-    expect(result["prompt"]).toBe("Line one\nLine two\nLine three");
+    expect(result["prompt"]).toBe("Line one\nLine two\nLine three\n");
   });
 
   it("parses multiline folded string (>)", () => {
-    const yaml = "desc: >\n  This is a\n  long description";
+    const yaml = "desc: >\n  This is a\n  long description\nnext: 1\n";
     const result = parseYaml(yaml) as Record<string, unknown>;
-    expect(result["desc"]).toBe("This is a long description");
+    expect(result["desc"]).toBe("This is a long description\n");
   });
 
   it("skips comments", () => {
@@ -66,5 +66,69 @@ describe("parseYaml", () => {
   it("handles empty input", () => {
     expect(parseYaml("")).toBeNull();
     expect(parseYaml("# just a comment")).toBeNull();
+  });
+
+  // #1618: the subset parser this replaced turned this into garbage silently.
+  it("resolves anchors, aliases and merge keys, with local keys overriding", () => {
+    const yaml = [
+      "phases:",
+      "  - &round",
+      "    id: fix",
+      "    model: opus",
+      "    prompt_file: fix.md",
+      "  - <<: *round",
+      "    id: fix_2",
+      "tools: &t [Read]",
+      "again: *t",
+      "",
+    ].join("\n");
+    expect(parseYaml(yaml)).toEqual({
+      phases: [
+        { id: "fix", model: "opus", prompt_file: "fix.md" },
+        { id: "fix_2", model: "opus", prompt_file: "fix.md" },
+      ],
+      tools: ["Read"],
+      again: ["Read"],
+    });
+  });
+
+  // Same dialect as the server's PyYAML safe_load.
+  it("reads YAML 1.1 booleans the way PyYAML does", () => {
+    expect(parseYaml("a: yes\nb: off\n")).toEqual({ a: true, b: false });
+  });
+
+  it("fails with source and line on an undefined alias", () => {
+    expect(() => parseYaml("a: 1\nb: *missing\n", "wf/workflow.yaml")).toThrow(
+      /^wf\/workflow\.yaml:2: /,
+    );
+  });
+
+  it("fails on a duplicate key instead of keeping one", () => {
+    expect(() => parseYaml("id: a\nid: b\n", "x.yaml")).toThrow(YamlParseError);
+  });
+
+  it("fails with source and line on a value that has no JSON form", () => {
+    expect(() => parseYaml("id: a\nwhen: 2026-10-05\n", "x.yaml")).toThrow(
+      /^x\.yaml:2: a YAML Date has no JSON form/,
+    );
+    expect(() => parseYaml("b: !!binary aGk=\n", "x.yaml")).toThrow(/^x\.yaml:1: a YAML (Buffer|Uint8Array) has no JSON form/);
+  });
+
+  it("fails with source and line on a cyclic alias instead of overflowing", () => {
+    expect(() => parseYaml("x: 1\na: &a {b: *a}\n", "x.yaml")).toThrow(
+      /^x\.yaml:2: alias \*a is inside the node it refers to/,
+    );
+    expect(() => parseYaml("a: &a\n  k: 1\n  <<: *a\n", "x.yaml")).toThrow(/^x\.yaml:3: alias \*a/);
+  });
+
+  it("fails with source and line on an unknown tag instead of dropping it", () => {
+    expect(() => parseYaml("id: a\ndescription: !typo text\n", "wf/workflow.yaml")).toThrow(
+      /^wf\/workflow\.yaml:2: Unresolved tag: !typo/,
+    );
+    expect(() => parseYaml("phases: !typo [a]\n", "x.yaml")).toThrow(/^x\.yaml:1: Unresolved tag: !typo/);
+  });
+
+  it("fails on more than one document", () => {
+    expect(() => parseYaml("a: 1\n---\nb: 2\n", "x.yaml")).toThrow(/^x\.yaml:\d+: /);
   });
 });

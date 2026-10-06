@@ -434,6 +434,16 @@ export interface PhaseExecutionDetail {
   pinned_at_start?: PhaseStartConfig | null
   /** Absent from a server that predates the field: treat as `unavailable`. */
   start_pins_status?: StartPinsStatus
+  /** Why THIS phase failed, in the server's words; null unless it failed. */
+  error_message?: string | null
+  /**
+   * What the platform classified THIS phase's failure as (#1592). A phase
+   * carries its own, so a card never borrows the run's for a phase it was not
+   * about. Null on a phase that did not fail; absent from an older server.
+   */
+  failure_classification?: FailureClassification | null
+  /** What this phase SAID caused its failure - attribution only, never a colour. */
+  reported_failure_reason?: ReportedFailureReason | null
 }
 
 /** A phase's start config, aliased to the generated schema rather than restated. */

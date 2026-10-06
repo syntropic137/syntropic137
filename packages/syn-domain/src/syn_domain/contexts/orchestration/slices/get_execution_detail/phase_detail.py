@@ -65,6 +65,13 @@ class PhaseDetail:
     ``None`` means the run stated no phase definitions, which is every
     execution started without them; it is not a budget of zero.
     """
+    provisioned_at: str | None = None
+    """When this phase's workspace was ready, from ``WorkspaceProvisionedForPhase``.
+
+    The phase's clock starts here, not at ``started_at`` (#1546): RUN_AGENT is
+    dispatched straight after this event, so this plus ``timeout_seconds`` is
+    the phase's deadline. ``None`` until the workspace is ready.
+    """
     error_message: str | None = None
     observed_branches: list[object] | None = None
     """How this phase's branches stood when it died (#1200), as stored.
@@ -111,6 +118,12 @@ class PhaseDetail:
     comment, a push): ``none``, ``succeeded``, ``denied`` or ``failed``, or
     ``None`` when it said nothing. A report, not a measurement - see
     `SideEffectStatus`."""
+    failure_classification: str | None = None
+    """Why this phase failed, as `FailureClassification` stores it; ``None``
+    for a phase that did not fail. Written only by `FailedPhaseRecord`."""
+    reported_failure_reason: str | None = None
+    """What this phase's agent said caused its failure, ``None`` when it said
+    nothing or did not fail."""
 
     @classmethod
     def running(
@@ -185,11 +198,14 @@ class PhaseDetail:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "timeout_seconds": self.timeout_seconds,
+            "provisioned_at": self.provisioned_at,
             "error_message": self.error_message,
             "observed_branches": self.observed_branches,
             "exit_code": self.exit_code,
             "deliverable_recovered": self.deliverable_recovered,
             "reported_side_effects": self.reported_side_effects,
+            "failure_classification": self.failure_classification,
+            "reported_failure_reason": self.reported_failure_reason,
         }
 
     @classmethod
@@ -210,9 +226,12 @@ class PhaseDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             timeout_seconds=data.get("timeout_seconds"),
+            provisioned_at=data.get("provisioned_at"),
             error_message=data.get("error_message"),
             observed_branches=data.get("observed_branches"),
             exit_code=data.get("exit_code"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=_side_effects(data.get("reported_side_effects")),
+            failure_classification=data.get("failure_classification"),
+            reported_failure_reason=data.get("reported_failure_reason"),
         )

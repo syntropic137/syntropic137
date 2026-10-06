@@ -19,7 +19,10 @@ type ExecutionList = components["schemas"]["ExecutionListResponse"];
 type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
 type InventorySummary = components["schemas"]["SessionInventorySummary"];
 type ResumeStart = components["schemas"]["ResumeStartInfo"];
+type StartQueue = components["schemas"]["ExecutionStartQueueInfo"];
 type SideEffectStatus = components["schemas"]["SideEffectStatus"];
+type FailureClassification = components["schemas"]["FailureClassification"];
+type ReportedFailureReason = components["schemas"]["ReportedFailureReason"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -110,6 +113,9 @@ const showCommand: CommandDef = {
     print(`${style("Execution:", BOLD)} ${ex.workflow_execution_id}`);
     print(`  Workflow:     ${ex.workflow_name}`);
     print(`  Status:       ${formatStatus(ex.status)}`);
+    // Accepted but waiting for a slot in the execution budget (#1557): there is
+    // no execution record yet, so this is the only place its wait shows.
+    if (ex.start_queue) print(`  Queue:        ${formatStartQueue(ex.start_queue)}`);
     if ((ex.tags ?? []).length > 0) print(`  Tags:         ${(ex.tags ?? []).join(", ")}`);
     print(`  Started:      ${formatTimestamp(ex.started_at)}`);
     if (ex.completed_at) print(`  Completed:    ${formatTimestamp(ex.completed_at)}`);
@@ -120,6 +126,9 @@ const showCommand: CommandDef = {
     // refused (#1501).
     print(`  Deliverable:  ${ex.deliverable_produced ? "yes" : "no"}`);
     print(`  Side effects: ${formatSideEffects(ex.reported_side_effects)}`);
+    if (ex.status === "failed") {
+      print(`  ${style("Failure:", RED)}      ${formatFailure(ex.failure_classification, ex.reported_failure_reason)}`);
+    }
     if (ex.error_message) print(`  ${style("Error:", RED)}        ${ex.error_message}`);
     if (ex.resume_start) printResumeStart(ex.resume_start);
 
@@ -164,10 +173,27 @@ const showCommand: CommandDef = {
         );
       }
       table.print();
+
+      // Below the table, not in it: an error is a sentence, and the phase a
+      // reader opens first must say why it failed, not only that it did.
+      for (const ph of phases.filter((p) => p.status === "failed")) {
+        print(`  ${style("✗", RED)} ${ph.name}: ${formatFailure(ph.failure_classification, ph.reported_failure_reason)}`);
+        print(`    ${ph.error_message || style("no error recorded", DIM)}`);
+      }
     }
     await printInventorySummary(ex.workflow_execution_id);
   },
 };
+
+/** Why a run or phase failed: the classification, then what its agent SAID
+ * caused it, kept apart because only the first is a measurement (#1392). */
+function formatFailure(
+  classification: FailureClassification | null | undefined,
+  reported: ReportedFailureReason | null | undefined,
+): string {
+  const measured = classification ?? "unclassified";
+  return reported ? `${measured} (agent reported: ${reported})` : measured;
+}
 
 /** What an agent SAID about its external writes. Null is its own answer, the
  * agent said nothing, and is never shown as "none", which is a claim. */
@@ -185,6 +211,12 @@ function printResumeStart(resume: ResumeStart): void {
   print(`${style("Resume start:", BOLD)} ${formatStatus(resume.status)}`);
   print(`  Attempts:   ${resume.attempts}/${resume.max_attempts}`);
   if (resume.status_reason) print(`  ${style("Reason:", RED)}    ${resume.status_reason}`);
+  if (resume.start_queue) print(`  Queue:      ${formatStartQueue(resume.start_queue)}`);
+}
+
+/** Where a start stands in the execution budget, e.g. "queued 2 of 3 (4/4 running) via resume". */
+function formatStartQueue(queue: StartQueue): string {
+  return `${queue.position_display} via ${queue.path}`;
 }
 
 /**

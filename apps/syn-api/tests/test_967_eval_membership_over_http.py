@@ -25,7 +25,8 @@ from httpx import ASGITransport, AsyncClient
 
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_domain.contexts._shared import AdmissionGate
-from syn_domain.contexts.orchestration import EvalChoice, TagSet, WorkflowExecutionAggregate
+from syn_domain.contexts.orchestration import TagSet, WorkflowExecutionAggregate
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId, Goal
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     StartExecutionCommand,
@@ -92,7 +93,6 @@ async def _create_eval(eval_id: str, *, archived: bool = False) -> None:
 async def _launch_execution(eval_id: str | None = None) -> None:
     """An execution launched into ``eval_id`` (or none), saved like a real one."""
     from syn_api._wiring import ensure_connected, get_workflow_execution_repository
-    from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 
     await ensure_connected()
     selection = EvalSelection.EXPLICIT if eval_id else EvalSelection.NONE
@@ -105,7 +105,7 @@ async def _launch_execution(eval_id: str | None = None) -> None:
             total_phases=1,
             inputs={},
             tags=TagSet(),
-            launch_eval=LaunchEval(eval_id, selection),
+            launch_eval=LaunchEval(EvalId(eval_id) if eval_id else None, selection),
         )
     )
     await get_workflow_execution_repository().save_new(aggregate)
@@ -270,19 +270,19 @@ class TestWorkflowDefaultEval:
 
 
 class _CapturingExecute:
-    """Stands in for `execute()`, keeping only the eval choice the route handed it."""
+    """Stands in for `execute()`, keeping only the resolved eval the route handed it."""
 
     def __init__(self) -> None:
-        self.choices: list[EvalChoice | None] = []
+        self.choices: list[LaunchEval | None] = []
 
     async def __call__(
         self,
         *,
         admitted: AdmissionTicket | None = None,
-        eval_choice: EvalChoice | None = None,
+        launch_eval: LaunchEval | None = None,
         **_: object,
     ) -> None:
-        self.choices.append(eval_choice)
+        self.choices.append(launch_eval)
         if admitted is not None:
             admitted.mark_visible()
 
@@ -328,7 +328,7 @@ class TestTheLaunchChoosesAnEval:
 
         assert await self._run(client, workflow_id, _Launch(eval_id="eval-a")) == 200
 
-        assert execution.choices == [EvalChoice(eval_id=EvalId("eval-a"))]
+        assert execution.choices == [LaunchEval(EvalId("eval-a"), EvalSelection.EXPLICIT)]
 
     async def test_no_eval_reaches_execute_as_an_ordinary_run(
         self, client: AsyncClient, execution: _CapturingExecute
@@ -339,7 +339,7 @@ class TestTheLaunchChoosesAnEval:
 
         assert await self._run(client, workflow_id, _Launch(no_eval=True)) == 200
 
-        assert execution.choices == [EvalChoice(ordinary=True)]
+        assert execution.choices == [LaunchEval(None, EvalSelection.ORDINARY)]
 
     @pytest.mark.parametrize(
         ("archived", "status"), [(True, 409), (None, 404)], ids=["archived", "missing"]
@@ -375,7 +375,7 @@ class TestTheLaunchChoosesAnEval:
 
         assert refused == 409
         assert ordinary == 200
-        assert execution.choices == [EvalChoice(ordinary=True)]
+        assert execution.choices == [LaunchEval(None, EvalSelection.ORDINARY)]
 
     async def test_eval_id_and_no_eval_together_are_422(
         self, client: AsyncClient, execution: _CapturingExecute
