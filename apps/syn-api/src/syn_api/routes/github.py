@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 
 from syn_api._wiring import ensure_connected
 from syn_api.services.github_repo_listing_cache import (
+    REFRESH_AFTER,
     CachedRepoListing,
     RepoListingCache,
     get_repo_listing_cache,
@@ -196,19 +197,21 @@ async def _aggregate_all_installations(
     """Return the repos every installation reaches, from the cache when it can.
 
     A listing younger than ``FRESH_FOR`` is served as complete without asking
-    GitHub. An older one is served at once as ``partial``, since a repo added
-    since would be missing from it, while a refresh runs in the background. With
-    nothing cached GitHub is asked live, as before the cache existed.
+    GitHub, and past ``REFRESH_AFTER`` a background refresh starts. Otherwise
+    GitHub is asked live, as before the cache existed, so nothing older than
+    ``FRESH_FOR`` is ever served as complete. If GitHub cannot be asked at all,
+    an older listing is served as ``partial``.
     """
     cache = get_repo_listing_cache()
     cached = await cache.get()
-    if cached is None:
-        repos, lookup = await _ask_github(client, cache)
-    elif cached.is_fresh():
+    if cached is not None and cached.is_fresh():
+        if cached.age() >= REFRESH_AFTER:
+            _revalidate_in_background(client, cache)
         repos, lookup = cached.repos, GitHubRepoLookup.COMPLETE
     else:
-        _revalidate_in_background(client, cache)
-        repos, lookup = cached.repos, GitHubRepoLookup.PARTIAL
+        repos, lookup = await _ask_github(client, cache)
+        if lookup == GitHubRepoLookup.UNAVAILABLE and cached is not None:
+            repos, lookup = cached.repos, GitHubRepoLookup.PARTIAL
     if not include_private:
         repos = [r for r in repos if not r.private]
     return repos, lookup
@@ -240,12 +243,14 @@ async def _ask_github(
 
     Installations are asked concurrently. A listing that is not complete is
     returned but never cached, so the cache only ever holds what GitHub
-    confirmed in full.
+    confirmed in full. The generation is read before GitHub is asked, so an
+    invalidation that lands while GitHub answers outranks this answer.
     """
     from syn_domain.contexts.github.slices.get_installation.projection import (
         get_installation_projection,
     )
 
+    generation = await cache.generation()
     started_at = datetime.now(UTC)
     installations, installations_current = await _known_installations(
         client, get_installation_projection()
@@ -262,9 +267,11 @@ async def _ask_github(
                 repos.append(repo)
     answered = sum(found is not None for found in answers)
     lookup = _lookup_of(len(installations), answered, installations_current)
-    if lookup == GitHubRepoLookup.COMPLETE:
+    if lookup == GitHubRepoLookup.COMPLETE and generation is not None:
         # Aged from when GitHub was asked, not when it finished answering.
-        await cache.put(CachedRepoListing(repos=repos, fetched_at=started_at))
+        await cache.put(
+            CachedRepoListing(repos=repos, fetched_at=started_at, generation=generation)
+        )
     return repos, lookup
 
 
@@ -329,11 +336,11 @@ async def list_accessible_repos_endpoint(
     """List repositories accessible to the GitHub App.
 
     With no installation_id, aggregates every installation. The last complete
-    listing is cached: under a minute old it is served as ``complete``; older,
-    it is served as ``partial`` while a background refresh asks GitHub; with
-    none cached, GitHub is asked live. The GitHub App's ``installation`` and
-    ``installation_repositories`` webhooks drop the cache at once. A single
-    installation_id is always asked live.
+    listing is cached and served as ``complete`` while under a minute old;
+    otherwise GitHub is asked live, and an older listing is served as
+    ``partial`` only if GitHub cannot be asked. The GitHub App's
+    ``installation`` and ``installation_repositories`` webhooks invalidate the
+    cache at once. A single installation_id is always asked live.
 
     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
     the App's reach (``complete``) or merely went unseen because GitHub failed.

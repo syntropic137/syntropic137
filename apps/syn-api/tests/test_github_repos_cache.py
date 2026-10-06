@@ -21,6 +21,7 @@ from syn_api.routes.github import list_accessible_repos
 from syn_api.routes.webhooks.handlers import _handle_installation_event
 from syn_api.services.github_repo_listing_cache import (
     FRESH_FOR,
+    REFRESH_AFTER,
     CachedRepoListing,
     RedisRepoListingCache,
     get_repo_listing_cache,
@@ -128,19 +129,68 @@ async def test_a_fresh_cache_answers_without_asking_github(github: _GitHub) -> N
     assert (_names(second), second.lookup) == (_names(first), GitHubRepoLookup.COMPLETE)
 
 
-async def test_an_expired_cache_is_served_partial_and_refreshed(github: _GitHub) -> None:
+async def test_the_first_request_after_expiry_asks_github_and_has_the_new_repo(
+    github: _GitHub,
+) -> None:
+    """No webhook: a repo added is in the first listing served once FRESH_FOR runs out."""
     await _listing()
     github.repos["inst-1"].append("acme/new")
     await _age_cache(FRESH_FOR + timedelta(seconds=1))
+    asked = len(github.calls)
 
-    stale = await _listing()
-    assert stale.lookup == GitHubRepoLookup.PARTIAL
-    assert "acme/new" not in _names(stale)
+    first = await _listing()
+
+    assert len(github.calls) > asked
+    assert (first.lookup, "acme/new" in _names(first)) == (GitHubRepoLookup.COMPLETE, True)
+
+
+async def test_a_listing_past_refresh_after_is_served_and_refreshed_behind(
+    github: _GitHub,
+) -> None:
+    await _listing()
+    github.repos["inst-1"].append("acme/new")
+    await _age_cache(REFRESH_AFTER + timedelta(seconds=1))
+
+    served = await _listing()
+    assert (served.lookup, "acme/new" in _names(served)) == (GitHubRepoLookup.COMPLETE, False)
 
     await _finish_revalidation()
+    asked = len(github.calls)
     refreshed = await _listing()
-    assert refreshed.lookup == GitHubRepoLookup.COMPLETE
-    assert "acme/new" in _names(refreshed)
+    assert len(github.calls) == asked  # answered from the refreshed cache
+    assert (refreshed.lookup, "acme/new" in _names(refreshed)) == (GitHubRepoLookup.COMPLETE, True)
+
+
+async def test_a_webhook_during_a_refresh_outranks_the_refresh(github: _GitHub) -> None:
+    """A refresh that read GitHub before the webhook must not be served after it."""
+    await _listing()
+    await _age_cache(REFRESH_AFTER + timedelta(seconds=1))
+    original = github.list_accessible_repos
+    read_old_answer, release = asyncio.Event(), asyncio.Event()
+
+    async def pauses_after_reading(installation_id: str | None = None) -> list[dict]:
+        answer = await original(installation_id)
+        if installation_id == "inst-2" and not release.is_set():
+            read_old_answer.set()
+            await release.wait()
+        return answer
+
+    with patch.object(github, "list_accessible_repos", pauses_after_reading):
+        await _listing()  # starts the background refresh
+        await asyncio.wait_for(read_old_answer.wait(), timeout=5)
+
+        github.repos["inst-2"].append("acme/new")
+        await _handle_installation_event(
+            "installation_repositories",
+            "added",
+            {"installation": {"id": "inst-2"}, "repositories_added": [{"full_name": "acme/new"}]},
+        )
+        release.set()
+        await _finish_revalidation()
+
+        after = await _listing()
+
+    assert (after.lookup, "acme/new" in _names(after)) == (GitHubRepoLookup.COMPLETE, True)
 
 
 async def test_an_installation_webhook_drops_the_cache(github: _GitHub) -> None:
@@ -173,7 +223,6 @@ async def test_github_down_with_a_warm_cache_serves_it_stale_and_keeps_it(
     github.down = True
 
     stale = await _listing()
-    await _finish_revalidation()
 
     assert (_names(stale), stale.lookup) == (_names(before), GitHubRepoLookup.PARTIAL)
     kept = await get_repo_listing_cache().get()
@@ -221,6 +270,17 @@ class _Redis:
             raise RedisConnectionError("down")
         return self.values.get(key)
 
+    async def mget(self, *keys: str) -> list[str | None]:
+        if self.broken:
+            raise RedisConnectionError("down")
+        return [self.values.get(k) for k in keys]
+
+    async def incr(self, key: str) -> int:
+        if self.broken:
+            raise RedisConnectionError("down")
+        self.values[key] = str(int(self.values.get(key, "0")) + 1)
+        return int(self.values[key])
+
     async def set(self, key: str, value: str, ex: int) -> None:
         if self.broken:
             raise RedisConnectionError("down")
@@ -242,7 +302,7 @@ def _cached() -> CachedRepoListing:
         owner="acme",
         installation_id="inst-1",
     )
-    return CachedRepoListing(repos=[repo], fetched_at=datetime.now(UTC))
+    return CachedRepoListing(repos=[repo], fetched_at=datetime.now(UTC), generation=0)
 
 
 async def test_redis_cache_round_trips_and_expires_the_key() -> None:
@@ -257,8 +317,24 @@ async def test_redis_cache_round_trips_and_expires_the_key() -> None:
     assert await cache.get() is None
 
 
+async def test_redis_cache_ignores_a_listing_put_from_before_an_invalidation() -> None:
+    cache = RedisRepoListingCache(_Redis())  # type: ignore[arg-type]  # stand-in for redis.asyncio.Redis
+
+    read_before = await cache.generation()
+    await cache.invalidate()
+    await cache.put(_cached().model_copy(update={"generation": read_before}))
+    assert await cache.get() is None
+
+    current = await cache.generation()
+    assert current is not None and current != read_before
+    fresh = _cached().model_copy(update={"generation": current})
+    await cache.put(fresh)
+    assert await cache.get() == fresh
+
+
 async def test_unreachable_redis_is_a_miss_not_an_error() -> None:
     cache = RedisRepoListingCache(_Redis(broken=True))  # type: ignore[arg-type]  # stand-in
+    assert await cache.generation() is None
     await cache.put(_cached())
     await cache.invalidate()
     assert await cache.get() is None
