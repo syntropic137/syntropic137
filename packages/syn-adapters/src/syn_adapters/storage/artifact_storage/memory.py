@@ -78,7 +78,7 @@ class InMemoryArtifactStorage(InMemoryAdapter):
         self._storage[artifact_id] = (content, result)
         return result
 
-    async def download(self, artifact_id: str) -> bytes:
+    async def download(self, artifact_id: str, *, storage_uri: str | None = None) -> bytes:  # noqa: ARG002 - keyed by id alone
         """Download artifact content from in-memory storage."""
         if artifact_id not in self._storage:
             raise ArtifactNotFoundError(artifact_id)

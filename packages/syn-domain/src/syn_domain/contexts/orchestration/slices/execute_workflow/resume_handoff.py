@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.artifacts import primary_text
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -99,7 +100,7 @@ async def inherited_outputs(
     # resolved; #1460 tracks that. Refusing on a count here would be a false
     # invariant, not a safer one.
     for phase_id, phase_files in files.items():
-        cache.record(phase_id, phase_files[0].content if phase_files else None, phase_files)
+        cache.record(phase_id, primary_text(phase_files), phase_files)
     return cache
 
 

@@ -59,7 +59,13 @@ class ArtifactType(StrEnum):
 
 
 class ContentType(StrEnum):
-    """MIME type of artifact content."""
+    """MIME type of artifact content.
+
+    The text members say how to READ a ``str``; the binary members (#990) say
+    the content is bytes and has no ``str`` form at all. Before #990 there were
+    no binary members, so every collected file was decoded as UTF-8 to fit -
+    and a PNG came back as U+FFFD followed by "PNG".
+    """
 
     TEXT_PLAIN = "text/plain"
     TEXT_MARKDOWN = "text/markdown"
@@ -69,17 +75,100 @@ class ContentType(StrEnum):
     TEXT_TYPESCRIPT = "text/x-typescript"
     TEXT_JAVASCRIPT = "text/javascript"
 
+    # Binary (#990). Content lives in object storage only (ADR-012): the
+    # event records the fact, its hash and its size, never the bytes.
+    IMAGE_PNG = "image/png"
+    IMAGE_JPEG = "image/jpeg"
+    IMAGE_GIF = "image/gif"
+    IMAGE_WEBP = "image/webp"
+    APPLICATION_PDF = "application/pdf"
+    APPLICATION_OCTET_STREAM = "application/octet-stream"
 
-def compute_content_hash(content: str) -> str:
-    """Compute SHA-256 hash of content.
+    @property
+    def is_binary(self) -> bool:
+        """Whether content of this type is bytes with no text form."""
+        return self in _BINARY_CONTENT_TYPES
 
-    Args:
-        content: The content to hash.
+    @classmethod
+    def of(cls, data: bytes, source_path: str | None = None) -> ContentType:
+        """What ``data`` is, judged by its bytes and, failing that, its name.
 
-    Returns:
-        Hex-encoded SHA-256 hash (64 characters).
+        Text is anything that is valid UTF-8 without a NUL byte, and keeps the
+        type every collected file had before #990 - so a text artifact is
+        stored exactly as it always was. Only content that CANNOT be text is
+        binary: its signature names it where it has one, then the file
+        extension, then ``application/octet-stream``. Never the other way
+        round: an extension alone cannot make valid text binary, and a ``.md``
+        holding PNG bytes is still a PNG.
+        """
+        if _is_text(data):
+            return cls.TEXT_MARKDOWN
+        return _by_signature(data) or _by_extension(source_path) or cls.APPLICATION_OCTET_STREAM
+
+
+_BINARY_CONTENT_TYPES: frozenset[ContentType] = frozenset(
+    {
+        ContentType.IMAGE_PNG,
+        ContentType.IMAGE_JPEG,
+        ContentType.IMAGE_GIF,
+        ContentType.IMAGE_WEBP,
+        ContentType.APPLICATION_PDF,
+        ContentType.APPLICATION_OCTET_STREAM,
+    }
+)
+
+_BINARY_SIGNATURES: tuple[tuple[bytes, ContentType], ...] = (
+    (b"\x89PNG\r\n\x1a\n", ContentType.IMAGE_PNG),
+    (b"\xff\xd8\xff", ContentType.IMAGE_JPEG),
+    (b"GIF87a", ContentType.IMAGE_GIF),
+    (b"GIF89a", ContentType.IMAGE_GIF),
+    (b"%PDF-", ContentType.APPLICATION_PDF),
+)
+
+_BINARY_EXTENSIONS: dict[str, ContentType] = {
+    "png": ContentType.IMAGE_PNG,
+    "jpg": ContentType.IMAGE_JPEG,
+    "jpeg": ContentType.IMAGE_JPEG,
+    "gif": ContentType.IMAGE_GIF,
+    "webp": ContentType.IMAGE_WEBP,
+    "pdf": ContentType.APPLICATION_PDF,
+}
+
+
+def _is_text(data: bytes) -> bool:
+    """Valid UTF-8 with no NUL byte: what every artifact was before #990."""
+    if b"\x00" in data:
+        return False
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def _by_signature(data: bytes) -> ContentType | None:
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return ContentType.IMAGE_WEBP
+    return next((ct for sig, ct in _BINARY_SIGNATURES if data.startswith(sig)), None)
+
+
+def _by_extension(source_path: str | None) -> ContentType | None:
+    if source_path is None or "." not in source_path:
+        return None
+    return _BINARY_EXTENSIONS.get(source_path.rsplit(".", 1)[-1].lower())
+
+
+def compute_content_hash(content: str | bytes) -> str:
+    """SHA-256 of the content's BYTES, hex-encoded (64 characters).
+
+    Text is hashed as its UTF-8 encoding, which is exactly what it was before
+    #990, so every existing ``content_hash`` is unchanged and still verifies.
+    Binary is hashed as-is: the hash is of the file the agent wrote, not of
+    any decoding of it (#990 hashed the U+FFFD-mangled text, which verified
+    nothing).
     """
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    data = content.encode("utf-8") if isinstance(content, str) else content
+    return hashlib.sha256(data).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -99,7 +188,29 @@ class PhaseOutputFile:
     """
 
     source_path: str | None
-    content: str
+    #: ``str`` for text, ``bytes`` for a binary file (#990). The handoff writes
+    #: either to the next workspace unchanged; only text can be a phase's
+    #: primary deliverable, because prompt substitution needs a string.
+    content: str | bytes
+
+
+def primary_text(files: list[PhaseOutputFile]) -> str | None:
+    """The text that stands for a phase's output, or None if it has none.
+
+    The first file with text content, because every source puts the primary
+    deliverable at the head: the projection sorts by ``_injection_rank``, which
+    ranks the explicitly-flagged primary first (#997), and the live path
+    collects in the order it flagged. Choosing by any other rule would recreate
+    the disagreement #1149 removed, one layer down - which is why the flat
+    alias and a resume's inherited primary both ask this one function.
+
+    Empty content is not a deliverable - `CreateArtifactCommand` rejects it and
+    every other reader skips it, so a legacy or corrupt row cannot become the
+    primary. Nor is a binary file (#990): the primary is read as the phase's
+    text, and a screenshot reaches the next phase through the tree at its own
+    path instead.
+    """
+    return next((f.content for f in files if isinstance(f.content, str) and f.content), None)
 
 
 @dataclass(frozen=True)

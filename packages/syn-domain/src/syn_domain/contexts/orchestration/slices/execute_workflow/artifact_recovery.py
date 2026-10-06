@@ -249,7 +249,7 @@ def is_usable_conclusion(message: str) -> bool:
     return _reporting_words(message) >= _MIN_CONCLUSION_WORDS
 
 
-def is_storable(content: str) -> bool:
+def is_storable(content: str | bytes) -> bool:
     """Whether the artifact store will accept `content` as it stands.
 
     Asks the store's own rule rather than restating it: the threshold is
