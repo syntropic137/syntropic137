@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from syn_adapters.in_memory import InMemoryAdapter
-from syn_api.types import GitHubRepoResponse
+from syn_api.types import GitHubRepoResponse  # noqa: TC001  # Pydantic resolves it at runtime
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis as AsyncRedis

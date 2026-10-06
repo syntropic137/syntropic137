@@ -8,9 +8,9 @@ getter the route uses.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -26,6 +26,9 @@ from syn_api.services.github_repo_listing_cache import (
     get_repo_listing_cache,
 )
 from syn_api.types import GitHubRepoListResponse, GitHubRepoLookup, GitHubRepoResponse, Ok
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.unit
 
@@ -84,7 +87,9 @@ def github() -> Iterator[_GitHub]:
         patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock),
         patch("syn_adapters.github.client.get_github_client", return_value=gh),
         patch(_PROJECTION, return_value=_projection(list(gh.repos))),
-        patch("syn_domain.contexts.github.get_installation_projection", return_value=_projection([])),
+        patch(
+            "syn_domain.contexts.github.get_installation_projection", return_value=_projection([])
+        ),
         patch.object(github_routes, "_revalidation", None),
     ):
         yield gh
