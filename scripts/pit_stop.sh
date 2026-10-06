@@ -439,8 +439,8 @@ elif [ "$SKIP_PROBE" = 1 ]; then
     PROBE_LINE=" PROBE SKIPPED: dispatch one real workflow and watch a PHASE reach running."
 else
     # BAK is set only when this run repointed the pins; under --swap-only the
-    # backup is the newest $COMPOSE.bak-* an earlier stage left on the host.
-    rollback="ssh $HOST 'cd $COMPOSE_DIR && ls $COMPOSE.bak-* && cp $COMPOSE.bak-${BAK:-<pin>} $COMPOSE'
+    # backup is the $COMPOSE.bak-* an earlier stage left on the host: put its PIN in.
+    rollback="ssh $HOST 'cd $COMPOSE_DIR && ls $COMPOSE.bak-* && cp $COMPOSE.bak-${BAK:-PIN} $COMPOSE'
    ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway'"
     RECOVERY="$TAG is LIVE and admission is OPEN, deliberately: in-flight work from other users is not held hostage to a failed probe. Nothing was rolled back. To roll back by hand:
    $rollback"
