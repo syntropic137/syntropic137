@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -39,13 +40,14 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 import syn_adapters.storage.repositories as repositories
 import syn_api._wiring as wiring
 import syn_api._wiring_admission as admission
+from syn_adapters.control.commands import CancelExecution, ControlResult
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
-from syn_api.execution_budget import ExecutionBudget, StartPath
-from syn_api.routes.executions import commands, queries
+from syn_api.execution_budget import ExecutionBudget, StartClaim, StartPath
+from syn_api.routes.executions import commands, control, queries
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -87,6 +89,7 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
 )
 from syn_domain.contexts.orchestration.slices.start_execution_request import (
     ExecutionRequestStartProcessManager,
+    ExecutionRequestStartRecord,
 )
 from syn_domain.contexts.orchestration.slices.start_resume import (
     ResumeStartProcessManager,
@@ -99,7 +102,7 @@ from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_domain.testing.stored_replay import stored_envelopes
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
 
     from event_sourcing import DomainEvent
 
@@ -244,6 +247,13 @@ class _Requests:
 
     async def save_new(self, aggregate: ExecutionRequestAggregate) -> None:
         await self._repo.save_new(aggregate)
+        await self._deliver()
+
+    async def save(self, aggregate: ExecutionRequestAggregate) -> None:
+        await self._repo.save(aggregate)
+        await self._deliver()
+
+    async def _deliver(self) -> None:
         stored = await stored_envelopes(self.client)
         for envelope in stored[self._seen :]:
             self._log.append(
@@ -1004,3 +1014,243 @@ class TestTheRequestDoesNotTakeTheExecutionsStream:
         ]
         assert requested.metadata.aggregate_id != execution_id
         assert getattr(requested.event, "execution_id", None) == execution_id
+
+
+# -- #1650: a queued execution can be cancelled -------------------------------
+
+_REASON = "probe deadline"
+
+
+async def _cancel(execution_id: str) -> control.ControlResponse:
+    """`POST /executions/{id}/cancel`, as `syn control cancel` calls it."""
+    return await control.cancel_execution_endpoint(
+        execution_id, control.CancelRequest(reason=_REASON)
+    )
+
+
+def _withdrawals(world: _World, execution_id: str) -> int:
+    return sum(
+        1
+        for e in world.log.envelopes
+        if e.metadata.event_type == "ExecutionRequestWithdrawn"
+        and getattr(e.event, "execution_id", None) == execution_id
+    )
+
+
+def _leases(world: _World) -> int:
+    return world.gate._outstanding  # pyright: ignore[reportPrivateUsage]
+
+
+async def _two_running_one_queued(world: _World) -> tuple[list[str], str]:
+    running = [await world.post_execute(), await world.post_execute()]
+    queued = await world.post_execute()
+    await world.agent.until(lambda: len(world.agent.inside) == LIMIT)
+    assert queued not in world.agent.inside
+    return running, queued
+
+
+async def _until_released(world: _World, execution_id: str) -> None:
+    async with asyncio.timeout(_WITHIN):
+        while world.budget.position(execution_id) is not None:
+            await asyncio.sleep(0)
+
+
+def _withdraw_once_granted(
+    world: _World, monkeypatch: pytest.MonkeyPatch, target: list[str], running_at_grant: list[int]
+) -> None:
+    """The race: the slot is GRANTED, then the withdrawal is recorded, then the start runs.
+
+    Both direct start paths enter `budget.held`; this records the withdrawal
+    between its grant and the start it guards, which is the only order a
+    pre-grant check cannot see.
+    """
+    held = world.budget.held
+
+    @asynccontextmanager
+    async def _granted_then_withdrawn(claim: StartClaim) -> AsyncIterator[None]:
+        async with held(claim):
+            if claim.execution_id in target:
+                running_at_grant.append(world.budget.running)
+                assert (await _cancel(claim.execution_id)).state == "cancelled"
+            yield
+
+    monkeypatch.setattr(world.budget, "held", _granted_then_withdrawn)
+
+
+class TestAQueuedStartCanBeCancelled:
+    async def test_cancel_withdraws_a_queued_start_and_it_never_runs(self, world: _World) -> None:
+        running, queued = await _two_running_one_queued(world)
+
+        cancelled = await _cancel(queued)
+
+        assert (cancelled.success, cancelled.execution_id, cancelled.state) == (
+            True,
+            queued,
+            "cancelled",
+        )
+        await world.coordinate()
+        shown = await world.shown(queued)
+        assert shown.status == "cancelled"
+        assert shown.error_message == _REASON
+        assert shown.start_queue is not None
+        assert shown.start_queue.start_status == "withdrawn"
+
+        await _release_everything(world)
+
+        assert queued not in world.agent.entered
+        assert queued not in world.executions.streams
+        assert sorted(world.agent.entered) == sorted(running)
+        assert world.budget.matching("exec-") == []
+        assert _leases(world) == 0, "the withdrawn start kept its admission lease"
+        assert await world.coordinate() == (0, 0)
+
+    async def test_cancelling_it_again_withdraws_nothing_twice(self, world: _World) -> None:
+        _, queued = await _two_running_one_queued(world)
+        await _cancel(queued)
+
+        again = await _cancel(queued)
+
+        assert again.state == "cancelled"
+        assert _withdrawals(world, queued) == 1
+        await _release_everything(world)
+
+    async def test_an_unknown_id_is_still_404_on_cancel(self, world: _World) -> None:
+        with pytest.raises(HTTPException) as refused:
+            await _cancel("exec-nobody-1650")
+        assert refused.value.status_code == 404
+
+
+class TestAWithdrawalWhileTheGrantIsInFlight:
+    async def test_the_route_start_does_not_run_and_gives_its_slot_back(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # In place before the route queues anything: its task enters `held` at once.
+        target: list[str] = []
+        running_at_grant: list[int] = []
+        _withdraw_once_granted(world, monkeypatch, target, running_at_grant)
+        running, queued = await _two_running_one_queued(world)
+        target.append(queued)
+        behind = await world.post_execute()
+
+        world.agent.release(running[0])
+        await _until_released(world, queued)
+
+        # Granted: it held a slot beside running[1] when the withdrawal landed.
+        assert running_at_grant == [LIMIT]
+        # Released, not leaked: the start behind it got that slot.
+        await world.agent.until(lambda: behind in world.agent.inside)
+        assert world.budget.running == LIMIT
+        assert queued not in world.agent.entered
+
+        await _release_everything(world)
+        assert queued not in world.executions.streams
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    async def test_the_process_manager_start_does_not_run_and_gives_its_slot_back(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same race on the restart path, where the ProcessManager starts it."""
+
+        def _never_queued(*args: object, **kwargs: object) -> None:
+            del args, kwargs  # recorded, then the process died before queueing it
+
+        with monkeypatch.context() as patched:
+            patched.setattr(commands, "queue_direct_start", _never_queued)
+            for _ in range(LIMIT + 1):
+                await world.post_execute()
+        requested = [
+            str(getattr(e.event, "execution_id", ""))
+            for e in world.log.envelopes
+            if e.metadata.event_type == "ExecutionRequested"
+        ]
+        await world.restart()
+        target: list[str] = []
+        running_at_grant: list[int] = []
+        _withdraw_once_granted(world, monkeypatch, target, running_at_grant)
+
+        assert await world.coordinate() == (0, LIMIT + 1)
+        await world.agent.until(lambda: len(world.agent.inside) == LIMIT)
+        (queued,) = [e for e in requested if e not in world.agent.inside]
+        target.append(queued)
+
+        world.agent.release(world.agent.inside[0])
+        await _until_released(world, queued)
+
+        assert running_at_grant == [LIMIT]
+        assert world.budget.running == LIMIT - 1, "the withdrawn start kept its slot"
+        assert queued not in world.agent.entered
+        await _release_everything(world)
+        assert await world.coordinate() == (0, 0)
+        assert queued not in world.agent.entered
+        assert _leases(world) == 0
+
+
+class TestAWithdrawnRequestSurvivesARestart:
+    async def test_the_rebuilt_to_do_list_never_offers_it(self, world: _World) -> None:
+        running, queued = await _two_running_one_queued(world)
+        await _cancel(queued)
+
+        await world.restart()
+        # Rebuilt from the event stream alone, as a new projection would be.
+        await world.request_manager.clear_all_data()
+        offered = await world.coordinate()
+
+        # Both runs that were killed had started; the withdrawn one is not owed.
+        assert offered == (0, 0)
+        row = await world.projections.store.get(
+            ExecutionRequestStartProcessManager.PROJECTION_NAME, queued
+        )
+        assert row is not None
+        assert ExecutionRequestStartRecord.model_validate(row).status == "withdrawn"
+        assert (await world.shown(queued)).status == "cancelled"
+        await _release_everything(world)
+        assert queued not in world.agent.entered
+        assert all(world.agent.entered.count(e) == 1 for e in running)
+
+    async def test_a_withdrawal_read_before_the_to_do_list_projects_it(self, world: _World) -> None:
+        """Restarted before the coordinator delivered anything: the stream answers."""
+        _, queued = await _two_running_one_queued(world)
+        await _cancel(queued)
+        await world.restart()
+
+        assert (await world.shown(queued)).status == "cancelled"
+        await _release_everything(world)
+
+
+class TestCancellingAStartedExecutionIsUnchanged:
+    async def test_it_goes_to_the_controller_and_withdraws_nothing(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        execution_id = await world.post_execute()
+        await world.agent.until(lambda: execution_id in world.agent.inside)
+        await world.projections.store.save(
+            "workflow_execution_details",
+            execution_id,
+            {"workflow_execution_id": execution_id},
+        )
+        sent: list[CancelExecution] = []
+
+        class _Controller:
+            async def handle_command(self, command: CancelExecution) -> ControlResult:
+                sent.append(command)
+                return ControlResult(
+                    success=True,
+                    execution_id=command.execution_id,
+                    new_state="cancelling",
+                    message="signalled",
+                )
+
+        monkeypatch.setattr(control, "get_controller", _Controller)
+
+        response = await _cancel(execution_id[:10])
+
+        assert (response.execution_id, response.state, response.message) == (
+            execution_id,
+            "cancelling",
+            "signalled",
+        )
+        assert [(c.execution_id, c.reason) for c in sent] == [(execution_id, _REASON)]
+        assert _withdrawals(world, execution_id) == 0
+        await _release_everything(world)
+        assert world.agent.entered == [execution_id]
