@@ -40,6 +40,28 @@ and detached by `RepoUnassignedFromSystem`.
 A Repo may exist without a System. Assignment is a separate fact, so a
 repository can be known before anyone decides what it belongs to.
 
+## Connected Repo
+
+A repository the platform can see and is expected to list: a **Repo** (one
+`RepoRegistered` exists for it) **or** a repository some GitHub App
+installation can reach, whether or not anyone registered it. The two are
+joined by full name, case-insensitively, so a repository that is both is one
+connected repo.
+
+Not sources of their own:
+
+- **A repo assigned to a System** - assignment is a fact about a Repo, so
+  such a repo is already registered.
+- **A repository named in an Execution's inputs** - an execution can name a
+  repository the platform cannot reach and was never told about. Naming it
+  does not connect it.
+
+The dashboard's `/repos` page lists connected repos; one that the App reaches
+but nobody registered shows as "Not registered" (feedback 29714ff9).
+
+Installing the App does not register a Repo: no installation webhook issues
+`RegisterRepo`. That is why this definition is a union and not just "a Repo".
+
 ## Repo Claim
 
 An exclusive hold on a Repo, taken by `RepoClaimed` and released by
