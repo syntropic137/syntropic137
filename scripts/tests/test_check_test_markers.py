@@ -25,6 +25,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from check_test_markers import (
+    UNMARKED_SELECTOR,
     Budget,
     collect_census,
     count_xfail_markers,
@@ -257,3 +258,16 @@ class TestCollectionErrorsAreNotAnImprovement:
         (tmp_path / "test_good.py").write_text(self.GOOD)
 
         assert collect_census(str(tmp_path), "-m", "unit") == 0
+
+    def test_an_e2e_only_test_is_counted_as_unmarked(self, tmp_path: Path) -> None:
+        """No CI job runs ``-m e2e``, so ``e2e`` alone reaches nothing (#1428).
+
+        The census once filtered ``e2e`` out as if it were selected, and 11
+        tests carrying only that marker ran in no job behind a zero count.
+        """
+        (tmp_path / "test_e2e_only.py").write_text(
+            "import pytest\n\n\n@pytest.mark.e2e\ndef test_a() -> None: ...\n\n\n"
+            "@pytest.mark.unit\n@pytest.mark.e2e\ndef test_b() -> None: ...\n"
+        )
+
+        assert collect_census(str(tmp_path), "-m", UNMARKED_SELECTOR) == 1

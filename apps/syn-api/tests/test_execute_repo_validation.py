@@ -321,6 +321,51 @@ class TestRequiresReposPreflightGating:
         assert exc_info.value.status_code == 422
         assert "task" in str(exc_info.value.detail)
 
+    @pytest.mark.asyncio
+    async def test_admission_rejects_missing_declaration_without_repos(self) -> None:
+        """The admission path, not just the helper, holds a requires_repos=False
+        workflow to its required declarations (PC-81)."""
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+
+        decl = MagicMock()
+        decl.name = "task"
+        decl.required = True
+        decl.default = None
+        wf = self._make_workflow(requires_repos=False, input_declarations=[decl])
+        preflight = AsyncMock()
+
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+            patch(
+                "syn_api.routes.executions.commands._preflight_repos_or_reject",
+                new=preflight,
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await _validate_execution_request("wf-1", ExecuteWorkflowRequest(inputs={}))
+            assert exc_info.value.status_code == 422
+            assert "task" in str(exc_info.value.detail)
+
+            # Control: the same workflow is admitted once the input is supplied,
+            # so the 422 above came from the missing declaration.
+            await _validate_execution_request(
+                "wf-1", ExecuteWorkflowRequest(inputs={"task": "do it"})
+            )
+
+        preflight.assert_not_awaited()
+
 
 # -- Reserved repo input-key rejection (ADR-063 boundary) ---------------------
 

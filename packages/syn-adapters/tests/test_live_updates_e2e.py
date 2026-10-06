@@ -240,6 +240,7 @@ def subscription_service(
 # ============================================================================
 
 
+@pytest.mark.unit
 @pytest.mark.e2e
 class TestLiveUpdatesE2E:
     """End-to-end tests for live update flow."""

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 
+@pytest.mark.unit
 @pytest.mark.e2e
 class TestPhaseCompletedE2EFlow:
     """E2E tests for PhaseCompleted event flow through the system."""
