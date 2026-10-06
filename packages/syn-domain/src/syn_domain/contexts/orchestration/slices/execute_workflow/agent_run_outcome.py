@@ -86,6 +86,12 @@ def phase_failure(result: AgentExecutionResult, *, phase_id: str) -> Exception |
         return None
 
     reason = _platform_reason(result, phase_id=phase_id, exit_code=exit_code)
+    # A spent quota leads with what it is and when it ends, so the execution's
+    # error says it in its first words instead of burying it in the CLI's
+    # (PC-83). The CLI's own sentence follows, unedited.
+    quota = UPSTREAM_FAILURES.quota_of(result.stream_result.error_reason)
+    if quota is not None:
+        reason = f"{quota.account()}. {reason}"
     # Capacity and auth are both platform failures and ask opposite things of
     # an operator - wait, or fix the login - so the failure carries which
     # (#1592), and `failed_phase_outcome` says it beside the reason (#1593).
