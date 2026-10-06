@@ -112,12 +112,10 @@ For home lab deployments, consider these optimizations:
 ```bash
 # In .env file:
 SYN_WORKSPACE_ISOLATION_BACKEND=firecracker
-SYN_WORKSPACE_POOL_SIZE=10           # Pre-warm 10 VMs
-SYN_WORKSPACE_MAX_CONCURRENT=50      # Max 50 concurrent agents
 
 # Per-workspace limits
-SYN_SECURITY_MAX_MEMORY=1Gi          # 1GB per workspace
-SYN_SECURITY_MAX_CPU=1.0             # 1 vCPU per workspace
+SYN_WORKSPACE_MEMORY_LIMIT_MB=1024   # 1GB per workspace
+SYN_WORKSPACE_CPU_LIMIT=1.0          # 1 vCPU per workspace
 ```
 
 ### KVM Permissions

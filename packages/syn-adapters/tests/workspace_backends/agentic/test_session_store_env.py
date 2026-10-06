@@ -435,6 +435,9 @@ class TestAdapterIntegration:
         assert ws_config.labels == {
             "syn.execution_id": "exec-abc",
             "syn.workspace_id": "ws-xyz",
+            # Counts live containers per phase (#1606). An identity, not a
+            # secret, so it is safe where `docker inspect` can read it.
+            "syn.phase_id": "phase-1",
         }
 
     @pytest.mark.asyncio

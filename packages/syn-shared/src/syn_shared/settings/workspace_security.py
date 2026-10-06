@@ -65,26 +65,6 @@ class WorkspaceSecuritySettings(BaseSettings):
         ),
     )
 
-    max_memory: str = Field(
-        default="512Mi",
-        description=(
-            "Maximum memory per workspace. "
-            "Format: Kubernetes resource format (512Mi, 1Gi, etc). "
-            "Prevents single agent from exhausting host memory."
-        ),
-    )
-
-    max_cpu: float = Field(
-        default=0.5,
-        ge=0.1,
-        le=16.0,
-        description=(
-            "Maximum CPU cores per workspace. "
-            "0.5 = 50% of one core. "
-            "Prevents single agent from monopolizing CPU."
-        ),
-    )
-
     max_pids: int = Field(
         default=100,
         ge=10,
@@ -107,19 +87,6 @@ class WorkspaceSecuritySettings(BaseSettings):
         if not self.allowed_hosts:
             return []
         return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
-
-    def get_docker_memory(self) -> str:
-        """Convert Kubernetes memory format (512Mi) to Docker format (512m)."""
-        mem = self.max_memory.strip()
-        if mem.endswith("Ki"):
-            return mem[:-2] + "k"
-        if mem.endswith("Mi"):
-            return mem[:-2] + "m"
-        if mem.endswith("Gi"):
-            return mem[:-2] + "g"
-        if mem.endswith("Ti"):
-            return mem[:-2] + "t"
-        return mem.lower()
 
 
 class ContainerLoggingSettings(BaseSettings):

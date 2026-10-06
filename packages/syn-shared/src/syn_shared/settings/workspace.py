@@ -36,6 +36,12 @@ from syn_shared.settings.workspace_security import (  # noqa: F401
     WorkspaceSecuritySettings,
 )
 
+DEFAULT_WORKSPACE_MEMORY_LIMIT_MB = 4096
+"""Memory ceiling for one workspace container, in MB."""
+
+DEFAULT_WORKSPACE_CPU_LIMIT = 2.0
+"""CPU ceiling for one workspace container, in cores."""
+
 
 class IsolationBackend(StrEnum):
     """Available isolation backends for agent workspaces."""
@@ -79,25 +85,6 @@ class WorkspaceSettings(BaseSettings):
         if v == "":
             return get_default_isolation_backend()
         return v
-
-    pool_size: int = Field(
-        default=100,
-        ge=0,
-        le=10000,
-        description="Number of pre-warmed workspace instances.",
-    )
-
-    max_concurrent: int = Field(
-        default=1000,
-        ge=1,
-        le=100000,
-        description="Maximum concurrent workspaces.",
-    )
-
-    enable_cloud_overflow: bool = Field(
-        default=True,
-        description="Enable cloud overflow when local capacity exceeded.",
-    )
 
     cloud_provider: CloudProvider = Field(
         default=CloudProvider.E2B,
@@ -149,6 +136,18 @@ class WorkspaceSettings(BaseSettings):
             )
             raise ValueError(msg)
         return value
+
+    memory_limit_mb: int = Field(
+        default=DEFAULT_WORKSPACE_MEMORY_LIMIT_MB,
+        ge=256,
+        description="Memory limit applied to each workspace container, in MB.",
+    )
+
+    cpu_limit: float = Field(
+        default=DEFAULT_WORKSPACE_CPU_LIMIT,
+        gt=0,
+        description="CPU limit applied to each workspace container, in cores.",
+    )
 
     docker_runtime: Literal["runsc", "runc"] = Field(
         default="runsc",
