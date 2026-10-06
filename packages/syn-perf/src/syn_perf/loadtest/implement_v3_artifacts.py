@@ -3,8 +3,9 @@
 Each text carries the sections that phase's prompt requires under "Write to
 ``artifacts/output/<phase-id>.md``", in the same order and with the same first
 line where one is demanded (``Round: N of 3`` for each fix round, ``CERTIFIED``
-then the round for each reverify, ``READY`` then ``Repair rounds: N of 3`` for
-finalize_pr), so the next phase reads the shape it reads in production.
+or ``BLOCKED`` then the round for each reverify, ``READY`` or ``DRAFT`` then
+``Repair rounds: N of 3`` for finalize_pr, all from the profile's planned
+run), so the next phase reads the shape it reads in production.
 ``{execution_id}``, ``{branch}``, ``{head_sha}`` and ``{pull_request}`` (the
 draft implement opened, as number and URL) are filled per execution by
 ``ScriptedAgentProfile.render_artifact``. Every phase after premise names the
@@ -15,9 +16,12 @@ When a phase prompt changes what its artifact must contain, change it here.
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Final
+from typing import Final, Literal
 
 from syn_perf.loadtest.handoff import HEAD_SHA_LINE
+
+ReviewVerdictName = Literal["certified", "blocked"]
+"""The words a review phase may report as ``review_verdict`` (``ReviewVerdict``)."""
 
 _STUB = "Load-test stub for execution `{execution_id}`; no agent ran."
 
@@ -58,7 +62,7 @@ Branch `{{branch}}`.
 
 
 def _reverify(n: int) -> str:
-    return f"""CERTIFIED
+    return f"""{{review_verdict}}
 Round: {n} of {len(_ROUNDS)}
 
 {_STUB}
@@ -71,7 +75,7 @@ Branch `{{branch}}`.
 
 ## Blocking defects
 
-None (stub verdict).
+As scripted by the load-test profile; no review ran.
 """
 
 
@@ -139,10 +143,8 @@ Branch `{{branch}}`.
                 (_round_id("reverify", n), _reverify(n)),
             )
         },
-        # Every stub reverify certifies, and a certified reverify skips the
-        # rounds after it, so a stub run always finishes in round one.
-        "finalize_pr": f"""READY
-Repair rounds: 1 of {len(_ROUNDS)}
+        "finalize_pr": f"""{{outcome}}
+Repair rounds: {{repair_rounds}} of {len(_ROUNDS)}
 
 {_STUB}
 
@@ -154,3 +156,10 @@ Branch: `{{branch}}`
 """,
     }
 )
+
+IMPLEMENT_V3_REVIEW_VERDICTS: Final[Mapping[str, ReviewVerdictName]] = MappingProxyType(
+    {"reverify": "certified"}
+)
+"""The default run: round one certifies, so the aggregate skips rounds two and
+three and finalize_pr marks the draft ready. Pass other verdicts to
+``ScriptedAgentProfile.for_workflow`` to load-test the repair rounds."""

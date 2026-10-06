@@ -92,6 +92,22 @@
           "title": "Artifact",
           "type": "string"
         },
+        "review_verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "certified",
+                "blocked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Verdict"
+        },
         "side_effect": {
           "discriminator": {
             "mapping": {

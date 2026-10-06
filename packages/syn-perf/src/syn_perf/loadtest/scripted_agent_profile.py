@@ -19,6 +19,12 @@ validated, so neither can be undone after the fact):
   provider. On the node tier that reproduces the real PR lifecycle: the first
   pushing phase opens a draft, the phase with no tree marks it ready. A phase that
   changes its contract changes its stub with it.
+- **The review verdict is declared, and the run follows it.** Each phase's
+  ``review_verdict`` is what the stub's ``TASK_RESULT`` reports, so it is the
+  value the engine reads, not prose in an artifact. The profile plans the run
+  with the aggregate's own ``next_phase``, and the final outcome (``READY`` or
+  ``DRAFT``, the repair rounds, whether the PR is marked ready) is derived from
+  that plan, so no profile can claim a round or a certification it never ran.
 - **The fixture repository is never this one.** Implement and fix push a
   branch per execution; at 100 executions that must not land on
   ``syntropic137/syntropic137``.
@@ -37,6 +43,7 @@ from __future__ import annotations
 import re
 import string
 from collections.abc import Mapping  # noqa: TC003 - pydantic resolves the field type at runtime
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Annotated, ClassVar, Final, Literal
 
@@ -50,8 +57,17 @@ from pydantic import (
     model_validator,
 )
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import next_phase
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    PhaseDefinition,
+    ReviewVerdict,
+)
 from syn_perf.loadtest.handoff import FULL_SHA
-from syn_perf.loadtest.implement_v3_artifacts import IMPLEMENT_V3_ARTIFACTS
+from syn_perf.loadtest.implement_v3_artifacts import (
+    IMPLEMENT_V3_ARTIFACTS,
+    IMPLEMENT_V3_REVIEW_VERDICTS,
+    ReviewVerdictName,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import WorkflowDefinition
@@ -70,7 +86,17 @@ _FORBIDDEN_FIXTURE_REPOS: Final = frozenset({"syntropic137/syntropic137"})
 #: The only fields an artifact template may name. Anything else is a typo the
 #: stub could not fill, so it is refused when the profile is built rather than
 #: when the hundredth workspace tries to render it.
-_ARTIFACT_FIELDS: Final = frozenset({"execution_id", "branch", "head_sha", "pull_request"})
+_ARTIFACT_FIELDS: Final = frozenset(
+    {
+        "execution_id",
+        "branch",
+        "head_sha",
+        "pull_request",
+        "review_verdict",
+        "outcome",
+        "repair_rounds",
+    }
+)
 
 _NO_PULL_REQUEST: Final = "none (the platform tier opens no pull request)"
 """What ``{pull_request}`` renders as on the platform tier."""
@@ -215,8 +241,15 @@ class ScriptedPhase(_Contract):
     side_effect: SideEffect
     artifact: str = Field(min_length=1)
     """Markdown written to ``artifacts/output/<phase_id>.md``. May name
-    ``{execution_id}``, ``{branch}``, ``{head_sha}`` and ``{pull_request}``;
-    literal braces are doubled."""
+    ``{execution_id}``, ``{branch}``, ``{head_sha}``, ``{pull_request}``,
+    ``{review_verdict}`` (this phase's, upper-cased), and ``{outcome}`` and
+    ``{repair_rounds}`` (how the planned run ends); literal braces are doubled."""
+    review_verdict: ReviewVerdictName | None = None
+    """The ``review_verdict`` this phase's ``TASK_RESULT`` reports, or none.
+
+    The stub ends the phase with ``ScriptedAgentProfile.task_result`` as its
+    last message and does not replay the recording's own ``TASK_RESULT``, so
+    this field, not the recording, is what the engine's verdict reader sees."""
 
     @model_validator(mode="after")
     def _consistent(self) -> ScriptedPhase:
@@ -283,7 +316,35 @@ class ScriptedAgentProfile(_Contract):
                 "opens the draft pull request, before the one that marks it ready"
             )
             raise ValueError(msg)
+        run = self.planned_run()
+        ran = [self.phases[p].side_effect for p in run.ran]
+        opened = any(isinstance(s, OpenDraftPullRequest) for s in ran)
+        readied = any(isinstance(s, MarkPullRequestReady) for s in ran)
+        if readied != (opened and run.ended_on == "certified"):
+            msg = (
+                f"the run is {list(run.ran)} and ends {run.ended_on or 'with no verdict'}; "
+                "a phase that runs marks the draft ready exactly when the run ends certified"
+            )
+            raise ValueError(msg)
         return self
+
+    def planned_run(self) -> PlannedRun:
+        """The phases this profile's verdicts make the engine run, and how it ends."""
+        ran, ended_on = _walk({p: phase.review_verdict for p, phase in self.phases.items()})
+        pushes = sum(
+            isinstance(self.phases[p].side_effect, (PushBranch, OpenDraftPullRequest)) for p in ran
+        )
+        return PlannedRun(ran=ran, ended_on=ended_on, repair_rounds=max(pushes - 1, 0))
+
+    def task_result(self, phase_id: str) -> str:
+        """The ``TASK_RESULT`` block the stub writes as its last message in ``phase_id``."""
+        phase = self.phases[phase_id]
+        report = _TaskResult(
+            side_effects="none" if isinstance(phase.side_effect, ReportOnly) else "succeeded",
+            comments=f"Load-test stub for phase {phase_id}; no agent ran.",
+            review_verdict=phase.review_verdict,
+        )
+        return f"TASK_RESULT: {report.model_dump_json(exclude_none=True)}\nTASK_RESULT_END"
 
     @staticmethod
     def branch(execution_id: str) -> str:
@@ -308,8 +369,10 @@ class ScriptedAgentProfile(_Contract):
         ``{pull_request}`` renders as its number and URL. The platform tier
         opens none, so it takes no URL and says so.
         """
-        template = self.phases[phase_id].artifact
+        phase = self.phases[phase_id]
+        template = phase.artifact
         named = _named_fields(template)
+        run = self.planned_run()
         if "head_sha" in named and not (head_sha and FULL_SHA.fullmatch(head_sha)):
             msg = f"phase {phase_id} artifact names the head; {head_sha!r} is not a full SHA"
             raise ValueError(msg)
@@ -318,6 +381,9 @@ class ScriptedAgentProfile(_Contract):
             branch=self.branch(execution_id),
             head_sha=head_sha,
             pull_request=self._pull_request(phase_id, pr_url) if "pull_request" in named else None,
+            review_verdict=(phase.review_verdict or "no verdict").upper(),
+            outcome="READY" if run.ended_on == "certified" else "DRAFT",
+            repair_rounds=run.repair_rounds,
         )
 
     def _pull_request(self, phase_id: str, pr_url: str | None) -> str:
@@ -361,6 +427,7 @@ class ScriptedAgentProfile(_Contract):
         streams: Mapping[str, ScriptedStream],
         workload: NoWorkload | SyntheticWorkload | GatesWorkload,
         artifacts: Mapping[str, str] = IMPLEMENT_V3_ARTIFACTS,
+        review_verdicts: Mapping[str, ReviewVerdictName] = IMPLEMENT_V3_REVIEW_VERDICTS,
     ) -> ScriptedAgentProfile:
         """Build the profile for every phase of ``workflow``.
 
@@ -373,7 +440,9 @@ class ScriptedAgentProfile(_Contract):
         stream must replay the harness the phase actually runs, and the
         streams and artifacts must cover exactly the workflow's phases - a
         missing one is an error, never a default, and a leftover one is a stub
-        for a phase the workflow no longer has.
+        for a phase the workflow no longer has. ``review_verdicts`` names the
+        phases that report one; the PR is marked ready only if the run they
+        produce ends certified, and otherwise stays a draft.
         """
         ids = {p.id for p in workflow.phases}
         mismatched = {
@@ -384,14 +453,24 @@ class ScriptedAgentProfile(_Contract):
         if mismatched:
             msg = f"workflow {workflow.id} phases and stubs differ: {mismatched}"
             raise ValueError(msg)
+        if unknown := sorted(set(review_verdicts) - ids):
+            msg = f"workflow {workflow.id} has no phases {unknown} to report a review verdict"
+            raise ValueError(msg)
 
         first_push = next((p.id for p in workflow.phases if _pushes(p)), None)
+        _, ended_on = _walk({p.id: review_verdicts.get(p.id) for p in workflow.phases})
         phases = {
             phase.id: ScriptedPhase(
                 stream=_stream_for(phase, streams[phase.id]),
                 workload=workload if phase.clone_repos else NoWorkload(),
-                side_effect=_side_effect_for(phase, tier, opens_the_pr=phase.id == first_push),
+                side_effect=_side_effect_for(
+                    phase,
+                    tier,
+                    opens_the_pr=phase.id == first_push,
+                    marks_ready=ended_on == "certified",
+                ),
                 artifact=artifacts[phase.id],
+                review_verdict=review_verdicts.get(phase.id),
             )
             for phase in workflow.phases
         }
@@ -414,11 +493,54 @@ def _pushes(phase: PhaseYamlDefinition) -> bool:
 
 
 def _side_effect_for(
-    phase: PhaseYamlDefinition, tier: Literal["platform", "node"], *, opens_the_pr: bool
+    phase: PhaseYamlDefinition,
+    tier: Literal["platform", "node"],
+    *,
+    opens_the_pr: bool,
+    marks_ready: bool,
 ) -> ReportOnly | PushBranch | OpenDraftPullRequest | MarkPullRequestReady | VerifyRemoteBranch:
     node = tier == "node"
     if not phase.clone_repos:
-        return MarkPullRequestReady() if node else VerifyRemoteBranch()
+        if not node:
+            return VerifyRemoteBranch()
+        # A run that ends blocked or unreported leaves the draft a draft.
+        return MarkPullRequestReady() if marks_ready else ReportOnly()
     if _pushes(phase):
         return OpenDraftPullRequest() if node and opens_the_pr else PushBranch()
     return ReportOnly()
+
+
+@dataclass(frozen=True)
+class PlannedRun:
+    """What a profile's declared verdicts make the engine do."""
+
+    ran: tuple[str, ...]
+    """The phases that run, in order; the rounds a certification skips are absent."""
+    ended_on: ReviewVerdictName | None
+    """The last verdict any phase that ran reported, as the aggregate records it."""
+    repair_rounds: int
+    """Pushing phases that ran after the first: the fix rounds."""
+
+
+class _TaskResult(_Contract):
+    success: Literal[True] = True
+    side_effects: Literal["none", "succeeded"]
+    comments: str
+    review_verdict: ReviewVerdictName | None = None
+
+
+def _walk(
+    verdicts: Mapping[str, ReviewVerdictName | None],
+) -> tuple[tuple[str, ...], ReviewVerdictName | None]:
+    """Sequence ``verdicts`` (phase id -> verdict, in phase order) with the aggregate's rule."""
+    definitions = [PhaseDefinition(phase_id=p, name=p, order=n) for n, p in enumerate(verdicts)]
+    ran: list[str] = []
+    ended_on: ReviewVerdictName | None = None
+    at = definitions[0] if definitions else None
+    while at is not None:
+        ran.append(at.phase_id)
+        said = verdicts[at.phase_id]
+        ended_on = said or ended_on
+        step = next_phase(definitions, at.order, ReviewVerdict(said) if said else None)
+        at = step.phase if step else None
+    return tuple(ran), ended_on

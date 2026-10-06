@@ -10,6 +10,15 @@ import pytest
 from pydantic import ValidationError
 
 from syn_domain.contexts.orchestration import WorkflowDefinition
+from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import next_phase
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    PhaseDefinition,
+    ReviewVerdict,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
+    VerdictStatus,
+)
 from syn_perf.loadtest import (
     HEAD_SHA_LINE,
     GatesWorkload,
@@ -61,7 +70,10 @@ def _streams(workflow: WorkflowDefinition) -> dict[str, ScriptedStream]:
 
 
 def _profile(
-    workflow: WorkflowDefinition, tier: str, workload: object = None
+    workflow: WorkflowDefinition,
+    tier: str,
+    workload: object = None,
+    review_verdicts: dict[str, str] | None = None,
 ) -> ScriptedAgentProfile:
     return ScriptedAgentProfile.for_workflow(
         workflow,
@@ -69,7 +81,11 @@ def _profile(
         fixture_repo=_FIXTURE,
         streams=_streams(workflow),
         workload=workload or SyntheticWorkload(cpu_seconds=3, mem_bytes=2**20, disk_bytes=4096),  # type: ignore[arg-type]
+        **({} if review_verdicts is None else {"review_verdicts": review_verdicts}),  # type: ignore[arg-type]
     )
+
+
+_ALL_BLOCKED = {"reverify": "blocked", "reverify_2": "blocked", "reverify_3": "blocked"}
 
 
 # --- side effects come from the real phase contract -----------------------
@@ -380,13 +396,105 @@ def test_each_repair_round_reports_which_round_it_is(
     workflow: WorkflowDefinition, n: int, fix: str, reverify: str
 ) -> None:
     """The fix prompts demand the round first; reverify demands it second (PC-63)."""
-    profile = _profile(workflow, "node")
+    profile = _profile(workflow, "node", review_verdicts=_ALL_BLOCKED)
 
     fixed = profile.render_artifact(fix, "exec-7f3a", _HEAD).splitlines()
-    certified = profile.render_artifact(reverify, "exec-7f3a", _HEAD).splitlines()
+    reviewed = profile.render_artifact(reverify, "exec-7f3a", _HEAD).splitlines()
 
     assert fixed[0] == f"Round: {n} of 3"
-    assert certified[:2] == ["CERTIFIED", f"Round: {n} of 3"]
+    assert reviewed[:2] == ["BLOCKED", f"Round: {n} of 3"]
+
+
+# --- the declared verdict is what the engine reads, and the run follows it ---
+
+_ROUNDS = ("fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3")
+
+
+def _engine_run(
+    workflow: WorkflowDefinition, profile: ScriptedAgentProfile
+) -> tuple[list[str], ReviewVerdict | None]:
+    """Feed each phase's emitted TASK_RESULT to the real reader and ``next_phase``.
+
+    The phase definitions carry the workflow's own ``order``, not the profile's
+    mapping position, so this is an independent run of the aggregate's rule.
+    """
+    definitions = [
+        PhaseDefinition(phase_id=p.id, name=p.name, order=p.order) for p in workflow.phases
+    ]
+    ran: list[str] = []
+    ended_on: ReviewVerdict | None = None
+    at: PhaseDefinition | None = definitions[0]
+    while at is not None:
+        ran.append(at.phase_id)
+        read = AgentVerdict.from_agent_text(profile.task_result(at.phase_id))
+        assert read.status is VerdictStatus.SUCCESS, at.phase_id
+        ended_on = read.reported_review_verdict or ended_on
+        step = next_phase(definitions, at.order, read.reported_review_verdict)
+        at = step.phase if step else None
+    return ran, ended_on
+
+
+@pytest.mark.parametrize(
+    ("verdicts", "rounds_run", "ended_on", "outcome"),
+    [
+        pytest.param(None, 1, ReviewVerdict.CERTIFIED, "READY", id="certified-in-round-1"),
+        pytest.param(
+            {"reverify": "blocked", "reverify_2": "certified"},
+            2,
+            ReviewVerdict.CERTIFIED,
+            "READY",
+            id="blocked-then-certified",
+        ),
+        pytest.param(_ALL_BLOCKED, 3, ReviewVerdict.BLOCKED, "DRAFT", id="blocked-at-the-bound"),
+        pytest.param({}, 3, None, "DRAFT", id="no-verdict-reported"),
+    ],
+)
+def test_the_final_outcome_is_the_run_the_engine_takes_from_the_emitted_verdicts(
+    workflow: WorkflowDefinition,
+    verdicts: dict[str, str] | None,
+    rounds_run: int,
+    ended_on: ReviewVerdict | None,
+    outcome: str,
+) -> None:
+    profile = _profile(workflow, "node", review_verdicts=verdicts)
+
+    ran, engine_ended_on = _engine_run(workflow, profile)
+
+    assert ran == [*_PHASES[:3], *_ROUNDS[: 2 * rounds_run], "finalize_pr"]
+    assert engine_ended_on is ended_on
+    assert profile.planned_run().ran == tuple(ran)
+    finalized = profile.render_artifact("finalize_pr", "exec-7f3a", _HEAD, _PR_URL)
+    assert finalized.splitlines()[:2] == [outcome, f"Repair rounds: {rounds_run} of 3"]
+    readies = isinstance(profile.phases["finalize_pr"].side_effect, MarkPullRequestReady)
+    assert readies is (outcome == "READY")
+    last_review = _ROUNDS[2 * rounds_run - 1]
+    reviewed = profile.render_artifact(last_review, "exec-7f3a", _HEAD).splitlines()
+    assert reviewed[0] == (ended_on.value.upper() if ended_on else "NO VERDICT")
+
+
+@pytest.mark.parametrize(
+    ("verdicts", "final_side_effect"),
+    [
+        pytest.param(None, {"kind": "report_only"}, id="certified-but-left-a-draft"),
+        pytest.param(_ALL_BLOCKED, {"kind": "mark_pull_request_ready"}, id="blocked-but-ready"),
+        pytest.param({}, {"kind": "mark_pull_request_ready"}, id="unreported-but-ready"),
+    ],
+)
+def test_a_hand_written_profile_cannot_finish_against_its_own_verdicts(
+    workflow: WorkflowDefinition, verdicts: dict[str, str] | None, final_side_effect: dict[str, str]
+) -> None:
+    payload = json.loads(_profile(workflow, "node", review_verdicts=verdicts).model_dump_json())
+    payload["phases"]["finalize_pr"]["side_effect"] = final_side_effect
+
+    with pytest.raises(ValidationError, match="marks the draft ready exactly when the run ends"):
+        ScriptedAgentProfile.model_validate(payload)
+
+
+def test_a_verdict_for_a_phase_the_workflow_does_not_have_is_refused(
+    workflow: WorkflowDefinition,
+) -> None:
+    with pytest.raises(ValueError, match=r"has no phases \['reverify_4'\]"):
+        _profile(workflow, "node", review_verdicts={"reverify_4": "certified"})
 
 
 def test_every_pushing_phase_reports_the_file_its_side_effect_commits(
