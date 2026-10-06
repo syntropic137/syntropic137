@@ -5644,6 +5644,8 @@ export interface components {
             model?: string | null;
             /** Requested Model */
             requested_model: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;

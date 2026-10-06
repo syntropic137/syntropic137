@@ -124,6 +124,17 @@ class PhaseExecutionDetail:
     permission to grant, not a run to repeat.
     """
 
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result (PC-83).
+
+    Not always the declared one: on capacity or quota the phase re-runs once on
+    its ``fallback_agent``. ``None`` when nothing recorded it, which includes
+    every phase that completed before PC-83.
+    """
+
+    agent_model: str | None = None
+    """The model that agent was asked for, beside ``agent_provider``."""
+
     observed_branches: tuple[BranchObservation, ...] | None = None
     """How this failed phase's branches stood when it died (#1200).
 
@@ -191,6 +202,8 @@ class PhaseExecutionDetail:
             "reported_side_effects": (
                 None if self.reported_side_effects is None else self.reported_side_effects.value
             ),
+            "agent_provider": self.agent_provider,
+            "agent_model": self.agent_model,
             "observed_branches": (
                 None
                 if self.observed_branches is None
@@ -235,6 +248,8 @@ class PhaseExecutionDetail:
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=SideEffectStatus.from_stored(data.get("reported_side_effects")),
+            agent_provider=data.get("agent_provider"),
+            agent_model=data.get("agent_model"),
             observed_branches=_observed_branches(data.get("observed_branches")),
             exit_code=_exit_code(data.get("exit_code")),
             failure_classification=(

@@ -15087,6 +15087,17 @@
             ],
             "title": "Requested Model"
           },
+          "agent_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Provider"
+          },
           "cost_by_model": {
             "additionalProperties": {
               "type": "string"

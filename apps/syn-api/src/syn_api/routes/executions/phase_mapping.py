@@ -299,7 +299,10 @@ async def _map_phase_detail(
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
         model=sc.agent_model,
-        requested_model=sc.requested_model,
+        # The agent that produced the result wins over the session's start
+        # record, which names the declared agent even after a fallback (PC-83).
+        requested_model=phase.agent_model or sc.requested_model,
+        agent_provider=phase.agent_provider,
         cost_by_model=sc.cost_by_model,
         # `.get` on purpose: a phase with no capture row is "not reported",
         # which is None - never [], which would claim a confirmed empty sweep.
@@ -394,6 +397,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         completed_at=str(phase.completed_at) if phase.completed_at else None,
         model=phase.model,
         requested_model=phase.requested_model,
+        agent_provider=phase.agent_provider,
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
         # Same model, passed through rather than rebuilt: this constructor is
         # the hop that has dropped a field twice (#891, #1176), and a phase

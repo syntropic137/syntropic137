@@ -35,6 +35,16 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
 )
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
+    WorkflowExecutionDetail,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    ExecutionJournal,
+)
+from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
+    WorkflowExecutionDetailProjection,
+)
 from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 from syn_shared.agents import AgentProvider, AgentRunner
 from syn_shared.upstream_failure import UpstreamFailureKind
@@ -111,6 +121,57 @@ async def _run(
 def _completed(repository: _RecordingRepository) -> AgentExecutionCompletedEvent:
     (event,) = [e for e in repository.events if isinstance(e, AgentExecutionCompletedEvent)]
     return event
+
+
+async def _detail(repository: _RecordingRepository, execution_id: str) -> WorkflowExecutionDetail:
+    """The execution record GET /executions/{id} serves, built from the run's own events."""
+    store = InMemoryProjectionStore()
+    projection = WorkflowExecutionDetailProjection(store)
+    for event in repository.events:
+        handler_name = ExecutionJournal._event_type_to_handler(  # pyright: ignore[reportPrivateUsage]
+            getattr(event, "event_type", type(event).__name__)
+        )
+        handler = getattr(projection, handler_name, None)
+        if handler:
+            await handler(ExecutionJournal._serialize_event(event))  # pyright: ignore[reportPrivateUsage]
+    record = await store.get(WorkflowExecutionDetailProjection.PROJECTION_NAME, execution_id)
+    assert record is not None
+    return WorkflowExecutionDetail.from_dict(record)
+
+
+class TestTheExecutionShowsTheAgentThatRan:
+    async def test_the_detail_names_the_fallback_after_a_fallback(self) -> None:
+        """The phase row an operator opens names the fallback, not the declared agent."""
+        fake = FakeAgentExecutionHandler.scripted(
+            *[FakeAgentExecutionHandler.failed(stream_error=OVERLOADED)] * NO_WAITING.max_attempts,
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE, says=SUCCEEDED),
+        )
+        phase = _phase(AgentConfiguration(provider=AgentProvider.CLAUDE), CODEX_FALLBACK)
+
+        result, repository = await _run(fake, phase, "exec-pc83-detail")
+
+        assert result.status == "completed", result.error_message
+        (row,) = (await _detail(repository, "exec-pc83-detail")).phases
+        assert row.agent_provider == AgentProvider.CODEX
+        assert row.agent_model == "gpt-5.1-codex-max"
+
+    async def test_a_phase_recorded_before_pc83_names_no_agent(self) -> None:
+        """An event without the fields leaves the row's agent unknown, never a guess."""
+        fake = FakeAgentExecutionHandler.scripted(
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE, says=SUCCEEDED),
+        )
+        result, repository = await _run(fake, _phase(AgentConfiguration(), None), "exec-pc83-old")
+        assert result.status == "completed", result.error_message
+        repository.events = [
+            e.model_copy(update={"agent_provider": None, "agent_model": None})
+            if isinstance(e, AgentExecutionCompletedEvent)
+            else e
+            for e in repository.events
+        ]
+
+        (row,) = (await _detail(repository, "exec-pc83-old")).phases
+        assert row.agent_provider is None
+        assert row.agent_model is None
 
 
 class TestTheFallbackRuns:

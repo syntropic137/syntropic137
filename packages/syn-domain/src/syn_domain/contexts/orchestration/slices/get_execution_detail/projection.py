@@ -28,6 +28,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ReviewVerdict,
     SideEffectStatus,
 )
+from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
+    AgentExecutionCompletedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
     ExecutionTagsAddedEvent,
 )
@@ -108,7 +111,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # main without bumping from 13, while PC-63 bumped 13 -> 14. A deployment
     # that had already rebuilt at this branch's 14 would never rebuild for
     # delegation_failure, so the merge takes the higher and bumps once more.
-    VERSION = 15
+    # v16: rebuild so stored AgentExecutionCompleted events populate
+    # agent_provider / agent_model, the agent that actually ran (PC-83).
+    VERSION = 16
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -336,6 +341,28 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # nearly every real completion takes.
         status = SideEffectStatus.from_stored(event_data.get("reported_side_effects"))
         phase["reported_side_effects"] = None if status is None else status.value
+
+    async def on_agent_execution_completed(self, event_data: dict) -> None:
+        """Record which agent PRODUCED the phase's result (PC-83).
+
+        A phase whose provider was at capacity or out of quota re-runs once on
+        its fallback_agent, so the declared agent is not always the one that
+        ran. Events written before PC-83 carry neither field and leave the
+        phase's values as they were (None), never a guess at the declared one.
+        """
+        event = AgentExecutionCompletedEvent.model_validate(event_data)
+        if event.agent_provider is None and event.agent_model is None:
+            return
+        existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
+        if not existing:
+            return
+        found = self._find_phase(existing.get("phases", []), event.phase_id)
+        if found is None:
+            return
+        _, phase = found
+        phase["agent_provider"] = event.agent_provider
+        phase["agent_model"] = event.agent_model
+        await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
 
     async def on_workspace_provisioned_for_phase(
         self, event_data: WorkspaceProvisionedForPhaseEvent
