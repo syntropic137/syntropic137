@@ -15,9 +15,10 @@
 #   --stage-only  stop after `stage` (runs may still be in flight)
 #   --swap-only   skip to `gate`; the version must already be staged
 #   --dry-run     echo every mutating command; still run read-only checks
+#   --skip-probe  EMERGENCIES ONLY: do not prove a real execution starts after ungate
 set -euo pipefail
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ $# -ge 1 ] || usage
 VERSION="${1#v}"; shift
 TAG="v${VERSION}"
@@ -28,13 +29,17 @@ COMPOSE_DIR="/root/.syntropic137"
 COMPOSE="docker-compose.syntropic137.yaml"
 DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-10800}"
 API_READY_TIMEOUT="${SYN_PIT_API_READY_TIMEOUT:-900}"
-MODE="all"; DRY=0; STAGE_ONLY=0; SWAP_ONLY=0
+PROBE_WORKFLOW="${SYN_PIT_PROBE_WORKFLOW:-telemetry-lag-probe-v1}"
+PROBE_TIMEOUT="${SYN_PIT_PROBE_TIMEOUT:-600}"
+PROBE_CANCEL_TIMEOUT="${SYN_PIT_PROBE_CANCEL_TIMEOUT:-300}"
+MODE="all"; DRY=0; STAGE_ONLY=0; SWAP_ONLY=0; SKIP_PROBE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --ref) [ $# -ge 2 ] || usage; REF="$2"; shift 2 ;;
         --stage-only) STAGE_ONLY=1; shift ;;
         --swap-only) SWAP_ONLY=1; shift ;;
         --dry-run) DRY=1; shift ;;
+        --skip-probe) SKIP_PROBE=1; shift ;;
         *) usage ;;
     esac
 done
@@ -88,6 +93,16 @@ case "$DRAIN_TIMEOUT" in
 esac
 case "$API_READY_TIMEOUT" in
     ""|*[!0-9]*) die "SYN_PIT_API_READY_TIMEOUT must be whole seconds (got: $API_READY_TIMEOUT)" ;;
+esac
+case "$PROBE_TIMEOUT" in
+    ""|*[!0-9]*) die "SYN_PIT_PROBE_TIMEOUT must be whole seconds (got: $PROBE_TIMEOUT)" ;;
+esac
+case "$PROBE_CANCEL_TIMEOUT" in
+    ""|*[!0-9]*) die "SYN_PIT_PROBE_CANCEL_TIMEOUT must be whole seconds (got: $PROBE_CANCEL_TIMEOUT)" ;;
+esac
+# Interpolated into an API path below, so checked here rather than trusted there.
+case "$PROBE_WORKFLOW" in
+    ""|*[!0-9A-Za-z._-]*) die "SYN_PIT_PROBE_WORKFLOW is not a workflow id (got: $PROBE_WORKFLOW)" ;;
 esac
 
 # Whether the READ PATH is at the head of the event store. Asked before any
@@ -373,8 +388,100 @@ fi
 step "gate: resuming execution admission"
 maintenance false "" || die "$TAG is live but the clear did not complete; retry PUT /maintenance (a 503 means admission is open but the paused triggers were not woken, #1387)"
 
+# THE START PATH, PROVEN (#1641). Every check above passed on beta.8 and beta.9
+# while no execution could start: each direct start was dropped as a duplicate,
+# and beta.8 sat live and broken for ~3h because the last check was manual. So
+# the pit stop dispatches one real run and declares nothing until a PHASE of it
+# is seen `running`. AFTER the ungate, deliberately: the probe goes through the
+# same admission as everyone else's work, and a failed probe never re-closes it.
+api_post() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m 90 -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
+
+# What one GET /executions/{id} says about the start path: prints a status line
+# and returns 0 started (a phase is running or completed), 1 not yet, 2 never
+# will (the run ended, or a phase failed, without one running).
+probe_verdict() {
+    python3 - "$1" <<'PROBE'
+import json, sys
+d = json.load(open(sys.argv[1]))
+phases = [f"{p.get('phase_id')}={p.get('status')}" for p in d.get("phases") or []]
+print(f"status={d.get('status')} phases=[{', '.join(phases)}]")
+statuses = [p.get("status") for p in d.get("phases") or []]
+if any(s in ("running", "completed") for s in statuses):
+    sys.exit(0)
+if d.get("status") in ("completed", "failed", "cancelled", "interrupted") or "failed" in statuses:
+    sys.exit(2)
+sys.exit(1)
+PROBE
+}
+
+# Leave the probe TERMINAL. A probe still in flight is in-flight work to the
+# next pit stop's drain, which would wait on it. Returns 0 only once GET says so.
+probe_settle() {  # $1: execution id
+    local waited=0 status=""
+    api_post "/executions/$1/cancel" '{"reason": "pit stop probe: the start path is proven"}' "$TMP/probe_cancel.json" 2>/dev/null \
+        || echo "   cancel was refused (it may already be terminal); reading it back"
+    while :; do
+        if api "/executions/$1" "$TMP/probe_detail.json" 2>/dev/null; then
+            status="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("status"))' "$TMP/probe_detail.json")"
+            printf '   [+%ss] probe %s: status=%s\n' "$waited" "$1" "$status"
+            case "$status" in completed|failed|cancelled|interrupted) return 0 ;; esac
+        fi
+        [ "$waited" -ge "$PROBE_CANCEL_TIMEOUT" ] && return 1
+        sleep 10; waited=$((waited + 10))
+    done
+}
+
+PROBE_LINE=""
+if [ "$DRY" = 1 ]; then
+    printf '   (dry-run) POST /workflows/%s/execute, then wait for a phase to reach running\n' "$PROBE_WORKFLOW"
+elif [ "$SKIP_PROBE" = 1 ]; then
+    printf '\n!!! --skip-probe: NO EXECUTION HAS BEEN SEEN TO START ON %s.\n!!! beta.8 passed every other check with every start dropped (#1641).\n!!! Dispatch one real workflow now and watch a PHASE reach running.\n' "$TAG" >&2
+    PROBE_LINE=" PROBE SKIPPED: dispatch one real workflow and watch a PHASE reach running."
+else
+    if [ -n "${BAK:-}" ]; then
+        rollback="ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-$BAK $COMPOSE && docker compose -f $COMPOSE up -d api gateway'"
+    else
+        rollback="ssh $HOST 'cd $COMPOSE_DIR && ls $COMPOSE.bak-*'   # then: cp <the backup> $COMPOSE && docker compose -f $COMPOSE up -d api gateway"
+    fi
+    RECOVERY="$TAG is LIVE and admission is OPEN, deliberately: in-flight work from other users is not held hostage to a failed probe. Nothing was rolled back. To roll back by hand:
+   $rollback"
+    step "probe: dispatching $PROBE_WORKFLOW; waiting up to ${PROBE_TIMEOUT}s for a PHASE to reach running"
+    api_post "/workflows/$PROBE_WORKFLOW/execute" \
+        "{\"task\": \"pit stop $TAG start-path probe: cancelled once a phase is running\", \"tags\": [\"pit-stop-probe\"], \"no_eval\": true}" \
+        "$TMP/probe.json" \
+        || die "could not dispatch the probe $PROBE_WORKFLOW (not installed on this host? syn workflow install workflows/probes/telemetry-lag)"
+    PROBE_ID="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["execution_id"])' "$TMP/probe.json")" \
+        || die "the probe dispatch answered without an execution_id"
+    RECOVERY="$RECOVERY
+Inspect the probe: curl -fsS -u admin:\$SYN_API_PASSWORD $API/executions/$PROBE_ID"
+    waited=0; last="not found by GET /executions/$PROBE_ID (a start dropped before it existed looks exactly like this)"
+    while :; do
+        verdict=1
+        if api "/executions/$PROBE_ID" "$TMP/probe_detail.json" 2>/dev/null; then
+            if last="$(probe_verdict "$TMP/probe_detail.json")"; then verdict=0; else verdict=$?; fi
+        fi
+        printf '   [+%ss] probe %s: %s\n' "$waited" "$PROBE_ID" "$last"
+        if [ "$verdict" = 0 ]; then break; fi
+        if [ "$verdict" = 2 ]; then
+            die "probe $PROBE_ID ended without a phase reaching running. Last status: $last"
+        fi
+        if [ "$waited" -ge "$PROBE_TIMEOUT" ]; then
+            # Still cancelled, so the next drain does not wait on a run that never started.
+            probe_settle "$PROBE_ID" || echo "   WARNING: probe $PROBE_ID is not terminal; cancel it by hand or the next drain waits on it" >&2
+            die "probe $PROBE_ID did not reach a running phase within ${PROBE_TIMEOUT}s. Last status: $last"
+        fi
+        sleep 10; waited=$((waited + 10))
+    done
+    # Not token-free: this is a real agent on a real model, so it is stopped as
+    # soon as it has proven the start, and the stop is read back, not assumed.
+    step "probe: a phase is running; cancelling $PROBE_ID"
+    probe_settle "$PROBE_ID" \
+        || die "the start path works, but probe $PROBE_ID is not terminal after ${PROBE_CANCEL_TIMEOUT}s: cancel it by hand (POST $API/executions/$PROBE_ID/cancel) or the next drain waits on it"
+    PROBE_LINE=" Probe $PROBE_ID reached a running phase and was stopped."
+fi
+
 if [ "$DRY" = 1 ]; then
     step "DRY RUN DONE: nothing was built, shipped, staged or swapped. $TAG is NOT live."
 else
-    step "PIT STOP DONE: $TAG live in $(( $(date +%s) - T0 ))s. Last check is yours: dispatch one real workflow and watch a PHASE reach running."
+    step "PIT STOP DONE: $TAG live in $(( $(date +%s) - T0 ))s.$PROBE_LINE"
 fi
