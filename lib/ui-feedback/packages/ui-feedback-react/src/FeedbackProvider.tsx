@@ -83,7 +83,7 @@ export function FeedbackProvider({
   );
 
   const {
-    state, openFeedbackMode, closeFeedbackMode, openModal, closeModal,
+    state, openFeedbackMode, closeFeedbackMode, openModal, closeModal, repickElement,
     addMedia, removeMedia, clearMedia, submitFeedback,
   } = useFeedbackState({ api, appName, appVersion, environment, gitCommit, gitBranch, hostname, subject, disabled });
 
@@ -94,8 +94,8 @@ export function FeedbackProvider({
   });
 
   const contextValue: FeedbackContextValue = useMemo(
-    () => ({ ...state, config, openFeedbackMode, closeFeedbackMode, openModal, closeModal, addMedia, removeMedia, clearMedia, submitFeedback }),
-    [state, config, openFeedbackMode, closeFeedbackMode, openModal, closeModal, addMedia, removeMedia, clearMedia, submitFeedback],
+    () => ({ ...state, config, openFeedbackMode, closeFeedbackMode, openModal, closeModal, repickElement, addMedia, removeMedia, clearMedia, submitFeedback }),
+    [state, config, openFeedbackMode, closeFeedbackMode, openModal, closeModal, repickElement, addMedia, removeMedia, clearMedia, submitFeedback],
   );
 
   return (

@@ -31,6 +31,7 @@ export interface UseFeedbackStateResult {
   closeFeedbackMode: () => void;
   openModal: (context: LocationContext) => void;
   closeModal: () => void;
+  repickElement: () => void;
   addMedia: (media: MediaUpload) => void;
   removeMedia: (index: number) => void;
   clearMedia: () => void;
@@ -50,7 +51,8 @@ export function useFeedbackState({
   }, [disabled]);
 
   const closeFeedbackMode = useCallback(() => {
-    setState((prev) => ({ ...prev, isFeedbackMode: false }));
+    // Media attached before a re-pick belongs to the abandoned draft.
+    setState((prev) => ({ ...prev, isFeedbackMode: false, pendingMedia: [] }));
   }, []);
 
   const openModal = useCallback((context: LocationContext) => {
@@ -59,6 +61,10 @@ export function useFeedbackState({
 
   const closeModal = useCallback(() => {
     setState((prev) => ({ ...prev, isOpen: false, locationContext: null, pendingMedia: [] }));
+  }, []);
+
+  const repickElement = useCallback(() => {
+    setState((prev) => ({ ...prev, isOpen: false, isFeedbackMode: true, locationContext: null }));
   }, []);
 
   const addMedia = useCallback((media: MediaUpload) => {
@@ -95,7 +101,7 @@ export function useFeedbackState({
   );
 
   return {
-    state, openFeedbackMode, closeFeedbackMode, openModal, closeModal,
+    state, openFeedbackMode, closeFeedbackMode, openModal, closeModal, repickElement,
     addMedia, removeMedia, clearMedia, submitFeedback,
   };
 }

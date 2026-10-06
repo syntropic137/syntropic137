@@ -868,6 +868,59 @@ body.ui-feedback-mode-active * {
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
 }
 
+/* Outline of the pinned element. Sits above the modal backdrop so the dim
+   and blur do not hide what was picked; pointer-events none keeps the modal
+   usable where they overlap. */
+.ui-feedback-pinned-highlight {
+  position: fixed;
+  z-index: 100001;
+  pointer-events: none;
+  border: 2px solid var(--feedback-primary);
+  border-radius: 4px;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.35);
+}
+
+.ui-feedback-pinned-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--feedback-text);
+  background-color: var(--feedback-background);
+  border: 1px solid var(--feedback-primary);
+  border-radius: 6px;
+}
+
+.ui-feedback-pinned-label > svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--feedback-primary);
+}
+
+.ui-feedback-pinned-label-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-feedback-pinned-label-text code {
+  font-family: monospace;
+}
+
+.ui-feedback-pinned-label-repick {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--feedback-primary);
+  background: none;
+  border: 1px solid var(--feedback-primary);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
 /* =====================================================
    Loading & Status
    ===================================================== */

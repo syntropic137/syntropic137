@@ -58,6 +58,20 @@ export interface LocationContext {
   cssSelector?: string;
   xpath?: string;
   componentName?: string;
+  /**
+   * Client-only: what the user pinned, so the widget can show it back to
+   * them. Neither field is sent to the API.
+   */
+  elementLabel?: string;
+  elementRect?: PinnedRect;
+}
+
+/** Viewport position of the pinned element at the moment it was pinned. */
+export interface PinnedRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 // =====================================================
@@ -269,6 +283,8 @@ export interface FeedbackContextValue extends FeedbackState {
   closeFeedbackMode: () => void;
   openModal: (context: LocationContext) => void;
   closeModal: () => void;
+  /** Leave the open modal and pick a different element; the draft is kept. */
+  repickElement: () => void;
   addMedia: (media: MediaUpload) => void;
   removeMedia: (index: number) => void;
   clearMedia: () => void;

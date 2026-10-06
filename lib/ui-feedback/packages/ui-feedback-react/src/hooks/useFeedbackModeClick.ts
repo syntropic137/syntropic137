@@ -1,6 +1,6 @@
 /**
  * Hook that registers page click/touch handlers when feedback mode is active.
- * Captures element info on click and opens the modal.
+ * Captures element info on click or tap and opens the modal.
  */
 
 import { useEffect } from 'react';
@@ -14,15 +14,19 @@ interface UseFeedbackModeClickOptions {
   openQuickFeedback: () => void;
 }
 
+/** A touch that travels further than this (px) was a scroll, not a tap. */
+const TAP_SLOP = 10;
+
 function getClientCoords(e: MouseEvent | TouchEvent): { clientX?: number; clientY?: number } {
-  if ('touches' in e) {
-    return { clientX: e.touches[0]?.clientX, clientY: e.touches[0]?.clientY };
+  // On touchend the lifted finger is only in changedTouches; touches is empty.
+  if ('changedTouches' in e) {
+    return { clientX: e.changedTouches[0]?.clientX, clientY: e.changedTouches[0]?.clientY };
   }
   return { clientX: e.clientX, clientY: e.clientY };
 }
 
 function getTarget(e: MouseEvent | TouchEvent): HTMLElement | null {
-  return (e.target || (e as TouchEvent).touches?.[0]?.target) as HTMLElement | null;
+  return e.target as HTMLElement | null;
 }
 
 function captureLocation(
@@ -76,13 +80,30 @@ export function useFeedbackModeClick({
     const handler = (e: MouseEvent | TouchEvent) =>
       handlePageClick(e, captureFromEvent, captureFromElement, openModal, openQuickFeedback);
 
+    // Pin on touchend rather than waiting for the synthesized click, and
+    // cancel it there, so the tap never activates the link or button under
+    // the finger. A touch that moved is a scroll and pins nothing.
+    let touchStart: { x: number; y: number } | null = null;
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      touchStart = t ? { x: t.clientX, y: t.clientY } : null;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const t = e.changedTouches[0];
+      const moved = touchStart && t && Math.hypot(t.clientX - touchStart.x, t.clientY - touchStart.y) > TAP_SLOP;
+      touchStart = null;
+      if (!moved) handler(e);
+    };
+
     document.addEventListener('click', handler, true);
-    document.addEventListener('touchend', handler as EventListener, true);
+    document.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+    document.addEventListener('touchend', onTouchEnd, { capture: true, passive: false });
     document.body.classList.add('ui-feedback-mode-active');
 
     return () => {
       document.removeEventListener('click', handler, true);
-      document.removeEventListener('touchend', handler as EventListener, true);
+      document.removeEventListener('touchstart', onTouchStart, true);
+      document.removeEventListener('touchend', onTouchEnd, true);
       document.body.classList.remove('ui-feedback-mode-active');
     };
   }, [isFeedbackMode, captureFromEvent, captureFromElement, openModal, openQuickFeedback]);

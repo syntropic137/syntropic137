@@ -10,12 +10,13 @@ import { useFeedback } from '../FeedbackContext';
 import { useFeedbackForm } from '../hooks/useFeedbackForm';
 import type { FeedbackType, MediaUpload, Priority } from '../types';
 import { BadgeDropdown } from './BadgeDropdown';
+import { PinnedElementLabel } from './FeedbackOverlays';
 import { CloseIcon } from './icons';
 import { ScreenshotUploader } from './ScreenshotUploader';
 import { VoiceRecorder } from './VoiceRecorder';
 
 export function FeedbackModal() {
-  const { isOpen, locationContext, closeModal, addMedia, removeMedia, pendingMedia, submitFeedback } = useFeedback();
+  const { isOpen, locationContext, closeModal, repickElement, addMedia, removeMedia, pendingMedia, submitFeedback } = useFeedback();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const form = useFeedbackForm({ locationContext, addMedia, submitFeedback, closeModal });
@@ -36,11 +37,11 @@ export function FeedbackModal() {
         </div>
 
         <div className="ui-feedback-modal-body">
+          <PinnedElementLabel locationContext={locationContext} onRepick={repickElement} />
           <div className="ui-feedback-badge-row">
             <BadgeDropdown options={FEEDBACK_TYPES} value={form.feedbackType} onChange={(v) => form.setFeedbackType(v as FeedbackType)} className="ui-feedback-badge--type" hotkey="1" />
             <BadgeDropdown options={PRIORITIES} value={form.priority} onChange={(v) => form.setPriority(v as Priority)} className="ui-feedback-badge--priority" hotkey="2" />
             <div className="ui-feedback-location-compact">
-              {locationContext.componentName && <span title={`Component: ${locationContext.componentName}`}>&lt;{locationContext.componentName}&gt;</span>}
               <span title="Viewport size">{locationContext.viewportWidth}&times;{locationContext.viewportHeight}</span>
             </div>
           </div>

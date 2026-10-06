@@ -1,5 +1,5 @@
 /**
- * Overlay components used during feedback mode (highlight, pin marker, mode hint).
+ * Overlay components used during feedback mode (highlight, pin marker, pinned label, mode hint).
  */
 
 import type { HoverHighlight } from '../hooks/useHoverHighlight';
@@ -10,7 +10,7 @@ export function FeedbackModeOverlay() {
   return (
     <div className="ui-feedback-mode-overlay">
       <div className="ui-feedback-mode-hint">
-        {'\u{1F3AF}'} Click on any element to pin feedback {'\u2022'} <kbd>Esc</kbd> to cancel
+        {'\u{1F3AF}'} Click or tap any element to pin feedback {'\u2022'} <kbd>Esc</kbd> to cancel
       </div>
     </div>
   );
@@ -30,9 +30,35 @@ export function ElementHighlight({ highlight }: { highlight: HoverHighlight }) {
 }
 
 export function PinMarker({ locationContext }: { locationContext: LocationContext }) {
+  const rect = locationContext.elementRect;
   return (
-    <div className="ui-feedback-pin" style={{ left: locationContext.clickX, top: locationContext.clickY }}>
+    <>
+      {rect && (
+        <div
+          className="ui-feedback-pinned-highlight"
+          style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+        />
+      )}
+      <div className="ui-feedback-pin" style={{ left: locationContext.clickX, top: locationContext.clickY }}>
+        <PinIcon />
+      </div>
+    </>
+  );
+}
+
+/** Says what the feedback is pinned to, with a way to pick again. */
+export function PinnedElementLabel({ locationContext, onRepick }: {
+  locationContext: LocationContext; onRepick: () => void;
+}) {
+  if (!locationContext.elementLabel) return null;
+  return (
+    <div className="ui-feedback-pinned-label">
       <PinIcon />
+      <span className="ui-feedback-pinned-label-text">
+        Pinned to <code>{locationContext.elementLabel}</code>
+        {locationContext.componentName && <> in <code>&lt;{locationContext.componentName}&gt;</code></>}
+      </span>
+      <button type="button" className="ui-feedback-pinned-label-repick" onClick={onRepick}>Re-pick</button>
     </div>
   );
 }

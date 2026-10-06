@@ -4,6 +4,7 @@
 
 import { useCallback } from 'react';
 import type { LocationContext } from '../types';
+import { describeElement } from '../utils/describeElement';
 import { getCssSelector, getXPath } from '../utils/getElementPath';
 import { getComponentInfo } from '../utils/getReactComponent';
 
@@ -37,6 +38,8 @@ export function useElementInfo(): UseElementInfoResult {
         cssSelector: getCssSelector(element),
         xpath: getXPath(element),
         componentName: getComponentInfo(element) ?? undefined,
+        elementLabel: describeElement(element),
+        elementRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       };
     },
     []
