@@ -55,9 +55,14 @@ from syn_domain.contexts.orchestration._shared.skill_errors import (
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
 )
+from syn_domain.contexts.orchestration._shared.start_record import StartStatus, read_start_record
+from syn_domain.contexts.orchestration._shared.start_todo import OWED_STATUSES
 from syn_domain.contexts.orchestration._shared.tags import (
     InvalidTagsError,
     TagSet,
+)
+from syn_domain.contexts.orchestration._shared.template_launch import (
+    TemplateLaunches,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PHASE_ID_PATTERN,
@@ -107,16 +112,24 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
+    ExecutionAlreadyRequestedError,
+    ExecutionRequestAggregate,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
     WorkflowTemplateConflictError,
     WorkflowTemplateDigestMismatchError,
     WorkflowTemplateProvenanceStrippedError,
     WorkflowTemplateVersionAlreadyInstalledError,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
+    TASK_PLACEHOLDER,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    ExecutionResult,
     ImageManifest,
     IsolationConfig,
     SecurityPolicy,
@@ -139,6 +152,12 @@ from syn_domain.contexts.orchestration.domain.commands import (
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
+    RequestExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
+    ExecutionRequestedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
@@ -188,6 +207,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspace import (
+    OrphanedWorkspace,
+    ReclaimableDir,
+    WorkspaceDirRemover,
+    guard_orphaned_workspace,
+    remove_reclaimed_dir,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
 )
@@ -227,6 +253,11 @@ from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
 )
+from syn_domain.contexts.orchestration.slices.start_execution_request import (
+    ExecutionRequestStarter,
+    ExecutionRequestStartProcessManager,
+    ExecutionRequestStartRecord,
+)
 from syn_domain.contexts.orchestration.slices.start_resume import (
     MAX_START_ATTEMPTS,
     ResumeStarter,
@@ -252,9 +283,11 @@ __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
     "MAX_START_ATTEMPTS",
+    "OWED_STATUSES",
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     "RETIRED_PHASE_FIELDS",
+    "TASK_PLACEHOLDER",
     # Tag edits after creation (#967)
     "AddExecutionTagsCommand",
     "AddExecutionTagsHandler",
@@ -304,9 +337,17 @@ __all__ = [
     "ExecuteCommandCommand",
     "ExecuteWorkflowCommand",
     "ExecuteWorkflowHandler",
+    "ExecutionAlreadyRequestedError",
     # Query services
     "ExecutionCostQueryService",
     "ExecutionJournal",
+    "ExecutionRequestAggregate",
+    "ExecutionRequestStartProcessManager",
+    "ExecutionRequestStartRecord",
+    "ExecutionRequestStarter",
+    "ExecutionRequestedEvent",
+    # Value objects - workspace
+    "ExecutionResult",
     "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
@@ -315,7 +356,6 @@ __all__ = [
     "GlobalClaudePluginNotFoundError",
     # Aggregates
     "HandlerResult",
-    # Value objects - workspace
     "ImageManifest",
     "InheritanceUnavailableError",
     "InjectTokensCommand",
@@ -324,6 +364,7 @@ __all__ = [
     "InvalidTagsError",
     "IsolationConfig",
     "LaunchEval",
+    "OrphanedWorkspace",
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
@@ -332,12 +373,14 @@ __all__ = [
     "PullRequestCommenter",
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",
+    "ReclaimableDir",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
     "RemoveWorkflowTagsHandler",
     "ReportedFailureReason",
     "RepositoryOutsideBaselineError",
+    "RequestExecutionCommand",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "ResumeExecutionCommand",
@@ -356,9 +399,11 @@ __all__ = [
     "SkillNotRegistered",
     "SkillRef",
     "StartResumeHandler",
+    "StartStatus",
     "StreamResult",
     "SubagentTracker",
     "TagSet",
+    "TemplateLaunches",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
     "UnsupportedExecutionTypeError",
@@ -380,15 +425,19 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "WorkspaceDirRemover",
     "announce_as",
     "build_command_from_definition",
+    "guard_orphaned_workspace",
     "inherited_outputs",
     "is_phase_id",
     "launch_eval_for",
     "mint_wrapper_name",
     "open_eval",
     "read_record",
+    "read_start_record",
     "refuse_resume_start",
+    "remove_reclaimed_dir",
     "render_workspace_prompt",
     "require_supported_execution_type",
     "retired_field_notices",

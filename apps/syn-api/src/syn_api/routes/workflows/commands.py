@@ -15,10 +15,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_api._wiring import (
     ensure_connected,
+    get_execution_repo,
     get_projection_mgr,
     get_publisher,
     get_workflow_repo,
     sync_published_events_to_projections,
+)
+from syn_api.routes.workflows.phase_defs import (
+    _build_input_declarations,
+    _build_phase_defs,
+    _resolve_classification,
+    _resolve_workflow_type,
 )
 from syn_api.types import (
     Err,
@@ -28,19 +35,10 @@ from syn_api.types import (
     WorkflowValidation,
 )
 from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider, require_runnable_sandbox
+from syn_shared.agents import AgentProvider
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
-
-    from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-        InputDeclaration,
-        PhaseDefinition,
-        WorkflowClassification,
-        WorkflowType,
-    )
     from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         InstallOutcome,
     )
@@ -48,187 +46,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
-
-
-def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
-    from syn_domain.contexts.orchestration import WorkflowType
-
-    type_map: dict[str, WorkflowType] = {
-        "research": WorkflowType.RESEARCH,
-        "planning": WorkflowType.PLANNING,
-        "implementation": WorkflowType.IMPLEMENTATION,
-        "review": WorkflowType.REVIEW,
-        "deployment": WorkflowType.DEPLOYMENT,
-        "custom": WorkflowType.CUSTOM,
-    }
-    return type_map.get(workflow_type.lower(), WorkflowType.CUSTOM)
-
-
-def _resolve_classification(classification: str) -> WorkflowClassification:
-    from syn_domain.contexts.orchestration import WorkflowClassification
-
-    classification_map: dict[str, WorkflowClassification] = {
-        "simple": WorkflowClassification.SIMPLE,
-        "standard": WorkflowClassification.STANDARD,
-        "complex": WorkflowClassification.COMPLEX,
-        "epic": WorkflowClassification.EPIC,
-    }
-    return classification_map.get(classification.lower(), WorkflowClassification.STANDARD)
-
-
-def _as_bool(value: object, field: str) -> bool:
-    """Only a real bool. Anything else is the caller's error, so say so.
-
-    `bool("false")` is True, so coercion turned `allow_delegation: "false"`
-    into delegation ENABLED -- asking for the feature off and getting it on.
-    The first fix silently defaulted a non-bool to False instead, which is
-    fail-closed but still wrong in the other direction: `1` and `"true"`
-    became False, so a caller asking for it ON silently got it OFF, with a
-    201. Trading one silent corruption for another is not a fix.
-
-    A JSON boolean literal arrives as a real bool; only a QUOTED value
-    arrives as a string, and that is a malformed request, not an opinion.
-    """
-    if isinstance(value, bool):
-        return value
-    msg = f"phase field {field!r} must be a boolean, got {type(value).__name__}: {value!r}"
-    raise ValueError(msg)
-
-
-def _expand_skills(entries: Iterable[object] | None) -> tuple[SkillRef, ...]:
-    """Expand each entry the way the YAML path does.
-
-    Passing raw entries straight to `SkillRef` looked equivalent and is not:
-    the verbose form `{"source": ..., "names": ["alpha", "beta"]}` declares
-    TWO skills, and direct validation produced ONE named after the repo. So a
-    caller asking for `alpha` and `beta` silently got a single skill called
-    `b` -- a wrong identity rather than a missing one, which resolves and
-    injects the wrong instructions.
-
-    That is worse than the bug this PR set out to fix. `main` dropped skills
-    entirely; absent is recoverable, wrong is not.
-    """
-    from syn_domain.contexts.orchestration._shared.skill_ref import expand_skill_entry
-
-    if not entries:
-        return ()
-    expanded: list[SkillRef] = []
-    for entry in entries:
-        expanded.extend(expand_skill_entry(entry))
-    return tuple(expanded)
-
-
-def _agent_field(phase: Mapping[str, Any], name: str, default: Any = None) -> Any:  # noqa: ANN401
-    """Read a phase's agent setting from either spelling.
-
-    The packaged workflow YAML nests these under ``agent:`` -- see
-    ``workflows/sdlc/research-plan/workflow.yaml`` -- while the create request
-    carries them flat. Posting the YAML shape sent the whole block into a key
-    nothing read, so the phase installed with no provider and no model, with a
-    201 and no warning (#1011).
-
-    A flat field wins when both are present: it is the more specific spelling,
-    and picking silently either way would be a guess.
-    """
-    if name in phase:
-        return phase[name]
-    agent = phase.get("agent")
-    if isinstance(agent, dict) and name in agent:
-        return agent[name]
-    return default
-
-
-def _runnable_sandbox(declared: object, phase_id: object) -> str:
-    """The phase's sandbox, refused here if a phase cannot finish under it (#1434).
-
-    Checked before the template is persisted, not only at execution: a level
-    a phase cannot finish under should never be stored with a 201.
-    """
-    require_runnable_sandbox(declared, phase_id=None if phase_id is None else str(phase_id))
-    return str(declared) if declared else DEFAULT_PHASE_SANDBOX
-
-
-def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
-    from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
-
-    if phases:
-        return [
-            PhaseDefinition(
-                phase_id=p.get("phase_id", str(uuid4())),
-                name=p["name"],
-                order=p.get("order", i + 1),
-                description=p.get("description"),
-                execution_type=p.get("execution_type", PhaseExecutionType.SEQUENTIAL),
-                input_artifact_types=p.get("input_artifact_types", []),
-                output_artifact_types=p.get("output_artifact_types", []),
-                prompt_template=p.get("prompt_template"),
-                max_tokens=p.get("max_tokens"),
-                timeout_seconds=p.get("timeout_seconds"),
-                allowed_tools=p.get("allowed_tools", []),
-                # Dropping this silently reinstates the clone for a phase
-                # installed through the API that declared it did not need one
-                # (#1187) - the bootstrap cost the declaration exists to avoid.
-                clone_repos=_as_bool(p.get("clone_repos", True), "clone_repos"),
-                # Dropping this silently re-arms the unpushed-work gate against
-                # a phase that declared it delivers no repository changes, so a
-                # build tool touching a tracked lockfile fails a phase that did
-                # its job (#1308). True is the field's own default, so
-                # forgetting it judges the phase strictly rather than leaving
-                # it unjudged.
-                delivers_repo_changes=_as_bool(
-                    p.get("delivers_repo_changes", True), "delivers_repo_changes"
-                ),
-                argument_hint=p.get("argument_hint"),
-                # These four were accepted and discarded (#1011). `provider`
-                # meant every codex phase installed through the API ran as
-                # claude; `skills` and `claude_plugins` meant per-phase
-                # injection installed nothing. The structural test in
-                # test_phase_create_carries_every_field.py fails if a future
-                # field is added to PhaseDefinition without being mapped here.
-                model=_agent_field(p, "model"),
-                provider=_agent_field(p, "provider"),
-                allow_delegation=_as_bool(
-                    _agent_field(p, "allow_delegation", False), "allow_delegation"
-                ),
-                require_delegation=_as_bool(
-                    _agent_field(p, "require_delegation", False), "require_delegation"
-                ),
-                # Dropping this silently downgrades a phase's declared
-                # authority to the default, which for a review phase means it
-                # can write the code it certifies (#1161). Caught by the
-                # roundtrip assertion in test_phase_create_carries_every_field.
-                sandbox=_runnable_sandbox(_agent_field(p, "sandbox"), p.get("phase_id")),
-                claude_plugins=tuple(p.get("claude_plugins") or ()),
-                skills=_expand_skills(p.get("skills")),
-            )
-            for i, p in enumerate(phases)
-        ]
-    return [
-        PhaseDefinition(
-            phase_id=str(uuid4()),
-            name="Initial Phase",
-            order=1,
-            description="Default initial phase",
-        )
-    ]
-
-
-def _build_input_declarations(
-    inputs: list[dict[str, Any]] | None,
-) -> list[InputDeclaration]:
-    from syn_domain.contexts.orchestration import InputDeclaration
-
-    if not inputs:
-        return []
-    return [
-        InputDeclaration(
-            name=inp["name"],
-            description=inp.get("description"),
-            required=inp.get("required", True),
-            default=inp.get("default"),
-        )
-        for inp in inputs
-    ]
 
 
 async def create_workflow(
@@ -395,27 +212,35 @@ def _classify_workflow_error(error_msg: str) -> WorkflowError:
         return WorkflowError.HAS_ACTIVE_EXECUTIONS
     if "already archived" in lower:
         return WorkflowError.ALREADY_ARCHIVED
+    if "package mismatch" in lower:
+        return WorkflowError.PACKAGE_MISMATCH
     return WorkflowError.INVALID_INPUT
 
 
 async def delete_workflow(
     workflow_id: str,
+    expected_package_name: str | None = None,
 ) -> Result[None, WorkflowError]:
     """Archive (soft-delete) a workflow template.
 
     Args:
         workflow_id: ID of the workflow template to archive.
+        expected_package_name: Archive only if the aggregate still attributes
+            the template to this package (#1588).
 
     Returns:
         Ok(None) on success, Err(WorkflowError) on failure.
     """
+    from syn_api._wiring_launch import ExecutionProjectionBarrier
     from syn_domain.contexts.orchestration import (
         ArchiveWorkflowTemplateCommand,
         ArchiveWorkflowTemplateHandler,
     )
 
     try:
-        command = ArchiveWorkflowTemplateCommand(workflow_id=workflow_id)
+        command = ArchiveWorkflowTemplateCommand(
+            workflow_id=workflow_id, expected_package_name=expected_package_name
+        )
     except ValueError as e:
         return Err(WorkflowError.INVALID_INPUT, message=str(e))
 
@@ -426,7 +251,11 @@ async def delete_workflow(
     handler = ArchiveWorkflowTemplateHandler(
         repository=repository,
         execution_projection=execution_projection,
+        executions=get_execution_repo(),
         event_publisher=publisher,
+        # #1588: executions started before launches were recorded are known
+        # only to the projection, so it must have caught up first.
+        projection_barrier=ExecutionProjectionBarrier(),
     )
 
     result = await handler.handle(command)
@@ -657,21 +486,38 @@ class DeleteWorkflowResponse(BaseModel):
     summary="Archive (soft-delete) a workflow template",
     responses={
         404: {"description": "Workflow template not found"},
-        409: {"description": "Conflict; workflow has active executions or is already archived"},
+        409: {
+            "description": (
+                "Conflict; workflow has active executions, is already archived, "
+                "or is not attributed to expected_package_name"
+            )
+        },
     },
 )
-async def delete_workflow_endpoint(workflow_id: str) -> DeleteWorkflowResponse:
+async def delete_workflow_endpoint(
+    workflow_id: str, expected_package_name: str | None = None
+) -> DeleteWorkflowResponse:
     """Archive (soft-delete) a workflow template.
 
     Archived templates are excluded from listing by default but remain
     accessible via `GET /workflows/{id}` and with `?include_archived=true`.
+
+    ``expected_package_name`` makes the archive conditional on the current
+    aggregate still attributing the workflow to that package (#1588). A prune
+    picks candidates from `GET /workflows/{id}`, a read model that can lag;
+    this check is made against the aggregate at the moment of archive, so a
+    workflow reinstalled by another package is refused with 409 however stale
+    that read was.
     """
-    result = await delete_workflow(workflow_id=workflow_id)
+    result = await delete_workflow(
+        workflow_id=workflow_id, expected_package_name=expected_package_name
+    )
     if isinstance(result, Err):
         status_map = {
             WorkflowError.NOT_FOUND: 404,
             WorkflowError.HAS_ACTIVE_EXECUTIONS: 409,
             WorkflowError.ALREADY_ARCHIVED: 409,
+            WorkflowError.PACKAGE_MISMATCH: 409,
         }
         status = status_map.get(result.error, 400)
         raise HTTPException(status_code=status, detail=result.message)
@@ -816,6 +662,7 @@ async def create_workflow_from_yaml(
     name_override: str | None = None,
     version: str | None = None,
     source_digest: str | None = None,
+    package_name: str | None = None,
     force: bool = False,
 ) -> Result[_YamlCreateOutcome, WorkflowError]:
     """Create a workflow template from raw YAML content.
@@ -863,6 +710,7 @@ async def create_workflow_from_yaml(
         name_override=name_override,
         version=version,
         source_digest=source_digest,
+        package_name=package_name,
         force=force,
     )
 
@@ -916,6 +764,7 @@ async def create_workflow_from_yaml_endpoint(
     workflow_id: str | None = None,
     version: str | None = None,
     source_digest: str | None = None,
+    package_name: str | None = None,
     force: bool = False,
 ) -> CreateWorkflowResponse:
     """Create a workflow template by uploading raw YAML.
@@ -935,6 +784,10 @@ async def create_workflow_from_yaml_endpoint(
     refused with 409 unless ``force`` is set, and a matching version that
     resolves to a different digest is refused regardless of how it looks,
     because that is the signature of a republished version.
+
+    ``package_name`` records which package installed the definition (#1588).
+    It is read back on ``GET /workflows/{id}`` so ``syn workflow install
+    --prune`` archives only what the server attributes to that package.
     """
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type not in _ACCEPTED_YAML_CONTENT_TYPES:
@@ -972,6 +825,7 @@ async def create_workflow_from_yaml_endpoint(
             name_override=name,
             version=version,
             source_digest=source_digest,
+            package_name=package_name,
             force=force,
         )
     except ClaudePluginError as e:

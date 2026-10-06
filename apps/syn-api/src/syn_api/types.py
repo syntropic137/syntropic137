@@ -141,6 +141,7 @@ class WorkflowError(StrEnum):
     INVALID_INPUT = "invalid_input"
     EXECUTION_FAILED = "execution_failed"
     HAS_ACTIVE_EXECUTIONS = "has_active_executions"
+    PACKAGE_MISMATCH = "package_mismatch"
     NOT_IMPLEMENTED = "not_implemented"
 
 
@@ -583,7 +584,9 @@ class WorkflowDetail(BaseModel):
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     default_eval_id: str | None = None
     """The eval a launch naming none joins (#967). Future runs only."""
-    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None when it was not
+    installed from a package or predates install provenance."""
 
 
 class ExecutionSummary(BaseModel):
@@ -2219,6 +2222,23 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
 
 
+class DiskSpaceHealth(BaseModel):
+    """Free space on the workspace volume, as /health reports it (#1560)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(description="Directory whose filesystem was measured.")
+    state: Literal["ok", "unmeasurable", "low", "critical"] = Field(
+        description="'low' degrades /health; 'critical' also refuses new executions."
+    )
+    free_percent: float | None = Field(description="Percent free; null when unmeasurable.")
+    free_bytes: int | None = Field(description="Bytes available; null when unmeasurable.")
+    degraded_below_percent: float = Field(description="SYN_DISK_DEGRADED_BELOW_PERCENT.")
+    refuse_admission_below_percent: float = Field(
+        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+    )
+
+
 class DbPoolHealth(BaseModel):
     """One Postgres connection pool in this API process, at the moment of asking (#1583).
 
@@ -2293,6 +2313,11 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Human-readable notes that need attention but do not degrade the "
         "instance. Omitted when there are none.",
+    )
+    disk: DiskSpaceHealth | None = Field(
+        default=None,
+        description="Free space on the workspace volume (#1560). Omitted only when "
+        "the probe itself could not be built.",
     )
     db_pools: list[DbPoolHealth] | None = Field(
         default=None,

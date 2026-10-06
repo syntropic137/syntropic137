@@ -54,6 +54,9 @@ _ALTERNATIVE_RESOLVERS: set[str] = {
     "_resolve_trigger_id",
     "_visible_run",
     "_resolve_inventory_job_id",
+    # GET /executions/{id} calls resolve_or_raise inside it, and falls back to
+    # the execution budget for an accepted start that has no record yet (#1557).
+    "_detail_or_queued",
 }
 
 

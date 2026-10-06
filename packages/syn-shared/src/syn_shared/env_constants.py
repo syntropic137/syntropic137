@@ -123,9 +123,15 @@ ENV_AGENTIC_SESSION_STORE_URL = "AGENTIC_SESSION_STORE_URL"
 ENV_AGENTIC_SESSION_STORE_AUTH = "AGENTIC_SESSION_STORE_AUTH"
 ENV_AGENTIC_SESSION_STORE_SPOOL = "AGENTIC_SESSION_STORE_SPOOL"
 
-#: How many workflow executions the background TRIGGER dispatcher runs at once.
-#: Bound to the settings field by `validation_alias`, so this name is what
-#: pydantic actually reads rather than a second spelling kept in step by hand.
+#: How many workflow executions one API process runs at once, across every start
+#: path (direct, trigger, resume; #1557). Bound to the settings field by
+#: `validation_alias`, so this name is what pydantic actually reads rather than
+#: a second spelling kept in step by hand.
+ENV_SYN_EXECUTION_MAX_CONCURRENT = "SYN_EXECUTION_MAX_CONCURRENT"
+
+#: RETIRED by #1557. It bounded the trigger dispatcher (and, unnamed, resumes)
+#: but never direct API starts. Read only to warn an operator who still sets it
+#: that it no longer does anything.
 ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES = "SYN_POLLING_MAX_CONCURRENT_DISPATCHES"
 ENV_AGENTIC_SESSION_STORE_PARTITION = "AGENTIC_SESSION_STORE_PARTITION"
 ENV_AGENTIC_SESSION_STORE_TAGS = "AGENTIC_SESSION_STORE_TAGS"
@@ -180,6 +186,7 @@ __all__ = [
     "ENV_GIT_COMMITTER_NAME",
     "ENV_OTEL_EXPORTER_OTLP_ENDPOINT",
     "ENV_SYN_AGENT_NETWORK",
+    "ENV_SYN_EXECUTION_MAX_CONCURRENT",
     "ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES",
     "ENV_SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP",
     "ENV_SYN_IMAGE_VERIFY_COSIGN_PATH",

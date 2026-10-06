@@ -45,6 +45,13 @@ export interface paths {
          *
          *     Archived templates are excluded from listing by default but remain
          *     accessible via `GET /workflows/{id}` and with `?include_archived=true`.
+         *
+         *     ``expected_package_name`` makes the archive conditional on the current
+         *     aggregate still attributing the workflow to that package (#1588). A prune
+         *     picks candidates from `GET /workflows/{id}`, a read model that can lag;
+         *     this check is made against the aggregate at the moment of archive, so a
+         *     workflow reinstalled by another package is refused with 409 however stale
+         *     that read was.
          */
         delete: operations["delete_workflow_endpoint_workflows__workflow_id__delete"];
         options?: never;
@@ -180,6 +187,10 @@ export interface paths {
          *     refused with 409 unless ``force`` is set, and a matching version that
          *     resolves to a different digest is refused regardless of how it looks,
          *     because that is the signature of a republished version.
+         *
+         *     ``package_name`` records which package installed the definition (#1588).
+         *     It is read back on ``GET /workflows/{id}`` so ``syn workflow install
+         *     --prune`` archives only what the server attributes to that package.
          */
         post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
         delete?: never;
@@ -3157,7 +3168,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -3214,6 +3225,43 @@ export interface components {
             workflow_id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * DiskSpaceHealth
+         * @description Free space on the workspace volume, as /health reports it (#1560).
+         */
+        DiskSpaceHealth: {
+            /**
+             * Path
+             * @description Directory whose filesystem was measured.
+             */
+            path: string;
+            /**
+             * State
+             * @description 'low' degrades /health; 'critical' also refuses new executions.
+             * @enum {string}
+             */
+            state: "ok" | "unmeasurable" | "low" | "critical";
+            /**
+             * Free Percent
+             * @description Percent free; null when unmeasurable.
+             */
+            free_percent: number | null;
+            /**
+             * Free Bytes
+             * @description Bytes available; null when unmeasurable.
+             */
+            free_bytes: number | null;
+            /**
+             * Degraded Below Percent
+             * @description SYN_DISK_DEGRADED_BELOW_PERCENT.
+             */
+            degraded_below_percent: number;
+            /**
+             * Refuse Admission Below Percent
+             * @description SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT.
+             */
+            refuse_admission_below_percent: number;
         };
         /**
          * EvalId
@@ -3298,7 +3346,7 @@ export interface components {
             };
             /**
              * Task
-             * @description Primary task description -- substituted for $ARGUMENTS in phase prompts.
+             * @description Primary task description -- substituted for $ARGUMENTS in phase prompts. Omit it to run without a task; an empty or whitespace-only task is rejected with 422 (PC-66).
              */
             task?: string | null;
             /**
@@ -3540,6 +3588,7 @@ export interface components {
                 [key: string]: string;
             };
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /**
          * ExecutionEvalResponse
@@ -3647,6 +3696,45 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+        };
+        /**
+         * ExecutionStartQueueInfo
+         * @description Where a start stands in the execution budget, before its execution exists (#1557).
+         *
+         *     Every start path - direct, trigger and resume - claims one of
+         *     ``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits
+         *     here, first come first served, and has no execution record yet; this is
+         *     what it shows instead of a 404.
+         */
+        ExecutionStartQueueInfo: {
+            path: components["schemas"]["StartPath"];
+            /** Position */
+            position: number | null;
+            /**
+             * Held
+             * @default true
+             */
+            held: boolean;
+            /** Start Status */
+            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed") | null;
+            /** Status Reason */
+            status_reason?: string | null;
+            /** Running */
+            running: number;
+            /** Waiting */
+            waiting: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
+            /**
+             * Position Display
+             * @description Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.
+             */
+            readonly position_display: string;
         };
         /**
          * ExecutionStatusCounts
@@ -4572,6 +4660,8 @@ export interface components {
              * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
              */
             warnings?: string[] | null;
+            /** @description Free space on the workspace volume (#1560). Omitted only when the probe itself could not be built. */
+            disk?: components["schemas"]["DiskSpaceHealth"] | null;
             /**
              * Db Pools
              * @description Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode.
@@ -6217,6 +6307,7 @@ export interface components {
             recorded_at: string;
             /** Dispatched At */
             dispatched_at?: string | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /**
          * ReviewVerdict
@@ -7141,6 +7232,12 @@ export interface components {
              */
             truncated: boolean;
         };
+        /**
+         * StartPath
+         * @description Which entrance an execution start came through.
+         * @enum {string}
+         */
+        StartPath: "direct" | "trigger" | "resume";
         /**
          * StateResponse
          * @description Response with execution state.
@@ -8287,6 +8384,8 @@ export interface components {
             tags?: string[];
             /** Default Eval Id */
             default_eval_id?: string | null;
+            /** Package Name */
+            package_name?: string | null;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -8512,7 +8611,9 @@ export interface operations {
     };
     delete_workflow_endpoint_workflows__workflow_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                expected_package_name?: string | null;
+            };
             header?: never;
             path: {
                 workflow_id: string;
@@ -8537,7 +8638,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Conflict; workflow has active executions or is already archived */
+            /** @description Conflict; workflow has active executions, is already archived, or is not attributed to expected_package_name */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8727,6 +8828,7 @@ export interface operations {
                 workflow_id?: string | null;
                 version?: string | null;
                 source_digest?: string | null;
+                package_name?: string | null;
                 force?: boolean;
             };
             header?: never;

@@ -95,5 +95,8 @@ class CreateWorkflowTemplateCommand(BaseModel):
     source_digest: str | None = None
     """Resolved source commit SHA the definition was built from."""
 
+    package_name: str | None = None
+    """Package that installed this definition (#1588). Read back by prune."""
+
     force: bool = False
     """Explicit intent to overwrite an already-installed matching version."""

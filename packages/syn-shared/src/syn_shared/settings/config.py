@@ -28,6 +28,8 @@ from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
     from syn_shared.settings.dev_tooling import DevToolingSettings
+    from syn_shared.settings.disk import DiskSettings
+    from syn_shared.settings.execution import ExecutionSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.polling import PollingSettings
@@ -759,6 +761,28 @@ class Settings(BaseSettings):
         from syn_shared.settings.polling import PollingSettings
 
         return PollingSettings()
+
+    # =========================================================================
+    # EXECUTION (#1557) - one concurrency budget for every start path
+    # =========================================================================
+
+    @property
+    def execution(self) -> ExecutionSettings:
+        """How many workflow executions this process runs at once (#1557)."""
+        from syn_shared.settings.execution import ExecutionSettings
+
+        return ExecutionSettings()
+
+    # =========================================================================
+    # DISK (#1560) - free space on the workspace volume
+    # =========================================================================
+
+    @property
+    def disk(self) -> DiskSettings:
+        """When low free space degrades /health and when it refuses admission."""
+        from syn_shared.settings.disk import DiskSettings
+
+        return DiskSettings()
 
 
 @lru_cache

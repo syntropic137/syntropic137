@@ -45,7 +45,24 @@ See [GitHub Integration](/docs/guide/github-integration) for the full setup guid
 |----------|---------|-------------|
 | `AGENT_WORKSPACE_DIR` | `/tmp/syn-workspaces` | Base directory for agent workspaces |
 | `AGENT_TIMEOUT` | `3600` | Maximum agent execution time (seconds) |
-| `AGENT_MAX_CONCURRENT` | `4` | Maximum concurrent agent sessions |
+
+## Execution Concurrency
+
+One budget bounds how many workflow executions run at once, across every
+start path: `syn workflow run` / `POST /workflows/{id}/execute`, trigger
+dispatch and resume. Starts beyond it wait in a first-come queue and show as
+`queued`, with their position, in `syn execution show <id>`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYN_EXECUTION_MAX_CONCURRENT` | `4` | Executions one API process runs at once |
+
+The limit is about memory. Every running execution holds a workspace container
+and roughly 96MiB of API memory, and an API that exceeds `API_MEMORY_LIMIT` is
+killed along with every execution it hosts. The default fits the `512m` API
+default; size it as `(API_MEMORY_LIMIT in MiB - 128) / 96`, for example `20`
+for `2g`, and make sure the host has RAM for that many workspaces. The API logs
+a warning at startup when the two disagree.
 
 ## Event Polling
 

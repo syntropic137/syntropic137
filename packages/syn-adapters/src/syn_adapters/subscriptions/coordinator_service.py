@@ -277,6 +277,34 @@ class CoordinatorSubscriptionService:
             now=datetime.now(UTC),
         )
 
+    async def projected_through_head(
+        self, projection_name: str, *, timeout: float = 5.0, interval: float = 0.1
+    ) -> bool:
+        """Whether ``projection_name`` has processed every event in the store NOW (#1588).
+
+        The head is read once, first, so the target is fixed: a projection that
+        reaches it has seen every event written before the call, however many
+        are written while it waits. False if the subscription is not up or the
+        projection does not reach that head within ``timeout`` - the caller
+        refuses and asks again rather than trusting a read model that may lag.
+        """
+        if self._coordinator is None or self._checkpoint_store is None:
+            return False
+        head_events, _is_end, _next = await self._event_store.read_all(
+            from_global_nonce=sys.maxsize, max_count=1, forward=False
+        )
+        head = head_events[0].metadata.global_nonce if head_events else None
+        if head is None:
+            return True
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            checkpoint = await self._checkpoint_store.get_checkpoint(projection_name)
+            if checkpoint is not None and checkpoint.global_position >= head:
+                return True
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(interval)
+
     async def describe_unapplied_starts(self) -> UnappliedStartsReport | None:
         """Executions whose start a read model's checkpoint passed without applying (#1545).
 
@@ -529,6 +557,8 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration import (
         CancelledWorkLedger,
         ExecutionJournal,
+        ExecutionRequestStarter,
+        ExecutionRequestStartProcessManager,
         QuarantineNoticeProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
@@ -548,6 +578,7 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.get_workflow_detail import (
         WorkflowDetailProjection,
     )
+    from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
     from syn_domain.contexts.orchestration.slices.list_executions import (
         WorkflowExecutionListProjection,
     )
@@ -576,7 +607,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
     from syn_domain.tool_call_counts import ToolCallCountsProjection
 
-    # Create all checkpointed projections (26 total - bumped for ADR-014 s7)
+    # Create all checkpointed projections (27 total - bumped for #1557)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -585,6 +616,7 @@ def create_coordinator_service(
             WorkflowDetailProjection(projection_store),
             WorkflowExecutionListProjection(projection_store),
             WorkflowExecutionDetailProjection(projection_store),
+            EvalListProjection(projection_store),
             DashboardMetricsProjection(projection_store),
             WorkflowPhaseMetricsProjection(projection_store),
             ExecutionTodoProjection(store=projection_store),
@@ -598,6 +630,12 @@ def create_coordinator_service(
             # dispatcher as above, through its gated `start_resume`.
             ResumeStartProcessManager(
                 resume_starter=cast("ResumeStarter | None", execution_service),
+                store=projection_store,
+            ),
+            # #1557: starts every admitted direct request from its durable
+            # record - after a restart, or when the route's own task never ran.
+            ExecutionRequestStartProcessManager(
+                starter=cast("ExecutionRequestStarter | None", execution_service),
                 store=projection_store,
             ),
             # #1547: tells the PR a failed phase's work is on a quarantine
