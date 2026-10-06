@@ -345,6 +345,11 @@ class StreamResult:
     #: than guessed (#788) - and it is also what a stream cut off before its
     #: first announcement leaves behind.
     announced_model: str | None = None
+    #: Why the platform stopped this run for spending past the phase's
+    #: `max_cost_usd`, or None if it did not (#1376). Set together with
+    #: `interrupt_requested`, which is what makes the attempt settled and the
+    #: missing exit status expected; this is what tells it apart from a cancel.
+    cost_limit_reason: str | None = None
 
 
 def _model_under_message(message: object) -> object:

@@ -139,6 +139,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 prompt_template=p.get("prompt_template"),
                 max_tokens=p.get("max_tokens"),
                 timeout_seconds=p.get("timeout_seconds"),
+                max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=p.get("allowed_tools", []),
                 # Dropping this silently reinstates the clone for a phase
                 # installed through the API that declared it did not need one

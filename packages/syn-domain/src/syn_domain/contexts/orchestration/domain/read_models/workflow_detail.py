@@ -124,6 +124,9 @@ class PhaseDefinitionDetail:
     timeout_seconds: int = PhaseDefaults.TIMEOUT_SECONDS
     """Timeout for phase execution in seconds."""
 
+    max_cost_usd: float | None = None
+    """The most this phase may spend, in USD, before it is stopped (#1376)."""
+
     allowed_tools: tuple[str, ...] = ()
     """Tools allowed during this phase execution."""
 
@@ -265,6 +268,7 @@ class WorkflowDetail:
                 order=p.get(PhaseFields.ORDER, i),
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE),
                 timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
+                max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
@@ -345,6 +349,7 @@ class WorkflowDetail:
                 PhaseFields.ORDER: p.order,
                 PhaseFields.PROMPT_TEMPLATE: p.prompt_template,
                 PhaseFields.TIMEOUT_SECONDS: p.timeout_seconds,
+                "max_cost_usd": p.max_cost_usd,
                 PhaseFields.ALLOWED_TOOLS: list(p.allowed_tools),
                 "argument_hint": p.argument_hint,
                 "model": p.model,

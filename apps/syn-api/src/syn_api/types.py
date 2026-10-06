@@ -525,6 +525,8 @@ class PhaseDefinitionResponse(BaseModel):
     agent_type: str = ""
     prompt_template: str | None = None
     timeout_seconds: int = 300
+    max_cost_usd: float | None = None
+    """The most this phase may spend, in USD, before it is stopped. None is unbounded."""
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
