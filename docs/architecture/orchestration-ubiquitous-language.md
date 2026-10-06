@@ -437,6 +437,20 @@ chose it. `attached`: it was Attached afterwards. A run Detached and then
 Attached again, even to the same Eval, is `attached`, because the current
 association was made after the fact.
 
+## Workspace Resource Usage
+
+What one Phase's workspace consumed, measured once as it is torn down: CPU
+time, CPU throttling, memory peak, OOM kills, the workspace's disk size, network
+bytes, and the paths its delete could not remove (`WorkspaceUsage`). The
+workspace provider measures it; the Phase that held the workspace records it,
+as one `workspace_resource_usage` observation under that Phase's session.
+
+It is telemetry (Lane 2), never domain state: no event, no aggregate, and a
+failed measurement or write never fails a Phase. Each field is independently
+unknown rather than zero when its read failed. A Phase retried after a failed
+attempt held one workspace per attempt, so it has one usage per attempt. It
+exists to size the platform against `docs/north-star.md`.
+
 ## Scripted Agent
 
 What runs in a Phase's workspace in place of the agent CLI during a load test

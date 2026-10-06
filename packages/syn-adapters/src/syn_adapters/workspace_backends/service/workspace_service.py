@@ -511,7 +511,7 @@ class WorkspaceService:
             # quarantine push: nothing left in the container needs a token (#725).
             if workspace is not None:
                 await workspace.revoke_issued_credentials()
-            await cleanup_workspace(
+            usage = await cleanup_workspace(
                 self,
                 aggregate,
                 workspace_id,
@@ -519,4 +519,9 @@ class WorkspaceService:
                 isolation_handle=isolation_handle,
                 sidecar_handle=sidecar_handle,
                 inject_tokens=inject_tokens,
+                phase_id=phase_id,
             )
+            # Handed back on the object every caller still holds after
+            # `__aexit__`, so the frame that knows the session can record it.
+            if workspace is not None:
+                workspace.teardown_usage = usage

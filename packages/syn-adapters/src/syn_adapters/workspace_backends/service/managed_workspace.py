@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         IsolationHandle,
         SidecarHandle,
         TokenInjectionResult,
+        WorkspaceUsage,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
         WorkspaceAggregate,
@@ -87,6 +88,10 @@ class ManagedWorkspace:
     #: the renewal task reads the installed credential's expiry from, and what
     #: teardown revokes. In-process only - see `issued_tokens`.
     _ledger: IssuanceLedger = field(default_factory=IssuanceLedger, repr=False)
+    #: What the isolation consumed, set by teardown (`create_workspace`'s
+    #: `finally`) and so only readable after `__aexit__`. None before teardown,
+    #: and when the backend measured nothing.
+    teardown_usage: WorkspaceUsage | None = None
 
     @property
     def path(self) -> Path:
