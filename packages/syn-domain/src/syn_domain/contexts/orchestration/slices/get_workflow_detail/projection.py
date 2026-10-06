@@ -159,6 +159,12 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Check both new and old field names for backwards compatibility
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE) or p.get("prompt_template_id"),
                 timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
+                # #1376. Same sibling-site rule as #1429 below: `from_dict` in
+                # read_models/workflow_detail.py reads it, and omitting it here
+                # made `GET /workflows/{id}` report no limit for a phase that
+                # runs under one. No VERSION bump: no event written before
+                # #1376 can carry the key, so no stored row is wrong.
+                max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
