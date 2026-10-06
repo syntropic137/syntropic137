@@ -438,11 +438,10 @@ elif [ "$SKIP_PROBE" = 1 ]; then
     printf '\n!!! --skip-probe: NO EXECUTION HAS BEEN SEEN TO START ON %s.\n!!! beta.8 passed every other check with every start dropped (#1641).\n!!! Dispatch one real workflow now and watch a PHASE reach running.\n' "$TAG" >&2
     PROBE_LINE=" PROBE SKIPPED: dispatch one real workflow and watch a PHASE reach running."
 else
-    if [ -n "${BAK:-}" ]; then
-        rollback="ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-$BAK $COMPOSE && docker compose -f $COMPOSE up -d api gateway'"
-    else
-        rollback="ssh $HOST 'cd $COMPOSE_DIR && ls $COMPOSE.bak-*'   # then: cp <the backup> $COMPOSE && docker compose -f $COMPOSE up -d api gateway"
-    fi
+    # BAK is set only when this run repointed the pins; under --swap-only the
+    # backup is the newest $COMPOSE.bak-* an earlier stage left on the host.
+    rollback="ssh $HOST 'cd $COMPOSE_DIR && ls $COMPOSE.bak-* && cp $COMPOSE.bak-${BAK:-<pin>} $COMPOSE'
+   ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway'"
     RECOVERY="$TAG is LIVE and admission is OPEN, deliberately: in-flight work from other users is not held hostage to a failed probe. Nothing was rolled back. To roll back by hand:
    $rollback"
     step "probe: dispatching $PROBE_WORKFLOW; waiting up to ${PROBE_TIMEOUT}s for a PHASE to reach running"
