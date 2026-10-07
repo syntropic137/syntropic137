@@ -55,7 +55,7 @@ class ScorecardProjection(AutoDispatchProjection):
     """Builds the scorecard's per-execution records from orchestration events."""
 
     PROJECTION_NAME = SCORECARD_RUNS
-    VERSION = 1
+    VERSION = 2  # Bumped: a failing phase's tokens are recorded from WorkflowFailed
 
     def __init__(self, store: ProjectionStore) -> None:
         self._store = store
@@ -208,6 +208,7 @@ class ScorecardProjection(AutoDispatchProjection):
         )
 
     async def on_workflow_failed(self, event_data: dict) -> None:
+        await self._record_failed_phase(event_data)
         await self._end(
             event_data,
             outcome=RunOutcome.FAILED,
@@ -216,6 +217,39 @@ class ScorecardProjection(AutoDispatchProjection):
                 event_data.get("failure_classification") or FailureClassification.UNCLASSIFIED
             ),
         )
+
+    async def _record_failed_phase(self, event_data: dict) -> None:
+        """Record the phase the run failed in, from the failure itself.
+
+        A failing phase never emits PhaseCompleted: its spend is only on
+        WorkflowFailed's ``failed_phase_*`` fields. Without this, every failed
+        verify would drop out of the phase table and the median verify tokens
+        target would be read from the verifies that passed.
+        """
+        execution_id = event_data.get("execution_id") or ""
+        phase_id = event_data.get("failed_phase_id")
+        if not execution_id or not phase_id:
+            return
+        run = await self._load(execution_id)
+        if run.outcome is not RunOutcome.RUNNING:
+            return  # replaying a second terminal event must not add the phase twice
+        usage = (
+            event_data.get("failed_phase_input_tokens") or 0,
+            event_data.get("failed_phase_output_tokens") or 0,
+            event_data.get("failed_phase_cache_creation_tokens") or 0,
+            event_data.get("failed_phase_cache_read_tokens") or 0,
+        )
+        phase = ScorecardPhase(
+            phase_id=phase_id,
+            success=False,
+            input_tokens=usage[0],
+            output_tokens=usage[1],
+            cache_creation_tokens=usage[2],
+            cache_read_tokens=usage[3],
+            total_tokens=sum(usage),
+            duration_seconds=event_data.get("failed_phase_duration_seconds") or 0.0,
+        )
+        await self._save(run.model_copy(update={"phases": (*run.phases, phase)}))
 
     async def on_execution_cancelled(self, event_data: dict) -> None:
         await self._end(

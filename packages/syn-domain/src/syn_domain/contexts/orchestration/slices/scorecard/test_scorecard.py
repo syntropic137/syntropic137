@@ -185,3 +185,38 @@ def test_phase_type_reads_rounds_and_names_the_rest_other() -> None:
     assert phase_type_of("reverify_3") is PhaseType.REVERIFY
     assert phase_type_of("finalize_pr") is PhaseType.FINALIZE
     assert phase_type_of("cross-model-review") is PhaseType.OTHER
+
+
+@pytest.mark.asyncio
+async def test_a_failed_verify_counts_toward_the_verify_tokens_it_spent() -> None:
+    """A failing phase emits no PhaseCompleted; its tokens are on WorkflowFailed."""
+    projection = ScorecardProjection(InMemoryProjectionStore())
+    await _run(projection, "a", start=0, end=1, outcome="completed", verify_tokens=1_000_000)
+    await _run(projection, "b", start=1, end=2, outcome="completed", verify_tokens=2_000_000)
+    await projection.on_workflow_execution_started(
+        {
+            "execution_id": "c",
+            "workflow_id": "wf",
+            "workflow_name": "implement",
+            "started_at": _at(2),
+        }
+    )
+    failure = {
+        "execution_id": "c",
+        "failed_at": _at(3),
+        "failure_classification": "task",
+        "failed_phase_id": "verify",
+        "failed_phase_input_tokens": 9_000_000,
+        "failed_phase_output_tokens": 500_000,
+        "failed_phase_cache_creation_tokens": 0,
+        "failed_phase_cache_read_tokens": 7_000_000,
+    }
+    await projection.on_workflow_failed(failure)
+    await projection.on_workflow_failed(failure)  # redelivered: recorded once
+
+    card = await _score(projection, {})
+
+    verify = next(p for p in card.phases if p.phase_type is PhaseType.VERIFY)
+    assert verify.phase_count == 3
+    assert verify.median_tokens == 2_000_000
+    assert verify.p90_tokens == 16_500_000
