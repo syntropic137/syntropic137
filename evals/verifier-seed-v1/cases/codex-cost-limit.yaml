@@ -1,0 +1,18 @@
+id: codex-cost-limit
+source_pr: 1654
+# The parent of the PR's final head 4dae285b2, which is the fix.
+commit: 123b25204fce5052f1b0ab494d2c59fa607624ad
+fix_commit: 4dae285b269ae8d3c216d69eba355a56083a8b69
+task: >
+  The change under review adds a per-phase max_cost_usd cost limit: a phase
+  whose running cost passes the limit is stopped. Review where the limit is
+  declared, validated and enforced for each agent provider, and judge it
+  against what each provider's CLI actually reports while a phase runs.
+expected:
+  files:
+    - CodexStreamProcessor.py
+    - agents.py
+  keywords:
+    - [codex]
+    - [usage, token, cost]
+    - [turn end, end of the turn, once, after the run, turn.completed, turn completed, too late, cannot stop, never stop]

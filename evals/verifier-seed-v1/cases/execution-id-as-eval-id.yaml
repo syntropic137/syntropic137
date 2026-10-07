@@ -1,0 +1,20 @@
+id: execution-id-as-eval-id
+source_pr: 1649
+# The parent of the PR's final head bd302d76, which is the fix.
+commit: 7047b1c3daf1c4057d63eeb478cadd676d712bf5
+fix_commit: bd302d76430c74d8d31a8aa0a016d6c862926d69
+task: >
+  The change under review adds the eval API and CLI: create, list, show, list
+  runs and archive an eval, and attach or detach an execution. The server mints
+  each eval id, and every eval command loads the Eval aggregate by the id it is
+  given. Review the Eval aggregate and the admission and edit paths that load
+  it, and judge them against the production ESP event store.
+expected:
+  files:
+    - EvalAggregate.py
+    - eval_admission.py
+    - eval_edit.py
+  keywords:
+    - [execution]
+    - [stream]
+    - [exists, EvalCreated, not an eval, no eval, accepted, accepts]

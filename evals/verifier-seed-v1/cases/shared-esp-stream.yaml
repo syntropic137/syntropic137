@@ -1,0 +1,20 @@
+id: shared-esp-stream
+source_pr: 1574
+# main just before #1641 merged (b1a162ab9^1), and #1641's branch base.
+commit: 6646da278d17a16e16549cf77b0749b25d8e8040
+fix_commit: 28607c4ec0845d617d9a07440d55407f00776711
+task: >
+  The change under review adds an ExecutionRequest aggregate so a direct start
+  is recorded as a request before the WorkflowExecution exists, gives every
+  start one execution concurrency budget, and makes queued starts visible.
+  Review the ExecutionRequest aggregate, the command that creates it and the
+  admission path that dispatches the execution, and judge them against the
+  production ESP event store.
+expected:
+  files:
+    - RequestExecutionCommand.py
+    - ExecutionRequestAggregate.py
+  keywords:
+    - [stream]
+    - [aggregate_id, aggregate id, execution_id, execution id, same id]
+    - [duplicate, dropped, conflict, collide, collision, share]

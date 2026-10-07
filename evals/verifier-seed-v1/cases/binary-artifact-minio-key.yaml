@@ -1,0 +1,17 @@
+id: binary-artifact-minio-key
+source_pr: 1652
+# The parent of 721a8014c, the commit that fixed it on the PR branch.
+commit: b2f680f00b4e154b94fa4802a92ead30429e7b98
+fix_commit: 721a8014cee0d44f267e379b2edbccb76899d13a
+task: >
+  The change under review keeps binary artifacts byte-for-byte through
+  collection, phase handoff and the API: binary content goes to object storage
+  and is read back from there. Review the artifact content storage adapters and
+  the read path behind the artifact content endpoint, and judge them against
+  production MinIO.
+expected:
+  files:
+    - minio.py
+  keywords:
+    - [key, object name, path]
+    - [404, not found, NoSuchKey, mismatch, does not match, different]

@@ -1,0 +1,22 @@
+# The verifier seed suite (#967 step 8). Each case is a commit that carries a
+# bug the platform's own verify certified and a second verifier caught
+# (docs/retrospectives/2026-10-06-merge-down-and-the-dropped-start.md).
+#
+# What it measures: given a workflow, a prompt and a model, does verification
+# find the defect? Change any of the three and the version goes up - runs of
+# different versions are different experiments, and the scorer prints the
+# version beside every row.
+id: verifier-seed-v1
+version: 1
+goal: >
+  Does the verifier block a change that carries a known escaped bug, and name
+  the defect and the file it lives in?
+repository: syntropic137/syntropic137
+workflow:
+  id: eval-verify-pinned-v1
+  path: workflows/evals/verify-pinned/workflow.yaml
+  # Each phase's declared model, as written in the workflow file. The test
+  # fails when they disagree; the scorer also prints the model each run
+  # actually reported, which is the one to compare.
+  models:
+    verify: opus
