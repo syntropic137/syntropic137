@@ -27,7 +27,7 @@ HOST="${SYN_PIT_HOST:-root@100.114.86.77}"
 API="${SYN_PIT_API:-http://100.114.86.77:8137/api/v1}"
 COMPOSE_DIR="/root/.syntropic137"
 COMPOSE="docker-compose.syntropic137.yaml"
-DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-10800}"
+DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-2700}"
 API_READY_TIMEOUT="${SYN_PIT_API_READY_TIMEOUT:-900}"
 PROBE_WORKFLOW="${SYN_PIT_PROBE_WORKFLOW:-telemetry-lag-probe-v1}"
 PROBE_TIMEOUT="${SYN_PIT_PROBE_TIMEOUT:-600}"
@@ -127,12 +127,24 @@ esac
 # drain verdict is believed, and again after the swap: `status_counts` is
 # tallied from an asynchronous projection, so a lagging one reports a quiet
 # system while the event store knows about work it has not caught up to.
+# Prints the status and /health's top-level degraded_reasons on every call.
+# Returns 0 at the head, 1 not yet, 2 for `dropped_events`: a read model went
+# past a start without applying it (#1696). That is wrong, not slow, and never
+# heals by waiting (PC-115 waited 2.25h on it), so it gets its own code and the
+# execution ids the repair runbook needs.
+DROPPED_RUNBOOK="docs/runbooks/repair-dropped-execution-start.md"
 projections_healthy() {
-    api "/health" "$TMP/health.json" 2>/dev/null || return 1
+    api "/health" "$TMP/health.json" 2>/dev/null || { echo "   subscription: /health unreachable"; return 1; }
     python3 - "$TMP/health.json" <<'PY'
 import json, sys
-s = json.load(open(sys.argv[1])).get("subscription", {})
-print("   subscription:", {k: s.get(k) for k in ("status", "is_catching_up", "lag")})
+h = json.load(open(sys.argv[1]))
+s = h.get("subscription") or {}
+print("   subscription:", {k: s.get(k) for k in ("status", "is_catching_up", "lag")},
+      "degraded_reasons:", h.get("degraded_reasons") or [])
+if s.get("status") == "dropped_events":
+    ids = sorted({u.get("execution_id") for u in s.get("unapplied_starts") or []} - {None})
+    print("   DROPPED STARTS, never applied by the read path:", ids or "none named yet")
+    sys.exit(2)
 sys.exit(0 if s.get("status") == "healthy" and not s.get("is_catching_up") and not s.get("lag") else 1)
 PY
 }
@@ -160,16 +172,39 @@ DISK
 # A drain is a statement about ONE instant: this returns 0 only when every
 # status key present is terminal. Read from status_counts, which is tallied over
 # the whole collection, never from a page of rows (see the runbook, section 1).
+# Returns 0 drained, 1 not yet, 2 the read path dropped events (see above).
 drained() {
-    projections_healthy > /dev/null || { echo "   read path is not at the event-store head yet"; return 1; }
+    local rc=0
+    projections_healthy || rc=$?
+    if [ "$rc" = 2 ]; then return 2; fi
+    if [ "$rc" != 0 ]; then echo "   read path is not at the event-store head yet"; return 1; fi
+    status_counts
+}
+
+# The busy-or-not reading of status_counts, printed; 0 only when every status
+# key present is terminal. Also printed at the gate: queued vs running there is
+# how long the drain is about to be.
+status_counts() {
     api "/executions?page_size=1" "$TMP/counts.json" || return 1
     python3 - "$TMP/counts.json" <<'PY'
 import json, sys
 counts = json.load(open(sys.argv[1]))["status_counts"]
 busy = sorted(set(counts) - {"completed", "failed", "cancelled", "interrupted"})
-print(f"   status_counts: {counts}" + (f"  IN FLIGHT: {busy}" if busy else "  (drained)"))
+print(f"   queued={counts.get('queued', 0)} running={counts.get('running', 0)}  status_counts: {counts}"
+      + (f"  IN FLIGHT: {busy}" if busy else "  (drained)"))
 sys.exit(1 if busy else 0)
 PY
+}
+
+# The drain's and the probe's bounds are DEADLINES on a monotonic clock, not counters of sleeps:
+# a counter that adds 10 per poll let one slow GET after another stretch a 600s
+# bound past 90 minutes. Every probe HTTP call is capped to what is left.
+mono_now() { python3 -c 'import time; print(int(time.monotonic()))'; }
+left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
+    local l=$(( $1 - $(mono_now) ))
+    if [ "$l" -gt 90 ]; then l=90; fi
+    if [ "$l" -lt 0 ]; then l=0; fi
+    echo "$l"
 }
 
 # Close or open the admission gate (#1387). THE DRAIN ALONE ONLY OBSERVES:
@@ -195,6 +230,58 @@ mode = json.load(open(sys.argv[1]))
 print(f"   maintenance: active={mode['active']} reason={mode['reason']!r}")
 sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
 GATE
+}
+
+# The executions still running, one per line, for an operator deciding what to
+# do about them. Read-only: the pit stop never cancels anyone's work.
+running_executions() {
+    api "/executions?status=running&page_size=200" "$TMP/running.json" || { echo "   could not list the running executions"; return 0; }
+    python3 - "$TMP/running.json" <<'RUN'
+import json, sys
+page = json.load(open(sys.argv[1]))
+rows = page.get("executions") or []
+print(f"   STILL RUNNING ({page.get('total', len(rows))}):")
+for r in rows:
+    print(f"     {r.get('workflow_execution_id')}  {r.get('workflow_name')}  started {r.get('started_at')}")
+RUN
+}
+
+# A drain that cannot finish ends the pit stop, and RE-OPENS admission first.
+# Nothing has been recreated, so the platform is exactly as it was apart from
+# the gate, and a gate left shut with no pit stop running to clear it is what
+# held admission for 2.25h in PC-115. Re-running with --swap-only closes it
+# again in one step; the stage already on the host is untouched.
+abort_drain() {
+    if maintenance false ""; then
+        echo "   admission is OPEN again" >&2
+    else
+        echo "   WARNING: admission is still PAUSED; clear it with PUT /maintenance" >&2
+    fi
+    die "$*; nothing was recreated"
+}
+
+# Wait, within SYN_PIT_DRAIN_TIMEOUT on a monotonic clock, for drained. Fails
+# fast on dropped events (waiting cannot fix them); on an exhausted budget lists
+# what is still running and stops, so the operator chooses (PC-114: one long
+# repair round held a whole drain for ~2h).
+drain_loop() {
+    local deadline rc t
+    deadline=$(( $(mono_now) + DRAIN_TIMEOUT ))
+    while :; do
+        rc=0
+        drained || rc=$?
+        if [ "$rc" = 0 ]; then return 0; fi
+        if [ "$rc" = 2 ]; then
+            abort_drain "the read path DROPPED execution starts (subscription.status=dropped_events, #1696). Waiting cannot fix it. Repair the executions named above with $DROPPED_RUNBOOK, then re-run with --swap-only"
+        fi
+        t=$(( deadline - $(mono_now) ))
+        if [ "$t" -le 0 ]; then
+            running_executions
+            abort_drain "drain budget of ${DRAIN_TIMEOUT}s spent with executions still in flight (listed above); none was cancelled. Choose: WAIT (re-run with --swap-only; SYN_PIT_DRAIN_TIMEOUT sets the budget), or INTERRUPT them yourself, re-run, and resume them after the pit stop"
+        fi
+        if [ "$t" -gt 60 ]; then t=60; fi
+        sleep "$t"
+    done
 }
 
 # The probe's workflow is installed and ACTIVE, asked before anything is built
@@ -326,20 +413,10 @@ fi
 
 step "gate: pausing execution admission for the rest of the pit stop"
 maintenance true "pit stop $VERSION" || die "could not pause admission; nothing was recreated"
+status_counts || true
 
-step "drain: waiting for every execution to be terminal (timeout ${DRAIN_TIMEOUT}s)"
-waited=0
-until drained; do
-    if [ "$waited" -ge "$DRAIN_TIMEOUT" ]; then
-        # Nothing has been recreated yet, so the platform is exactly as it was
-        # apart from the gate. Leaving it shut would strand admission on a
-        # deploy that never happened.
-        maintenance false "" || \
-            echo "   WARNING: admission is still paused; clear it with PUT /maintenance" >&2
-        die "not drained after ${DRAIN_TIMEOUT}s; nothing was recreated"
-    fi
-    sleep 60; waited=$((waited + 60))
-done
+step "drain: waiting for every execution to be terminal (budget ${DRAIN_TIMEOUT}s)"
+drain_loop
 
 # Bring api + gateway up. Idempotent: a second call recreates nothing that
 # already matches the compose file, it only starts what is still `Created`.
@@ -449,16 +526,6 @@ maintenance false "" || die "$TAG is live but the clear did not complete; retry 
 # same admission as everyone else's work, and a failed probe never re-closes it.
 api_post() { api_curl -m "${4:-90}" -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
 
-# The probe's bounds are DEADLINES on a monotonic clock, not counters of sleeps:
-# a counter that adds 10 per poll let one slow GET after another stretch a 600s
-# bound past 90 minutes. Every HTTP call is capped to what is left.
-mono_now() { python3 -c 'import time; print(int(time.monotonic()))'; }
-left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
-    local l=$(( $1 - $(mono_now) ))
-    if [ "$l" -gt 90 ]; then l=90; fi
-    if [ "$l" -lt 0 ]; then l=0; fi
-    echo "$l"
-}
 nap() {  # $1: deadline; sleep the poll interval, never past the deadline
     local t
     t="$(left "$1")"
