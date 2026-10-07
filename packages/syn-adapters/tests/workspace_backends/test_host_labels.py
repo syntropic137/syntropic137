@@ -9,7 +9,7 @@ correctly and dropped one hop later fails here.
 from __future__ import annotations
 
 import socket
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -25,6 +25,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 from syn_shared.env_constants import ENV_BUILD_IMAGE_TAG
 from syn_shared.settings import reset_settings
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable, Iterator
 
 pytestmark = pytest.mark.unit
 
@@ -140,12 +143,12 @@ async def test_sidecar_container_carries_every_label(stamped_host: None) -> None
 
 @pytest.mark.parametrize("labels_of", [_workspace_labels, _sidecar_labels])
 async def test_an_unconfigured_host_is_named_by_its_hostname(
-    unstamped_host: None, labels_of: object
+    unstamped_host: None, labels_of: Callable[[], Awaitable[dict[str, str]]]
 ) -> None:
     """No `SYN_HOST_ID` falls back to the hostname; an empty tag is `unknown`.
 
     Both labels are still written, so a later reap can filter on their presence.
     """
-    labels = await labels_of()  # type: ignore[operator]
+    labels = await labels_of()
     assert labels["syn.host_id"] == socket.gethostname()
     assert labels["syn.host_generation"] == UNKNOWN_GENERATION
