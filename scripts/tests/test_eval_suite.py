@@ -31,12 +31,12 @@ import yaml
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
-    blocking_findings,
     Case,
     DefinitionError,
     Expected,
     Launch,
     LoadedSuite,
+    blocking_findings,
     check_commits,
     install_provenance,
     launch_suite,
