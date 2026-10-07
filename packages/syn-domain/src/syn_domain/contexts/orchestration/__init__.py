@@ -264,6 +264,17 @@ from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     PullRequestCommenter,
     QuarantineNoticeProcessManager,
 )
+from syn_domain.contexts.orchestration.slices.scorecard import (
+    OutcomeCounts,
+    Scorecard,
+    ScorecardProjection,
+    ScorecardRun,
+    TargetResult,
+    compute_scorecard,
+)
+from syn_domain.contexts.orchestration.slices.scorecard import (
+    day_key as scorecard_day_key,
+)
 from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
 )
@@ -389,6 +400,7 @@ __all__ = [
     "IsolationConfig",
     "LaunchEval",
     "OrphanedWorkspace",
+    "OutcomeCounts",
     "PhaseDefinition",
     "PhaseExecutionType",
     "PhaseProgress",
@@ -413,6 +425,9 @@ __all__ = [
     "ResumeStartStatus",
     "ResumeStarter",
     "ReviewVerdict",
+    "Scorecard",
+    "ScorecardProjection",
+    "ScorecardRun",
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",
@@ -427,6 +442,7 @@ __all__ = [
     "StreamResult",
     "SubagentTracker",
     "TagSet",
+    "TargetResult",
     "TemplateLaunches",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
@@ -454,6 +470,7 @@ __all__ = [
     "WorkspaceUsage",
     "announce_as",
     "build_command_from_definition",
+    "compute_scorecard",
     "execution_request_id",
     "guard_orphaned_workspace",
     "inherited_outputs",
@@ -469,6 +486,7 @@ __all__ = [
     "require_supported_execution_type",
     "retired_field_notices",
     "salvage_stranded_phase",
+    "scorecard_day_key",
     "validate_phase_declarations",
     "validate_workflow_yaml",
 ]

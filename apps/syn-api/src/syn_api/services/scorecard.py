@@ -22,11 +22,11 @@ from syn_api.scorecard_types import (
     ScorecardTargetResponse,
     ScorecardThroughputResponse,
 )
-from syn_domain.contexts.orchestration.slices.scorecard import (
+from syn_domain.contexts.orchestration import (
     ScorecardProjection,
     compute_scorecard,
 )
-from syn_domain.contexts.orchestration.slices.scorecard.projection import day_key
+from syn_domain.contexts.orchestration import scorecard_day_key as day_key
 from syn_shared.display.formatters import (
     EM_DASH,
     format_cost,
@@ -40,10 +40,10 @@ if TYPE_CHECKING:
 
     from event_sourcing import ProjectionStore
 
-    from syn_domain.contexts.orchestration.slices.scorecard import ScorecardRun
-    from syn_domain.contexts.orchestration.slices.scorecard.scorecard import (
+    from syn_domain.contexts.orchestration import (
         OutcomeCounts,
         Scorecard,
+        ScorecardRun,
         TargetResult,
     )
 
