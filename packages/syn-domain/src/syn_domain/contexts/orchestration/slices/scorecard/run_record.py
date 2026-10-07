@@ -47,6 +47,20 @@ class ScorecardPhase(BaseModel):
         return phase_type_of(self.phase_id)
 
 
+class PhaseSession(BaseModel):
+    """The agent session a phase ran in, as the run's own events recorded it.
+
+    Kept apart from ``ScorecardPhase`` because a failing phase never emits
+    PhaseCompleted: its session is only known from provisioning, start or the
+    agent's completion, and without it its tool calls read as unmeasured.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    session_id: str
+
+
 class ScorecardRun(BaseModel):
     """One execution: when it was asked for, ran and ended, and how.
 
@@ -72,6 +86,27 @@ class ScorecardRun(BaseModel):
     models: tuple[str, ...] = ()
     """Observed models (``agent_model`` as the harness reported it), in first-seen order."""
     phases: tuple[ScorecardPhase, ...] = ()
+    phase_sessions: tuple[PhaseSession, ...] = ()
+    """The latest recorded session of each phase, one entry per phase id."""
+
+    def session_of(self, phase_id: str) -> str | None:
+        return next((s.session_id for s in self.phase_sessions if s.phase_id == phase_id), None)
+
+    def with_phase(self, phase: ScorecardPhase) -> ScorecardRun:
+        """This run with ``phase`` recorded once: a redelivered phase replaces itself."""
+        kept = tuple(p for p in self.phases if p.phase_id != phase.phase_id)
+        return self.model_copy(update={"phases": (*kept, phase)})
+
+    def with_session(self, phase_id: str, session_id: str) -> ScorecardRun:
+        kept = tuple(s for s in self.phase_sessions if s.phase_id != phase_id)
+        sessions = (*kept, PhaseSession(phase_id=phase_id, session_id=session_id))
+        phases = tuple(
+            p.model_copy(update={"session_id": session_id})
+            if p.phase_id == phase_id and p.session_id is None
+            else p
+            for p in self.phases
+        )
+        return self.model_copy(update={"phase_sessions": sessions, "phases": phases})
 
     @property
     def is_final(self) -> bool:

@@ -27,6 +27,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent imp
 from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
     PhaseCompletedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
+    PhaseStartedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
     WorkflowCompletedEvent,
 )
@@ -38,6 +41,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import 
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowInterruptedEvent import (
     WorkflowInterruptedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+    WorkspaceProvisionedForPhaseEvent,
 )
 from syn_domain.contexts.orchestration.slices.scorecard.run_record import (
     DayIndex,
@@ -75,7 +81,7 @@ class ScorecardProjection(AutoDispatchProjection):
     """Builds the scorecard's per-execution records from orchestration events."""
 
     PROJECTION_NAME = SCORECARD_RUNS
-    VERSION = 2  # Bumped: a failing phase's tokens are recorded from WorkflowFailed
+    VERSION = 3  # Bumped: phases upsert by id, and a failing phase keeps its session
 
     def __init__(self, store: ProjectionStore) -> None:
         self._store = store
@@ -142,19 +148,22 @@ class ScorecardProjection(AutoDispatchProjection):
         failure_classification: FailureClassification | None = None,
     ) -> None:
         run = await self._load(execution_id)
-        if run.outcome is not RunOutcome.RUNNING:
-            return  # first terminal event wins: an interrupt is followed by its cancel
-        end = _utc(ended_at)
-        run = run.model_copy(
-            update={
-                "outcome": outcome,
-                "ended_at": end,
-                "failure_classification": failure_classification,
-            }
-        )
-        await self._save(run)
-        await self._index_remove(OPEN_RUNS_KEY, execution_id)
+        # First terminal event wins (an interrupt is followed by its cancel),
+        # but the indexes are reconciled from the stored end every time: the
+        # three writes below are separate, so a redelivery after a partial
+        # write is what repairs it.
+        if run.outcome is RunOutcome.RUNNING:
+            run = run.model_copy(
+                update={
+                    "outcome": outcome,
+                    "ended_at": _utc(ended_at),
+                    "failure_classification": failure_classification,
+                }
+            )
+            await self._save(run)
+        end = run.ended_at or _utc(ended_at)
         await self._index_add(day_key(end), execution_id)
+        await self._index_remove(OPEN_RUNS_KEY, execution_id)
 
     # === Handlers ===
     # The dispatcher hands each handler ``event.model_dump()``; validating it
@@ -192,7 +201,7 @@ class ScorecardProjection(AutoDispatchProjection):
         run = await self._load(event.execution_id)
         phase = ScorecardPhase(
             phase_id=event.phase_id,
-            session_id=event.session_id,
+            session_id=event.session_id or run.session_of(event.phase_id),
             success=event.success,
             input_tokens=event.input_tokens,
             output_tokens=event.output_tokens,
@@ -201,10 +210,28 @@ class ScorecardProjection(AutoDispatchProjection):
             total_tokens=event.total_tokens,
             duration_seconds=event.duration_seconds,
         )
-        await self._save(run.model_copy(update={"phases": (*run.phases, phase)}))
+        await self._save(run.with_phase(phase))
+
+    async def _record_session(self, execution_id: str, phase_id: str, session_id: str) -> None:
+        run = await self._load(execution_id)
+        if run.session_of(phase_id) != session_id:
+            await self._save(run.with_session(phase_id, session_id))
+
+    async def on_workspace_provisioned_for_phase(
+        self, event_data: WorkspaceProvisionedForPhaseEvent
+    ) -> None:
+        event = WorkspaceProvisionedForPhaseEvent.model_validate(event_data)
+        await self._record_session(event.execution_id, event.phase_id, event.session_id)
+
+    async def on_phase_started(self, event_data: PhaseStartedEvent) -> None:
+        event = PhaseStartedEvent.model_validate(event_data)
+        if event.session_id:
+            await self._record_session(event.execution_id, event.phase_id, event.session_id)
 
     async def on_agent_execution_completed(self, event_data: AgentExecutionCompletedEvent) -> None:
         event = AgentExecutionCompletedEvent.model_validate(event_data)
+        if event.session_id:
+            await self._record_session(event.execution_id, event.phase_id, event.session_id)
         model = event.agent_model
         if not model:
             return  # written before PC-83: no observed model, never a guessed one
@@ -240,7 +267,7 @@ class ScorecardProjection(AutoDispatchProjection):
             return
         run = await self._load(event.execution_id)
         if run.outcome is not RunOutcome.RUNNING:
-            return  # replaying a second terminal event must not add the phase twice
+            return  # a second terminal event must not overwrite the first failure's phase
         usage = (
             event.failed_phase_input_tokens,
             event.failed_phase_output_tokens,
@@ -249,6 +276,7 @@ class ScorecardProjection(AutoDispatchProjection):
         )
         phase = ScorecardPhase(
             phase_id=event.failed_phase_id,
+            session_id=run.session_of(event.failed_phase_id),
             success=False,
             input_tokens=usage[0],
             output_tokens=usage[1],
@@ -257,7 +285,7 @@ class ScorecardProjection(AutoDispatchProjection):
             total_tokens=sum(usage),
             duration_seconds=event.failed_phase_duration_seconds or 0.0,
         )
-        await self._save(run.model_copy(update={"phases": (*run.phases, phase)}))
+        await self._save(run.with_phase(phase))
 
     async def on_execution_cancelled(self, event_data: ExecutionCancelledEvent) -> None:
         event = ExecutionCancelledEvent.model_validate(event_data)
