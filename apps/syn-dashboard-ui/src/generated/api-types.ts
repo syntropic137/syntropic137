@@ -6742,6 +6742,12 @@ export interface components {
             median_verify_cost_display: string;
             /** Peak Concurrency */
             peak_concurrency: number;
+            /** Phases */
+            phases: components["schemas"]["ScorecardPhaseTypeResponse"][];
+            /** By Workflow */
+            by_workflow: components["schemas"]["ScorecardOutcomeRowResponse"][];
+            /** By Model */
+            by_model: components["schemas"]["ScorecardOutcomeRowResponse"][];
         };
         /**
          * ScorecardDeliveryResponse
@@ -6854,6 +6860,8 @@ export interface components {
             phases_scope: string;
             /** Daily */
             daily: components["schemas"]["ScorecardDailyPointResponse"][];
+            /** Daily Scope */
+            daily_scope: string;
             throughput: components["schemas"]["ScorecardThroughputResponse"];
             /** Total Cost Usd */
             total_cost_usd: string;

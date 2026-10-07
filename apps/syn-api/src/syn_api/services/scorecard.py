@@ -226,9 +226,19 @@ def render(card: Scorecard, window: str) -> ScorecardResponse:
                 median_verify_cost_usd=_usd(d.median_verify_cost_usd),
                 median_verify_cost_display=format_cost(d.median_verify_cost_usd),
                 peak_concurrency=d.peak_concurrency,
+                phases=[_phase(p) for p in d.phases],
+                by_workflow=[_row(r) for r in d.by_workflow],
+                by_model=[_row(r) for r in d.by_model],
             )
             for d in card.daily
         ],
+        daily_scope=(
+            "One point per UTC day in the window, over the chains whose final run ended "
+            "that day: the same outcome, phase, workflow and model rules as the window's "
+            "figures, applied to that day's chains alone. The days partition the window's "
+            "chains, so phase_count and outcome totals sum to the window's; medians and "
+            "p90s are each day's own and do not."
+        ),
         throughput=ScorecardThroughputResponse(
             average_concurrency=throughput.average_concurrency,
             average_concurrency_display=_number(throughput.average_concurrency),

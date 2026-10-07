@@ -16901,6 +16901,27 @@
           "peak_concurrency": {
             "type": "integer",
             "title": "Peak Concurrency"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardPhaseTypeResponse"
+            },
+            "type": "array",
+            "title": "Phases"
+          },
+          "by_workflow": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardOutcomeRowResponse"
+            },
+            "type": "array",
+            "title": "By Workflow"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardOutcomeRowResponse"
+            },
+            "type": "array",
+            "title": "By Model"
           }
         },
         "additionalProperties": false,
@@ -16914,7 +16935,10 @@
           "median_verify_tokens_display",
           "median_verify_cost_usd",
           "median_verify_cost_display",
-          "peak_concurrency"
+          "peak_concurrency",
+          "phases",
+          "by_workflow",
+          "by_model"
         ],
         "title": "ScorecardDailyPointResponse"
       },
@@ -17256,6 +17280,10 @@
             "type": "array",
             "title": "Daily"
           },
+          "daily_scope": {
+            "type": "string",
+            "title": "Daily Scope"
+          },
           "throughput": {
             "$ref": "#/components/schemas/ScorecardThroughputResponse"
           },
@@ -17299,6 +17327,7 @@
           "phases",
           "phases_scope",
           "daily",
+          "daily_scope",
           "throughput",
           "total_cost_usd",
           "total_cost_display",

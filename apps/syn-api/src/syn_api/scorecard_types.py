@@ -61,18 +61,6 @@ class ScorecardOutcomeRowResponse(_Frozen):
     phases: list[ScorecardPhaseTypeResponse]
 
 
-class ScorecardDailyPointResponse(_Frozen):
-    day: str
-    counts: ScorecardOutcomeCountsResponse
-    cost_usd: str
-    cost_display: str
-    median_verify_tokens: float | None
-    median_verify_tokens_display: str
-    median_verify_cost_usd: str | None
-    median_verify_cost_display: str
-    peak_concurrency: int
-
-
 class ScorecardThroughputResponse(_Frozen):
     average_concurrency: float
     average_concurrency_display: str
@@ -104,6 +92,21 @@ class ScorecardTargetResponse(_Frozen):
     status: TargetStatusValue
 
 
+class ScorecardDailyPointResponse(_Frozen):
+    day: str
+    counts: ScorecardOutcomeCountsResponse
+    cost_usd: str
+    cost_display: str
+    median_verify_tokens: float | None
+    median_verify_tokens_display: str
+    median_verify_cost_usd: str | None
+    median_verify_cost_display: str
+    peak_concurrency: int
+    phases: list[ScorecardPhaseTypeResponse]
+    by_workflow: list[ScorecardOutcomeRowResponse]
+    by_model: list[ScorecardOutcomeRowResponse]
+
+
 class ScorecardResponse(_Frozen):
     """The platform's return on investment over a window of UTC days."""
 
@@ -117,6 +120,7 @@ class ScorecardResponse(_Frozen):
     phases: list[ScorecardPhaseTypeResponse]
     phases_scope: str
     daily: list[ScorecardDailyPointResponse]
+    daily_scope: str
     throughput: ScorecardThroughputResponse
     total_cost_usd: str
     total_cost_display: str

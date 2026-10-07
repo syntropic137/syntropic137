@@ -64,8 +64,12 @@ const BODY: ScorecardData = {
       median_verify_cost_usd: '1.75',
       median_verify_cost_display: '$1.75',
       peak_concurrency: 6,
+      phases: [],
+      by_workflow: [],
+      by_model: [],
     },
   ],
+  daily_scope: 'One point per UTC day.',
   throughput: {
     average_concurrency: 2.5,
     average_concurrency_display: '2.5',

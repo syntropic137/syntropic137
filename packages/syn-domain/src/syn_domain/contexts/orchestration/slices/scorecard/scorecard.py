@@ -119,6 +119,9 @@ class DailyPoint:
     median_verify_tokens: float | None
     median_verify_cost_usd: Decimal | None
     peak_concurrency: int
+    phases: tuple[PhaseTypeStats, ...] = ()
+    by_workflow: tuple[OutcomeRow, ...] = ()
+    by_model: tuple[OutcomeRow, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -429,12 +432,22 @@ def _daily(
     start: datetime,
     end: datetime,
     window_days: int,
+    *,
+    tool_calls_by_session: Mapping[str, int],
+    cost_by_session_model: Mapping[str, Mapping[str, Decimal]],
 ) -> tuple[DailyPoint, ...]:
+    """One point per UTC day, from the chains whose final run ended that day.
+
+    Each day's phase, workflow and model statistics are computed by the same
+    functions as the window's, over that day's chains only, so a day's
+    distribution is its own and the days partition the window's chains.
+    """
     points: list[DailyPoint] = []
     for i in range(window_days):
         day_start = start + timedelta(days=i)
         day = day_key(day_start)
         day_chains = [c for c in chains if c.final.ended_at and day_key(c.final.ended_at) == day]
+        day_members = [m for c in day_chains for m in c.members]
         points.append(
             DailyPoint(
                 day=day,
@@ -449,6 +462,14 @@ def _daily(
                 ),
                 peak_concurrency=_peak(
                     _intervals(started, day_start, min(day_start + timedelta(days=1), end))
+                ),
+                phases=_phase_stats(day_members, tool_calls_by_session, spend),
+                by_workflow=_breakdown(day_chains, tool_calls_by_session, spend),
+                by_model=_breakdown(
+                    day_chains,
+                    tool_calls_by_session,
+                    spend,
+                    cost_by_session_model=cost_by_session_model,
                 ),
             )
         )
@@ -515,7 +536,16 @@ def compute_scorecard(
             cost_by_session_model=cost_by_session_model,
         ),
         phases=_phase_stats(members, tool_calls_by_session, spend_by_execution),
-        daily=_daily(chains, started, spend_by_execution, start, now, window_days),
+        daily=_daily(
+            chains,
+            started,
+            spend_by_execution,
+            start,
+            now,
+            window_days,
+            tool_calls_by_session=tool_calls_by_session,
+            cost_by_session_model=cost_by_session_model,
+        ),
         throughput=throughput,
         total_cost_usd=sum((_chain_cost(c, spend_by_execution) for c in chains), Decimal(0)),
         executions_costed=sum(1 for m in members if m.execution_id in spend_by_execution),

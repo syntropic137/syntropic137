@@ -161,3 +161,53 @@ async def test_a_resume_on_another_model_keeps_each_runs_phases_under_its_own_mo
     rows = {row.key: row for row in card.by_model}
     assert [(p.phase_count, p.median_tokens) for p in rows[MODEL_A].phases] == [(1, 900)]
     assert [(p.phase_count, p.median_tokens) for p in rows[MODEL_B].phases] == [(1, 300)]
+
+
+async def test_each_day_keeps_its_own_phase_workflow_and_model_distribution() -> None:
+    projection = ScorecardProjection(InMemoryProjectionStore())
+    # Day 1 (2026-10-06): implement 100 on A. Day 2 (2026-10-07): verify 900 on B.
+    for execution_id, start, phase_id, tokens in (
+        ("d1", -20, "implement", 100),
+        ("d2", 0, "verify", 900),
+    ):
+        await _deliver(projection, _started(execution_id, start=start))
+        await _phase(projection, execution_id, phase_id, tokens, configured="opus")
+        await _deliver(
+            projection,
+            WorkflowCompletedEvent(
+                workflow_id="wf",
+                execution_id=execution_id,
+                completed_at=_at(start + 1),
+                total_phases=1,
+                completed_phases=1,
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_tokens=tokens,
+                total_duration_seconds=0.0,
+                artifact_ids=[],
+            ),
+        )
+    runs = {r.execution_id: r for r in await projection.runs_for_days(["2026-10-06", "2026-10-07"])}
+    card = compute_scorecard(
+        runs=runs,
+        spend_by_execution={},
+        tool_calls_by_session={},
+        cost_by_session_model={
+            "s-d1-implement": {MODEL_A: Decimal("1")},
+            "s-d2-verify": {MODEL_B: Decimal("2")},
+        },
+        now=NOW,
+        window_days=2,
+    )
+
+    day1, day2 = card.daily
+    assert (day1.day, day2.day) == ("2026-10-06", "2026-10-07")
+    assert [(p.phase_type, p.median_tokens) for p in day1.phases] == [(PhaseType.IMPLEMENT, 100)]
+    assert [(p.phase_type, p.median_tokens) for p in day2.phases] == [(PhaseType.VERIFY, 900)]
+    assert [r.key for r in day1.by_model] == [MODEL_A]
+    assert [r.key for r in day2.by_model] == [MODEL_B]
+    assert [r.counts.total for r in day1.by_workflow] == [1]
+    # The days partition the window: their phase counts sum to the window's.
+    assert sum(p.phase_count for d in card.daily for p in d.phases) == sum(
+        p.phase_count for p in card.phases
+    )
