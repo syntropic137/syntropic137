@@ -16,6 +16,21 @@ export type EvalListState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; rows: EvalListRow[]; total: number }
 
+async function loadRow(summary: EvalSummary): Promise<EvalListRow> {
+  if (summary.run_count === 0) return { eval: summary, recentVerdicts: [] }
+  try {
+    const runs = await listEvalRuns(summary.eval_id, { page_size: SPARKLINE_RUNS })
+    // Runs arrive newest first; a sparkline reads left to right in time.
+    return { eval: summary, recentVerdicts: runs.items.map((r) => r.verdict).reverse() }
+  } catch {
+    return { eval: summary, recentVerdicts: [] }
+  }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
 /**
  * The eval list, each eval with its latest verdicts.
  *
@@ -34,22 +49,11 @@ export function useEvalList(tag: string | null): EvalListState {
 
     listEvals({ tag: tag ?? undefined })
       .then(async (page) => {
-        const rows = await Promise.all(
-          page.evals.map(async (summary): Promise<EvalListRow> => {
-            if (summary.run_count === 0) return { eval: summary, recentVerdicts: [] }
-            try {
-              const runs = await listEvalRuns(summary.eval_id, { page_size: SPARKLINE_RUNS })
-              // Runs arrive newest first; a sparkline reads left to right in time.
-              return { eval: summary, recentVerdicts: runs.items.map((r) => r.verdict).reverse() }
-            } catch {
-              return { eval: summary, recentVerdicts: [] }
-            }
-          }),
-        )
+        const rows = await Promise.all(page.evals.map(loadRow))
         if (!cancelled) setLoaded({ tag, state: { kind: 'ready', rows, total: page.total } })
       })
       .catch((err: unknown) => {
-        if (!cancelled) setLoaded({ tag, state: { kind: 'error', message: err instanceof Error ? err.message : String(err) } })
+        if (!cancelled) setLoaded({ tag, state: { kind: 'error', message: errorMessage(err) } })
       })
 
     return () => {
