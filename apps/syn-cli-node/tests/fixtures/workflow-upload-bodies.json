@@ -352,6 +352,41 @@
       }
     ]
   },
+  "workflows/evals/verify-pinned-codex/workflow.yaml": {
+    "id": "eval-verify-pinned-codex-v1",
+    "name": "Eval: verify the pinned checkout, read-only, on codex (v1)",
+    "description": "eval-verify-pinned-v1 with a different verifier: the same single verify phase and the same prompt over the commit the workspace was provisioned at, run on codex. The verifier-seed eval suite (evals/verifier-seed-v1) launches either workflow over the same cases, so the two verifiers' scores compare directly.\n",
+    "type": "custom",
+    "classification": "standard",
+    "requires_repos": true,
+    "inputs": [
+      {
+        "name": "task",
+        "description": "What the change under review claims to do, and where to look",
+        "required": true
+      }
+    ],
+    "phases": [
+      {
+        "id": "verify",
+        "name": "Verify the pinned checkout independently",
+        "order": 1,
+        "execution_type": "sequential",
+        "input_artifacts": [],
+        "output_artifacts": [
+          "markdown"
+        ],
+        "timeout_seconds": 3600,
+        "delivers_repo_changes": false,
+        "agent": {
+          "provider": "codex",
+          "model": "gpt-sol",
+          "sandbox": "workspace-write"
+        },
+        "prompt_template": "# Verify the change at this checkout\n\nYou are an independent verifier. The repository under `/workspace/repos/` is\nchecked out at exactly the commit you are asked to review. The platform pinned\nit and read HEAD back before you started.\n\n## The change under review\n\n$ARGUMENTS\n\n## Rules\n\n- **Review this checkout and nothing else.** Do not fetch, pull, check out or\n  merge any other ref, and do not look up the change on GitHub. A later\n  commit may already contain a fix, and reading it would make this review\n  meaningless.\n- **Write nothing back.** Do not commit, push, comment, or open or edit any\n  issue or pull request.\n- **Judge it against the real backends.** A test double that does not behave\n  like the backend it stands in for (an in-memory event store, in-memory object\n  storage, a fixture standing in for a CLI's output) is exactly how a passing\n  change ships broken. When the change crosses a backend, read the code that\n  talks to it and ask what the real one does.\n- You may run tests and other read-only commands. Say which ones you ran and\n  what they printed.\n\n## Report\n\nWrite `artifacts/output/verify.md`:\n\n1. The first line is exactly `VERDICT: CERTIFIED` or `VERDICT: BLOCKED`.\n2. A `## BLOCKING` heading. Under it, one `###` block per defect that blocks\n   the change, each in exactly this shape:\n\n   ```\n   ### Finding 1\n   - File: `path/to/file.py:123`\n   - Defect: the root cause, and what goes wrong at runtime\n   - Why blocking: why it stops the change, and what would prove it fixed\n   ```\n\n   One defect per block, with its file in the same block. A defect described\n   anywhere else is not read as a blocking finding. If nothing blocks, write\n   `None` under the heading.\n3. A `## NON-BLOCKING` heading for anything that does not block.\n\n## Report the verdict to the engine\n\nYour `TASK_RESULT` block MUST carry `\"review_verdict\"`, exactly `\"certified\"`\nor `\"blocked\"`, matching your first line. A blocked review you completed is a\nsuccessful phase: write `\"success\": true, \"review_verdict\": \"blocked\"`. Use\n`\"success\": false` only when you could not review the checkout at all."
+      }
+    ]
+  },
   "workflows/examples/claude-delegates-to-codex.yaml": {
     "id": "claude-delegates-to-codex",
     "name": "Claude delegates a subtask to Codex",
