@@ -23,6 +23,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     TASK_INPUT_KEY,
 )
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 
 logger = logging.getLogger(__name__)
 
@@ -300,6 +301,9 @@ class WorkflowExecutionDetail:
     completed_phases: int = 0
     """Phases that finished, as accumulated and then restated by the terminal event."""
 
+    skipped_phase_ids: tuple[str, ...] = ()
+    """Phases a review verdict made unnecessary (PC-63): they will never run."""
+
     artifact_ids: tuple[str, ...] = field(default_factory=tuple)
     """IDs of all artifacts produced."""
 
@@ -386,6 +390,16 @@ class WorkflowExecutionDetail:
         return self.inputs.get(TASK_INPUT_KEY)
 
     @property
+    def phase_progress(self) -> PhaseProgress:
+        """How far through its phases the run is, skipped phases accounted for."""
+        return PhaseProgress(
+            status=self.status,
+            completed=self.completed_phases,
+            skipped=len(self.skipped_phase_ids),
+            defined=self.total_phases,
+        )
+
+    @property
     def deliverable_produced(self) -> bool:
         """True when any phase stored an artifact.
 
@@ -433,6 +447,7 @@ class WorkflowExecutionDetail:
             total_duration_seconds=data.get("total_duration_seconds", 0.0),
             total_phases=data.get("total_phases", 0),
             completed_phases=data.get("completed_phases", 0),
+            skipped_phase_ids=tuple(data.get("skipped_phase_ids") or ()),
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
             # Through `from_stored` for the reason it exists: a row written
@@ -480,6 +495,7 @@ class WorkflowExecutionDetail:
             "total_duration_seconds": self.total_duration_seconds,
             "total_phases": self.total_phases,
             "completed_phases": self.completed_phases,
+            "skipped_phase_ids": list(self.skipped_phase_ids),
             "artifact_ids": list(self.artifact_ids),
             "error_message": self.error_message,
             "failure_classification": self.failure_classification.value,

@@ -42,6 +42,7 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent imp
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
     ExecutionTagsRemovedEvent,
 )
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import record_skips
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
@@ -61,7 +62,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
     """
 
     PROJECTION_NAME = WORKFLOW_EXECUTIONS
-    VERSION = 8  # v8: eval_id and association_kind (#967)
+    VERSION = 9  # v9: skipped_phase_ids, so phase progress drops skipped rounds
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -163,6 +164,25 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             phase_tool_calls = event_data.get("tool_call_count", 0)
             existing["tool_call_count"] = existing.get("tool_call_count", 0) + phase_tool_calls
 
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_next_phase_ready(self, event_data: dict) -> None:
+        """Handle NextPhaseReady: record the phases a review verdict skipped (PC-63).
+
+        Without this a run certified at its first review reads as finished
+        short of its total, because the rounds it never needed stay in the
+        denominator.
+        """
+        execution_id = event_data.get("execution_id")
+        skipped = event_data.get("skipped_phase_ids") or []
+        if not execution_id or not skipped:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["skipped_phase_ids"] = record_skips(
+                existing.get("skipped_phase_ids") or [], skipped
+            )
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_workflow_completed(self, event_data: dict) -> None:

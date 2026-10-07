@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
     WorkspaceProvisionedForPhaseEvent,
 )
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import record_skips
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -108,7 +109,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # main without bumping from 13, while PC-63 bumped 13 -> 14. A deployment
     # that had already rebuilt at this branch's 14 would never rebuild for
     # delegation_failure, so the merge takes the higher and bumps once more.
-    VERSION = 15
+    # v16: skipped_phase_ids from NextPhaseReady, so a run certified early
+    # stops reading as finished short of its total. Rebuilt so every run
+    # since PC-63 gets its skips, not only new ones.
+    VERSION = 16
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -417,6 +421,25 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["phases"] = phases
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_next_phase_ready(self, event_data: dict) -> None:
+        """Handle NextPhaseReady: record the phases a review verdict skipped (PC-63).
+
+        Without this a run certified at its first review reads as finished
+        short of its total, because the rounds it never needed stay in the
+        denominator.
+        """
+        execution_id = event_data.get("execution_id")
+        skipped = event_data.get("skipped_phase_ids") or []
+        if not execution_id or not skipped:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["skipped_phase_ids"] = record_skips(
+                existing.get("skipped_phase_ids") or [], skipped
+            )
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_workflow_completed(self, event_data: dict) -> None:
         """Handle WorkflowCompleted event.
