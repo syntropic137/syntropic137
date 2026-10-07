@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from event_sourcing import ProjectionStore
     from event_sourcing.core.checkpoint import DispatchContext
 
@@ -61,7 +63,12 @@ class _ExecutionService(Protocol):
         execution_id: str,
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
-    ) -> AdmissionTicket | None: ...
+        on_held: Callable[[Exception], Awaitable[None]] | None = None,
+    ) -> AdmissionTicket | None:
+        """``on_held`` is told when a start admitted here, then queued for a
+        slot, is refused at its slot because the gate closed meanwhile (#1617).
+        """
+        ...
 
 
 class _BudgetChecker(Protocol):
@@ -331,11 +338,18 @@ class WorkflowDispatchProjection(ProcessManager):
         #
         # `None` means this dispatcher was built without a gate, which only
         # happens in fixtures; the timestamp falls back to now.
+        async def hold_again(exc: Exception) -> None:
+            # #1617: queued for a slot when a pause closed the gate, so it did
+            # not start. `paused` again, so the re-open re-offers it.
+            reason = exc.hold_reason if isinstance(exc, AdmissionRefusedError) else str(exc)
+            await self._save_record_status(execution_id, record, _PAUSED, reason)
+
         ticket = await self._execution_service.run_workflow(
             workflow_id=workflow_id,
             inputs=str_inputs,
             execution_id=execution_id,
             repos=repos,
+            on_held=hold_again,
         )
 
         record["status"] = "dispatched"
