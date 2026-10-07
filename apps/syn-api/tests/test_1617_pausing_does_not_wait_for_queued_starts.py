@@ -41,6 +41,9 @@ from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
 from syn_domain.contexts._shared.integration_events.AdmissionOpenEvent import (
     AdmissionOpenEvent,
 )
+from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
+    WorkflowDispatchProjection,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     InheritedPhase,
 )
@@ -100,6 +103,9 @@ class _LongRunningHandler:
 async def _drain(dispatcher: BackgroundWorkflowDispatcher) -> None:
     while dispatcher._tasks:  # pyright: ignore[reportPrivateUsage]
         await asyncio.gather(*dispatcher._tasks)  # pyright: ignore[reportPrivateUsage]
+        # A gather over tasks already done completes without yielding, so the
+        # done callbacks that discard them would never run and this would spin.
+        await asyncio.sleep(0)
 
 
 class TestSixTriggersQueuedBehindFourRunning:
@@ -190,6 +196,91 @@ class TestSixTriggersQueuedBehindFourRunning:
             await closing
             await _drain(dispatcher)
         assert recorded == ["exec-in-flight"]
+
+
+class _SlowDispatchedSave(InMemoryProjectionStore):
+    """A store whose `dispatched` write for one key suspends until released -
+    an async Postgres save waiting on its pool, in the shape that matters."""
+
+    def __init__(self, key: str) -> None:
+        super().__init__()
+        self._key = key
+        self.suspended = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def save(
+        self, projection: str, key: str, data: dict[str, str | int | float | bool | None]
+    ) -> None:
+        if key == self._key and data.get("status") == "dispatched":
+            self.suspended.set()
+            await self.release.wait()
+        await super().save(projection, key, data)
+
+
+class TestATriggerHeldAtItsSlotWhileItsDispatchedWriteIsInFlight:
+    async def test_the_durable_record_is_paused_and_the_reopen_starts_it_once(self) -> None:
+        queued = "exec-trigger-queued"
+        gate = AdmissionGate(InMemoryMaintenanceAdapter())
+        handler = _LongRunningHandler()
+        dispatcher = BackgroundWorkflowDispatcher(
+            handler,  # type: ignore[arg-type]
+            maintenance=gate,
+            budget=ExecutionBudget(1),
+        )
+        store = _SlowDispatchedSave(queued)
+        projection = WorkflowDispatchProjection(
+            execution_service=dispatcher,  # type: ignore[arg-type]
+            store=store,
+        )
+        name = projection.PROJECTION_NAME
+
+        await dispatcher.run_workflow("wf", {}, "exec-busy")
+        await _let_the_loop_run()
+        assert handler.started == ["exec-busy"]
+
+        await store.save(
+            name,
+            queued,
+            {
+                "execution_id": queued,
+                "workflow_id": "wf",
+                "trigger_id": "trigger-1",
+                "workflow_inputs": {},
+                "status": "pending",
+            },
+        )
+        dispatching = asyncio.create_task(projection.process_pending())
+        async with asyncio.timeout(_PATIENCE):
+            await store.suspended.wait()
+        assert dispatcher.budget.waiting == 1, "the trigger should be queued for a slot"
+
+        async with asyncio.timeout(_PATIENCE):
+            await gate.set_mode(active=True, reason="pit stop", actor="deploy")
+
+        # The slot frees while the `dispatched` write is still in flight: the
+        # queued trigger reaches it, is refused, and is handed back held.
+        handler.may_finish.set()
+        await _let_the_loop_run()
+        store.release.set()
+        async with asyncio.timeout(_PATIENCE):
+            await dispatching
+            await _drain(dispatcher)
+
+        assert handler.started == ["exec-busy"], "a queued trigger ran behind the pause"
+        row = await store.get(name, queued)
+        assert row is not None
+        assert row["status"] == "paused", (
+            "the in-flight `dispatched` write landed over the hand-back: the "
+            "trigger never ran and nothing will offer it again"
+        )
+
+        await gate.set_mode(active=False, reason="", actor="deploy")
+        assert await projection.process_pending() == 1
+        async with asyncio.timeout(_PATIENCE):
+            await _drain(dispatcher)
+        assert await projection.process_pending() == 0
+        await _drain(dispatcher)
+        assert handler.started == ["exec-busy", queued]
 
 
 # -- Resumes (#1677): the ResumeStartProcessManager path ----------------------

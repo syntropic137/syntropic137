@@ -13,6 +13,7 @@ PROCESSOR SIDE (process_pending): reads pending records and dispatches.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -344,6 +345,12 @@ class WorkflowDispatchProjection(ProcessManager):
         # `None` means this dispatcher was built without a gate, which only
         # happens in fixtures; the timestamp falls back to now.
         store = self._store
+        # Set once the `dispatched` write below has landed (or will not happen).
+        # The hand-back runs on the dispatcher's task, so without this its
+        # `paused` could land first and be overwritten by a `dispatched` save
+        # still in flight, leaving a start that never ran and is never
+        # re-offered (#1617).
+        recorded = asyncio.Event()
 
         async def hold_again(exc: Exception) -> None:
             # #1617: queued for a slot when a pause closed the gate, so it did
@@ -352,23 +359,27 @@ class WorkflowDispatchProjection(ProcessManager):
             # under it.
             reason = exc.hold_reason if isinstance(exc, AdmissionRefusedError) else str(exc)
             if execution_id:
+                await recorded.wait()
                 held = {**record, "status": _PAUSED, "status_reason": reason}
                 await store.save(self.PROJECTION_NAME, execution_id, held)
 
-        ticket = await self._execution_service.run_workflow(
-            workflow_id=workflow_id,
-            inputs=str_inputs,
-            execution_id=execution_id,
-            repos=repos,
-            on_held=hold_again,
-        )
+        try:
+            ticket = await self._execution_service.run_workflow(
+                workflow_id=workflow_id,
+                inputs=str_inputs,
+                execution_id=execution_id,
+                repos=repos,
+                on_held=hold_again,
+            )
 
-        record["status"] = "dispatched"
-        record["dispatched_at"] = (
-            ticket.granted_at if ticket is not None else datetime.now(UTC)
-        ).isoformat()
-        if execution_id:
-            await self._store.save(self.PROJECTION_NAME, execution_id, record)
+            record["status"] = "dispatched"
+            record["dispatched_at"] = (
+                ticket.granted_at if ticket is not None else datetime.now(UTC)
+            ).isoformat()
+            if execution_id:
+                await self._store.save(self.PROJECTION_NAME, execution_id, record)
+        finally:
+            recorded.set()
 
         self._record_dispatch_timestamp()
 
