@@ -338,11 +338,17 @@ class WorkflowDispatchProjection(ProcessManager):
         #
         # `None` means this dispatcher was built without a gate, which only
         # happens in fixtures; the timestamp falls back to now.
+        store = self._store
+
         async def hold_again(exc: Exception) -> None:
             # #1617: queued for a slot when a pause closed the gate, so it did
-            # not start. `paused` again, so the re-open re-offers it.
+            # not start. `paused` again, so the re-open re-offers it. A copy,
+            # so the record this method saves as `dispatched` is not mutated
+            # under it.
             reason = exc.hold_reason if isinstance(exc, AdmissionRefusedError) else str(exc)
-            await self._save_record_status(execution_id, record, _PAUSED, reason)
+            if execution_id:
+                held = {**record, "status": _PAUSED, "status_reason": reason}
+                await store.save(self.PROJECTION_NAME, execution_id, held)
 
         ticket = await self._execution_service.run_workflow(
             workflow_id=workflow_id,
