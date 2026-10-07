@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, JsonValue
 
 from syn_api.routes.github import router
+from syn_api.services.github_repo_listing_cache import reset_repo_listing_cache
 from syn_api.types import GitHubRepoListResponse, GitHubRepoLookup
 
 pytestmark = pytest.mark.unit
@@ -67,7 +68,9 @@ def _get(
     ``installations_sync`` scripts GitHub's installation list; by default it
     lists exactly the cached installations. ``upserted`` scripts persisting
     each synced installation, in order; by default every upsert succeeds.
+    Each call starts with no cached listing, so GitHub is asked.
     """
+    reset_repo_listing_cache()
     client = MagicMock()
     client.list_accessible_repos = AsyncMock(side_effect=repos_by_installation)
     if installations_sync is None:

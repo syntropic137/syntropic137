@@ -177,6 +177,14 @@ def _definition(name: str) -> str:
     return "\n".join(lines[start : end + 1])
 
 
+# Room for a test whose scripted reads END the probe before any deadline. Each
+# poll forks curl and python3 (mono_now) several times, and mono_now rounds to
+# whole seconds, so 3s let a loaded host time out a probe that was succeeding.
+# Never give it to a test that waits a deadline out: `sleep` is stubbed, so
+# that one would spin for all of it.
+_ROOM = 30
+
+
 def _run(
     tmp: Path,
     api: str,
@@ -279,7 +287,7 @@ def test_a_probe_that_reaches_running_is_cancelled_and_the_pit_stop_is_done(
         _detail("running", "pending"),
         _detail("running", "running"),
     ]
-    proc = _run(tmp_path, api)
+    proc = _run(tmp_path, api, probe_timeout=_ROOM)
     assert proc.returncode == 0, proc.stderr
     assert "PIT STOP DONE: v0.40.0-beta.1 live in" in proc.stdout
     assert (
@@ -310,7 +318,7 @@ def test_a_phase_that_already_completed_counts_as_started(
 ) -> None:
     state, api = host
     state.details = [_detail("completed", "completed")]
-    proc = _run(tmp_path, api)
+    proc = _run(tmp_path, api, probe_timeout=_ROOM)
     assert proc.returncode == 0, proc.stderr
     assert "PIT STOP DONE" in proc.stdout
 
@@ -394,7 +402,7 @@ def test_a_probe_that_fails_after_a_phase_ran_is_not_done(
     state.details = [_detail("running", "running")]
     state.after_cancel = [_detail(ending, ending)]
     state.cancel_lands = False
-    proc = _run(tmp_path, api)
+    proc = _run(tmp_path, api, probe_timeout=_ROOM, cancel_timeout=_ROOM)
     _failed_loudly(proc)
     assert f"probe {_PROBE_ID} FAILED after a phase ran" in proc.stderr
     assert f"Last status: status={ending} phases=[heartbeat={ending}]" in proc.stderr
@@ -441,7 +449,7 @@ def test_a_probe_that_ends_without_a_running_phase_fails_without_done(
 ) -> None:
     state, api = host
     state.details = [_detail("running"), ending]
-    proc = _run(tmp_path, api)
+    proc = _run(tmp_path, api, probe_timeout=_ROOM)
     _failed_loudly(proc)
     assert "ended without a phase reaching running" in proc.stderr
     assert f"status={ending['status']}" in proc.stderr
