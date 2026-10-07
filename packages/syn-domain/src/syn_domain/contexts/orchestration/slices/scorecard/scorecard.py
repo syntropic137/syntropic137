@@ -270,25 +270,17 @@ def _verify_median(runs: Sequence[ScorecardRun]) -> float | None:
     )
 
 
-def compute_scorecard(
-    *,
-    runs: Mapping[str, ScorecardRun],
-    cost_by_execution: Mapping[str, Decimal],
-    tool_calls_by_session: Mapping[str, int],
-    now: datetime,
-    window_days: int,
-) -> Scorecard:
-    """Score the ``window_days`` UTC days ending today.
+def _chain_cost(chain: _Chain, cost_by_execution: Mapping[str, Decimal]) -> Decimal:
+    return sum(
+        (cost_by_execution.get(m.execution_id, Decimal(0)) for m in chain.members), Decimal(0)
+    )
 
-    ``runs`` must hold every run that ended in the window, every run still
-    running, and every member of their resume chains, keyed by execution id.
-    """
-    today = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    start = today - timedelta(days=window_days - 1)
-    end = now
-    days = [day_key(start + timedelta(days=i)) for i in range(window_days)]
 
-    chains = [
+def _chains_ended_between(
+    runs: Mapping[str, ScorecardRun], start: datetime, end: datetime
+) -> list[_Chain]:
+    """Every chain whose final run ended in [start, end], with the members we hold."""
+    return [
         _Chain(run, tuple(runs[i] for i in run.chain if i in runs))
         for run in runs.values()
         if run.is_final
@@ -296,50 +288,32 @@ def compute_scorecard(
         and run.ended_at is not None
         and start <= run.ended_at <= end
     ]
-    members = [m for chain in chains for m in chain.members]
 
-    def chain_cost(chain: _Chain) -> Decimal:
-        return sum(
-            (cost_by_execution.get(m.execution_id, Decimal(0)) for m in chain.members), Decimal(0)
-        )
 
-    by_workflow: dict[str, list[_Chain]] = {}
-    by_model: dict[str, list[_Chain]] = {}
+def _breakdown(chains: Sequence[_Chain], *, by_model: bool) -> tuple[OutcomeRow, ...]:
+    groups: dict[str, list[_Chain]] = {}
     for chain in chains:
-        by_workflow.setdefault(chain.final.workflow_name or chain.final.workflow_id, []).append(
-            chain
+        keys = (
+            dict.fromkeys(m for member in chain.members for m in member.models)
+            if by_model
+            else (chain.final.workflow_name or chain.final.workflow_id,)
         )
-        for model in dict.fromkeys(m for member in chain.members for m in member.models):
-            by_model.setdefault(model, []).append(chain)
+        for key in keys:
+            groups.setdefault(key, []).append(chain)
+    return tuple(OutcomeRow(k, _tally(v)) for k, v in sorted(groups.items()))
 
-    started = [run for run in runs.values() if run.started_at is not None]
-    spans = _intervals(started, start, end)
+
+def _throughput(runs: Sequence[ScorecardRun], start: datetime, end: datetime) -> Throughput:
+    spans = _intervals(runs, start, end)
     window_seconds = (end - start).total_seconds()
     waits = [
         (run.started_at - run.requested_at).total_seconds()
-        for run in started
+        for run in runs
         if run.requested_at is not None
         and run.started_at is not None
         and start <= run.started_at <= end
     ]
-
-    daily: list[DailyPoint] = []
-    for i, day in enumerate(days):
-        day_start = start + timedelta(days=i)
-        day_end = min(day_start + timedelta(days=1), end)
-        day_chains = [c for c in chains if c.final.ended_at and day_key(c.final.ended_at) == day]
-        daily.append(
-            DailyPoint(
-                day=day,
-                counts=_tally(day_chains),
-                cost_usd=sum((chain_cost(c) for c in day_chains), Decimal(0)),
-                median_verify_tokens=_verify_median([m for c in day_chains for m in c.members]),
-                peak_concurrency=_peak(_intervals(started, day_start, day_end)),
-            )
-        )
-
-    counts = _tally(chains)
-    throughput = Throughput(
+    return Throughput(
         average_concurrency=(
             sum((hi - lo).total_seconds() for lo, hi in spans) / window_seconds
             if window_seconds > 0
@@ -350,48 +324,99 @@ def compute_scorecard(
         p90_queue_wait_seconds=percentile(waits, 0.9),
         queue_waits_measured=len(waits),
     )
-    verify_median = _verify_median(members)
+
+
+def _daily(
+    chains: Sequence[_Chain],
+    started: Sequence[ScorecardRun],
+    cost_by_execution: Mapping[str, Decimal],
+    start: datetime,
+    end: datetime,
+    window_days: int,
+) -> tuple[DailyPoint, ...]:
+    points: list[DailyPoint] = []
+    for i in range(window_days):
+        day_start = start + timedelta(days=i)
+        day = day_key(day_start)
+        day_chains = [c for c in chains if c.final.ended_at and day_key(c.final.ended_at) == day]
+        points.append(
+            DailyPoint(
+                day=day,
+                counts=_tally(day_chains),
+                cost_usd=sum((_chain_cost(c, cost_by_execution) for c in day_chains), Decimal(0)),
+                median_verify_tokens=_verify_median([m for c in day_chains for m in c.members]),
+                peak_concurrency=_peak(
+                    _intervals(started, day_start, min(day_start + timedelta(days=1), end))
+                ),
+            )
+        )
+    return tuple(points)
+
+
+def _targets(
+    counts: OutcomeCounts, verify_median: float | None, throughput: Throughput, *, ran: bool
+) -> tuple[TargetResult, ...]:
+    return (
+        _target(
+            "Platform-failure-free completion",
+            counts.platform_failure_free_rate,
+            TARGET_PLATFORM_FAILURE_FREE_RATE,
+            higher=True,
+        ),
+        _target("Median verify tokens", verify_median, TARGET_MEDIAN_VERIFY_TOKENS, higher=False),
+        _target(
+            "Cost per merged PR (USD)", None, float(TARGET_COST_PER_MERGED_PR_USD), higher=False
+        ),
+        _target(
+            "Stable concurrency",
+            throughput.average_concurrency if ran else None,
+            TARGET_CONCURRENCY,
+            higher=True,
+        ),
+    )
+
+
+def compute_scorecard(
+    *,
+    runs: Mapping[str, ScorecardRun],
+    cost_by_execution: Mapping[str, Decimal],
+    tool_calls_by_session: Mapping[str, int],
+    now: datetime,
+    window_days: int,
+) -> Scorecard:
+    """Score the ``window_days`` UTC days ending now.
+
+    ``runs`` must hold every run that ended in the window, every run still
+    running, and every member of their resume chains, keyed by execution id.
+    """
+    today = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = today - timedelta(days=window_days - 1)
+    chains = _chains_ended_between(runs, start, now)
+    members = [m for chain in chains for m in chain.members]
+    started = [run for run in runs.values() if run.started_at is not None]
+    counts = _tally(chains)
+    throughput = _throughput(started, start, now)
 
     return Scorecard(
         window_start=start,
-        window_end=end,
+        window_end=now,
         window_days=window_days,
         counts=counts,
-        by_workflow=tuple(OutcomeRow(k, _tally(v)) for k, v in sorted(by_workflow.items())),
-        by_model=tuple(OutcomeRow(k, _tally(v)) for k, v in sorted(by_model.items())),
+        by_workflow=_breakdown(chains, by_model=False),
+        by_model=_breakdown(chains, by_model=True),
         phases=_phase_stats(members, tool_calls_by_session),
-        daily=tuple(daily),
+        daily=_daily(chains, started, cost_by_execution, start, now, window_days),
         throughput=throughput,
-        total_cost_usd=sum((chain_cost(c) for c in chains), Decimal(0)),
+        total_cost_usd=sum((_chain_cost(c, cost_by_execution) for c in chains), Decimal(0)),
         executions_costed=sum(1 for m in members if m.execution_id in cost_by_execution),
         executions_in_chains=len(members),
         merged_prs=None,
         cost_per_merged_pr_usd=None,
         merged_pr_scope=MERGED_PR_UNAVAILABLE,
-        targets=(
-            _target(
-                "Platform-failure-free completion",
-                counts.platform_failure_free_rate,
-                TARGET_PLATFORM_FAILURE_FREE_RATE,
-                higher=True,
-            ),
-            _target(
-                "Median verify tokens",
-                verify_median,
-                TARGET_MEDIAN_VERIFY_TOKENS,
-                higher=False,
-            ),
-            _target(
-                "Cost per merged PR (USD)",
-                None,
-                float(TARGET_COST_PER_MERGED_PR_USD),
-                higher=False,
-            ),
-            _target(
-                "Stable concurrency",
-                throughput.average_concurrency if spans else None,
-                TARGET_CONCURRENCY,
-                higher=True,
-            ),
+        targets=_targets(
+            counts,
+            _verify_median(members),
+            throughput,
+            ran=bool(_intervals(started, start, now)),
         ),
     )
