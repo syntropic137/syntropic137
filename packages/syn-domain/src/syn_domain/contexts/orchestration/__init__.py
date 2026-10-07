@@ -267,6 +267,7 @@ from syn_domain.contexts.orchestration.slices.notify_quarantine import (
 from syn_domain.contexts.orchestration.slices.scorecard import (
     ExecutionSpend,
     OutcomeCounts,
+    OutcomeRow,
     PhaseTypeStats,
     Scorecard,
     ScorecardProjection,
@@ -404,6 +405,7 @@ __all__ = [
     "LaunchEval",
     "OrphanedWorkspace",
     "OutcomeCounts",
+    "OutcomeRow",
     "PhaseDefinition",
     "PhaseExecutionType",
     "PhaseProgress",

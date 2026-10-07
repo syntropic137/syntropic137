@@ -6,6 +6,7 @@ from .run_record import RunOutcome, ScorecardPhase, ScorecardRun
 from .scorecard import (
     ExecutionSpend,
     OutcomeCounts,
+    OutcomeRow,
     PhaseTypeStats,
     Scorecard,
     TargetResult,
@@ -16,6 +17,7 @@ from .scorecard import (
 __all__ = [
     "ExecutionSpend",
     "OutcomeCounts",
+    "OutcomeRow",
     "PhaseType",
     "PhaseTypeStats",
     "RunOutcome",
