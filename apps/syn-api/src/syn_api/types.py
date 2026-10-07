@@ -574,8 +574,8 @@ class PhaseDefinitionResponse(BaseModel):
     target is what runs. ``expected``: the CLI resolves it (claude), so the
     target is what the pinned CLI is expected to pick. ``None`` with no alias."""
     model_display: str | None = None
-    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6-sol``, or
-    ``default → gpt-sol → gpt-6-sol`` when execution substitutes the
+    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6.1-sol``, or
+    ``default → gpt-sol → gpt-6.1-sol`` when execution substitutes the
     provider default; the bare model when there is nothing to resolve. Render
     verbatim."""
     provider: str | None = None
