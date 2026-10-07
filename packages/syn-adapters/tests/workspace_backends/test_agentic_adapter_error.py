@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agentic_isolation.providers.base import ExecuteResult
 
 from syn_adapters.workspace_backends.agentic.adapter import (
     AgenticIsolationAdapter,
@@ -89,6 +90,7 @@ async def test_provision_success_does_not_raise() -> None:
 
     mock_provider = MagicMock()
     mock_provider.create = AsyncMock(return_value=mock_workspace)
+    mock_provider.execute = AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr=""))
 
     config = IsolationConfig(
         execution_id="exec-abc",

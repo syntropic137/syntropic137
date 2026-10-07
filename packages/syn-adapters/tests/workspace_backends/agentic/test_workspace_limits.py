@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from agentic_isolation import SecurityConfig, WorkspaceConfig
+from agentic_isolation.providers.base import ExecuteResult
 from agentic_isolation.providers.docker import WorkspaceDockerProvider
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
@@ -64,6 +65,7 @@ async def _render_docker_run(isolation_config: IsolationConfig) -> list[str]:
     workspace.metadata = {"workspace_dir": "/tmp/ws-1"}
     provider = MagicMock()
     provider.create = AsyncMock(return_value=workspace)
+    provider.execute = AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr=""))
 
     adapter = AgenticIsolationAdapter()
 

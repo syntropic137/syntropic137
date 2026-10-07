@@ -9,6 +9,7 @@ See ADR-021: Isolated Workspace Architecture
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shlex
@@ -116,13 +117,17 @@ _WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
 }
 
 
+#: Reaps still running after the provision that started them was cancelled.
+_PENDING_REAPS: set[asyncio.Task[None]] = set()
+
+
 def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
     """Point TMPDIR and the tool caches somewhere with room, unless told otherwise.
 
     A caller-supplied value always wins: these are defaults for the common
-    case, not policy. Nothing is created here - `just`, `mktemp`, `uv` and
-    `npm` all create their own directories, and doing it here would mean a
-    filesystem side effect in a function whose job is to build a dict.
+    case, not policy. Nothing is created here: this function only builds a
+    dict. The caches are created by the tools that use them (`uv`, `npm`), but
+    TMPDIR is NOT - `create` makes it, see `_ensure_tmpdir`.
     """
     resolved = dict(environment)
     for key, value in ({"TMPDIR": _EXECUTABLE_TMPDIR} | _WORKSPACE_CACHE_ENV).items():
@@ -349,6 +354,8 @@ class AgenticIsolationAdapter:
                 f"Workspace provisioning failed for execution {config.execution_id}: {exc}"
             ) from exc
 
+        await self._ensure_tmpdir(workspace_obj, environment, config.execution_id)
+
         # Store for later operations
         self._workspaces[workspace_obj.id] = workspace_obj  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
@@ -365,6 +372,77 @@ class AgenticIsolationAdapter:
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
         )
+
+    async def _ensure_tmpdir(
+        self, workspace: object, environment: Mapping[str, str], execution_id: str
+    ) -> None:
+        """Create the workspace's TMPDIR before anything runs in it (PC-120).
+
+        A TMPDIR that does not exist is not a harmless default. Codex's
+        linux-sandbox canonicalizes it and PANICS (exit 101):
+
+            failed to resolve synthetic mount registry temp directory
+            /workspace/.tmp: No such file or directory (os error 2)
+
+        so a codex phase's sandbox probe refused the workspace. It went
+        unnoticed because `skills add` happens to create `$TMPDIR`, and every
+        codex phase but the eval verifier declared skills: a phase with none
+        failed 5 of 6 runs. Whoever chooses the directory makes it exist, rather
+        than relying on an unrelated step to create it first. A failure here is
+        a provisioning failure: a workspace whose TMPDIR cannot be made would
+        fail later, with a far worse message.
+        """
+        tmpdir = environment.get("TMPDIR")
+        if not tmpdir:
+            return
+        # The container exists and no caller holds a handle to it yet, so
+        # nobody else can reap it: every way out of here but success - a
+        # failed mkdir, a provider error, a cancelled provision - destroys it.
+        try:
+            result = await self._provider.execute(
+                workspace,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                shlex.join(["mkdir", "-p", tmpdir]),
+            )
+        except BaseException:
+            await self._reap_unregistered(workspace, execution_id)
+            raise
+        if result.exit_code != 0:
+            await self._reap_unregistered(workspace, execution_id)
+            raise WorkspaceProvisionError(
+                f"Workspace provisioning failed for execution {execution_id}: "
+                f"could not create TMPDIR {tmpdir} (exit {result.exit_code}): "
+                f"{(result.stderr or result.stdout or '').strip()[:300] or 'no output'}"
+            )
+
+    async def _reap_unregistered(self, workspace: object, execution_id: str) -> None:
+        """Destroy a container no handle was returned for, whatever happens meanwhile.
+
+        Shielded: a second cancellation (the provision being torn down while
+        it reaps) must not stop the reap, or the container leaks exactly as if
+        there had been no reap. A reap that itself fails is logged, not raised,
+        so the caller's original error is the one that propagates.
+        """
+        provider = self._provider
+
+        async def reap_and_log() -> None:
+            # Logged inside the task: a second cancellation can return the
+            # caller before the reap finishes, and nothing would see its error.
+            try:
+                await provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+            except Exception:
+                logger.exception(
+                    "Could not destroy workspace for execution %s after a failed provision",
+                    execution_id,
+                )
+
+        reap = asyncio.create_task(reap_and_log())
+        # The event loop holds tasks weakly: keep the reap alive even when the
+        # cancellation below returns before it finishes.
+        _PENDING_REAPS.add(reap)
+        reap.add_done_callback(_PENDING_REAPS.discard)
+        # The shielded reap keeps running if this await is cancelled; the
+        # cancellation is the caller's and propagates.
+        await asyncio.shield(reap)
 
     async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:
         """Destroy an isolated workspace.
