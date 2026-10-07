@@ -425,25 +425,21 @@ class BackgroundWorkflowDispatcher:
     ) -> None:
         """Wait for ``claim``'s slot, then run ``start`` under its lease - if the gate allows.
 
-        The one shape every start path shares. Queued, the start leases nothing
-        and a pause does not wait for it (#1617). On reaching its slot it
-        re-checks the gate: open, it leases until its start event is durable;
-        shut, it does not start and the refusal goes to ``on_held``, whose
-        durable record holds the start until the gate re-opens and re-offers
-        it. ``carrying`` ends the lease however this leaves; `_track`'s backstop
-        covers the task that never runs at all.
+        The one shape every dispatcher start shares. Queued, the start leases
+        nothing and a pause does not wait for it (#1617); at its slot,
+        ``held`` re-checks the gate. Refused there, it does not start and the
+        refusal goes to ``on_held``, whose durable record holds the start until
+        the gate re-opens and re-offers it. ``carrying`` ends the lease however
+        this leaves; `_track`'s backstop covers the task that never runs at all.
         """
         with carrying(admitted):
-            async with self._budget.held(claim):
-                if admitted is not None:
-                    try:
-                        await admitted.enter_slot()
-                    except AdmissionRefusedError as exc:
-                        logger.warning("Start of %s held at its slot: %s", claim.execution_id, exc)
-                        if on_held is not None:
-                            await self._report_start_failure(claim.execution_id, on_held, exc)
-                        return
-                await start()
+            try:
+                async with self._budget.held(claim, admitted):
+                    await start()
+            except AdmissionRefusedError as exc:
+                logger.warning("Start of %s held at its slot: %s", claim.execution_id, exc)
+                if on_held is not None:
+                    await self._report_start_failure(claim.execution_id, on_held, exc)
 
     async def _start_resume_in_budget(
         self,
