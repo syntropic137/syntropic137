@@ -72,7 +72,8 @@ async def _let_the_loop_run() -> None:
 
 
 class TestASetThatArrivesWhileALeaseIsOutstanding:
-    """The admission has its ticket and the work it stands for has not become
+    """The admission has its ticket, its start holds a slot (#1617: that is
+    when a ticket starts to lease), and the work it stands for has not become
     visible yet. The operator asks for maintenance mode. The set must wait for
     the work to EXIST, not merely for the flag to be written, and not merely
     for whoever queued the work to finish queueing it."""
@@ -86,6 +87,7 @@ class TestASetThatArrivesWhileALeaseIsOutstanding:
         async def _admit() -> None:
             nonlocal admitted
             async with gate.admitting() as ticket:
+                await ticket.enter_slot()
                 in_the_body.set()
                 await may_finish.wait()  # the decisive step yields
                 admitted = True
@@ -122,6 +124,7 @@ class TestASetThatArrivesWhileALeaseIsOutstanding:
         async def _admit() -> None:
             async with gate.admitting() as ticket:
                 carried.append(ticket)  # "hand the work to a background task"
+            await ticket.enter_slot()  # a slot was free
             queued.set()
 
         async def _the_background_task() -> None:
@@ -156,6 +159,7 @@ class TestASetThatArrivesWhileALeaseIsOutstanding:
 
         async with gate.admitting() as ticket:
             carried.append(ticket)
+        await ticket.enter_slot()
 
         closing = asyncio.create_task(gate.set_mode(active=True, reason="pit stop", actor="deploy"))
         await _let_the_loop_run()
@@ -305,6 +309,7 @@ class TestTheLeaseItself:
 
         async with gate.admitting() as first:
             pass
+        await first.enter_slot()
         first.mark_visible()
         first.abort()
         first.abort()
@@ -312,6 +317,7 @@ class TestTheLeaseItself:
 
         async with gate.admitting() as second:
             pass
+        await second.enter_slot()
 
         closing = asyncio.create_task(gate.set_mode(active=True, reason="pit stop", actor="deploy"))
         await _let_the_loop_run()
