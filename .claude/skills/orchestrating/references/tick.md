@@ -25,6 +25,16 @@ dispatch, and land before you dispatch more.
 | `exit_code=137` | killed, usually OOM at the workspace cap | check `dmesg` on the host; size the limit |
 | `finalize_pr` timeout after the PR is ready | the run did its job | review the PR normally |
 
+**Resume first, re-dispatch only when the prompt must change.** A resume keeps
+the run's branch, PR and completed phases, so it is the cheapest recovery and the
+default for anything transient: capacity, a one-off auth error, a deadline on a
+slow host, or a blocker that has since been fixed elsewhere (`syn execution
+resume <id> --acknowledge-external-effects`). A resume replays the SAME brief,
+so when the failure came from the brief itself (premise doing implement's work,
+a false premise, missing scope), write a better brief and dispatch it, on the
+same branch if a PR exists. A run that reached verify on an existing PR can also
+be recovered with `sdlc-reverify-pr-v1 -t "#NNNN"`.
+
 ## 3. Land what is ready
 
 For each non-draft agent PR:
