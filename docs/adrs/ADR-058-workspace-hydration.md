@@ -79,17 +79,19 @@ Every repository a run recorded a commit for (`WorkflowExecutionStarted.source_c
 
 ### 2. Inject Both `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`
 
-After the setup script completes, the Python layer injects both `AGENTS.md` and `CLAUDE.md` at the workspace root with **identical content**: direct `@`-imports of each repo's `AGENTS.md` followed by its `CLAUDE.md`.
+After the setup script completes, the Python layer injects both `AGENTS.md` and `CLAUDE.md` at the workspace root with **identical content**: direct `@`-imports of each repo's **distinct** instruction files, `AGENTS.md` before `CLAUDE.md`.
+
+The handler reads both files from the clone first. A repo's `AGENTS.md` is not imported when it is byte-identical to its `CLAUDE.md`, or when it is a breadcrumb (at most 512 bytes, naming `CLAUDE.md`) pointing at it. Claude Code does not deduplicate imports (see below), so before this rule a repo that kept the two files as copies paid for its instructions twice on every turn. In syntropic137 that was 36,274 bytes, about 9k tokens. A file that is not in the checkout is not imported. If the files cannot be read, both are imported, as before.
 
 ```
-@/workspace/repos/repo-a/AGENTS.md
-@/workspace/repos/repo-a/CLAUDE.md
-@/workspace/repos/repo-b/AGENTS.md
+@/workspace/repos/repo-a/CLAUDE.md          # repo-a: AGENTS.md is a copy or a breadcrumb
+@/workspace/repos/repo-b/AGENTS.md          # repo-b: the two files differ
 @/workspace/repos/repo-b/CLAUDE.md
 ```
 
 ```python
-content = _generate_workspace_context(repos)
+imports = [p for url in repos for p in await _repo_instruction_imports(workspace, name(url))]
+content = _generate_workspace_context(imports)
 await workspace.inject_files([
     ("AGENTS.md", content.encode()),
     ("CLAUDE.md", content.encode()),
