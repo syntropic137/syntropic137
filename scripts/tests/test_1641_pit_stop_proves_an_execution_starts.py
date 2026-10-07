@@ -36,6 +36,12 @@ _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "pit_stop.sh"
 _START = "# AFTER verify, deliberately."
 _PASSWORD = "s3cret-pit-pw"
 _PROBE_ID = "exec-probe0000001"
+# A deadline a test does not expect to reach. The fake answers at once, so a
+# test that ends before it pays nothing for it, but every poll spawns curl and
+# python3, and on a loaded 2-CPU host a 3s deadline passed before the fourth
+# read of a probe that was about to report running. A test that needs a
+# deadline to PASS says so with an explicit, short one.
+_UNREACHED = 30
 
 
 @dataclass
@@ -184,8 +190,8 @@ def _run(
     api: str,
     *,
     skip_probe: bool = False,
-    probe_timeout: int = 3,
-    cancel_timeout: int = 3,
+    probe_timeout: int = _UNREACHED,
+    cancel_timeout: int = _UNREACHED,
 ) -> subprocess.CompletedProcess[str]:
     preamble = f"""
 set -euo pipefail
@@ -326,9 +332,11 @@ def test_a_probe_queued_past_both_deadlines_is_withdrawn_verified_and_still_fail
     probe never ran, so nothing proved the start path."""
     state, api = host
     state.details = [_detail("queued")]
-    proc = _run(tmp_path, api, probe_timeout=1, cancel_timeout=3)
+    # Whole seconds on a monotonic clock: a 1s deadline can pass before the
+    # first read, and push CI on eda62183 failed with no status read at all.
+    proc = _run(tmp_path, api, probe_timeout=3, cancel_timeout=3)
     _failed_loudly(proc)
-    assert "did not reach a running phase within 1s" in proc.stderr
+    assert "did not reach a running phase within 3s" in proc.stderr
     assert "Last status: status=queued phases=[]" in proc.stderr
     assert state.withdrawn
     assert _verified_terminal_after_cancel(state)
@@ -424,7 +432,7 @@ def test_a_start_dropped_before_it_existed_fails_without_done(
     state, api = host
     state.details = [None]
     state.cancel_lands = False
-    proc = _run(tmp_path, api)
+    proc = _run(tmp_path, api, probe_timeout=3, cancel_timeout=3)
     _failed_loudly(proc)
     assert "not found by GET" in proc.stderr
     assert f"PROBE {_PROBE_ID} MAY STILL BE LIVE" in proc.stderr
@@ -468,7 +476,7 @@ def test_a_probe_whose_cancel_never_lands_is_not_done(
     state, api = host
     state.details = [_detail("running", "running")]
     state.cancel_lands = False
-    proc = _run(tmp_path, api)
+    proc = _run(tmp_path, api, cancel_timeout=3)
     assert proc.returncode != 0
     assert "PIT STOP DONE" not in proc.stdout
     assert f"the start path works, but probe {_PROBE_ID} is not terminal after 3s" in proc.stderr
