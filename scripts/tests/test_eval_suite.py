@@ -23,6 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import yaml
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
@@ -60,14 +61,73 @@ def _copy_suite(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+_CODEX_WF = "eval-verify-pinned-codex-v1"
+
+
 @pytest.mark.unit
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.suite.tag == "verifier-seed-v1:v1"
-    assert loaded.suite.workflow.id == "eval-verify-pinned-v1"
-    assert loaded.suite.workflow.models == {"verify": "opus"}
-    assert {c.source_pr for c in loaded.cases} == {1574, 1649, 1652, 1654}
+    assert loaded.tag == "verifier-seed-v1:v2:eval-verify-pinned-v1"
+    assert loaded.workflow.id == "eval-verify-pinned-v1"
+    assert loaded.workflow.models == {"verify": "opus"}
+    assert {c.source_pr for c in loaded.cases} == {1574, 1649, 1652, 1654, 1679, 1680}
+
+
+@pytest.mark.unit
+def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> None:
+    opus = load_suite(DEFAULT_SUITE)
+    codex = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+
+    assert codex.workflow.id == _CODEX_WF
+    assert codex.workflow.models == {"verify": "gpt-sol"}
+    assert codex.tag == f"verifier-seed-v1:v2:{_CODEX_WF}"
+    assert codex.tag != opus.tag
+    assert codex.cases == opus.cases
+
+
+@pytest.mark.unit
+def test_a_workflow_the_suite_does_not_list_is_refused() -> None:
+    with pytest.raises(DefinitionError, match="not one of the suite's"):
+        load_suite(DEFAULT_SUITE, workflow="sdlc-reverify-pr-v1")
+
+
+def _workflow_yaml(relative: str) -> dict[str, object]:
+    loaded = yaml.safe_load((ROOT / relative).read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+@pytest.mark.unit
+def test_the_two_verify_workflows_differ_only_in_the_agent() -> None:
+    """Same cases, different verifier: a score difference must be the verifier alone."""
+    refs = {r.id: r for r in load_suite(DEFAULT_SUITE).suite.workflows}
+    opus_path, codex_path = refs["eval-verify-pinned-v1"].path, refs[_CODEX_WF].path
+
+    # The prompt files, byte for byte, and the prompt each definition resolves.
+    opus_prompt = (ROOT / opus_path).parent / "phases" / "verify.md"
+    codex_prompt = (ROOT / codex_path).parent / "phases" / "verify.md"
+    assert opus_prompt.read_bytes() == codex_prompt.read_bytes()
+    opus_def = WorkflowDefinition.from_file(ROOT / opus_path)
+    codex_def = WorkflowDefinition.from_file(ROOT / codex_path)
+    assert [p.prompt_template for p in opus_def.phases] == [
+        p.prompt_template for p in codex_def.phases
+    ]
+
+    # Everything else but identity and the agent block is the same document.
+    def comparable(doc: dict[str, object]) -> dict[str, object]:
+        rest = {k: v for k, v in doc.items() if k not in ("id", "name", "description")}
+        phases = rest["phases"]
+        assert isinstance(phases, list)
+        rest["phases"] = [
+            {k: v for k, v in p.items() if k not in ("agent", "allowed_tools")} for p in phases
+        ]
+        return rest
+
+    assert comparable(_workflow_yaml(opus_path)) == comparable(_workflow_yaml(codex_path))
+    agent = codex_def.phases[0].agent
+    assert agent is not None
+    assert (agent.provider, agent.model, agent.sandbox) == ("codex", "gpt-sol", "workspace-write")
 
 
 def _is_shallow() -> bool:
@@ -92,6 +152,16 @@ def test_a_model_change_without_the_suite_record_is_refused(tmp_path: Path) -> N
     suite_yaml.write_text(suite_yaml.read_text().replace("verify: opus", "verify: sonnet"))
 
     with pytest.raises(DefinitionError, match="the workflow declares"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_a_model_change_in_an_unselected_workflow_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    suite_yaml = suite_dir / "suite.yaml"
+    suite_yaml.write_text(suite_yaml.read_text().replace("verify: gpt-sol", "verify: gpt-other"))
+
+    with pytest.raises(DefinitionError, match=f"for {_CODEX_WF}, the workflow declares"):
         load_suite(suite_dir)
 
 
@@ -442,6 +512,40 @@ _PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
             "an EvalCreated event, and the attach is accepted.",
         ),
     ),
+    "live-commits-unvalidated-sha": (
+        (
+            "useEventFeed.ts:62",
+            "toGitCommit accepts any non-empty string as the sha, so a payload whose sha is "
+            "'???????' is rendered as-is - the very placeholder the change set out to remove.",
+        ),
+        (
+            "hooks/useEventFeed.ts",
+            "the commit hash is never checked to be hex, so garbage such as '???????' or "
+            "whitespace still shows up on the Live Commits card.",
+        ),
+        (
+            "useEventFeed.ts",
+            "text() treats any truthy string as a commit id; a malformed sha is displayed "
+            "instead of the event being dropped.",
+        ),
+    ),
+    "repo-privacy-ignores-app": (
+        (
+            "useRepoList.ts:68",
+            "isPrivate comes from the stored is_private ?? false and the App's answer is "
+            "discarded, so a private repository is shown as public.",
+        ),
+        (
+            "useRepoList.ts",
+            "registeredRow ignores the GitHub App entry it already matched; the CLI registers "
+            "every repo with is_private false, so private repos render without their lock.",
+        ),
+        (
+            "src/hooks/useRepoList.ts",
+            "the row's visibility comes from the registration record, never from GitHub's live "
+            "answer, so the page displays a private repo as public.",
+        ),
+    ),
     "shared-esp-stream": (
         (
             "RequestExecutionCommand.py:22",
@@ -499,6 +603,17 @@ _WRONG_DEFECTS: dict[str, tuple[str, str]] = {
         "EvalAggregate.py:70",
         "archive does not check the caller's permission.",
     ),
+    # The other defect the same fix closed: a true finding, not this seed's.
+    "live-commits-unvalidated-sha": (
+        "useEventFeed.ts:120",
+        "the row key is built from the array index, so prepending a live event remounts every "
+        "row and drops keyboard focus.",
+    ),
+    "repo-privacy-ignores-app": (
+        "useRepoList.ts:58",
+        "rows are keyed by full name alone, so two organizations registering the same name "
+        "collapse into one row.",
+    ),
     "shared-esp-stream": (
         "ExecutionRequestAggregate.py:9",
         "the request's priority field is never validated.",
@@ -539,9 +654,9 @@ class _ServedPhase:
 
 def _phases_of(loaded: LoadedSuite) -> list[_ServedPhase]:
     """The phases the server would serve back for the checked-in workflow."""
-    local = WorkflowDefinition.from_file(ROOT / loaded.suite.workflow.path)
+    local = WorkflowDefinition.from_file(ROOT / loaded.workflow.path)
     return [
-        _ServedPhase(p.id, p.prompt_template, loaded.suite.workflow.models[p.id])
+        _ServedPhase(p.id, p.prompt_template, loaded.workflow.models[p.id])
         for p in local.phases
     ]
 
@@ -566,7 +681,8 @@ class _Server:
         self.phases = served_phases if served_phases is not None else _phases_of(loaded)
         self.attached = attached
         self.eval_pin = _PIN
-        self.run_workflow = _WF
+        self.run_workflow = loaded.workflow.id
+        self.tag = loaded.tag
 
     def client(self) -> httpx.Client:
         return httpx.Client(base_url="http://api", transport=httpx.MockTransport(self.handle))
@@ -608,7 +724,7 @@ class _Server:
             "name": "n",
             "goal": "g",
             "starting_workflow_id": None,
-            "tags": ["verifier-seed-v1:v1", f"case:{_CASE}"],
+            "tags": [self.tag, f"case:{_CASE}"],
             "frozen": True,
             "archived": False,
             "created_at": None,
@@ -643,13 +759,13 @@ class _Server:
                     "warnings": [],
                 },
             )
-        if path == f"/workflows/{_WF}" and request.method == "GET":
-            if self.installed != _WF:
+        if path.startswith("/workflows/") and request.method == "GET":
+            if path != f"/workflows/{self.installed}":
                 return httpx.Response(404, json={"detail": "Workflow not found"})
             return httpx.Response(
                 200,
                 json={
-                    "id": _WF,
+                    "id": self.installed,
                     "name": "w",
                     "workflow_type": "custom",
                     "classification": "standard",
@@ -684,17 +800,22 @@ class _Server:
             body = json.loads(request.content)
             return httpx.Response(
                 200,
-                json={"execution_id": f"exec-for-{body['eval_id']}", "workflow_id": _WF},
+                json={
+                    "execution_id": f"exec-for-{body['eval_id']}",
+                    "workflow_id": self.installed,
+                },
             )
         if path == "/evals":
+            # The real list filters by tag: another verifier's tag finds nothing.
+            evals = [self._eval()] if request.url.params.get("tag") == self.tag else []
             return httpx.Response(
                 200,
                 json={
-                    "total": 1,
+                    "total": len(evals),
                     "page": 1,
                     "page_size": 200,
                     "status_counts": {},
-                    "evals": [self._eval()],
+                    "evals": evals,
                 },
             )
         if path == "/evals/eval-1":
@@ -733,14 +854,18 @@ class _Server:
         return httpx.Response(404, json={"detail": path})
 
 
-_LAUNCHED = Launch(
-    suite="verifier-seed-v1:v1",
-    case=_CASE,
-    eval_id="eval-1",
-    run_id="exec-1",
-    commit=_PIN,
-    workflow_id=_WF,
-)
+def _launched(loaded: LoadedSuite) -> Launch:
+    return Launch(
+        suite=loaded.tag,
+        case=_CASE,
+        eval_id="eval-1",
+        run_id="exec-1",
+        commit=_PIN,
+        workflow_id=loaded.workflow.id,
+    )
+
+
+_LAUNCHED = _launched(load_suite(DEFAULT_SUITE))
 
 
 @pytest.mark.unit
@@ -760,7 +885,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/4 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/6 passed" in table
 
 
 @pytest.mark.unit
@@ -822,9 +947,9 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
     assert [c["baseline_repos"][0]["requested_ref"] for c in creates] == [
         c.commit for c in loaded.cases
     ]
-    assert all("verifier-seed-v1:v1" in c["tags"] for c in creates)
+    assert all(loaded.tag in c["tags"] for c in creates)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert len(lines) == 5
+    assert len(lines) == 1 + len(loaded.cases)
 
     recorded = read_launches(ledger)
     assert [(x.case, x.commit, x.eval_id, x.run_id) for x in recorded] == [
@@ -878,3 +1003,53 @@ def test_launch_stops_when_the_server_pins_another_commit(tmp_path: Path) -> Non
 @pytest.mark.unit
 def test_a_run_that_reported_no_verdict_fails() -> None:
     assert not score_report(_EXPECTED, None, _FINDING).passed
+
+
+# ---------------------------------------------------------------------------
+# Same cases, different verifier
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
+    tmp_path: Path,
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    server = _Server(loaded)
+    ledger = tmp_path / "launches.jsonl"
+    launch_suite(loaded, server.client(), ledger)
+
+    paths = [(r.method, r.url.path) for r in server.requests]
+    assert paths[1] == ("GET", f"/workflows/{_CODEX_WF}")
+    creates = [json.loads(r.content) for r in server.requests if r.url.path == "/evals"]
+    assert {c["starting_workflow_id"] for c in creates} == {_CODEX_WF}
+    assert all(f"verifier-seed-v1:v2:{_CODEX_WF}" in c["tags"] for c in creates)
+    assert all("verifier-seed-v1:v2:eval-verify-pinned-v1" not in c["tags"] for c in creates)
+    starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
+    assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
+    recorded = read_launches(ledger)
+    assert {(x.suite, x.workflow_id) for x in recorded} == {
+        (f"verifier-seed-v1:v2:{_CODEX_WF}", _CODEX_WF)
+    }
+
+
+@pytest.mark.unit
+def test_scoring_one_verifier_never_counts_the_other_verifiers_runs() -> None:
+    opus = load_suite(DEFAULT_SUITE)
+    codex = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    # The server answers as if the opus run were in the eval: only the ledger
+    # line's tag keeps it out of the codex table.
+    rows, _ = score_suite(codex, _Server(opus).client(), [_launched(opus)])
+
+    assert {r.status for r in rows} == {"not launched"}
+    assert "workflow eval-verify-pinned-codex-v1" in render(codex, rows)
+
+
+@pytest.mark.unit
+def test_a_codex_run_scores_in_the_codex_table() -> None:
+    codex = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    rows, unrecorded = score_suite(codex, _Server(codex).client(), [_launched(codex)])
+
+    row = next(r for r in rows if r.case == _CASE)
+    assert row.score is not None and row.score.passed
+    assert unrecorded == ()
