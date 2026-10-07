@@ -114,7 +114,9 @@ class FakeConn:
         self._calls.append((table, (kwargs.get("source"),)))
         return "COPY 1"
 
-    def transaction(self, *, isolation: str | None = None, readonly: bool = False) -> FakeTransaction:
+    def transaction(
+        self, *, isolation: str | None = None, readonly: bool = False
+    ) -> FakeTransaction:
         """The write path wraps the row and its tool-call tally in one (#1322).
 
         The read path opens its snapshot here too, with the isolation and
