@@ -294,6 +294,28 @@ def test_the_file_and_the_defect_must_be_in_the_same_blocking_finding() -> None:
 
 
 @pytest.mark.unit
+def test_the_seed_file_named_inside_the_defect_counts() -> None:
+    """verifier-seed-v1 first run (exec-707cefadabf8): the verifier filed the entry
+    point (direct_start.py) and named the root-cause modules in its Defect. That is
+    the correct finding and must pass."""
+    seed = _case("shared-esp-stream").expected
+    report = (
+        "VERDICT: BLOCKED\n\n## BLOCKING\n\n### Finding 1\n"
+        "- File: `apps/syn-api/src/syn_api/routes/executions/direct_start.py:48`\n"
+        "- Defect: The ExecutionRequest is written under aggregate id = the execution id "
+        "(`RequestExecutionCommand.aggregate_id` returns `execution_id`, "
+        "`RequestExecutionCommand.py:35-37`). The WorkflowExecution uses the same aggregate id. "
+        "The production store keys a stream by aggregate id alone, so `ExecutionRequest-exec-X` and "
+        "`WorkflowExecution-exec-X` are one stream; the start's NO_STREAM append conflicts, "
+        "it is treated as a duplicate and every direct start silently never runs.\n"
+        "- Why blocking: breaks POST /execute.\n"
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.named_file is not None, score
+    assert score.passed, score
+
+
+@pytest.mark.unit
 def test_a_seed_file_named_only_in_why_blocking_does_not_count() -> None:
     """Codex review at 70fbbb14: the seed file appears only in another finding's
     'Why blocking' text. File and defect must come from the File and Defect fields."""

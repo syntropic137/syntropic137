@@ -365,7 +365,12 @@ def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Sc
         # Defect field: a benign mention in "Why blocking" or a stray line does
         # not name the seed (codex review of #1683).
         fields = finding_fields(text)
-        named = next((f for f in expected.files if _names(fields.get("file", ""), f)), None)
+        # The seed file may be the finding's File or be named inside its Defect
+        # (a verifier often files the entry point and names the root-cause
+        # module in the explanation: verifier-seed-v1 first run, shared-esp-stream).
+        # It never counts from "Why blocking" alone, where a benign mention lives.
+        located = fields.get("file", "") + "\n" + fields.get("defect", "")
+        named = next((f for f in expected.files if _names(located, f)), None)
         lowered = _normalise(fields.get("defect", ""))
         missing = tuple(
             g for g in expected.keywords if not any(_normalise(w) in lowered for w in g)
