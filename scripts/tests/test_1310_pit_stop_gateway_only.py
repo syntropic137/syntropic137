@@ -139,7 +139,9 @@ class TestGatewayOnly:
         reads = (log / "curl").read_text().splitlines()
         # The disk report is the one read left: it is a report, not a gate,
         # and it is just as true before loading one image as two.
-        assert reads and all(r.split("http://fake-host:8137/api/v1", 1)[1].startswith("/health ") for r in reads), reads
+        assert reads and all(
+            r.split("http://fake-host:8137/api/v1", 1)[1].startswith("/health ") for r in reads
+        ), reads
 
     def test_dispatches_no_probe_and_never_checks_for_one(self, tmp_path: Path) -> None:
         """The probe proves a run can START, which a gateway swap does not touch;
