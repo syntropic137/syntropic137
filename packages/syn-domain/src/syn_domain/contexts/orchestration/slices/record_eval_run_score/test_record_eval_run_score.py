@@ -188,7 +188,8 @@ class TestSummarize:
 
         assert summary.run_count == 6
         assert summary.scored_count == 5
-        assert summary.pass_rate == pytest.approx(3 / 5)
+        # Run 4's ERROR is scored but not judged: PASS over PASS + FAIL is 3/4.
+        assert summary.pass_rate == pytest.approx(3 / 4)
         assert summary.last_run_at == "2026-10-06T00:00:00+00:00"
         assert summary.last_verdict is Verdict.PASS
         by_key = {(v.workflow_id, v.models): v for v in summary.variants}
@@ -204,7 +205,8 @@ class TestSummarize:
         assert wf_a_opus.avg_cost_usd == Decimal("2.00")
         assert wf_a_opus.last_run_at == "2026-10-02T00:00:00+00:00"
         assert by_key["wf-a", (sonnet,)].avg_cost_usd is None
-        assert by_key["wf-b", (opus,)].pass_rate == 0.0
+        # ERROR-only: nothing was judged, so no rate rather than 0%.
+        assert by_key["wf-b", (opus,)].pass_rate is None
         mixed = by_key["wf-b", (opus, sonnet)]
         # Unscored run 5 counts as a run, not as a scored one.
         assert (mixed.run_count, mixed.pass_count, mixed.pass_rate) == (2, 1, 1.0)

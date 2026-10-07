@@ -83,7 +83,7 @@ class EvalVariant:
     run_count: int
     pass_count: int
     pass_rate: float | None
-    """PASS over scored runs (PASS, FAIL and ERROR); ``None`` when none is scored."""
+    """PASS over PASS + FAIL; ``None`` when neither. ERROR is not a verdict on the work."""
     avg_cost_usd: Decimal | None
     """Mean over the runs whose cost is known; ``None`` when none is."""
     last_run_at: str | None
@@ -103,9 +103,15 @@ class EvalRunsSummary:
 
 
 def _pass_rate(runs: Sequence[EvalRunFacts]) -> tuple[int, int, float | None]:
+    """Scored count (every verdict), PASS count, and PASS over PASS + FAIL.
+
+    ERROR is a run that could not be judged (a provision failure, say), so it
+    counts as scored but stays out of the rate: it is neither a pass nor a fail.
+    """
     scored = [r.score for r in runs if r.score is not None]
     passed = sum(1 for s in scored if s.verdict is Verdict.PASS)
-    return len(scored), passed, (passed / len(scored)) if scored else None
+    judged = sum(1 for s in scored if s.verdict is not Verdict.ERROR)
+    return len(scored), passed, (passed / judged) if judged else None
 
 
 def _newest_first(runs: Iterable[EvalRunFacts]) -> list[EvalRunFacts]:

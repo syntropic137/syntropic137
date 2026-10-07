@@ -1049,12 +1049,12 @@ class EvalVariantResponse(BaseModel):
     """Every run of an eval with the same workflow and the same OBSERVED models (Evals v2)."""
 
     workflow_id: str
-    models: list[str]
+    models: list[ObservedModelId]
     """Sorted, unique models the runs' phases reported running. Never an alias."""
     run_count: int
     pass_count: int
     pass_rate: float | None
-    """PASS over this variant's scored runs, 0..1. Null when none is scored."""
+    """PASS over this variant's PASS + FAIL runs, 0..1 (ERROR excluded). Null when none."""
     pass_rate_display: str
     avg_cost_usd: Decimal | None
     """Mean over the runs whose cost is known. Null when none is."""
@@ -1081,9 +1081,9 @@ class EvalResponse(BaseModel):
     run_status_counts: dict[str, int]
     """Those executions tallied by execution status."""
     scored_count: int = 0
-    """Runs with a score. ``ERROR`` counts as scored, and not as passed."""
+    """Runs with a score. ``ERROR`` counts as scored, and is left out of the pass rate."""
     pass_rate: float | None = None
-    """PASS over scored runs, 0..1. Null when no run is scored."""
+    """PASS over PASS + FAIL runs, 0..1 (ERROR excluded). Null when there are none."""
     pass_rate_display: str = EM_DASH
     last_run_at: str | None = None
     """When the newest run started, ISO 8601 UTC."""
@@ -1097,7 +1097,7 @@ class EvalRunModelResponse(BaseModel):
     """The model one phase of a run ACTUALLY ran, as its harness reported it."""
 
     phase_id: str
-    model: str
+    model: ObservedModelId
 
 
 class EvalRunResponse(BaseModel):

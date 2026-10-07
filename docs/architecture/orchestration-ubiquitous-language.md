@@ -419,14 +419,16 @@ membership, Scores do grow the Eval's stream, one event per judgement.
 
 `PASS`, `FAIL` or `ERROR` (`Verdict`, a StrEnum). `ERROR` means the Run could
 not be judged (it did not finish, or produced nothing to judge): it counts as
-scored and not as passed. Not the same word as a Review Verdict, which is a
+scored, and is left out of the Pass Rate entirely: an unjudged Run is
+neither a pass nor a fail. Not the same word as a Review Verdict, which is a
 phase's own `certified` / `blocked` about a change; a scorer reads the Review
 Verdict and records a Verdict about the Run.
 
 ## Pass Rate
 
-`PASS` Runs divided by scored Runs. None (shown as an em dash) when no Run is
-scored: no data is not 0%.
+`PASS` Runs divided by `PASS` + `FAIL` Runs. `ERROR` Runs are excluded, so a
+provision failure never counts as a `FAIL`. None (shown as an em dash) when no
+Run is judged `PASS` or `FAIL`: no data is not 0%.
 
 ## Variant
 

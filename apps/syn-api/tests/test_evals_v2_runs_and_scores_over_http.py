@@ -312,8 +312,9 @@ class TestSummary:
         for body in (row, shown):
             assert body["run_count"] == 5
             assert body["scored_count"] == 4
-            assert body["pass_rate"] == pytest.approx(0.5)
-            assert body["pass_rate_display"] == "50%"
+            # r4's ERROR is scored but not judged: PASS over PASS + FAIL is 2/3.
+            assert body["pass_rate"] == pytest.approx(2 / 3)
+            assert body["pass_rate_display"] == "67%"
             assert body["last_run_at"] == "2026-10-05T00:00:00+00:00"
             assert body["last_verdict"] == "ERROR"
             variants = {(v["workflow_id"], tuple(v["models"])): v for v in body["variants"]}
@@ -331,6 +332,9 @@ class TestSummary:
             assert wf_a_opus["last_run_at"] == "2026-10-02T00:00:00+00:00"
             assert variants["wf-b", (SONNET,)]["pass_rate"] is None
             assert variants["wf-b", (SONNET,)]["pass_rate_display"] == "—"
+            # ERROR-only: nothing was judged, so no rate rather than 0%.
+            assert variants["wf-b", (OPUS,)]["pass_count"] == 0
+            assert variants["wf-b", (OPUS,)]["pass_rate"] is None
 
 
 class TestScore:
@@ -352,7 +356,7 @@ class TestScore:
         runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
         assert next(r for r in runs if r["execution_id"] == "r2")["verdict"] == "PASS"
         shown = (await client.get(f"/evals/{eval_id}")).json()
-        assert shown["pass_rate"] == pytest.approx(3 / 4)
+        assert shown["pass_rate"] == pytest.approx(3 / 3)
 
     async def test_a_non_member_cannot_be_scored(self, client: AsyncClient, lane2: _Lane2) -> None:
         eval_id = await _create(client)
