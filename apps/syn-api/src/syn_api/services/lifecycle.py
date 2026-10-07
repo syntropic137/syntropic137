@@ -53,6 +53,7 @@ from syn_api.types import (
     DbPoolHealth,
     Err,
     HealthResponse,
+    HeldProjectionHealth,
     LifecycleError,
     Ok,
     Result,
@@ -608,7 +609,11 @@ async def _describe_subscription_health() -> SubscriptionHealthResult:
         drops = await _state.subscription_service.describe_unapplied_starts()
         unapplied = list(drops.unapplied) if drops is not None else None
         verdict = _judge_read_path(
-            running=sub_status.running, lag=lag, dropped_events=bool(unapplied)
+            running=sub_status.running,
+            lag=lag,
+            dropped_events=bool(unapplied),
+            held=bool(sub_status.held_projections),
+            halted=sub_status.halted_at is not None,
         )
 
         health = SubscriptionHealth(
@@ -616,6 +621,15 @@ async def _describe_subscription_health() -> SubscriptionHealthResult:
             running=sub_status.running,
             projection_count=sub_status.projection_count,
             realtime_enabled=sub_status.realtime_enabled,
+            held_projections=[
+                HeldProjectionHealth(
+                    projection=held.projection_name,
+                    event_type=held.event_type,
+                    global_nonce=held.global_nonce,
+                )
+                for held in sub_status.held_projections
+            ],
+            halted_at=sub_status.halted_at,
             unapplied_starts=unapplied,
             **(lag.model_dump() if lag is not None else {}),
         )

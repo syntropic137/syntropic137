@@ -39,8 +39,17 @@ _FORKED_FIELD_RENAMES = {
 }
 
 
-class LegacyEventShapeError(RuntimeError):
-    """A stored payload cannot be read as the type its name now means."""
+class LegacyEventShapeError(ValueError):
+    """A stored payload cannot be read as the type its name now means.
+
+    A ``ValueError`` because it is raised inside event validators, and pydantic
+    reports only ``ValueError`` / ``AssertionError`` from a validator as a
+    ``ValidationError``. That is the one exception the event store's ADR-023
+    fallback (``on_invalid_payload="generic"``, ESP v0.17.0) turns into a
+    ``GenericDomainEvent``. Any other type escapes the decoder: ESP v0.16 caught
+    every exception, v0.17 does not, and a refused legacy payload then fails
+    the read instead of replaying generic.
+    """
 
 
 class ResumedEventShape(StrEnum):

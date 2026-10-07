@@ -9717,6 +9717,8 @@
           "projection_catchup",
           "projection_stalled",
           "projection_dropped_event",
+          "projection_held",
+          "subscription_halted",
           "event_poller",
           "check_run_poller",
           "anthropic_api_key",
@@ -13328,6 +13330,34 @@
         ],
         "title": "HeatmapDayBucketResponse",
         "description": "Single day's aggregated activity."
+      },
+      "HeldProjectionHealth": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as in projection_checkpoints."
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "description": "Type of the event it failed to apply."
+          },
+          "global_nonce": {
+            "type": "integer",
+            "title": "Global Nonce",
+            "description": "Global nonce of the event it is held at."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "event_type",
+          "global_nonce"
+        ],
+        "title": "HeldProjectionHealth",
+        "description": "A projection held below an event it failed to apply (ESP #391).\n\nIt is retried there with backoff and never checkpointed past it, so it is\nbehind and stays behind until the handler is fixed or the projection is\nrebuilt. Every other projection keeps consuming."
       },
       "IdentityBinding": {
         "properties": {
@@ -18582,13 +18612,15 @@
             "enum": [
               "healthy",
               "degraded",
+              "halted",
               "dropped_events",
+              "held",
               "stalled",
               "catching_up",
               "unknown"
             ],
             "title": "Status",
-            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed."
+            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed."
           },
           "running": {
             "anyOf": [
@@ -18625,6 +18657,33 @@
             ],
             "title": "Realtime Enabled",
             "description": "Whether a realtime (SSE) projection is attached."
+          },
+          "held_projections": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HeldProjectionHealth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Projections",
+            "description": "Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed."
+          },
+          "halted_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Halted At",
+            "description": "Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted."
           },
           "is_catching_up": {
             "anyOf": [

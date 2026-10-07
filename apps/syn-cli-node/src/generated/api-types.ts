@@ -3307,7 +3307,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -4949,6 +4949,31 @@ export interface components {
             breakdown?: {
                 [key: string]: number;
             };
+        };
+        /**
+         * HeldProjectionHealth
+         * @description A projection held below an event it failed to apply (ESP #391).
+         *
+         *     It is retried there with backoff and never checkpointed past it, so it is
+         *     behind and stays behind until the handler is fixed or the projection is
+         *     rebuilt. Every other projection keeps consuming.
+         */
+        HeldProjectionHealth: {
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Event Type
+             * @description Type of the event it failed to apply.
+             */
+            event_type: string;
+            /**
+             * Global Nonce
+             * @description Global nonce of the event it is held at.
+             */
+            global_nonce: number;
         };
         /**
          * IdentityBinding
@@ -7610,10 +7635,10 @@ export interface components {
         SubscriptionHealth: {
             /**
              * Status
-             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed.
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed.
              * @enum {string}
              */
-            status: "healthy" | "degraded" | "dropped_events" | "stalled" | "catching_up" | "unknown";
+            status: "healthy" | "degraded" | "halted" | "dropped_events" | "held" | "stalled" | "catching_up" | "unknown";
             /**
              * Running
              * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
@@ -7629,6 +7654,16 @@ export interface components {
              * @description Whether a realtime (SSE) projection is attached.
              */
             realtime_enabled?: boolean | null;
+            /**
+             * Held Projections
+             * @description Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed.
+             */
+            held_projections?: components["schemas"]["HeldProjectionHealth"][] | null;
+            /**
+             * Halted At
+             * @description Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted.
+             */
+            halted_at?: number | null;
             /**
              * Is Catching Up
              * @description True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable.

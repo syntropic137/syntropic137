@@ -27,7 +27,10 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from syn_adapters.subscriptions.coordinator_service import SubscriptionServiceStatus
+from syn_adapters.subscriptions.coordinator_service import (
+    HeldProjection,
+    SubscriptionServiceStatus,
+)
 from syn_adapters.subscriptions.read_model_lag import (
     STALLED_AFTER_SECONDS,
     CheckpointState,
@@ -68,14 +71,22 @@ class _SubscriptionServiceStub:
         running: bool,
         lag: ReadModelLag | None,
         drops: UnappliedStartsReport | None = None,
+        held: tuple[HeldProjection, ...] = (),
+        halted_at: int | None = None,
     ) -> None:
         self._running = running
         self._lag = lag
         self._drops = drops
+        self._held = held
+        self._halted_at = halted_at
 
     def get_status(self) -> SubscriptionServiceStatus:
         return SubscriptionServiceStatus(
-            running=self._running, projection_count=25, realtime_enabled=True
+            running=self._running,
+            projection_count=25,
+            realtime_enabled=True,
+            held_projections=self._held,
+            halted_at=self._halted_at,
         )
 
     async def describe_read_model_lag(self) -> ReadModelLag | None:
@@ -122,9 +133,15 @@ async def health_payload() -> AsyncIterator[HealthProbe]:
     app = create_app()
 
     async def get(
-        running: bool, lag: ReadModelLag | None, drops: UnappliedStartsReport | None = None
+        running: bool,
+        lag: ReadModelLag | None,
+        drops: UnappliedStartsReport | None = None,
+        held: tuple[HeldProjection, ...] = (),
+        halted_at: int | None = None,
     ) -> dict:
-        lifecycle._state.subscription_service = _SubscriptionServiceStub(running, lag, drops)  # type: ignore[assignment]  # stub
+        lifecycle._state.subscription_service = _SubscriptionServiceStub(  # type: ignore[assignment]  # stub
+            running, lag, drops, held, halted_at
+        )
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/health")
@@ -299,3 +316,71 @@ def test_a_dropped_event_outranks_a_stall_but_not_a_dead_coordinator() -> None:
         DegradedReason.SUBSCRIPTION_COORDINATOR,
         DegradedReason.PROJECTION_DROPPED_EVENT,
     )
+
+
+HELD = HeldProjection(
+    projection_name="resume_start_todo", event_type="ExecutionResumed", global_nonce=HEAD - 5
+)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_held_projection_is_visible_on_health_although_lag_is_zero(
+    health_payload: HealthProbe,
+) -> None:
+    """ESP v0.17.0 (#391): a projection that fails an event is held, not skipped.
+
+    Every other projection keeps consuming, so lag alone can read healthy while
+    one read model, or one ProcessManager's side effects, has stopped. The hold
+    has to set the status, add a reason and name the event.
+    """
+    body = await health_payload(True, _lag_at_head(), held=(HELD,))
+
+    subscription = body["subscription"]
+    assert subscription["status"] == "held"
+    assert body["mode"] == "degraded"
+    assert body["degraded_reasons"] == ["projection_held"]
+    assert subscription["held_projections"] == [
+        {
+            "projection": "resume_start_todo",
+            "event_type": "ExecutionResumed",
+            "global_nonce": HEAD - 5,
+        }
+    ]
+    assert "halted_at" not in subscription
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_halted_subscription_is_visible_on_health_while_still_running(
+    health_payload: HealthProbe,
+) -> None:
+    """ADR-026: halted at an undecodable event, `running` still True."""
+    body = await health_payload(True, _lag_at_head(), halted_at=HEAD - 9)
+
+    subscription = body["subscription"]
+    assert subscription["status"] == "halted"
+    assert subscription["halted_at"] == HEAD - 9
+    assert subscription["held_projections"] == []
+    assert body["degraded_reasons"] == ["subscription_halted"]
+
+
+@pytest.mark.unit
+def test_halted_and_held_rank_by_what_they_stop() -> None:
+    """A halt stops every projection; a hold stops one, and outranks its own stall."""
+    everything = _judge_read_path(
+        running=True, lag=_lag_wedged(), dropped_events=True, held=True, halted=True
+    )
+    assert everything.status == "halted"
+    assert everything.degraded_reasons == (
+        DegradedReason.SUBSCRIPTION_HALTED,
+        DegradedReason.PROJECTION_DROPPED_EVENT,
+        DegradedReason.PROJECTION_HELD,
+        DegradedReason.PROJECTION_STALLED,
+    )
+
+    held = _judge_read_path(running=True, lag=_lag_wedged(), held=True)
+    assert held.status == "held"
+
+    dead = _judge_read_path(running=False, lag=None, halted=True)
+    assert dead.status == "degraded"
