@@ -2302,8 +2302,30 @@ class _OmitsAbsentFields(BaseModel):
 #: reports when it failed and has no verdict to publish.
 #: ``test_health_contract.py`` fails if those four ever stop being a subset.
 SubscriptionHealthStatus = Literal[
-    "healthy", "degraded", "dropped_events", "stalled", "catching_up", "unknown"
+    "healthy",
+    "degraded",
+    "halted",
+    "dropped_events",
+    "held",
+    "stalled",
+    "catching_up",
+    "unknown",
 ]
+
+
+class HeldProjectionHealth(BaseModel):
+    """A projection held below an event it failed to apply (ESP #391).
+
+    It is retried there with backoff and never checkpointed past it, so it is
+    behind and stays behind until the handler is fixed or the projection is
+    rebuilt. Every other projection keeps consuming.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    projection: str = Field(description="Projection name, as in projection_checkpoints.")
+    event_type: str = Field(description="Type of the event it failed to apply.")
+    global_nonce: int = Field(description="Global nonce of the event it is held at.")
 
 
 class SubscriptionHealth(_OmitsAbsentFields):
@@ -2313,13 +2335,17 @@ class SubscriptionHealth(_OmitsAbsentFields):
     runbook already read. The fields from ``running`` down are
     ``CoordinatorSubscriptionService.get_status()``; the ones from
     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
-    ``lifecycle._describe_subscription_health``.
+    ``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).
 
     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
     rather than a default: ``lag is None`` means the coordinator is not up yet,
     so there is nothing whose progress could be measured — which is not the same
-    as "not behind", and must not serialize as ``lag: 0``. When the probe itself
-    fails, ``status`` is "unknown" and nothing else is known at all.
+    as "not behind", and must not serialize as ``lag: 0``. When the lag or
+    dropped-start probe fails, the lag fields are absent but what the
+    coordinator itself knows (``running``, ``held_projections``, ``halted_at``)
+    is still published, and still sets ``status``: a halt at an undecodable
+    head event is exactly when the lag probe fails too. ``status`` is "unknown"
+    only when none of those fires.
 
     ``ReadModelLag``'s fields are restated here because the block is flat on the
     wire and a generated client has to be able to see them. That restatement is
@@ -2332,8 +2358,10 @@ class SubscriptionHealth(_OmitsAbsentFields):
     status: SubscriptionHealthStatus = Field(
         description="Verdict on the read path: 'healthy', 'catching_up' during a replay "
         "that ends by itself, 'stalled' for a projection that does not, 'degraded' "
-        "for a coordinator that is not running, 'dropped_events' when a read model "
-        "passed an event without applying it, or 'unknown' when the probe failed.",
+        "for a coordinator that is not running, 'halted' when the subscription stopped "
+        "at a stored event it cannot decode, 'dropped_events' when a read model "
+        "passed an event without applying it, 'held' when a projection failed to apply "
+        "an event and is retried below it, or 'unknown' when the probe failed.",
     )
     running: bool | None = Field(
         default=None,
@@ -2345,6 +2373,18 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
     realtime_enabled: bool | None = Field(
         default=None, description="Whether a realtime (SSE) projection is attached."
+    )
+    held_projections: list[HeldProjectionHealth] | None = Field(
+        default=None,
+        description="Projections held below an event they failed to apply (ESP #391). "
+        "Non-empty sets status 'held'; the cause is in the API log as the handler's "
+        "exception. Null when the probe failed.",
+    )
+    halted_at: int | None = Field(
+        default=None,
+        description="Global nonce of the undecodable stored event the subscription is "
+        "halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; "
+        "repair per the ESP ADR-026 recovery steps in the API log. Null when not halted.",
     )
     is_catching_up: bool | None = Field(
         default=None,
