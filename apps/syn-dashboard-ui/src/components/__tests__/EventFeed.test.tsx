@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SSEEventFrame } from '../../types'
 import { EventFeed } from '../EventFeed'
+import { toGitCommit } from '../../hooks/useEventFeed'
 
 let pushFrame: ((frame: SSEEventFrame) => void) | null = null
 
@@ -35,7 +36,7 @@ const RECENT = [
   {
     time: '2026-10-06T09:00:00Z',
     event_type: 'git_commit',
-    data: { commit_hash: 'feedface0000', message: 'webhook flat commit', repository: 'acme/api', branch: 'main' },
+    data: { commit_hash: 'feedface0000', message: 'webhook flat commit', repository: 'acme/api', branch: 'main', url: 'https://github.com/acme/api/commit/feedface0000' },
   },
   {
     time: '2026-10-06T08:00:00Z',
@@ -91,5 +92,98 @@ describe('EventFeed', () => {
     expect(screen.getByText('9876543')).toBeTruthy()
     expect(screen.queryByText('0123456')).toBeNull()
     expect(screen.queryByText(/\?\?\?/)).toBeNull()
+  })
+
+  it('drops rows whose sha is a placeholder, blank, or not hex', async () => {
+    render(<EventFeed />)
+    await waitFor(() => expect(screen.getByText('a1b2c3d')).toBeTruthy())
+    act(() => {
+      // The exact placeholder this card exists to eliminate.
+      pushFrame?.(frame('git_commit', { sha: '???????', message: 'placeholder sha' }))
+      // Whitespace renders a blank hash, because the card slices 7 characters.
+      pushFrame?.(frame('git_commit', { sha: '   ', message: 'blank sha' }))
+      // Non-hex, and too short to be even a short sha.
+      pushFrame?.(frame('git_commit', { commit_hash: 'not-a-sha!', message: 'non hex sha' }))
+      pushFrame?.(frame('git_commit', { commit_hash: 'abc123', message: 'too short sha' }))
+      // Longer than a full sha.
+      pushFrame?.(frame('git_commit', { commit_hash: 'a'.repeat(41), message: 'too long sha' }))
+    })
+    expect(screen.queryByText(/\?\?\?/)).toBeNull()
+    expect(screen.queryByText('placeholder sha')).toBeNull()
+    expect(screen.queryByText('blank sha')).toBeNull()
+    expect(screen.queryByText('non hex sha')).toBeNull()
+    expect(screen.queryByText('too short sha')).toBeNull()
+    expect(screen.queryByText('too long sha')).toBeNull()
+  })
+
+  it('accepts a 7-character short sha, a full 40-character sha, and trims padding', async () => {
+    render(<EventFeed />)
+    await waitFor(() => expect(screen.getByText('a1b2c3d')).toBeTruthy())
+    act(() => {
+      pushFrame?.(frame('git_commit', { sha: '1234567', message: 'short sha' }))
+      pushFrame?.(frame('git_commit', { sha: 'b'.repeat(40), message: 'full sha' }))
+      pushFrame?.(frame('git_commit', { sha: '  C0FFEE1  ', message: 'padded uppercase sha' }))
+    })
+    expect(screen.getByText('1234567')).toBeTruthy()
+    expect(screen.getByText('bbbbbbb')).toBeTruthy()
+    expect(screen.getByText('C0FFEE1')).toBeTruthy()
+  })
+
+  it('keeps keyboard focus on an existing row when a live commit is prepended', async () => {
+    render(<EventFeed />)
+    await waitFor(() => expect(screen.getByText('feedfac')).toBeTruthy())
+    const link = screen.getByTitle('View on GitHub')
+    link.focus()
+    expect(document.activeElement).toBe(link)
+    act(() => {
+      pushFrame?.(frame('git_commit', { git: { operation: 'commit', sha: '0f0f0f0f0f0f', message: 'prepended' } }))
+    })
+    expect(screen.getByText('0f0f0f0')).toBeTruthy()
+    // An index-based key shifts every existing row's key here, remounting the
+    // row and detaching the focused link.
+    expect(document.activeElement).toBe(link)
+    expect(screen.getByTitle('View on GitHub')).toBe(link)
+  })
+
+  it('renders two rows for the same sha without a duplicate-key collision', async () => {
+    const errors: unknown[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args[0])
+    })
+    render(<EventFeed />)
+    await waitFor(() => expect(screen.getByText('a1b2c3d')).toBeTruthy())
+    act(() => {
+      pushFrame?.(frame('git_commit', { sha: 'abcdef1234567', message: 'first' }))
+      pushFrame?.(frame('git_commit', { sha: 'abcdef1234567', message: 'second' }))
+    })
+    expect(screen.getAllByText('abcdef1')).toHaveLength(2)
+    expect(errors.filter((e) => String(e).includes('same key'))).toHaveLength(0)
+    spy.mockRestore()
+  })
+})
+
+describe('toGitCommit', () => {
+  it('returns null without throwing for shapes that are not commit payloads', () => {
+    expect(toGitCommit('t', 'git_commit', null)).toBeNull()
+    expect(toGitCommit('t', 'git_commit', undefined)).toBeNull()
+    expect(toGitCommit('t', 'git_commit', [])).toBeNull()
+    expect(toGitCommit('t', 'git_commit', ['a1b2c3d4e5f6'])).toBeNull()
+    expect(toGitCommit('t', 'git_commit', 'a1b2c3d4e5f6')).toBeNull()
+    expect(toGitCommit('t', 'git_commit', 42)).toBeNull()
+    expect(toGitCommit('t', 'git_commit', { git: null })).toBeNull()
+    expect(toGitCommit('t', 'git_commit', { git: 'a1b2c3d4e5f6' })).toBeNull()
+    expect(toGitCommit('t', 'git_commit', { git: ['a1b2c3d4e5f6'] })).toBeNull()
+    expect(toGitCommit('t', 'git_commit', { context: 7 })).toBeNull()
+    expect(toGitCommit('t', 'git_commit', { sha: 123456789 })).toBeNull()
+    expect(toGitCommit('t', 'git_commit', { commit_hash: { toString: () => 'a1b2c3d' } })).toBeNull()
+    expect(toGitCommit('t', 'git_checkout', { sha: 'a1b2c3d4e5f6' })).toBeNull()
+  })
+
+  it('gives two rows for the same sha and timestamp distinct ids', () => {
+    const payload = { sha: 'a1b2c3d4e5f6', timestamp: '2026-10-06T10:00:00Z' }
+    const first = toGitCommit('t', 'git_commit', payload)
+    const second = toGitCommit('t', 'git_commit', payload)
+    expect(first?.id).toBeTruthy()
+    expect(first?.id).not.toEqual(second?.id)
   })
 })
