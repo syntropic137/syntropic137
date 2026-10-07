@@ -322,9 +322,10 @@ class ModelId(StrEnum):
     fallback.
     """
 
-    # --- Current generation (verified 2026-09-24) ---
+    # --- Current generation (verified 2026-09-24; gpt-6.1-sol 2026-10-06) ---
     CLAUDE_OPUS_5_5 = "claude-opus-5-5"
     CLAUDE_SONNET_5_5 = "claude-sonnet-5-5"  # verified 2026-10-07
+    GPT_6_1_SOL = "gpt-6.1-sol"
     GPT_6_SOL = "gpt-6-sol"
     # --- ADR-067 phase 0 generation (verified 2026-08-16) ---
     CLAUDE_OPUS_5 = "claude-opus-5"
@@ -365,7 +366,7 @@ class CodexModelAlias(StrEnum):
 
 
 CODEX_MODEL_ALIAS_TARGETS: dict[CodexModelAlias, ModelId] = {
-    CodexModelAlias.GPT_SOL: ModelId.GPT_6_SOL,
+    CodexModelAlias.GPT_SOL: ModelId.GPT_6_1_SOL,
 }
 """What each codex alias runs as today. One entry per ``CodexModelAlias``."""
 
@@ -396,7 +397,7 @@ class AliasResolutionBasis(StrEnum):
 
     TRANSLATED = "translated"
     """The platform itself rewrites the alias before the CLI sees it (codex
-    ``--model gpt-6-sol``): the target IS what runs."""
+    ``--model gpt-6.1-sol``): the target IS what runs."""
 
     EXPECTED = "expected"
     """The alias reaches the CLI verbatim and the CLI resolves it (claude):
@@ -455,7 +456,7 @@ And at EXECUTION, for templates stored before defaults were persisted, whose
 phases carry ``model=None``. THIS CHANGES WHAT THOSE TEMPLATES RUN, on
 purpose: a legacy claude phase that used to fall back to ``haiku`` now runs
 ``opus``, and a legacy codex phase that used to leave the choice to codex now
-runs ``gpt-sol`` (``--model gpt-6-sol``). The owner approved this on
+runs ``gpt-sol`` (``--model gpt-6.1-sol``). The owner approved this on
 2026-09-24; there is deliberately no migration pinning legacy phases to the
 old behaviour. Reinstalling such a template does not rewrite its stored
 ``None`` either (see ``CreateWorkflowTemplateHandler``); a phase EDIT does.
@@ -480,7 +481,7 @@ run as Haiku, and synthesizing the provider name ``"codex"`` produced
 ``codex exec --model codex`` and GPT-5.6 rates for a model never run.
 
 ``gpt-sol`` is not a guess. It is a concrete, priced model that the platform
-now FORCES with ``--model gpt-6-sol``, so the requested model is the model that
+now FORCES with ``--model gpt-6.1-sol``, so the requested model is the model that
 runs, and the price attached to it is the price of that model. The observed
 model (read from the codex rollout, #1284) still wins wherever it exists.
 """
@@ -526,6 +527,7 @@ CLAUDE_MODEL_IDS: frozenset[ModelId] = frozenset(
 
 CODEX_MODEL_IDS: frozenset[ModelId] = frozenset(
     {
+        ModelId.GPT_6_1_SOL,
         ModelId.GPT_6_SOL,
         ModelId.GPT_5_6_SOL,
         ModelId.GPT_5_6_TERRA,

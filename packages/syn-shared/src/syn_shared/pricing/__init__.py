@@ -236,6 +236,21 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.10"),
     ),
+    # GPT-6.1-Sol (codex slug `gpt-6.1-sol`, the `gpt-sol` target since
+    # 2026-10-06): $2 in / $0.10 cached / $2.50 cache write / $10 out per
+    # MTok, SHORT-CONTEXT (<=272K input) Standard tier. Source, retrieved
+    # 2026-10-06: https://developers.openai.com/api/docs/pricing and
+    # https://developers.openai.com/api/docs/models/gpt-6.1-sol . Above 272K
+    # input OpenAI bills 2x input/cache and 1.5x output for the whole request;
+    # that tier is not modelled, so a long-context run is under-priced. Only
+    # the cached-input rate differs from gpt-6-sol (half).
+    ModelId.GPT_6_1_SOL: ModelPricing(
+        model_id=ModelId.GPT_6_1_SOL,
+        input_per_million=Decimal("2.00"),
+        output_per_million=Decimal("10.00"),
+        cache_creation_per_million=Decimal("2.50"),
+        cache_read_per_million=Decimal("0.10"),
+    ),
     # GPT-6-Sol (codex slug `gpt-6-sol`): $2 in / $0.20 cached / $10 out per
     # MTok, SHORT-CONTEXT Standard tier; the long-context rate was not
     # captured, so a long-context run is under-priced (same caveat as the

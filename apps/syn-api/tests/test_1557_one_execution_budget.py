@@ -109,6 +109,7 @@ if TYPE_CHECKING:
     from event_sourcing import DomainEvent
 
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts.orchestration import AgentExecutionResult
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
 
@@ -1073,8 +1074,10 @@ def _withdraw_once_granted(
     held = world.budget.held
 
     @asynccontextmanager
-    async def _granted_then_withdrawn(claim: StartClaim) -> AsyncIterator[None]:
-        async with held(claim):
+    async def _granted_then_withdrawn(
+        claim: StartClaim, admitted: AdmissionTicket | None = None
+    ) -> AsyncIterator[None]:
+        async with held(claim, admitted):
             if claim.execution_id in target:
                 running_at_grant.append(world.budget.running)
                 assert (await _cancel(claim.execution_id)).state == "cancelled"

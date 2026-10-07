@@ -13,6 +13,7 @@ from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import (
     AdmissionAnnouncementFailedError,
     AdmissionAnnouncer,
+    AdmissionDrainTimeoutError,
     AdmissionGate,
     AdmissionTicket,
     MaintenanceMode,
@@ -27,6 +28,7 @@ from syn_domain.contexts._shared.repository_ref import RepositoryRef
 __all__ = [
     "AdmissionAnnouncementFailedError",
     "AdmissionAnnouncer",
+    "AdmissionDrainTimeoutError",
     "AdmissionGate",
     "AdmissionOpenEvent",
     "AdmissionRefusedError",
