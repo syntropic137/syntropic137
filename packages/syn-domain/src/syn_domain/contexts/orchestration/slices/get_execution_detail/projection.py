@@ -410,23 +410,25 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not existing:
             return
 
-        phase_id = event_data.get("phase_id")
+        phase_id: str = event_data.get("phase_id") or ""
         phases = existing.get("phases", [])
 
-        found = self._find_phase(phases, phase_id or "")
+        found = self._find_phase(phases, phase_id)
         if found:
             _, phase = found
             self._update_phase_metrics(phase, event_data)
         else:
             budgets = existing.get("phase_budgets") or {}
             new_phase = PhaseDetail.completed(
-                phase_id or "",
-                phase_id or "",
+                phase_id,
+                phase_id,
                 event_data,
-                timeout_seconds=budgets.get(phase_id or ""),
+                timeout_seconds=budgets.get(phase_id),
             )
             row = new_phase.to_dict()
-            row.update((existing.get("phase_agents") or {}).get(phase_id or "", {}))
+            # The agent held by `on_agent_execution_completed` for a phase
+            # that had no row yet (PC-83).
+            row.update(existing.get("phase_agents", {}).get(phase_id, {}))
             phases.append(row)
 
         # Aggregate totals
