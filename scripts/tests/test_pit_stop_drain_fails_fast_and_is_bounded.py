@@ -275,8 +275,10 @@ def test_the_gate_prints_queued_versus_running(tmp_path: Path, host: tuple[_Host
 
     proc = _run(tmp_path, api, budget=2700)
 
-    gate_line = next(line for line in proc.stdout.splitlines() if "queued=" in line)
-    assert "queued=2 running=1" in gate_line
+    # Printed AT THE GATE, before the drain starts: the drain's own checks print
+    # the same counts, so only the order shows the gate read them.
+    at_gate = proc.stdout.split("==> drain:")[0]
+    assert "queued=2 running=1" in at_gate
     assert proc.returncode == 0, proc.stderr
 
 
