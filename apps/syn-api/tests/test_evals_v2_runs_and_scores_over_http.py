@@ -386,3 +386,157 @@ class TestScore:
         response = await _score(client, eval_id, "r1", "MAYBE")
 
         assert response.status_code == 422
+
+
+async def _start_resumed_child(
+    parent_id: str, child_id: str, *, workflow_version: str | None, reinstall_at: str | None
+) -> None:
+    """A parent that ran at ``workflow_version`` and failed, then the child its
+    resume admitted - started through the same ``resume_start_command`` the
+    resume route uses, AFTER the template was reinstalled at ``reinstall_at``."""
+    from syn_api._wiring import get_workflow_execution_repository, get_workflow_repository
+    from syn_domain.contexts.orchestration import (
+        CreateWorkflowTemplateCommand,
+        UpdateWorkflowTemplateCommand,
+        WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        FailExecutionCommand,
+        ResumeExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        phase_definitions_of,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.test_resume_start import (
+        COMMIT,
+        _pinned,
+        _run_research,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        FailureClassification,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+        WorkflowClassification,
+        WorkflowType,
+    )
+
+    templates = get_workflow_repository()
+    created = CreateWorkflowTemplateCommand(
+        aggregate_id="wf-1",
+        name="Resume provenance",
+        workflow_type=WorkflowType.RESEARCH,
+        classification=WorkflowClassification.SIMPLE,
+        repository_url="",
+        requires_repos=False,
+        phases=[PhaseDefinition(phase_id="research", name="Research", order=1)],
+        version=workflow_version,
+    )
+    template = WorkflowTemplateAggregate()
+    template._handle_command(created)
+    await templates.save(template)
+
+    executions = get_workflow_execution_repository()
+    phases = _pinned()
+    parent = WorkflowExecutionAggregate()
+    parent.start_execution(
+        StartExecutionCommand(
+            execution_id=parent_id,
+            workflow_id="wf-1",
+            workflow_name="Resume provenance",
+            total_phases=len(phases),
+            inputs={},
+            phase_definitions=phase_definitions_of(phases),
+            pinned_phases=phases,
+            source_commits=[COMMIT],
+            workflow_version=workflow_version,
+        )
+    )
+    _run_research(parent)
+    parent.fail_execution(
+        FailExecutionCommand(
+            execution_id=parent_id,
+            error="boom",
+            error_type="AgentError",
+            failed_phase_id=None,
+            completed_phases=1,
+            total_phases=len(phases),
+            classification=FailureClassification.UNCLASSIFIED,
+        )
+    )
+    parent.resume_execution(
+        ResumeExecutionCommand(execution_id=parent_id, resume_execution_id=child_id)
+    )
+    await executions.save_new(parent)
+
+    if reinstall_at is not None:
+        reinstalled = await templates.get_by_id("wf-1")
+        assert reinstalled is not None
+        reinstalled._handle_command(
+            UpdateWorkflowTemplateCommand(
+                **created.model_dump(exclude={"force", "version", "source_digest"}),
+                version=reinstall_at,
+                force=True,
+            )
+        )
+        await templates.save(reinstalled)
+        moved = await templates.get_by_id("wf-1")
+        assert moved is not None
+        assert moved.package_version == reinstall_at
+
+    stored = await executions.get_by_id(parent_id)
+    assert stored is not None
+    child = WorkflowExecutionAggregate()
+    child.start_resume(stored.resume_start_command())
+    await executions.save_new(child)
+
+
+async def _project_executions() -> None:
+    from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
+
+    from syn_adapters.projections.manager import get_projection_manager
+    from syn_adapters.storage.event_store_client import get_event_store_client
+    from syn_domain.testing.stored_replay import replay
+
+    await replay(
+        get_event_store_client(),  # type: ignore[arg-type]  # memory client in tests
+        MemoryCheckpointStore(),
+        get_projection_manager().workflow_execution_list,
+    )
+
+
+class TestAResumedRunsVersion:
+    """A resumed child is a run of the version its PARENT ran, whatever the
+    template says by the time the child starts (Evals v2 provenance)."""
+
+    async def test_a_template_reinstalled_between_parent_and_child_does_not_move_it(
+        self, client: AsyncClient
+    ) -> None:
+        await _start_resumed_child(
+            "exec-parent", "exec-child", workflow_version="1.2.3", reinstall_at="2.0.0"
+        )
+        eval_id = await _create(client)
+        attached = await client.post("/executions/exec-child/eval", json={"eval_id": eval_id})
+        assert attached.status_code == 200, attached.text
+        await _project_executions()
+        await _catch_up()
+
+        runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+
+        assert [(r["execution_id"], r["workflow_version"]) for r in runs] == [
+            ("exec-child", "1.2.3")
+        ]
+
+    async def test_a_parent_with_no_known_version_reports_none(self, client: AsyncClient) -> None:
+        await _start_resumed_child(
+            "exec-parent", "exec-child", workflow_version=None, reinstall_at="2.0.0"
+        )
+        eval_id = await _create(client)
+        attached = await client.post("/executions/exec-child/eval", json={"eval_id": eval_id})
+        assert attached.status_code == 200, attached.text
+        await _project_executions()
+        await _catch_up()
+
+        runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+
+        assert [(r["execution_id"], r["workflow_version"]) for r in runs] == [("exec-child", None)]
