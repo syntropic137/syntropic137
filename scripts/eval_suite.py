@@ -262,7 +262,9 @@ _BLOCKING_HEADING = re.compile(r"^[\W\d]*blocking\b", re.IGNORECASE)
 #: A heading that names non-blocking content (``NON-BLOCKING``, ``Not blocking``,
 #: ``Nits``) at ANY depth: nothing under it is a blocking finding, even when it
 #: is nested inside the ``BLOCKING`` section.
-_NON_BLOCKING_HEADING = re.compile(r"\b(non[\s-]*blocking|not\s+blocking|nits?|minor)\b", re.IGNORECASE)
+_NON_BLOCKING_HEADING = re.compile(
+    r"\b(non[\s-]*blocking|not\s+blocking|nits?|minor)\b", re.IGNORECASE
+)
 #: The structured fields the verify prompt requires in each finding block.
 _FIELD = re.compile(r"^\s*[-*]?\s*(file|defect|why blocking)\s*:\s*(.*)$", re.IGNORECASE)
 
