@@ -209,6 +209,8 @@ sleep() {{ :; }}
 {_definition("api_curl")}
 {_definition("api")}
 {_definition("maintenance")}
+{_definition("mono_now")}
+{_definition("left")}
 """
     # The real curl behind a recorder of its argv: what `ps` would have shown (PC-85).
     bin_dir = tmp / "bin"

@@ -507,7 +507,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
 
         A matching version whose source digest differs is refused with the
         stronger error: that is the signature of a republished version, which
-        a version check alone would not catch.
+        a version check alone would not catch. This holds for an archived
+        template too: archiving retires the template, not its provenance, so
+        a republish over an archived version is still a republish (#1705).
 
         A byte-identical reinstall never reaches here: the caller treats it as
         a no-op, because #822 is about install being idempotent and failing on
@@ -522,12 +524,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             return
         if command.force:
             return
-        # An archived template is not "already installed". Reinstalling it is
-        # how a user restores one a failed update archived, so refusing here
-        # would strand them behind --force for an ordinary recovery.
-        if self._is_archived:
-            return
 
+        # Checked BEFORE the archived exemption below: archived or not, the
+        # same version under a different digest is a republish (#1705).
         digest_changed = (
             command.source_digest is not None
             and self._source_digest is not None
@@ -540,6 +539,13 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
                 installed_digest=str(self._source_digest),
                 incoming_digest=str(command.source_digest),
             )
+
+        # An archived template is not "already installed". Reinstalling it with
+        # the provenance it was archived under is how a user restores one a
+        # failed update archived, so refusing here would strand them behind
+        # --force for an ordinary recovery.
+        if self._is_archived:
+            return
 
         raise WorkflowTemplateVersionAlreadyInstalledError(
             workflow_id=str(self.id),

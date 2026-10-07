@@ -14,8 +14,33 @@ Status: proposed implementation plan. Date: 2026-09-29.
 | 6. API and CLI | merged, partial: `POST /evals` (id minted server-side, so it cannot share another aggregate's stream; receipt read from the aggregate), `GET /evals`, `GET /evals/{id}`, `GET /evals/{id}/runs` (= `GET /executions?eval_id=`), `POST /evals/{id}/archive`; `syn eval create/list/show/runs/archive` beside the existing `attach/detach`. Not yet: `PATCH /evals/{id}` (and `syn eval update`) and an eval-scoped `POST /evals/{id}/runs`; launching into an eval already works through `syn workflow run --eval`. Every eval command now refuses an id whose stream holds no `EvalCreated` (`EvalAggregate.exists`): on the server an execution's id loads the execution's stream as an eval | #1649 |
 | 7. Dashboard and docs | not started. The suite and scorer below are documented in `evals/verifier-seed-v1/suite.yaml` and `scripts/eval_suite.py`; no dashboard page and no public docs yet | |
 | 8. Integration acceptance | in review: the verifier seed suite `evals/verifier-seed-v1` (four escaped bugs from #1574, #1649, #1652 and #1654, each pinned to the commit before its fix), a read-only verify-only workflow `eval-verify-pinned-v1` on Opus, and `scripts/eval_suite.py check` (offline: definitions, SHAs, pin-before-fix, bug files) / `launch` (installs the workflow from the checked-in file and refuses unless the server's phases, prompts and models then match, before any eval exists; records each started run in `evals/verifier-seed-v1/launches.jsonl`) / `score` (pass = verdict blocked AND the report names the bug file and every keyword group; scores only ledger runs still in their eval, whose eval pins the case's commit and whose workflow is the suite's). One eval per case, grouped by the tag `verifier-seed-v1:v1`, because a Baseline pins one SHA per repository. Not yet: the runs have not been launched, so no score exists; no `syn eval score` in the Node CLI; and the API exposes no run's `checked_out_commits`, and the read path does not say whether a run was launched into its eval or attached later, so the scorer trusts the launch ledger plus the eval's Baseline for the commit; a run found only by tag is listed and never scored | #1683 |
+| 8a. Same cases, different verifier | in review: suite v2 adds two escaped bugs from #1668 (#1679 Live Commits accepted any non-empty string as a sha; #1680 a private repo rendered public because the App's live privacy was discarded), pinned at #1668's certified head. A second workflow `eval-verify-pinned-codex-v1` is `eval-verify-pinned-v1` with only the verify agent changed (codex, `gpt-sol`, `sandbox: workspace-write`; `read-only` is refused because it blocks the report write); a test asserts the prompts are byte-identical and the documents differ only in identity and the agent block. The suite lists both workflows; `--workflow` selects one and the tag is `verifier-seed-v1:v2:<workflow id>`, so each verifier is its own eval set and score table. v1 (Opus 5.5, four cases) scored 4/4 at $0.90-1.28 and 5-7 min per case. Not yet: no v2 run of either verifier | this PR |
 
 Issue: #967. Keep this table current when a step's PR merges.
+
+### Running the same cases under a different verifier
+
+`evals/verifier-seed-v1/suite.yaml` lists every workflow its cases run under.
+They differ only in the verify phase's agent, so a score difference is the
+verifier. Each run of the script picks one with `--workflow` (default: the
+first listed):
+
+```
+uv run python scripts/eval_suite.py check                                     # validates every listed workflow
+uv run python scripts/eval_suite.py launch --workflow eval-verify-pinned-v1   # Opus
+uv run python scripts/eval_suite.py launch --workflow eval-verify-pinned-codex-v1
+uv run python scripts/eval_suite.py score  --workflow eval-verify-pinned-v1
+uv run python scripts/eval_suite.py score  --workflow eval-verify-pinned-codex-v1
+```
+
+`launch` costs money and never runs in CI. Commit `launches.jsonl` after each
+launch. The tag `<suite id>:v<version>:<workflow id>` keeps each verifier's
+evals, ledger rows and score table apart, so comparing them means putting the
+two `score` tables side by side: pass per case, cost and duration. Adding a
+verifier is a new workflow file (same prompt; the byte-identity test in
+`scripts/tests/test_eval_suite.py` names the pair it checks) plus one entry
+under `workflows:`. Changing a listed workflow's model or prompt bumps the
+suite version.
 
 ## Product goal
 

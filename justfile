@@ -2482,6 +2482,8 @@ changelog-check *args:
 #   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
 #   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
 #   just pit-stop 0.29.1-beta.5 --skip-probe    # EMERGENCIES ONLY: no proof a run starts
+# The drain gives up after SYN_PIT_DRAIN_TIMEOUT seconds (default 2700) and lists
+# what is still running; it never cancels anything.
 [positional-arguments]
 pit-stop version *flags:
     #!/usr/bin/env bash
