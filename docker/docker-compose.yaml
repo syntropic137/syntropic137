@@ -156,6 +156,12 @@ services:
     extends:
       file: generated/api.env.yaml
       service: api-env
+    # Shutdown records each running execution INTERRUPTED after saving its
+    # unpushed work (#1381), and Docker SIGKILLs at this deadline. It must
+    # exceed uvicorn's --timeout-graceful-shutdown (30) + SYN_INTERRUPT_BUDGET_S
+    # (60) + the salvage settle after a cut-off (95, shutdown_interruption.py).
+    # Raise it with SYN_INTERRUPT_BUDGET_S, or the kill decides instead.
+    stop_grace_period: 200s
     build:
       context: ..
       dockerfile: infra/docker/images/syn-api/Dockerfile
