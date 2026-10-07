@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from syn_adapters.projection_stores.lean_documents import lean_source
+from syn_adapters.projection_stores.postgres_page_keys import instant_sql
 from syn_adapters.projection_stores.postgres_query_builder import _SAFE_FIELD, _build_where_clause
 from syn_domain.projection_scan import SqlPage, UnjudgedRow, WindowPlacement
 
@@ -355,6 +356,26 @@ LIST_FILTER_INDEXES: dict[str, tuple[str, ...]] = {
     "artifact_summaries": ("workflow_id", "execution_id", "session_id"),
 }
 
+#: Projection -> the timestamp fields its list page is windowed on, and so is
+#: indexed on by instant (``postgres_page_keys.instant_sql``): the window is a
+#: range scan on the index rather than a parse of every row's text.
+LIST_WINDOW_INDEXES: dict[str, tuple[str, ...]] = {
+    "workflow_executions": ("started_at",),
+}
+
+
+def _list_indexes(projection: str, table_name: str) -> list[tuple[str, str]]:
+    """Each list index ``projection`` should have: its name, and what it indexes."""
+    filters = [
+        (f"idx_{table_name}_list_{_field(field)}", f"(data->>'{field}')")
+        for field in LIST_FILTER_INDEXES.get(projection, ())
+    ]
+    windows = [
+        (f"idx_{table_name}_window_{_field(field)}", instant_sql(field))
+        for field in LIST_WINDOW_INDEXES.get(projection, ())
+    ]
+    return filters + windows
+
 
 #: How long a build may wait for the transactions CONCURRENTLY waits out. One
 #: long transaction would otherwise hold the build - and its pool connection -
@@ -373,8 +394,7 @@ async def ensure_list_indexes(pool: asyncpg.Pool, projection: str, table_name: s
     and swallowed: the index makes a filtered page fast; without it the page
     scans and answers the same.
     """
-    for field in LIST_FILTER_INDEXES.get(projection, ()):
-        name = f"idx_{table_name}_list_{_field(field)}"
+    for name, expression in _list_indexes(projection, table_name):
         try:
             async with pool.acquire() as conn:
                 await conn.execute(f"SET lock_timeout = '{_INDEX_LOCK_TIMEOUT}'")
@@ -389,7 +409,7 @@ async def ensure_list_indexes(pool: asyncpg.Pool, projection: str, table_name: s
                     await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
                 await conn.execute(
                     f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} "
-                    f"ON {table_name} ((data->>'{field}'))"
+                    f"ON {table_name} (({expression}))"
                 )
         except Exception:
             logger.warning(
