@@ -17,6 +17,8 @@
 # v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
 # v2: two cases added (#1679, #1680) and the codex verifier. The Sonnet
 #     verifier was added later under v2: a new workflow, no existing table.
+#     So were three codex verifiers pinned to cheaper GPT slugs (gpt-6-luna,
+#     gpt-5.6-luna, gpt-5.6-terra), the same way.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
@@ -46,6 +48,25 @@ workflows:
     path: workflows/evals/verify-pinned-sonnet/workflow.yaml
     models:
       verify: sonnet
+  # Is there a GPT verifier cheaper per run than gpt-6.1-sol that still
+  # catches every case? Each names an explicit codex slug, never an alias, so
+  # no retargeting can change what was measured. Per MTok (in / out), from
+  # syn_shared.pricing: gpt-6-luna 0.10 / 0.50, gpt-5.6-luna 0.20 / 1.20,
+  # gpt-5.6-terra 2.00 / 12.00 against gpt-6.1-sol's 2.00 / 10.00 - Terra
+  # is cheaper only if it spends fewer tokens. Added under v2: new workflows,
+  # no existing table.
+  - id: eval-verify-pinned-codex-gpt-6-luna-v1
+    path: workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml
+    models:
+      verify: gpt-6-luna
+  - id: eval-verify-pinned-codex-gpt-5-6-luna-v1
+    path: workflows/evals/verify-pinned-codex-gpt-5-6-luna/workflow.yaml
+    models:
+      verify: gpt-5.6-luna
+  - id: eval-verify-pinned-codex-gpt-5-6-terra-v1
+    path: workflows/evals/verify-pinned-codex-gpt-5-6-terra/workflow.yaml
+    models:
+      verify: gpt-5.6-terra
 history:
   # v1 predates the workflow suffix in the tag.
   - version: 1

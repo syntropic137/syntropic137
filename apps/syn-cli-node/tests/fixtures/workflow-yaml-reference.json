@@ -109,6 +109,39 @@
       ],
       "document_sha256": "e415b6b2ef430f4d63e526324fff380183ca16e73bd44179c227144132e7024b"
     },
+    "workflows/evals/verify-pinned-codex-gpt-5-6-luna/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "2c6be39e5740b5e989314b4cd9c3adbbb6ce388ce6f85959bf9009cf66d6e9d2"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-5-6-terra/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "bce8b0f4922a247e3bd8ac6f7302258f96b63ec9c107ae1422a6a80f04b5d453"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "331f06b66b87e16d4803ec20897a40eee344e489287f5ae9d8e0087ad2659846"
+    },
     "workflows/evals/verify-pinned-sonnet/workflow.yaml": {
       "phases": [
         {
