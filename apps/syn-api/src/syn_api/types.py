@@ -88,6 +88,7 @@ from syn_domain.contexts.orchestration import (
     EvalId,
     FailureClassification,
     PhaseProgress,
+    PlannedPhase,
     QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
@@ -646,6 +647,36 @@ class PhaseProgressInfo(BaseModel):
         are counted.
         """
         return cls.of(PhaseProgress(status=status, completed=completed, skipped=0, defined=defined))
+
+
+class PlannedPhaseInfo(BaseModel):
+    """One phase the run declared, and where it stands (feedback cee46909).
+
+    ``ExecutionDetail.phase_plan`` lists every declared phase, so a client
+    shows what is left as well as what ran. Clients render ``status_display``
+    and style by ``status``; they never work the status out themselves.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    name: str
+    status: str
+    """``pending``, ``skipped`` (a review made it unnecessary), ``inherited``
+    (completed by the run this one resumed), or the status of the phase as it
+    ran here: ``running``, ``completed``, ``failed``, ..."""
+    status_display: str
+    """E.g. ``Pending``, ``Skipped (not needed)``, ``Inherited (completed earlier)``."""
+
+    @classmethod
+    def of(cls, phase: PlannedPhase) -> PlannedPhaseInfo:
+        """The response shape of the domain's answer."""
+        return cls(
+            phase_id=phase.phase_id,
+            name=phase.name,
+            status=phase.status,
+            status_display=phase.status_display,
+        )
 
 
 class ExecutionSummary(BaseModel):
@@ -1677,6 +1708,9 @@ class ExecutionDetailFull(BaseModel):
     that never started (#1147)."""
     completed_phases: int = 0
     phase_progress: PhaseProgressInfo
+    phase_plan: list[PlannedPhaseInfo]
+    """Every phase the run declared, in order, with where each stands. Counts
+    the same phases ``total_phases`` does; ``phases`` is only the ones that ran."""
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
