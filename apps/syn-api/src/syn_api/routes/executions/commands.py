@@ -44,11 +44,11 @@ from syn_api.types import (
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
-    PhaseProgress,
     EvalChoice,
     EvalId,
     EvalUnavailableError,
     LaunchEval,
+    PhaseProgress,
     RepositoryOutsideBaselineError,
     RequestExecutionCommand,
     SkillError,

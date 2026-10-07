@@ -113,7 +113,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
-from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionAlreadyRequestedError,
     ExecutionRequestAggregate,
@@ -175,6 +174,7 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
 )
@@ -389,6 +389,7 @@ __all__ = [
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
+    "PhaseProgress",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
     "PullRequestCommenter",
@@ -399,7 +400,6 @@ __all__ = [
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
     "RemoveWorkflowTagsHandler",
-    "PhaseProgress",
     "ReportedFailureReason",
     "RepositoryOutsideBaselineError",
     "RequestExecutionCommand",

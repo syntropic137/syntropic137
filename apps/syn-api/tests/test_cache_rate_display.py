@@ -16,7 +16,14 @@ import pytest
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_api.cache_rate_display import cache_rate_display, format_rate_multiplier
-from syn_api.types import ExecutionDetailFull, Ok, PhaseExecution, SessionDetail
+from syn_api.types import (
+    ExecutionDetailFull,
+    Ok,
+    PhaseExecution,
+    PhaseProgressInfo,
+    SessionDetail,
+)
+from syn_domain.contexts.orchestration import PhaseProgress
 from syn_shared.agents import ModelId
 from syn_shared.observed_model import UNKNOWN_MODEL_KEY
 
@@ -97,6 +104,9 @@ async def _execution_response(monkeypatch: pytest.MonkeyPatch, phases: list[Phas
                 workflow_name="wf",
                 status="completed",
                 phases=phases,
+                phase_progress=PhaseProgressInfo.of(
+                    PhaseProgress(status="completed", completed=0, skipped=0, defined=0)
+                ),
                 total_duration_seconds=None,
                 repos=[],
             )
