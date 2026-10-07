@@ -12,7 +12,7 @@
 import { FolderGit2, Lock } from 'lucide-react'
 
 import { Card, EmptyState, PageLoader } from '../components'
-import { useRepoList, type Attachment, type RepoRow } from '../hooks/useRepoList'
+import { useRepoList, type Attachment, type Privacy, type RepoRow } from '../hooks/useRepoList'
 
 const MUTED_BADGE =
   'rounded-full bg-[var(--color-surface-elevated)] px-2 py-0.5 text-xs text-[var(--color-text-muted)]'
@@ -26,6 +26,24 @@ function AttachedBadge({ attachment }: { attachment: Attachment }) {
     )
   }
   return <span className={MUTED_BADGE}>{attachment === 'unknown' ? 'Unknown' : 'Not attached'}</span>
+}
+
+/** A public repo gets no mark; an unknown one never passes for public. */
+function PrivacyMark({ privacy }: { privacy: Privacy }) {
+  if (privacy === 'private') {
+    return <Lock aria-label="Private" className="h-3 w-3 text-[var(--color-text-muted)]" />
+  }
+  if (privacy === 'unknown') {
+    return (
+      <span
+        className={MUTED_BADGE}
+        title="Privacy not visible: the GitHub App cannot reach this repo, and registration does not record it"
+      >
+        Privacy unknown
+      </span>
+    )
+  }
+  return null
 }
 
 function RepoTable({ repos }: { repos: RepoRow[] }) {
@@ -45,9 +63,7 @@ function RepoTable({ repos }: { repos: RepoRow[] }) {
               <td className="px-4 py-2 text-[var(--color-text-primary)]">
                 <span className="inline-flex items-center gap-1.5">
                   {repo.fullName}
-                  {repo.isPrivate && (
-                    <Lock aria-label="Private" className="h-3 w-3 text-[var(--color-text-muted)]" />
-                  )}
+                  <PrivacyMark privacy={repo.privacy} />
                 </span>
               </td>
               <td className="px-4 py-2 text-[var(--color-text-secondary)]">
