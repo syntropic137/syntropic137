@@ -16,7 +16,17 @@ expected:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_eval/EvalAggregate.py
     - packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/eval_admission.py
     - packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/eval_edit.py
+  # Matched within ONE blocking finding, case-insensitive, with `_`, `-` and
+  # space alike, as substrings: a stem (`collid`) covers its inflections.
+  # Every group must match; within a group, any one word. Each group is one
+  # concept of the defect, written as the ways a correct finding says it.
   keywords:
-    - [execution]
-    - [stream]
-    - [exists, EvalCreated, not an eval, no eval, accepted, accepts]
+    # The id that is not an eval's.
+    - [execution, run id, run's id, workflow run, other aggregate, another aggregate,
+       foreign, unrelated]
+    # It is looked up by stream, not by type.
+    - [stream, event store, events, load, rehydrat, replay, aggregate type, type check]
+    # So a non-eval is accepted as one.
+    - [exist, present, evalcreated, eval created, not an eval, no eval, isn't an eval,
+       accepted, accept, treated as, mistak, satisf, passes, without, wrong type,
+       any aggregate, not checked, never checked, admit, attach]

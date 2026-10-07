@@ -14,6 +14,15 @@ expected:
   # name, because a verifier writes `minio.py:212` as often as the full path.
   files:
     - packages/syn-adapters/src/syn_adapters/storage/artifact_storage/minio.py
+  # Matched within ONE blocking finding, case-insensitive, with `_`, `-` and
+  # space alike, as substrings: a stem (`collid`) covers its inflections.
+  # Every group must match; within a group, any one word. Each group is one
+  # concept of the defect, written as the ways a correct finding says it.
   keywords:
-    - [key, object name, path]
-    - ["404", not found, NoSuchKey, mismatch, does not match, different]
+    # The object key the two sides compute.
+    - [key, object name, object path, path, prefix, object id, artifact id, name]
+    # They disagree, so the read misses.
+    - ["404", not found, nosuchkey, no such key, mismatch, not match, "n't match",
+       differ, disagree, inconsistent, wrong, another, never read, cannot read,
+       "can't read", never retriev, cannot retriev, "can't retriev", cannot be read,
+       cannot be retriev, fail, missing, discard, drop, lost, unreachable, orphan]

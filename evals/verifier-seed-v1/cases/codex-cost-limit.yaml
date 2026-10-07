@@ -14,7 +14,20 @@ expected:
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
     - packages/syn-shared/src/syn_shared/agents.py
+  # Matched within ONE blocking finding, case-insensitive, with `_`, `-` and
+  # space alike, as substrings: a stem (`collid`) covers its inflections.
+  # Every group must match; within a group, any one word. Each group is one
+  # concept of the defect, written as the ways a correct finding says it.
   keywords:
     - [codex]
-    - [usage, token, cost]
-    - [turn end, end of the turn, once, after the run, turn.completed, turn completed, too late, cannot stop, never stop]
+    # What the limit is checked against.
+    - [usage, token, cost, spend, spent, consum, budget, price, dollar, max cost usd]
+    # It only arrives at the end, after the money is gone.
+    - [turn end, end of the turn, end of the run, end of execution, at the end, once,
+       after the run, after all, after spend, after the spend, after the fact, afterward,
+       turn.completed, turn completed, complet, finish, shut down, shutdown, exit,
+       only when, only at, only after, too late, cannot stop, "can't stop", never stop,
+       cannot interrupt, "can't interrupt", never interrupt, cannot cut, already spent,
+       already been spent, has occurred, not stream, no running, no incremental,
+       never incremental, mid run, mid turn, during the run, while it runs, exceed,
+       overshoot, overrun, unbounded, not enforced, never enforced, ineffective, no effect]

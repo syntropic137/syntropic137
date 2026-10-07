@@ -241,10 +241,12 @@ Verdict = Literal["certified", "blocked"]
 
 class Score(_Frozen):
     verdict: Verdict | None
+    findings: int
+    """How many structured blocking findings the report holds."""
     named_file: str | None
-    """The first expected file the report names, by file name."""
+    """The expected file the best-matching blocking finding names, by file name."""
     missing_keywords: tuple[tuple[str, ...], ...]
-    """Keyword groups no word of which the report contains."""
+    """Keyword groups no word of which that same finding contains."""
 
     @property
     def matched(self) -> bool:
@@ -255,16 +257,83 @@ class Score(_Frozen):
         return self.verdict == "blocked" and self.matched
 
 
-def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Score:
-    """Pass = the run's verdict is blocked AND the report names the defect.
+_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+_BLOCKING_HEADING = re.compile(r"^[\W\d]*blocking\b", re.IGNORECASE)
 
-    Naming it means: one of the expected files appears by file name, and every
-    keyword group has at least one word in the report (case-insensitive).
+
+def blocking_findings(report: str) -> list[str]:
+    """The text of each finding under the report's ``BLOCKING`` heading.
+
+    The verify prompt asks for one sub-heading per blocking defect. A finding
+    runs from its sub-heading to the next heading at the same depth or
+    shallower; the section ends at the next heading as shallow as ``BLOCKING``
+    itself (so ``NON-BLOCKING``, a different word, is never read). Text under
+    ``BLOCKING`` but outside any sub-heading is not a finding. A ``#`` line
+    inside a fenced code block is code, not a heading.
     """
-    lowered = report.lower()
-    named = next((f for f in expected.files if Path(f).name in report), None)
-    missing = tuple(g for g in expected.keywords if not any(w.lower() in lowered for w in g))
-    return Score(verdict=verdict, named_file=named, missing_keywords=missing)
+    findings: list[list[str]] = []
+    section: int | None = None
+    finding: int | None = None
+    fenced = False
+    for line in report.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        heading = None if fenced else _HEADING.match(line)
+        if heading:
+            depth = len(heading.group(1))
+            title = heading.group(2).replace("*", "").replace("_", "")
+            if section is not None and depth <= section:
+                section = finding = None
+            if section is None:
+                if _BLOCKING_HEADING.match(title):
+                    section = depth
+                continue
+            if finding is None or depth <= finding:
+                finding = depth
+                findings.append([])
+        if finding is not None:
+            findings[-1].append(line)
+    return ["\n".join(lines) for lines in findings]
+
+
+def _normalise(text: str) -> str:
+    """Lower case, curly quotes made straight, and ``_``/``-``/runs of space made one space.
+
+    So ``execution_id``, ``execution-id`` and ``execution id`` are one word to
+    the keyword tables, and markdown emphasis or code ticks do not split one.
+    """
+    text = text.lower().replace("\u2019", "'").replace("`", "").replace("*", "")
+    return re.sub(r"[\s_\-]+", " ", text)
+
+
+def _names(text: str, file: str) -> bool:
+    """The text names the file by its file name, not as the tail of a longer one."""
+    return re.search(rf"(?<![\w.-]){re.escape(Path(file).name)}\b", text) is not None
+
+
+def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Score:
+    """Pass = the run's verdict is blocked AND one blocking finding names the defect.
+
+    Naming it means: within ONE finding under the report's ``BLOCKING``
+    heading, one of the expected files appears by file name and every keyword
+    group has at least one word (case-insensitive, ``_``/``-``/space alike).
+    A file mentioned only in passing - under another heading, or in a different
+    finding from the one describing the defect - names nothing.
+    """
+    findings = blocking_findings(report)
+    best: tuple[str | None, tuple[tuple[str, ...], ...]] = (None, expected.keywords)
+    for text in findings:
+        named = next((f for f in expected.files if _names(text, f)), None)
+        lowered = _normalise(text)
+        missing = tuple(
+            g for g in expected.keywords if not any(_normalise(w) in lowered for w in g)
+        )
+        # The finding that names the file outranks one that does not; then the fewest gaps.
+        if (named is None, len(missing)) < (best[0] is None, len(best[1])):
+            best = (named, missing)
+    return Score(
+        verdict=verdict, findings=len(findings), named_file=best[0], missing_keywords=best[1]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -526,7 +595,8 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
                 (
                     "yes"
                     if s.matched
-                    else f"no{'' if s.named_file else ' (file)'}"
+                    else f"no{'' if s.findings else ' (no blocking findings)'}"
+                    f"{'' if s.named_file or not s.findings else ' (file)'}"
                     f"{' (keywords: ' + '; '.join('/'.join(g) for g in s.missing_keywords) + ')' if s.missing_keywords else ''}"
                 )
                 if s

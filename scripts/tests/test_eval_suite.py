@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
+    Case,
     DefinitionError,
     Expected,
     Launch,
@@ -225,7 +226,23 @@ _EXPECTED = Expected(
     files=("packages/syn-adapters/src/syn_adapters/storage/artifact_storage/minio.py",),
     keywords=(("key",), ("404", "not found")),
 )
-_FINDING = "BLOCKING: minio.py:212 download() builds the id-only key; upload keys by execution, so reads 404."
+
+
+def _report(*blocking: tuple[str, str], non_blocking: str = "None.") -> str:
+    """A report in the shape the verify prompt asks for: one block per (file, defect)."""
+    blocks = "\n\n".join(
+        f"### Finding {n}\n- File: `{file}`\n- Defect: {defect}\n- Why blocking: it ships broken."
+        for n, (file, defect) in enumerate(blocking, start=1)
+    )
+    return (
+        f"VERDICT: BLOCKED\n\n## BLOCKING\n\n{blocks or 'None.'}\n\n"
+        f"## NON-BLOCKING\n\n{non_blocking}\n"
+    )
+
+
+_FINDING = _report(
+    ("minio.py:212", "download() builds the id-only key; upload keys by execution, so reads 404.")
+)
 
 
 @pytest.mark.unit
@@ -241,14 +258,214 @@ def test_a_certified_run_fails_even_when_the_report_names_the_defect() -> None:
 
 @pytest.mark.unit
 def test_a_report_that_misses_the_file_does_not_match() -> None:
-    score = score_report(_EXPECTED, "blocked", "the object key does not match, so reads 404")
+    report = _report(("storage.py:10", "the object key does not match, so reads 404"))
+    score = score_report(_EXPECTED, "blocked", report)
     assert score.named_file is None and not score.passed
 
 
 @pytest.mark.unit
 def test_a_report_missing_a_keyword_group_says_which() -> None:
-    score = score_report(_EXPECTED, "blocked", "minio.py uses the wrong key")
+    score = score_report(_EXPECTED, "blocked", _report(("minio.py", "uses the wrong key")))
     assert score.missing_keywords == (("404", "not found"),) and not score.passed
+
+
+@pytest.mark.unit
+def test_a_benign_mention_beside_an_unrelated_blocker_fails() -> None:
+    """The false pass verification found at b80c4a68: the seed's file is named
+    only to clear it, and an unrelated blocking defect supplies the verdict."""
+    seed = _case("binary-artifact-minio-key").expected
+    report = _report(
+        ("other.py:40", "the retry loop never backs off, so a 404 from the API is hammered."),
+        non_blocking="- minio.py: upload/download key handling looks fine; no mismatch found.",
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.findings == 1 and score.named_file is None and not score.passed
+
+
+@pytest.mark.unit
+def test_the_file_and_the_defect_must_be_in_the_same_blocking_finding() -> None:
+    seed = _case("binary-artifact-minio-key").expected
+    report = _report(
+        ("minio.py:12", "the bucket name is read from an unvalidated setting."),
+        ("other.py:40", "the object key does not match the uploaded one, so the read is a 404."),
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.findings == 2 and not score.passed
+
+
+@pytest.mark.unit
+def test_prose_under_blocking_outside_a_finding_block_is_not_a_finding() -> None:
+    report = (
+        "VERDICT: BLOCKED\n\n## BLOCKING\n\n"
+        "minio.py:212 download() builds the id-only key, so reads 404.\n"
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.findings == 0 and not score.passed
+
+
+@pytest.mark.unit
+def test_a_hash_line_in_a_code_fence_does_not_end_the_finding() -> None:
+    report = _report(
+        (
+            "minio.py:212",
+            "download() builds the id-only key:\n\n```python\n# id only\n```\n\nso reads 404.",
+        )
+    )
+    assert score_report(_EXPECTED, "blocked", report).passed
+
+
+@pytest.mark.unit
+def test_a_longer_file_name_ending_in_the_seed_file_does_not_name_it() -> None:
+    report = _report(("test_minio.py:5", "the fixture key does not match, so reads 404."))
+    assert score_report(_EXPECTED, "blocked", report).named_file is None
+
+
+def _case(case_id: str) -> Case:
+    return next(c for c in load_suite(DEFAULT_SUITE).cases if c.id == case_id)
+
+
+# Natural, correct descriptions of each seed's defect, worded independently of
+# the keyword tables - including the three per seed the verification probe at
+# ca52f38c wrote, of which the scorer then passed 1 in 12. Each must pass.
+_PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
+    "binary-artifact-minio-key": (
+        (
+            "minio.py:212",
+            "upload() stores the blob under an execution-scoped object name, but download() asks "
+            "for the bare artifact ID, so the binary content is never read back.",
+        ),
+        (
+            "artifact_storage/minio.py",
+            "the reader asks MinIO for a different object than the writer created, so production "
+            "returns NoSuchKey for every binary artifact.",
+        ),
+        (
+            "minio.py:198-230",
+            "the read path discards the execution prefix the write path added, and cannot "
+            "retrieve the blob it just stored.",
+        ),
+        (
+            "minio.py",
+            "the key computed on upload and the key computed on download disagree, so the "
+            "content endpoint answers 404 for binary artifacts.",
+        ),
+    ),
+    "codex-cost-limit": (
+        (
+            "CodexStreamProcessor.py",
+            "Codex supplies token usage only when execution finishes; max_cost_usd is checked "
+            "after all spending has occurred.",
+        ),
+        (
+            "CodexStreamProcessor.py:88",
+            "token totals are emitted at completion, so the cap cannot interrupt a Codex phase "
+            "that is running over budget.",
+        ),
+        (
+            "syn_shared/agents.py:41",
+            "for codex the consumption is revealed at shutdown, after the budget is already "
+            "exceeded; the limit is declared but never enforced.",
+        ),
+        (
+            "CodexStreamProcessor.py:120",
+            "the Codex CLI reports usage once, in turn.completed, so a running cost never exists "
+            "to compare against the limit.",
+        ),
+    ),
+    "execution-id-as-eval-id": (
+        (
+            "eval_admission.py:52",
+            "an execution ID loaded as an Eval reads the execution's stream, so an existing "
+            "execution makes an absent eval seem present.",
+        ),
+        (
+            "EvalAggregate.py",
+            "a workflow run ID used as an eval ID loads that run's events, and those unrelated "
+            "events satisfy the existence check.",
+        ),
+        (
+            "eval_edit.py:30",
+            "the store hands back execution events, which are replayed as an eval that never had "
+            "an EvalCreated event, and the attach is accepted.",
+        ),
+    ),
+    "shared-esp-stream": (
+        (
+            "RequestExecutionCommand.py:22",
+            "the request and the workflow execution are written to the same event stream, so the "
+            "second aggregate collides with the first.",
+        ),
+        (
+            "ExecutionRequestAggregate.py",
+            "both records reuse one stream identifier, and the request's events contaminate the "
+            "execution's state when it is loaded.",
+        ),
+        (
+            "ExecutionRequestAggregate.py:15",
+            "the request and the run occupy one stream, and the second write conflicts on the "
+            "expected version, so the start is dropped.",
+        ),
+        (
+            "RequestExecutionCommand.py",
+            "aggregate_id is the execution_id, and ESP keys streams by id alone, so the two "
+            "aggregates share a stream.",
+        ),
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("case_id", "file", "defect"),
+    [(case, file, defect) for case, found in _PARAPHRASES.items() for file, defect in found],
+)
+def test_a_natural_correct_finding_passes(case_id: str, file: str, defect: str) -> None:
+    seed = _case(case_id).expected
+    report = _report(("other.py:3", "an unrelated defect."), (file, defect))
+    score = score_report(seed, "blocked", report)
+    assert score.passed, score
+
+
+@pytest.mark.unit
+def test_every_seed_has_at_least_three_paraphrases() -> None:
+    assert {c.id for c in load_suite(DEFAULT_SUITE).cases} == set(_PARAPHRASES)
+    assert all(len(found) >= 3 for found in _PARAPHRASES.values())
+
+
+# Blocking findings that name a seed's file but describe a different defect.
+_WRONG_DEFECTS: dict[str, tuple[str, str]] = {
+    "binary-artifact-minio-key": (
+        "minio.py:12",
+        "the bucket name is read from an unvalidated setting.",
+    ),
+    "codex-cost-limit": (
+        "CodexStreamProcessor.py:30",
+        "a malformed JSON line raises instead of being logged.",
+    ),
+    "execution-id-as-eval-id": (
+        "EvalAggregate.py:70",
+        "archive does not check the caller's permission.",
+    ),
+    "shared-esp-stream": (
+        "ExecutionRequestAggregate.py:9",
+        "the request's priority field is never validated.",
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("case_id", "found"), list(_WRONG_DEFECTS.items()))
+def test_the_seed_file_with_a_different_defect_fails(case_id: str, found: tuple[str, str]) -> None:
+    score = score_report(_case(case_id).expected, "blocked", _report(found))
+    assert score.named_file is not None and not score.passed, score
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("case_id", list(_PARAPHRASES))
+def test_a_correct_finding_outside_blocking_fails(case_id: str) -> None:
+    file, defect = _PARAPHRASES[case_id][0]
+    report = _report(("other.py:3", "an unrelated defect."), non_blocking=f"- {file}: {defect}")
+    assert not score_report(_case(case_id).expected, "blocked", report).passed
 
 
 # ---------------------------------------------------------------------------

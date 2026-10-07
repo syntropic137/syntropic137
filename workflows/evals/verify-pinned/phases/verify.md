@@ -29,10 +29,20 @@ $ARGUMENTS
 Write `artifacts/output/verify.md`:
 
 1. The first line is exactly `VERDICT: CERTIFIED` or `VERDICT: BLOCKED`.
-2. Under a `BLOCKING` heading, each defect that blocks the change: the file and
-   line, the root cause, what goes wrong at runtime, and what would prove it
-   fixed.
-3. Under a separate heading, anything that does not block.
+2. A `## BLOCKING` heading. Under it, one `###` block per defect that blocks
+   the change, each in exactly this shape:
+
+   ```
+   ### Finding 1
+   - File: `path/to/file.py:123`
+   - Defect: the root cause, and what goes wrong at runtime
+   - Why blocking: why it stops the change, and what would prove it fixed
+   ```
+
+   One defect per block, with its file in the same block. A defect described
+   anywhere else is not read as a blocking finding. If nothing blocks, write
+   `None` under the heading.
+3. A `## NON-BLOCKING` heading for anything that does not block.
 
 ## Report the verdict to the engine
 
