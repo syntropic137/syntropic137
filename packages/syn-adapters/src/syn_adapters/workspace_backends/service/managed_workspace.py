@@ -170,6 +170,10 @@ class ManagedWorkspace:
         Yields:
             Individual stdout lines
         """
+        # The agent's read-only API access (ADR-072) rides on every streamed
+        # launch, whatever the provider: callers do not need to know it exists.
+        if self.platform_grant is not None:
+            environment = {**(environment or {}), **self.platform_grant.env}
         stream = self._service._event_stream.stream(
             self.isolation_handle,
             command,

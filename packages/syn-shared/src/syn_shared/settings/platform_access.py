@@ -40,10 +40,10 @@ class PlatformAccessSettings(BaseSettings):
         ),
     )
     workspace_api_url: str = Field(
-        default="http://syn-platform.internal",
+        default="http://envoy-proxy:8081/syn-platform",
         description=(
-            "SYN_API_URL as seen from inside a workspace. The host is routed by "
-            "the Envoy sidecar to the API's workspace ingress; it is not a real "
-            "DNS name and resolves nowhere else."
+            "SYN_API_URL as seen from inside a workspace: the Envoy sidecar's "
+            "/syn-platform prefix, which it forwards to the API marked as "
+            "workspace ingress. The syn CLI appends /api/v1."
         ),
     )

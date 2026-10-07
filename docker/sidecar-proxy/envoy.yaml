@@ -56,6 +56,56 @@ static_resources:
                         - "envoy-proxy:8081"
                         - "envoy-proxy"
                       routes:
+                        # Syntropic137 API, workspace ingress (PC-127, ADR-072).
+                        # SYN_API_URL=http://envoy-proxy:8081/syn-platform; the
+                        # CLI appends /api/v1. Sent straight to api:8000, never
+                        # through the gateway (gateway:80 has no auth).
+                        # x-syn-workspace-ingress is OVERWRITTEN, so the API
+                        # knows a workspace sent this whatever the workspace
+                        # set, and refuses it without a platform token whose
+                        # scope allows the route. ext_authz is OFF here so no
+                        # provider credential is ever added to an API request;
+                        # the workspace's own Bearer token passes unchanged.
+                        - match:
+                            prefix: "/syn-platform/api/v1/"
+                          route:
+                            cluster: syn_platform_api
+                            timeout: 30s
+                            prefix_rewrite: "/"
+                          request_headers_to_add:
+                            - header:
+                                key: "x-syn-workspace-ingress"
+                                value: "envoy"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                        - match:
+                            path: "/syn-platform/health"
+                          route:
+                            cluster: syn_platform_api
+                            timeout: 10s
+                            prefix_rewrite: "/health"
+                          request_headers_to_add:
+                            - header:
+                                key: "x-syn-workspace-ingress"
+                                value: "envoy"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                        - match:
+                            prefix: "/syn-platform/"
+                          direct_response:
+                            status: 404
+                            body:
+                              inline_string: '{"error": "Not found", "message": "Only /syn-platform/api/v1/ and /syn-platform/health reach the platform"}'
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
                         - match:
                             prefix: "/"
                           route:
@@ -108,46 +158,6 @@ static_resources:
                     # code: agent containers do not set HTTP_PROXY, so pip/npm
                     # always hit those hosts direct via agent-net egress. Removed
                     # to shrink the proxy's stats and TLS-context footprint.
-
-                    # Syntropic137 API, workspace ingress (PC-127, ADR-072).
-                    # Not a real DNS name: it exists only inside this proxy.
-                    # x-syn-workspace-ingress is OVERWRITTEN on every request,
-                    # so the API knows this came from a workspace whatever the
-                    # workspace sent, and refuses it without a platform token
-                    # whose scope allows the route. The API enforces the
-                    # scope; this route only delivers the request. With
-                    # SYN_PLATFORM_ACCESS_ENABLED off the API refuses all of it.
-                    - name: syn_platform
-                      domains:
-                        - "syn-platform.internal"
-                      routes:
-                        - match:
-                            prefix: "/api/v1/"
-                          route:
-                            cluster: syn_platform_api
-                            timeout: 30s
-                            prefix_rewrite: "/"
-                          request_headers_to_add:
-                            - header:
-                                key: "x-syn-workspace-ingress"
-                                value: "envoy"
-                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
-                        - match:
-                            prefix: "/health"
-                          route:
-                            cluster: syn_platform_api
-                            timeout: 10s
-                          request_headers_to_add:
-                            - header:
-                                key: "x-syn-workspace-ingress"
-                                value: "envoy"
-                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
-                        - match:
-                            prefix: "/"
-                          direct_response:
-                            status: 404
-                            body:
-                              inline_string: '{"error": "Not found", "message": "Only /api/v1/ and /health are routed to the platform"}'
 
                     # Block all other hosts
                     - name: blocked

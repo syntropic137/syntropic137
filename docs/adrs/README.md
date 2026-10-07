@@ -117,6 +117,7 @@
 | [ADR-065](ADR-065-claude-plugin-injection.md) | Skills as the Workflow Capability Unit | Accepted |
 | [ADR-068](ADR-068-remove-interactive-tmux-path.md) | Remove the Interactive tmux Agent Path | Accepted |
 | [ADR-071](ADR-071-session-inventory-and-discovery.md) | Session Inventory and Discovery | Accepted |
+| [ADR-072](ADR-072-workspace-platform-access.md) | Workspace Access to the Syntropic137 API | Accepted |
 
 ### Organization & Repos
 

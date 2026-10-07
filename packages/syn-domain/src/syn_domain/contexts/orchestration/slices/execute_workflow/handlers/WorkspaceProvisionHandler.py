@@ -740,10 +740,6 @@ class WorkspaceProvisionHandler:
         # fixes. It is provider-independent, and this is the single point both
         # providers pass through on their way to `workspace.stream(...)`.
         agent_env.update(_repo_identity_env(effective_repos))
-        # Provider-independent for the same reason: read-only API access
-        # (ADR-072), present only when the operator turned it on.
-        if workspace.platform_grant is not None:
-            agent_env.update(workspace.platform_grant.env)
         return claude_cmd, agent_env
 
     @staticmethod

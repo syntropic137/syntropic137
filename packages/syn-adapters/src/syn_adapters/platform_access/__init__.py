@@ -155,7 +155,7 @@ class PlatformTokenService:
         store: PlatformTokenStore | None,
         *,
         max_ttl_seconds: int,
-        workspace_api_url: str = "http://syn-platform.internal",
+        workspace_api_url: str = "http://envoy-proxy:8081/syn-platform",
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
