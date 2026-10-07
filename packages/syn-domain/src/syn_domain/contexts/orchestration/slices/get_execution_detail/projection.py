@@ -283,6 +283,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # default worth defending here; 0 would be a run with no phases.
             "total_phases": event_data.get("total_phases", 0),
             "completed_phases": inherited_phase_count(event_data.get("resumed_from")),
+            # Skips a certified review made in the parent (#1681), so a resume
+            # does not count rounds it will never run as work still to do.
+            "skipped_phase_ids": list(event_data.get("inherited_skipped_phase_ids") or []),
             # Held here, not served from here: `on_phase_started` moves each
             # budget onto the phase that it belongs to, which is where a
             # reader needs it next to that phase's elapsed time (#1262).

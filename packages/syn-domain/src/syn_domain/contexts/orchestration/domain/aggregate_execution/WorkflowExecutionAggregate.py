@@ -265,6 +265,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: and a parent may be resumed only once.
         self._completed_phase_ids: set[str] = set()
         self._phase_artifact_ids: dict[str, list[str]] = {}
+        #: Phases a certified review skipped, here or in a parent (#1681): a
+        #: resume passes over them rather than stopping at them as a gap.
+        self._skipped_phase_ids: set[str] = set()
         #: Whether this execution has admitted a resume. THIS is the
         #: "resumed at most once" rule, deliberately separate from the child's
         #: id below, which under ADR-023 can replay as None and would make the
@@ -809,6 +812,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             started_phase_ids=self._phase_attempts,
             command=command,
             repair_point=self._reviews.repair_point(self._phase_definitions),
+            skipped_phase_ids=self._skipped_phase_ids,
         )
         if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
@@ -830,6 +834,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._eval = EvalMembership.launched_into(evt(event, "eval_id"))
         if self._pins.resumed_from is not None:
             self._inherit(self._pins.resumed_from)
+            self._skipped_phase_ids.update(self._pins.inherited_skipped_phase_ids)
 
     def _inherit(self, origin: ResumeOrigin) -> None:
         """Take over the parent's completed prefix as this run's own.
@@ -966,8 +971,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._reviews.collect(phase_id)
 
     @event_sourcing_handler("NextPhaseReady")
-    def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:
-        """Apply NextPhaseReadyEvent — to-do list projection reacts, not aggregate."""
+    def on_next_phase_ready(self, event: NextPhaseReadyEvent) -> None:
+        """Apply NextPhaseReadyEvent: the to-do list reacts; this keeps only its skips."""
+        self._skipped_phase_ids.update(evt(event, "skipped_phase_ids") or [])
 
     @event_sourcing_handler("ExecutionCancelled")
     def on_execution_cancelled(self, event: ExecutionCancelledEvent) -> None:

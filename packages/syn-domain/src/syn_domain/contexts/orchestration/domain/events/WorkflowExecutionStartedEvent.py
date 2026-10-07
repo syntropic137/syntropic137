@@ -33,7 +33,14 @@ TASK_INPUT_KEY = "task"
 
 #: Fields a release before #1513 does not know: omitted when None.
 _WRITTEN_ONLY_WHEN_SET = frozenset(
-    {"continued_branches", "abandoned_branches", "eval_id", "eval_selection", "eval_baseline"}
+    {
+        "continued_branches",
+        "abandoned_branches",
+        "inherited_skipped_phase_ids",
+        "eval_id",
+        "eval_selection",
+        "eval_baseline",
+    }
 )
 
 
@@ -114,6 +121,12 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: Set only on a resume (#1513): branches it could have continued and
     #: started fresh instead, each with why - the recorded warning.
     abandoned_branches: list[AbandonedBranch] | None = None
+
+    #: Set only on a resume (#1681): the phases before `resumed_from`'s resume
+    #: phase that a certified review in the parent skipped, in phase order.
+    #: Top-level for the same reason as `continued_branches`. None on a fresh
+    #: run, on a resume with none, and before the field existed.
+    inherited_skipped_phase_ids: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod

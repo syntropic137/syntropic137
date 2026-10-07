@@ -119,6 +119,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             started_at=event_data.get("started_at"),
             completed_at=None,
             completed_phases=inherited_phase_count(event_data.get("resumed_from")),
+            skipped_phase_ids=tuple(event_data.get("inherited_skipped_phase_ids") or ()),
             total_phases=event_data.get("total_phases", 0),
             total_tokens=0,
             total_input_tokens=0,
