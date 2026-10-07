@@ -111,7 +111,16 @@ def test_price_tokens_reports_unpriced_rather_than_zero() -> None:
 
 def test_all_current_rates_are_verified_not_placeholder() -> None:
     """No shipped rate is a guess. PLACEHOLDER exists for when one is."""
-    for model in ("gpt-5.6", "gpt-5.6-sol", "gpt-sol", "gpt-6.1-sol", "gpt-6-sol", "opus", "sonnet", "haiku"):
+    for model in (
+        "gpt-5.6",
+        "gpt-5.6-sol",
+        "gpt-sol",
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+        "opus",
+        "sonnet",
+        "haiku",
+    ):
         assert price_tokens(model, 1_000_000, 0).status is PricingStatus.PRICED, model
 
 
