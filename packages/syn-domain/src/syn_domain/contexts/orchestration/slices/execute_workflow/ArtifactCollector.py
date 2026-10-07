@@ -737,6 +737,37 @@ class ArtifactCollector:
                 artifact_path,
             )
             deliverables.append(_Deliverable.of(recovered))
+        # Files on disk are not a report when none of them is text. A verify
+        # phase screenshots before it writes (#1648); when the report never
+        # followed, the PNGs used to switch the salvage above off and the next
+        # phase got pictures with no verdict (exec-8fb041217a15). Salvage
+        # exactly as for "no file", and keep the screenshots beside it.
+        if not any(isinstance(d.content, str) for d in deliverables):
+            binaries = tuple(d.source_path for d in deliverables)
+            recovered = recover_deliverable(
+                last_agent_message=last_agent_message,
+                wrote=None,
+                title=f"{phase_name}: {RECOVERED_SOURCE_PATH}",
+                work=await _where_the_work_is(describe_work),
+                alongside=binaries,
+            )
+            if recovered is None:
+                logger.warning(
+                    "Phase %s (%s) wrote only binary files (%s) and no text report, "
+                    "and its agent said nothing recoverable",
+                    phase_id,
+                    phase_name,
+                    ", ".join(binaries),
+                )
+            else:
+                logger.warning(
+                    "Phase %s (%s) wrote only binary files (%s) and no text report; "
+                    "recovered its conclusion from the session transcript",
+                    phase_id,
+                    phase_name,
+                    ", ".join(binaries),
+                )
+                deliverables.append(_Deliverable.of(recovered))
         # Text before binary, otherwise in collection order: the head is
         # flagged the Primary Deliverable, and a screenshot that the glob
         # happened to list first must not take the flag from the phase's
@@ -796,6 +827,34 @@ class ArtifactCollector:
             )
             artifact_type = _primary_type(output_artifact_types)
             artifact_ids: list[str] = []
+            # Salvaged when nothing storable is TEXT, not only when nothing is
+            # storable: screenshots without a report are the same incident as
+            # no file at all (exec-8fb041217a15). Stored FIRST, so the report
+            # and not a screenshot takes the single primary flag below.
+            storable = [(p, b) for p, b in partial_artifacts if is_storable(b)]
+            if not any(not ContentType.of(b, p).is_binary for p, b in storable):
+                recovered = recover_deliverable(
+                    last_agent_message=last_agent_message,
+                    wrote=None,
+                    title=outcome.title(phase_name=phase_name, source_path=RECOVERED_SOURCE_PATH),
+                    alongside=tuple(p for p, _ in storable),
+                )
+                if recovered is not None:
+                    artifact_id = str(uuid4())
+                    await self.create_artifact(
+                        artifact_id=artifact_id,
+                        workflow_id=workflow_id,
+                        phase_id=phase_id,
+                        execution_id=execution_id,
+                        session_id=session_id,
+                        artifact_type=artifact_type,
+                        content=recovered.content,
+                        title=recovered.title,
+                        source_path=recovered.source_path,
+                        is_primary_deliverable=True,
+                        agent=agent,
+                    )
+                    artifact_ids.append(artifact_id)
             for artifact_path, artifact_content in partial_artifacts:
                 artifact_id = str(uuid4())
                 content, content_type = _as_collected(artifact_path, artifact_content)
@@ -833,28 +892,6 @@ class ArtifactCollector:
                     agent=agent,
                 )
                 artifact_ids.append(artifact_id)
-            if not artifact_ids:
-                recovered = recover_deliverable(
-                    last_agent_message=last_agent_message,
-                    wrote=None,
-                    title=outcome.title(phase_name=phase_name, source_path=RECOVERED_SOURCE_PATH),
-                )
-                if recovered is not None:
-                    artifact_id = str(uuid4())
-                    await self.create_artifact(
-                        artifact_id=artifact_id,
-                        workflow_id=workflow_id,
-                        phase_id=phase_id,
-                        execution_id=execution_id,
-                        session_id=session_id,
-                        artifact_type=artifact_type,
-                        content=recovered.content,
-                        title=recovered.title,
-                        source_path=recovered.source_path,
-                        is_primary_deliverable=True,
-                        agent=agent,
-                    )
-                    artifact_ids.append(artifact_id)
             return artifact_ids
         except Exception as err:
             logger.warning(

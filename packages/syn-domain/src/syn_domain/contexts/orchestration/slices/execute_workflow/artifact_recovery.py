@@ -111,6 +111,12 @@ _WROTE_NOTHING: Final[str] = (
     "branches - is unaffected by this and is described below if the agent "
     "described it."
 )
+_WROTE_ONLY_BINARY: Final[str] = (
+    "This phase wrote only binary files under `artifacts/output/` ({files}) and "
+    "no text report, so what follows is the last message its agent produced, "
+    "not the deliverable it owed. The binary files are stored beside this one "
+    "unchanged."
+)
 _CAVEAT: Final[str] = (
     " It may be a complete conclusion or it may be a sign-off line; read it as "
     "evidence of what the phase decided, not as the phase's own document.\n\n"
@@ -282,6 +288,7 @@ def recover_deliverable(
     wrote: str | None,
     title: str,
     work: str | None = None,
+    alongside: tuple[str, ...] = (),
 ) -> RecoveredArtifact | None:
     """The artifact to store in place of a deliverable that is not on disk.
 
@@ -306,11 +313,21 @@ def recover_deliverable(
     A `work` report alone is NOT a conclusion and does not make one: a phase
     that pushed a branch and said nothing about it still reached no verdict,
     and that failure is reported where failures are reported.
+
+    `alongside` names the binary files the phase DID write when it wrote no
+    text (exec-8fb041217a15: two screenshots, no report). It changes only what
+    the reader is told; the salvage is filed where a no-file salvage is,
+    because in both cases there is no text deliverable on disk to stand in for.
     """
     said = (last_agent_message or "").strip()
     if not is_usable_conclusion(said):
         return None
-    reason = _WROTE_AN_EMPTY_FILE.format(wrote=wrote) if wrote is not None else _WROTE_NOTHING
+    if wrote is not None:
+        reason = _WROTE_AN_EMPTY_FILE.format(wrote=wrote)
+    elif alongside:
+        reason = _WROTE_ONLY_BINARY.format(files=", ".join(f"`{p}`" for p in alongside))
+    else:
+        reason = _WROTE_NOTHING
     where = _WHERE_THE_WORK_IS.format(work=work) if work else ""
     return RecoveredArtifact(
         content=_PREAMBLE + reason + _CAVEAT + said + where,
