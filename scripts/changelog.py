@@ -69,6 +69,7 @@ MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from (\S+)$")
 CONVENTIONAL_TYPE = re.compile(r"^(\w+)(?:\([^)]*\))?!?:\s*(.*)$")
 RELEASE_NOTES_HEADING = re.compile(r"^#{1,6}\s*release notes\s*:?\s*$", re.IGNORECASE)
 HEADING = re.compile(r"^#{1,6}\s")
+FENCE = re.compile(r"^\s*(```|~~~)")
 BULLET = re.compile(r"^\s*[-*+]\s+(.*)$")
 TRAILING_PR_REF = re.compile(r"\s*\(#\d+\)$")
 
@@ -166,15 +167,25 @@ def plain_text(text: str) -> str:
 def release_notes_bullet(body: str) -> str | None:
     """The first bullet of a ``## Release notes`` section, joined to one line.
 
-    Continuation lines of that bullet are kept; the next bullet, a blank line or
-    the next heading ends it.
+    Continuation lines of that bullet are kept; the next bullet, a blank line,
+    a code fence or the next heading ends it. Fenced code is not prose: a YAML
+    list inside a fence is not a bullet. A section written as paragraphs has
+    no bullet, and the caller falls back to the PR title.
     """
     lines = body.replace("\r\n", "\n").split("\n")
     in_section = False
+    in_fence = False
     collected: list[str] = []
     for line in lines:
         if not in_section:
             in_section = RELEASE_NOTES_HEADING.match(line.strip()) is not None
+            continue
+        if FENCE.match(line):
+            if collected:
+                break
+            in_fence = not in_fence
+            continue
+        if in_fence:
             continue
         if HEADING.match(line):
             break
