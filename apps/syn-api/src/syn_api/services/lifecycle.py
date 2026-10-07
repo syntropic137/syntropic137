@@ -49,6 +49,7 @@ from syn_api.services.reconciliation import (
     reconcile_orphaned_sessions,
 )
 from syn_api.services.seeding import seed_offline_data
+from syn_api.services.subscription_health import render_subscription_health
 from syn_api.types import (
     DbPoolHealth,
     Err,
@@ -600,29 +601,41 @@ async def _describe_subscription_health() -> SubscriptionHealthResult:
 
     try:
         sub_status = _state.subscription_service.get_status()
+    except Exception:
+        logger.debug("subscription status read failed", exc_info=True)
+        return SubscriptionHealth(status="unknown"), ()
+
+    # The coordinator's own facts survive a failed probe (#1737): a halt at an
+    # undecodable head fails the lag probe too, and so can a hold's cause.
+    held = bool(sub_status.held_projections)
+    halted = sub_status.halted_at is not None
+
+    try:
         lag = await asyncio.wait_for(
             _state.subscription_service.describe_read_model_lag(),
             timeout=_LAG_PROBE_TIMEOUT_S,
         )
         # Never scans on this path: the latest background reconciliation (#1545).
         drops = await _state.subscription_service.describe_unapplied_starts()
-        unapplied = list(drops.unapplied) if drops is not None else None
-        verdict = _judge_read_path(
-            running=sub_status.running, lag=lag, dropped_events=bool(unapplied)
-        )
-
-        health = SubscriptionHealth(
-            status=verdict.status,
-            running=sub_status.running,
-            projection_count=sub_status.projection_count,
-            realtime_enabled=sub_status.realtime_enabled,
-            unapplied_starts=unapplied,
-            **(lag.model_dump() if lag is not None else {}),
-        )
-        return health, verdict.degraded_reasons
     except Exception:
         logger.debug("subscription health probe failed", exc_info=True)
-        return SubscriptionHealth(status="unknown"), ()
+        # Only the coordinator's own signals can fire; none firing is "unknown".
+        verdict = _judge_read_path(running=sub_status.running, lag=None, held=held, halted=halted)
+        status = verdict.status if verdict.degraded_reasons else "unknown"
+        return render_subscription_health(sub_status, status), verdict.degraded_reasons
+
+    unapplied = list(drops.unapplied) if drops is not None else None
+    verdict = _judge_read_path(
+        running=sub_status.running,
+        lag=lag,
+        dropped_events=bool(unapplied),
+        held=held,
+        halted=halted,
+    )
+    return (
+        render_subscription_health(sub_status, verdict.status, lag, unapplied),
+        verdict.degraded_reasons,
+    )
 
 
 # ── Service init functions ─────────────────────────────────────────

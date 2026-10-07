@@ -31,6 +31,7 @@ import yaml
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
+    blocking_findings,
     Case,
     DefinitionError,
     Expected,
@@ -76,6 +77,7 @@ def _copy_suite(tmp_path: Path) -> Path:
 
 
 _CODEX_WF = "eval-verify-pinned-codex-v1"
+_SONNET_WF = "eval-verify-pinned-sonnet-v1"
 
 
 @pytest.mark.unit
@@ -101,6 +103,17 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
 
 @pytest.mark.unit
+def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> None:
+    opus = load_suite(DEFAULT_SUITE)
+    sonnet = load_suite(DEFAULT_SUITE, workflow=_SONNET_WF)
+
+    assert sonnet.workflow.id == _SONNET_WF
+    assert sonnet.workflow.models == {"verify": "sonnet"}
+    assert sonnet.tag == f"verifier-seed-v1:v2:{_SONNET_WF}"
+    assert sonnet.cases == opus.cases
+
+
+@pytest.mark.unit
 def test_a_workflow_the_suite_does_not_list_is_refused() -> None:
     with pytest.raises(DefinitionError, match="not one of the suite's"):
         load_suite(DEFAULT_SUITE, workflow="sdlc-reverify-pr-v1")
@@ -113,19 +126,37 @@ def _workflow_yaml(relative: str) -> dict[str, object]:
 
 
 @pytest.mark.unit
-def test_the_two_verify_workflows_differ_only_in_the_agent() -> None:
+@pytest.mark.parametrize(
+    ("variant", "agent_fields"),
+    [
+        (_CODEX_WF, ("codex", "gpt-sol", "workspace-write")),
+        (_SONNET_WF, ("claude", "sonnet", None)),
+    ],
+)
+def test_each_verify_variant_differs_from_opus_only_in_the_agent(
+    variant: str, agent_fields: tuple[str, str, str | None]
+) -> None:
     """Same cases, different verifier: a score difference must be the verifier alone."""
     refs = {r.id: r for r in load_suite(DEFAULT_SUITE).suite.workflows}
-    opus_path, codex_path = refs["eval-verify-pinned-v1"].path, refs[_CODEX_WF].path
+    # The sdlc prompt pair (#1726) differs from opus in the prompt too; its own
+    # tests below hold it to the codex workflow instead.
+    assert set(refs) == {
+        "eval-verify-pinned-v1",
+        _CODEX_WF,
+        _SONNET_WF,
+        "eval-verify-pinned-sdlc-baseline-v1",
+        "eval-verify-pinned-sdlc-lean-v1",
+    }
+    opus_path, variant_path = refs["eval-verify-pinned-v1"].path, refs[variant].path
 
     # The prompt files, byte for byte, and the prompt each definition resolves.
     opus_prompt = (ROOT / opus_path).parent / "phases" / "verify.md"
-    codex_prompt = (ROOT / codex_path).parent / "phases" / "verify.md"
-    assert opus_prompt.read_bytes() == codex_prompt.read_bytes()
+    variant_prompt = (ROOT / variant_path).parent / "phases" / "verify.md"
+    assert opus_prompt.read_bytes() == variant_prompt.read_bytes()
     opus_def = WorkflowDefinition.from_file(ROOT / opus_path)
-    codex_def = WorkflowDefinition.from_file(ROOT / codex_path)
+    variant_def = WorkflowDefinition.from_file(ROOT / variant_path)
     assert [p.prompt_template for p in opus_def.phases] == [
-        p.prompt_template for p in codex_def.phases
+        p.prompt_template for p in variant_def.phases
     ]
 
     # Everything else but identity and the agent block is the same document.
@@ -138,10 +169,10 @@ def test_the_two_verify_workflows_differ_only_in_the_agent() -> None:
         ]
         return rest
 
-    assert comparable(_workflow_yaml(opus_path)) == comparable(_workflow_yaml(codex_path))
-    agent = codex_def.phases[0].agent
+    assert comparable(_workflow_yaml(opus_path)) == comparable(_workflow_yaml(variant_path))
+    agent = variant_def.phases[0].agent
     assert agent is not None
-    assert (agent.provider, agent.model, agent.sandbox) == ("codex", "gpt-sol", "workspace-write")
+    assert (agent.provider, agent.model, agent.sandbox) == agent_fields
 
 
 _SDLC_VERIFY = ROOT / "workflows/sdlc/implement-v3/phases/verify.md"
@@ -775,8 +806,10 @@ class _Server:
         *,
         attached: bool = False,
         served_phases: list[_ServedPhase] | None = None,
+        report: str = _FINDING,
     ) -> None:
         self.requests: list[httpx.Request] = []
+        self.report = report
         self.installed: str | None = None
         self.phases = served_phases if served_phases is not None else _phases_of(loaded)
         self.attached = attached
@@ -946,7 +979,7 @@ class _Server:
                 200,
                 json={
                     "artifact_id": "art-1",
-                    "content": _FINDING,
+                    "content": self.report,
                     "content_type": "text/markdown",
                     "size_bytes": 10,
                 },
@@ -990,6 +1023,68 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     # run's total, and the median over the runs that reported one.
     assert row.tokens == 1_234_567
     assert "1,234,567" in table and "median tokens 1,234,567 over 1 run(s)" in table
+
+
+#: A report that blocks only on the workspace: its gates could not install
+#: their dependencies (#1726, modelled on exec-e1709cef93c6; see the fixture).
+_ENVIRONMENT_REPORT = (
+    Path(__file__).parent / "fixtures" / "eval_environment_blocked_report.md"
+).read_text()
+
+
+@pytest.mark.unit
+def test_a_run_blocked_only_on_the_environment_scores_error_not_fail() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded, report=_ENVIRONMENT_REPORT)
+    rows, _ = score_suite(loaded, server.client(), [_LAUNCHED])
+
+    row = next(r for r in rows if r.case == _CASE)
+    assert row.score is not None and not row.score.passed and row.score.errored
+    line = next(line for line in render(loaded, rows).splitlines() if "exec-1" in line)
+    assert " ERROR " in line and " FAIL " not in line
+    assert "0/6 passed (1 ERROR: blocked on the environment" in render(loaded, rows)
+
+
+@pytest.mark.unit
+def test_an_environment_blocker_beside_a_code_blocker_that_misses_is_still_error() -> None:
+    env = blocking_findings(_ENVIRONMENT_REPORT)[0]
+    report = _FINDING.replace("## NON-BLOCKING", env + "\n\n## NON-BLOCKING").replace(
+        "download() builds the id-only key; upload keys by execution, so reads 404.",
+        "logs at the wrong level.",
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.findings == 2 and not score.passed and score.errored
+
+
+@pytest.mark.unit
+def test_an_environment_blocker_never_hides_a_caught_seed() -> None:
+    env = blocking_findings(_ENVIRONMENT_REPORT)[0]
+    report = _FINDING.replace("## NON-BLOCKING", env + "\n\n## NON-BLOCKING")
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.passed and not score.errored
+
+
+@pytest.mark.unit
+def test_a_code_defect_that_discusses_dns_and_network_is_a_fail_not_an_error() -> None:
+    report = _report(
+        (
+            "docker/sidecar-proxy/envoy.yaml:88",
+            "the api.github.com route resolves DNS through the wrong cluster, so network "
+            "egress to GitHub is denied with Operation not permitted and the proxy 503s.",
+        )
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert not score.passed and not score.errored
+
+
+@pytest.mark.unit
+def test_gate_output_outside_blocking_is_not_an_environment_blocker() -> None:
+    report = _report(
+        ("other.py", "drops the key"),
+        non_blocking="uv first failed: dns error reaching files.pythonhosted.org; retried fine.",
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.environment_findings == 0 and not score.errored
 
 
 @pytest.mark.unit

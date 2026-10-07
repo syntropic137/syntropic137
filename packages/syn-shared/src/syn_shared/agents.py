@@ -52,8 +52,12 @@ class PhaseSandbox(StrEnum):
     """Read, write and run commands inside ``/workspace``, including
     ``artifacts/output/`` and git commits; writes outside it are denied. The
     least authority a phase can finish with, so prefer it for any phase that
-    does not need to reach outside the workspace. Network egress is available
-    at every level."""
+    does not need to reach outside the workspace. NO NETWORK: codex's
+    workspace-write sandbox denies egress unless
+    ``sandbox_workspace_write.network_access`` is set, which this platform does
+    not set, so a gate that installs packages fails on DNS here (#1726: every
+    sdlc verify eval run blocked on files.pythonhosted.org). Only
+    ``FULL_ACCESS`` has the network."""
 
     FULL_ACCESS = "full-access"
     """No codex sandbox: unrestricted filesystem access inside the workspace
@@ -322,8 +326,10 @@ class ModelId(StrEnum):
     fallback.
     """
 
-    # --- Current generation (verified 2026-09-24) ---
+    # --- Current generation (verified 2026-09-24; gpt-6.1-sol 2026-10-06) ---
     CLAUDE_OPUS_5_5 = "claude-opus-5-5"
+    CLAUDE_SONNET_5_5 = "claude-sonnet-5-5"  # verified 2026-10-07
+    GPT_6_1_SOL = "gpt-6.1-sol"
     GPT_6_SOL = "gpt-6-sol"
     # --- ADR-067 phase 0 generation (verified 2026-08-16) ---
     CLAUDE_OPUS_5 = "claude-opus-5"
@@ -364,7 +370,7 @@ class CodexModelAlias(StrEnum):
 
 
 CODEX_MODEL_ALIAS_TARGETS: dict[CodexModelAlias, ModelId] = {
-    CodexModelAlias.GPT_SOL: ModelId.GPT_6_SOL,
+    CodexModelAlias.GPT_SOL: ModelId.GPT_6_1_SOL,
 }
 """What each codex alias runs as today. One entry per ``CodexModelAlias``."""
 
@@ -373,7 +379,11 @@ CLAUDE_MODEL_ALIAS_TARGETS: dict[ModelAlias, ModelId] = {
     # claude-code 2.1.280 moved `opus` to Opus 5.5; probed on 2.1.281, the CLI
     # reports it as exactly `claude-opus-5-5` (no `[1m]` suffix).
     ModelAlias.OPUS: ModelId.CLAUDE_OPUS_5_5,
-    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5,
+    # `sonnet` means the newest Sonnet. claude-code 2.1.281, the pinned CLI on
+    # 2026-10-07, predates Sonnet 5.5 and still resolves it to Sonnet 5; the
+    # first CLI carrying `claude-sonnet-5-5` seen was 2.1.293. Until that pin
+    # lands this is ahead of the CLI, and the observed model wins (see below).
+    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5_5,
     ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
     ModelAlias.FABLE: ModelId.CLAUDE_FABLE_5,
 }
@@ -391,7 +401,7 @@ class AliasResolutionBasis(StrEnum):
 
     TRANSLATED = "translated"
     """The platform itself rewrites the alias before the CLI sees it (codex
-    ``--model gpt-6-sol``): the target IS what runs."""
+    ``--model gpt-6.1-sol``): the target IS what runs."""
 
     EXPECTED = "expected"
     """The alias reaches the CLI verbatim and the CLI resolves it (claude):
@@ -450,7 +460,7 @@ And at EXECUTION, for templates stored before defaults were persisted, whose
 phases carry ``model=None``. THIS CHANGES WHAT THOSE TEMPLATES RUN, on
 purpose: a legacy claude phase that used to fall back to ``haiku`` now runs
 ``opus``, and a legacy codex phase that used to leave the choice to codex now
-runs ``gpt-sol`` (``--model gpt-6-sol``). The owner approved this on
+runs ``gpt-sol`` (``--model gpt-6.1-sol``). The owner approved this on
 2026-09-24; there is deliberately no migration pinning legacy phases to the
 old behaviour. Reinstalling such a template does not rewrite its stored
 ``None`` either (see ``CreateWorkflowTemplateHandler``); a phase EDIT does.
@@ -475,7 +485,7 @@ run as Haiku, and synthesizing the provider name ``"codex"`` produced
 ``codex exec --model codex`` and GPT-5.6 rates for a model never run.
 
 ``gpt-sol`` is not a guess. It is a concrete, priced model that the platform
-now FORCES with ``--model gpt-6-sol``, so the requested model is the model that
+now FORCES with ``--model gpt-6.1-sol``, so the requested model is the model that
 runs, and the price attached to it is the price of that model. The observed
 model (read from the codex rollout, #1284) still wins wherever it exists.
 """
@@ -502,6 +512,7 @@ class PhaseModelDefaults:
 CLAUDE_MODEL_IDS: frozenset[ModelId] = frozenset(
     {
         ModelId.CLAUDE_OPUS_5_5,
+        ModelId.CLAUDE_SONNET_5_5,
         ModelId.CLAUDE_OPUS_5,
         ModelId.CLAUDE_SONNET_5,
         ModelId.CLAUDE_FABLE_5,
@@ -520,6 +531,7 @@ CLAUDE_MODEL_IDS: frozenset[ModelId] = frozenset(
 
 CODEX_MODEL_IDS: frozenset[ModelId] = frozenset(
     {
+        ModelId.GPT_6_1_SOL,
         ModelId.GPT_6_SOL,
         ModelId.GPT_5_6_SOL,
         ModelId.GPT_5_6_TERRA,

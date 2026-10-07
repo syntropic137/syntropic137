@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 # Global client instance (managed lifecycle)
 _client: EventStoreClient | None = None
 
@@ -66,7 +67,7 @@ def _create_memory_client() -> EventStoreClient:
 
 def _create_grpc_client() -> EventStoreClient:
     """Create a gRPC client for development/production."""
-    from event_sourcing import EventStoreClientFactory
+    from syn_adapters.storage.legacy_tolerant_client import LegacyShapeTolerantGrpcClient
 
     settings = get_settings()
 
@@ -79,9 +80,10 @@ def _create_grpc_client() -> EventStoreClient:
         },
     )
 
-    return EventStoreClientFactory.create_grpc_client(
-        host=settings.event_store_host,
-        port=settings.event_store_port,
+    # Strict decoding (ESP ADR-027), admitting only the legacy payload shapes
+    # the domain reads on purpose: see `legacy_tolerant_client`.
+    return LegacyShapeTolerantGrpcClient(
+        address=f"{settings.event_store_host}:{settings.event_store_port}",
         tenant_id=settings.event_store_tenant_id,
     )
 

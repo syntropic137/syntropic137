@@ -35,7 +35,15 @@ from syn_api.types import HealthResponse, SubscriptionHealth
 #: rather than from a lag measurement. Everything else on it must be a
 #: ``ReadModelLag`` field — see ``test_the_flat_lag_fields_match_read_model_lag``.
 _SERVICE_STATUS_FIELDS = frozenset(
-    {"status", "running", "projection_count", "realtime_enabled", "unapplied_starts"}
+    {
+        "status",
+        "running",
+        "projection_count",
+        "realtime_enabled",
+        "held_projections",
+        "halted_at",
+        "unapplied_starts",
+    }
 )
 
 
