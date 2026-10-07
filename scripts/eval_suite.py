@@ -34,9 +34,11 @@ Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
+import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
@@ -664,6 +666,31 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
 # ---------------------------------------------------------------------------
 
 
+def _read_back(client: httpx.Client, path: str, attempts: int = 30) -> _Workflow:
+    """Read a just-installed workflow back, waiting out read-model lag.
+
+    The install is accepted before the workflow read model applies it, so an
+    immediate GET can 404. Retry 404s for up to ``attempts`` seconds; any other
+    status, or a 404 that outlasts the wait, is raised.
+    """
+    for attempt in range(attempts):
+        response = client.get(path)
+        if response.status_code != 404 or attempt == attempts - 1:
+            response.raise_for_status()
+            return _Workflow.model_validate(response.json())
+        time.sleep(1)
+    raise AssertionError("unreachable")
+
+
+def _basic_auth() -> httpx.BasicAuth | None:
+    """Basic auth for a deployed API (gateway), from the same variables the CLI reads.
+
+    Local dev APIs need none; a selfhost gateway refuses unauthenticated calls.
+    """
+    user, password = os.environ.get("SYN_API_USER"), os.environ.get("SYN_API_PASSWORD")
+    return httpx.BasicAuth(user, password) if user and password else None
+
+
 def _workflow_document(loaded: LoadedSuite, root: Path) -> str:
     """The suite's workflow as one YAML document, its prompt files inlined.
 
@@ -697,7 +724,7 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
 
     local = WorkflowDefinition.from_file(root / s.workflow.path)
     want = {p.id: (p.prompt_template, s.workflow.models[p.id]) for p in local.phases}
-    server = _get(client, _Workflow, f"/workflows/{s.workflow.id}")
+    server = _read_back(client, f"/workflows/{s.workflow.id}")
     have = {p.phase_id: (p.prompt_template, p.model) for p in server.phases}
     if have != want:
         differs = sorted(k for k in want.keys() | have.keys() if want.get(k) != have.get(k))
@@ -820,7 +847,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     ledger: Path = args.launches or launches_path(args.suite)
-    with httpx.Client(base_url=args.api_url or get_dev_api_url(), timeout=60) as client:
+    with httpx.Client(
+        base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
+    ) as client:
         if args.command == "launch":
             print("\n".join(launch_suite(loaded, client, ledger)))
             print(f"recorded in {ledger}: commit it, `score` reads only the runs it names")
