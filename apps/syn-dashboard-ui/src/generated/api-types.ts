@@ -7591,7 +7591,7 @@ export interface components {
          *     runbook already read. The fields from ``running`` down are
          *     ``CoordinatorSubscriptionService.get_status()``; the ones from
          *     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
-         *     ``lifecycle._describe_subscription_health``.
+         *     ``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).
          *
          *     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
          *     rather than a default: ``lag is None`` means the coordinator is not up yet,
