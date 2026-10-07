@@ -80,7 +80,7 @@ mkdir -p /workspace/.tmp /workspace/.cache
 export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv
 just preflight-agent > /workspace/.tmp/preflight.log 2>&1; echo "exit=$?"
 tail -n 40 /workspace/.tmp/preflight.log
-grep -nE 'NOT RUN|FAIL|error' /workspace/.tmp/preflight.log | head -n 40
+grep -nE 'NOT RUN|FAIL|error:' /workspace/.tmp/preflight.log | head -n 40
 uv run pytest -m unit -q > /workspace/.tmp/unit.log 2>&1; echo "exit=$?"
 tail -n 40 /workspace/.tmp/unit.log
 ```
