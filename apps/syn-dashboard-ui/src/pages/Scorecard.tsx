@@ -92,9 +92,12 @@ export function Scorecard() {
 
   useEffect(() => {
     let live = true
-    setError(null)
     getScorecard(window)
-      .then((d) => live && setData(d))
+      .then((d) => {
+        if (!live) return
+        setData(d)
+        setError(null)
+      })
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)))
     return () => {
       live = false
