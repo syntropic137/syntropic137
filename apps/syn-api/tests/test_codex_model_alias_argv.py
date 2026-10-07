@@ -1,4 +1,4 @@
-"""`gpt-sol` reaches codex as `--model gpt-6-sol` (R2).
+"""`gpt-sol` reaches codex as `--model gpt-6.1-sol` (R2).
 
 Codex has no alias feature: `codex exec --model gpt-sol` names a model that
 does not exist. The platform alias is stored and requested as written and
@@ -22,9 +22,9 @@ def _model_flag(cmd: list[str]) -> str | None:
     return cmd[cmd.index("--model") + 1]
 
 
-def test_gpt_sol_is_sent_as_gpt_6_sol() -> None:
+def test_gpt_sol_is_sent_as_gpt_6_1_sol() -> None:
     cmd = _build_codex_command("p", CodexModelAlias.GPT_SOL)
-    assert _model_flag(cmd) == ModelId.GPT_6_SOL
+    assert _model_flag(cmd) == ModelId.GPT_6_1_SOL
     assert CodexModelAlias.GPT_SOL not in cmd
 
 

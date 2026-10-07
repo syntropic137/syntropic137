@@ -54,8 +54,8 @@ describe('alias resolution on the phase definition', () => {
   })
 
   it('shows the default an unset model runs as', () => {
-    render(<PhasePromptEditor phase={phase({ provider: 'codex', resolved_model: 'gpt-6-sol', model_display: 'default \u2192 gpt-sol \u2192 gpt-6-sol' })} workflowId="wf-1" />)
-    expect(screen.getByText('default \u2192 gpt-sol \u2192 gpt-6-sol')).toBeTruthy()
+    render(<PhasePromptEditor phase={phase({ provider: 'codex', resolved_model: 'gpt-6.1-sol', model_display: 'default \u2192 gpt-sol \u2192 gpt-6.1-sol' })} workflowId="wf-1" />)
+    expect(screen.getByText('default \u2192 gpt-sol \u2192 gpt-6.1-sol')).toBeTruthy()
   })
 
   it('falls back to the raw model when the API sends no display', () => {

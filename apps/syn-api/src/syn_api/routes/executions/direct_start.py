@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from syn_api._wiring_admission import get_execution_budget, request_withdrawn
 from syn_api.execution_budget import StartAlreadyClaimedError, StartPath
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 
 if TYPE_CHECKING:
@@ -99,12 +100,12 @@ def queue_direct_start(
 
     async def _run() -> None:
         # #1387: the lease, carried across the hop that used to spend it. It
-        # ends inside `execute()` when the execution's start event is durable,
-        # or here if this task produced no execution at all, and it spans the
-        # wait for a budget slot, as on the trigger path.
+        # starts at the budget slot (#1617) and ends inside `execute()` when the
+        # execution's start event is durable, or here if this task produced no
+        # execution at all.
         with carrying(admitted):
             try:
-                async with budget.held(claim):
+                async with budget.held(claim, admitted):
                     from syn_adapters.storage.repositories import (
                         get_execution_request_repository,
                     )
@@ -113,6 +114,11 @@ def queue_direct_start(
                     if await request_withdrawn(get_execution_request_repository(), execution_id):
                         return
                     await start()
+            except AdmissionRefusedError as exc:
+                # #1617: paused while this start was queued. Its durable request
+                # is still owed, and the request ProcessManager offers it again
+                # once admission re-opens.
+                logger.warning("Start of %s held at its slot: %s", execution_id, exc)
             except Exception:
                 logger.exception(
                     "Workflow execution raised exception",

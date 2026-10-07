@@ -2202,6 +2202,11 @@ export interface paths {
          *     still asleep and nothing else will re-offer them, so reporting success here
          *     would close the deploy over work that never runs. Repeating the clear
          *     re-announces, which is why this is a retryable status and not a 500.
+         *
+         *     Pausing waits only for starts that already hold an execution slot and have
+         *     not written their start event, and only for a bound (#1617). Starts queued
+         *     for a slot stay queued and start after the clear. A pause that runs out of
+         *     that bound answers 503 with the flag NOT set: admission is still open.
          */
         put: operations["set_maintenance_mode_maintenance_put"];
         post?: never;

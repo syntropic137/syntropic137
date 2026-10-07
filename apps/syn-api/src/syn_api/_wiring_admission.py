@@ -54,6 +54,7 @@ from syn_api.execution_budget import (
     StartClaim,
     StartPath,
 )
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 
 logger = logging.getLogger(__name__)
@@ -415,6 +416,31 @@ class BackgroundWorkflowDispatcher:
         asyncio_task.add_done_callback(lambda _task: self._budget.release(claim))
         guarantee_settled(ticket, asyncio_task)
 
+    async def _in_slot(
+        self,
+        claim: StartClaim,
+        admitted: AdmissionTicket | None,
+        on_held: StartFailureReporter | None,
+        start: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Wait for ``claim``'s slot, then run ``start`` under its lease - if the gate allows.
+
+        The one shape every dispatcher start shares. Queued, the start leases
+        nothing and a pause does not wait for it (#1617); at its slot,
+        ``held`` re-checks the gate. Refused there, it does not start and the
+        refusal goes to ``on_held``, whose durable record holds the start until
+        the gate re-opens and re-offers it. ``carrying`` ends the lease however
+        this leaves; `_track`'s backstop covers the task that never runs at all.
+        """
+        with carrying(admitted):
+            try:
+                async with self._budget.held(claim, admitted):
+                    await start()
+            except AdmissionRefusedError as exc:
+                logger.warning("Start of %s held at its slot: %s", claim.execution_id, exc)
+                if on_held is not None:
+                    await self._report_start_failure(claim.execution_id, on_held, exc)
+
     async def _start_resume_in_budget(
         self,
         parent_execution_id: str,
@@ -423,20 +449,22 @@ class BackgroundWorkflowDispatcher:
         on_failure: StartFailureReporter,
     ) -> None:
         resume_handler = await self._resolved_resume_handler()
-        with carrying(admitted):
-            async with self._budget.held(claim):
-                try:
-                    await resume_handler.handle(parent_execution_id, admitted=admitted)
-                except Exception as exc:
-                    logger.exception(
-                        "Background resume start raised exception",
-                        extra={"parent_execution_id": parent_execution_id},
-                    )
-                    # A log alone left the to-do `dispatched` and re-offered for
-                    # ever, counting no attempt and recording no reason (#1463).
-                    # The record decides what the failure means; this only
-                    # delivers it.
-                    await self._report_start_failure(parent_execution_id, on_failure, exc)
+
+        async def start() -> None:
+            try:
+                await resume_handler.handle(parent_execution_id, admitted=admitted)
+            except Exception as exc:
+                logger.exception(
+                    "Background resume start raised exception",
+                    extra={"parent_execution_id": parent_execution_id},
+                )
+                # A log alone left the to-do `dispatched` and re-offered for
+                # ever, counting no attempt and recording no reason (#1463).
+                # The record decides what the failure means; this only
+                # delivers it.
+                await self._report_start_failure(parent_execution_id, on_failure, exc)
+
+        await self._in_slot(claim, admitted, on_failure, start)
 
     @staticmethod
     async def _report_start_failure(
@@ -548,29 +576,30 @@ class BackgroundWorkflowDispatcher:
             WorkflowNotFoundError,
         )
 
-        with carrying(admitted):
-            async with self._budget.held(claim):
-                if self._requests is not None and await request_withdrawn(
-                    self._requests, claim.execution_id
-                ):
-                    return
-                try:
-                    await self._handler.handle(command, admitted=admitted)
-                except DuplicateExecutionError:
-                    # Its stream already exists: started, by this or another
-                    # process. The start event settles the record.
-                    logger.info("Requested execution %s already started", claim.execution_id)
-                except WorkflowNotFoundError as exc:
-                    # A refusal by recorded facts, so terminal: ValueError.
-                    await self._report_start_failure(
-                        claim.execution_id, on_failure, ValueError(str(exc))
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "Requested execution start raised exception",
-                        extra={"execution_id": claim.execution_id},
-                    )
-                    await self._report_start_failure(claim.execution_id, on_failure, exc)
+        async def start() -> None:
+            if self._requests is not None and await request_withdrawn(
+                self._requests, claim.execution_id
+            ):
+                return
+            try:
+                await self._handler.handle(command, admitted=admitted)
+            except DuplicateExecutionError:
+                # Its stream already exists: started, by this or another
+                # process. The start event settles the record.
+                logger.info("Requested execution %s already started", claim.execution_id)
+            except WorkflowNotFoundError as exc:
+                # A refusal by recorded facts, so terminal: ValueError.
+                await self._report_start_failure(
+                    claim.execution_id, on_failure, ValueError(str(exc))
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Requested execution start raised exception",
+                    extra={"execution_id": claim.execution_id},
+                )
+                await self._report_start_failure(claim.execution_id, on_failure, exc)
+
+        await self._in_slot(claim, admitted, on_failure, start)
 
     async def run_workflow(
         self,
@@ -579,7 +608,11 @@ class BackgroundWorkflowDispatcher:
         execution_id: str = "",
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
+        on_held: StartFailureReporter | None = None,
     ) -> AdmissionTicket | None:
+        # ``on_held`` receives the refusal of a start that was queued for a slot
+        # when the gate closed (#1617), so the trigger record can hold it again.
+        #
         # Named HERE, before the start is queued, so a start waiting for a slot
         # has an id to be found by (#1557). The handler would mint the same
         # shape later; minting it first only moves the moment.
@@ -599,7 +632,7 @@ class BackgroundWorkflowDispatcher:
         if self._maintenance is None:
             await self._handler.validate_stored_declarations(workflow_id)
             launch_eval = await self._launch_eval(workflow_id)
-            self._spawn(workflow_id, inputs, execution_id, task, repos, None, launch_eval)
+            self._spawn(workflow_id, inputs, execution_id, task, repos, None, launch_eval, None)
             return None
 
         # Two reads, and they are not the same check twice. This first one is
@@ -621,7 +654,9 @@ class BackgroundWorkflowDispatcher:
         # the projection, which is the only place it can still change what the
         # trigger record says.
         async with self._maintenance.admitting() as ticket:
-            self._spawn(workflow_id, inputs, execution_id, task, repos, ticket, launch_eval)
+            self._spawn(
+                workflow_id, inputs, execution_id, task, repos, ticket, launch_eval, on_held
+            )
             return ticket
 
     async def _launch_eval(self, workflow_id: str) -> LaunchEval | None:
@@ -647,6 +682,7 @@ class BackgroundWorkflowDispatcher:
         repos: list[RepositoryRef] | None,
         ticket: AdmissionTicket | None,
         launch_eval: LaunchEval | None,
+        on_held: StartFailureReporter | None,
     ) -> None:
         """Claim the start's place and create its fire-and-forget task. Synchronous,
         so nothing interleaves between the gate's answer and the work existing.
@@ -676,6 +712,7 @@ class BackgroundWorkflowDispatcher:
                 repos=repos,
                 admitted=ticket,
                 launch_eval=launch_eval,
+                on_held=on_held,
             ),
             name=f"workflow-exec-{execution_id}",
         )
@@ -690,26 +727,22 @@ class BackgroundWorkflowDispatcher:
         repos: list[RepositoryRef] | None = None,
         admitted: AdmissionTicket | None = None,
         launch_eval: LaunchEval | None = None,
+        on_held: StartFailureReporter | None = None,
     ) -> None:
-        # #1387: the lease spans the wait for a slot. This is the case that
-        # rebuilt the execution-loss window - a ticket spent at `create_task`
-        # while the execution sat queued behind another one, invisible to the
-        # drain. `carrying` ends the lease however this task leaves: the
-        # execution became durable and ended it already, `_run` swallowed a
-        # failure, or shutdown cancelled us while still queued. It ends the
-        # lease at the moment the body stops rather than a loop turn later;
-        # `_track`'s backstop covers the body that never starts at all.
-        with carrying(admitted):
-            async with self._budget.held(claim):
-                await self._run(
-                    workflow_id,
-                    inputs,
-                    claim.execution_id,
-                    task=task,
-                    repos=repos,
-                    admitted=admitted,
-                    launch_eval=launch_eval,
-                )
+        # #1387/#1617: the lease starts at the slot, not at `create_task`, and
+        # lasts until the execution is durable; `_in_slot` owns both ends.
+        async def start() -> None:
+            await self._run(
+                workflow_id,
+                inputs,
+                claim.execution_id,
+                task=task,
+                repos=repos,
+                admitted=admitted,
+                launch_eval=launch_eval,
+            )
+
+        await self._in_slot(claim, admitted, on_held, start)
 
     async def _run(
         self,

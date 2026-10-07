@@ -171,7 +171,7 @@ phases:
     prompt_file: phases/review.md
     agent:
       provider: codex
-      model: gpt-sol          # platform alias for gpt-6-sol
+      model: gpt-sol          # platform alias for gpt-6.1-sol
 ```
 
 Running the same work through two vendors is the main reason to mix them. A codex
@@ -250,10 +250,10 @@ laptop cannot revoke, use a ChatGPT Business or Enterprise access token. See
 
 ### Codex model ids and cost
 
-On codex phases, write `gpt-sol` or a concrete model id such as `gpt-6-sol`.
+On codex phases, write `gpt-sol` or a concrete model id such as `gpt-6.1-sol`.
 `gpt-sol` is a **platform** alias: codex has no aliases of its own, so the
-platform sends it to codex as `--model gpt-6-sol` and prices the run as
-`gpt-6-sol`. A codex phase that leaves `model` unset gets `gpt-sol` (or whatever
+platform sends it to codex as `--model gpt-6.1-sol` and prices the run as
+`gpt-6.1-sol`. A codex phase that leaves `model` unset gets `gpt-sol` (or whatever
 `SYN_DEFAULT_CODEX_MODEL` names), recorded in the workflow when you install it.
 
 Other codex aliases, such as OpenAI's `gpt-5.6`, are not translated. Codex may
