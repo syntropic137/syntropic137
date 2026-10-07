@@ -41,6 +41,11 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # working unchanged.
 from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.exec_status_lost import (
+    diagnose_lost_status,
+    status_was_lost,
+    workspace_container_name,
+)
 from syn_adapters.workspace_backends.host_security import host_security_failure
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
@@ -451,12 +456,24 @@ class AgenticIsolationAdapter:
                 handle.isolation_id,
                 signal_death.describe(),
             )
+        # No status AND no output is not an answer, and passed on as-is it
+        # reached the operator as "failed ... and printed nothing". Say what
+        # the container was doing and whether the deadline had already passed,
+        # here, while the container still exists to be asked.
+        stderr = result.stderr
+        if status_was_lost(result):
+            stderr = await diagnose_lost_status(
+                workspace_container_name(handle.isolation_id),
+                duration_ms=result.duration_ms,
+                timeout_seconds=float(timeout_seconds) if timeout_seconds else None,
+            )
+            logger.error("Command in workspace %s: %s", handle.isolation_id, stderr)
         return ExecutionResult(
             exit_code=result.exit_code,
             success=result.success,
             duration_ms=result.duration_ms,
             stdout=result.stdout,
-            stderr=result.stderr,
+            stderr=stderr,
             timed_out=result.timed_out,
             signal_death=signal_death,
         )

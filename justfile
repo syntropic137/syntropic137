@@ -542,7 +542,7 @@ cli-node-qa: cli-node-typecheck cli-node-test cli-node-build
 # Loads .env for database connection and API keys
 api-backend:
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    uv run uvicorn syn_api.main:app --host 0.0.0.0 --port 8000 --reload
+    uv run uvicorn syn_api.main:app --host 0.0.0.0 --port 8000 --reload --loop asyncio
 
 # --- Dashboard & Frontend ---
 
