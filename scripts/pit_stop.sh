@@ -118,6 +118,14 @@ esac
 case "$PROBE_CANCEL_TIMEOUT" in
     ""|*[!0-9]*) die "SYN_PIT_PROBE_CANCEL_TIMEOUT must be whole seconds (got: $PROBE_CANCEL_TIMEOUT)" ;;
 esac
+# Base ten, explicitly: Bash arithmetic reads a leading zero as octal, so `08`
+# passed the digits-only check above and then broke the drain's deadline sum,
+# and an arithmetic error abandons the function it is in WITHOUT tripping
+# `set -e`. The pit stop carried on past an undrained platform.
+DRAIN_TIMEOUT=$(( 10#$DRAIN_TIMEOUT ))
+API_READY_TIMEOUT=$(( 10#$API_READY_TIMEOUT ))
+PROBE_TIMEOUT=$(( 10#$PROBE_TIMEOUT ))
+PROBE_CANCEL_TIMEOUT=$(( 10#$PROBE_CANCEL_TIMEOUT ))
 # Interpolated into an API path below, so checked here rather than trusted there.
 case "$PROBE_WORKFLOW" in
     ""|*[!0-9A-Za-z._-]*) die "SYN_PIT_PROBE_WORKFLOW is not a workflow id (got: $PROBE_WORKFLOW)" ;;
@@ -133,8 +141,8 @@ esac
 # heals by waiting (PC-115 waited 2.25h on it), so it gets its own code and the
 # execution ids the repair runbook needs.
 DROPPED_RUNBOOK="docs/runbooks/repair-dropped-execution-start.md"
-projections_healthy() {
-    api "/health" "$TMP/health.json" 2>/dev/null || { echo "   subscription: /health unreachable"; return 1; }
+projections_healthy() {  # $1: optional curl cap in seconds (the drain's)
+    api "/health" "$TMP/health.json" "${1:-90}" 2>/dev/null || { echo "   subscription: /health unreachable"; return 1; }
     python3 - "$TMP/health.json" <<'PY'
 import json, sys
 h = json.load(open(sys.argv[1]))
@@ -173,19 +181,22 @@ DISK
 # status key present is terminal. Read from status_counts, which is tallied over
 # the whole collection, never from a page of rows (see the runbook, section 1).
 # Returns 0 drained, 1 not yet, 2 the read path dropped events (see above).
-drained() {
+# Every read is capped to what is left of $1, the drain's deadline, so a slow
+# answer cannot carry the drain past its budget, let alone return a verdict
+# from after it.
+drained() {  # $1: deadline from mono_now
     local rc=0
-    projections_healthy || rc=$?
+    projections_healthy "$(cap "$1")" || rc=$?
     if [ "$rc" = 2 ]; then return 2; fi
     if [ "$rc" != 0 ]; then echo "   read path is not at the event-store head yet"; return 1; fi
-    status_counts
+    status_counts "$(cap "$1")"
 }
 
 # The busy-or-not reading of status_counts, printed; 0 only when every status
 # key present is terminal. Also printed at the gate: queued vs running there is
 # how long the drain is about to be.
-status_counts() {
-    api "/executions?page_size=1" "$TMP/counts.json" || return 1
+status_counts() {  # $1: optional curl cap in seconds (the drain's)
+    api "/executions?page_size=1" "$TMP/counts.json" "${1:-90}" || return 1
     python3 - "$TMP/counts.json" <<'PY'
 import json, sys
 counts = json.load(open(sys.argv[1]))["status_counts"]
@@ -200,6 +211,19 @@ PY
 # not counters of sleeps: a counter that adds 10 per poll let one slow GET after
 # another stretch the probe's 600s bound past 90 minutes.
 mono_now() { python3 -c 'import time; print(int(time.monotonic()))'; }
+left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
+    local l=$(( $1 - $(mono_now) ))
+    if [ "$l" -gt 90 ]; then l=90; fi
+    if [ "$l" -lt 0 ]; then l=0; fi
+    echo "$l"
+}
+# A curl -m for a read against a deadline. Never 0: `curl -m 0` means NO limit.
+cap() {  # $1: deadline from mono_now
+    local l
+    l="$(left "$1")"
+    if [ "$l" -lt 1 ]; then l=1; fi
+    echo "$l"
+}
 
 # Close or open the admission gate (#1387). THE DRAIN ALONE ONLY OBSERVES:
 # `drained` is a statement about one instant, and nothing used to stop a
@@ -227,17 +251,29 @@ GATE
 }
 
 # The executions still running, one per line, for an operator deciding what to
-# do about them. Read-only: the pit stop never cancels anyone's work.
+# do about them. EVERY one: 200 is the API's largest page, so this follows the
+# pages until `total` is listed. Read-only: the pit stop never cancels anyone's
+# work. Each page is capped at 30s, since the budget is already spent.
 running_executions() {
-    api "/executions?status=running&page_size=200" "$TMP/running.json" || { echo "   could not list the running executions"; return 0; }
-    python3 - "$TMP/running.json" <<'RUN'
+    local page=1 rc
+    while :; do
+        api "/executions?status=running&page_size=200&page=$page" "$TMP/running.json" 30 \
+            || { echo "   could not list the running executions (page $page)"; return 0; }
+        rc=0
+        python3 - "$TMP/running.json" "$page" <<'RUN' || rc=$?
 import json, sys
-page = json.load(open(sys.argv[1]))
-rows = page.get("executions") or []
-print(f"   STILL RUNNING ({page.get('total', len(rows))}):")
+body, page = json.load(open(sys.argv[1])), int(sys.argv[2])
+rows = body.get("executions") or []
+total = body.get("total", len(rows))
+if page == 1:
+    print(f"   STILL RUNNING ({total}):")
 for r in rows:
     print(f"     {r.get('workflow_execution_id')}  {r.get('workflow_name')}  started {r.get('started_at')}")
+sys.exit(10 if rows and page * 200 < total else 0)
 RUN
+        if [ "$rc" != 10 ]; then return 0; fi
+        page=$(( page + 1 ))
+    done
 }
 
 # A drain that cannot finish ends the pit stop, and RE-OPENS admission first.
@@ -258,17 +294,22 @@ abort_drain() {
 # fast on dropped events (waiting cannot fix them); on an exhausted budget lists
 # what is still running and stops, so the operator chooses (PC-114: one long
 # repair round held a whole drain for ~2h).
+#
+# Sets DRAINED=1 on the one path that saw drained; the caller checks that flag
+# rather than trusting the call's return, because an expansion error abandons a
+# function without tripping `set -e` and execution resumes after the call.
+DRAINED=0
 drain_loop() {
     local deadline rc t
     deadline=$(( $(mono_now) + DRAIN_TIMEOUT ))
     while :; do
         rc=0
-        drained || rc=$?
-        if [ "$rc" = 0 ]; then return 0; fi
+        drained "$deadline" || rc=$?
+        if [ "$rc" = 0 ]; then DRAINED=1; return 0; fi
         if [ "$rc" = 2 ]; then
             abort_drain "the read path DROPPED execution starts (subscription.status=dropped_events, #1696). Waiting cannot fix it. Repair the executions named above with $DROPPED_RUNBOOK, then re-run with --swap-only"
         fi
-        t=$(( deadline - $(mono_now) ))
+        t="$(left "$deadline")"
         if [ "$t" -le 0 ]; then
             running_executions
             abort_drain "drain budget of ${DRAIN_TIMEOUT}s spent with executions still in flight (listed above); none was cancelled. Choose: WAIT (re-run with --swap-only; SYN_PIT_DRAIN_TIMEOUT sets the budget), or INTERRUPT them yourself, re-run, and resume them after the pit stop"
@@ -411,6 +452,7 @@ status_counts || true
 
 step "drain: waiting for every execution to be terminal (budget ${DRAIN_TIMEOUT}s)"
 drain_loop
+[ "$DRAINED" = 1 ] || abort_drain "the drain ended without a drained verdict (see the error above)"
 
 # Bring api + gateway up. Idempotent: a second call recreates nothing that
 # already matches the compose file, it only starts what is still `Created`.
@@ -520,13 +562,7 @@ maintenance false "" || die "$TAG is live but the clear did not complete; retry 
 # same admission as everyone else's work, and a failed probe never re-closes it.
 api_post() { api_curl -m "${4:-90}" -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
 
-# Every probe HTTP call is capped to what is left of its deadline.
-left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
-    local l=$(( $1 - $(mono_now) ))
-    if [ "$l" -gt 90 ]; then l=90; fi
-    if [ "$l" -lt 0 ]; then l=0; fi
-    echo "$l"
-}
+# Every probe HTTP call is capped to what is left of its deadline (`left`).
 nap() {  # $1: deadline; sleep the poll interval, never past the deadline
     local t
     t="$(left "$1")"

@@ -18,10 +18,12 @@ import json
 import os
 import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -37,6 +39,11 @@ _RUNBOOK = "docs/runbooks/repair-dropped-execution-start.md"
 _DROPPED_A = "exec-dropped00000a"
 _DROPPED_B = "exec-dropped00000b"
 _LONG_RUN = "exec-longrepair0001"
+_LONG_ROW: dict[str, str] = {
+    "workflow_execution_id": _LONG_RUN,
+    "workflow_name": "repair-round",
+    "started_at": "2026-10-07T10:00:00Z",
+}
 
 _HEALTHY: dict[str, object] = {
     "status": "healthy",
@@ -64,10 +71,16 @@ _DROPPED: dict[str, object] = {
 
 @dataclass
 class _Host:
-    """``counts`` are successive status_counts bodies, the last repeating."""
+    """``counts`` are successive status_counts bodies, the last repeating.
+
+    ``health_delay`` holds every /health answer back, in seconds; ``running``
+    is the whole running collection, served in the pages the client asks for.
+    """
 
     health: dict[str, object]
     counts: list[dict[str, int]]
+    health_delay: float = 0.0
+    running: list[dict[str, str]] = field(default_factory=lambda: [_LONG_ROW])
     count_reads: int = 0
     requests: list[tuple[str, str, bytes]] = field(default_factory=list)
 
@@ -97,18 +110,18 @@ def host() -> Iterator[tuple[_Host, str]]:
         def do_GET(self) -> None:
             self._record()
             if self.path == "/api/v1/health":
+                time.sleep(state.health_delay)
                 self._answer(state.health)
             elif self.path == "/api/v1/executions?page_size=1":
                 counts = state.counts[min(state.count_reads, len(state.counts) - 1)]
                 state.count_reads += 1
                 self._answer({"executions": [], "total": 0, "status_counts": counts})
             elif self.path.startswith("/api/v1/executions?status=running"):
-                row = {
-                    "workflow_execution_id": _LONG_RUN,
-                    "workflow_name": "repair-round",
-                    "started_at": "2026-10-07T10:00:00Z",
-                }
-                self._answer({"executions": [row], "total": 1})
+                query = parse_qs(urlsplit(self.path).query)
+                page = int(query.get("page", ["1"])[0])
+                size = min(int(query.get("page_size", ["50"])[0]), 200)  # the API's maximum
+                rows = state.running[(page - 1) * size : page * size]
+                self._answer({"executions": rows, "total": len(state.running)})
             else:
                 self.send_error(404)
 
@@ -134,27 +147,42 @@ def _definition(name: str) -> str:
     return "\n".join(lines[start : end + 1])
 
 
+def _assignments(name: str) -> list[str]:
+    """Every top-level assignment of ``name`` in the script, in order."""
+    return [line for line in _SCRIPT.read_text().splitlines() if line.startswith(f"{name}=")]
+
+
 def _assignment(name: str) -> str:
-    lines = _SCRIPT.read_text().splitlines()
-    hits = [line for line in lines if line.startswith(f"{name}=")]
+    hits = _assignments(name)
     assert len(hits) == 1, f"expected one assignment of {name} in {_SCRIPT.name}"
     return hits[0]
 
 
 def _gate_and_drain() -> str:
-    """The script from the gate step through the drain, as written."""
+    """The script from the gate step through the drain and its guard, as written."""
     lines = _SCRIPT.read_text().splitlines()
     start = lines.index(_GATE_START)
     end = lines.index("drain_loop", start)
-    return "\n".join(lines[start : end + 1])
+    assert lines[end + 1].startswith('[ "$DRAINED" = 1 ] || abort_drain'), (
+        "the drain lost its guard"
+    )
+    return "\n".join(lines[start : end + 2])
 
 
-def _run(tmp: Path, api: str, *, budget: int) -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp: Path, api: str, *, budget: int | str, override: str = ""
+) -> subprocess.CompletedProcess[str]:
+    """``budget`` is SYN_PIT_DRAIN_TIMEOUT, parsed by the script's own lines.
+
+    ``override`` runs after that parsing, to reach states it now forbids.
+    """
     functions = [
         "api_curl",
         "api",
         "maintenance",
         "mono_now",
+        "left",
+        "cap",
         "projections_healthy",
         "drained",
         "status_counts",
@@ -166,8 +194,10 @@ def _run(tmp: Path, api: str, *, budget: int) -> subprocess.CompletedProcess[str
         [
             "set -euo pipefail",
             f"VERSION=0.40.0-beta.1; DRY=0; API={api}; TMP={tmp}; RECOVERY=''",
-            f"DRAIN_TIMEOUT={budget}",
+            *_assignments("DRAIN_TIMEOUT"),
+            override,
             _assignment("DROPPED_RUNBOOK"),
+            _assignment("DRAINED"),
             "step() { printf '==> %s\\n' \"$*\"; }",
             "die() { printf 'PIT STOP ABORTED: %s\\n' \"$*\" >&2; exit 1; }",
             "sleep() { :; }",
@@ -176,7 +206,11 @@ def _run(tmp: Path, api: str, *, budget: int) -> subprocess.CompletedProcess[str
     )
     return subprocess.run(
         ["bash", "-c", preamble + "\n" + _gate_and_drain() + "\necho DRAINED-AND-CONTINUING"],
-        env={"PATH": os.environ["PATH"], "SYN_API_PASSWORD": _PASSWORD},
+        env={
+            "PATH": os.environ["PATH"],
+            "SYN_API_PASSWORD": _PASSWORD,
+            "SYN_PIT_DRAIN_TIMEOUT": str(budget),
+        },
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -287,4 +321,92 @@ def test_the_gate_prints_queued_versus_running(tmp_path: Path, host: tuple[_Host
 
 
 def test_the_default_budget_is_45_minutes() -> None:
-    assert _assignment("DRAIN_TIMEOUT") == 'DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-2700}"'
+    assert _assignments("DRAIN_TIMEOUT")[0] == 'DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-2700}"'
+
+
+def test_a_slow_read_cannot_carry_the_drain_past_its_budget(
+    tmp_path: Path, host: tuple[_Host, str]
+) -> None:
+    """A 1s budget and a /health that answers in 3s, with terminal counts.
+
+    Uncapped, the late answer arrived after the budget and the drain returned
+    success from it (4.66s, rc 0). Capped, the read times out inside the budget
+    and the drain stops undrained.
+    """
+    state, api = host
+    state.health_delay = 3.0
+    state.counts = [{"completed": 4}]
+
+    started = time.monotonic()
+    proc = _run(tmp_path, api, budget=1)
+    elapsed = time.monotonic() - started
+
+    assert proc.returncode != 0
+    assert "DRAINED-AND-CONTINUING" not in proc.stdout
+    assert "drain budget of 1s spent" in proc.stderr
+    assert elapsed < 3.0, f"the drain took {elapsed:.2f}s on a 1s budget"
+    assert _admission_puts(state) == [True, False]
+    _no_secret_leaked(proc)
+
+
+def test_a_spent_budget_lists_every_running_execution_past_one_page(
+    tmp_path: Path, host: tuple[_Host, str]
+) -> None:
+    state, api = host
+    state.counts = [{"running": 201}]
+    state.running = [
+        {
+            "workflow_execution_id": f"exec-{i:03d}",
+            "workflow_name": "repair-round",
+            "started_at": "2026-10-07T10:00:00Z",
+        }
+        for i in range(201)
+    ]
+
+    proc = _run(tmp_path, api, budget=0)
+
+    assert proc.returncode != 0
+    assert "STILL RUNNING (201)" in proc.stdout
+    missing = [
+        r["workflow_execution_id"]
+        for r in state.running
+        if r["workflow_execution_id"] not in proc.stdout
+    ]
+    assert not missing, f"not listed: {missing}"
+    assert proc.stdout.count("STILL RUNNING") == 1
+    _no_secret_leaked(proc)
+
+
+def test_a_leading_zero_budget_is_read_in_base_ten(tmp_path: Path, host: tuple[_Host, str]) -> None:
+    """``08`` passes the digits-only check; read as octal it broke the drain."""
+    state, api = host
+    state.counts = [{"running": 1}, {"running": 1}, {"completed": 4}]
+
+    proc = _run(tmp_path, api, budget="08")
+
+    assert proc.returncode == 0, proc.stderr
+    assert "value too great for base" not in proc.stderr
+    assert "budget 8s" in proc.stdout
+    assert "(drained)" in proc.stdout
+    assert _admission_puts(state) == [True]
+
+
+def test_a_drain_that_errors_out_never_continues_and_reopens_admission(
+    tmp_path: Path, host: tuple[_Host, str]
+) -> None:
+    """Bash abandons a function on an arithmetic error WITHOUT ``set -e``.
+
+    Force one past the parsing, with a busy platform: whatever breaks inside
+    the drain, nothing undrained may continue to the swap.
+    """
+    state, api = host
+    state.counts = [{"running": 1}]
+
+    proc = _run(tmp_path, api, budget=2700, override="DRAIN_TIMEOUT=08")
+
+    assert "value too great for base" in proc.stderr
+    assert proc.returncode != 0
+    assert "DRAINED-AND-CONTINUING" not in proc.stdout
+    assert "without a drained verdict" in proc.stderr
+    assert _admission_puts(state) == [True, False]
+    _no_secret_leaked(proc)
