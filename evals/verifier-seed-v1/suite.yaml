@@ -6,17 +6,31 @@
 # find the defect? Change any of the three and the version goes up - runs of
 # different versions are different experiments, and the scorer prints the
 # version beside every row.
+#
+# SAME CASES, DIFFERENT VERIFIER. `workflows` lists every workflow the cases
+# run under; they differ only in the verify phase's agent. `eval_suite.py
+# --workflow <id>` picks one (default: the first), and the suite tag carries
+# it - `verifier-seed-v1:v2:<workflow id>` - so each verifier's runs are their
+# own evals and their own score table. Adding a workflow changes no existing
+# table; changing a listed workflow's model or prompt bumps the version.
+#
+# v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
+# v2: two cases added (#1679, #1680) and the codex verifier.
 id: verifier-seed-v1
-version: 1
+version: 2
 goal: >
   Does the verifier block a change that carries a known escaped bug, and name
   the defect and the file it lives in?
 repository: syntropic137/syntropic137
-workflow:
-  id: eval-verify-pinned-v1
-  path: workflows/evals/verify-pinned/workflow.yaml
-  # Each phase's declared model, as written in the workflow file. The test
-  # fails when they disagree; the scorer also prints the model each run
-  # actually reported, which is the one to compare.
-  models:
-    verify: opus
+workflows:
+  - id: eval-verify-pinned-v1
+    path: workflows/evals/verify-pinned/workflow.yaml
+    # Each phase's declared model, as written in the workflow file. The test
+    # fails when they disagree; the scorer also prints the model each run
+    # actually reported, which is the one to compare.
+    models:
+      verify: opus
+  - id: eval-verify-pinned-codex-v1
+    path: workflows/evals/verify-pinned-codex/workflow.yaml
+    models:
+      verify: gpt-sol
