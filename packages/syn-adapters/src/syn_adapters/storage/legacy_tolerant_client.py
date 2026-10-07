@@ -20,9 +20,7 @@ from typing import TYPE_CHECKING
 from event_sourcing.client.grpc_client import GrpcEventStoreClient
 from event_sourcing.core.errors import EventPayloadError
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
-    replays_generic,
-)
+from syn_domain.contexts.orchestration import replays_generic
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope

@@ -95,6 +95,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     ResumeExecutionCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    replays_generic,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
     refuse_resume_start,
 )
@@ -466,6 +469,7 @@ __all__ = [
     "refuse_resume_start",
     "remove_reclaimed_dir",
     "render_workspace_prompt",
+    "replays_generic",
     "require_supported_execution_type",
     "retired_field_notices",
     "salvage_stranded_phase",
