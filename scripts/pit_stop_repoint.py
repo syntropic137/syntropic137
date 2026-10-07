@@ -7,8 +7,8 @@ Called by scripts/pit_stop.sh at `stage`:
 It writes the staged compose and prints, on stdout, the name to back the
 deployed file up under (empty when every pin is already the shipped ref, so
 there is nothing to stage). `--service gateway` repoints the syn-gateway pin
-alone and leaves syn-api's exactly as deployed (#1310). Anything it cannot repoint safely exits 1 with the
-reason on stderr, and nothing is written.
+alone and leaves syn-api's exactly as deployed (#1310). Anything it cannot
+repoint safely exits 1 with the reason on stderr, and nothing is written.
 
 WHY THIS IS NOT A sed. A host installed from a release pins every image BY
 DIGEST (`ghcr.io/syntropic137/syn-api@sha256:<64 hex>`), and the two digests

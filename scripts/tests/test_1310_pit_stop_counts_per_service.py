@@ -63,7 +63,9 @@ step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 remote() {{ bash -c "$*"; }}
 """
-    counters = _block("pins_on_tag() {", '\nif [ "$MODE" != "swap" ]; then')
+    text = _SCRIPT.read_text()
+    begin = text.index("pins_on_tag() {")
+    counters = text[begin : text.index("\n}\n", text.index("images_on_tag() {", begin)) + 3]
     precheck = _block('if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then', "\nfi\n") + "\nfi\n"
     return subprocess.run(
         ["bash", "-c", preamble + counters + precheck],

@@ -80,6 +80,50 @@ on cross-model-gated PRs; one that looks the same but skipped the gate borrows
 trust it did not earn, and nothing in the diff reveals which workflow produced
 it.
 
+## Re-verifying an existing PR: `reverify-pr`
+
+`sdlc-reverify-pr-v1` runs the verification half of `sdlc-implement-v3` -
+verify, up to three fix/re-verify rounds, `finalize_pr` - against a pull request
+that already exists. Use it when an implement-v3 run finished `implement` and
+then died in verify: resuming re-runs the same dead phase, and dispatching
+implement-v3 again re-runs `implement` on a PR it rightly refuses to redo.
+
+    syn workflow run sdlc-reverify-pr-v1 -t "#1649"
+
+Its first phase, `prepare`, checks out the PR head, merges `origin/main` into it
+(pushing the merge only when it is clean), and writes the report `verify`
+reads - the branch, the full SHA and the PR's own brief - which is the job
+`implement` does in implement-v3. It refuses a task that names no open PR,
+rather than verifying `main`.
+
+Every phase after `prepare` is implement-v3's phase of the same id. A
+`prompt_file` cannot reach outside its workflow directory, so the prompts are
+copies, and `scripts/tests/test_reverify_pr_workflow.py` fails unless each is
+identical to implement-v3's (verify.md may differ only in reading `prepare`
+instead of `implement`). **Change a shared prompt in `implement-v3/phases/` and
+copy it to `reverify-pr/phases/`.**
+
+### Switching the verifier model
+
+The verifier is a property of the workflow YAML, never of a prompt. In
+`reverify-pr/workflow.yaml` it is the `agent:` block of four phases: `verify`,
+`reverify`, `reverify_2` and `reverify_3`. Today it is codex `gpt-sol`. To run
+verification on Opus instead - for example while codex quota is exhausted -
+change all four to:
+
+```yaml
+    agent:
+      provider: claude
+      model: opus
+```
+
+and re-install (`syn workflow install ./workflows/sdlc/reverify-pr`). Do not
+add `allowed_tools` to them: a claude phase without a list holds every tool,
+which is what a verifier that must run the gates needs. The test above fails if
+the four disagree, so a switch that misses a round cannot certify round 1 on one
+model and round 3 on another. Remember a verifier on the same model as the fix
+phases (`opus`) is no longer a cross-model review; say so when you rely on it.
+
 ## What `timeout_seconds` actually bounds
 
 `timeout_seconds` is an AGENT-WORK budget, not a wall-clock budget for the

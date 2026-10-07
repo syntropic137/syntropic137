@@ -9,6 +9,8 @@ import pytest
 
 from syn_api.types import Err, Ok
 
+pytestmark = pytest.mark.unit
+
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 

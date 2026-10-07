@@ -60,6 +60,7 @@ _APPLIED: dict[str, tuple[str, str]] = {
     "prompt_file": ("ExecutablePhase", "prompt_template"),
     "output_artifacts": ("ExecutablePhase", "output_artifact_types"),
     "timeout_seconds": ("ExecutablePhase", "timeout_seconds"),
+    "max_cost_usd": ("ExecutablePhase", "max_cost_usd"),
     # Carried the full six hops to `SetupPhaseSecrets`, where it decides
     # whether the setup script contains `git clone` at all (#1187). Applied,
     # not validated: any boolean is legal, and both values do something.
@@ -75,6 +76,10 @@ _APPLIED: dict[str, tuple[str, str]] = {
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),
     "model": ("AgentConfiguration", "model"),
     "agent": ("AgentConfiguration", "provider"),
+    # Resolved against the phase's final agent config and run by
+    # `run_phase_agent` when the primary's provider is at capacity past its
+    # retries or out of quota (PC-83).
+    "fallback_agent": ("ExecutablePhase", "fallback_agent"),
 }
 
 #: Fields refused at authoring time, with WHY. Each must have a validator in

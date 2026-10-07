@@ -20,6 +20,7 @@ from syn_adapters.workspace_backends.agentic.stream_reader import (
     StreamOutcome,
     read_lines,
 )
+from syn_adapters.workspace_backends.exec_status_lost import workspace_container_name
 from syn_shared.diagnostics import SignalDeath, name_exit_status
 
 if TYPE_CHECKING:
@@ -155,7 +156,7 @@ class AgenticEventStreamAdapter:
         if self._provider is None:
             raise RuntimeError("Provider not set. Call set_provider first.")
 
-        container_name = f"agentic-ws-{handle.isolation_id.split('-')[1]}"
+        container_name = workspace_container_name(handle.isolation_id)
         exec_cmd = _build_exec_command(
             container_name,
             command,

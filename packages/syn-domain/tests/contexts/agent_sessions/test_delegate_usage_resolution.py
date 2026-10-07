@@ -30,6 +30,8 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
     UnpricedUsage,
 )
 
+pytestmark = pytest.mark.unit
+
 _FIXTURES = Path(__file__).parents[2] / "fixtures" / "delegation"
 
 

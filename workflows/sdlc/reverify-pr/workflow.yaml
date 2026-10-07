@@ -1,0 +1,309 @@
+id: sdlc-reverify-pr-v1
+name: "SDLC: Verify an existing PR's head, fix, re-verify, mark ready (v1)"
+description: >
+  Take a pull request that already exists - typically one whose
+  sdlc-implement-v3 run finished implement and then died in verify - and run
+  that workflow's verification half on its head: bring the head up to main,
+  verify it independently, fix what verification found and confirm the fix (up
+  to three rounds), then mark it ready or leave it a draft with the blocker
+  written on it. It never writes the change itself.
+type: implementation
+classification: standard
+requires_repos: true
+
+# The task names the PR (`#NNNN`) and may add a brief. `prepare` refuses a task
+# that names no open PR rather than verifying main.
+inputs:
+  - name: task
+    description: "The pull request to verify (#NNNN), optionally with the brief it was built against"
+    required: true
+
+# WHY THIS EXISTS (#1634).
+#
+# On 2026-10-06 three sdlc-implement-v3 runs (PRs #1649, #1651, #1652) finished
+# implement and died in verify on a codex quota error. Resuming re-runs the
+# same codex phase; dispatching implement-v3 again re-runs implement on a PR
+# that already exists, which implement correctly refuses. Nothing could say
+# "verify this PR head", so a dead verify degraded to a read-only review that
+# runs no gates.
+#
+# ONE SET OF PROMPTS, TWO WORKFLOWS. Every phase after `prepare` is
+# implement-v3's phase of the same id. A prompt_file may not leave its own
+# workflow directory (both resolvers reject it, symlinks included), so the
+# prompts are copies, and scripts/tests/test_reverify_pr_workflow.py fails
+# unless each one is byte-identical to implement-v3's - except verify.md, which
+# may differ only in naming `prepare` as the report it reads. Edit
+# implement-v3's prompt and copy it here; the test says which.
+#
+# NO YAML ANCHORS. implement-v3 writes its repair rounds with merge keys; this
+# file spells every phase out, so any YAML parser reads it the same (#1619).
+
+skills:
+  - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+  - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+
+phases:
+  # Phase ids are load-bearing: a later phase reads an earlier one's output at
+  # artifacts/input/<phase-id>/, so renaming a phase breaks the ones after it.
+  # `prepare` plays the role implement plays in implement-v3: verify reads its
+  # report for the branch and SHA to check out.
+  - id: prepare
+    name: Bring the PR head up to main for verification
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    # Checkout, merge, submodules, push, gh: no reasoning about the change.
+    timeout_seconds: 900
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/prepare.md
+
+  - id: verify
+    name: Verify the change independently
+    order: 2
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    # No allowed_tools: this phase runs on codex, which enforces a
+    # filesystem sandbox rather than a tool vocabulary. A tool list here
+    # would be accepted and never applied, so the validator refuses it.
+    agent:
+      provider: codex
+      # THE VERIFIER MODEL. Four phases carry it - verify, reverify,
+      # reverify_2, reverify_3 - and the test below fails unless all four
+      # agree, so switching it is one edit made four times. See "Switching the
+      # verifier model" in workflows/sdlc/README.md.
+      #
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6.1-sol`, and priced as gpt-6.1-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/software-complexity@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/verify.md
+
+  - id: fix
+    name: Address what verification found
+    order: 3
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Edit
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/fix.md
+
+  - id: reverify
+    name: Confirm the fix closed what verification found
+    order: 4
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    # Half of verify's budget: this pass checks a delta, not the whole change,
+    # and its prompt forbids re-reviewing what the first pass already certified.
+    timeout_seconds: 1800
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    # No allowed_tools: this phase runs on codex, which enforces a
+    # filesystem sandbox rather than a tool vocabulary. A tool list here
+    # would be accepted and never applied, so the validator refuses it.
+    agent:
+      provider: codex
+      # The verifier model: keep in step with `verify` (README).
+      model: gpt-sol
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/security@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/reverify.md
+
+  # BOUNDED REPAIR ROUNDS, as in implement-v3 (PC-63): three fix/reverify
+  # pairs, never more. A round whose predecessor CERTIFIED never runs - the
+  # execution aggregate skips to the last phase on a `certified` review_verdict
+  # - so `finalize_pr` must stay the LAST phase.
+  - id: fix_2
+    name: Address what verification found (round 2)
+    order: 5
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Edit
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/fix_2.md
+
+  - id: reverify_2
+    name: Confirm the fix closed what verification found (round 2)
+    order: 6
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    # Half of verify's budget: this pass checks a delta, not the whole change,
+    # and its prompt forbids re-reviewing what the first pass already certified.
+    timeout_seconds: 1800
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    # No allowed_tools: this phase runs on codex, which enforces a
+    # filesystem sandbox rather than a tool vocabulary. A tool list here
+    # would be accepted and never applied, so the validator refuses it.
+    agent:
+      provider: codex
+      # The verifier model: keep in step with `verify` (README).
+      model: gpt-sol
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/security@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/reverify_2.md
+
+  - id: fix_3
+    name: Address what verification found (round 3)
+    order: 7
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Edit
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/fix_3.md
+
+  - id: reverify_3
+    name: Confirm the fix closed what verification found (round 3)
+    order: 8
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    # Half of verify's budget: this pass checks a delta, not the whole change,
+    # and its prompt forbids re-reviewing what the first pass already certified.
+    timeout_seconds: 1800
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    # No allowed_tools: this phase runs on codex, which enforces a
+    # filesystem sandbox rather than a tool vocabulary. A tool list here
+    # would be accepted and never applied, so the validator refuses it.
+    agent:
+      provider: codex
+      # The verifier model: keep in step with `verify` (README).
+      model: gpt-sol
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/security@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/reverify_3.md
+
+  - id: finalize_pr
+    name: Open the pull request
+    order: 9
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 600
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
+    # NO WORKING TREE (#1187): this phase reads the reverify artifact, checks a
+    # remote ref and calls `gh`, so it clones nothing. The history behind this
+    # and the retired `can_open_pr` field is on implement-v3's `finalize_pr`.
+    clone_repos: false
+    allowed_tools:
+      - Read
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    skills:
+      - syntropic137/software-leverage-points/documentation@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    prompt_file: phases/finalize_pr.md

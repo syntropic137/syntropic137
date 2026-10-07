@@ -506,16 +506,105 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  Previous pins, for the record: claude-cli 12a38b8a,
 #                  omni-agent d9395a2e, toolchain 16132cce, all from
 #                  agentic-workspace 7afde6b6 (v0.3.0).
+#
+#                  Previous pins, for the record: claude-cli 974979c9,
+#                  omni-agent e151bb91, toolchain 2f41b47c, all from
+#                  agentic-workspace 5ddd1074 (release PR #29).
+# AGENTIC-WORKSPACE BROWSER QA, 2026-10-04 (#1028). Taken from release-branch
+# run 37247289124 ("Release Workspace Images", push to release, success) of
+# agentic-workspace 121a9742 (release PR #35), the commit lib/agentic-workspace
+# pins. Re-verified here rather than trusted: `docker buildx imagetools
+# inspect --format '{{.Manifest.Digest}}'` of each manifest-version tag and
+# full commit tag returns exactly the INDEX digest below (OCI index, amd64 +
+# arm64), every image carries agentic.image.channel=release and revision
+# 121a9742, and `cosign verify` (v3.1.3) passes for each against the
+# release-images.yml@refs/heads/release identity with the GitHub Actions OIDC
+# issuer. The repo label stays agentic.repo.version=0.3.0. This release carries
+# AW #33: an offline headless Chromium (Playwright 1.63.0 CLI exact-pinned,
+# --only-shell headless shell revision 1243 + ffmpeg 1011, per-arch archives
+# sha256-verified before unpacking, explicit ~40 MiB apt list instead of
+# --with-deps) baked root-owned and read-only at
+# PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright, so an agent (uid 1000) can run
+# `npx --no-install playwright screenshot` with no network. No exporter,
+# session-store or harness CLI change (AW diff 5ddd1074..121a9742 touches only
+# the claude-cli / omni-agent Dockerfiles, the three manifests, the images
+# README and tests/integration/test_browser_qa.py).
+#
+# omni-agent       omni-agent manifest 1.14.0.
+# toolchain        toolchain manifest 1.5.0, built FROM omni dadf3288 in the
+#                  same run (label org.opencontainers.image.base.digest).
+# claude-cli       claude-cli manifest 2.2.0.
+#
+#                  Previous pins, for the record: claude-cli e57e6257,
+#                  omni-agent dadf3288, toolchain 41d85bdb, all from
+#                  agentic-workspace 121a9742 (release PR #35).
+# AGENTIC-WORKSPACE CODEX CLI 0.160.1, 2026-10-07. Taken from release-branch
+# run 37665109798 ("Release Workspace Images", push to release, success) of
+# agentic-workspace 7329ede7 (release PR #38, from #36), the commit
+# lib/agentic-workspace pins. Re-verified here rather than trusted: `docker
+# buildx imagetools inspect --format '{{.Manifest.Digest}}'` of each
+# manifest-version tag and full commit tag returns exactly the INDEX digest
+# below (OCI index, amd64 + arm64), every image carries
+# agentic.image.channel=release and revision 7329ede7, and `cosign verify`
+# (v3.1.3) passes for each against the release-images.yml@refs/heads/release
+# identity with the GitHub Actions OIDC issuer. This release carries AW #36:
+# Codex CLI 0.156.1 -> 0.160.1 in every image (gpt-6.1-sol support), and the
+# agentic-codex-sandbox AppArmor profile admits Codex 0.160.1's new read-only
+# tmpfs mask over .aws. AppArmor hosts MUST reload the profile
+# (`just apparmor-setup`) before running these images. agentic-isolation
+# 0.12.0 -> 0.12.1 (Codex 0.160.1 rollout parsing).
+#
+# omni-agent       omni-agent manifest 1.15.0. Verified by running OUT OF THIS
+#                  DIGEST: "codex-cli 0.160.1", "2.1.281 (Claude Code)",
+#                  "apss-session-exporter 0.6.0". Label
+#                  agentic.codex_cli_version=0.160.1.
+# toolchain        toolchain manifest 1.6.0, built FROM omni 4d2a18a7 in the
+#                  same run (label org.opencontainers.image.base.digest).
+#                  Verified by running OUT OF THIS DIGEST: same codex, claude
+#                  and exporter as omni.
+# claude-cli       claude-cli manifest 2.3.0. Verified by running OUT OF THIS
+#                  DIGEST: "codex-cli 0.160.1", "2.1.126 (Claude Code)", no
+#                  exporter (unchanged).
+#
+#                  Previous pins, for the record: claude-cli 1b4bf6b9,
+#                  omni-agent 4d2a18a7, toolchain 7eb278fd, all from
+#                  agentic-workspace 7329ede7 (release PR #38).
+# AGENTIC-WORKSPACE CLAUDE CODE CLI 2.1.293, 2026-10-07. Taken from
+# release-branch run 37673446590 ("Release Workspace Images", push to release,
+# success) of agentic-workspace 5c4e5595 (release PR #42), the commit
+# lib/agentic-workspace pins. Re-verified here rather than trusted: `docker
+# buildx imagetools inspect --format '{{.Manifest.Digest}}'` of each
+# manifest-version tag and full commit tag returns exactly the INDEX digest
+# below (OCI index, amd64 + arm64), every image carries
+# agentic.image.channel=release and revision 5c4e5595, and `cosign verify`
+# (v3.1.3) passes for each against the release-images.yml@refs/heads/release
+# identity with the GitHub Actions OIDC issuer. This release carries AW #42:
+# Claude Code CLI -> 2.1.293 in every image (claude-cli moves up from 2.1.126,
+# omni-agent and toolchain from 2.1.281). No agentic-isolation, AppArmor
+# profile, exporter or Codex change (Codex stays 0.160.1), so uv.lock is
+# unchanged and no `just apparmor-setup` is needed beyond the one 7329ede7
+# already required.
+#
+# omni-agent       omni-agent manifest 1.16.0. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.293 (Claude Code)", "codex-cli 0.160.1",
+#                  "apss-session-exporter 0.6.0".
+# toolchain        toolchain manifest 1.7.0, built FROM omni 2cabc694 in the
+#                  same run (label org.opencontainers.image.base.digest).
+#                  Verified by running OUT OF THIS DIGEST: same claude, codex
+#                  and exporter as omni.
+# claude-cli       claude-cli manifest 2.4.0. Verified by running OUT OF THIS
+#                  DIGEST: "2.1.293 (Claude Code)", "codex-cli 0.160.1", no
+#                  exporter (unchanged).
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:974979c99a8f98fcff491b466356ed31031ab31dd5f885aa8938eec831c673f5"
+            "sha256:927641f9e7f1d18a19fce9c11f9923ef68e2e498ca48105cc32de21122614843"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:e151bb91e93a6972879729d80261999c575d4b135ba44f3012c09566479f8670"
+            "sha256:2cabc694d450807ca953ea634ca0d50d53fcfdb6864be58c91464ab5008fe6e4"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:2f41b47c35db1707458637e6bc19325e12a3b8daf0c8cda386c25cc772a8c15c"
+            "sha256:4a76c184a8d36b8663a0f0191842410304ea1e10b0e719516817949ae8c862f8"
         ),
     }
 )
@@ -646,4 +735,7 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:27b70b32a41b010f71291dc1ff8edd57fce8025ff19322bd9c6fa8aa92419dd8",  # f1647f93
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:e38b1a45b14e7b58040d7664a83e9f53191f24d9ea92462b4eeee829d3ad65f9",  # 70ca5fae
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:16132cce4470d9375dc2421780915e2d68ccaffb118a4479689e34f8cd20cd44",  # 546433c6
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:2f41b47c35db1707458637e6bc19325e12a3b8daf0c8cda386c25cc772a8c15c",  # 6fa4f281
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:41d85bdb8d623b6005898f0f1595dc0ee3ff48bc02257eedeabcaee060e3ba5d",  # a4665941
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:7eb278fda8ef8f574ab340b3177a169939eac8c92f6eb034b73178efae477c7a",  # 29d7dec3
 )

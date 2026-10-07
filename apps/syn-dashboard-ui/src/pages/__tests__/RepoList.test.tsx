@@ -209,6 +209,37 @@ describe('Repos page', () => {
     expect(within(await rowFor('acme/web')).getByText('Unknown')).toBeInTheDocument()
   })
 
+  // `syn repo register` stores `is_private: false` for every repo, so for a
+  // repo the App cannot see that flag is no answer, and must not read as public.
+  it('marks privacy unknown, never public, for a repo the App cannot reach', async () => {
+    serve([repo({ repo_id: 'r9', full_name: 'acme/secret', is_private: false })], [])
+    renderPage()
+
+    const row = within(await rowFor('acme/secret'))
+    const mark = row.getByText('Privacy unknown')
+    expect(mark).toHaveAttribute('title', expect.stringMatching(/GitHub App cannot reach/))
+    expect(row.queryByLabelText('Private')).not.toBeInTheDocument()
+  })
+
+  it('locks a repo the App cannot reach when registration stored it private', async () => {
+    serve([repo({ repo_id: 'r10', full_name: 'acme/vault', is_private: true })], [])
+    renderPage()
+
+    const row = within(await rowFor('acme/vault'))
+    expect(row.getByLabelText('Private')).toBeInTheDocument()
+    expect(row.queryByText('Privacy unknown')).not.toBeInTheDocument()
+  })
+
+  it('shows the App-reported privacy for a repo the App reaches', async () => {
+    // Stored true, but the App (appRepo) reports it public: no mark at all.
+    serve([repo({ repo_id: 'r11', full_name: 'acme/open', is_private: true })], ['acme/open'])
+    renderPage()
+
+    const row = within(await rowFor('acme/open'))
+    expect(row.queryByLabelText('Private')).not.toBeInTheDocument()
+    expect(row.queryByText('Privacy unknown')).not.toBeInTheDocument()
+  })
+
   it('falls back to the system id when the system is not listed', async () => {
     serve([repo({ repo_id: 'r3', full_name: 'acme/legacy', system_id: 'sys-gone' })])
     renderPage()

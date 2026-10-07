@@ -7,6 +7,8 @@ import pytest
 from syn_collector.client.http import EventCollectorClient
 from syn_collector.events.types import CollectedEvent, EventType
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def sample_event() -> CollectedEvent:

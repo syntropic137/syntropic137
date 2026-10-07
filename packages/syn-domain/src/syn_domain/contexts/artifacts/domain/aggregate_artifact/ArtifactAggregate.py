@@ -43,6 +43,29 @@ if TYPE_CHECKING:
     )
 
 
+def _measured(command: CreateArtifactCommand) -> tuple[ContentType, str, str, int]:
+    """The command's content as the event records it: type, inline text, hash, size.
+
+    Binary bytes live in object storage only (ADR-012, #990): Lane 1 records
+    that the file exists, its hash and its size, never the file - so binary
+    content without a storage_uri is refused, and its inline content is "".
+    Hash and size are of the BYTES; for text that is its UTF-8 encoding,
+    exactly as before, so existing hashes still verify.
+    """
+    content_type = command.content_type or ContentType.TEXT_MARKDOWN
+    content = command.content
+    if isinstance(content, bytes) != content_type.is_binary:
+        kind = "bytes" if content_type.is_binary else "str"
+        msg = f"Content of type {content_type} must be {kind}"
+        raise ValueError(msg)
+    if isinstance(content, str):
+        return content_type, content, compute_content_hash(content), len(content.encode("utf-8"))
+    if command.storage_uri is None:
+        msg = "Binary artifact content must be in object storage (storage_uri)"
+        raise ValueError(msg)
+    return content_type, "", compute_content_hash(content), len(content)
+
+
 @aggregate("Artifact")
 class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
     """Artifact aggregate root.
@@ -218,9 +241,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         # Generate ID if not provided
         artifact_id = command.aggregate_id or str(uuid4())
 
-        # Compute content hash and size
-        content_hash = compute_content_hash(command.content)
-        size_bytes = len(command.content.encode("utf-8"))
+        content_type, event_content, content_hash, size_bytes = _measured(command)
 
         # Initialize aggregate
         self._initialize(artifact_id)
@@ -233,8 +254,8 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
             execution_id=command.execution_id,  # Link to execution run
             session_id=command.session_id,
             artifact_type=command.artifact_type,
-            content_type=command.content_type or ContentType.TEXT_MARKDOWN,
-            content=command.content,
+            content_type=content_type,
+            content=event_content,
             content_hash=content_hash,
             size_bytes=size_bytes,
             title=command.title,

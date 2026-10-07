@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.model_identity import cost_by_observed_model
@@ -23,9 +24,9 @@ from syn_api.types import (
     ExecutionSummary,
     Ok,
     PhaseExecution,
+    PhaseProgressInfo,
     Result,
 )
-from syn_domain import tool_call_counts
 from syn_domain.contexts.orchestration import (
     MAX_START_ATTEMPTS,
     InvalidTagsError,
@@ -54,6 +55,7 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
+from .queued_start import not_yet_started, start_queue_info
 from .start_config import load_start_configs
 
 if TYPE_CHECKING:
@@ -195,6 +197,7 @@ def _build_execution_summary_response(
         completed_at=_to_str(e.completed_at),
         completed_phases=e.completed_phases,
         total_phases=e.total_phases,
+        phase_progress=e.phase_progress,
         total_tokens=totals.total_tokens,
         total_tokens_display=format_tokens(totals.total_tokens),
         total_input_tokens=totals.input_tokens,
@@ -233,6 +236,8 @@ class _ExecutionEnrichment:
     cache_creation_tokens: int | None = None
     cache_read_tokens: int | None = None
     total_tokens: int | None = None
+    tool_call_count: int = 0
+    """From the tool-call tally, read with the costs rather than beside them."""
 
 
 def _enrichment_for(
@@ -256,18 +261,23 @@ async def _load_execution_enrichment(
     if not execution_ids:
         return {}
     try:
-        costs = await manager.execution_cost.list_costs_for_ids(execution_ids)
+        read = await manager.execution_cost.list_costs_for_ids(execution_ids)
     except Exception:
         logger.debug("Failed to load execution cost enrichment", exc_info=True)
         return {}
-    out: dict[str, _ExecutionEnrichment] = {}
-    for eid, ec in costs.items():
+    # An execution with tool calls and no token telemetry yet carries its
+    # count and nothing else: its token fields stay None, so the domain
+    # summary's totals win rather than a zero nobody measured.
+    out = {
+        eid: _ExecutionEnrichment(tool_call_count=count) for eid, count in read.tool_calls.items()
+    }
+    for ec in read.costs:
         # Summed explicitly rather than read from ExecutionCost.total_tokens.
         # This path and the cost path must arrive at the same number by
         # independent routes, which is what makes the cross-read-model test in
         # test_cross_read_model_token_totals.py a real check (issue #873).
         total = ec.input_tokens + ec.output_tokens + ec.cache_creation_tokens + ec.cache_read_tokens
-        out[eid] = _ExecutionEnrichment(
+        out[ec.execution_id] = _ExecutionEnrichment(
             total_cost_usd=ec.total_cost_usd,
             unpriced_observation_count=ec.unpriced_observation_count,
             input_tokens=ec.input_tokens,
@@ -275,38 +285,9 @@ async def _load_execution_enrichment(
             cache_creation_tokens=ec.cache_creation_tokens,
             cache_read_tokens=ec.cache_read_tokens,
             total_tokens=total,
+            tool_call_count=ec.tool_calls,
         )
     return out
-
-
-async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
-    """Tool calls per execution, read from the tally.
-
-    This used to be a ``COUNT(*)`` over ``agent_events`` filtered on
-    ``event_type``, which is in neither of that hypertable's compression keys
-    and so could only be answered by decompressing every segment of every
-    execution on the page - 4-30s for one page of the list this serves
-    (#1322). ``tool_call_counts`` keeps the number instead of deriving it.
-
-    Keyed by the execution id AS the tally holds it: the writer sanitises the
-    id (AgentEvent's validator), so both the ids bound here and the keys of the
-    returned mapping have to be in that spelling, or a caller looks its count
-    up under a name the result never carries (#1241).
-    """
-    try:
-        from syn_adapters.postgres_text import pg_safe
-        from syn_api._wiring import get_event_store_instance
-
-        execution_ids = [pg_safe(eid) for eid in execution_ids]
-        event_store = get_event_store_instance()
-        pool = event_store.pool
-        if pool is None:
-            return {}
-        async with pool.acquire() as conn:
-            return await tool_call_counts.by_execution(conn, execution_ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-    except Exception:
-        logger.debug("Could not read tool counts from the tally", exc_info=True)
-        return {}
 
 
 # -- Service functions --------------------------------------------------------
@@ -322,7 +303,8 @@ async def _load_execution_list_data(
     started_before: datetime | None = None,
     search: str | None = None,
     tags: TagSet | None = None,
-) -> tuple[Page[WorkflowExecutionSummary], dict[str, int], dict[str, _ExecutionEnrichment]]:
+    eval_id: str | None = None,
+) -> tuple[Page[WorkflowExecutionSummary], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
     Shared by ``list_()`` and ``list_executions_endpoint`` so a single request
@@ -346,19 +328,19 @@ async def _load_execution_list_data(
             started_before=started_before,
             search=search,
             tags=tags,
+            eval_id=eval_id,
             offset=offset,
             limit=limit,
         )
     execution_ids = [s.workflow_execution_id for s in page.rows]
-    tool_counts = await _fetch_tool_counts(execution_ids) if page.rows else {}
-    # Enrich each execution's cost + token totals from the Lane 2 execution_cost projection (#695)
+    # Cost, tokens and tool calls from the Lane 2 execution_cost read (#695),
+    # which reads the tool-call tally itself: one read of it, not two.
     cost_by_execution = await _load_execution_enrichment(manager, execution_ids)
-    return page, tool_counts, cost_by_execution
+    return page, cost_by_execution
 
 
 def _to_execution_summary(
     s: WorkflowExecutionSummary,
-    tool_counts: dict[str, int],
     cost_by_execution: dict[str, _ExecutionEnrichment],
 ) -> ExecutionSummary:
     """Build an ExecutionSummary from a domain summary plus already-loaded enrichment."""
@@ -372,6 +354,7 @@ def _to_execution_summary(
         completed_at=s.completed_at,
         completed_phases=s.completed_phases,
         total_phases=s.total_phases,
+        phase_progress=PhaseProgressInfo.of(s.phase_progress),
         total_tokens=s.total_tokens,
         total_input_tokens=s.total_input_tokens,
         total_output_tokens=s.total_output_tokens,
@@ -381,7 +364,7 @@ def _to_execution_summary(
         reported_failure_reason=s.reported_failure_reason,
         total_cost_usd=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
-        tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
+        tool_call_count=enrichment.tool_call_count,
         error_message=s.error_message,
         repos=list(s.repos),
         tags=list(s.tags),
@@ -396,10 +379,10 @@ async def list_(
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
-    page, tool_counts, cost_by_execution = await _load_execution_list_data(
+    page, cost_by_execution = await _load_execution_list_data(
         manager, workflow_id, [status] if status else None, limit, offset
     )
-    return Ok([_to_execution_summary(s, tool_counts, cost_by_execution) for s in page.rows])
+    return Ok([_to_execution_summary(s, cost_by_execution) for s in page.rows])
 
 
 async def get(
@@ -454,6 +437,9 @@ async def get(
             error_message=detail.error_message,
             failure_classification=detail.failure_classification,
             reported_failure_reason=detail.reported_failure_reason,
+            quarantined_refs=list(detail.quarantined_refs),
+            review_verdict=detail.review_verdict,
+            delegation_failure=detail.delegation_failure,
             deliverable_produced=detail.deliverable_produced,
             reported_side_effects=detail.reported_side_effects,
             repos=list(detail.repos),
@@ -561,6 +547,7 @@ async def get_detail(
             phases=phases,
             total_phases=detail.total_phases,
             completed_phases=detail.completed_phases,
+            phase_progress=PhaseProgressInfo.of(detail.phase_progress),
             total_tokens=enriched.total_tokens,
             total_cost_usd=enriched.total_cost_usd,
             unpriced_observation_count=enriched.unpriced_observation_count,
@@ -569,6 +556,9 @@ async def get_detail(
             error_message=detail.error_message,
             failure_classification=detail.failure_classification,
             reported_failure_reason=detail.reported_failure_reason,
+            quarantined_refs=list(detail.quarantined_refs),
+            review_verdict=detail.review_verdict,
+            delegation_failure=detail.delegation_failure,
             deliverable_produced=detail.deliverable_produced,
             reported_side_effects=detail.reported_side_effects,
             repos=list(detail.repos),
@@ -607,6 +597,7 @@ async def list_active(
                 completed_at=s.completed_at,
                 completed_phases=s.completed_phases,
                 total_phases=s.total_phases,
+                phase_progress=PhaseProgressInfo.of(s.phase_progress),
                 total_tokens=s.total_tokens,
                 total_cost_usd=_enrichment_for(
                     cost_by_execution, s.workflow_execution_id
@@ -654,6 +645,13 @@ async def list_executions_endpoint(
             "Normalised like stored tags; an invalid tag is rejected with 422."
         ),
     ),
+    eval_id: str | None = Query(
+        None,
+        description=(
+            "Keep only executions currently in this eval: an eval's runs (#967). "
+            "Matched exactly, never as a prefix."
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
@@ -665,7 +663,7 @@ async def list_executions_endpoint(
     offset = (page - 1) * page_size
     await ensure_connected()
     manager = get_projection_mgr()
-    execution_page, tool_counts, cost_by_execution = await _load_execution_list_data(
+    execution_page, cost_by_execution = await _load_execution_list_data(
         manager,
         None,
         parse_statuses(statuses, status),
@@ -675,11 +673,12 @@ async def list_executions_endpoint(
         started_before=started_before,
         search=q,
         tags=tags,
+        eval_id=eval_id,
     )
     return ExecutionListResponse(
         executions=[
             _build_execution_summary_response(
-                _to_execution_summary(s, tool_counts, cost_by_execution),
+                _to_execution_summary(s, cost_by_execution),
                 cost_by_execution.get(s.workflow_execution_id),
             )
             for s in execution_page.rows
@@ -712,6 +711,34 @@ def _models_run(phases: list[PhaseExecutionInfo]) -> set[str]:
     return models
 
 
+async def _detail_or_queued(
+    mgr: ProjectionManager, execution_id: str
+) -> tuple[ExecutionDetailFull, str] | ExecutionDetailResponse:
+    """The stored detail and its full id, or the queued start it still is (#1557).
+
+    A 404 from either lookup falls back to the execution budget before it is
+    raised: an accepted start waiting for a slot has no record yet.
+    """
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    try:
+        full_id = await resolve_or_raise(
+            mgr.store, "workflow_execution_details", execution_id, "Execution"
+        )
+    except HTTPException as exc:
+        queued = await not_yet_started(mgr, execution_id) if exc.status_code == 404 else None
+        if queued is None:
+            raise
+        return queued
+    result = await get_detail(full_id)
+    if isinstance(result, Ok):
+        return result.value, full_id
+    queued = await not_yet_started(mgr, full_id)
+    if queued is None:
+        raise HTTPException(status_code=404, detail=f"Execution {full_id} not found")
+    return queued
+
+
 async def _resume_start_of(
     store: ProjectionStoreProtocol, execution_id: str
 ) -> ResumeStartInfo | None:
@@ -731,6 +758,7 @@ async def _resume_start_of(
         max_attempts=MAX_START_ATTEMPTS,
         recorded_at=record.recorded_at,
         dispatched_at=record.dispatched_at,
+        start_queue=start_queue_info(get_execution_budget().resume_of(execution_id)),
     )
 
 
@@ -738,16 +766,12 @@ async def _resume_start_of(
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
     from syn_api._wiring import get_projection_mgr
-    from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    execution_id = await resolve_or_raise(
-        mgr.store, "workflow_execution_details", execution_id, "Execution"
-    )
-    result = await get_detail(execution_id)
-    if isinstance(result, Err):
-        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
-    detail = result.value
+    found = await _detail_or_queued(mgr, execution_id)
+    if isinstance(found, ExecutionDetailResponse):
+        return found
+    detail, execution_id = found
     phases = [_map_phase_to_response(p) for p in detail.phases or []]
     total_input = sum(p.input_tokens for p in detail.phases or [])
     total_output = sum(p.output_tokens for p in detail.phases or [])
@@ -765,6 +789,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         phases=phases,
         total_phases=detail.total_phases,
         completed_phases=detail.completed_phases,
+        phase_progress=detail.phase_progress,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
         total_cache_creation_tokens=total_cache_creation,
@@ -781,6 +806,9 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         error_message=detail.error_message,
         failure_classification=detail.failure_classification,
         reported_failure_reason=detail.reported_failure_reason,
+        quarantined_refs=list(detail.quarantined_refs),
+        review_verdict=detail.review_verdict,
+        delegation_failure=detail.delegation_failure,
         deliverable_produced=detail.deliverable_produced,
         reported_side_effects=detail.reported_side_effects,
         repos=list(detail.repos),

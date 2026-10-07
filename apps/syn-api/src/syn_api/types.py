@@ -34,6 +34,7 @@ from pydantic import (
 # rather than restated - the probe that produces a shape is the only place
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_adapters.subscriptions.unapplied_starts import UnappliedStart  # noqa: TC001
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -80,11 +81,16 @@ from syn_api.inventory_types import TranscriptDeletionResponse as TranscriptDele
 from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdentityRequest
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
+from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    DelegationFailure,
     EvalId,
     FailureClassification,
+    PhaseProgress,
+    QuarantinedRef,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
     TagSet,
 )
@@ -94,6 +100,7 @@ from syn_domain.contexts.orchestration import (
 # guard on AliasResolutionBasis both unused and misleading.
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
+from syn_shared.display import format_utc_timestamp
 from syn_shared.observed_model import format_observed_model
 
 # ---------------------------------------------------------------------------
@@ -135,6 +142,7 @@ class WorkflowError(StrEnum):
     INVALID_INPUT = "invalid_input"
     EXECUTION_FAILED = "execution_failed"
     HAS_ACTIVE_EXECUTIONS = "has_active_executions"
+    PACKAGE_MISMATCH = "package_mismatch"
     NOT_IMPLEMENTED = "not_implemented"
 
 
@@ -508,6 +516,13 @@ class PhaseRefResponse(BaseModel):
     """The shorthand spelling when the stored row held a bare string."""
 
 
+class FallbackAgentResponse(BaseModel):
+    """The agent a phase is re-run on when its own provider cannot serve it (PC-83)."""
+
+    provider: str
+    model: str | None = None
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -518,6 +533,8 @@ class PhaseDefinitionResponse(BaseModel):
     agent_type: str = ""
     prompt_template: str | None = None
     timeout_seconds: int = 300
+    max_cost_usd: float | None = None
+    """The most this phase may spend, in USD, before it is stopped. None is unbounded."""
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
@@ -533,8 +550,8 @@ class PhaseDefinitionResponse(BaseModel):
     target is what runs. ``expected``: the CLI resolves it (claude), so the
     target is what the pinned CLI is expected to pick. ``None`` with no alias."""
     model_display: str | None = None
-    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6-sol``, or
-    ``default → gpt-sol → gpt-6-sol`` when execution substitutes the
+    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6.1-sol``, or
+    ``default → gpt-sol → gpt-6.1-sol`` when execution substitutes the
     provider default; the bare model when there is nothing to resolve. Render
     verbatim."""
     provider: str | None = None
@@ -542,6 +559,12 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
+    # The obligation beside the permission (#894): a phase declaring it fails
+    # unless its delegate succeeded.
+    require_delegation: bool = False
+    # PC-83: re-run once on this agent after capacity outlived the retries, or
+    # a spent quota. None when the phase declared no fallback.
+    fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
     sandbox: str = DEFAULT_PHASE_SANDBOX
@@ -574,7 +597,55 @@ class WorkflowDetail(BaseModel):
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     default_eval_id: str | None = None
     """The eval a launch naming none joins (#967). Future runs only."""
-    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None when it was not
+    installed from a package or predates install provenance."""
+
+
+class PhaseProgressInfo(BaseModel):
+    """How far through its phases an execution is, skipped phases accounted for.
+
+    ``total_phases`` is what the workflow defines, and a review that certifies
+    skips the repair rounds after it (PC-63), so ``completed/total`` read
+    "6/10" for a run that finished. Clients render ``display`` and draw
+    ``percent``; they never divide the raw counts themselves.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    completed: int
+    """Phases that ran to completion."""
+    skipped: int
+    """Phases a review verdict made unnecessary; they will never run."""
+    possible: int
+    """The most phases this run can complete: defined, less the skipped."""
+    remaining_possible: int
+    """Phases that could still run. Zero once the run has ended."""
+    percent: int
+    """Completed as a share of ``possible``, 0-100. A completed run is 100."""
+    display: str
+    """E.g. ``6 of 6 (4 phases not needed)``, ``phase 3 of up to 10``."""
+
+    @classmethod
+    def of(cls, progress: PhaseProgress) -> PhaseProgressInfo:
+        """The response shape of the domain's answer."""
+        return cls(
+            completed=progress.completed,
+            skipped=progress.skipped,
+            possible=progress.possible,
+            remaining_possible=progress.remaining_possible,
+            percent=progress.percent,
+            display=progress.display,
+        )
+
+    @classmethod
+    def without_skips(cls, status: str, completed: int, defined: int) -> PhaseProgressInfo:
+        """Progress from a run result, which carries no skips.
+
+        The list and detail reads, built from NextPhaseReady, are where skips
+        are counted.
+        """
+        return cls.of(PhaseProgress(status=status, completed=completed, skipped=0, defined=defined))
 
 
 class ExecutionSummary(BaseModel):
@@ -590,6 +661,7 @@ class ExecutionSummary(BaseModel):
     completed_at: datetime | str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -707,6 +779,13 @@ class ExecutionDetail(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -725,6 +804,12 @@ class ExecutionDetail(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
+    """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
 
@@ -734,6 +819,9 @@ class ExecutionDetail(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -891,6 +979,100 @@ class WorkflowDefaultEvalResponse(BaseModel):
 
     workflow_id: str
     default_eval_id: str | None
+
+
+class EvalBaselineRepoRequest(BaseModel):
+    """One repository of a new eval's Baseline, before its ref is pinned (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str = Field(description="The repository, as an `owner/name` slug.")
+    requested_ref: str = Field(
+        min_length=1,
+        description=(
+            "A branch, tag or commit. Resolved once, at create, to a full commit SHA; "
+            "every run starts from that SHA even after the branch or tag moves."
+        ),
+    )
+
+
+class CreateEvalRequest(BaseModel):
+    """A new eval (#967). The server mints its id; see `EvalCreatedResponse`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    goal: str = Field(min_length=1, description="What the eval sets out to measure.")
+    starting_workflow_id: str | None = Field(
+        default=None, min_length=1, description="The workflow a run uses when it names none."
+    )
+    baseline_repos: list[EvalBaselineRepoRequest] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class EvalBaselineRepoResponse(BaseModel):
+    """One repository of an eval's Baseline: the ref asked for and the SHA it pinned to."""
+
+    repository: str
+    """The repository, as an `owner/name` slug."""
+    requested_ref: str
+    commit_sha: str
+
+
+class EvalCreatedResponse(BaseModel):
+    """The receipt for a create, read from the Eval aggregate, never a projection (#967).
+
+    The eval list and `GET /evals/{eval_id}` are read models and may not show
+    the eval for a moment after this returns. That is lag, not a failed create:
+    `eval_id` is authoritative from here on.
+    """
+
+    eval_id: str
+    name: str
+    goal: str
+    starting_workflow_id: str | None
+    baseline_repos: list[EvalBaselineRepoResponse]
+    """Each ref the request named, with the commit SHA it resolved to."""
+    tags: list[str]
+
+
+class EvalArchivedResponse(BaseModel):
+    """The receipt for an archive, read from the Eval aggregate (#967)."""
+
+    eval_id: str
+    archived: bool
+
+
+class EvalResponse(BaseModel):
+    """An eval as the eval read model holds it, with its run tally (#967)."""
+
+    eval_id: str
+    name: str
+    goal: str
+    starting_workflow_id: str | None
+    baseline_repos: list[EvalBaselineRepoResponse]
+    tags: list[str]
+    frozen: bool
+    """True once a run was admitted: the goal and Baseline can no longer change."""
+    archived: bool
+    created_at: str | None
+    updated_at: str | None
+    run_count: int
+    """Executions currently in the eval. A detached run is not counted."""
+    run_status_counts: dict[str, int]
+    """Those executions tallied by execution status."""
+
+
+class EvalListResponse(BaseModel):
+    """One page of evals, newest first (#967)."""
+
+    evals: list[EvalResponse]
+    total: int
+    """Evals matching every filter, before paging."""
+    page: int
+    page_size: int
+    status_counts: dict[str, int]
+    """Matching evals tallied as `active` / `archived`, ignoring the status filter."""
 
 
 # ---------------------------------------------------------------------------
@@ -1339,6 +1521,22 @@ class PhaseActivityInfo(BaseModel):
     budget - not that there was none, and not zero.
     """
 
+    deadline: datetime | None = None
+    """When this phase is killed on its budget (#1546), in UTC: the moment its
+    workspace was ready plus ``timeout_seconds``.
+
+    Not ``started_at`` plus ``timeout_seconds``. The phase starts before its
+    workspace is provisioned and its clock only after, so that sum is early by
+    the provisioning time - which is why phases appeared to run past their
+    limit. This is the deadline the agent is told as ``SYN_PHASE_DEADLINE``,
+    to within the moment between the workspace being recorded ready and the
+    agent being dispatched. Like that variable it is in whole seconds,
+    truncated, so it is never later than the agent's.
+
+    ``None`` until the workspace is ready, when the budget is unknown, or for
+    a phase provisioned before this was recorded.
+    """
+
 
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""
@@ -1367,6 +1565,13 @@ class PhaseExecution(BaseModel):
     """What this phase's agent said happened to its external writes, ``None``
     when it said nothing. A report, never a measurement, and it never decides
     whether the phase completed."""
+    failure_classification: FailureClassification | None = None
+    """Why this phase failed - ``platform``, ``task``, ``correct_refusal`` or
+    ``unclassified`` - and ``None`` exactly when it did not fail. The same fact
+    as the execution's ``failure_classification``, at the phase it failed in."""
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What this phase's agent SAID caused its failure, ``None`` when it said
+    nothing. A report beside the classification, never a replacement for it."""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -1387,6 +1592,11 @@ class PhaseExecution(BaseModel):
     """
     requested_model: str | None = None
     """The model the phase REQUESTED (often an alias such as ``opus``), or None."""
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result, or null
+    (PC-83). Differs from the declared provider when the phase fell back to its
+    ``fallback_agent`` on capacity or quota; ``requested_model`` is then the
+    fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
@@ -1466,6 +1676,7 @@ class ExecutionDetailFull(BaseModel):
     phase one carries one phase and a total of 3, and the gap is the phases
     that never started (#1147)."""
     completed_phases: int = 0
+    phase_progress: PhaseProgressInfo
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
@@ -1515,6 +1726,13 @@ class ExecutionDetailFull(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -1533,6 +1751,12 @@ class ExecutionDetailFull(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
+    """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
 
@@ -1542,6 +1766,9 @@ class ExecutionDetailFull(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -1986,8 +2213,8 @@ class BuildInfo(_NamesTheRunningRelease):
     twenty releases behind the installed package.
 
     The release and its status come from ``_NamesTheRunningRelease``. What this
-    model adds is the two build-time stamps, which only an image can supply and
-    only ``/health`` reports.
+    model adds is the two build-time stamps, which only an image can supply,
+    and when this process went live, which only the process can.
     """
 
     image_tag: str | None = Field(
@@ -2001,6 +2228,20 @@ class BuildInfo(_NamesTheRunningRelease):
         description="Git commit the image was built from, stamped at image build time. "
         "Null when the build did not stamp one.",
     )
+    started_at: datetime = Field(
+        description="When this API process started (UTC, ISO 8601): the moment the "
+        "running deployment went live. Captured once per process, so it changes only "
+        "when the process is replaced, which is what a redeploy does.",
+    )
+
+    @computed_field(
+        description="started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. "
+        "Relative and local-time renderings are the client's to make from started_at.",
+    )
+    @property
+    def started_at_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``started_at``."""
+        return format_utc_timestamp(self.started_at)
 
 
 class RootResponse(_NamesTheRunningRelease):
@@ -2060,7 +2301,9 @@ class _OmitsAbsentFields(BaseModel):
 #: is added here because only /health can produce it — it is what the probe
 #: reports when it failed and has no verdict to publish.
 #: ``test_health_contract.py`` fails if those four ever stop being a subset.
-SubscriptionHealthStatus = Literal["healthy", "degraded", "stalled", "catching_up", "unknown"]
+SubscriptionHealthStatus = Literal[
+    "healthy", "degraded", "dropped_events", "stalled", "catching_up", "unknown"
+]
 
 
 class SubscriptionHealth(_OmitsAbsentFields):
@@ -2089,7 +2332,8 @@ class SubscriptionHealth(_OmitsAbsentFields):
     status: SubscriptionHealthStatus = Field(
         description="Verdict on the read path: 'healthy', 'catching_up' during a replay "
         "that ends by itself, 'stalled' for a projection that does not, 'degraded' "
-        "for a coordinator that is not running, or 'unknown' when the probe failed.",
+        "for a coordinator that is not running, 'dropped_events' when a read model "
+        "passed an event without applying it, or 'unknown' when the probe failed.",
     )
     running: bool | None = Field(
         default=None,
@@ -2129,6 +2373,57 @@ class SubscriptionHealth(_OmitsAbsentFields):
         description="Every projection short of the head, furthest behind first. Empty when "
         "all are at the head; null when lag is unmeasurable.",
     )
+    unapplied_starts: list[UnappliedStart] | None = Field(
+        default=None,
+        description="Executions whose WorkflowExecutionStarted an execution read model's "
+        "checkpoint passed without applying (#1545). Lag cannot show these: the read model "
+        "is at the head and wrong. Non-empty sets status 'dropped_events'; repair per "
+        "docs/runbooks/repair-dropped-execution-start.md. Null when not measured.",
+    )
+
+
+class DiskSpaceHealth(BaseModel):
+    """Free space on the workspace volume, as /health reports it (#1560)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(description="Directory whose filesystem was measured.")
+    state: Literal["ok", "unmeasurable", "low", "critical"] = Field(
+        description="'low' degrades /health; 'critical' also refuses new executions."
+    )
+    free_percent: float | None = Field(description="Percent free; null when unmeasurable.")
+    free_bytes: int | None = Field(description="Bytes available; null when unmeasurable.")
+    degraded_below_percent: float = Field(description="SYN_DISK_DEGRADED_BELOW_PERCENT.")
+    refuse_admission_below_percent: float = Field(
+        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+    )
+
+
+class DbPoolHealth(BaseModel):
+    """One Postgres connection pool in this API process, at the moment of asking (#1583).
+
+    ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+    requests are queueing for a connection rather than for the database itself.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="What the pool serves, e.g. 'projections' or 'agent_events'.")
+    size: int = Field(description="Connections currently open.")
+    max_size: int = Field(description="Most connections the pool will open.")
+    in_use: int = Field(description="Connections checked out right now.")
+    waiting: int = Field(description="Callers blocked waiting for a connection right now.")
+
+    @classmethod
+    def snapshot(cls) -> list[DbPoolHealth]:
+        """Every open pool, read from in-process counters only.
+
+        Costs nothing and cannot hang on the database it describes, so /health
+        can always report it.
+        """
+        from syn_adapters.postgres_pool import pool_stats
+
+        return [cls.model_validate(stats, from_attributes=True) for stats in pool_stats()]
 
 
 class HealthResponse(_OmitsAbsentFields):
@@ -2178,6 +2473,22 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Human-readable notes that need attention but do not degrade the "
         "instance. Omitted when there are none.",
+    )
+    disk: DiskSpaceHealth | None = Field(
+        default=None,
+        description="Free space on the workspace volume (#1560). Omitted only when "
+        "the probe itself could not be built.",
+    )
+    db_pools: list[DbPoolHealth] | None = Field(
+        default=None,
+        description="Every open Postgres pool in this process, by name. Omitted when none "
+        "is open, e.g. in offline mode.",
+    )
+    cpu_throttling: CpuThrottling | None = Field(
+        default=None,
+        description="How often the API container hit its CPU limit (#1600). Always present "
+        "once the gate is ready, with status 'unknown' when the cgroup does not say; "
+        "omitted only while the gate is withholding the API.",
     )
 
 

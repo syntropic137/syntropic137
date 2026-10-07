@@ -72,6 +72,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     api_error_label,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.held_token_rows import HeldTokenRows
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+    limit_exceeded,
+    spend,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     VerdictReader,
 )
@@ -95,6 +99,9 @@ if TYPE_CHECKING:
 
     from syn_adapters.control import ExecutionController
     from syn_domain.contexts.orchestration.ports import CodexRolloutPort
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
         TokenAccumulator,
     )
@@ -197,6 +204,17 @@ def codex_fault_reason(message: str) -> str:
     but the reason it was never retried for.
     """
     return f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
+
+
+def codex_login_fault_reason(status: str, line: str) -> str:
+    """The reason text a codex CLI login fault on stdout is reported under.
+
+    A function for the same reason as `codex_fault_reason`: the upstream
+    failure reader recognises this shape as `auth` by the prefix this writes
+    with an empty `line`, so the two cannot drift apart.
+    """
+    label = api_error_label(ApiErrorType.AUTHENTICATION, status)
+    return f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
 
 
 def _as_int(value: object) -> int:
@@ -405,8 +423,11 @@ class CodexStreamProcessor:
         session_id: str,
         agent_model: str | None,
         rollout: CodexRolloutPort | None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> None:
         self._tokens = tokens
+        self._cost_limit = cost_limit
+        self._cost_limit_reason: str | None = None
         #: Where the model comes from when the stream does not name one, which
         #: so far is every codex run there has ever been (#1284). Stated by
         #: every caller and given no default on purpose: `None` here means
@@ -486,6 +507,30 @@ class CodexStreamProcessor:
         finally:
             await self._held_rows.flush(self._announced_model, raise_errors=False)
 
+    async def _step(
+        self, line: str, line_count: int, workspace: InterruptibleWorkspace
+    ) -> tuple[bool, str | None]:
+        """Process one line; ``(True, reason)`` when the agent was interrupted."""
+        poll = await self._cancel_poller.check(line_count)
+        if poll.should_interrupt:
+            await workspace.interrupt()
+            return True, poll.reason
+
+        await self._process_line(line)
+
+        # Same check as the claude path (#1376), as a backstop only. `codex
+        # exec` reports usage on ONE `turn.completed`, when the run has
+        # ended, so this can never stop a codex agent mid-run - which is why
+        # `require_enforceable_cost_limit` refuses `max_cost_usd` on a codex
+        # phase at install, and a codex phase does not reach here with one.
+        over = limit_exceeded(self._cost_limit)
+        if over is None:
+            return False, None
+        logger.warning("Phase %s %s - interrupting the agent", self._phase_id, over)
+        self._cost_limit_reason = over
+        await workspace.interrupt()
+        return True, over
+
     async def _process_stream(
         self,
         stream: AsyncIterator[str],
@@ -503,14 +548,9 @@ class CodexStreamProcessor:
             if line.strip():
                 conversation_lines.append(line)
 
-            poll = await self._cancel_poller.check(line_count)
-            if poll.should_interrupt:
-                await workspace.interrupt()
-                interrupt_requested = True
-                interrupt_reason = poll.reason
+            interrupt_requested, interrupt_reason = await self._step(line, line_count, workspace)
+            if interrupt_requested:
                 break
-
-            await self._process_line(line)
 
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream
@@ -606,6 +646,7 @@ class CodexStreamProcessor:
             # asked - and the codex phase is the OTHER half of every
             # cross-model claim this platform makes (#1284).
             announced_model=self._announced_model,
+            cost_limit_reason=self._cost_limit_reason,
         )
 
     async def _name_the_model_from_disk(self) -> None:
@@ -748,11 +789,9 @@ class CodexStreamProcessor:
         if not _AUTH_FAILURE_MARKER_RE.search(line):
             return
         status = _HTTP_AUTH_STATUS_RE.search(line)
-        label = api_error_label(
-            ApiErrorType.AUTHENTICATION,
-            status.group(1) if status else "",
+        self._auth_fault_candidate = codex_login_fault_reason(
+            status.group(1) if status else "", line
         )
-        self._auth_fault_candidate = f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
         logger.warning("Codex auth fault seen on stdout: %s", line[:_MAX_FAULT_LINE_LEN])
 
     def _note_delegation_attempt(self, tool_use_id: str, command: str) -> None:
@@ -1026,3 +1065,14 @@ class CodexStreamProcessor:
         )
         # Held, not written: see `held_token_rows`.
         self._held_rows.hold(turn_usage)
+        # Priced by the same rule `_estimate_cost` applies to the totals.
+        spend(
+            self._cost_limit,
+            RecordedModel(
+                observed=self._announced_model, requested=self._agent_model
+            ).pricing_model,
+            turn_usage.fresh_input,
+            turn_usage.billable_output,
+            0,
+            turn_usage.cache_read,
+        )

@@ -19,8 +19,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from event_sourcing import ProjectionStore
     from event_sourcing.core.checkpoint import DispatchContext
+
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
 
 from event_sourcing import (
     DispatchContext,
@@ -32,8 +36,8 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
-from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 
@@ -59,7 +63,12 @@ class _ExecutionService(Protocol):
         execution_id: str,
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
-    ) -> AdmissionTicket | None: ...
+        on_held: Callable[[Exception], Awaitable[None]] | None = None,
+    ) -> AdmissionTicket | None:
+        """``on_held`` is told when a start admitted here, then queued for a
+        slot, is refused at its slot because the gate closed meanwhile (#1617).
+        """
+        ...
 
 
 class _BudgetChecker(Protocol):
@@ -110,6 +119,20 @@ def _to_str_dict(value: _EventValue) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
     return {str(k): str(v) for k, v in value.items()}
+
+
+def _repos_from_slug(repo_slug: object) -> list[RepositoryRef]:
+    """Typed repository identity for a trigger's ``repository`` input, if valid."""
+    if not isinstance(repo_slug, str) or not repo_slug:
+        return []
+    try:
+        return [RepositoryRef.from_slug(repo_slug)]
+    except ValueError:
+        logger.warning(
+            "Invalid repository slug '%s' in trigger inputs, skipping typed conversion",
+            repo_slug,
+        )
+        return []
 
 
 class WorkflowDispatchProjection(ProcessManager):
@@ -269,20 +292,18 @@ class WorkflowDispatchProjection(ProcessManager):
         try:
             await self._execute_and_record(record, execution_id, workflow_id, trigger_id)
             return True
-        except MaintenancePausedError as exc:
-            # #1387: refused, not broken. The execution service raises this
-            # SYNCHRONOUSLY, before any task exists, so nothing was started and
-            # this record is the whole truth about the trigger. Recording it as
-            # `failed` would say the dispatch was attempted and went wrong;
+        except AdmissionRefusedError as exc:
+            # #1387/#1560: refused, not broken. The execution service raises
+            # this SYNCHRONOUSLY, before any task exists, so nothing was started
+            # and this record is the whole truth about the trigger. Recording it
+            # as `failed` would say the dispatch was attempted and went wrong;
             # `paused` says it was held back, and _pending_records() picks it up
-            # again once the gate clears.
-            logger.info(
-                "Dispatch of workflow %s for trigger %s held: %s",
-                workflow_id,
-                trigger_id,
-                exc.mode.refusal_detail,
+            # again once the refusal clears. Caught as the family, not by
+            # reason: naming one reason is how a full disk dropped triggers.
+            logger.warning(
+                "Dispatch of workflow %s for trigger %s held: %s", workflow_id, trigger_id, exc
             )
-            await self._save_record_status(execution_id, record, _PAUSED, "maintenance_mode")
+            await self._save_record_status(execution_id, record, _PAUSED, exc.hold_reason)
             return False
         except Exception:
             logger.exception(
@@ -312,18 +333,9 @@ class WorkflowDispatchProjection(ProcessManager):
             str_inputs = {}
 
         # ADR-063: extract repository identity at the boundary
-        repos: list[RepositoryRef] = []
-        repo_slug = str_inputs.get("repository", "")
-        if isinstance(repo_slug, str) and repo_slug:
-            try:
-                repos = [RepositoryRef.from_slug(repo_slug)]
-            except ValueError:
-                logger.warning(
-                    "Invalid repository slug '%s' in trigger inputs, skipping typed conversion",
-                    repo_slug,
-                )
+        repos = _repos_from_slug(str_inputs.get("repository", ""))
 
-        # #1387: `run_workflow` either raises MaintenancePausedError - which
+        # #1387: `run_workflow` either raises an AdmissionRefusedError - which
         # _dispatch_record records as `paused` - or hands back the admission
         # ticket the gate issued under its transition lock. The record below is
         # written FROM that ticket, so "dispatched" cannot be a guess: there is
@@ -331,19 +343,51 @@ class WorkflowDispatchProjection(ProcessManager):
         #
         # `None` means this dispatcher was built without a gate, which only
         # happens in fixtures; the timestamp falls back to now.
-        ticket = await self._execution_service.run_workflow(
-            workflow_id=workflow_id,
-            inputs=str_inputs,
-            execution_id=execution_id,
-            repos=repos,
-        )
+        store = self._store
+        # #1617: the hand-back runs on the dispatcher's task, so its `paused`
+        # could land first and be overwritten by the `dispatched` save below
+        # while that is still in flight, leaving a start that never ran and is
+        # never re-offered. So a hand-back that arrives before the `dispatched`
+        # write has landed is parked here and written after it. Each check and
+        # update below has no await between them, so on the one event loop
+        # they cannot interleave.
+        recorded = False
+        held: dict[str, str | int | float | bool | None] | None = None
 
-        record["status"] = "dispatched"
-        record["dispatched_at"] = (
-            ticket.granted_at if ticket is not None else datetime.now(UTC)
-        ).isoformat()
-        if execution_id:
-            await self._store.save(self.PROJECTION_NAME, execution_id, record)
+        async def hold_again(exc: Exception) -> None:
+            # #1617: queued for a slot when a pause closed the gate, so it did
+            # not start. `paused` again, so the re-open re-offers it. A copy,
+            # so the record this method saves as `dispatched` is not mutated
+            # under it.
+            nonlocal held
+            reason = exc.hold_reason if isinstance(exc, AdmissionRefusedError) else str(exc)
+            if not execution_id:
+                return
+            paused = {**record, "status": _PAUSED, "status_reason": reason}
+            if recorded:
+                await store.save(self.PROJECTION_NAME, execution_id, paused)
+            else:
+                held = paused
+
+        try:
+            ticket = await self._execution_service.run_workflow(
+                workflow_id=workflow_id,
+                inputs=str_inputs,
+                execution_id=execution_id,
+                repos=repos,
+                on_held=hold_again,
+            )
+
+            record["status"] = "dispatched"
+            record["dispatched_at"] = (
+                ticket.granted_at if ticket is not None else datetime.now(UTC)
+            ).isoformat()
+            if execution_id:
+                await self._store.save(self.PROJECTION_NAME, execution_id, record)
+        finally:
+            recorded = True
+            if held is not None and execution_id:
+                await store.save(self.PROJECTION_NAME, execution_id, held)
 
         self._record_dispatch_timestamp()
 

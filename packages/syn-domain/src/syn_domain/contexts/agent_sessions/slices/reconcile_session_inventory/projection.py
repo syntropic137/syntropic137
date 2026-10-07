@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -20,7 +21,10 @@ from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSwe
     InventoryReconciliationSweepEvent,
 )
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import RunIdentity
-from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import InventoryJob
+from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
+    InventoryJob,
+    InventoryStepOutcome,
+)
 
 if TYPE_CHECKING:
     from event_sourcing import (
@@ -42,7 +46,19 @@ logger = logging.getLogger(__name__)
 
 class InventoryWorkPort(Protocol):
     async def schedule(self) -> None: ...
-    async def execute(self, lease: InventoryJobLease) -> None: ...
+    async def execute(self, lease: InventoryJobLease) -> InventoryStepOutcome: ...
+
+
+def _log_stage(stage: str, started: float, job_id: str | None = None) -> None:
+    # Per-stage wall time for #1528: which part of a tick is slow is measured,
+    # not guessed. Debug level, so it costs nothing unless enabled.
+    duration_ms = (time.perf_counter() - started) * 1000
+    logger.debug(
+        "Inventory process_pending stage %s took %.1f ms",
+        stage,
+        duration_ms,
+        extra={"stage": stage, "job_id": job_id, "duration_ms": duration_ms},
+    )
 
 
 class InventoryReconciliationProcessManager(ProcessManager):
@@ -58,12 +74,19 @@ class InventoryReconciliationProcessManager(ProcessManager):
         lease_seconds: int,
         retry_seconds: int,
         max_jobs_per_tick: int,
+        park_safety_seconds: int = 900,
         host_evidence: HostSessionEvidenceProjector | None = None,
     ) -> None:
-        if lease_seconds < 1 or retry_seconds < 0 or max_jobs_per_tick < 1:
+        if (
+            lease_seconds < 1
+            or retry_seconds < 0
+            or max_jobs_per_tick < 1
+            or park_safety_seconds < 1
+        ):
             raise ValueError("invalid inventory worker limits")
         self._jobs, self._work = jobs, work
         self._lease_seconds, self._retry_seconds = lease_seconds, retry_seconds
+        self._park_safety_seconds = park_safety_seconds
         self._max_jobs = max_jobs_per_tick
         self._host_evidence = host_evidence
 
@@ -139,23 +162,37 @@ class InventoryReconciliationProcessManager(ProcessManager):
         return ProjectionResult.SUCCESS
 
     async def process_pending(self) -> int:
+        """Run due work; return how many steps ADVANCED. Idle returns 0 and emits nothing."""
         if self._host_evidence is not None:
             # Before scheduling, so a released deadline is reconciled this tick.
+            started = time.perf_counter()
             await self._host_evidence.release_deadlines()
+            _log_stage("release_deadlines", started)
+        started = time.perf_counter()
         await self._work.schedule()
+        _log_stage("schedule", started)
         processed = 0
         for _ in range(self._max_jobs):
             lease = await self._jobs.claim(lease_seconds=self._lease_seconds)
             if lease is None:
                 break
+            started = time.perf_counter()
             try:
-                await self._work.execute(lease)
-                processed += 1
+                outcome = await self._work.execute(lease)
             except Exception:
                 logger.exception(
                     "Inventory step failed; durable job remains retryable",
                     extra={"job_id": lease.job.job_id},
                 )
-            finally:
                 await self._jobs.release(lease, retry_seconds=self._retry_seconds)
+                continue
+            finally:
+                _log_stage("execute", started, lease.job.job_id)
+            # Either way the job's next step depends on an event this manager
+            # has not projected yet: the one the step just saved, or the newer
+            # one the store already holds. A timed retry would only re-claim
+            # the same stale row (#1528), so wait for project() to re-arm it.
+            await self._jobs.park(lease, safety_seconds=self._park_safety_seconds)
+            if outcome is InventoryStepOutcome.ADVANCED:
+                processed += 1
         return processed

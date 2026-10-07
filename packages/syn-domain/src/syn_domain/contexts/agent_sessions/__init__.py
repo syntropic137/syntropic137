@@ -46,6 +46,9 @@ from syn_domain.contexts.agent_sessions._shared import (
     SessionStatus,
     TokenMetrics,
 )
+from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import (
+    ReconciliationStage,
+)
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_SESSION_USAGE_CTE,
     CANONICAL_USAGE_DECISION_CTE,
@@ -68,6 +71,9 @@ from syn_domain.contexts.agent_sessions.domain.aggregate_inventory_reconciliatio
 )
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
+)
+from syn_domain.contexts.agent_sessions.domain.events.DelegationFinishedEvent import (
+    DelegationOutcome,
 )
 from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSweepEvent import (
     InventoryReconciliationSweepEvent,
@@ -120,6 +126,7 @@ from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
     InventoryJob,
     InventoryJobLease,
     InventoryLeaseLost,
+    InventoryStepOutcome,
     SessionInventoryJobPort,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionInventoryReadPort import (
@@ -277,6 +284,7 @@ __all__ = [
     "CompleteSessionHandler",
     "CostCalculator",
     "CoverageState",
+    "DelegationOutcome",
     "EvidenceBatch",
     "EvidenceClass",
     "EvidencePage",
@@ -314,6 +322,7 @@ __all__ = [
     "InventoryReplicationProcessManager",
     "InventorySnapshot",
     "InventoryStepHandler",
+    "InventoryStepOutcome",
     "InvocationContextEvidence",
     "InvocationLifecycleEvidence",
     "InvocationStatus",
@@ -345,6 +354,7 @@ __all__ = [
     "ProcessHistoryBackfillQueueHandler",
     "QualifiedSessionIdentity",
     "ReadLocalTranscriptHandler",
+    "ReconciliationStage",
     "RecordOperationCommand",
     "RecordOperationHandler",
     "RecordSessionInvocationCommand",

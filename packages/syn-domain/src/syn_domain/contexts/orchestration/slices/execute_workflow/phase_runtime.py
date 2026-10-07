@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 
 from syn_domain.contexts.artifacts import AgentIdentity
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    AgentConfiguration,
     PhaseUsage,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.branch_observation import (
@@ -51,6 +52,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
+    record_workspace_usage,
     remember_leader_native_id,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
@@ -98,6 +100,23 @@ class PhaseLaunch:
     claude_cmd: list[str]
     started_at: datetime
     session_manager: SessionLifecycleManager | None
+    #: How to run the phase's declared `fallback_agent` in the SAME workspace,
+    #: built at provisioning beside the primary's command (PC-83). None when
+    #: the phase declared no fallback.
+    fallback: FallbackLaunch | None = None
+
+
+@dataclass(frozen=True)
+class FallbackLaunch:
+    """The second agent a phase may run on: who it is, and its own command and env.
+
+    Its own env because credentials are scoped per provider: a codex run must
+    not see claude's token, and the reverse.
+    """
+
+    agent: AgentConfiguration
+    agent_env: dict[str, str]
+    claude_cmd: list[str]
 
 
 @dataclass(frozen=True)
@@ -250,6 +269,7 @@ class PhaseRuntime:
         self._workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
         self._envs: dict[str, dict[str, str]] = {}
         self._cmds: dict[str, list[str]] = {}
+        self._fallbacks: dict[str, FallbackLaunch | None] = {}
         self._session_managers: dict[str, SessionLifecycleManager] = {}
         # Per-phase so `finalize` can attribute the capture.
         self._session_ids: dict[str, str] = {}
@@ -344,6 +364,7 @@ class PhaseRuntime:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         delivers_repo_changes: bool,
+        fallback: FallbackLaunch | None = None,
     ) -> None:
         """Hold the container this phase will run in, and how to close it again.
 
@@ -364,6 +385,7 @@ class PhaseRuntime:
         self._workspace_cms[phase_id] = workspace_cm
         self._envs[phase_id] = agent_env
         self._cmds[phase_id] = claude_cmd
+        self._fallbacks[phase_id] = fallback
         self._delivers_repo_changes[phase_id] = delivers_repo_changes
 
     async def record_starting_point(self, phase_id: str) -> None:
@@ -419,6 +441,7 @@ class PhaseRuntime:
             claude_cmd=self._cmds[phase_id],
             started_at=self._started_at.get(phase_id, datetime.now(UTC)),
             session_manager=self._session_managers.get(phase_id),
+            fallback=self._fallbacks.get(phase_id),
         )
 
     def remember_leader(
@@ -539,6 +562,7 @@ class PhaseRuntime:
         session_id = self._session_ids.pop(phase_id, "")
         self._envs.pop(phase_id, None)
         self._cmds.pop(phase_id, None)
+        self._fallbacks.pop(phase_id, None)
         self._announced_models.pop(phase_id, None)
         workspace_cm = self._workspace_cms.pop(phase_id, None)
 
@@ -557,6 +581,9 @@ class PhaseRuntime:
 
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
+        await record_workspace_usage(
+            self._writer, workspace, session_id=session_id, phase_id=phase_id
+        )
 
     async def abandon_phase(self, execution_id: str, phase_id: str, *, reason: str) -> None:
         """Release one failed attempt while retaining its authoritative usage."""
@@ -569,6 +596,7 @@ class PhaseRuntime:
         session_id = self._session_ids.pop(phase_id, "")
         self._envs.pop(phase_id, None)
         self._cmds.pop(phase_id, None)
+        self._fallbacks.pop(phase_id, None)
         self._announced_models.pop(phase_id, None)
         self._tokens.pop(phase_id, None)
         self._artifact_ids.pop(phase_id, None)
@@ -588,6 +616,9 @@ class PhaseRuntime:
         self._leader_native_ids.pop((execution_id, phase_id), None)
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
+        await record_workspace_usage(
+            self._writer, workspace, session_id=session_id, phase_id=phase_id
+        )
 
     # ── when the execution ends ───────────────────────────────────────────
 
@@ -710,6 +741,7 @@ class PhaseRuntime:
         self._starting_points.forget_all()
         self._envs.clear()
         self._cmds.clear()
+        self._fallbacks.clear()
         self._delivers_repo_changes.clear()
 
     @property

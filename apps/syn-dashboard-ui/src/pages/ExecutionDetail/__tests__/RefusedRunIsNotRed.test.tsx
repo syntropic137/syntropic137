@@ -39,8 +39,11 @@ const { ExecutionDetail } = await import('../ExecutionDetail')
 const EXECUTION_ID = 'exec-1'
 const REFUSAL_MESSAGE = 'Phase review reported success=false: the deliverable is not acceptable'
 
-function failedPhase(): PhaseExecutionDetail {
+function failedPhase(failure_classification: FailureClassification): PhaseExecutionDetail {
+  // The phase carries its own classification, as the API sends it (#1592):
+  // the timeline colours each card from its phase, not from the run.
   return {
+    failure_classification,
     workflow_phase_id: 'phase-1',
     name: 'review',
     status: 'failed',
@@ -71,9 +74,10 @@ function failedExecution(
     status: 'failed',
     started_at: '2026-09-18T00:00:00Z',
     completed_at: '2026-09-18T00:05:00Z',
-    phases: [failedPhase()],
+    phases: [failedPhase(failure_classification)],
     total_phases: 1,
     completed_phases: 0,
+    phase_progress: { completed: 0, skipped: 0, possible: 0, remaining_possible: 0, percent: 100, display: '0 of 0' },
     total_input_tokens: 10,
     total_output_tokens: 20,
     total_cache_creation_tokens: 0,

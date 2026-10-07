@@ -202,10 +202,11 @@ _EXPECTED_SPAN_LOOKUPS: dict[_Case, tuple[str, ...]] = {
     ),
     _case("GET /costs/executions (list)", _Branch.SUMMARISED): (_EXECUTION_SPAN,),
     _case("GET /costs/executions (list)", _Branch.IN_PROGRESS): (),
-    _case("GET /executions (one page, by id)", _Branch.SUMMARISED): (
-        _EXECUTION_SPAN,
-        _EXECUTION_SPAN,
-    ),
+    # One lookup, not two: the phase costs read a subset of the page's ids, so
+    # the page's span already bounds them (#1693). The second lookup was a
+    # whole round trip on every dashboard poll, 7 ms p50 and 200 ms at worst
+    # on the loaded selfhost, for bounds the caller already held.
+    _case("GET /executions (one page, by id)", _Branch.SUMMARISED): (_EXECUTION_SPAN,),
     _case("GET /executions (one page, by id)", _Branch.IN_PROGRESS): (_EXECUTION_SPAN,),
     _case("GET /costs/executions/{id} (detail)", _Branch.SUMMARISED): (_EXECUTION_SPAN,),
     _case("GET /costs/executions/{id} (detail)", _Branch.IN_PROGRESS): (_EXECUTION_SPAN,),
@@ -215,10 +216,11 @@ _EXPECTED_SPAN_LOOKUPS: dict[_Case, tuple[str, ...]] = {
 _SPAN = agent_event_span.EventSpan.of_days(_WHEN.date(), _WHEN.date())
 
 #: The two statements ``agent_event_span.custom_plans`` issues, in this order,
-#: at the top of its transaction; neither reads anything. The first makes the
-#: span lookup and the reads it bounds share one snapshot, and is only
-#: effective as the transaction's first statement.
-_SNAPSHOT_SETTING = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+#: to open its transaction; neither reads anything. The first is the BEGIN
+#: itself, carrying the snapshot that makes the span lookup and the reads it
+#: bounds agree, as asyncpg spells it for ``transaction(isolation=...,
+#: readonly=True)``.
+_SNAPSHOT_SETTING = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
 _PLAN_SETTING = "SET LOCAL plan_cache_mode"
 
 
@@ -290,9 +292,9 @@ class _RecordingConnection:
         self._record(query, args)
         return "OK"
 
-    def transaction(self) -> _Transaction:
+    def transaction(self, *, isolation: str, readonly: bool) -> _Transaction:
         """What ``agent_event_span.custom_plans`` opens around a bounded read."""
-        return _Transaction(self)
+        return _Transaction(self, isolation=isolation, readonly=readonly)
 
     async def fetch(self, query: str, *args: object) -> list[_AnyRow]:
         self._record(query, args)
@@ -359,8 +361,8 @@ class _RecordingConnection:
     def bounded_statements_outside_one_snapshot(self) -> list[str]:
         """Span lookups and the reads they bound, not run under custom_plans.
 
-        Each must run in a transaction whose first statement set the read-only
-        snapshot and whose second set the plan mode: otherwise the span and the
+        Each must run in a transaction whose BEGIN opened the read-only
+        snapshot and whose next statement set the plan mode: otherwise the span and the
         read can see different data, or the read is planned without its bounds.
         """
         wrong: list[str] = []
@@ -400,14 +402,19 @@ class _RecordingConnection:
 
 
 class _Transaction:
-    """Marks which statements ran inside it, and where it began."""
+    """Marks which statements ran inside it, and where it began: at its BEGIN."""
 
-    def __init__(self, conn: _RecordingConnection) -> None:
+    def __init__(self, conn: _RecordingConnection, *, isolation: str, readonly: bool) -> None:
         self._conn = conn
+        self._begin = "BEGIN ISOLATION LEVEL " + isolation.replace("_", " ").upper()
+        if readonly:
+            self._begin += " READ ONLY"
 
     async def __aenter__(self) -> None:
         assert self._conn.open_transaction_at is None, "custom_plans must be outermost"
         self._conn.open_transaction_at = len(self._conn.statements)
+        # A round trip like any other, so it is recorded like any other.
+        self._conn._record(self._begin, ())
 
     async def __aexit__(self, *_exc: object) -> bool:
         self._conn.open_transaction_at = None

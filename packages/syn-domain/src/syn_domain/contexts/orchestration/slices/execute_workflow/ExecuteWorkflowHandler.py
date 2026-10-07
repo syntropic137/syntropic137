@@ -16,7 +16,7 @@ from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration._shared.eval_admission import admit_launch
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -38,6 +38,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.source_commits im
 )
 from syn_shared.agents import (
     AgentProvider,
+    require_enforceable_cost_limit,
     require_executable_provider,
     require_runnable_sandbox,
 )
@@ -48,7 +49,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
     )
-    from syn_domain.contexts.orchestration._shared.eval_choice import LaunchEval
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
     )
@@ -58,9 +58,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.skill_ref import (
         SkillRef,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_eval.EvalAggregate import (
-        EvalAggregate,
-    )
+    from syn_domain.contexts.orchestration._shared.template_launch import TemplateLaunches
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
@@ -74,7 +72,6 @@ if TYPE_CHECKING:
         WorkflowExecutionProcessor,
         WorkflowExecutionResult,
     )
-    from syn_domain.repository import Repository
 
 # WHY (issue #726, PR2): the resolver is injected as a callable so the
 # domain handler does not import the application service. The wiring layer
@@ -230,6 +227,7 @@ def _phase_declares_anything(
     model: str | None,
     provider: str | None,
     allow_delegation: bool,
+    require_delegation: bool,
     allowed_tools: tuple[str, ...],
     sandbox: str | None,
 ) -> bool:
@@ -242,7 +240,14 @@ def _phase_declares_anything(
     `allowed_tools` a release. For `sandbox` the same bug would run a phase
     with authority it explicitly declined.
     """
-    return bool(model or provider or allow_delegation or allowed_tools or sandbox is not None)
+    return bool(
+        model
+        or provider
+        or allow_delegation
+        or require_delegation
+        or allowed_tools
+        or sandbox is not None
+    )
 
 
 def _grant_skill_invocation(
@@ -270,6 +275,35 @@ def _grant_skill_invocation(
     return replace(config, allowed_tools=(*config.allowed_tools, ToolName.SKILL))
 
 
+def _fallback_agent_config(phase: object, primary: AgentConfiguration) -> AgentConfiguration | None:
+    """The phase's declared `fallback_agent`, resolved like its primary (PC-83).
+
+    The primary's configuration with only WHO runs it changed: the same tools,
+    sandbox and delegation, so a fallback run cannot do anything the phase was
+    not already allowed to do. A None model resolves to the fallback
+    provider's own default in `AgentConfiguration`, never to the primary's.
+
+    The same execution-boundary refusals as the primary, for the same reason:
+    a stored template never saw the YAML validator that also refuses these.
+    """
+    declared = getattr(phase, "fallback_agent", None)
+    if declared is None:
+        return None
+    phase_id: str | None = getattr(phase, "phase_id", None)
+    provider = require_executable_provider(declared.provider, phase_id=phase_id)
+    if provider is AgentProvider.CODEX and primary.allowed_tools:
+        raise UnsupportedToolPolicyForProviderError(
+            provider=str(provider), phase_id=phase_id, declared=list(primary.allowed_tools)
+        )
+    # The phase's cost limit binds whichever agent runs it, and codex cannot
+    # stop at one (#1376). Refused here, before any workspace is paid for,
+    # rather than discovered when the primary fails over.
+    require_enforceable_cost_limit(
+        provider, getattr(phase, "max_cost_usd", None), phase_id=phase_id
+    )
+    return replace(primary, provider=declared.provider, model=declared.model)
+
+
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
@@ -289,7 +323,11 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
-    allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
+    require_delegation: bool = bool(getattr(phase, "require_delegation", False))
+    # A requirement implies the permission: a stored template never saw the
+    # YAML validator that insists on both, and a required delegate whose auth
+    # was not staged could only ever fail.
+    allow_delegation: bool = require_delegation or bool(getattr(phase, "allow_delegation", False))
     sandbox: str | None = getattr(phase, "sandbox", None)
     phase_id: str | None = getattr(phase, "phase_id", None)
     # Canonicalise here, not just in the YAML validator: a stored template
@@ -322,6 +360,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
         model=phase_model,
         provider=phase_provider,
         allow_delegation=allow_delegation,
+        require_delegation=require_delegation,
         allowed_tools=allowed_tools,
         sandbox=sandbox,
     ):
@@ -330,6 +369,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
         provider=resolved_provider,
         model=phase_model,
         allow_delegation=allow_delegation,
+        require_delegation=require_delegation,
         allowed_tools=allowed_tools,
         # `is not None`, NOT `or`: a stored phase carrying sandbox="" is
         # invalid input, and `or` would quietly widen it to the write-capable
@@ -361,7 +401,7 @@ class ExecuteWorkflowHandler:
         phase_skill_resolver: PhaseSkillResolver | None = None,
         maintenance: MaintenancePort | None = None,
         commit_resolver: SourceCommitResolverPort | None = None,
-        eval_repository: Repository[EvalAggregate] | None = None,
+        launches: TemplateLaunches | None = None,
     ) -> None:
         self._processor = processor
         self._workflow_repo = workflow_repository
@@ -384,10 +424,10 @@ class ExecuteWorkflowHandler:
         # unknown, which is honest and resumes exactly as before. Production
         # passes the GitHub resolver.
         self._commit_resolver = commit_resolver
-        # WHY optional (#967): a handler without one can still launch ordinary
-        # runs, and refuses any launch that resolves to an eval rather than
-        # recording membership nobody checked.
-        self._eval_repo = eval_repository
+        # WHY optional (#1588): as with maintenance, the fixtures that build a
+        # handler directly launch against no archive. Production passes it,
+        # and test_execute_handler_records_launches checks the wiring.
+        self._launches = launches
 
     async def handle(
         self,
@@ -444,16 +484,24 @@ class ExecuteWorkflowHandler:
         # Raises (a ValueError) if the union exceeds the tag limit.
         tags = workflow.tags.union(command.tags)
 
-        # #967: also a launch snapshot, and decided last of the refusals, so a
-        # launch refused for anything else never freezes the eval it named.
-        launch_eval = command.eval_choice.resolve(workflow.default_eval_id)
-        await self._admit_to_eval(launch_eval)
+        # #967: also a launch snapshot, taken by the dispatcher and carried on
+        # the command, so a retry joins the eval it was dispatched into.
+        launch_eval = self._launch_eval(command, workflow)
+        # A run in an eval checks out only what the eval froze; a repository
+        # outside that snapshot has no frozen commit, so the run is refused.
+        launch_eval.refuse_unpinned(repos)
 
         execution_id = (
             command.execution_id
             if command.execution_id and command.execution_id.startswith("exec-")
             else f"exec-{uuid4().hex[:12]}"
         )
+
+        # #1588: on the template's stream, before this execution's own stream
+        # exists, so an archive racing this launch either sees it or conflicts.
+        # Raises TemplateArchivedError if the archive won.
+        if self._launches is not None:
+            await self._launches.record(command.aggregate_id, execution_id)
 
         try:
             # #1387: the ticket travels all the way to the write. The lease it
@@ -469,7 +517,9 @@ class ExecuteWorkflowHandler:
                 execution_id=execution_id,
                 repos=repos,
                 admitted=admitted,
-                source_commits=await source_commits_for(self._commit_resolver, repos),
+                source_commits=await source_commits_for(
+                    self._commit_resolver, repos, launch_eval.baseline
+                ),
                 tags=tags,
                 launch_eval=launch_eval,
             )
@@ -480,17 +530,26 @@ class ExecuteWorkflowHandler:
             )
             raise DuplicateExecutionError(execution_id) from None
 
-    async def _admit_to_eval(self, launch_eval: LaunchEval) -> None:
-        """Refuse a launch whose eval is missing or archived, and freeze it otherwise."""
-        if launch_eval.eval_id is None:
-            return
-        if self._eval_repo is None:
+    @staticmethod
+    def _launch_eval(
+        command: ExecuteWorkflowCommand, workflow: WorkflowTemplateAggregate
+    ) -> LaunchEval:
+        """The eval the dispatcher resolved and admitted; never re-resolved here.
+
+        A command that carries none was built by a dispatcher that made no eval
+        decision. That is an ordinary run only if the workflow has no default
+        eval; otherwise it is refused, rather than silently run outside it.
+        """
+        if command.launch_eval is not None:
+            return command.launch_eval
+        if workflow.default_eval_id:
             msg = (
-                f"This launch resolves to eval {launch_eval.eval_id}, but no eval "
-                "repository is wired to admit it"
+                f"Workflow {command.aggregate_id} defaults to eval "
+                f"{workflow.default_eval_id}, but this launch was dispatched without "
+                "a resolved eval (eval_admission.launch_eval_for)"
             )
             raise ValueError(msg)
-        await admit_launch(self._eval_repo, launch_eval.eval_id)
+        return LaunchEval(None, EvalSelection.NONE)
 
     @staticmethod
     def _merge_inputs(
@@ -603,6 +662,9 @@ class ExecuteWorkflowHandler:
                     order=phase.order,
                     description=phase.description,
                     agent_config=agent_config,
+                    # Resolved from the FINAL primary config, after the skill
+                    # grant, so the fallback runs under exactly its tools.
+                    fallback_agent=_fallback_agent_config(phase, agent_config),
                     prompt_template=phase.prompt_template or "",
                     # Passed through whole. Collapsing to `[0] or "text"` here
                     # is what erased the difference between a phase that
@@ -610,6 +672,7 @@ class ExecuteWorkflowHandler:
                     # before anything could act on it (#1167).
                     output_artifact_types=tuple(phase.output_artifact_types),
                     timeout_seconds=phase.timeout_seconds,
+                    max_cost_usd=phase.max_cost_usd,
                     clone_repos=phase.clone_repos,
                     # Dropping this would put the unpushed-work gate back to
                     # guessing what an uncommitted change means, which is

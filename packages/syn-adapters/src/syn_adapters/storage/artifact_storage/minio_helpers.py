@@ -8,6 +8,28 @@ from __future__ import annotations
 from typing import Any
 
 
+def build_artifact_key(
+    artifact_id: str,
+    workflow_id: str | None = None,
+    execution_id: str | None = None,
+    *,
+    prefix: str = "artifacts",
+) -> str:
+    """Where an artifact's content lives: ``{prefix}/{workflow_id}/{execution_id}/{artifact_id}.md``.
+
+    The one definition of the artifact keyspace, shared by the MinIO adapter
+    and its in-memory stand-in so the two cannot disagree on where an upload
+    landed (#990: the fake keyed by id alone and hid every 404).
+    """
+    parts = [prefix]
+    if workflow_id:
+        parts.append(workflow_id)
+    if execution_id:
+        parts.append(execution_id)
+    parts.append(f"{artifact_id}.md")
+    return "/".join(parts)
+
+
 def parse_s3_key(uri: str) -> str | None:
     """Extract the object key from an s3://bucket/key URI, or return None."""
     if not uri.startswith("s3://"):

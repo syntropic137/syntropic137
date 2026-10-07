@@ -12,24 +12,24 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from syn_domain.pagination import Page
+
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
     ArtifactSummary,
     read_primary_flag,
 )
-from syn_domain.pagination import (
-    Page,
-    ProjectionRecord,
-    matches_search,
-)
-from syn_domain.projection_scan import paginate_projection
+from syn_domain.projection_scan import ListShape, page_projection
 
-#: Every field ``page``'s predicates read - the filters, the facet, the window
-#: and the search. ``paginate_projection`` scans only these for the whole
-#: collection and reads whole documents for the page alone (E2). A predicate
-#: that reads a field missing here raises rather than matching on None.
-_PAGE_FIELDS = ("id", "name", "workflow_id", "phase_id", "artifact_type", "created_at")
+#: What ``page`` windows, orders, tallies and searches by. A store that pages
+#: in SQL writes these as one statement; any other store evaluates the same
+#: shape in Python (``syn_domain.projection_scan.page_projection``, E2).
+_PAGE_SHAPE = ListShape(
+    timestamp_field="created_at",
+    facet_field="artifact_type",
+    search_fields=("id", "name", "workflow_id", "phase_id"),
+)
 
 
 class ArtifactListProjection(AutoDispatchProjection):
@@ -56,7 +56,7 @@ class ArtifactListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "artifact_summaries"
-    VERSION = 6  # Added agent_provider/agent_model to the read model (#1284)
+    VERSION = 7  # Added content_type and storage_uri to the read model (#990)
 
     def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
@@ -101,6 +101,11 @@ class ArtifactListProjection(AutoDispatchProjection):
             size_bytes=size_bytes,
             content=content,
             content_hash=event_data.get("content_hash"),
+            # Says whether `content` IS the artifact or the bytes are in object
+            # storage only (#990). Every event carries it; v1-v6 always text.
+            content_type=event_data.get("content_type"),
+            # Where the bytes are (#990); the id alone does not locate them.
+            storage_uri=event_data.get("storage_uri"),
             source_path=event_data.get("source_path"),  # v5 event field (#988)
             # v6 event fields (#1284). Absent on every pre-v6 event, and no
             # upcaster runs, so None here IS the record that nothing was
@@ -303,11 +308,10 @@ class ArtifactListProjection(AutoDispatchProjection):
         it is why the type counts describe every type the rest of the query
         matched instead of only the one already selected.
 
-        Only the equality filters the store can express are pushed down. The
-        window and the search cannot be, so they are spelled once here, in the
-        same pass that produces ``total`` -- deriving the count separately is
-        how a total comes to describe a different collection than the rows
-        (#1119).
+        The filters, the window, the search, the order and the counts are
+        all computed by one pass over one collection - one SQL statement on
+        Postgres, ``paginate`` elsewhere (``page_projection``) - so ``total``
+        cannot describe a different collection than the rows (#1119).
 
         ``search`` matches case-insensitively against the artifact id, its
         name, and the workflow and phase it belongs to.
@@ -322,22 +326,15 @@ class ArtifactListProjection(AutoDispatchProjection):
             )
             if value
         }
-
-        def base(record: ProjectionRecord) -> bool:
-            return matches_search(
-                search,
-                record.get("id"),
-                record.get("name"),
-                record.get("workflow_id"),
-                record.get("phase_id"),
-            )
-
-        return await paginate_projection(
+        return await page_projection(
             self._store,
             self.PROJECTION_NAME,
-            fields=_PAGE_FIELDS,
+            shape=_PAGE_SHAPE,
             filters=filters or None,
-            order_by="-created_at",
+            search=search,
+            statuses=artifact_types,
+            after=created_after,
+            before=created_before,
             full_read=lambda: self._store.query(
                 self.PROJECTION_NAME,
                 filters=filters if filters else None,
@@ -345,12 +342,6 @@ class ArtifactListProjection(AutoDispatchProjection):
                 limit=None,
                 offset=0,
             ),
-            base_predicate=base,
-            status_of=lambda r: str(r.get("artifact_type") or ""),
-            statuses=artifact_types,
-            timestamp_of=lambda r: r.get("created_at"),
-            after=created_after,
-            before=created_before,
             to_row=lambda record: ArtifactSummary.from_dict(dict(record)),
             offset=offset,
             limit=limit,

@@ -7,6 +7,7 @@ from syn_domain.contexts.artifacts._shared.value_objects import (
     ContentType,
     PhaseOutputFile,
     compute_content_hash,
+    primary_text,
 )
 from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
     ArtifactAggregate,
@@ -20,4 +21,5 @@ __all__ = [
     "ContentType",
     "PhaseOutputFile",
     "compute_content_hash",
+    "primary_text",
 ]

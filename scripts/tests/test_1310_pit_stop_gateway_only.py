@@ -37,7 +37,8 @@ case "$*" in
 esac
 """
 
-# The drain reads /health and /executions; a dry run still makes both calls.
+# The prechecks read /workflows (the probe's) and /health (the disk), and the
+# drain reads /health and /executions; a dry run still makes every one of them.
 _CURL = """#!/usr/bin/env bash
 echo "$*" >> "$PIT_LOG/curl"
 out=""; url=""
@@ -47,6 +48,7 @@ done
 case "$url" in
     */health) body='{"status": "healthy", "subscription": {"status": "healthy", "is_catching_up": false, "lag": 0}}' ;;
     */executions*) body='{"status_counts": {"completed": 3}}' ;;
+    */workflows*) body='{"workflows": [{"id": "telemetry-lag-probe-v1", "is_archived": false}]}' ;;
     *) exit 22 ;;
 esac
 printf '%s' "$body" > "$out"
@@ -134,7 +136,18 @@ class TestGatewayOnly:
         out, _, log = _dry_run(tmp_path, "--service", "gateway")
         assert "/maintenance" not in out
         assert "drain:" not in out
-        assert not (log / "curl").exists(), "a gateway swap has no reason to read the API"
+        reads = (log / "curl").read_text().splitlines()
+        # The disk report is the one read left: it is a report, not a gate,
+        # and it is just as true before loading one image as two.
+        assert reads and all(r.split("http://fake-host:8137/api/v1", 1)[1].startswith("/health ") for r in reads), reads
+
+    def test_dispatches_no_probe_and_never_checks_for_one(self, tmp_path: Path) -> None:
+        """The probe proves a run can START, which a gateway swap does not touch;
+        it also waits minutes and spends tokens, so a gateway pit stop skips it,
+        and its precheck with it (#1310)."""
+        out, _, log = _dry_run(tmp_path, "--service", "gateway")
+        assert "probe" not in out
+        assert "/workflows" not in (log / "curl").read_text()
 
     def test_recreates_the_gateway_without_its_dependencies(self, tmp_path: Path) -> None:
         out, _, _ = _dry_run(tmp_path, "--service", "gateway")

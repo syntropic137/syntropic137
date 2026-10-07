@@ -85,6 +85,7 @@ async def test_seed_from_file(seeder: WorkflowSeeder) -> None:
         path.unlink()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_seed_from_file_dry_run(seeder: WorkflowSeeder) -> None:
     """Test dry-run mode doesn't create workflow."""
@@ -105,6 +106,7 @@ async def test_seed_from_file_dry_run(seeder: WorkflowSeeder) -> None:
         path.unlink()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_seed_from_directory(seeder: WorkflowSeeder) -> None:
     """Test seeding multiple workflows from directory."""
@@ -137,6 +139,7 @@ phases:
         assert report.all_succeeded is True
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_skip_existing_workflow(seeder: WorkflowSeeder) -> None:
     """Test that existing workflows are skipped."""
@@ -158,6 +161,7 @@ async def test_skip_existing_workflow(seeder: WorkflowSeeder) -> None:
         path.unlink()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_register_existing_workflows(seeder: WorkflowSeeder) -> None:
     """Test registering existing workflow IDs for skipping."""
@@ -183,6 +187,7 @@ phases:
         path.unlink()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_seed_report_statistics(seeder: WorkflowSeeder) -> None:
     """Test that seed report correctly tracks statistics."""

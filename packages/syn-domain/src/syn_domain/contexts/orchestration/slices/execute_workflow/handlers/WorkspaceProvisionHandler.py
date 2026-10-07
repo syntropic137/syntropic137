@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
@@ -23,6 +24,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.checkout_verification import (
+    verify_checkout,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
@@ -34,6 +38,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sa
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
     install_skill,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import FallbackLaunch
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -44,6 +49,7 @@ from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CLAUDE_SESSION_ID,
     ENV_GH_REPO,
+    ENV_SYN_PHASE_DEADLINE,
 )
 from syn_shared.process_exit import describe_process_failure
 
@@ -146,6 +152,20 @@ def _auth_staging_for(provider: str, allow_delegation: bool) -> tuple[bool, bool
     return include_codex_auth, needs_claude_env
 
 
+def _codex_auth_staged_for(phase: ExecutablePhase) -> bool:
+    """Whether the workspace gets ``~/.codex/auth.json``: for the phase's agent OR its fallback.
+
+    THE FALLBACK'S CREDENTIAL IS STAGED UP FRONT, deliberately (PC-83). The
+    workspace is hydrated once, before the agent runs, and the fallback runs
+    in that same workspace after the primary failed - there is no later point
+    at which to stage it. So a claude phase declaring a codex fallback has
+    the codex auth file in its workspace for the whole phase. Declaring the
+    fallback IS asking for that; a phase that declares none is unchanged.
+    """
+    agents = (phase.agent_config, *((phase.fallback_agent,) if phase.fallback_agent else ()))
+    return any(_auth_staging_for(a.provider, a.allow_delegation)[0] for a in agents)
+
+
 def _append_claude_plugin_dirs(
     claude_cmd: list[str],
     phase: ExecutablePhase,
@@ -182,6 +202,12 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
                 f"{prior_sha!r} vs {skill.resolved_sha!r}",
             )
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
+
+
+_DEADLINE_NOTICE = (
+    f"This phase is killed at ${ENV_SYN_PHASE_DEADLINE} (ISO 8601 UTC; read it with "
+    f"`echo ${ENV_SYN_PHASE_DEADLINE}`). Only pushed work survives: commit and push before then."
+)
 
 
 async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
@@ -293,6 +319,14 @@ def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
     return {ENV_GH_REPO: primary[0]} if primary else {}
 
 
+def _cloned_pins(repos: Sequence[str], pinned_commits: Sequence[SourceCommit]) -> dict[str, str]:
+    """``owner/name`` -> pinned commit, for the pinned repositories this phase clones."""
+    cloned = set(_repo_full_names(repos))
+    return {
+        c.repository: c.sha for c in pinned_commits if c.sha is not None and c.repository in cloned
+    }
+
+
 class ProvisionResult:
     """Result of workspace provisioning."""
 
@@ -300,6 +334,7 @@ class ProvisionResult:
         "agent_env",
         "claude_cmd",
         "command",
+        "fallback",
         "workspace",
         "workspace_cm",
     )
@@ -311,8 +346,10 @@ class ProvisionResult:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         command: ProvisionWorkspaceCompletedCommand,
+        fallback: FallbackLaunch | None = None,
     ) -> None:
         self.workspace = workspace
+        self.fallback = fallback
         self.workspace_cm = workspace_cm  # async context manager for cleanup
         self.agent_env = agent_env
         self.claude_cmd = claude_cmd
@@ -403,10 +440,7 @@ class WorkspaceProvisionHandler:
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
         workspace = await workspace_cm.__aenter__()
         try:
-            include_codex_auth, _ = _auth_staging_for(
-                phase.agent_config.provider,
-                phase.agent_config.allow_delegation,
-            )
+            include_codex_auth = _codex_auth_staged_for(phase)
             await self._hydrate_workspace(
                 workspace,
                 effective_repos,
@@ -415,6 +449,18 @@ class WorkspaceProvisionHandler:
                 pinned_commits=pinned_commits,
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
+            )
+            # Read back BEFORE anything else is staged and long before the agent
+            # is launched: a workspace not at its pins is refused here (#967).
+            checked_out = (
+                await verify_checkout(
+                    workspace,
+                    _cloned_pins(effective_repos, pinned_commits),
+                    continued_branches=continued_branches or {},
+                    phase_name=phase.name,
+                )
+                if phase.clone_repos
+                else ()
             )
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
@@ -434,6 +480,7 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 outputs.primary,
                 inputs,
+                checked_out,
             )
         except BaseException as exc:
             await workspace_cm.__aexit__(type(exc), exc, exc.__traceback__)
@@ -622,6 +669,7 @@ class WorkspaceProvisionHandler:
         effective_repos: list[str],
         outputs: dict[str, str],
         inputs: dict[str, object] | None,
+        checked_out: Sequence[SourceCommit] = (),
     ) -> ProvisionResult:
         """Build prompt, CLI command, and return the ProvisionResult."""
         # repo_url for {{repo_url}} prompt substitution (backward compat — uses first repo)
@@ -629,6 +677,46 @@ class WorkspaceProvisionHandler:
         prompt = await self._prompt_builder(
             phase, todo.execution_id, workflow_id, repo_url_for_prompt, outputs, inputs or {}
         )
+        claude_cmd, agent_env = await self._launch_for(
+            phase, prompt, workspace, session_id, effective_repos
+        )
+        fallback: FallbackLaunch | None = None
+        if phase.fallback_agent is not None:
+            # The SAME prompt, built once: the fallback re-runs this phase, it
+            # does not get a phase of its own. Only who runs it changes.
+            on_fallback = replace(phase, agent_config=phase.fallback_agent, fallback_agent=None)
+            fallback_cmd, fallback_env = await self._launch_for(
+                on_fallback, prompt, workspace, session_id, effective_repos
+            )
+            fallback = FallbackLaunch(
+                agent=phase.fallback_agent, agent_env=fallback_env, claude_cmd=fallback_cmd
+            )
+        assert todo.phase_id is not None
+        command = ProvisionWorkspaceCompletedCommand(
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            workspace_id=workspace.workspace_id,
+            session_id=session_id,
+            checked_out_commits=checked_out,
+        )
+        return ProvisionResult(
+            workspace=workspace,
+            workspace_cm=workspace_cm,
+            agent_env=agent_env,
+            claude_cmd=claude_cmd,
+            command=command,
+            fallback=fallback,
+        )
+
+    async def _launch_for(
+        self,
+        phase: ExecutablePhase,
+        prompt: str,
+        workspace: ManagedWorkspace,
+        session_id: str,
+        effective_repos: list[str],
+    ) -> tuple[list[str], dict[str, str]]:
+        """The command and env that run ``phase`` on its own ``agent_config``."""
         claude_cmd = self._command_builder(phase, prompt)
         # `--plugin-dir` is a claude-only flag; appending it to a `codex exec`
         # argv (after the prompt) produces an invalid command, so restrict the
@@ -652,20 +740,7 @@ class WorkspaceProvisionHandler:
         # fixes. It is provider-independent, and this is the single point both
         # providers pass through on their way to `workspace.stream(...)`.
         agent_env.update(_repo_identity_env(effective_repos))
-        assert todo.phase_id is not None
-        command = ProvisionWorkspaceCompletedCommand(
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            workspace_id=workspace.workspace_id,
-            session_id=session_id,
-        )
-        return ProvisionResult(
-            workspace=workspace,
-            workspace_cm=workspace_cm,
-            agent_env=agent_env,
-            claude_cmd=claude_cmd,
-            command=command,
-        )
+        return claude_cmd, agent_env
 
     @staticmethod
     def _repo_name(url: str) -> str:
@@ -805,4 +880,8 @@ class WorkspaceProvisionHandler:
             name = WorkspaceProvisionHandler._repo_name(url)
             lines.append(f"@/workspace/repos/{name}/AGENTS.md")
             lines.append(f"@/workspace/repos/{name}/CLAUDE.md")
+        # A pointer, not a time (#1546). This file is written before the
+        # phase's clock starts, so a timestamp here would disagree with the
+        # one the agent is killed on; the env var is set from that clock.
+        lines.append(_DEADLINE_NOTICE)
         return "\n".join(lines) + "\n"

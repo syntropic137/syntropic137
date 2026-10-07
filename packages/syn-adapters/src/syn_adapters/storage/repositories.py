@@ -45,6 +45,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution_request.ExecutionRequestAggregate import (
+        ExecutionRequestAggregate,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
         GlobalClaudePluginRegistryAggregate,
     )
@@ -131,6 +134,7 @@ class RepositoryAdapter[TAggregate: BaseAggregate[Any]]:
 # Cached repository instances (RepositoryAdapter wrapping SDK repos)
 _workflow_repository: RepositoryAdapter[WorkflowTemplateAggregate] | None = None
 _workflow_execution_repository: RepositoryAdapter[WorkflowExecutionAggregate] | None = None
+_execution_request_repository: RepositoryAdapter[ExecutionRequestAggregate] | None = None
 _session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
 _artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
 _trigger_repository: RepositoryAdapter[TriggerRuleAggregate] | None = None
@@ -194,6 +198,23 @@ def get_workflow_execution_repository() -> RepositoryAdapter[WorkflowExecutionAg
     )
     _workflow_execution_repository = RepositoryAdapter(sdk_repo)
     return _workflow_execution_repository
+
+
+def get_execution_request_repository() -> RepositoryAdapter[ExecutionRequestAggregate]:
+    """Get an ExecutionRequestAggregate repository (#1557)."""
+    global _execution_request_repository
+    if _execution_request_repository is not None:
+        return _execution_request_repository
+
+    from syn_domain.contexts.orchestration import ExecutionRequestAggregate
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        ExecutionRequestAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+        aggregate_type="ExecutionRequest",
+    )
+    _execution_request_repository = RepositoryAdapter(sdk_repo)
+    return _execution_request_repository
 
 
 def get_eval_repository() -> RepositoryAdapter[EvalAggregate]:
@@ -419,6 +440,7 @@ def reset_repositories() -> None:
     global \
         _workflow_repository, \
         _workflow_execution_repository, \
+        _execution_request_repository, \
         _session_repository, \
         _artifact_repository, \
         _trigger_repository, \
@@ -432,6 +454,7 @@ def reset_repositories() -> None:
         _eval_repository
     _workflow_repository = None
     _workflow_execution_repository = None
+    _execution_request_repository = None
     _session_repository = None
     _artifact_repository = None
     _trigger_repository = None

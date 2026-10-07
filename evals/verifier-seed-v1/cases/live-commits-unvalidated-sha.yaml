@@ -1,0 +1,27 @@
+id: live-commits-unvalidated-sha
+source_pr: 1679
+# The fix's first parent: main just before the fix, with the bug and none of
+# the fix. Its useEventFeed.ts is byte-identical to the head #1668's verify
+# certified (d8012384d, merged as 9b7fe6790).
+commit: 4c16d8f95fca32a282210510fca70bebe7e8f902
+fix_commit: 137d35c9ade5caa904925124efcb06b950ffc14e
+task: >
+  The change under review fixes the dashboard's Live Commits card, which
+  showed `???????` instead of a commit hash. Commits arrive in several shapes
+  (the push webhook's flat commit_hash, an agent commit's nested data.git.sha,
+  a legacy sha), and the event-feed hook now normalises each event to a commit
+  and drops anything that is not one, so that the card never shows a
+  placeholder hash. It also lists every connected repository on /repos. Review
+  whether the card can still render a hash that is not a commit's.
+expected:
+  files:
+    - apps/syn-dashboard-ui/src/hooks/useEventFeed.ts
+  keywords:
+    # What is accepted unchecked.
+    - [sha, hash, commit id]
+    # It is not validated: any non-empty string passes.
+    - [validat, any non empty, any string, any truthy, truthy, non empty, not check, never check,
+       unchecked, hex, format, malformed, garbage, invalid, bogus, arbitrary, length, regex,
+       pattern, accept]
+    # So the placeholder still reaches the card.
+    - [placeholder, "???", question mark, render, display, show, blank, card, appear, visible]

@@ -6,6 +6,8 @@ import pytest
 
 from syn_domain.contexts.orchestration._shared.value_objects import CostAmount, TokenCount
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestCostAmount:

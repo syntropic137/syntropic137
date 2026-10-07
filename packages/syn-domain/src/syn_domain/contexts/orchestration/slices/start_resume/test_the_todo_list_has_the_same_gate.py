@@ -193,6 +193,10 @@ class TestAnUnstartableResumeSettlesRatherThanStranding:
         store = InMemoryProjectionStore()
 
         class _CannotName:
+            def holds_start(self, parent_execution_id: str) -> bool:
+                del parent_execution_id
+                return False
+
             async def start_resume(self, parent_execution_id: str, *, on_failure: object) -> None:
                 del parent_execution_id, on_failure
                 msg = "Execution exec-parent-1 admitted a resume its stream cannot name"

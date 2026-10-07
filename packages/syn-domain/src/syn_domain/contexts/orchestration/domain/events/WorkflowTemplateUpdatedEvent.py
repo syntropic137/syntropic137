@@ -75,3 +75,8 @@ class WorkflowTemplateUpdatedEvent(DomainEvent):
 
     source_digest: str | None = None
     """Resolved source commit SHA this definition was built from."""
+
+    package_name: str | None = None
+    """Package that installed this definition (#1588). Absent on older events,
+    and on a workflow created outside `syn workflow install`; prune treats
+    absent as "not this package's", so it never archives one."""

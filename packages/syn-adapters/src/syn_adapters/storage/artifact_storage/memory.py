@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from syn_adapters.in_memory import InMemoryAdapter, InMemoryAdapterError
+from syn_adapters.storage.artifact_storage.minio_helpers import build_artifact_key
 from syn_domain.contexts.artifacts.ports import ArtifactStorageError
 
 # Re-export for backwards compatibility
@@ -40,7 +41,16 @@ class InMemoryArtifactStorage(InMemoryAdapter):
 
     Inherits environment guard from InMemoryAdapter.
     Stores artifacts in a dict (lost on process exit).
+
+    Objects are keyed exactly as MinioArtifactStorage keys them
+    (``build_artifact_key``), so an upload made with a workflow or execution
+    id is only found again through the ``storage_uri`` it returned, as in
+    MinIO. Keyed by id alone, this fake served reads that 404'd in
+    production (#990, #1652). ``tests/contract/test_artifact_storage_contract.py``
+    holds both adapters to the same assertions.
     """
+
+    _URI_SCHEME = "memory://"
 
     def __init__(self) -> None:
         """Initialize in-memory storage."""
@@ -60,7 +70,8 @@ class InMemoryArtifactStorage(InMemoryAdapter):
     ) -> StorageResult:
         """Upload artifact content to in-memory storage."""
         content_hash = hashlib.sha256(content).hexdigest()
-        storage_uri = f"memory://{artifact_id}"
+        key = build_artifact_key(artifact_id, workflow_id, execution_id)
+        storage_uri = f"{self._URI_SCHEME}{key}"
 
         result = StorageResult(
             storage_uri=storage_uri,
@@ -75,22 +86,29 @@ class InMemoryArtifactStorage(InMemoryAdapter):
             },
         )
 
-        self._storage[artifact_id] = (content, result)
+        self._storage[key] = (content, result)
         return result
 
-    async def download(self, artifact_id: str) -> bytes:
-        """Download artifact content from in-memory storage."""
-        if artifact_id not in self._storage:
+    async def download(self, artifact_id: str, *, storage_uri: str | None = None) -> bytes:
+        """Download artifact content: from ``storage_uri`` when given, else the id-only key."""
+        key = self._key_from_uri(storage_uri) or build_artifact_key(artifact_id)
+        if key not in self._storage:
             raise ArtifactNotFoundError(artifact_id)
-        return self._storage[artifact_id][0]
+        return self._storage[key][0]
 
     async def delete(self, artifact_id: str) -> None:
-        """Delete artifact from in-memory storage."""
-        self._storage.pop(artifact_id, None)
+        """Delete the artifact at its id-only key, as MinioArtifactStorage does."""
+        self._storage.pop(build_artifact_key(artifact_id), None)
 
     async def exists(self, artifact_id: str) -> bool:
-        """Check if artifact exists in in-memory storage."""
-        return artifact_id in self._storage
+        """Check the artifact's id-only key, as MinioArtifactStorage does."""
+        return build_artifact_key(artifact_id) in self._storage
+
+    @classmethod
+    def _key_from_uri(cls, storage_uri: str | None) -> str | None:
+        if storage_uri and storage_uri.startswith(cls._URI_SCHEME):
+            return storage_uri.removeprefix(cls._URI_SCHEME) or None
+        return None
 
     def clear(self) -> None:
         """Clear all stored artifacts (for test cleanup)."""

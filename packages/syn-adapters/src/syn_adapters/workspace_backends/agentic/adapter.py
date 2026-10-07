@@ -9,6 +9,7 @@ See ADR-021: Isolated Workspace Architecture
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shlex
@@ -29,6 +30,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_from_workspace,
     copy_files_to_workspace,
 )
+from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     apply_session_store_env,
     deployment_identity,
@@ -39,7 +41,13 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # raised/imported without depending on this Docker-specific module. Existing
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
+from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.exec_status_lost import (
+    diagnose_lost_status,
+    status_was_lost,
+    workspace_container_name,
+)
 from syn_adapters.workspace_backends.host_security import host_security_failure
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
@@ -58,6 +66,7 @@ if TYPE_CHECKING:
         ExecutionResult,
         IsolationConfig,
         IsolationHandle,
+        WorkspaceUsage,
     )
     from syn_shared.settings.session_store import SessionStoreSettings
 
@@ -108,19 +117,39 @@ _WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
 }
 
 
+#: Reaps still running after the provision that started them was cancelled.
+_PENDING_REAPS: set[asyncio.Task[None]] = set()
+
+
 def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
     """Point TMPDIR and the tool caches somewhere with room, unless told otherwise.
 
     A caller-supplied value always wins: these are defaults for the common
-    case, not policy. Nothing is created here - `just`, `mktemp`, `uv` and
-    `npm` all create their own directories, and doing it here would mean a
-    filesystem side effect in a function whose job is to build a dict.
+    case, not policy. Nothing is created here: this function only builds a
+    dict. The caches are created by the tools that use them (`uv`, `npm`), but
+    TMPDIR is NOT - `create` makes it, see `_ensure_tmpdir`.
     """
     resolved = dict(environment)
     for key, value in ({"TMPDIR": _EXECUTABLE_TMPDIR} | _WORKSPACE_CACHE_ENV).items():
         if not resolved.get(key):
             resolved[key] = value
     return resolved
+
+
+def _container_labels(config: IsolationConfig) -> dict[str, str]:
+    """Docker labels that let an operator count live containers by owner.
+
+    A workspace provisioned outside a phase has no phase, so it gets no
+    `syn.phase_id` label rather than an empty one: `--filter label=syn.phase_id`
+    must match only containers that really belong to a phase.
+    """
+    labels = {
+        "syn.execution_id": config.execution_id,
+        "syn.workspace_id": config.workspace_id,
+    }
+    if config.phase_id:
+        labels["syn.phase_id"] = config.phase_id
+    return labels
 
 
 class AgenticIsolationAdapter:
@@ -211,7 +240,10 @@ class AgenticIsolationAdapter:
         # local provider and durable mount after this host-owned contract is built.
         # Caller-supplied capture settings never override configured credentials.
         return apply_session_store_env(
-            _with_executable_tmpdir(config.environment or {}),
+            with_cpu_hints(
+                _with_executable_tmpdir(config.environment or {}),
+                config.security_policy.cpu_limit_cores,
+            ),
             self._session_store,
             execution_id=config.execution_id,
             workspace_id=config.workspace_id,
@@ -251,7 +283,7 @@ class AgenticIsolationAdapter:
         Returns:
             IsolationHandle for subsequent operations
         """
-        from agentic_isolation import WorkspaceConfig
+        from agentic_isolation import ResourceLimits, WorkspaceConfig
 
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             IsolationHandle,
@@ -294,11 +326,12 @@ class AgenticIsolationAdapter:
             working_dir="/workspace",
             environment=environment,
             mounts=capture_mounts,
-            labels={
-                "syn.execution_id": config.execution_id,
-                "syn.workspace_id": config.workspace_id,
-            },
+            labels=_container_labels(config),
             security=self._security,
+            limits=ResourceLimits(
+                cpu=f"{config.security_policy.cpu_limit_cores:g}",
+                memory=f"{config.security_policy.memory_limit_mb}m",
+            ),
         )
 
         # Create workspace via provider — wrap so docker/network failures surface
@@ -321,6 +354,8 @@ class AgenticIsolationAdapter:
                 f"Workspace provisioning failed for execution {config.execution_id}: {exc}"
             ) from exc
 
+        await self._ensure_tmpdir(workspace_obj, environment, config.execution_id)
+
         # Store for later operations
         self._workspaces[workspace_obj.id] = workspace_obj  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
@@ -338,19 +373,99 @@ class AgenticIsolationAdapter:
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
         )
 
-    async def destroy(self, handle: IsolationHandle) -> None:
+    async def _ensure_tmpdir(
+        self, workspace: object, environment: Mapping[str, str], execution_id: str
+    ) -> None:
+        """Create the workspace's TMPDIR before anything runs in it (PC-120).
+
+        A TMPDIR that does not exist is not a harmless default. Codex's
+        linux-sandbox canonicalizes it and PANICS (exit 101):
+
+            failed to resolve synthetic mount registry temp directory
+            /workspace/.tmp: No such file or directory (os error 2)
+
+        so a codex phase's sandbox probe refused the workspace. It went
+        unnoticed because `skills add` happens to create `$TMPDIR`, and every
+        codex phase but the eval verifier declared skills: a phase with none
+        failed 5 of 6 runs. Whoever chooses the directory makes it exist, rather
+        than relying on an unrelated step to create it first. A failure here is
+        a provisioning failure: a workspace whose TMPDIR cannot be made would
+        fail later, with a far worse message.
+        """
+        tmpdir = environment.get("TMPDIR")
+        if not tmpdir:
+            return
+        # The container exists and no caller holds a handle to it yet, so
+        # nobody else can reap it: every way out of here but success - a
+        # failed mkdir, a provider error, a cancelled provision - destroys it.
+        try:
+            result = await self._provider.execute(
+                workspace,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                shlex.join(["mkdir", "-p", tmpdir]),
+            )
+        except BaseException:
+            await self._reap_unregistered(workspace, execution_id)
+            raise
+        if result.exit_code != 0:
+            await self._reap_unregistered(workspace, execution_id)
+            raise WorkspaceProvisionError(
+                f"Workspace provisioning failed for execution {execution_id}: "
+                f"could not create TMPDIR {tmpdir} (exit {result.exit_code}): "
+                f"{(result.stderr or result.stdout or '').strip()[:300] or 'no output'}"
+            )
+
+    async def _reap_unregistered(self, workspace: object, execution_id: str) -> None:
+        """Destroy a container no handle was returned for, whatever happens meanwhile.
+
+        Shielded: a second cancellation (the provision being torn down while
+        it reaps) must not stop the reap, or the container leaks exactly as if
+        there had been no reap. A reap that itself fails is logged, not raised,
+        so the caller's original error is the one that propagates.
+        """
+        provider = self._provider
+
+        async def reap_and_log() -> None:
+            # Logged inside the task: a second cancellation can return the
+            # caller before the reap finishes, and nothing would see its error.
+            try:
+                await provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+            except Exception:
+                logger.exception(
+                    "Could not destroy workspace for execution %s after a failed provision",
+                    execution_id,
+                )
+
+        reap = asyncio.create_task(reap_and_log())
+        # The event loop holds tasks weakly: keep the reap alive even when the
+        # cancellation below returns before it finishes.
+        _PENDING_REAPS.add(reap)
+        reap.add_done_callback(_PENDING_REAPS.discard)
+        # The shielded reap keeps running if this await is cancelled; the
+        # cancellation is the caller's and propagates.
+        await asyncio.shield(reap)
+
+    async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:
         """Destroy an isolated workspace.
 
         Args:
             handle: Handle from create()
+
+        Returns:
+            What the workspace consumed, from the provider's teardown report,
+            or None when the provider reported nothing.
         """
         workspace = self._workspaces.pop(handle.isolation_id, None)
         if workspace is None:
             logger.warning("Workspace not found: %s", handle.isolation_id)
-            return
+            return None
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
-        await self._provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        # `object`: the pinned provider is annotated `-> None`, so pyright
+        # cannot check its report against `TeardownReportLike` yet; a field
+        # mismatch is logged at runtime by `usage_from_report` instead. Once
+        # agentic-workspace types `destroy` against the Protocol, drop this.
+        report: object = await self._provider.destroy(workspace)  # type: ignore[arg-type,func-returns-value]  # Workspace vs AgenticWorkspace adapter boundary
+        return usage_from_report(report)
 
     async def execute(
         self,
@@ -423,12 +538,24 @@ class AgenticIsolationAdapter:
                 handle.isolation_id,
                 signal_death.describe(),
             )
+        # No status AND no output is not an answer, and passed on as-is it
+        # reached the operator as "failed ... and printed nothing". Say what
+        # the container was doing and whether the deadline had already passed,
+        # here, while the container still exists to be asked.
+        stderr = result.stderr
+        if status_was_lost(result):
+            stderr = await diagnose_lost_status(
+                workspace_container_name(handle.isolation_id),
+                duration_ms=result.duration_ms,
+                timeout_seconds=float(timeout_seconds) if timeout_seconds else None,
+            )
+            logger.error("Command in workspace %s: %s", handle.isolation_id, stderr)
         return ExecutionResult(
             exit_code=result.exit_code,
             success=result.success,
             duration_ms=result.duration_ms,
             stdout=result.stdout,
-            stderr=result.stderr,
+            stderr=stderr,
             timed_out=result.timed_out,
             signal_death=signal_death,
         )

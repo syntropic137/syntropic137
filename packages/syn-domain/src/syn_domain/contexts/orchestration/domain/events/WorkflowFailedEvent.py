@@ -10,8 +10,11 @@ from pydantic import Field
 # Runtime import needed for the Pydantic field type (noqa: TC001)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    DelegationFailure,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
+    UpstreamFailureKind,
 )
 
 
@@ -80,6 +83,18 @@ class WorkflowFailedEvent(DomainEvent):
     # whose word this reader does not know.
     reported_failure_reason: ReportedFailureReason | None = None
 
+    # WHAT KIND OF UPSTREAM FAULT ended the run (#1593), when a service such as
+    # GitHub raised it: `unavailable` is transient and the run is resumable,
+    # `auth` waits on an operator. `None` for every other failure and for the
+    # whole store before #1593.
+    upstream_failure_kind: UpstreamFailureKind | None = None
+
+    # Which required delegate did not happen, and why (#894). A platform
+    # observation, beside the agent's claim above and never folded into it.
+    # `None` for every failure that is not a failed delegation, which is every
+    # event written before #894.
+    delegation_failure: DelegationFailure | None = None
+
     # How long failed_phase_id had been running when the failure was caught.
     # None when no phase was in flight (e.g. failure between phases).
     failed_phase_duration_seconds: float | None = None
@@ -139,6 +154,13 @@ class WorkflowFailedEvent(DomainEvent):
     # collecting artifacts is what a phase that finished does and emitting it
     # would tell the stream the next phase is ready in a run being failed.
     failed_phase_artifact_ids: list[str] = Field(default_factory=list)
+
+    # The failed phase's unpushed work that LANDED on a quarantine ref (#1547),
+    # one per repository; empty when nothing did, and for every event written
+    # before this field. Until it existed the refs were prose in
+    # `error_message` and nothing could act on them - above all, nothing told
+    # the PR the run was working on. `QuarantineNoticeProcessManager` does.
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
 
     # What the failed phase itself had spent when it died (#1262), zeros when
     # its agent never ran.

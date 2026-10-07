@@ -29,6 +29,10 @@ stub bridge leaves this file 3 levels of nested imports, a copy leaves 4.
 
 Syntropic137 - orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability. Two capabilities: **orchestration** (workspace lifecycle, secure token handling, GitHub App integration) and **observability** (tool use, tokens, costs, errors - all streamed to a real-time dashboard).
 
+**North star:** 20 concurrent executions now, 100 as soon as possible, 1,000 for production. Judge every design against it: read [docs/north-star.md](docs/north-star.md).
+
+**Purpose:** scale quality development - reach the quality bar first, then make the same bar cheaper and faster. Orchestrating or dogfooding the platform: read [.claude/skills/orchestrating/SKILL.md](.claude/skills/orchestrating/SKILL.md).
+
 The end goal: a `gh`-style CLI (`syn`) that integrates with Claude Code and OpenClaw for agentic workflow automation.
 
 ## Architecture
@@ -294,7 +298,7 @@ All TODO and FIXME comments MUST reference a GitHub issue:
 
 ### Scratch Documentation Policy
 
-Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
+Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
 
 ## Key Concepts
 

@@ -44,7 +44,7 @@
 # #934 still owns splitting `run`/`_handle_run_agent` out of this class.
 
 [max-loc-file."apps.syn-api.src.syn_api._wiring"]
-value = 1200
+value = 1007
 issue = "#185"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -139,10 +139,10 @@ issue = "#673"
 # `unmarked` must ratchet to 0. `xfail` counts disarmed guards: an xfail on a
 # correctness invariant is a disabled alarm, not a known issue.
 [test-markers.unmarked]
-# Tightened 1329 -> 1169 to remove 160 tests of slack. A ratchet with headroom
-# is not a ratchet: it silently permits exactly the growth it exists to stop.
-# 1169 is the measured census on this commit, so the number can only fall.
-value = 1169
+# Zero-tolerance since #1428: every collected test carries unit, integration or
+# e2e, so a new unmarked module fails `just preflight`. Raising this is not a
+# ratchet move; scripts/tests/test_check_test_markers.py pins it at 0.
+value = 0
 issue = "#825"
 
 [test-markers.xfail]

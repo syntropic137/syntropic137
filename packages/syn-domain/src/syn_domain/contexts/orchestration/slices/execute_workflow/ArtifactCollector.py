@@ -15,13 +15,20 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
-from syn_domain.contexts.artifacts import AgentIdentity, ArtifactType, PhaseOutputFile
+from syn_domain.contexts.artifacts import (
+    AgentIdentity,
+    ArtifactType,
+    ContentType,
+    PhaseOutputFile,
+    primary_text,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
     DescribeWork,
     RecoveredArtifact,
     is_storable,
     recover_deliverable,
+    where_the_work_is,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     EmptyPhaseArtifactError,
@@ -107,24 +114,6 @@ def map_artifact_type(type_str: str) -> ArtifactType:
     return _ARTIFACT_TYPE_MAP.get(type_str.lower(), ArtifactType.OTHER)
 
 
-async def _where_the_work_is(describe_work: DescribeWork | None) -> str | None:
-    """Ask where this phase's work stands, tolerating an inspection that fails.
-
-    A salvage runs on a phase that has already gone wrong once. An inspection
-    that raised here would turn a recoverable incident into an unrecoverable
-    one - the conclusion was in hand and would be discarded by the very code
-    trying to save it - so a failed reading becomes no reading, which is what
-    `None` already means to the caller.
-    """
-    if describe_work is None:
-        return None
-    try:
-        return await describe_work()
-    except Exception:
-        logger.warning("Could not read where the phase's work stands", exc_info=True)
-        return None
-
-
 #: What an artifact is tagged as when its phase declared no type at all.
 _UNDECLARED_ARTIFACT_TYPE: Final[str] = "text"
 
@@ -202,8 +191,11 @@ class _Deliverable:
     """
 
     source_path: str
-    content: str
+    content: str | bytes
     title: str
+    #: Binary content arrives as ``bytes`` under a binary type (#990); text
+    #: keeps the type every collected file had before.
+    content_type: ContentType = ContentType.TEXT_MARKDOWN
     #: How this one arrived. The storage loop still cannot treat a recovered
     #: deliverable differently - it never reads this - but the caller has to
     #: report the fact, and the alternative was re-deriving it from the title
@@ -219,6 +211,46 @@ class _Deliverable:
             title=recovered.title,
             recovered=True,
         )
+
+
+async def _with_report(
+    deliverables: list[_Deliverable],
+    *,
+    last_agent_message: str | None,
+    title: str,
+    describe_work: DescribeWork | None,
+) -> list[_Deliverable]:
+    """`deliverables`, text first, with the transcript salvaged when none is text.
+
+    Files on disk are not a report when none of them is text. A verify phase
+    screenshots before it writes its report (#1648); when the report never
+    followed, the PNGs used to switch the #1300 salvage off and the next phase
+    got pictures with no verdict (exec-8fb041217a15). "Only binaries" and "no
+    file at all" are therefore one incident and get one answer here; the
+    binaries are kept beside the salvage either way.
+
+    Text before binary, otherwise in collection order: the head is flagged the
+    Primary Deliverable, and a screenshot the glob happened to list first must
+    not take the flag from the phase's report (#990).
+    """
+    if not any(isinstance(d.content, str) for d in deliverables):
+        binaries = tuple(d.source_path for d in deliverables)
+        recovered = recover_deliverable(
+            last_agent_message=last_agent_message,
+            wrote=None,
+            title=title,
+            work=await where_the_work_is(describe_work),
+            alongside=binaries,
+        )
+        if recovered is not None:
+            logger.warning(
+                "%s: no text deliverable on disk (binary: %s); recovered the conclusion "
+                "from the session transcript (#1300)",
+                title,
+                ", ".join(binaries) or "none",
+            )
+            deliverables = [*deliverables, _Deliverable.of(recovered)]
+    return sorted(deliverables, key=lambda d: isinstance(d.content, bytes))
 
 
 #: DIRECTORY names that hold machine-generated build output (issue #919).
@@ -240,6 +272,21 @@ _IGNORED_DIRECTORY_SEGMENTS: Final[frozenset[str]] = frozenset(
         ".pytest_cache",
     }
 )
+
+
+def _as_collected(artifact_path: str, data: bytes) -> tuple[str | bytes, ContentType]:
+    """A collected file's content in the form it is stored in, and its type.
+
+    Text is decoded strictly - ``ContentType.of`` has already established it
+    IS valid UTF-8, so the decode is exact and re-encoding returns the same
+    bytes. Anything else stays bytes. Before #990 every file went through
+    ``decode("utf-8", errors="replace")``, which turned a 32,776-byte PNG into
+    12,517 U+FFFD sequences without raising.
+    """
+    content_type = ContentType.of(data, artifact_path)
+    if content_type.is_binary:
+        return data, content_type
+    return data.decode("utf-8"), content_type
 
 
 def _is_collectable(artifact_path: str) -> bool:
@@ -397,30 +444,15 @@ class ArtifactCollector:
             if path in seen:
                 continue
             seen.add(path)
-            out.append((path, produced_file.content.encode()))
+            body = produced_file.content
+            out.append((path, body.encode() if isinstance(body, str) else body))
 
-        primary = cls._primary_deliverable(produced)
+        primary = primary_text(produced)
         alias = cls._flat_alias_path(phase_id)
         if primary is not None and alias not in seen:
             seen.add(alias)
             out.append((alias, primary.encode()))
         return out
-
-    @staticmethod
-    def _primary_deliverable(produced: list[PhaseOutputFile]) -> str | None:
-        """The one file that stands for the phase, or None if it produced none.
-
-        The head of the list, because both sources put the primary
-        deliverable there: the projection sorts by ``_injection_rank``, which
-        ranks the explicitly-flagged primary first (#997), and the live path
-        collects in the order it flagged. Choosing here by any other rule
-        would recreate the disagreement #1149 removed, one layer down.
-
-        Empty content is not a deliverable - `CreateArtifactCommand` rejects
-        it and every other reader skips it, so a legacy or corrupt row cannot
-        become the alias.
-        """
-        return next((f.content for f in produced if f.content), None)
 
     @staticmethod
     def _tree_path(phase_id: str, source_path: str) -> str | None:
@@ -596,11 +628,44 @@ class ArtifactCollector:
             describe_work=describe_work,
         )
 
-        artifact_type = _primary_type(output_artifact_types)
-        artifact_ids: list[str] = []
-        files: list[PhaseOutputFile] = []
-        first_content: str | None = None
+        artifact_ids = await self._store(
+            deliverables,
+            workflow_id=workflow_id,
+            phase_id=phase_id,
+            execution_id=execution_id,
+            session_id=session_id,
+            artifact_type=_primary_type(output_artifact_types),
+            agent=agent,
+        )
+        files = [
+            PhaseOutputFile(source_path=d.source_path, content=d.content) for d in deliverables
+        ]
+        return CollectedArtifacts(
+            artifact_ids=artifact_ids,
+            first_content=primary_text(files),
+            files=files,
+            deliverable_recovered=any(d.recovered for d in deliverables),
+        )
 
+    async def _store(
+        self,
+        deliverables: list[_Deliverable],
+        *,
+        workflow_id: str,
+        phase_id: str,
+        execution_id: str,
+        session_id: str,
+        artifact_type: str,
+        agent: AgentIdentity,
+    ) -> list[str]:
+        """Store `deliverables` in order and return their ids.
+
+        Only the head is flagged the Primary Deliverable: the flat
+        `<phase-id>.md` alias reads this flag after a restart, so it must name
+        the file the live path injects (#997), and a phase that wrote four
+        files used to declare four primaries and leave the alias to a tiebreak.
+        """
+        artifact_ids: list[str] = []
         for index, deliverable in enumerate(deliverables):
             artifact_id = str(uuid4())
             await self.create_artifact(
@@ -611,29 +676,14 @@ class ArtifactCollector:
                 session_id=session_id,
                 artifact_type=artifact_type,
                 content=deliverable.content,
+                content_type=deliverable.content_type,
                 title=deliverable.title,
                 source_path=deliverable.source_path,
                 agent=agent,
-                # The flat `<phase-id>.md` alias reads this after a restart,
-                # so it must name the file the live path injects (#997).
                 is_primary_deliverable=index == 0,
             )
             artifact_ids.append(artifact_id)
-            files.append(
-                PhaseOutputFile(
-                    source_path=deliverable.source_path,
-                    content=deliverable.content,
-                )
-            )
-            if first_content is None:
-                first_content = deliverable.content
-
-        return CollectedArtifacts(
-            artifact_ids=artifact_ids,
-            first_content=first_content,
-            files=files,
-            deliverable_recovered=any(d.recovered for d in deliverables),
-        )
+        return artifact_ids
 
     @staticmethod
     async def _deliverables(
@@ -647,61 +697,36 @@ class ArtifactCollector:
     ) -> list[_Deliverable]:
         """What this phase actually delivered, whatever route it arrived by.
 
-        The single place that decides between the three states a phase can be
-        in; the caller above only stores what comes back. Splitting the
-        decision across the storage loop is what let #1300 exist: the empty
-        file was salvaged inside the loop and "no file" was refused before the
-        loop was ever reached, so the two incidents were answered by different
-        code that had no reason to agree.
+        The single place that decides between the states a phase can be in;
+        the caller above only stores what comes back. Splitting the decision
+        across the storage loop is what let #1300 exist: the empty file was
+        salvaged inside the loop and "no file" was refused before the loop was
+        ever reached, so the two incidents were answered by different code
+        that had no reason to agree.
 
         Whichever route the content came by, a recovered deliverable is stored
         marked - `recover_deliverable` owns the title, the banner and the path,
         so there is one description of "recovered" and not two.
         """
-        # Judged on COLLECTABLE files, not on what the glob returned: a phase
-        # whose entire output tree was build junk produced no deliverable, and
-        # that is the same incident as writing nothing at all.
-        #
-        # EVERY phase, declared or not (#1476): a phase that declared no output
-        # types used to store nothing here and complete, so its conclusion
-        # lived only in the transcript (exec-2d90c10fbdb3).
-        if not artifacts:
-            recovered = recover_deliverable(
-                last_agent_message=last_agent_message,
-                wrote=None,
-                title=f"{phase_name}: {RECOVERED_SOURCE_PATH}",
-                work=await _where_the_work_is(describe_work),
-            )
-            if recovered is None:
-                raise PhaseProducedNoDeclaredOutputError(
-                    phase_id=phase_id,
-                    phase_name=phase_name,
-                    declared=output_artifact_types,
-                )
-            logger.warning(
-                "Phase %s (%s) declared %s and wrote no collectable file; recovered "
-                "its conclusion from the session transcript instead of discarding "
-                "the execution (#1300)",
-                phase_id,
-                phase_name,
-                ", ".join(output_artifact_types) or "no output types",
-            )
-            return [_Deliverable.of(recovered)]
-
         deliverables: list[_Deliverable] = []
         for artifact_path, artifact_content in artifacts:
-            content_str = artifact_content.decode("utf-8", errors="replace")
+            content, content_type = _as_collected(artifact_path, artifact_content)
             title = f"{phase_name}: {artifact_path}"
-            if is_storable(content_str):
+            if is_storable(content):
                 deliverables.append(
-                    _Deliverable(source_path=artifact_path, content=content_str, title=title)
+                    _Deliverable(
+                        source_path=artifact_path,
+                        content=content,
+                        title=title,
+                        content_type=content_type,
+                    )
                 )
                 continue
             recovered = recover_deliverable(
                 last_agent_message=last_agent_message,
                 wrote=artifact_path,
                 title=title,
-                work=await _where_the_work_is(describe_work),
+                work=await where_the_work_is(describe_work),
             )
             # Deliberately raises rather than skipping the file. Skipping would
             # put the execution back where #1167 found it - advancing past a
@@ -722,6 +747,23 @@ class ArtifactCollector:
                 artifact_path,
             )
             deliverables.append(_Deliverable.of(recovered))
+        deliverables = await _with_report(
+            deliverables,
+            last_agent_message=last_agent_message,
+            title=f"{phase_name}: {RECOVERED_SOURCE_PATH}",
+            describe_work=describe_work,
+        )
+        # Judged on COLLECTABLE files, not on what the glob returned: a phase
+        # whose entire output tree was build junk produced no deliverable, and
+        # that is the same incident as writing nothing at all. EVERY phase,
+        # declared or not (#1476): a phase that declared no output types used
+        # to store nothing here and complete (exec-2d90c10fbdb3).
+        if not deliverables:
+            raise PhaseProducedNoDeclaredOutputError(
+                phase_id=phase_id,
+                phase_name=phase_name,
+                declared=output_artifact_types,
+            )
         return deliverables
 
     async def collect_from_unfinished_phase(
@@ -746,9 +788,9 @@ class ArtifactCollector:
         violation over an empty salvage would replace a truthful reason with a
         misleading one and lose the real one (#1167).
 
-        When nothing storable was written, `last_agent_message` is salvaged
-        the way #1300 salvages a completed phase, marked recovered and under
-        the outcome's title, and the phase stays failed (#1476). A phase that
+        When nothing storable was TEXT, `last_agent_message` is salvaged the
+        way #1300 salvages a completed phase, marked recovered and under the
+        outcome's title, and the phase stays failed (#1476). A phase that
         reported `success=false` over a refused PR comment had drafted three
         findings and kept none of them (exec-82ce478a6c46): a wrong verdict
         must not be able to destroy the work it was a verdict on.
@@ -769,70 +811,47 @@ class ArtifactCollector:
             # only the other site would leave every such run sweeping junk
             # (issue #919).
             partial_collected = await workspace.collect_files(patterns=[_OUTPUT_GLOB])
-            partial_artifacts = [
-                (path, body) for path, body in partial_collected if _is_collectable(path)
-            ]
-            artifact_type = _primary_type(output_artifact_types)
-            artifact_ids: list[str] = []
-            for artifact_path, artifact_content in partial_artifacts:
-                artifact_id = str(uuid4())
-                content_str = artifact_content.decode("utf-8", errors="replace")
-                if not is_storable(content_str):
+            kept: list[_Deliverable] = []
+            for artifact_path, artifact_content in partial_collected:
+                if not _is_collectable(artifact_path):
+                    continue
+                content, content_type = _as_collected(artifact_path, artifact_content)
+                if not is_storable(content):
                     # SKIPPED, not recovered and not raised. This is the same
                     # empty-file shape as #1195, but on the interrupt path the
                     # outcome is already decided by the interrupt: there is no
                     # verdict to rescue, and substituting the transcript would
                     # invent a deliverable for a run nobody is going to read as
                     # one. What it does fix is that the store's refusal used to
-                    # escape into the `except` below and abandon every
-                    # REMAINING file, so one empty file cost the whole salvage.
+                    # abandon every REMAINING file, so one empty file cost the
+                    # whole salvage.
                     logger.info(
-                        "Skipping empty partial artifact %s for %s",
-                        artifact_path,
-                        session_id,
+                        "Skipping empty partial artifact %s for %s", artifact_path, session_id
                     )
                     continue
-                await self.create_artifact(
-                    artifact_id=artifact_id,
-                    workflow_id=workflow_id,
-                    phase_id=phase_id,
-                    execution_id=execution_id,
-                    session_id=session_id,
-                    artifact_type=artifact_type,
-                    content=content_str,
-                    title=outcome.title(phase_name=phase_name, source_path=artifact_path),
-                    source_path=artifact_path,
-                    # Only the first, for the reason the happy path gives: the
-                    # flat `<phase-id>.md` alias resolves through this flag, and
-                    # a phase that wrote four files used to declare four
-                    # primaries and leave the alias to a tiebreak.
-                    is_primary_deliverable=not artifact_ids,
-                    agent=agent,
-                )
-                artifact_ids.append(artifact_id)
-            if not artifact_ids:
-                recovered = recover_deliverable(
-                    last_agent_message=last_agent_message,
-                    wrote=None,
-                    title=outcome.title(phase_name=phase_name, source_path=RECOVERED_SOURCE_PATH),
-                )
-                if recovered is not None:
-                    artifact_id = str(uuid4())
-                    await self.create_artifact(
-                        artifact_id=artifact_id,
-                        workflow_id=workflow_id,
-                        phase_id=phase_id,
-                        execution_id=execution_id,
-                        session_id=session_id,
-                        artifact_type=artifact_type,
-                        content=recovered.content,
-                        title=recovered.title,
-                        source_path=recovered.source_path,
-                        is_primary_deliverable=True,
-                        agent=agent,
+                kept.append(
+                    _Deliverable(
+                        source_path=artifact_path,
+                        content=content,
+                        title=outcome.title(phase_name=phase_name, source_path=artifact_path),
+                        content_type=content_type,
                     )
-                    artifact_ids.append(artifact_id)
-            return artifact_ids
+                )
+            kept = await _with_report(
+                kept,
+                last_agent_message=last_agent_message,
+                title=outcome.title(phase_name=phase_name, source_path=RECOVERED_SOURCE_PATH),
+                describe_work=None,
+            )
+            return await self._store(
+                kept,
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+                execution_id=execution_id,
+                session_id=session_id,
+                artifact_type=_primary_type(output_artifact_types),
+                agent=agent,
+            )
         except Exception as err:
             logger.warning(
                 "Failed to keep the output of unfinished phase %s (%s): %s",
@@ -850,11 +869,12 @@ class ArtifactCollector:
         execution_id: str,
         session_id: str,
         artifact_type: str,
-        content: str,
+        content: str | bytes,
         title: str,
         agent: AgentIdentity,
         source_path: str | None = None,
         is_primary_deliverable: bool = True,
+        content_type: ContentType = ContentType.TEXT_MARKDOWN,
     ) -> None:
         """Create and save an artifact with two-tier storage (ADR-012).
 
@@ -885,7 +905,11 @@ class ArtifactCollector:
         # know how a backend establishes readability, only that a returned URI
         # can be read. A backend that cannot confirm it raises
         # ArtifactStorageError, and we leave storage_uri None - the artifact is
-        # still whole, because the event embeds the content either way.
+        # still whole, because the event embeds TEXT content either way.
+        #
+        # BINARY content is not embedded (#990): its bytes are in object
+        # storage or nowhere, so a binary artifact with no readable upload is
+        # refused by the aggregate rather than stored as a hash of nothing.
         #
         # ONLY that exception. A bare `except Exception` here would swallow our
         # own bugs - a bad keyword argument to upload() would read as a backend
@@ -897,11 +921,11 @@ class ArtifactCollector:
             try:
                 result = await self._content_storage.upload(
                     artifact_id=artifact_id,
-                    content=content.encode("utf-8"),
+                    content=content.encode("utf-8") if isinstance(content, str) else content,
                     workflow_id=workflow_id,
                     phase_id=phase_id,
                     execution_id=execution_id,
-                    content_type="text/markdown",
+                    content_type=content_type.value,
                     metadata={
                         "session_id": session_id,
                         "artifact_type": artifact_type,
@@ -932,6 +956,7 @@ class ArtifactCollector:
             execution_id=execution_id,
             session_id=session_id,
             artifact_type=artifact_type_enum,
+            content_type=content_type,
             content=content,
             title=title,
             source_path=source_path,

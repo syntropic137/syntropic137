@@ -11,6 +11,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionMetrics,
     FailureClassification,
     PhaseResult,
+    QuarantinedRef,
     ReportedFailureReason,
 )
 from syn_domain.repository import Repository
@@ -39,6 +40,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
     )
 
 
@@ -133,6 +137,7 @@ class AgentHandlerProtocol(Protocol):
         collector: ObservabilityCollector | None = None,
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> AgentExecutionResult: ...
 
 
@@ -166,3 +171,24 @@ class WorkflowExecutionResult:
     A caller dispatching a run synchronously is exactly the reader who wants
     both: what the platform recorded, and what its agent said about it.
     """
+    unrecorded_work: tuple[QuarantinedRef, ...] = ()
+    """A cancel's landed refs that neither the event store nor the owed store
+    took (#1547). Empty on every run whose work is on record: a cancel naming
+    refs here was NOT handled, and its PR has not been told yet."""
+
+    @property
+    def unrecorded_work_error(self) -> str | None:
+        """Why this run is a failure however its status reads, None when it is not (#1547).
+
+        One sentence for every path that reports a run - the synchronous API
+        and the background dispatcher - naming each ref and commit, because
+        this result and the log it reaches may be the only places left that
+        hold them.
+        """
+        if not self.unrecorded_work:
+            return None
+        refs = ", ".join(f"{ref.ref} at {ref.commit}" for ref in self.unrecorded_work)
+        return (
+            f"Execution {self.execution_id} was cancelled but its landed work was NOT "
+            f"recorded; recover these refs by hand: {refs}"
+        )

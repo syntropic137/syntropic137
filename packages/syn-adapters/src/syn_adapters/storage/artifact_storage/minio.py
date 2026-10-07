@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from syn_adapters.object_storage.protocol import StorageError as ObjectStorageError
 from syn_adapters.storage.artifact_storage.minio_helpers import (
+    build_artifact_key,
     build_s3_metadata,
     parse_s3_key,
 )
@@ -87,17 +88,8 @@ class MinioArtifactStorage:
         workflow_id: str | None = None,
         execution_id: str | None = None,
     ) -> str:
-        """Build storage key for an artifact.
-
-        Format: {prefix}/{workflow_id}/{execution_id}/{artifact_id}.md
-        """
-        parts = [self._prefix]
-        if workflow_id:
-            parts.append(workflow_id)
-        if execution_id:
-            parts.append(execution_id)
-        parts.append(f"{artifact_id}.md")
-        return "/".join(parts)
+        """Build storage key for an artifact (see ``build_artifact_key``)."""
+        return build_artifact_key(artifact_id, workflow_id, execution_id, prefix=self._prefix)
 
     async def upload(
         self,
@@ -157,14 +149,16 @@ class MinioArtifactStorage:
             metadata={"key": result.key, "etag": result.etag, **s3_metadata},
         )
 
-    async def download(self, artifact_id: str) -> bytes:
+    async def download(self, artifact_id: str, *, storage_uri: str | None = None) -> bytes:
         """Download artifact content from MinIO.
 
-        Note: This searches for the artifact key. For faster lookups,
-        store the full key in the aggregate's storage_uri field.
+        ``storage_uri`` is where ``upload`` put it, and is the only way to
+        find an object uploaded with a workflow or execution id: the key
+        includes them, and the id alone builds a different key (#990). Without
+        it, the id-only key is tried, which is where an upload with neither
+        (the API upload endpoint) lands.
         """
-        # Simple key lookup (assumes artifact_id is unique)
-        key = self._build_key(artifact_id)
+        key = (parse_s3_key(storage_uri) if storage_uri else None) or self._build_key(artifact_id)
 
         try:
             return await self._storage.download(key)

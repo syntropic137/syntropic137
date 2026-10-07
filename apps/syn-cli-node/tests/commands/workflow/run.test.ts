@@ -606,7 +606,8 @@ describe("workflow run commands", () => {
 
       await runCommand.handler({
         positionals: ["wf-unref"],
-        values: { input: ["issue=syntropic137/syntropic137#993"] },
+        // The prompt consumes the task, so one is required (PC-66).
+        values: { task: "Scope the issue.", input: ["issue=syntropic137/syntropic137#993"] },
       });
 
       const out = stdout();
@@ -801,14 +802,76 @@ describe("workflow run commands", () => {
       expect(body.task).toBe("Close the flaky projection test.");
     });
 
-    it("warns, but still dispatches, when a phase consumes the task and none was supplied (issue #1280)", async () => {
+    it("refuses before sending when a stored definition declares no task but a phase consumes it (PC-66)", async () => {
+      // An older definition: no `task` declaration, but its prompt substitutes
+      // one. The API's admission infers it as required and answers 422; the CLI
+      // applies the same rule and refuses without making the execute call.
       mockResolveThen(taskWorkflow("Your assignment: $ARGUMENTS"));
+
+      await expect(runCommand.handler({ positionals: ["wf-task"], values: {} })).rejects.toThrow(
+        "Missing required inputs",
+      );
+
+      expect(stderrText()).toContain("Missing required inputs");
+      expect(stdout()).toContain('-t "<task>"');
+      // resolve (404), list, detail: no execute POST.
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("refuses before sending when only a later phase of a stored definition consumes the task (PC-66)", async () => {
+      // The rule is "any phase", not "the first phase": a checker that stopped
+      // after phase one would dispatch this and the API would answer 422.
+      mockResolveThen({
+        ...taskWorkflow("Check out the repo and run the QA ladder."),
+        phases: [
+          { phase_id: "p1", name: "setup", prompt_template: "Check out the repo and run the QA ladder." },
+          { phase_id: "p2", name: "work", prompt_template: "Now do this: $ARGUMENTS" },
+        ],
+      });
+
+      await expect(runCommand.handler({ positionals: ["wf-task"], values: {} })).rejects.toThrow(
+        "Missing required inputs",
+      );
+
+      expect(stderrText()).toContain("Missing required inputs");
+      expect(stdout()).toContain('-t "<task>"');
+      // resolve (404), list, detail: no execute POST.
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("refuses a blank -i task= on a stored definition whose prompt consumes {{task}} (PC-66)", async () => {
+      mockResolveThen(taskWorkflow("Work on {{task}}."));
+
+      await expect(
+        runCommand.handler({ positionals: ["wf-task"], values: { input: ["task=  "] } }),
+      ).rejects.toThrow("Missing required inputs");
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("dispatches with no task when no phase prompt consumes it (PC-66)", async () => {
+      mockResolveThen(taskWorkflow("Run the QA ladder."));
+
+      await runCommand.handler({ positionals: ["wf-task"], values: {} });
+
+      expect(stdout()).toContain("execution started");
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.task).toBeNull();
+    });
+
+    it("warns, but still dispatches, when the workflow declares the task optional (issue #1280)", async () => {
+      // Declaring `task` optional is the author saying $ARGUMENTS is an
+      // addendum, so the declaration wins over the inference (PC-66).
+      mockResolveThen(
+        taskWorkflow("Your assignment: $ARGUMENTS", [
+          { name: "task", description: null, required: false, default: null },
+        ]),
+      );
 
       await runCommand.handler({ positionals: ["wf-task"], values: {} });
 
       expect(stdout()).toContain("Warning:");
       expect(stdout()).toContain("will render empty");
-      // A prompt may use $ARGUMENTS as an optional addendum, so this one runs.
       expect(stdout()).toContain("execution started");
       const executeReq = mockFetch.mock.calls[3]![0] as Request;
       const body = JSON.parse(await executeReq.clone().text());
@@ -859,6 +922,61 @@ describe("workflow run commands", () => {
       // same gap in the CLI's model of how the task is delivered.
       expect(stderrText()).not.toContain("Missing required inputs");
       expect(stdout()).toContain("execution started");
+    });
+
+    // ---- an empty task is refused before anything is sent (PC-66) ----------
+    //
+    // `syn workflow run sdlc-implement-v3 -t ""` admitted exec-2dced6933763,
+    // which would have run a full implement workflow on nothing.
+
+    it.each([
+      ["an empty", ""],
+      ["a whitespace-only", "  \t\n "],
+    ])("refuses %s -t without calling the API (PC-66)", async (_label, task) => {
+      mockResolveThen(taskWorkflow("Your assignment: $ARGUMENTS"));
+
+      await expect(
+        runCommand.handler({ positionals: ["wf-task"], values: { task } }),
+      ).rejects.toThrow("Empty task");
+
+      expect(stderrText()).toContain("empty task");
+      // Not even the workflow lookup: the refusal needs nothing from the server.
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no task at all", {}],
+      ["a whitespace-only -i task=", { input: ["task=   "] }],
+    ])(
+      "refuses %s when the workflow declares `task` required, and never dispatches (PC-66)",
+      async (_label, values) => {
+        mockResolveThen(
+          taskWorkflow("Your assignment: $ARGUMENTS", [
+            { name: "task", description: "what to do", required: true, default: null },
+          ]),
+        );
+
+        await expect(
+          runCommand.handler({ positionals: ["wf-task"], values }),
+        ).rejects.toThrow("Missing required inputs");
+
+        expect(stderrText()).toContain("Missing required inputs");
+        // The hint names the flag a person types for the task.
+        expect(stdout()).toContain('-t "<task>"');
+        // detail probe, workflows list, detail -- never the execute POST.
+        expect(mockFetch).toHaveBeenCalledTimes(3);
+      },
+    );
+
+    it("runs a workflow that takes no task without one (PC-66)", async () => {
+      mockResolveThen(taskWorkflow("Run the QA ladder: pytest, ruff, just preflight."));
+
+      await runCommand.handler({ positionals: ["wf-task"], values: {} });
+
+      expect(stdout()).toContain("execution started");
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.task).toBeNull();
     });
 
     it("fails loud when API returns status!=started", async () => {
@@ -920,6 +1038,14 @@ describe("workflow run commands", () => {
                 status: "completed",
                 completed_phases: 3,
                 total_phases: 3,
+                phase_progress: {
+                  completed: 3,
+                  skipped: 0,
+                  possible: 3,
+                  remaining_possible: 0,
+                  percent: 100,
+                  display: "3 of 3",
+                },
                 total_tokens: 15000,
                 total_cost_usd: "0.25",
               },
@@ -936,6 +1062,7 @@ describe("workflow run commands", () => {
       expect(out).toContain("Status WF");
       expect(out).toContain("completed");
       expect(out).toContain("Executions");
+      expect(out).toContain("3 of 3");
     });
 
     it("shows empty message when no executions", async () => {

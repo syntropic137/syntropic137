@@ -81,20 +81,17 @@ Create `.env` file:
 # Options: firecracker (Linux+KVM), gvisor (Docker+runsc), docker_hardened, cloud
 SYN_WORKSPACE_ISOLATION_BACKEND=firecracker
 
-# ---- Capacity ----
-SYN_WORKSPACE_POOL_SIZE=10              # Pre-warmed workspaces
-SYN_WORKSPACE_MAX_CONCURRENT=50         # Maximum concurrent agents
+# ---- Per-workspace limits (applied to every workspace container) ----
+SYN_WORKSPACE_MEMORY_LIMIT_MB=4096      # 4GB per workspace
+SYN_WORKSPACE_CPU_LIMIT=2.0             # 2 CPUs per workspace
 
-# ---- Cloud Overflow (backup when local capacity exhausted) ----
-SYN_WORKSPACE_ENABLE_CLOUD_OVERFLOW=true
+# ---- Cloud provider ----
 SYN_WORKSPACE_CLOUD_PROVIDER=e2b
 SYN_WORKSPACE_CLOUD_API_KEY=your-e2b-api-key
 
 # ---- Security Settings ----
 SYN_SECURITY_ALLOW_NETWORK=false        # No network by default
 SYN_SECURITY_READ_ONLY_ROOT=true        # Read-only root filesystem
-SYN_SECURITY_MAX_MEMORY=1Gi             # 1GB per workspace
-SYN_SECURITY_MAX_CPU=1.0                # 1 CPU per workspace
 SYN_SECURITY_MAX_PIDS=100               # Process limit
 SYN_SECURITY_MAX_EXECUTION_TIME=3600    # 1 hour timeout
 
@@ -493,9 +490,6 @@ firecracker --version
 ```bash
 # Check pool warmup
 uv run python -c "from syn_adapters.workspaces import get_workspace_router; print(get_workspace_router().stats)"
-
-# Increase pool size
-export SYN_WORKSPACE_POOL_SIZE=50
 ```
 
 #### Memory Issues
@@ -505,7 +499,7 @@ export SYN_WORKSPACE_POOL_SIZE=50
 docker stats
 
 # Reduce per-workspace memory
-export SYN_SECURITY_MAX_MEMORY=256Mi
+export SYN_WORKSPACE_MEMORY_LIMIT_MB=2048
 ```
 
 ---

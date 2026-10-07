@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    stored_fallback_agent,
+)
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
@@ -159,6 +162,12 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Check both new and old field names for backwards compatibility
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE) or p.get("prompt_template_id"),
                 timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
+                # #1376. Same sibling-site rule as #1429 below: `from_dict` in
+                # read_models/workflow_detail.py reads it, and omitting it here
+                # made `GET /workflows/{id}` report no limit for a phase that
+                # runs under one. No VERSION bump: no event written before
+                # #1376 can carry the key, so no stored row is wrong.
+                max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
@@ -166,6 +175,10 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                require_delegation=bool(p.get("require_delegation", False)),
+                # PC-83. The sibling site in read_models/workflow_detail.py
+                # reads it too, through the same function.
+                fallback_agent=stored_fallback_agent(p.get("fallback_agent")),
                 # #1429. The sibling site in read_models/workflow_detail.py
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.
@@ -209,6 +222,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             requires_repos=event_data.get("requires_repos", True),
             tags=TagSet.recorded(event_data.get("tags") or []).values,
             default_eval_id=event_data.get("default_eval_id"),
+            package_name=event_data.get("package_name"),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 

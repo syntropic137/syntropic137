@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         SidecarHandle,
         TokenInjectionResult,
         TokenType,
+        WorkspaceUsage,
     )
 
 
@@ -36,8 +37,12 @@ class IsolationBackendPort(Protocol):
         """Create isolation environment (container/VM)."""
         ...
 
-    async def destroy(self, handle: IsolationHandle) -> None:
-        """Destroy isolation environment. Idempotent."""
+    async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:
+        """Destroy isolation environment. Idempotent.
+
+        Returns what the workspace consumed, measured at teardown, or None when
+        this backend does not measure (or the handle was already gone).
+        """
         ...
 
     async def execute(

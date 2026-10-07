@@ -90,6 +90,12 @@ class StartPins(BaseModel):
     continued_branches: list[ContinuedBranch] = Field(default_factory=list)
     #: Set on a resume only: branches it could have continued and did not, and why.
     abandoned_branches: list[AbandonedBranch] = Field(default_factory=list)
+    #: Set on a resume only: phases its parent's certified review skipped (#1681).
+    inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
+
+    def inherited_owners(self) -> dict[str, str]:
+        """Who holds the artifacts of each phase a resume inherited, by phase id."""
+        return {} if self.resumed_from is None else self.resumed_from.owners()
 
     def checkout_for(self, phase_id: str) -> PhaseCheckout:
         """What ``phase_id``'s repositories are checked out at (#1458, #1513).
@@ -147,6 +153,7 @@ class AdmittedResume(BaseModel):
     resume_execution_id: str | None = None
     inherited_phases: list[InheritedPhase] = Field(default_factory=list)
     resume_phase_id: str | None = None
+    inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
 
 
 def phase_definitions_of(phases: Sequence[ExecutablePhase]) -> list[PhaseDefinition]:
@@ -160,7 +167,7 @@ def phase_definitions_of(phases: Sequence[ExecutablePhase]) -> list[PhaseDefinit
             phase_id=p.phase_id,
             name=p.name,
             order=p.order,
-            timeout_seconds=p.timeout_seconds or p.agent_config.timeout_seconds,
+            timeout_seconds=p.effective_timeout_seconds,
         )
         for p in phases
     ]
@@ -201,13 +208,13 @@ def read_pinned_phases(raw: object) -> list[ExecutablePhase]:
 
 
 def read_source_commits(raw: object) -> list[SourceCommit]:
-    """The recorded source commits, or empty when absent or unreadable."""
+    """Recorded commits - a start's, or a provisioning's checkout - or empty when unreadable."""
     if not raw:
         return []
     try:
         return _SOURCE_COMMITS.validate_python(raw)
     except ValidationError:
-        logger.warning("Unreadable source_commits on a replayed start event; treating as absent")
+        logger.warning("Unreadable commits on a replayed event; treating as absent")
         return []
 
 
@@ -232,6 +239,7 @@ def read_start_pins(event: DomainEvent) -> StartPins:
         ),
         continued_branches=read_continued_branches(evt(event, "continued_branches")),
         abandoned_branches=read_abandoned_branches(evt(event, "abandoned_branches")),
+        inherited_skipped_phase_ids=read_phase_ids(evt(event, "inherited_skipped_phase_ids")),
     )
 
 
@@ -263,7 +271,15 @@ def read_admitted_resume(event: DomainEvent) -> AdmittedResume:
             evt(event, "inherited_phases"), evt(event, INHERITED_PHASE_OWNERS)
         ),
         resume_phase_id=evt(event, "resume_phase_id"),
+        inherited_skipped_phase_ids=read_phase_ids(evt(event, "inherited_skipped_phase_ids")),
     )
+
+
+def read_phase_ids(value: object) -> list[str]:
+    """A stored list of phase ids; empty when absent, as on events before #1681."""
+    if not isinstance(value, list):
+        return []
+    return [str(v) for v in value]
 
 
 def _stored_str(value: object) -> str | None:

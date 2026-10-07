@@ -49,7 +49,7 @@ def _counters() -> str:
     """`pins_on_tag` and `images_on_tag` as the script defines them."""
     text = _SCRIPT.read_text()
     start = text.index("pins_on_tag() {")
-    end = text.index('\nif [ "$MODE" != "swap" ]; then', start)
+    end = text.index("\n}\n", text.index("images_on_tag() {", start)) + 3
     return text[start:end]
 
 

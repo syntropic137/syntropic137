@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration._shared.tags import TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
@@ -27,12 +28,16 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        DelegationFailure,
         ExecutablePhase,
         FailureClassification,
         PhaseDefinition,
+        QuarantinedRef,
         ReportedFailureReason,
+        ReviewVerdict,
         SideEffectStatus,
     )
+    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 class StartExecutionCommand:
@@ -86,6 +91,7 @@ class StartResumeCommand:
         source_commits: list[SourceCommit],
         resumed_from: ResumeOrigin,
         continuation_candidates: list[ContinuedBranch] | None = None,
+        inherited_skipped_phase_ids: list[str] | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -97,6 +103,9 @@ class StartResumeCommand:
         #: The branches the parent's failing attempt at the resumed phase left
         #: on origin (#1513). Read back from the parent's stream.
         self.continuation_candidates = continuation_candidates or []
+        #: Phases the parent's certified review skipped before the resume
+        #: phase (#1681), as its `ExecutionResumed` fixed them.
+        self.inherited_skipped_phase_ids = inherited_skipped_phase_ids or []
         #: What the forge says about each candidate now. Filled in by
         #: `StartResumeHandler` before the start; the aggregate decides from it
         #: (`branch_continuation.decide_continuation`).
@@ -151,9 +160,14 @@ class FailExecutionCommand:
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
+        quarantined: tuple[QuarantinedRef, ...] = (),
+        upstream_failure_kind: UpstreamFailureKind | None = None,
+        delegation_failure: DelegationFailure | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
+        #: The unpushed work saved to quarantine refs as the phase ended (#1547).
+        self.quarantined = quarantined
         self.error_type = error_type
         self.failed_phase_id = failed_phase_id
         self.completed_phases = completed_phases
@@ -210,6 +224,15 @@ class FailExecutionCommand:
         #: the classification and never folded into it (#1392): an operator
         #: reads the agent's word, and no number is computed from it.
         self.reported_failure_reason = reported_failure_reason
+        #: What kind of upstream fault ended the run, when a service such as
+        #: GitHub raised it (#1593). Beside the classification like the field
+        #: above: `PLATFORM` either way, and this says whether a resume clears
+        #: it or an operator must act.
+        self.upstream_failure_kind = upstream_failure_kind
+        #: Which required delegate did not happen, and why (#894). `None` for
+        #: every failure that is not a failed delegation - every call site but
+        #: the one whose phase declared one.
+        self.delegation_failure = delegation_failure
 
 
 class StartPhaseCommand:
@@ -301,6 +324,20 @@ class CancelExecutionCommand:
         self.reason = reason
 
 
+class RecordCancelledWorkCommand:
+    """Command to record what a cancelled phase's save landed on quarantine refs (#1547)."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        quarantined: tuple[QuarantinedRef, ...],
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.quarantined = quarantined
+
+
 class InterruptExecutionCommand:
     """Command to forcefully interrupt a workflow execution mid-stream."""
 
@@ -324,7 +361,12 @@ class InterruptExecutionCommand:
 
 
 class ProvisionWorkspaceCompletedCommand:
-    """Command reported by WorkspaceProvisionHandler after workspace is ready."""
+    """Command reported by WorkspaceProvisionHandler after workspace is ready.
+
+    `checked_out_commits` is where each pinned repository was actually found,
+    read back off the workspace once setup finished and verified against its
+    pin (#967) - the run's recorded starting state, not its request.
+    """
 
     def __init__(
         self,
@@ -332,11 +374,13 @@ class ProvisionWorkspaceCompletedCommand:
         phase_id: str,
         workspace_id: str,
         session_id: str = "",
+        checked_out_commits: Sequence[SourceCommit] = (),
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.workspace_id = workspace_id
         self.session_id = session_id
+        self.checked_out_commits = tuple(checked_out_commits)
 
 
 class AgentExecutionCompletedCommand:
@@ -360,17 +404,34 @@ class AgentExecutionCompletedCommand:
         cache_read_tokens: int = 0,
         last_agent_message: str | None = None,
         reported_side_effects: SideEffectStatus | None = None,
+        reported_review_verdict: ReviewVerdict | None = None,
+        agent_provider: str | None = None,
+        agent_model: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.session_id = session_id
         self.exit_code = exit_code
+        self.agent_provider = agent_provider
+        self.agent_model = agent_model
+
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.cache_creation_tokens = cache_creation_tokens
         self.cache_read_tokens = cache_read_tokens
         self.last_agent_message = last_agent_message
         self.reported_side_effects = reported_side_effects
+        self.reported_review_verdict = reported_review_verdict
+
+    def produced_by(self, *, provider: str, model: str | None) -> None:
+        """Name the agent that produced this result (PC-83).
+
+        Set by the one frame that knows - `run_phase_agent`, which chose
+        between the phase's agent and its fallback - rather than by the
+        handler, which runs whatever command it is given.
+        """
+        self.agent_provider = provider
+        self.agent_model = model
 
 
 class ArtifactsCollectedCommand:

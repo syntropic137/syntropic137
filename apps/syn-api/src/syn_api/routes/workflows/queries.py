@@ -13,9 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.types import (
     Err,
+    FallbackAgentResponse,
     InputDeclarationResponse,
     Ok,
     PhaseDefinitionResponse,
+    PhaseProgressInfo,
     PhaseRefResponse,
     Result,
     WorkflowDetail,
@@ -109,6 +111,9 @@ class WorkflowResponse(BaseModel):
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     default_eval_id: str | None = None
     """The eval a launch naming none joins (#967). Future runs only."""
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None when it was not
+    installed from a package or predates install provenance."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -128,6 +133,8 @@ class ExecutionRunSummary(BaseModel):
     completed_at: str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
+    """Progress with skipped repair rounds accounted for; what clients render."""
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     error_message: str | None = None
@@ -198,6 +205,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         agent_type=p.agent_type,
         prompt_template=p.prompt_template,
         timeout_seconds=p.timeout_seconds or 300,
+        max_cost_usd=p.max_cost_usd,
         allowed_tools=list(p.allowed_tools),
         argument_hint=p.argument_hint,
         model=p.model,
@@ -206,6 +214,12 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         model_display=format_phase_model_definition(resolution),
         provider=p.provider,
         allow_delegation=p.allow_delegation,
+        require_delegation=p.require_delegation,
+        fallback_agent=(
+            FallbackAgentResponse(provider=p.fallback_agent.provider, model=p.fallback_agent.model)
+            if p.fallback_agent is not None
+            else None
+        ),
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
         sandbox=p.sandbox,
@@ -297,6 +311,7 @@ async def get_workflow(
             requires_repos=detail.requires_repos,
             tags=list(detail.tags),
             default_eval_id=detail.default_eval_id,
+            package_name=detail.package_name,
         )
     )
 
@@ -473,6 +488,8 @@ def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
         entries.append(f"      model: {_yaml_quote(phase.model)}")
     if phase.allow_delegation:
         entries.append("      allow_delegation: true")
+    if phase.require_delegation:
+        entries.append("      require_delegation: true")
     # #1429. `sandbox` is an `agent.` field in the authoring schema, not a
     # top-level one, so it round-trips here. Emitted only when it differs from
     # the loader default: writing the default back would turn "inherits" into
@@ -488,6 +505,17 @@ def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if phase.sandbox != DEFAULT_PHASE_SANDBOX:
         entries.append(f"      sandbox: {_yaml_quote(phase.sandbox)}")
     return ["    agent:", *entries] if entries else []
+
+
+def _yaml_fallback_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The phase's ``fallback_agent`` block, so an exported package reinstalls with it (PC-83)."""
+    fallback = phase.fallback_agent
+    if fallback is None:
+        return []
+    lines = ["    fallback_agent:", f"      provider: {_yaml_quote(fallback.provider)}"]
+    if fallback.model:
+        lines.append(f"      model: {_yaml_quote(fallback.model)}")
+    return lines
 
 
 def _yaml_ref_entry(key: str, ref: PhaseRefResponse) -> list[str]:
@@ -563,6 +591,8 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # declares nothing", which reinstalls differently again.
     if phase.timeout_seconds is not None:
         lines.append(f"    timeout_seconds: {phase.timeout_seconds}")
+    if phase.max_cost_usd is not None:
+        lines.append(f"    max_cost_usd: {phase.max_cost_usd}")
     # EXPORT PRESERVES WHAT THE SCHEMA CAN EXPRESS, even when the loader would
     # refuse it (#1039). Omitting a refused declaration LAUNDERS it: a stored
     # `execution_type: human_in_loop` phase, dropped on export, reinstalls as
@@ -598,6 +628,7 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if not phase.delivers_repo_changes:
         lines.append("    delivers_repo_changes: false")
     lines.extend(_yaml_agent_lines(phase))
+    lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))
     return lines
@@ -834,6 +865,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         requires_repos=detail.requires_repos,
         tags=list(detail.tags),
         default_eval_id=detail.default_eval_id,
+        package_name=detail.package_name,
     )
 
 
@@ -885,6 +917,7 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
                 completed_at=str(e.completed_at) if e.completed_at else None,
                 completed_phases=e.completed_phases,
                 total_phases=e.total_phases,
+                phase_progress=e.phase_progress,
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 error_message=e.error_message,

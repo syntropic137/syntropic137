@@ -56,6 +56,7 @@ function execution(
 ): ExecutionDetailResponse {
   return {
     workflow_execution_id: 'exec-1',
+    phase_progress: { completed: 0, skipped: 0, possible: 1, remaining_possible: 1, percent: 0, display: 'phase 1 of up to 1' },
     workflow_id: 'wf-1',
     workflow_name: 'Run',
     status: 'running',
@@ -275,5 +276,37 @@ describe('PhaseTimeline per-phase token figures', () => {
     // A pending phase really has used no tokens, so its 0 is a reading and
     // stays unqualified; only the running one is still being counted.
     expect(container.textContent?.match(/so far/g)).toHaveLength(1)
+  })
+})
+
+describe('a failed phase card says why that phase failed (#1592)', () => {
+  it('shows the phase’s own classification and error text, not the run’s', () => {
+    const { getByTestId } = renderTimeline(
+      [
+        phase({
+          workflow_phase_id: 'verify',
+          status: 'failed',
+          error_message: 'Agent failed: codex reported: Selected model is at capacity.',
+          failure_classification: 'platform',
+          reported_failure_reason: 'platform',
+        }),
+      ],
+      // The run says something different on purpose: a card that borrowed the
+      // execution's classification or text would render these instead.
+      { status: 'failed', failure_classification: 'correct_refusal', error_message: 'run text' },
+    )
+
+    const failure = getByTestId('phase-failure')
+    expect(failure.textContent).toContain('platform')
+    expect(failure.textContent).toContain('Selected model is at capacity.')
+    expect(failure.textContent).toContain('The agent reported: platform')
+    expect(failure.textContent).not.toContain('correct_refusal')
+    expect(failure.textContent).not.toContain('run text')
+    expect(failure.closest('[class*="red-"]')).not.toBeNull()
+  })
+
+  it('says nothing about failure on a phase that did not fail', () => {
+    const { queryByTestId } = renderTimeline([phase({ workflow_phase_id: 'plan' })])
+    expect(queryByTestId('phase-failure')).toBeNull()
   })
 })

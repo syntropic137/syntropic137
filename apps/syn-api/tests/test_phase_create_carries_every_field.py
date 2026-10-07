@@ -64,6 +64,7 @@ _EVERY_FIELD: Mapping[str, object] = {
     "prompt_template": "do the thing",
     "max_tokens": 1234,
     "timeout_seconds": 2400,
+    "max_cost_usd": 12.5,
     "allowed_tools": ["Read", "Grep"],
     # NOT the default. True is the default, so asserting it would pass with
     # the mapping deleted -- the same tautology the execution_type and
@@ -75,12 +76,18 @@ _EVERY_FIELD: Mapping[str, object] = {
     # "unsaved deliverable" into "build-tool side effect" (#1308).
     "delivers_repo_changes": False,
     "argument_hint": "[task]",
-    "model": "gpt-5.6-sol",
-    "provider": "codex",
+    "model": "claude-opus-5-5",
+    # NOT the default (None). Claude, not codex: a codex phase cannot carry
+    # the `max_cost_usd` above, because codex reports usage only when its run
+    # has ended and the create path refuses the pair (#1376).
+    "provider": "claude",
     "allow_delegation": True,
+    "require_delegation": True,
     # NOT the default ("full-access"), so only the caller's value arriving
     # satisfies the assertion; a dropped mapping falls back and fails it.
     "sandbox": "workspace-write",
+    # NOT the default (None). Claude for the same #1376 reason as `provider`.
+    "fallback_agent": {"provider": "claude", "model": "claude-sonnet-5"},
     "claude_plugins": ["owner/repo@abc123"],
     # Skill refs name a SKILL inside a repo; plugin refs name the repo.
     # The model rejects the plugin spelling here, which is how I learned it.
@@ -130,7 +137,13 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.prompt_template == "do the thing"
     assert phase.max_tokens == 1234
     assert phase.timeout_seconds == 2400
+    assert phase.max_cost_usd == 12.5
     assert phase.allowed_tools == ["Read", "Grep"]
+    assert phase.fallback_agent is not None
+    assert (phase.fallback_agent.provider, phase.fallback_agent.model) == (
+        "claude",
+        "claude-sonnet-5",
+    )
     # False cannot be produced by any fallback here: the domain field, the
     # `p.get` default and `PhaseYamlDefinition` all default to True, so only
     # the caller's value arriving satisfies this (#1187).
@@ -140,9 +153,10 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # nobody has thought about must keep the gate (#1308).
     assert phase.delivers_repo_changes is False
     assert phase.argument_hint == "[task]"
-    assert phase.model == "gpt-5.6-sol"
-    assert phase.provider == "codex"
+    assert phase.model == "claude-opus-5-5"
+    assert phase.provider == "claude"
     assert phase.allow_delegation is True
+    assert phase.require_delegation is True
     assert phase.sandbox == "workspace-write"
     # IDENTITY, not cardinality. The previous version asserted `len(...) == 1`
     # while its comment claimed identity was checked -- so an implementation
@@ -307,3 +321,17 @@ class TestMultiNameSkillsExpand:
         )
 
         assert [s.skill_name for s in phase.skills] == ["one-skill"]
+
+
+def test_a_cost_limit_on_a_codex_phase_is_refused_at_create() -> None:
+    """#1376: the API create path never passes the YAML validator, so it refuses too."""
+    phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "codex"}}
+
+    with pytest.raises(ValueError, match="max_cost_usd on provider 'codex'"):
+        _build_phase_defs([phase])
+
+
+def test_a_cost_limit_on_a_claude_phase_is_kept_at_create() -> None:
+    phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "claude"}}
+
+    assert _build_phase_defs([phase])[0].max_cost_usd == 12.5

@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from syn_domain.contexts.artifacts import ContentType
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
@@ -51,6 +52,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
     )
 
 logger = logging.getLogger(__name__)
@@ -144,7 +148,14 @@ _OUTPUT_ARTIFACT_GLOB: Final[str] = "artifacts/output/**/*"
 
 
 async def _produced_deliverable(workspace: ManagedWorkspace, phase_id: str) -> bool:
-    """Whether the phase left any non-empty file in artifacts/output/.
+    """Whether the phase left a non-empty TEXT file in artifacts/output/.
+
+    A binary file does not count. A screenshot is evidence a report cites, not
+    the report: since #1648 a verify phase writes its PNGs BEFORE its report,
+    so "any file exists" completed a codex stream that died between the two
+    and handed the next phase pictures with no verdict (exec-8fb041217a15).
+    The test is the one `primary_text` applies when it picks what stands for a
+    phase's output, judged by the same `ContentType.of`.
 
     Fails CLOSED: if the workspace cannot be read, the answer is "no", so a
     phase is never completed on the strength of a check that did not run.
@@ -158,7 +169,9 @@ async def _produced_deliverable(workspace: ManagedWorkspace, phase_id: str) -> b
             phase_id,
         )
         return False
-    return any(content for _, content in collected)
+    return any(
+        content and not ContentType.of(content, path).is_binary for path, content in collected
+    )
 
 
 async def _exit_code_after_codex_verdict(
@@ -288,6 +301,7 @@ class AgentExecutionResult:
         "command",
         "exit_code",
         "launch_failed",
+        "primary_failure",
         "stream_result",
         "subagents",
         "tokens",
@@ -315,6 +329,9 @@ class AgentExecutionResult:
         self.exit_code = command.exit_code if command is not None else exit_code
         self.usage = usage if usage is not None else FinalUsage.resolve(stream_result, tokens)
         self.launch_failed = launch_failed
+        #: Set only on a FALLBACK run that failed too (PC-83): who failed
+        #: first and why, so the phase's error carries both failures.
+        self.primary_failure: str | None = None
 
 
 class AgentExecutionHandler:
@@ -341,6 +358,7 @@ class AgentExecutionHandler:
         collector: ObservabilityCollector | None = None,
         runner: AgentRunner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> AgentExecutionResult:
         """Run agent in workspace and stream output.
 
@@ -369,6 +387,7 @@ class AgentExecutionHandler:
             tokens=tokens,
             subagents=subagents,
             on_launch=on_launch,
+            cost_limit=cost_limit,
         )
 
     def _select_stream_processor(
@@ -382,6 +401,7 @@ class AgentExecutionHandler:
         session_id: str,
         agent_model: str | None,
         collector: ObservabilityCollector | None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> EventStreamProcessor | CodexStreamProcessor:
         """Pick the codex or claude stream processor for a headless phase."""
         assert todo.phase_id is not None
@@ -402,6 +422,7 @@ class AgentExecutionHandler:
                 # read inside the container's lifetime - by collection time the
                 # workspace is torn down and the only copy is gone.
                 rollout=workspace,
+                cost_limit=cost_limit,
             )
         return EventStreamProcessor(
             tokens=tokens,
@@ -414,6 +435,7 @@ class AgentExecutionHandler:
             workspace_id=getattr(workspace, "id", None),
             agent_model=agent_model,
             collector=collector,
+            cost_limit=cost_limit,
         )
 
     async def _run_headless(
@@ -431,6 +453,7 @@ class AgentExecutionHandler:
         tokens: TokenAccumulator,
         subagents: SubagentTracker,
         on_launch: AgentLaunchObserver | None,
+        cost_limit: PhaseCostLimit | None = None,
     ) -> AgentExecutionResult:
         """Stream a headless (claude -p / codex exec) phase and build its result."""
         assert todo.phase_id is not None
@@ -443,6 +466,7 @@ class AgentExecutionHandler:
             session_id=session_id,
             agent_model=agent_model,
             collector=collector,
+            cost_limit=cost_limit,
         )
 
         # The launch fact is settled AFTER the stream, not while it runs: the
@@ -564,6 +588,7 @@ class AgentExecutionHandler:
             # input (#1195, #1300).
             last_agent_message=stream_result.last_agent_message,
             reported_side_effects=stream_result.verdict.reported_side_effects,
+            reported_review_verdict=stream_result.verdict.reported_review_verdict,
         )
 
         return AgentExecutionResult(

@@ -48,6 +48,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
         UpstreamRetryPolicy,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+        AgentHandlerProtocol,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +123,7 @@ _AN_ANSWER = (
 
 
 def _make_processor(
-    agent_handler: FakeAgentExecutionHandler,
+    agent_handler: AgentHandlerProtocol,
     session_capture: object | None = None,
     artifact_repository: object | None = None,
     retry_policy: UpstreamRetryPolicy | None = None,

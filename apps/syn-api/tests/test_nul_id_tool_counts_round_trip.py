@@ -1,6 +1,7 @@
 """The executions list must count tools under the id the tally holds (#1241).
 
-``_fetch_tool_counts`` binds execution ids into ``execution_id = ANY($1)`` and
+The list's enrichment (``_load_execution_enrichment``, through the cost read's
+``list_for_ids``) binds execution ids into ``execution_id = ANY($1)`` and
 then RETURNS A MAPPING KEYED BY THOSE IDS, so it has two ways to lose the
 answer: ask for a spelling no row carries, or answer under a key no caller
 looks up. Either shows the same thing on the dashboard - an execution with 0
@@ -62,16 +63,34 @@ def _stored_spelling() -> str:
 
 
 class _Tally:
+    """Holds one execution's tally row and nothing else: no cost, no tokens."""
+
     def __init__(self) -> None:
         self.binds: list[tuple[object, ...]] = []
 
-    async def fetch(self, _query: str, *args: object) -> list[_TallyRow]:
+    def transaction(self, *, isolation: str, readonly: bool) -> _Transaction:
+        return _Transaction()
+
+    async def execute(self, _query: str, *_args: object) -> str:
+        return "SET"
+
+    async def fetch(self, query: str, *args: object) -> list[_TallyRow]:
+        if "agent_tool_call_counts" not in query:
+            return []
         self.binds.append(args)
         wanted = args[0]
         assert isinstance(wanted, list)
         if STORED_ID not in wanted:
             return []
         return [_TallyRow(execution_id=STORED_ID, cnt=7)]
+
+
+class _Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
 
 
 class _Acquire:
@@ -93,23 +112,24 @@ class _Pool:
         return _Acquire(self.conn)
 
 
-class _EventStore:
+class _Manager:
     def __init__(self, pool: _Pool) -> None:
-        self.pool = pool
+        from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
+            ExecutionCostProjection,
+        )
+
+        self.execution_cost = ExecutionCostProjection(store=None, pool=pool)  # type: ignore[arg-type]  # a recording double
 
 
-async def test_tool_counts_round_trip_for_a_nul_bearing_execution_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from syn_api import _wiring
-    from syn_api.routes.executions.queries import _fetch_tool_counts
+async def test_tool_counts_round_trip_for_a_nul_bearing_execution_id() -> None:
+    from syn_api.routes.executions.queries import _load_execution_enrichment
 
     assert _stored_spelling() == STORED_ID
-    store = _EventStore(_Pool(_Tally()))
-    monkeypatch.setattr(_wiring, "get_event_store_instance", lambda: store)
+    tally = _Tally()
 
-    counts = await _fetch_tool_counts([RAW_ID])
+    enrichment = await _load_execution_enrichment(_Manager(_Pool(tally)), [RAW_ID])  # type: ignore[arg-type]  # a recording double
 
     # Found at all - and filed under the key a caller holding a stored id
     # will look up, which is the second half of the same failure.
-    assert counts == {STORED_ID: 7}
+    assert {eid: e.tool_call_count for eid, e in enrichment.items()} == {STORED_ID: 7}
+    assert tally.binds == [([STORED_ID],)]

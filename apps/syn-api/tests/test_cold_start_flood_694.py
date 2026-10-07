@@ -29,6 +29,8 @@ from syn_domain.contexts.github.services import (
     GitHubRepoIngestionService,
 )
 
+pytestmark = pytest.mark.unit
+
 # -- Test doubles ------------------------------------------------------------
 
 

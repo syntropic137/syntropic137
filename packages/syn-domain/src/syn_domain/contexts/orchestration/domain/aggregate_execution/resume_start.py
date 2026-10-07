@@ -57,7 +57,9 @@ def refuse_resume_start(command: StartResumeCommand) -> str | None:
     * a resume phase absent from the snapshot;
     * inherited phases that are not exactly the snapshot's phases before the
       resume phase, in order - a gap would run nothing for a phase the resumed
-      one may read.
+      one may read. A phase the parent's certified review skipped is not a gap
+      (#1681): it was never going to run, so it is passed over here as the
+      parent's prefix passed over it.
     """
     resume_execution_id = command.aggregate_id
     pinned_phases = command.pinned_phases
@@ -82,7 +84,8 @@ def refuse_resume_start(command: StartResumeCommand) -> str | None:
             f"Cannot start resume {resume_execution_id}: resume phase {resume!r} is absent "
             "from the pinned phase config"
         )
-    before_resume = pinned_ids[: pinned_ids.index(resume)]
+    skipped = set(command.inherited_skipped_phase_ids)
+    before_resume = [p for p in pinned_ids[: pinned_ids.index(resume)] if p not in skipped]
     if inherited_ids != before_resume:
         return (
             f"Cannot start resume {resume_execution_id}: inherited phases {inherited_ids} are "
@@ -147,6 +150,7 @@ def resume_start_command(
             resume_phase_id=resume_phase_id,
         ),
         continuation_candidates=continuation_candidates(left, resume_phase_id),
+        inherited_skipped_phase_ids=list(admitted.inherited_skipped_phase_ids),
     )
 
 
@@ -189,4 +193,5 @@ def resume_started_event(command: StartResumeCommand) -> WorkflowExecutionStarte
         resumed_from=command.resumed_from,
         continued_branches=continued or None,
         abandoned_branches=abandoned or None,
+        inherited_skipped_phase_ids=command.inherited_skipped_phase_ids or None,
     )

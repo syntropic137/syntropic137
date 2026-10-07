@@ -1,4 +1,10 @@
 
+==> [T] precheck: the probe workflow telemetry-lag-probe-v1 is installed and active
+   probe workflow telemetry-lag-probe-v1: active
+
+==> [T] precheck: free space on the data volume
+   disk: not reported by this API (predates #1560)
+
 ==> [T] prepare: worktree at origin/main, bump to 0.33.2-beta.9
    (dry-run) git -C <PARENT>/syntropic137 fetch -q origin
    (dry-run) git -C <PARENT>/syntropic137 worktree add -b chore/bump-0.33.2-beta.9 <PARENT>/syntropic137_worktrees/pit-stop-0.33.2-beta.9 origin/main
@@ -15,9 +21,11 @@
 
 ==> [T] gate: pausing execution admission for the rest of the pit stop
    (dry-run) PUT /maintenance active=true
+   queued=0 running=0  status_counts: {'completed': 3}  (drained)
 
-==> [T] drain: waiting for every execution to be terminal (timeout 10800s)
-   status_counts: {'completed': 3}  (drained)
+==> [T] drain: waiting for every execution to be terminal (budget 2700s)
+   subscription: {'status': 'healthy', 'is_catching_up': False, 'lag': 0} degraded_reasons: []
+   queued=0 running=0  status_counts: {'completed': 3}  (drained)
 
 ==> [T] swap: recreate api + gateway (no pull: the images are only in the host's daemon)
    (dry-run) remote cd /root/.syntropic137 && docker compose -f docker-compose.syntropic137.yaml up -d api gateway
@@ -26,5 +34,6 @@
 
 ==> [T] gate: resuming execution admission
    (dry-run) PUT /maintenance active=false
+   (dry-run) POST /workflows/telemetry-lag-probe-v1/execute, then wait for a phase to reach running
 
 ==> [T] DRY RUN DONE: nothing was built, shipped, staged or swapped. v0.33.2-beta.9 is NOT live.

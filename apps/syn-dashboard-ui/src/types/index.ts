@@ -48,10 +48,15 @@ export interface PhaseDefinition {
   resolved_model?: string | null
   /** "translated" (platform rewrites it, codex) or "expected" (the CLI picks, claude). */
   resolution_basis?: 'translated' | 'expected' | null
-  /** e.g. "gpt-sol → gpt-6-sol"; the bare model otherwise. Render verbatim. */
+  /** e.g. "gpt-sol → gpt-6.1-sol"; the bare model otherwise. Render verbatim. */
   model_display?: string | null
   provider: string | null
+  /** Skills the phase DECLARES, as written; a version may be a tag, not a SHA. */
+  skills?: PhaseRef[]
 }
+
+/** A declared skill or plugin reference, aliased to the generated schema rather than restated. */
+export type PhaseRef = components['schemas']['PhaseRefResponse']
 
 export interface WorkflowResponse {
   id: string
@@ -296,6 +301,13 @@ export interface ExecutionHistoryResponse {
 // WORKFLOW EXECUTION TYPES (NEW)
 // =============================================================================
 
+/**
+ * Phase progress with skipped repair rounds accounted for, computed by the
+ * API (PC-63). Render `display` and draw `percent`; never divide
+ * `completed_phases` by `total_phases`, which counts skipped rounds.
+ */
+export type PhaseProgressInfo = components['schemas']['PhaseProgressInfo']
+
 export interface WorkflowExecutionSummary {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
@@ -305,6 +317,7 @@ export interface WorkflowExecutionSummary {
   completed_at: string | null
   completed_phases: number
   total_phases: number
+  phase_progress: PhaseProgressInfo
   total_tokens: number
   total_cost_usd: number
   /**
@@ -355,6 +368,7 @@ export interface ExecutionListItem {
   completed_at: string | null
   completed_phases: number
   total_phases: number
+  phase_progress: PhaseProgressInfo
   total_tokens: number
   total_tokens_display: string
   total_cost_usd: number
@@ -434,6 +448,16 @@ export interface PhaseExecutionDetail {
   pinned_at_start?: PhaseStartConfig | null
   /** Absent from a server that predates the field: treat as `unavailable`. */
   start_pins_status?: StartPinsStatus
+  /** Why THIS phase failed, in the server's words; null unless it failed. */
+  error_message?: string | null
+  /**
+   * What the platform classified THIS phase's failure as (#1592). A phase
+   * carries its own, so a card never borrows the run's for a phase it was not
+   * about. Null on a phase that did not fail; absent from an older server.
+   */
+  failure_classification?: FailureClassification | null
+  /** What this phase SAID caused its failure - attribution only, never a colour. */
+  reported_failure_reason?: ReportedFailureReason | null
 }
 
 /** A phase's start config, aliased to the generated schema rather than restated. */
@@ -461,6 +485,7 @@ export interface ExecutionDetailResponse {
    */
   total_phases: number
   completed_phases: number
+  phase_progress: PhaseProgressInfo
   total_input_tokens: number
   total_output_tokens: number
   total_cache_creation_tokens: number

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from syn_api._wiring import (
+from syn_api._wiring_agent_command import (
     _build_agent_command,
     _build_claude_command,
     _build_codex_command,
@@ -89,13 +89,13 @@ def test_codex_command_omits_claude_alias_model() -> None:
     assert _build_codex_command("do the thing", "o3")[-3:] == ["--model", "o3", "do the thing"]
 
 
-def test_codex_command_via_domain_default_model_forces_gpt_6_sol() -> None:
+def test_codex_command_via_domain_default_model_forces_gpt_6_1_sol() -> None:
     """A codex phase that omits `model:` runs the codex default, FORCED.
 
     Regression history (#788, PR #795): an earlier fix synthesized
     `--model codex`, which is not a real model id. The default is now the
     platform alias `gpt-sol`, which must reach codex as the concrete slug
-    `gpt-6-sol` - codex has no alias feature and would reject `gpt-sol`.
+    `gpt-6.1-sol` - codex has no alias feature and would reject `gpt-sol`.
     """
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         PhaseDefinition,
@@ -124,7 +124,7 @@ def test_codex_command_via_domain_default_model_forces_gpt_6_sol() -> None:
         FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
         "--model",
-        ModelId.GPT_6_SOL,
+        ModelId.GPT_6_1_SOL,
         "do the thing",
     ]
     assert CodexModelAlias.GPT_SOL not in cmd

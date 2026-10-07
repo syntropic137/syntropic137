@@ -286,6 +286,8 @@ async def _map_phase_detail(
         error_message=phase.error_message,
         deliverable_recovered=phase.deliverable_recovered,
         reported_side_effects=phase.reported_side_effects,
+        failure_classification=phase.failure_classification,
+        reported_failure_reason=phase.reported_failure_reason,
         # None stays None: nothing observed a status is not a clean exit (#1319).
         exit_code=phase.exit_code,
         input_tokens=phase.input_tokens,
@@ -297,7 +299,8 @@ async def _map_phase_detail(
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
         model=sc.agent_model,
-        requested_model=sc.requested_model,
+        requested_model=_requested_model(phase, sc.requested_model),
+        agent_provider=phase.agent_provider,
         cost_by_model=sc.cost_by_model,
         # `.get` on purpose: a phase with no capture row is "not reported",
         # which is None - never [], which would claim a confirmed empty sweep.
@@ -342,6 +345,15 @@ async def _map_phase_detail(
     )
 
 
+def _requested_model(phase: PhaseExecutionDetail, session_requested: str | None) -> str | None:
+    """The model the agent that PRODUCED the phase's result was asked for.
+
+    Wins over the session's start record, which names the declared agent even
+    after the phase fell back to its fallback_agent (PC-83).
+    """
+    return phase.agent_model or session_requested
+
+
 def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
     """Map an API PhaseExecution to an HTTP response model."""
     operations = [
@@ -372,6 +384,8 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         error_message=phase.error_message,
         deliverable_recovered=phase.deliverable_recovered,
         reported_side_effects=phase.reported_side_effects,
+        failure_classification=phase.failure_classification,
+        reported_failure_reason=phase.reported_failure_reason,
         # Passed through for the reason spelled out below: this constructor
         # re-lists every field by hand and is the hop that drops one (#1319).
         exit_code=phase.exit_code,
@@ -390,6 +404,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         completed_at=str(phase.completed_at) if phase.completed_at else None,
         model=phase.model,
         requested_model=phase.requested_model,
+        agent_provider=phase.agent_provider,
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
         # Same model, passed through rather than rebuilt: this constructor is
         # the hop that has dropped a field twice (#891, #1176), and a phase
