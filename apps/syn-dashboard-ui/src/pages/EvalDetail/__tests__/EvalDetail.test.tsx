@@ -1,8 +1,9 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { EvalRun } from '../../../api/evals'
 import { LONG_MODEL, evalRun, evalSummary, json, runPage, variant } from '../../../test/evalFixtures'
 import { EvalDetail } from '../EvalDetail'
 
@@ -25,6 +26,21 @@ function renderDetail() {
       </Routes>
     </MemoryRouter>,
   )
+}
+
+/** A server that pages `runs` (newest first) the way `/evals/{id}/runs` does. */
+function servePaged(runs: EvalRun[]) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), 'http://x')
+    if (url.pathname === '/api/v1/evals/eval-1') return json(evalSummary({ run_count: runs.length }))
+    if (url.pathname !== '/api/v1/evals/eval-1/runs') return json({ detail: 'nope' }, 404)
+    const page = Number(url.searchParams.get('page') ?? '1')
+    const pageSize = Number(url.searchParams.get('page_size') ?? '50')
+    const items = runs.slice((page - 1) * pageSize, page * pageSize)
+    return json({ items, total: runs.length, page, page_size: pageSize })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 afterEach(() => vi.unstubAllGlobals())
@@ -82,8 +98,35 @@ describe('EvalDetail', () => {
     expect(within(runs).getByText(/All 14 checkout tests passed/)).toBeVisible()
 
     // The server's total, not the rows on this page.
-    expect(screen.getByText(/of 120/)).toBeInTheDocument()
+    expect(screen.getByText('Showing 1-50 of 120 runs')).toBeInTheDocument()
   })
+
+  it('keeps every run on the timeline, older than the first page included, while the table pages', async () => {
+    const day = 24 * 60 * 60 * 1000
+    const newest = Date.parse('2026-10-06T00:00:00Z')
+    const runs = Array.from({ length: 260 }, (_, i) =>
+      evalRun({ execution_id: `exec-${i}`, started_at: new Date(newest - i * day).toISOString() }),
+    )
+    servePaged(runs)
+    const { container } = renderDetail()
+    await screen.findByRole('heading', { level: 1 })
+
+    const markers = () => container.querySelectorAll('svg circle')
+    await screen.findByText('All 260 runs, by variant')
+    expect(markers()).toHaveLength(260)
+    // The oldest run, far past the table's first page, is on the chart.
+    expect([...markers()].some((c) => c.textContent?.includes('exec-259'))).toBe(true)
+
+    const table = () => screen.getAllByRole('table')[1]
+    expect(within(table()).getAllByRole('link')[0]).toHaveAttribute('href', '/executions/exec-0')
+    await userEvent.click(screen.getByRole('button', { name: /Next/ }))
+    await waitFor(() =>
+      expect(within(table()).getAllByRole('link')[0]).toHaveAttribute('href', '/executions/exec-50'),
+    )
+    expect(markers()).toHaveLength(260)
+    // Two timeline pages, 260 markers and two table renders: past vitest's 5s
+    // default when the suite runs in parallel, nowhere near it alone.
+  }, 20_000)
 
   it('reports a failed load instead of an empty page', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ detail: 'Eval not found' }, 404)))

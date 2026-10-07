@@ -8,9 +8,10 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import type { EvalSummary } from '../../api/evals'
-import { Breadcrumbs, Card, CardHeader, EmptyState, ListPagination, PageLoader } from '../../components'
+import { Breadcrumbs, Card, CardHeader, EmptyState, ListPagination, Loader, PageLoader } from '../../components'
 import { EvalRunsChart, EvalRunsTable, EvalVariantsTable } from '../../components/evals'
 import { useEvalDetail } from '../../hooks/useEvalDetail'
+import { useEvalTimeline, type EvalTimelineState } from '../../hooks/useEvalTimeline'
 
 function EvalHeader({ e }: { e: EvalSummary }) {
   return (
@@ -53,10 +54,30 @@ function EvalHeader({ e }: { e: EvalSummary }) {
   )
 }
 
+function timelineSubtitle(timeline: EvalTimelineState): string {
+  if (timeline.kind !== 'ready') return 'Every run, by variant'
+  if (timeline.runs.length < timeline.total) return `Latest ${timeline.runs.length} of ${timeline.total} runs, by variant`
+  return `All ${timeline.total} runs, by variant`
+}
+
+function TimelineCard({ timeline }: { timeline: EvalTimelineState }) {
+  return (
+    <Card>
+      <CardHeader title="Runs over time" subtitle={timelineSubtitle(timeline)} />
+      {timeline.kind === 'loading' && <Loader className="p-4" />}
+      {timeline.kind === 'error' && (
+        <p className="p-4 text-sm text-[var(--color-text-muted)]">Could not load the run history: {timeline.message}</p>
+      )}
+      {timeline.kind === 'ready' && <EvalRunsChart runs={timeline.runs} />}
+    </Card>
+  )
+}
+
 export function EvalDetail() {
   const { evalId } = useParams<{ evalId: string }>()
   const [page, setPage] = useState(1)
   const state = useEvalDetail(evalId, page)
+  const timeline = useEvalTimeline(evalId)
 
   if (state.kind === 'loading') return <PageLoader />
   if (state.kind === 'error') {
@@ -76,10 +97,7 @@ export function EvalDetail() {
         <CardHeader title="Compare" subtitle={`${e.run_count} runs · ${e.scored_count} scored · pass rate ${e.pass_rate_display}`} />
         <EvalVariantsTable variants={e.variants} />
       </Card>
-      <Card>
-        <CardHeader title="Runs over time" subtitle={`This page of runs, by variant`} />
-        <EvalRunsChart runs={state.runs} />
-      </Card>
+      <TimelineCard timeline={timeline} />
       <Card>
         <CardHeader title="Runs" />
         <EvalRunsTable runs={state.runs} />
