@@ -356,12 +356,15 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
         if not existing:
             return
+        agent = {"agent_provider": event.agent_provider, "agent_model": event.agent_model}
         found = self._find_phase(existing.get("phases", []), event.phase_id)
         if found is None:
-            return
-        _, phase = found
-        phase["agent_provider"] = event.agent_provider
-        phase["agent_model"] = event.agent_model
+            # No row yet: its PhaseStarted was never projected. Held, like
+            # `phase_budgets`, until `on_phase_completed` creates the row, so
+            # the salvage path names its agent the way the common path does.
+            existing.setdefault("phase_agents", {})[event.phase_id] = agent
+        else:
+            found[1].update(agent)
         await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
 
     async def on_workspace_provisioned_for_phase(
@@ -422,7 +425,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 event_data,
                 timeout_seconds=budgets.get(phase_id or ""),
             )
-            phases.append(new_phase.to_dict())
+            row = new_phase.to_dict()
+            row.update((existing.get("phase_agents") or {}).get(phase_id or "", {}))
+            phases.append(row)
 
         # Aggregate totals
         input_tokens = event_data.get("input_tokens", 0)
