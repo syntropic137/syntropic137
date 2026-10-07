@@ -19,12 +19,15 @@ import re
 import stat
 import subprocess
 import threading
-from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.unit
 
@@ -62,9 +65,7 @@ printf '%s' "$body" > "$out"
 """
 
 
-def _dry_run(
-    tmp: Path, *flags: str, compose: str = "compose-tag.yaml"
-) -> tuple[str, str, Path]:
+def _dry_run(tmp: Path, *flags: str, compose: str = "compose-tag.yaml") -> tuple[str, str, Path]:
     """A dry run's normalised stdout, its stderr, and where the stubs logged."""
     bin_dir, log = tmp / "bin", tmp / "log"
     bin_dir.mkdir()
@@ -326,9 +327,7 @@ class TestGatewayOnlyLive:
         assert "did not answer 200 through the new gateway" in proc.stderr
 
     @pytest.mark.parametrize("status", [204, 302])
-    def test_a_success_that_is_not_200_never_completes(
-        self, tmp_path: Path, status: int
-    ) -> None:
+    def test_a_success_that_is_not_200_never_completes(self, tmp_path: Path, status: int) -> None:
         """curl -f passes a 204 and a 302; neither is /health routed to the API."""
         proc, calls = _run_branch(tmp_path, health=[status])
         assert proc.returncode != 0
