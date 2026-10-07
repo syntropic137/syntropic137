@@ -93,7 +93,7 @@ export function EventFeed() {
             </p>
           </div>
         ) : (
-          events.map((event, i) => <EventRow key={`${event.data.commit_hash}-${i}`} event={event} />)
+          events.map((event) => <EventRow key={event.id} event={event} />)
         )}
       </div>
     </div>
