@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from syn_adapters.object_storage.protocol import StorageError as ObjectStorageError
 from syn_adapters.storage.artifact_storage.minio_helpers import (
+    build_artifact_key,
     build_s3_metadata,
     parse_s3_key,
 )
@@ -87,17 +88,8 @@ class MinioArtifactStorage:
         workflow_id: str | None = None,
         execution_id: str | None = None,
     ) -> str:
-        """Build storage key for an artifact.
-
-        Format: {prefix}/{workflow_id}/{execution_id}/{artifact_id}.md
-        """
-        parts = [self._prefix]
-        if workflow_id:
-            parts.append(workflow_id)
-        if execution_id:
-            parts.append(execution_id)
-        parts.append(f"{artifact_id}.md")
-        return "/".join(parts)
+        """Build storage key for an artifact (see ``build_artifact_key``)."""
+        return build_artifact_key(artifact_id, workflow_id, execution_id, prefix=self._prefix)
 
     async def upload(
         self,
