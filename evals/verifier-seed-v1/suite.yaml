@@ -1,0 +1,51 @@
+# The verifier seed suite (#967 step 8). Each case is a commit that carries a
+# bug the platform's own verify certified and a second verifier caught
+# (docs/retrospectives/2026-10-06-merge-down-and-the-dropped-start.md).
+#
+# What it measures: given a workflow, a prompt and a model, does verification
+# find the defect? Change any of the three and the version goes up - runs of
+# different versions are different experiments, and the scorer prints the
+# version beside every row.
+#
+# SAME CASES, DIFFERENT VERIFIER. `workflows` lists every workflow the cases
+# run under; they differ only in the verify phase's agent. `eval_suite.py
+# --workflow <id>` picks one (default: the first), and the suite tag carries
+# it - `verifier-seed-v1:v2:<workflow id>` - so each verifier's runs are their
+# own evals and their own score table. Adding a workflow changes no existing
+# table; changing a listed workflow's model or prompt bumps the version.
+#
+# v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
+# v2: two cases added (#1679, #1680) and the codex verifier.
+#
+# EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
+# runs launches.jsonl still holds: the tag exactly as those runs carry it, the
+# workflow it ran and the cases it held. `score` scores each version's runs
+# against its own cases only. Never edit a history entry or a ledger line.
+id: verifier-seed-v1
+version: 2
+goal: >
+  Does the verifier block a change that carries a known escaped bug, and name
+  the defect and the file it lives in?
+repository: syntropic137/syntropic137
+workflows:
+  - id: eval-verify-pinned-v1
+    path: workflows/evals/verify-pinned/workflow.yaml
+    # Each phase's declared model, as written in the workflow file. The test
+    # fails when they disagree; the scorer also prints the model each run
+    # actually reported, which is the one to compare.
+    models:
+      verify: opus
+  - id: eval-verify-pinned-codex-v1
+    path: workflows/evals/verify-pinned-codex/workflow.yaml
+    models:
+      verify: gpt-sol
+history:
+  # v1 predates the workflow suffix in the tag.
+  - version: 1
+    tag: verifier-seed-v1:v1
+    workflow: eval-verify-pinned-v1
+    cases:
+      - binary-artifact-minio-key
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - shared-esp-stream

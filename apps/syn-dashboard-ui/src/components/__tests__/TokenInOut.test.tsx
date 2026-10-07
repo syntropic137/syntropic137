@@ -68,6 +68,7 @@ describe('every In/Out card agrees with the execution header', () => {
     } as ExecutionDetailResponse['phases'][number]
     const execution = {
       workflow_execution_id: 'exec-105b88d56234',
+      phase_progress: { completed: 0, skipped: 0, possible: 1, remaining_possible: 1, percent: 0, display: 'phase 1 of up to 1' },
       workflow_id: 'multi-agent-programmatic',
       workflow_name: 'Multi-agent',
       status: 'completed',

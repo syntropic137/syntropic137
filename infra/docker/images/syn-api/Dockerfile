@@ -126,6 +126,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # holding half-updated grpc state, and it segfaults in cygrpc before exec: the
 # random exit -11 of #1046/#1295. Nothing here uses grpc in a forked child.
 ENV GRPC_ENABLE_FORK_SUPPORT=false
+# ...and do not fork at all (#1690). uvloop's fork() runs on the event-loop
+# thread and copies this whole ~330 MB, ~29-thread process before the child can
+# exec. On a loaded host that froze every request for p50 ~200-330 ms per
+# spawn, and the session-inventory recovery worker spawns `docker` several
+# times a minute. The stdlib loop spawns with vfork: nothing is copied.
+# apps/syn-api/tests/test_1690_spawning_a_subprocess_never_forks_the_api.py
+ENV UVICORN_LOOP=asyncio
 
 # Default configuration
 ENV SYN_API_HOST=0.0.0.0

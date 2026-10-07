@@ -42,6 +42,13 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent imp
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
     ExecutionTagsRemovedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+    NextPhaseReadyEvent,
+)
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
+    inherited_phase_count,
+    record_skips,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
@@ -61,7 +68,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
     """
 
     PROJECTION_NAME = WORKFLOW_EXECUTIONS
-    VERSION = 8  # v8: eval_id and association_kind (#967)
+    VERSION = 9  # v9: skipped_phase_ids, so phase progress drops skipped rounds
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -111,7 +118,8 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             status="running",
             started_at=event_data.get("started_at"),
             completed_at=None,
-            completed_phases=0,
+            completed_phases=inherited_phase_count(event_data.get("resumed_from")),
+            skipped_phase_ids=tuple(event_data.get("inherited_skipped_phase_ids") or ()),
             total_phases=event_data.get("total_phases", 0),
             total_tokens=0,
             total_input_tokens=0,
@@ -163,6 +171,26 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             phase_tool_calls = event_data.get("tool_call_count", 0)
             existing["tool_call_count"] = existing.get("tool_call_count", 0) + phase_tool_calls
 
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_next_phase_ready(self, event_data: NextPhaseReadyEvent) -> None:
+        """Handle NextPhaseReady: record the phases a review verdict skipped (PC-63).
+
+        Without this a run certified at its first review reads as finished
+        short of its total, because the rounds it never needed stay in the
+        denominator.
+        """
+        event = NextPhaseReadyEvent.model_validate(event_data)
+        execution_id = event.execution_id
+        skipped = event.skipped_phase_ids
+        if not execution_id or not skipped:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["skipped_phase_ids"] = record_skips(
+                existing.get("skipped_phase_ids") or [], skipped
+            )
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_workflow_completed(self, event_data: dict) -> None:

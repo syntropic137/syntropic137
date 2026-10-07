@@ -9,6 +9,7 @@ See #532 for why reads and writes were separated.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -189,6 +190,22 @@ def _phase_costs(phase_map: dict[str, PhaseCosts], execution_id: str) -> PhaseCo
     )
 
 
+@dataclass(frozen=True)
+class ExecutionCostsForIds:
+    """One batched read for a set of executions: their costs and their tool calls.
+
+    The two are kept apart because they are not observed together. An execution
+    can call tools before it reports a token - a harness may report usage at
+    the end of a turn - so it has a tally and no cost. It is absent from
+    ``costs``, not present with zero tokens: a caller falls back to what it
+    already knows rather than replacing it with a zero nobody measured.
+    """
+
+    costs: list[ExecutionCost]
+    tool_calls: dict[str, int]
+    """Tool calls per execution, from the tally, keyed by the stored id."""
+
+
 class ExecutionCostQueryService:
     """Read-only query service for execution cost data.
 
@@ -238,6 +255,13 @@ class ExecutionCostQueryService:
     async def list_for_ids(self, execution_ids: Iterable[str]) -> list[ExecutionCost]:
         """Batch cost lookup for a caller-provided set of execution ids.
 
+        The costs half of ``read_for_ids``.
+        """
+        return (await self.read_for_ids(execution_ids)).costs
+
+    async def read_for_ids(self, execution_ids: Iterable[str]) -> ExecutionCostsForIds:
+        """Batch cost and tool-call lookup for a caller-provided set of execution ids.
+
         Same fixed-count query shape as ``list_all`` (4 round trips: summary,
         token_usage, the tool-call tally, phase costs), but scoped by id instead of
         recency + limit, so it returns exactly the requested executions
@@ -251,7 +275,7 @@ class ExecutionCostQueryService:
         """
         ids = [pg_safe(eid) for eid in execution_ids]
         if not ids:
-            return []
+            return ExecutionCostsForIds(costs=[], tool_calls={})
         async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             # Bounded to the days these executions have telemetry on, so the
             # planner opens those chunks and no others (E2). Same rows: see
@@ -269,7 +293,10 @@ class ExecutionCostQueryService:
             # compress_orderby - the same defect as on the sessions list, and
             # the reason /executions took 4-30s (#1322).
             tool_counts = await tool_call_counts.by_execution(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-            return await self._assemble(conn, summary_rows, token_rows, tool_counts)
+            # The phase costs read a subset of these ids, so this span already
+            # bounds them; looking it up again was a wasted round trip (#1693).
+            costs = await self._assemble(conn, summary_rows, token_rows, tool_counts, span=span)
+        return ExecutionCostsForIds(costs=costs, tool_calls=tool_counts)
 
     async def _assemble(
         self,
@@ -277,10 +304,18 @@ class ExecutionCostQueryService:
         summary_rows: list[asyncpg.Record],
         token_rows: list[asyncpg.Record],
         tool_counts: dict[str, int],
+        *,
+        span: agent_event_span.EventSpan | None = None,
     ) -> list[ExecutionCost]:
-        """Build ``ExecutionCost`` records from already-fetched summary/token rows."""
+        """Build ``ExecutionCost`` records from already-fetched summary/token rows.
+
+        ``span``, when given, must cover every execution in ``summary_rows``;
+        the phase costs are then bounded by it rather than by a fresh lookup.
+        """
         summary_rows_by_execution = self._group_rows_by_execution(summary_rows)
-        phase_map = await self._fetch_phase_cost_map(conn, list(summary_rows_by_execution))
+        phase_map = await self._fetch_phase_cost_map(
+            conn, list(summary_rows_by_execution), span=span
+        )
 
         results: list[ExecutionCost] = []
         for eid, rows in summary_rows_by_execution.items():
@@ -309,7 +344,11 @@ class ExecutionCostQueryService:
         return rows_by_execution
 
     async def _fetch_phase_cost_map(
-        self, conn: object, execution_ids: list[str]
+        self,
+        conn: object,
+        execution_ids: list[str],
+        *,
+        span: agent_event_span.EventSpan | None = None,
     ) -> dict[str, PhaseCosts]:
         """Fetch per-execution, per-phase costs, priced like the execution total.
 
@@ -326,7 +365,8 @@ class ExecutionCostQueryService:
         """
         if not execution_ids:
             return {}
-        span = await agent_event_span.for_executions(conn, execution_ids)  # type: ignore[arg-type]  # the caller's asyncpg connection
+        if span is None:
+            span = await agent_event_span.for_executions(conn, execution_ids)  # type: ignore[arg-type]  # the caller's asyncpg connection
         rows = await conn.fetch(  # type: ignore[union-attr]
             _COST_BY_PHASE_QUERY, SESSION_SUMMARY, execution_ids, span.lower, span.upper
         )

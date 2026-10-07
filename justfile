@@ -542,7 +542,7 @@ cli-node-qa: cli-node-typecheck cli-node-test cli-node-build
 # Loads .env for database connection and API keys
 api-backend:
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    uv run uvicorn syn_api.main:app --host 0.0.0.0 --port 8000 --reload
+    uv run uvicorn syn_api.main:app --host 0.0.0.0 --port 8000 --reload --loop asyncio
 
 # --- Dashboard & Frontend ---
 
@@ -2444,11 +2444,32 @@ bump-version version:
     uv sync --quiet
     just codegen
     echo ""
+    # The release PR carries the changelog: everything merged since the last
+    # tag moves from Unreleased into this version's section. A prerelease
+    # version is left under Unreleased (scripts/changelog.py).
+    echo "Regenerating CHANGELOG.md..."
+    just changelog --release {{version}}
+    echo ""
     python3 scripts/workflows/bump_version.py --check
 
 # Validate every version-carrying file has the same version
 check-version:
     python3 scripts/workflows/bump_version.py --check
+
+# Pull requests never edit CHANGELOG.md; see scripts/changelog.py for why.
+#   just changelog                  # Unreleased = everything since the last vX.Y.Z tag
+#   just changelog --offline        # git only, no gh
+#   just changelog --release 0.34.0 # what bump-version runs
+# Regenerate CHANGELOG.md from merged PRs (git; gh adds release-notes bullets)
+changelog *args:
+    uv run scripts/changelog.py {{args}}
+
+# Deliberately NOT in preflight or CI: every merge to main makes it stale,
+# which would fail unrelated PRs. Not the same thing as CI's release-gate
+# `changelog-check` job, which only checks the release PR body.
+# Fail (with a diff) if CHANGELOG.md is stale
+changelog-check *args:
+    uv run scripts/changelog.py --check {{args}}
 
 # Image build, push, retag and release-asset recipes live in just/release.just
 # (imported at the top of this file), so they can be owner-reviewed without

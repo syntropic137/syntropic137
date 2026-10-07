@@ -8,8 +8,8 @@
  * price.
  */
 
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { PhaseDefinition, PhaseMetrics } from '../../../types'
 import { PhasePipeline } from '../PhasePipeline'
@@ -126,5 +126,70 @@ describe('workflow Phase Pipeline card', () => {
     )
     expect(screen.getByText('$0.1324')).toBeTruthy()
     expect(screen.queryByText(/so far/)).toBeNull()
+  })
+
+  it('lists each declared skill with its repo, short SHA and a link to that version', () => {
+    const sha = '7e48aad9c7186bb03b8b0df899f56b7cd3b2a454'
+    render(
+      <PhasePipeline
+        phases={[
+          {
+            ...PLAN,
+            skills: [
+              {
+                name: 'architecture',
+                source_url: 'https://github.com/syntropic137/software-leverage-points',
+                version: sha,
+                name_overridden: false,
+                raw: null,
+              },
+              // `PhaseRefDetail.from_stored("acme/skills/foo@v1")`: a remote
+              // shorthand the API keeps whole, which is not a local skill.
+              { name: null, source_url: null, version: null, name_overridden: false, raw: 'acme/skills/foo@v1' },
+              // `SkillRef("git@github.com:org/skills@v1")` through `from_stored`.
+              { name: 'skills', source_url: 'git@github.com:org/skills', version: 'v1', name_overridden: false, raw: null },
+            ],
+          },
+        ]}
+        phaseMetrics={undefined}
+      />,
+    )
+    const [pinned, shorthand, ssh] = screen.getAllByTestId('skill-ref')
+    expect(pinned.textContent).toContain('architecture')
+    expect(pinned.textContent).toContain('syntropic137/software-leverage-points')
+    expect(pinned.textContent).toContain('7e48aad')
+    expect(pinned.textContent).not.toContain(sha)
+    expect(screen.getByRole('link', { name: 'Source of architecture at 7e48aad' }).getAttribute('href')).toBe(
+      `https://github.com/syntropic137/software-leverage-points/tree/${sha}`,
+    )
+    expect(shorthand.textContent).toContain('acme/skills/foo@v1')
+    expect(shorthand.textContent).not.toMatch(/local/i)
+    expect(ssh.textContent).toContain('org/skills @ v1')
+    expect(screen.getByRole('link', { name: 'Source of skills at v1' }).getAttribute('href')).toBe(
+      'https://github.com/org/skills/tree/v1',
+    )
+  })
+
+  it('Enter on a skill source link follows the link and does not toggle the phase', () => {
+    // Codex review of #1676: Enter bubbled from the link to the card's handler,
+    // which called preventDefault (no navigation) and toggled selection.
+    const onPhaseSelect = vi.fn()
+    render(
+      <PhasePipeline
+        phases={[{ ...PLAN, skills: [{ name: 'architecture', source_url: 'https://github.com/syntropic137/software-leverage-points', version: '7e48aad9c7186bb03b8b0df899f56b7cd3b2a454', name_overridden: false, raw: null }] }]}
+        onPhaseSelect={onPhaseSelect}
+      />,
+    )
+    const link = screen.getByRole('link', { name: /Source of architecture/ })
+    const notPrevented = fireEvent.keyDown(link, { key: 'Enter' })
+    expect(onPhaseSelect).not.toHaveBeenCalled()
+    expect(notPrevented).toBe(true)
+    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter' })
+    expect(onPhaseSelect).toHaveBeenCalledWith('plan')
+  })
+
+  it('says a phase declares no skills rather than leaving it blank', () => {
+    render(<PhasePipeline phases={[PLAN]} phaseMetrics={undefined} />)
+    expect(screen.getByTestId('phase-skills').textContent).toBe('Skillsnone')
   })
 })

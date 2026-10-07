@@ -214,13 +214,14 @@ class _ProjectingConnection:
     def __init__(self, rows_by_query: Mapping[str, Sequence[_EventRow]]) -> None:
         self._rows_by_query = rows_by_query
 
-    def transaction(self) -> _Transaction:
-        """``agent_event_span.custom_plans`` wraps the page's reads in one."""
+    def transaction(self, *, isolation: str, readonly: bool) -> _Transaction:
+        """``agent_event_span.custom_plans`` wraps the page's reads in one read-only snapshot."""
+        assert (isolation, readonly) == ("repeatable_read", True)
         return _Transaction()
 
     async def execute(self, query: str, *_args: object) -> str:
-        # custom_plans: the read-only snapshot, then the plan setting.
-        assert "REPEATABLE READ, READ ONLY" in query or "plan_cache_mode" in query, query
+        # custom_plans: the plan setting, its one statement after the BEGIN.
+        assert "plan_cache_mode" in query, query
         return "SET"
 
     def _span(self, ids: object) -> _SpanRow:

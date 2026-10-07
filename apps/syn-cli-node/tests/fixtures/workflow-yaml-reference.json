@@ -87,6 +87,28 @@
       ],
       "document_sha256": "99f32a9ed4d9809a13e0ae1fa48bb1369154e8a0eba3e83ef69635a98ae51059"
     },
+    "workflows/evals/verify-pinned/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "4e44a83d26998ddf1c77340b1ff46ab0747e6ad1db7cade610169f75a4d16571"
+    },
+    "workflows/evals/verify-pinned-codex/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "e415b6b2ef430f4d63e526324fff380183ca16e73bd44179c227144132e7024b"
+    },
     "workflows/examples/claude-delegates-to-codex.yaml": {
       "phases": [
         {

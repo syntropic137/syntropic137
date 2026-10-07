@@ -14,12 +14,14 @@ from syn_api.types import (
     GitHubError,
     ObservabilityError,
     Ok,
+    PhaseProgressInfo,
     SessionError,
     SessionSummary,
     WorkflowDetail,
     WorkflowError,
     WorkflowSummary,
 )
+from syn_domain.contexts.orchestration import PhaseProgress
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
@@ -173,6 +175,9 @@ class TestWorkflowDetail:
 class TestExecutionSummary:
     def test_create_with_cost(self):
         ex = ExecutionSummary(
+            phase_progress=PhaseProgressInfo.of(
+                PhaseProgress(status="completed", completed=0, skipped=0, defined=0)
+            ),
             workflow_execution_id="exec-1",
             workflow_id="wf-1",
             workflow_name="Test",

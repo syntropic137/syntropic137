@@ -1429,11 +1429,12 @@ export interface paths {
          * List Accessible Repos Endpoint
          * @description List repositories accessible to the GitHub App.
          *
-         *     Queries all active installations and aggregates results when no
-         *     installation_id is provided. The installation list is cached locally with
-         *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
-         *     GitHub API without requiring a webhook URL. Stale data is kept as a
-         *     fallback if the GitHub API is unreachable during refresh.
+         *     With no installation_id, aggregates every installation. The last complete
+         *     listing is cached and served as ``complete`` while under a minute old;
+         *     otherwise GitHub is asked live, and an older listing is served as
+         *     ``partial`` only if GitHub cannot be asked. The GitHub App's
+         *     ``installation`` and ``installation_repositories`` webhooks invalidate the
+         *     cache at once. A single installation_id is always asked live.
          *
          *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
          *     the App's reach (``complete``) or merely went unseen because GitHub failed.
@@ -3777,6 +3778,7 @@ export interface components {
              * @default 0
              */
             completed_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */
@@ -3929,6 +3931,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /**
              * Total Tokens
              * @default 0
@@ -4049,6 +4052,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -4089,6 +4093,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Total Tokens */
             total_tokens: number;
             /**
@@ -4267,6 +4272,16 @@ export interface components {
              * @default
              */
             last_seen: string;
+        };
+        /**
+         * FallbackAgentResponse
+         * @description The agent a phase is re-run on when its own provider cannot serve it (PC-83).
+         */
+        FallbackAgentResponse: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
         };
         /**
          * FeatureDisabledDetail
@@ -5555,6 +5570,7 @@ export interface components {
              * @default false
              */
             require_delegation: boolean;
+            fallback_agent?: components["schemas"]["FallbackAgentResponse"] | null;
             /**
              * Clone Repos
              * @default true
@@ -5638,6 +5654,8 @@ export interface components {
             model?: string | null;
             /** Requested Model */
             requested_model: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -5732,6 +5750,29 @@ export interface components {
             success: boolean;
             /** Error Message */
             error_message?: string | null;
+        };
+        /**
+         * PhaseProgressInfo
+         * @description How far through its phases an execution is, skipped phases accounted for.
+         *
+         *     ``total_phases`` is what the workflow defines, and a review that certifies
+         *     skips the repair rounds after it (PC-63), so ``completed/total`` read
+         *     "6/10" for a run that finished. Clients render ``display`` and draw
+         *     ``percent``; they never divide the raw counts themselves.
+         */
+        PhaseProgressInfo: {
+            /** Completed */
+            completed: number;
+            /** Skipped */
+            skipped: number;
+            /** Possible */
+            possible: number;
+            /** Remaining Possible */
+            remaining_possible: number;
+            /** Percent */
+            percent: number;
+            /** Display */
+            display: string;
         };
         /**
          * PhaseRefResponse

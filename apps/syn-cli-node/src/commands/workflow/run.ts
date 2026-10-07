@@ -411,7 +411,7 @@ export const statusCommand: CommandDef = {
       table.addRow(
         run.workflow_execution_id.slice(0, 12) + "...",
         run.status,
-        `${run.completed_phases}/${run.total_phases}`,
+        run.phase_progress.display,
         formatTokens(run.total_tokens),
         formatCost(run.total_cost_usd),
       );

@@ -68,6 +68,7 @@ from syn_domain.contexts.orchestration._shared.template_launch import (
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PHASE_ID_PATTERN,
     RESERVED_INPUT_NAMES,
+    FallbackAgentYamlDefinition,
     WorkflowDefinition,
     is_phase_id,
     validate_workflow_yaml,
@@ -174,6 +175,7 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
 )
@@ -371,6 +373,8 @@ __all__ = [
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
+    # Value objects - workflow
+    "FallbackAgentYamlDefinition",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     "Goal",
@@ -385,9 +389,9 @@ __all__ = [
     "IsolationConfig",
     "LaunchEval",
     "OrphanedWorkspace",
-    # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
+    "PhaseProgress",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
     "PullRequestCommenter",

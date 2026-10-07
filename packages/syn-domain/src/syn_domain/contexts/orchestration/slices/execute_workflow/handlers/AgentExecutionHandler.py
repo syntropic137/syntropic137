@@ -301,6 +301,7 @@ class AgentExecutionResult:
         "command",
         "exit_code",
         "launch_failed",
+        "primary_failure",
         "stream_result",
         "subagents",
         "tokens",
@@ -328,6 +329,9 @@ class AgentExecutionResult:
         self.exit_code = command.exit_code if command is not None else exit_code
         self.usage = usage if usage is not None else FinalUsage.resolve(stream_result, tokens)
         self.launch_failed = launch_failed
+        #: Set only on a FALLBACK run that failed too (PC-83): who failed
+        #: first and why, so the phase's error carries both failures.
+        self.primary_failure: str | None = None
 
 
 class AgentExecutionHandler:

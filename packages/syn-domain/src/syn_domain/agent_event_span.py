@@ -86,7 +86,7 @@ class PlanningConnection(Protocol):
 
     async def execute(self, query: str, /, *args: object) -> str: ...
 
-    def transaction(self) -> SpanTransaction: ...
+    def transaction(self, *, isolation: str, readonly: bool) -> SpanTransaction: ...
 
 
 #: Bounds that admit every row: ``time`` is NOT NULL and a timestamptz, and no
@@ -164,10 +164,12 @@ async def custom_plans(conn: PlanningConnection) -> AsyncIterator[None]:
     force_custom_plan`` so a bounded read is always planned with its bounds as
     constants and the planner excludes the chunks outside them. Both end with
     the transaction, so a pooled connection goes back as it came. Must be the
-    connection's outermost transaction: the isolation level is set by the
-    first statement after BEGIN.
+    connection's outermost transaction, as the isolation level is the BEGIN's.
+
+    Two round trips: the BEGIN carries the snapshot's settings itself
+    (``BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY``), so only the plan
+    setting is a statement of its own.
     """
-    async with conn.transaction():
-        await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+    async with conn.transaction(isolation="repeatable_read", readonly=True):
         await conn.execute("SET LOCAL plan_cache_mode = force_custom_plan")
         yield

@@ -46,6 +46,7 @@ function phase(overrides: Partial<Phase>): Phase {
 function renderPhases(phases: Phase[]) {
   const execution = {
     workflow_execution_id: 'exec-1',
+    phase_progress: { completed: 0, skipped: 0, possible: 1, remaining_possible: 1, percent: 0, display: 'phase 1 of up to 1' },
     workflow_id: 'wf-1',
     workflow_name: 'Run',
     status: 'completed',

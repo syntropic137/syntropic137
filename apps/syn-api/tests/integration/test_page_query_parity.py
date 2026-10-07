@@ -11,7 +11,8 @@ query.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import asyncpg
@@ -82,6 +83,10 @@ DOCS: dict[str, ProjectionRecord] = {
 
 AFTER = datetime(2026, 10, 2, tzinfo=UTC)
 BEFORE = datetime(2026, 10, 4, 12, tzinfo=UTC)
+#: Exactly the instants of "a" (after) and "g" (before, written at -05:00): the
+#: window is inclusive at both ends, and an index range must keep both rows.
+AT_A = datetime(2026, 10, 1, 10, tzinfo=UTC)
+AT_G = datetime(2026, 10, 5, 4, 30, tzinfo=UTC)
 TEXT = StatusOf.text("status")
 FLAG = StatusOf.flag("archived", if_true="archived", if_false="active")
 
@@ -96,6 +101,15 @@ QUERIES = [
         after=AFTER,
         before=BEFORE,
         statuses=frozenset({"failed"}),
+    ),
+    PageQuery(status=TEXT, timestamp_field="at", after=AT_A, before=AT_G),
+    PageQuery(status=TEXT, timestamp_field="at", after=AT_G),
+    PageQuery(status=TEXT, timestamp_field="at", before=AT_A),
+    PageQuery(
+        status=TEXT,
+        timestamp_field="at",
+        after=AT_A + timedelta(microseconds=1),
+        before=AT_G - timedelta(microseconds=1),
     ),
     PageQuery(status=TEXT, timestamp_field="at", contains_all={"tags": frozenset({"x", "y"})}),
     PageQuery(status=TEXT, timestamp_field="at", search="alpha", search_fields=("name",)),
@@ -176,5 +190,45 @@ async def test_postgres_count_by_answers_what_counting_the_documents_answers(
 
         assert isinstance(store, ProjectionGroupCount)
         assert dict(await store.count_by(PROJECTION, fields, filters=filters)) == expected
+    finally:
+        await pool.close()
+
+
+async def test_the_execution_window_is_answered_from_its_index(e2_database: str) -> None:
+    """The window is an index range scan on ``workflow_executions``, with the same answer.
+
+    Seq scans are switched off so the planner takes the index whenever the
+    query's expression IS the index's: if the two ever drift apart, it cannot,
+    and the plan says so. A table this small would otherwise be scanned anyway.
+    """
+    from syn_adapters.projection_stores.postgres_page_keys import build_page_query
+
+    projection = "workflow_executions"
+    # The same awkward stamps, under the field this projection is windowed on.
+    docs = {
+        key: {("started_at" if f == "at" else f): v for f, v in doc.items()}
+        for key, doc in DOCS.items()
+    }
+    query = PageQuery(status=TEXT, timestamp_field="started_at", after=AT_A, before=AT_G, limit=3)
+    pool = await asyncpg.create_pool(e2_database, min_size=1, max_size=2)
+    try:
+        store = PostgresProjectionStore(pool)
+        for key in reversed(docs):
+            await store.save(projection, key, dict(docs[key]))
+        # The store builds it in the background on first use of the table.
+        await asyncio.gather(*store._index_builds)
+        sql, params = build_page_query(projection, query, lean_ready=False)
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("SET LOCAL enable_seqscan = off")
+            plan = "\n".join(row[0] for row in await conn.fetch(f"EXPLAIN {sql}", *params))
+        stored = await store.get_all(projection)
+        expected = query.run(
+            [(key, docs[key]) for key in _keys_in_read_order(stored)],
+            document_of=lambda kv: kv[1],
+            to_row=lambda kv: kv[0],
+        )
+
+        assert f"idx_{projection}_window_started_at" in plan, plan
+        assert await store.page_keys(projection, query) == expected
     finally:
         await pool.close()

@@ -28,14 +28,24 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ReviewVerdict,
     SideEffectStatus,
 )
+from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
+    AgentExecutionCompletedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
     ExecutionTagsAddedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
     ExecutionTagsRemovedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+    NextPhaseReadyEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
     WorkspaceProvisionedForPhaseEvent,
+)
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
+    inherited_phase_count,
+    record_skips,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
@@ -108,7 +118,14 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # main without bumping from 13, while PC-63 bumped 13 -> 14. A deployment
     # that had already rebuilt at this branch's 14 would never rebuild for
     # delegation_failure, so the merge takes the higher and bumps once more.
-    VERSION = 15
+    # v16: skipped_phase_ids from NextPhaseReady, so a run certified early
+    # stops reading as finished short of its total. Rebuilt so every run
+    # since PC-63 gets its skips, not only new ones.
+    # v16 (main, PC-83): rebuild so stored AgentExecutionCompleted events
+    # populate agent_provider / agent_model, the agent that actually ran.
+    # v17: both branches bumped 15 -> 16 independently; a deployment already
+    # at either 16 would miss the other's rebuild, so the merge bumps once more.
+    VERSION = 17
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -272,7 +289,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # (#1147). total_phases is required on the event, so there is no
             # default worth defending here; 0 would be a run with no phases.
             "total_phases": event_data.get("total_phases", 0),
-            "completed_phases": 0,
+            "completed_phases": inherited_phase_count(event_data.get("resumed_from")),
+            # Skips a certified review made in the parent (#1681), so a resume
+            # does not count rounds it will never run as work still to do.
+            "skipped_phase_ids": list(event_data.get("inherited_skipped_phase_ids") or []),
             # Held here, not served from here: `on_phase_started` moves each
             # budget onto the phase that it belongs to, which is where a
             # reader needs it next to that phase's elapsed time (#1262).
@@ -337,6 +357,31 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         status = SideEffectStatus.from_stored(event_data.get("reported_side_effects"))
         phase["reported_side_effects"] = None if status is None else status.value
 
+    async def on_agent_execution_completed(self, event_data: AgentExecutionCompletedEvent) -> None:
+        """Record which agent PRODUCED the phase's result (PC-83).
+
+        A phase whose provider was at capacity or out of quota re-runs once on
+        its fallback_agent, so the declared agent is not always the one that
+        ran. Events written before PC-83 carry neither field and leave the
+        phase's values as they were (None), never a guess at the declared one.
+        """
+        event = AgentExecutionCompletedEvent.model_validate(event_data)
+        if event.agent_provider is None and event.agent_model is None:
+            return
+        existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
+        if not existing:
+            return
+        agent = {"agent_provider": event.agent_provider, "agent_model": event.agent_model}
+        found = self._find_phase(existing.get("phases", []), event.phase_id)
+        if found is None:
+            # No row yet: its PhaseStarted was never projected. Held, like
+            # `phase_budgets`, until `on_phase_completed` creates the row, so
+            # the salvage path names its agent the way the common path does.
+            existing.setdefault("phase_agents", {})[event.phase_id] = agent
+        else:
+            found[1].update(agent)
+        await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
+
     async def on_workspace_provisioned_for_phase(
         self, event_data: WorkspaceProvisionedForPhaseEvent
     ) -> None:
@@ -380,22 +425,26 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not existing:
             return
 
-        phase_id = event_data.get("phase_id")
+        phase_id: str = event_data.get("phase_id") or ""
         phases = existing.get("phases", [])
 
-        found = self._find_phase(phases, phase_id or "")
+        found = self._find_phase(phases, phase_id)
         if found:
             _, phase = found
             self._update_phase_metrics(phase, event_data)
         else:
             budgets = existing.get("phase_budgets") or {}
             new_phase = PhaseDetail.completed(
-                phase_id or "",
-                phase_id or "",
+                phase_id,
+                phase_id,
                 event_data,
-                timeout_seconds=budgets.get(phase_id or ""),
+                timeout_seconds=budgets.get(phase_id),
             )
-            phases.append(new_phase.to_dict())
+            row = new_phase.to_dict()
+            # The agent held by `on_agent_execution_completed` for a phase
+            # that had no row yet (PC-83).
+            row.update(existing.get("phase_agents", {}).get(phase_id, {}))
+            phases.append(row)
 
         # Aggregate totals
         input_tokens = event_data.get("input_tokens", 0)
@@ -417,6 +466,26 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["phases"] = phases
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_next_phase_ready(self, event_data: NextPhaseReadyEvent) -> None:
+        """Handle NextPhaseReady: record the phases a review verdict skipped (PC-63).
+
+        Without this a run certified at its first review reads as finished
+        short of its total, because the rounds it never needed stay in the
+        denominator.
+        """
+        event = NextPhaseReadyEvent.model_validate(event_data)
+        execution_id = event.execution_id
+        skipped = event.skipped_phase_ids
+        if not execution_id or not skipped:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["skipped_phase_ids"] = record_skips(
+                existing.get("skipped_phase_ids") or [], skipped
+            )
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_workflow_completed(self, event_data: dict) -> None:
         """Handle WorkflowCompleted event.
