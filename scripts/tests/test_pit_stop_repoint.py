@@ -52,7 +52,8 @@ def _precheck_count(compose: Path, tag: str = _TAG, swapped: str = "api gateway"
             "bash",
             "-c",
             f'remote() {{ bash -c "$*"; }}\nTAG={tag}; SWAPPED="{swapped}"\n'
-            f"COMPOSE_DIR={compose.parent}; COMPOSE={compose.name}\n{counter}pins_on_tag",
+            f"COMPOSE_DIR={compose.parent}; COMPOSE={compose.name}; TMP={compose.parent}\n"
+            f"REPOINT_PY={_SCRIPT.parent / 'pit_stop_repoint.py'}\n{counter}pins_on_tag",
         ],
         capture_output=True,
         text=True,

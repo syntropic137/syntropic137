@@ -63,15 +63,14 @@ def _run_stage(
     n, swapped = {"all": (2, "api gateway"), "gateway": (1, "gateway")}[service]
     preamble = f"""
 set -euo pipefail
-TAG={_TAG}; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; N={n}; SWAPPED="{swapped}"
-COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; TMP={tmp}
+TAG={_TAG}; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; ALREADY="pins already on the tag"; N={n}; SWAPPED="{swapped}"
+COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; TMP={tmp}; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 run() {{ "$@"; }}
 {stub}
 {_counters()}
 """
-    # $0 is the real script, so `$(dirname "$0")/pit_stop_repoint.py` resolves.
     return subprocess.run(
         ["bash", "-c", preamble + _stage_block(), str(_SCRIPT)],
         stdin=subprocess.DEVNULL,

@@ -3,6 +3,13 @@
 Called by scripts/pit_stop.sh at `stage`:
 
     python3 scripts/pit_stop_repoint.py <tag> <deployed-compose> <staged-compose> [--service gateway]
+    python3 scripts/pit_stop_repoint.py --on-tag <tag> <compose> <service>
+
+The second form prints 1 when <service> (`api` or `gateway`) has exactly one
+image line and it names exactly the ref `ship` loaded, else 0. It is the count
+the stage and --swap-only prechecks trust, so it reads the image lines the same
+way the repoint writes them: a commented-out line, a longer tag that merely
+starts with <tag> (`beta.1` vs `beta.10`) or a suffixed one is not on the tag.
 
 It writes the staged compose and prints, on stdout, the name to back the
 deployed file up under (empty when every pin is already the shipped ref, so
@@ -105,7 +112,21 @@ def repoint(compose: str, tag: str, services: tuple[str, ...] = SERVICES) -> Rep
     return Repoint(old=tuple(old), text=text, changed=text != compose)
 
 
+def on_tag(compose: str, tag: str, service: str) -> bool:
+    """Whether `service`'s one image line names `REGISTRY/<service>:<tag>`
+    exactly, optionally digest-qualified. Compared whole, never as a pattern."""
+    found = [m["ref"] for m in _IMAGE_LINE.finditer(compose) if _image_name(m["ref"]) == service]
+    if len(found) != 1:
+        return False
+    ref, _, digest = found[0].partition("@")
+    return ref == f"{REGISTRY}/{service}:{tag}" and (not digest or bool(_DIGEST.fullmatch(digest)))
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) == 4 and argv[0] == "--on-tag":
+        _, tag, compose, svc = argv
+        print(1 if on_tag(Path(compose).read_text(), tag, f"syn-{svc}") else 0)
+        return 0
     service = "all"
     if len(argv) == 5 and argv[3] == "--service":
         service, argv = argv[4], argv[:3]

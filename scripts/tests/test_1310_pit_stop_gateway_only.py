@@ -18,6 +18,10 @@ import os
 import re
 import stat
 import subprocess
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -28,6 +32,9 @@ _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "pit_stop.sh"
 _FIXTURES = Path(__file__).parent / "fixtures" / "pit_stop"
 _GOLDEN = _FIXTURES / "dry-run-all.txt"
+#: The same, on a host whose compose already pins both services to the target:
+#: a replayed stage, which the original script answered with its own message.
+_GOLDEN_STAGED = _FIXTURES / "dry-run-all-staged.txt"
 _VERSION = "0.33.2-beta.9"
 
 _SSH = """#!/usr/bin/env bash
@@ -55,7 +62,9 @@ printf '%s' "$body" > "$out"
 """
 
 
-def _dry_run(tmp: Path, *flags: str) -> tuple[str, str, Path]:
+def _dry_run(
+    tmp: Path, *flags: str, compose: str = "compose-tag.yaml"
+) -> tuple[str, str, Path]:
     """A dry run's normalised stdout, its stderr, and where the stubs logged."""
     bin_dir, log = tmp / "bin", tmp / "log"
     bin_dir.mkdir()
@@ -68,7 +77,7 @@ def _dry_run(tmp: Path, *flags: str) -> tuple[str, str, Path]:
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "PIT_LOG": str(log),
-        "PIT_COMPOSE": str(_FIXTURES / "compose-tag.yaml"),
+        "PIT_COMPOSE": str(_FIXTURES / compose),
         "SYN_API_PASSWORD": "pw",
         "SYN_PIT_HOST": "root@fake-host",
         "SYN_PIT_API": "http://fake-host:8137/api/v1",
@@ -106,6 +115,13 @@ class TestTheDefaultIsUnchanged:
     def test_service_all_is_the_default(self, tmp_path: Path) -> None:
         out, _, _ = _dry_run(tmp_path, "--service", "all")
         assert out == _GOLDEN.read_text()
+
+    @pytest.mark.parametrize("flags", [(), ("--service", "all")])
+    def test_an_already_staged_host_prints_what_the_two_image_script_printed(
+        self, tmp_path: Path, flags: tuple[str, ...]
+    ) -> None:
+        out, _, _ = _dry_run(tmp_path, *flags, compose="compose-staged.yaml")
+        assert out == _GOLDEN_STAGED.read_text()
 
 
 class TestGatewayOnly:
@@ -187,20 +203,61 @@ def _function(name: str) -> str:
     return "\n".join(lines[start : end + 1])
 
 
+@contextmanager
+def _api(statuses: list[int], log: Path) -> Iterator[str]:
+    """A real HTTP server answering each request with the next status (the last
+    repeats), logging `api <path>` per request. Yields the API base URL."""
+    remaining = list(statuses)
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            with log.open("a") as f:
+                f.write(f"api {self.path.removeprefix('/api/v1')}\n")
+            code = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+            body = b'{"status": "healthy"}' if code == 200 else b""
+            self.send_response(code)
+            if code == 302:
+                self.send_header("Location", "/login")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/api/v1"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def _run_branch(
     tmp: Path,
     *,
     running_image: str = "sha256:new",
     running: str = "true",
-    health_fails: int = 0,
+    health: list[int] | None = None,
     ssh_down: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-    """Run the branch for real (DRY=0) with `remote` and `api` playing the
-    host and the API. Every remote and api call is logged, in order."""
+    """Run the branch for real (DRY=0) with `remote` playing the host, and the
+    script's own `api_curl` and the real curl asking a real HTTP server that
+    answers /health with `health`, in order. Every remote and api call is
+    logged, in order."""
     log = tmp / "calls"
+    with _api(health or [200], log) as api_url:
+        return _run_branch_against(tmp, log, api_url, running_image, running, ssh_down)
+
+
+def _run_branch_against(
+    tmp: Path, log: Path, api_url: str, running_image: str, running: str, ssh_down: bool
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     preamble = f"""
 set -euo pipefail
-TAG=v0.33.2-beta.9; SERVICE=gateway; DRY=0; HOST=fake-host; API=http://fake/api/v1
+TAG=v0.33.2-beta.9; SERVICE=gateway; DRY=0; HOST=fake-host; API={api_url}; SYN_API_PASSWORD=pw
 COMPOSE_DIR=/root/.syntropic137; COMPOSE=docker-compose.syntropic137.yaml; TMP={tmp}
 RECOVERY=""; T0=$(date +%s)
 step() {{ printf '==> %s\\n' "$*"; }}
@@ -222,11 +279,7 @@ remote() {{
         *) echo "unexpected remote: $*" >&2; return 99 ;;
     esac
 }}
-api() {{
-    echo "api $1" >> {log}
-    n=$(grep -c '^api ' {log})
-    [ "$n" -gt {health_fails} ]
-}}
+{_function("api_curl")}
 maintenance() {{ echo "maintenance $1" >> {log}; }}
 {_function("swapped_is_running")}
 """
@@ -243,7 +296,7 @@ maintenance() {{ echo "maintenance $1" >> {log}; }}
 
 class TestGatewayOnlyLive:
     def test_swaps_and_verifies_without_touching_the_api_or_admission(self, tmp_path: Path) -> None:
-        proc, calls = _run_branch(tmp_path, health_fails=2)
+        proc, calls = _run_branch(tmp_path, health=[502, 503, 200])
         assert proc.returncode == 0, proc.stderr
         assert "PIT STOP DONE: syn-gateway v0.33.2-beta.9" in proc.stdout
         compose = [c for c in calls if "docker compose" in c]
@@ -268,9 +321,27 @@ class TestGatewayOnlyLive:
         assert "syn137-gateway is not running after the swap" in proc.stderr
 
     def test_health_that_never_answers_fails_verify(self, tmp_path: Path) -> None:
-        proc, _ = _run_branch(tmp_path, health_fails=100)
+        proc, _ = _run_branch(tmp_path, health=[502])
         assert proc.returncode != 0
         assert "did not answer 200 through the new gateway" in proc.stderr
+
+    @pytest.mark.parametrize("status", [204, 302])
+    def test_a_success_that_is_not_200_never_completes(
+        self, tmp_path: Path, status: int
+    ) -> None:
+        """curl -f passes a 204 and a 302; neither is /health routed to the API."""
+        proc, calls = _run_branch(tmp_path, health=[status])
+        assert proc.returncode != 0
+        assert f"did not answer 200 through the new gateway (last status: {status})" in proc.stderr
+        assert "PIT STOP DONE" not in proc.stdout
+        assert ": 200" not in proc.stdout
+        assert [c for c in calls if c.startswith("api ")] == ["api /health"] * 10
+
+    @pytest.mark.parametrize("status", [204, 302])
+    def test_a_non_200_success_then_a_200_completes(self, tmp_path: Path, status: int) -> None:
+        proc, _ = _run_branch(tmp_path, health=[status, 200])
+        assert proc.returncode == 0, proc.stderr
+        assert "GET /health through syn137-gateway: 200" in proc.stdout
 
     def test_losing_the_host_aborts_through_die_with_the_recovery(self, tmp_path: Path) -> None:
         proc, _ = _run_branch(tmp_path, ssh_down=True)

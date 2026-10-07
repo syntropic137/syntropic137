@@ -39,16 +39,19 @@ def _block(start: str, end: str) -> str:
     return text[begin : text.index(end, begin)]
 
 
+def _compose(api: str, gateway: str) -> str:
+    return f"services:\n  api:\n    image: {_REPO}/syn-api:{api}\n  gateway:\n    image: {_REPO}/syn-gateway:{gateway}\n"
+
+
 def _precheck(
-    tmp: Path, service: str, api: str, gateway: str, images: list[str]
+    tmp: Path, service: str, api: str, gateway: str, images: list[str], compose: str | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """Run the precheck with the compose pinning api/gateway to the given tags."""
+    """Run the precheck with the compose pinning api/gateway to the given tags,
+    or with `compose` verbatim when given."""
     host, bin_dir = tmp / "host", tmp / "bin"
     host.mkdir()
     bin_dir.mkdir()
-    (host / _COMPOSE).write_text(
-        f"services:\n  api:\n    image: {_REPO}/syn-api:{api}\n  gateway:\n    image: {_REPO}/syn-gateway:{gateway}\n"
-    )
+    (host / _COMPOSE).write_text(_compose(api, gateway) if compose is None else compose)
     (tmp / "images").write_text("".join(f"{line}\n" for line in images))
     docker = bin_dir / "docker"
     docker.write_text(_DOCKER)
@@ -58,7 +61,7 @@ def _precheck(
 set -euo pipefail
 export PATH={bin_dir}:$PATH PIT_IMAGES={tmp / "images"}
 TAG={_NEW}; MODE=swap; DRY=0; HOST=fake-host; N={n}; SWAPPED="{swapped}"
-COMPOSE_DIR={host}; COMPOSE={_COMPOSE}
+COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; TMP={tmp}; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 remote() {{ bash -c "$*"; }}
@@ -129,3 +132,45 @@ class TestAll:
         proc = _precheck(tmp_path, "all", api=_NEW, gateway=_NEW, images=_images(present))
         assert proc.returncode == 1
         assert "1/2 images" in proc.stderr
+
+
+class TestTheValueIsComparedWhole:
+    """A pin or image that merely CONTAINS the requested one is not it.
+
+    In every case the requested gateway image IS on the host, so the image
+    guard passes and only the pin guard stands between the operator and a
+    gateway recreated from the wrong pin (and vice versa for the image).
+    """
+
+    @pytest.mark.parametrize("deployed", [f"{_NEW}0", f"{_NEW}-extra"])
+    def test_a_longer_tag_that_starts_with_the_request_is_refused(
+        self, tmp_path: Path, deployed: str
+    ) -> None:
+        proc = _precheck(tmp_path, "gateway", api=_OLD, gateway=deployed, images=_images("gateway"))
+        assert proc.returncode == 1
+        assert "pins 0/1 services" in proc.stderr
+
+    def test_a_commented_out_pin_on_the_tag_is_not_counted(self, tmp_path: Path) -> None:
+        compose = _compose(_OLD, _OLD) + f"    # image: {_REPO}/syn-gateway:{_NEW}\n"
+        proc = _precheck(
+            tmp_path, "gateway", api=_OLD, gateway=_OLD, images=_images("gateway"), compose=compose
+        )
+        assert proc.returncode == 1
+        assert "pins 0/1 services" in proc.stderr
+
+    def test_a_near_matching_image_repository_is_refused(self, tmp_path: Path) -> None:
+        images = [f"ghcrxio/syntropic137/syn-gateway:{_NEW}", f"{_REPO}/syn-api:{_NEW}"]
+        proc = _precheck(tmp_path, "gateway", api=_OLD, gateway=_NEW, images=images)
+        assert proc.returncode == 1
+        assert "0/1 images" in proc.stderr
+
+    def test_a_quoted_digest_qualified_pin_with_a_comment_passes(self, tmp_path: Path) -> None:
+        compose = (
+            f"services:\n  api:\n    image: {_REPO}/syn-api:{_OLD}\n  gateway:\n"
+            f'    image: "{_REPO}/syn-gateway:{_NEW}@sha256:{"a" * 64}"  # staged\n'
+        )
+        proc = _precheck(
+            tmp_path, "gateway", api=_OLD, gateway=_NEW, images=_images("gateway"), compose=compose
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "pins=1 images=1" in proc.stdout

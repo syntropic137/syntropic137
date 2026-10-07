@@ -55,6 +55,8 @@ done
 COMMON="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)"
 if [ "$(basename "$COMMON")" = ".git" ]; then REPO_TOP="$(dirname "$COMMON")"; else REPO_TOP="$COMMON"; fi
 WT_BASE="$(dirname "$REPO_TOP")/$(basename "$REPO_TOP")_worktrees"
+# Reads and rewrites the compose image pins; the stage and every pin count use it.
+REPOINT_PY="$(dirname "$0")/pit_stop_repoint.py"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 T0=$(date +%s)
 step() { printf '\n==> [%s +%ss] %s\n' "$(date -u +%H:%M:%SZ)" "$(( $(date +%s) - T0 ))" "$*"; }
@@ -113,8 +115,10 @@ esac
 # What this pit stop ships: the containers it recreates, the images behind
 # them, and how many of each every count below must find.
 case "$SERVICE" in
-    all) SWAPPED="api gateway"; SHIPS="syn-api + syn-gateway"; REPOINTS="both pins"; N=2 ;;
-    gateway) SWAPPED="gateway"; SHIPS="syn-gateway"; REPOINTS="the syn-gateway pin"; N=1 ;;
+    all) SWAPPED="api gateway"; SHIPS="syn-api + syn-gateway"; REPOINTS="both pins"; N=2
+         ALREADY="both pins are already $TAG" ;;
+    gateway) SWAPPED="gateway"; SHIPS="syn-gateway"; REPOINTS="the syn-gateway pin"; N=1
+         ALREADY="the syn-gateway pin is already $TAG" ;;
     *) die "--service must be all or gateway (got: $SERVICE)" ;;
 esac
 IMAGES=""
@@ -285,10 +289,17 @@ GATE
 # pin from the API's, so a gateway-only stage on a host whose API is already on
 # $TAG would count 2, and one whose API alone is there would pass at 1 with the
 # gateway still old (#1310). Each service must name $TAG exactly once.
+#
+# Both compare WHOLE values, never a pattern: a substring grep counted
+# `syn-gateway:v0.33.2-beta.10` and a commented-out `# image:` line as staged
+# for v0.33.2-beta.1, and an unescaped `.` let `ghcrxio/...` stand in for
+# `ghcr.io/...`. The pin is read by the repoint's own parser, so the precheck
+# and the stage agree on what an image line is.
 pins_on_tag() {
     local n=0 svc c
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.check" || { echo 0; return 0; }
     for svc in $SWAPPED; do
-        c="$(remote "grep -c 'syn-$svc:$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
+        c="$(python3 "$REPOINT_PY" --on-tag "$TAG" "$TMP/compose.check" "$svc" || true)"
         if [ "$c" = 1 ]; then n=$((n + 1)); fi
     done
     echo "$n"
@@ -296,7 +307,7 @@ pins_on_tag() {
 images_on_tag() {
     local n=0 svc c
     for svc in $SWAPPED; do
-        c="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -cx 'ghcr.io/syntropic137/syn-$svc:$TAG'" || true)"
+        c="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -cxF 'ghcr.io/syntropic137/syn-$svc:$TAG'" || true)"
         if [ "$c" = 1 ]; then n=$((n + 1)); fi
     done
     echo "$n"
@@ -471,7 +482,7 @@ if [ "$MODE" != "swap" ]; then
     # pins each image by its own digest and a hotfixed one by its own tag, so no
     # single substitution covers both services (scripts/pit_stop_repoint.py).
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
-    BAK="$(python3 "$(dirname "$0")/pit_stop_repoint.py" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
+    BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
     if [ -n "$BAK" ]; then
         # Written beside the file, checked against the staged checksum, and only
@@ -485,7 +496,7 @@ if [ "$MODE" != "swap" ]; then
             echo "   backed up to $COMPOSE.bak-$BAK"
         fi
     else
-        echo "   $REPOINTS already on $TAG"
+        echo "   $ALREADY"
     fi
     # The same count --swap-only prechecks, so a stage it would refuse fails here.
     # Only the swapped services are counted, so syn-api's pin, old or new, says
@@ -551,13 +562,16 @@ if [ "$SERVICE" = gateway ]; then
         # Not /version: that reports the API's build, which this did not touch.
         # /health through the gateway proves the new one is routing. nginx can
         # be a moment behind its container, hence the short bounded retry.
-        routed=0
+        # The STATUS is read, not curl's exit: `-f` passes a 204 or a 302, and
+        # a gateway answering either is not routing /health to the API.
+        routed=0 code=none
         for _ in $(seq 1 10); do
-            if api "/health" "$TMP/gateway.json" 2>/dev/null; then routed=1; break; fi
+            code="$(api_curl -m 90 "$API/health" -o "$TMP/gateway.json" -w '%{http_code}' 2>/dev/null)" || code="${code:-none}"
+            if [ "$code" = 200 ]; then routed=1; break; fi
             sleep 3
         done
-        [ "$routed" = 1 ] || die "GET $API/health did not answer 200 through the new gateway"
-        echo "   GET /health through syn137-gateway: 200"
+        [ "$routed" = 1 ] || die "GET $API/health did not answer 200 through the new gateway (last status: $code)"
+        echo "   GET /health through syn137-gateway: $code"
     fi
     if [ "$DRY" = 1 ]; then
         step "DRY RUN DONE: nothing was built, shipped, staged or swapped. $TAG is NOT live."
