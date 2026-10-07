@@ -88,12 +88,15 @@ Over the API the same record is on the parent's detail response under
 ## Resume is not fork
 
 Resume continues work that did **not finish**. It is not a way to re-run a
-workflow from an arbitrary point, and it is not available on a run that
-succeeded.
+workflow from an arbitrary point. It is not available on a run that completed
+cleanly; the one `completed` run that can be resumed is one that ended with
+unresolved findings (`review_verdict: blocked`), and it resumes at its repair
+point ([see below](#resuming-a-run-with-unresolved-findings)).
 
 | You want | How | Status |
 | --- | --- | --- |
 | Pick up a **failed or interrupted** run where it stopped | `syn execution resume <id>` | Available |
+| Run another repair round on a **completed** run with unresolved findings | `syn execution resume <id> --acknowledge-external-effects` | Available |
 | Start a new run from a chosen point of a **completed** run, the way a git branch is taken from a commit | - | **Not built.** Reserved as *fork* |
 | Run the same workflow again from scratch | `syn workflow run <name>` | Available |
 
@@ -111,7 +114,10 @@ what went wrong survives.
 ## What the child inherits
 
 The resume inherits the **contiguous** run of phases that completed, in order,
-stopping at the first one that did not:
+stopping at the first one that did not. A `completed` run with unresolved
+findings is the exception: every phase completed, so the child inherits only the
+phases before its repair point ([see below](#resuming-a-run-with-unresolved-findings)).
+Either way:
 
 - those phases are never re-run
 - their artifacts are handed to the resumed phase, so it reads its
@@ -194,9 +200,11 @@ syn execution resume exec-1234 --acknowledge-external-effects
 | `completed` | Only when it ended with **unresolved findings** (`review_verdict: blocked`); see below. Otherwise no - nothing is left to run |
 | `running` | No - resuming would put two runs on one piece of work |
 
-Three conditions apply whatever the status. A run with **no unfinished phase** has
-nothing to resume and is refused. A run whose resumed phase had already started
-needs `--acknowledge-external-effects`. And a parent that pinned no phase
+Three conditions apply whatever the status. A run with **nothing to resume** is
+refused: a `failed` or `interrupted` run resumes at its first unfinished phase, so
+one with no unfinished phase is refused, while a `completed` run with unresolved
+findings has no unfinished phase and resumes at its repair point instead. A run
+whose resumed phase had already started needs `--acknowledge-external-effects`. And a parent that pinned no phase
 configuration - an execution from before that was recorded - cannot be resumed at
 all, because what the child would run could then only be read from the current
 workflow template.
