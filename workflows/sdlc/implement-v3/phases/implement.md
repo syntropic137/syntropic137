@@ -87,6 +87,18 @@ change, not the object you just edited.
 A fixture value must be one that could not have arisen without your change. A
 default asserted in its default direction proves nothing.
 
+## Keep command output out of your context
+
+Everything a command prints is re-read on every later turn, so one long test
+log costs its size times every turn after it. Run anything that can print more
+than a screen (test suites, the gate, builds, `gh run view --log`) as
+`<cmd> > /workspace/.tmp/<name>.log 2>&1; echo "exit=$?"`, then read
+`tail -n 40` of the log and `grep` it for what you need. Read files by the
+lines you need (`grep -n`, `sed -n '<a>,<b>p'`), not whole, and never dump a
+lockfile, a generated file or a recording. While iterating, run the test file
+you are changing, not the suite; run the whole suite once, before you push.
+This saves tokens and skips no check.
+
 ## Start from current main
 
 **Before you write anything, merge `origin/main` into your working branch** (or
