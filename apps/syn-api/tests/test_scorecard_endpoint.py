@@ -28,7 +28,10 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEve
 from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
 )
-from syn_domain.contexts.orchestration.slices.scorecard import ScorecardProjection
+from syn_domain.contexts.orchestration.slices.scorecard import (
+    ExecutionSpend,
+    ScorecardProjection,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -38,8 +41,11 @@ pytestmark = pytest.mark.unit
 NOW = datetime(2026, 10, 7, 18, 0, tzinfo=UTC)
 
 
-async def _costs(ids: Iterable[str]) -> dict[str, Decimal]:
-    known = {"parent": Decimal("4.25"), "child": Decimal("1.50")}
+async def _costs(ids: Iterable[str]) -> dict[str, ExecutionSpend]:
+    known = {
+        "parent": ExecutionSpend(total_usd=Decimal("4.25"), by_phase={}),
+        "child": ExecutionSpend(total_usd=Decimal("1.50"), by_phase={"verify_2": Decimal("1.50")}),
+    }
     return {i: known[i] for i in ids if i in known}
 
 
@@ -145,6 +151,11 @@ async def test_the_response_carries_a_resumed_chains_full_cost_and_one_outcome()
     assert response.phases[0].phase_type == "verify"
     assert response.phases[0].median_tokens_display == "2.5M"
     assert response.phases[0].median_tool_calls == 12.0
+    assert response.phases[0].median_cost_usd == "1.50"
+    assert response.phases[0].median_cost_display == "$1.50"
+    assert response.phases[0].phases_with_cost == 1
+    assert response.by_workflow[0].phases[0].p90_cost_usd == "1.50"
+    assert response.daily[-1].median_verify_cost_display == "$1.50"
     verify_target = next(t for t in response.targets if t.name == "Median verify tokens")
     assert verify_target.status == "on_track"
     assert response.delivery.merged_prs is None

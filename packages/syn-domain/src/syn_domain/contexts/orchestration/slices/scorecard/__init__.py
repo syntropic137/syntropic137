@@ -3,11 +3,21 @@
 from .phase_type import PhaseType, phase_type_of
 from .projection import ScorecardProjection, day_key
 from .run_record import RunOutcome, ScorecardPhase, ScorecardRun
-from .scorecard import OutcomeCounts, Scorecard, TargetResult, TargetStatus, compute_scorecard
+from .scorecard import (
+    ExecutionSpend,
+    OutcomeCounts,
+    PhaseTypeStats,
+    Scorecard,
+    TargetResult,
+    TargetStatus,
+    compute_scorecard,
+)
 
 __all__ = [
+    "ExecutionSpend",
     "OutcomeCounts",
     "PhaseType",
+    "PhaseTypeStats",
     "RunOutcome",
     "Scorecard",
     "ScorecardPhase",

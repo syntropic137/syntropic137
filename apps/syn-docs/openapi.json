@@ -16815,6 +16815,21 @@
             "type": "string",
             "title": "Median Verify Tokens Display"
           },
+          "median_verify_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Verify Cost Usd"
+          },
+          "median_verify_cost_display": {
+            "type": "string",
+            "title": "Median Verify Cost Display"
+          },
           "peak_concurrency": {
             "type": "integer",
             "title": "Peak Concurrency"
@@ -16829,6 +16844,8 @@
           "cost_display",
           "median_verify_tokens",
           "median_verify_tokens_display",
+          "median_verify_cost_usd",
+          "median_verify_cost_display",
           "peak_concurrency"
         ],
         "title": "ScorecardDailyPointResponse"
@@ -16952,13 +16969,21 @@
           },
           "counts": {
             "$ref": "#/components/schemas/ScorecardOutcomeCountsResponse"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardPhaseTypeResponse"
+            },
+            "type": "array",
+            "title": "Phases"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "key",
-          "counts"
+          "counts",
+          "phases"
         ],
         "title": "ScorecardOutcomeRowResponse"
       },
@@ -17050,6 +17075,40 @@
           "phases_with_tool_counts": {
             "type": "integer",
             "title": "Phases With Tool Counts"
+          },
+          "median_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Cost Usd"
+          },
+          "median_cost_display": {
+            "type": "string",
+            "title": "Median Cost Display"
+          },
+          "p90_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90 Cost Usd"
+          },
+          "p90_cost_display": {
+            "type": "string",
+            "title": "P90 Cost Display"
+          },
+          "phases_with_cost": {
+            "type": "integer",
+            "title": "Phases With Cost"
           }
         },
         "additionalProperties": false,
@@ -17067,7 +17126,12 @@
           "median_tool_calls_display",
           "tokens_per_tool_call",
           "tokens_per_tool_call_display",
-          "phases_with_tool_counts"
+          "phases_with_tool_counts",
+          "median_cost_usd",
+          "median_cost_display",
+          "p90_cost_usd",
+          "p90_cost_display",
+          "phases_with_cost"
         ],
         "title": "ScorecardPhaseTypeResponse"
       },

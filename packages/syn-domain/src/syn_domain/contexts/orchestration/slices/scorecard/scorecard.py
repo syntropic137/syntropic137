@@ -42,7 +42,7 @@ MERGED_PR_UNAVAILABLE = (
 )
 
 
-def percentile(values: Sequence[float], fraction: float) -> float | None:
+def percentile[T: (float, Decimal)](values: Sequence[T], fraction: float) -> T | None:
     """Nearest-rank percentile; None for no values, never a made-up zero."""
     if not values:
         return None
@@ -81,9 +81,18 @@ class OutcomeCounts:
 
 
 @dataclass(frozen=True)
+class ExecutionSpend:
+    """One execution's Lane-2 cost: its total, and the part of it each phase_id spent."""
+
+    total_usd: Decimal
+    by_phase: Mapping[str, Decimal]
+
+
+@dataclass(frozen=True)
 class OutcomeRow:
     key: str
     counts: OutcomeCounts
+    phases: tuple[PhaseTypeStats, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -96,6 +105,10 @@ class PhaseTypeStats:
     median_tool_calls: float | None
     tokens_per_tool_call: float | None
     phases_with_tool_counts: int
+    median_cost_usd: Decimal | None
+    p90_cost_usd: Decimal | None
+    phases_with_cost: int
+    """Phases whose execution recorded a cost for that phase_id; the cost figures are over these."""
 
 
 @dataclass(frozen=True)
@@ -104,6 +117,7 @@ class DailyPoint:
     counts: OutcomeCounts
     cost_usd: Decimal
     median_verify_tokens: float | None
+    median_verify_cost_usd: Decimal | None
     peak_concurrency: int
 
 
@@ -191,14 +205,36 @@ def _tally(chains: Sequence[_Chain]) -> OutcomeCounts:
     return OutcomeCounts(**fields)
 
 
+def _phase_costs(
+    runs: Sequence[ScorecardRun], spend: Mapping[str, ExecutionSpend], phase_type: PhaseType
+) -> list[Decimal]:
+    """What each phase of this type cost, for the phases whose execution recorded it.
+
+    Keyed by (execution, phase_id), so a failed phase - which has no session on
+    the run record - is costed the same way as one that completed.
+    """
+    costs: list[Decimal] = []
+    for run in runs:
+        recorded = spend.get(run.execution_id)
+        if recorded is None:
+            continue
+        for p in run.phases:
+            if p.phase_type is phase_type and p.phase_id in recorded.by_phase:
+                costs.append(recorded.by_phase[p.phase_id])
+    return costs
+
+
 def _phase_stats(
-    runs: Sequence[ScorecardRun], tool_calls_by_session: Mapping[str, int]
+    runs: Sequence[ScorecardRun],
+    tool_calls_by_session: Mapping[str, int],
+    spend: Mapping[str, ExecutionSpend],
 ) -> tuple[PhaseTypeStats, ...]:
     rows: list[PhaseTypeStats] = []
     for phase_type in PhaseType:
         phases = [p for run in runs for p in run.phases if p.phase_type is phase_type]
         if not phases:
             continue
+        costs = _phase_costs(runs, spend, phase_type)
         tokens = [float(p.total_tokens) for p in phases]
         all_tokens = sum(p.total_tokens for p in phases)
         counted = [
@@ -219,6 +255,9 @@ def _phase_stats(
                 median_tool_calls=percentile([float(c) for _, c in counted], 0.5),
                 tokens_per_tool_call=(sum(t for t, _ in counted) / calls if calls else None),
                 phases_with_tool_counts=len(counted),
+                median_cost_usd=percentile(costs, 0.5),
+                p90_cost_usd=percentile(costs, 0.9),
+                phases_with_cost=len(costs),
             )
         )
     return tuple(rows)
@@ -270,9 +309,10 @@ def _verify_median(runs: Sequence[ScorecardRun]) -> float | None:
     )
 
 
-def _chain_cost(chain: _Chain, cost_by_execution: Mapping[str, Decimal]) -> Decimal:
+def _chain_cost(chain: _Chain, spend: Mapping[str, ExecutionSpend]) -> Decimal:
     return sum(
-        (cost_by_execution.get(m.execution_id, Decimal(0)) for m in chain.members), Decimal(0)
+        (spend[m.execution_id].total_usd for m in chain.members if m.execution_id in spend),
+        Decimal(0),
     )
 
 
@@ -290,7 +330,13 @@ def _chains_ended_between(
     ]
 
 
-def _breakdown(chains: Sequence[_Chain], *, by_model: bool) -> tuple[OutcomeRow, ...]:
+def _breakdown(
+    chains: Sequence[_Chain],
+    tool_calls_by_session: Mapping[str, int],
+    spend: Mapping[str, ExecutionSpend],
+    *,
+    by_model: bool,
+) -> tuple[OutcomeRow, ...]:
     groups: dict[str, list[_Chain]] = {}
     for chain in chains:
         keys = (
@@ -300,7 +346,14 @@ def _breakdown(chains: Sequence[_Chain], *, by_model: bool) -> tuple[OutcomeRow,
         )
         for key in keys:
             groups.setdefault(key, []).append(chain)
-    return tuple(OutcomeRow(k, _tally(v)) for k, v in sorted(groups.items()))
+    return tuple(
+        OutcomeRow(
+            k,
+            _tally(v),
+            _phase_stats([m for c in v for m in c.members], tool_calls_by_session, spend),
+        )
+        for k, v in sorted(groups.items())
+    )
 
 
 def _throughput(runs: Sequence[ScorecardRun], start: datetime, end: datetime) -> Throughput:
@@ -329,7 +382,7 @@ def _throughput(runs: Sequence[ScorecardRun], start: datetime, end: datetime) ->
 def _daily(
     chains: Sequence[_Chain],
     started: Sequence[ScorecardRun],
-    cost_by_execution: Mapping[str, Decimal],
+    spend: Mapping[str, ExecutionSpend],
     start: datetime,
     end: datetime,
     window_days: int,
@@ -343,8 +396,14 @@ def _daily(
             DailyPoint(
                 day=day,
                 counts=_tally(day_chains),
-                cost_usd=sum((_chain_cost(c, cost_by_execution) for c in day_chains), Decimal(0)),
+                cost_usd=sum((_chain_cost(c, spend) for c in day_chains), Decimal(0)),
                 median_verify_tokens=_verify_median([m for c in day_chains for m in c.members]),
+                median_verify_cost_usd=percentile(
+                    _phase_costs(
+                        [m for c in day_chains for m in c.members], spend, PhaseType.VERIFY
+                    ),
+                    0.5,
+                ),
                 peak_concurrency=_peak(
                     _intervals(started, day_start, min(day_start + timedelta(days=1), end))
                 ),
@@ -379,7 +438,7 @@ def _targets(
 def compute_scorecard(
     *,
     runs: Mapping[str, ScorecardRun],
-    cost_by_execution: Mapping[str, Decimal],
+    spend_by_execution: Mapping[str, ExecutionSpend],
     tool_calls_by_session: Mapping[str, int],
     now: datetime,
     window_days: int,
@@ -402,13 +461,13 @@ def compute_scorecard(
         window_end=now,
         window_days=window_days,
         counts=counts,
-        by_workflow=_breakdown(chains, by_model=False),
-        by_model=_breakdown(chains, by_model=True),
-        phases=_phase_stats(members, tool_calls_by_session),
-        daily=_daily(chains, started, cost_by_execution, start, now, window_days),
+        by_workflow=_breakdown(chains, tool_calls_by_session, spend_by_execution, by_model=False),
+        by_model=_breakdown(chains, tool_calls_by_session, spend_by_execution, by_model=True),
+        phases=_phase_stats(members, tool_calls_by_session, spend_by_execution),
+        daily=_daily(chains, started, spend_by_execution, start, now, window_days),
         throughput=throughput,
-        total_cost_usd=sum((_chain_cost(c, cost_by_execution) for c in chains), Decimal(0)),
-        executions_costed=sum(1 for m in members if m.execution_id in cost_by_execution),
+        total_cost_usd=sum((_chain_cost(c, spend_by_execution) for c in chains), Decimal(0)),
+        executions_costed=sum(1 for m in members if m.execution_id in spend_by_execution),
         executions_in_chains=len(members),
         merged_prs=None,
         cost_per_merged_pr_usd=None,

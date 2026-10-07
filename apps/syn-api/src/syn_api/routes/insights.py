@@ -293,12 +293,19 @@ async def get_scorecard_endpoint(
     from syn_api._wiring import get_event_store_instance, get_execution_cost_query
     from syn_api.services.scorecard import WindowError, build_scorecard
     from syn_domain import tool_call_counts
+    from syn_domain.contexts.orchestration import ExecutionSpend
 
     await ensure_connected()
 
-    async def read_costs(execution_ids: Iterable[str]) -> dict[str, Decimal]:
+    async def read_costs(execution_ids: Iterable[str]) -> dict[str, ExecutionSpend]:
         costs = await get_execution_cost_query().list_for_ids(execution_ids)
-        return {c.execution_id: Decimal(c.total_cost_usd) for c in costs}
+        return {
+            c.execution_id: ExecutionSpend(
+                total_usd=Decimal(c.total_cost_usd),
+                by_phase={k: Decimal(v) for k, v in c.cost_by_phase.items()},
+            )
+            for c in costs
+        }
 
     async def read_tool_calls(session_ids: Iterable[str]) -> dict[str, int]:
         pool = get_event_store_instance().pool

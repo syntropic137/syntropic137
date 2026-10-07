@@ -265,7 +265,9 @@ from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     QuarantineNoticeProcessManager,
 )
 from syn_domain.contexts.orchestration.slices.scorecard import (
+    ExecutionSpend,
     OutcomeCounts,
+    PhaseTypeStats,
     Scorecard,
     ScorecardProjection,
     ScorecardRun,
@@ -381,6 +383,7 @@ __all__ = [
     # Value objects - workspace
     "ExecutionResult",
     "ExecutionResumedEvent",
+    "ExecutionSpend",
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
@@ -404,6 +407,7 @@ __all__ = [
     "PhaseDefinition",
     "PhaseExecutionType",
     "PhaseProgress",
+    "PhaseTypeStats",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
     "PullRequestCommenter",

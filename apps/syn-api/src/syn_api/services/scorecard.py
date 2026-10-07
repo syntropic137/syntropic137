@@ -41,7 +41,10 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
     from syn_domain.contexts.orchestration import (
+        ExecutionSpend,
         OutcomeCounts,
+        OutcomeRow,
+        PhaseTypeStats,
         Scorecard,
         ScorecardRun,
         TargetResult,
@@ -80,7 +83,7 @@ async def load_runs(
 async def build_scorecard(
     *,
     store: ProjectionStore,
-    read_costs: Callable[[Iterable[str]], Awaitable[Mapping[str, Decimal]]],
+    read_costs: Callable[[Iterable[str]], Awaitable[Mapping[str, ExecutionSpend]]],
     read_tool_calls: Callable[[Iterable[str]], Awaitable[Mapping[str, int]]],
     window: str,
     now: datetime | None = None,
@@ -91,7 +94,7 @@ async def build_scorecard(
     sessions = [p.session_id for r in runs.values() for p in r.phases if p.session_id]
     card = compute_scorecard(
         runs=runs,
-        cost_by_execution=await read_costs(list(runs)),
+        spend_by_execution=await read_costs(list(runs)),
         tool_calls_by_session=await read_tool_calls(sessions),
         now=moment,
         window_days=window_days,
@@ -134,6 +137,39 @@ _TARGET_DISPLAY: dict[str, Callable[[float | None], str]] = {
 }
 
 
+def _usd(value: Decimal | None) -> str | None:
+    return None if value is None else str(value)
+
+
+def _phase(p: PhaseTypeStats) -> ScorecardPhaseTypeResponse:
+    return ScorecardPhaseTypeResponse(
+        phase_type=p.phase_type.value,
+        phase_count=p.phase_count,
+        median_tokens=p.median_tokens,
+        median_tokens_display=_tokens(p.median_tokens),
+        p90_tokens=p.p90_tokens,
+        p90_tokens_display=_tokens(p.p90_tokens),
+        cache_read_share=p.cache_read_share,
+        cache_read_share_display=_rate(p.cache_read_share),
+        median_tool_calls=p.median_tool_calls,
+        median_tool_calls_display=_number(p.median_tool_calls),
+        tokens_per_tool_call=p.tokens_per_tool_call,
+        tokens_per_tool_call_display=_tokens(p.tokens_per_tool_call),
+        phases_with_tool_counts=p.phases_with_tool_counts,
+        median_cost_usd=_usd(p.median_cost_usd),
+        median_cost_display=format_cost(p.median_cost_usd),
+        p90_cost_usd=_usd(p.p90_cost_usd),
+        p90_cost_display=format_cost(p.p90_cost_usd),
+        phases_with_cost=p.phases_with_cost,
+    )
+
+
+def _row(row: OutcomeRow) -> ScorecardOutcomeRowResponse:
+    return ScorecardOutcomeRowResponse(
+        key=row.key, counts=_counts(row.counts), phases=[_phase(p) for p in row.phases]
+    )
+
+
 def _target(target: TargetResult) -> ScorecardTargetResponse:
     display = _TARGET_DISPLAY.get(target.name, _number)
     return ScorecardTargetResponse(
@@ -161,36 +197,16 @@ def render(card: Scorecard, window: str) -> ScorecardResponse:
             "over finished chains other than cancelled ones."
         ),
         counts=_counts(card.counts),
-        by_workflow=[
-            ScorecardOutcomeRowResponse(key=r.key, counts=_counts(r.counts))
-            for r in card.by_workflow
-        ],
-        by_model=[
-            ScorecardOutcomeRowResponse(key=r.key, counts=_counts(r.counts)) for r in card.by_model
-        ],
-        phases=[
-            ScorecardPhaseTypeResponse(
-                phase_type=p.phase_type.value,
-                phase_count=p.phase_count,
-                median_tokens=p.median_tokens,
-                median_tokens_display=_tokens(p.median_tokens),
-                p90_tokens=p.p90_tokens,
-                p90_tokens_display=_tokens(p.p90_tokens),
-                cache_read_share=p.cache_read_share,
-                cache_read_share_display=_rate(p.cache_read_share),
-                median_tool_calls=p.median_tool_calls,
-                median_tool_calls_display=_number(p.median_tool_calls),
-                tokens_per_tool_call=p.tokens_per_tool_call,
-                tokens_per_tool_call_display=_tokens(p.tokens_per_tool_call),
-                phases_with_tool_counts=p.phases_with_tool_counts,
-            )
-            for p in card.phases
-        ],
+        by_workflow=[_row(r) for r in card.by_workflow],
+        by_model=[_row(r) for r in card.by_model],
+        phases=[_phase(p) for p in card.phases],
         phases_scope=(
             "Completed phases of every run in those chains, failed and resumed runs included, "
             "grouped by phase_id (fix_2 is a fix; finalize_pr and open_pr are finalize; "
             "quickfix is implement; anything else is other). Tool calls come from each "
-            "phase's session tally; phases_with_tool_counts says how many had one."
+            "phase's session tally; phases_with_tool_counts says how many had one. Cost is the "
+            "Lane-2 cost its execution recorded for that phase_id, failed phases included; "
+            "median and p90 cost are over the phases_with_cost phases that had one."
         ),
         daily=[
             ScorecardDailyPointResponse(
@@ -200,6 +216,8 @@ def render(card: Scorecard, window: str) -> ScorecardResponse:
                 cost_display=format_cost(d.cost_usd),
                 median_verify_tokens=d.median_verify_tokens,
                 median_verify_tokens_display=_tokens(d.median_verify_tokens),
+                median_verify_cost_usd=_usd(d.median_verify_cost_usd),
+                median_verify_cost_display=format_cost(d.median_verify_cost_usd),
                 peak_concurrency=d.peak_concurrency,
             )
             for d in card.daily

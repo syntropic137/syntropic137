@@ -36,6 +36,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import 
     WorkflowFailedEvent,
 )
 from syn_domain.contexts.orchestration.slices.scorecard import (
+    ExecutionSpend,
     PhaseType,
     ScorecardProjection,
     TargetStatus,
@@ -186,7 +187,11 @@ async def _run(
         )
 
 
-async def _score(projection: ScorecardProjection, costs: dict[str, Decimal]):
+async def _score(
+    projection: ScorecardProjection,
+    costs: dict[str, Decimal],
+    phase_costs: dict[str, dict[str, Decimal]] | None = None,
+):
     days = ["2026-10-07"]
     loaded = {r.execution_id: r for r in await projection.runs_for_days(days)}
     for run in list(loaded.values()):
@@ -195,7 +200,10 @@ async def _score(projection: ScorecardProjection, costs: dict[str, Decimal]):
                 loaded[member] = got
     return compute_scorecard(
         runs=loaded,
-        cost_by_execution=costs,
+        spend_by_execution={
+            i: ExecutionSpend(total_usd=c, by_phase=(phase_costs or {}).get(i, {}))
+            for i, c in costs.items()
+        },
         tool_calls_by_session={"s-a": 10, "s-b": 30},
         now=NOW,
         window_days=1,
@@ -320,3 +328,49 @@ async def test_a_failed_verify_counts_toward_the_verify_tokens_it_spent() -> Non
     assert verify.phase_count == 3
     assert verify.median_tokens == 2_000_000
     assert verify.p90_tokens == 16_500_000
+
+
+@pytest.mark.asyncio
+async def test_a_failed_verify_counts_toward_the_verify_cost_it_spent() -> None:
+    """Phase cost is read per (execution, phase_id), so the failed verify is costed too.
+
+    Without it the costs are [1, 2]: median 1, p90 2. With it, [1, 2, 9].
+    """
+    projection = ScorecardProjection(InMemoryProjectionStore())
+    await _run(projection, "a", start=0, end=1, outcome="completed", verify_tokens=1_000)
+    await _run(projection, "b", start=1, end=2, outcome="completed", verify_tokens=2_000)
+    await _deliver(projection, _started("c", start=2))
+    await _deliver(
+        projection,
+        _failed("c", end=3, classification=FailureClassification.TASK, phase_id="verify"),
+    )
+
+    card = await _score(
+        projection,
+        {"a": Decimal("1"), "b": Decimal("2"), "c": Decimal("9")},
+        {
+            "a": {"verify": Decimal("1")},
+            "b": {"verify": Decimal("2")},
+            "c": {"verify": Decimal("9")},
+        },
+    )
+
+    verify = next(p for p in card.phases if p.phase_type is PhaseType.VERIFY)
+    assert verify.phases_with_cost == 3
+    assert verify.median_cost_usd == Decimal("2")
+    assert verify.p90_cost_usd == Decimal("9")
+    assert card.daily[-1].median_verify_cost_usd == Decimal("2")
+    (workflow,) = card.by_workflow
+    assert workflow.phases[0].p90_cost_usd == Decimal("9")
+
+
+@pytest.mark.asyncio
+async def test_a_phase_with_no_recorded_cost_is_not_costed_as_zero() -> None:
+    projection = ScorecardProjection(InMemoryProjectionStore())
+    await _run(projection, "a", start=0, end=1, outcome="completed", verify_tokens=1_000)
+
+    card = await _score(projection, {"a": Decimal("1")})
+
+    verify = next(p for p in card.phases if p.phase_type is PhaseType.VERIFY)
+    assert verify.phases_with_cost == 0
+    assert verify.median_cost_usd is None

@@ -6691,6 +6691,10 @@ export interface components {
             median_verify_tokens: number | null;
             /** Median Verify Tokens Display */
             median_verify_tokens_display: string;
+            /** Median Verify Cost Usd */
+            median_verify_cost_usd: string | null;
+            /** Median Verify Cost Display */
+            median_verify_cost_display: string;
             /** Peak Concurrency */
             peak_concurrency: number;
         };
@@ -6739,6 +6743,8 @@ export interface components {
             /** Key */
             key: string;
             counts: components["schemas"]["ScorecardOutcomeCountsResponse"];
+            /** Phases */
+            phases: components["schemas"]["ScorecardPhaseTypeResponse"][];
         };
         /** ScorecardPhaseTypeResponse */
         ScorecardPhaseTypeResponse: {
@@ -6768,6 +6774,16 @@ export interface components {
             tokens_per_tool_call_display: string;
             /** Phases With Tool Counts */
             phases_with_tool_counts: number;
+            /** Median Cost Usd */
+            median_cost_usd: string | null;
+            /** Median Cost Display */
+            median_cost_display: string;
+            /** P90 Cost Usd */
+            p90_cost_usd: string | null;
+            /** P90 Cost Display */
+            p90_cost_display: string;
+            /** Phases With Cost */
+            phases_with_cost: number;
         };
         /**
          * ScorecardResponse
