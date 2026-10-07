@@ -46,7 +46,8 @@ export function useFeedbackState({
 
   const openFeedbackMode = useCallback(() => {
     if (disabled) return;
-    setState((prev) => ({ ...prev, isFeedbackMode: true }));
+    // Also closes the modal, so "Re-pick" from an open modal keeps its draft and media.
+    setState((prev) => ({ ...prev, isFeedbackMode: true, isOpen: false }));
   }, [disabled]);
 
   const closeFeedbackMode = useCallback(() => {

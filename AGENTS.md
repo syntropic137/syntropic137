@@ -298,7 +298,7 @@ All TODO and FIXME comments MUST reference a GitHub issue:
 
 ### Scratch Documentation Policy
 
-Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
+Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
 
 ## Key Concepts
 
