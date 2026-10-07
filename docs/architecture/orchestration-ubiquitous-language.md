@@ -216,6 +216,25 @@ completed it. Carries the artifact ids that Phase produced, and the id of the
 Execution that actually produced them - which may be an ancestor further up a
 chain of Resumes, not the immediate predecessor.
 
+## Declared Phase
+
+A Phase an Execution set out to do, as its `WorkflowExecutionStarted` stated
+it in `phase_definitions`. The same list `total_phases` counts. An Execution
+started before those definitions were recorded (ISS-196) has none.
+
+## Phase Plan
+
+Every Declared Phase of an Execution, in order, each with where it stands:
+the status it ran to here, `inherited`, `skipped`, or `pending`. Served on the
+execution detail API as `phase_plan` (feedback cee46909). Not `phases`, which
+holds only the Phases that started in this Execution.
+
+## Pending Phase
+
+A Declared Phase that has not started, is not an Inherited Phase and is not a
+Skipped Phase: work still to come. Only ever a Phase Plan status; a Phase that
+starts reports its own.
+
 ## Resume Phase
 
 The Phase a resumed Execution starts at: the first Phase, in order, that the
