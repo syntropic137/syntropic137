@@ -14,8 +14,19 @@ evals carrying the suite's tag.
     uv run python scripts/eval_suite.py launch [--suite DIR] [--api-url URL]
     uv run python scripts/eval_suite.py score  [--suite DIR] [--api-url URL]
 
-``check`` needs only git. ``launch`` creates the evals and starts real agent
-runs, which cost money: never run it from CI. ``score`` only reads.
+``check`` needs only git. ``launch`` installs the suite's workflow from the
+checked-in file (refusing to go on unless the server then holds exactly that
+definition), creates the evals and starts real agent runs, which cost money:
+never run it from CI. ``score`` only reads.
+
+THE LAUNCH LEDGER. ``launch`` appends one line per started run to
+``<suite>/launches.jsonl`` (commit it: the workspace that launched is
+ephemeral). ``score`` scores only the runs that ledger names, and only after
+re-reading from the server that the run is still in the eval it launched into,
+that the eval pins the case's commit, and that the run used the suite's
+workflow. An eval's run list cannot tell a run launched into it from one
+attached afterwards - attach never copies the baseline - so a run found only
+by tag is reported and never scored.
 
 Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 """
@@ -68,7 +79,7 @@ class Suite(_Frozen):
 
     @property
     def tag(self) -> str:
-        """The tag every eval of this suite version carries; `score` finds them by it."""
+        """The tag every eval of this suite version carries; the launch ledger and `score` name it."""
         return f"{self.id}:v{self.version}"
 
 
@@ -311,6 +322,22 @@ class _ArtifactContent(_Read):
     content: str | None
 
 
+class _PhaseDefinition(_Read):
+    phase_id: str
+    prompt_template: str | None = None
+    model: str | None = None
+
+
+class _Workflow(_Read):
+    id: str
+    phases: list[_PhaseDefinition]
+
+
+class _Installed(_Read):
+    id: str
+    status: str
+
+
 class _Created(_Read):
     eval_id: str
     baseline_repos: list[_BaselineRepo]
@@ -318,6 +345,34 @@ class _Created(_Read):
 
 class _Started(_Read):
     execution_id: str
+
+
+class Launch(_Frozen):
+    """One run `launch` started: the only association `score` trusts."""
+
+    suite: str
+    """The suite tag, `<id>:v<version>`."""
+    case: str
+    eval_id: str
+    run_id: str
+    commit: str
+    workflow_id: str
+
+
+def launches_path(suite_dir: Path) -> Path:
+    return suite_dir / "launches.jsonl"
+
+
+def read_launches(path: Path) -> list[Launch]:
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [Launch.model_validate_json(line) for line in lines if line.strip()]
+
+
+def _append_launch(path: Path, launch: Launch) -> None:
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(launch.model_dump_json() + "\n")
 
 
 class ScoredRun(_Frozen):
@@ -358,59 +413,96 @@ def _duration_of(run: _Execution) -> str:
     return f"{floor}{run.total_duration_seconds:.0f}s"
 
 
-def score_suite(loaded: LoadedSuite, client: httpx.Client) -> list[ScoredRun]:
-    """One row per run of every eval carrying the suite's tag, and one per case with no run."""
-    evals = _get(client, _EvalList, "/evals", tag=loaded.suite.tag, page_size=200).evals
+def _row(case: str, eval_id: str, run_id: str | None, status: str) -> ScoredRun:
+    return ScoredRun(
+        case=case,
+        eval_id=eval_id,
+        run_id=run_id,
+        status=status,
+        score=None,
+        cost_usd=None,
+        duration="-",
+        models="-",
+    )
+
+
+def _launch_problem(
+    loaded: LoadedSuite,
+    case: Case,
+    launch: Launch,
+    ev: _Eval,
+    member_ids: set[str],
+    run: _Execution,
+) -> str | None:
+    """Why the server no longer backs this ledger line, or None when it does."""
+    s = loaded.suite
+    if launch.run_id not in member_ids:
+        return f"not in eval {ev.eval_id} any more"
+    if not {s.tag, case.tag} <= set(ev.tags):
+        return f"eval {ev.eval_id} is not tagged {s.tag} {case.tag}"
+    pinned = [(b.repository, b.commit_sha) for b in ev.baseline_repos]
+    if pinned != [(s.repository, case.commit)]:
+        return f"eval {ev.eval_id} pins {pinned}, the case pins {case.commit[:12]}"
+    if run.workflow_id != s.workflow.id:
+        return f"ran workflow {run.workflow_id}, the suite runs {s.workflow.id}"
+    return None
+
+
+def score_suite(
+    loaded: LoadedSuite, client: httpx.Client, launches: list[Launch]
+) -> tuple[list[ScoredRun], tuple[str, ...]]:
+    """Score every run the launch ledger records for this suite version.
+
+    Returns one row per launched run (and one per case never launched), and a
+    line per run found in a tagged eval that the ledger does not record: those
+    were attached, or launched by hand, and say nothing about a pinned start.
+    """
+    s = loaded.suite
     rows: list[ScoredRun] = []
+    scored_ids: set[str] = set()
     for case in loaded.cases:
-        mine = [e for e in evals if case.tag in e.tags]
+        mine = [x for x in launches if x.suite == s.tag and x.case == case.id]
         if not mine:
+            rows.append(_row(case.id, "-", None, "not launched"))
+        for launch in mine:
+            ev = _get(client, _Eval, f"/evals/{launch.eval_id}")
+            runs = _get(client, _RunList, f"/evals/{ev.eval_id}/runs", page_size=200).executions
+            run = _get(client, _Execution, f"/executions/{launch.run_id}")
+            scored_ids.add(launch.run_id)
+            problem = _launch_problem(
+                loaded, case, launch, ev, {r.workflow_execution_id for r in runs}, run
+            )
+            if problem:
+                rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
+                continue
+            score = score_report(case.expected, run.review_verdict, _report_of(client, run))
             rows.append(
                 ScoredRun(
                     case=case.id,
-                    eval_id="-",
-                    run_id=None,
-                    status="not launched",
-                    score=None,
-                    cost_usd=None,
-                    duration="-",
-                    models="-",
+                    eval_id=ev.eval_id,
+                    run_id=run.workflow_execution_id,
+                    status=run.status,
+                    score=score,
+                    cost_usd=run.total_cost_usd,
+                    duration=_duration_of(run),
+                    models=_models_of(run),
                 )
             )
-        for ev in mine:
-            runs = _get(client, _RunList, f"/evals/{ev.eval_id}/runs", page_size=200).executions
-            if not runs:
-                rows.append(
-                    ScoredRun(
-                        case=case.id,
-                        eval_id=ev.eval_id,
-                        run_id=None,
-                        status="no run",
-                        score=None,
-                        cost_usd=None,
-                        duration="-",
-                        models="-",
-                    )
+
+    unrecorded: list[str] = []
+    for ev in _get(client, _EvalList, "/evals", tag=s.tag, page_size=200).evals:
+        for summary in _get(
+            client, _RunList, f"/evals/{ev.eval_id}/runs", page_size=200
+        ).executions:
+            if summary.workflow_execution_id not in scored_ids:
+                unrecorded.append(
+                    f"{summary.workflow_execution_id} in eval {ev.eval_id}: "
+                    "not in the launch ledger, not scored"
                 )
-            for summary in runs:
-                run = _get(client, _Execution, f"/executions/{summary.workflow_execution_id}")
-                score = score_report(case.expected, run.review_verdict, _report_of(client, run))
-                rows.append(
-                    ScoredRun(
-                        case=case.id,
-                        eval_id=ev.eval_id,
-                        run_id=run.workflow_execution_id,
-                        status=run.status,
-                        score=score,
-                        cost_usd=run.total_cost_usd,
-                        duration=_duration_of(run),
-                        models=_models_of(run),
-                    )
-                )
-    return rows
+    return rows, tuple(unrecorded)
 
 
-def render(loaded: LoadedSuite, rows: list[ScoredRun]) -> str:
+def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ...] = ()) -> str:
     header = (
         "case",
         "run id",
@@ -453,6 +545,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun]) -> str:
     return (
         f"suite {loaded.suite.tag}  workflow {loaded.suite.workflow.id}  "
         f"declared models {loaded.suite.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed"
+        + "".join(f"\nignored: {line}" for line in unrecorded)
     )
 
 
@@ -461,10 +554,62 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def launch_suite(loaded: LoadedSuite, client: httpx.Client) -> list[str]:
-    """Create one pinned eval per case and start its run. Returns a line per case."""
+def _workflow_document(loaded: LoadedSuite, root: Path) -> str:
+    """The suite's workflow as one YAML document, its prompt files inlined.
+
+    The server has no base directory and refuses a `prompt_file`, so they are
+    resolved here by the same domain code `WorkflowDefinition.from_file` uses.
+    """
+    path = root / loaded.suite.workflow.path
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    WorkflowDefinition._resolve_prompt_files(data, path.parent)  # pyright: ignore[reportPrivateUsage]
+    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROOT) -> str:
+    """Install the suite's workflow, then prove the server holds exactly it.
+
+    Install is load-or-create and a byte-identical reinstall is a no-op, so
+    this is safe on every launch. The read-back is what makes the suite's
+    recorded workflow and models true of the runs: a server whose definition
+    differs in a phase, a prompt or a model is refused before any eval exists.
+    """
     s = loaded.suite
-    out: list[str] = []
+    response = client.post(
+        "/workflows/from-yaml",
+        content=_workflow_document(loaded, root).encode("utf-8"),
+        headers={"content-type": "application/yaml"},
+    )
+    response.raise_for_status()
+    installed = _Installed.model_validate(response.json())
+    if installed.id != s.workflow.id:
+        raise RuntimeError(f"installed workflow {installed.id!r}, the suite runs {s.workflow.id!r}")
+
+    local = WorkflowDefinition.from_file(root / s.workflow.path)
+    want = {p.id: (p.prompt_template, s.workflow.models[p.id]) for p in local.phases}
+    server = _get(client, _Workflow, f"/workflows/{s.workflow.id}")
+    have = {p.phase_id: (p.prompt_template, p.model) for p in server.phases}
+    if have != want:
+        differs = sorted(k for k in want.keys() | have.keys() if want.get(k) != have.get(k))
+        raise RuntimeError(
+            f"server definition of {s.workflow.id} differs from {s.workflow.path} "
+            f"in phase(s) {differs} (prompt or model); no eval was created"
+        )
+    return (
+        f"workflow {s.workflow.id}: {installed.status}, server definition matches {s.workflow.path}"
+    )
+
+
+def launch_suite(
+    loaded: LoadedSuite, client: httpx.Client, ledger: Path, root: Path = ROOT
+) -> list[str]:
+    """Install the workflow, then create one pinned eval per case and start its run.
+
+    Each started run is appended to `ledger` as it starts, so a launch that
+    dies part way still records the runs it began.
+    """
+    s = loaded.suite
+    out = [install_workflow(loaded, client, root)]
     for case in loaded.cases:
         response = client.post(
             "/evals",
@@ -493,6 +638,17 @@ def launch_suite(loaded: LoadedSuite, client: httpx.Client) -> list[str]:
         )
         response.raise_for_status()
         started = _Started.model_validate(response.json())
+        _append_launch(
+            ledger,
+            Launch(
+                suite=s.tag,
+                case=case.id,
+                eval_id=created.eval_id,
+                run_id=started.execution_id,
+                commit=case.commit,
+                workflow_id=s.workflow.id,
+            ),
+        )
         out.append(
             f"{case.id}: eval {created.eval_id} @ {case.commit[:12]} -> run {started.execution_id}"
         )
@@ -503,8 +659,11 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
     """What `launch` would send, one line per case. Writes nothing."""
     s = loaded.suite
     return [
+        f"first: POST /workflows/from-yaml {s.workflow.path} (prompts inlined), then "
+        f"GET /workflows/{s.workflow.id} must match its phases, prompts and models {s.workflow.models}"
+    ] + [
         f"{c.id}: POST /evals baseline {s.repository}@{c.commit} tags [{s.tag}, {c.tag}]; "
-        f"then POST /workflows/{s.workflow.id}/execute with that eval_id"
+        f"then POST /workflows/{s.workflow.id}/execute with that eval_id; run recorded in launches.jsonl"
         for c in loaded.cases
     ]
 
@@ -524,6 +683,12 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", type=Path, default=ROOT, help="git checkout holding the pinned commits"
     )
     parser.add_argument("--api-url", default=None, help="defaults to DEV__API_URL / localhost")
+    parser.add_argument(
+        "--launches",
+        type=Path,
+        default=None,
+        help="launch ledger launch appends to and score reads (default <suite>/launches.jsonl)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -544,12 +709,14 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(describe_launch(loaded)))
             return 0
 
+    ledger: Path = args.launches or launches_path(args.suite)
     with httpx.Client(base_url=args.api_url or get_dev_api_url(), timeout=60) as client:
         if args.command == "launch":
-            print("\n".join(launch_suite(loaded, client)))
+            print("\n".join(launch_suite(loaded, client, ledger)))
+            print(f"recorded in {ledger}: commit it, `score` reads only the runs it names")
             return 0
-        rows = score_suite(loaded, client)
-    print(render(loaded, rows))
+        rows, unrecorded = score_suite(loaded, client, read_launches(ledger))
+    print(render(loaded, rows, unrecorded))
     return 0 if rows and all(r.score and r.score.passed for r in rows) else 1
 
 

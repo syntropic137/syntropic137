@@ -14,6 +14,7 @@ import json
 import shutil
 import subprocess
 import sys
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -27,13 +28,18 @@ from eval_suite import (
     ROOT,
     DefinitionError,
     Expected,
+    Launch,
+    LoadedSuite,
     check_commits,
     launch_suite,
     load_suite,
+    read_launches,
     render,
     score_report,
     score_suite,
 )
+
+from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -251,12 +257,136 @@ def test_a_report_missing_a_keyword_group_says_which() -> None:
 
 _CASE = "binary-artifact-minio-key"
 _PIN = "b2f680f00b4e154b94fa4802a92ead30429e7b98"
+_WF = "eval-verify-pinned-v1"
 
 
-def _api(requests: list[httpx.Request]) -> httpx.Client:
-    def handle(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
+@dataclass(frozen=True)
+class _ServedPhase:
+    phase_id: str
+    prompt_template: str | None
+    model: str
+
+
+def _phases_of(loaded: LoadedSuite) -> list[_ServedPhase]:
+    """The phases the server would serve back for the checked-in workflow."""
+    local = WorkflowDefinition.from_file(ROOT / loaded.suite.workflow.path)
+    return [
+        _ServedPhase(p.id, p.prompt_template, loaded.suite.workflow.models[p.id])
+        for p in local.phases
+    ]
+
+
+class _Server:
+    """A fresh API server: no workflow installed until `/workflows/from-yaml` installs one.
+
+    `eval-1` pins the case's commit and holds `exec-1` (launched) and, when
+    `attached` is set, `exec-attached`: a blocked run with a matching report
+    that was attached afterwards, as the API allows without copying the baseline.
+    """
+
+    def __init__(
+        self,
+        loaded: LoadedSuite,
+        *,
+        attached: bool = False,
+        served_phases: list[_ServedPhase] | None = None,
+    ) -> None:
+        self.requests: list[httpx.Request] = []
+        self.installed: str | None = None
+        self.phases = served_phases if served_phases is not None else _phases_of(loaded)
+        self.attached = attached
+        self.eval_pin = _PIN
+        self.run_workflow = _WF
+
+    def client(self) -> httpx.Client:
+        return httpx.Client(base_url="http://api", transport=httpx.MockTransport(self.handle))
+
+    def _execution(self, run_id: str) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "workflow_execution_id": run_id,
+                "workflow_id": self.run_workflow,
+                "workflow_name": "w",
+                "status": "completed",
+                "review_verdict": "blocked",
+                "total_cost_usd": "3.75",
+                "total_duration_seconds": 640.2,
+                "unknown_duration_phase_count": 0,
+                "total_input_tokens": 1,
+                "total_output_tokens": 1,
+                "total_cache_creation_tokens": 0,
+                "total_cache_read_tokens": 0,
+                "total_tokens": 2,
+                "artifact_ids": ["art-1"],
+                "phases": [
+                    {
+                        "phase_id": "verify",
+                        "name": "v",
+                        "status": "completed",
+                        "artifact_id": "art-1",
+                        "model": "claude-opus-5-5",
+                        "requested_model": "opus",
+                    }
+                ],
+            },
+        )
+
+    def _eval(self) -> dict[str, object]:
+        return {
+            "eval_id": "eval-1",
+            "name": "n",
+            "goal": "g",
+            "starting_workflow_id": None,
+            "tags": ["verifier-seed-v1:v1", f"case:{_CASE}"],
+            "frozen": True,
+            "archived": False,
+            "created_at": None,
+            "updated_at": None,
+            "run_count": 1,
+            "run_status_counts": {"completed": 1},
+            "baseline_repos": [
+                {
+                    "repository": "syntropic137/syntropic137",
+                    "requested_ref": self.eval_pin,
+                    "commit_sha": self.eval_pin,
+                }
+            ],
+        }
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
         path = request.url.path
+        if request.method == "POST" and path == "/workflows/from-yaml":
+            definition = WorkflowDefinition.from_yaml(request.content.decode())
+            self.installed = definition.id
+            return httpx.Response(
+                201,
+                json={
+                    "id": definition.id,
+                    "name": definition.name,
+                    "workflow_type": "custom",
+                    "classification": "standard",
+                    "repository_url": "",
+                    "requires_repos": True,
+                    "status": "created",
+                    "warnings": [],
+                },
+            )
+        if path == f"/workflows/{_WF}" and request.method == "GET":
+            if self.installed != _WF:
+                return httpx.Response(404, json={"detail": "Workflow not found"})
+            return httpx.Response(
+                200,
+                json={
+                    "id": _WF,
+                    "name": "w",
+                    "workflow_type": "custom",
+                    "classification": "standard",
+                    "requires_repos": True,
+                    "phases": [asdict(p) for p in self.phases],
+                },
+            )
         if request.method == "POST" and path == "/evals":
             body = json.loads(request.content)
             pin = body["baseline_repos"][0]["requested_ref"]
@@ -278,13 +408,13 @@ def _api(requests: list[httpx.Request]) -> httpx.Client:
                 },
             )
         if request.method == "POST" and path.endswith("/execute"):
+            # The real route 404s when the workflow repository has no such id.
+            if path != f"/workflows/{self.installed}/execute":
+                return httpx.Response(404, json={"detail": "Workflow not found"})
             body = json.loads(request.content)
             return httpx.Response(
                 200,
-                json={
-                    "execution_id": f"exec-for-{body['eval_id']}",
-                    "workflow_id": "eval-verify-pinned-v1",
-                },
+                json={"execution_id": f"exec-for-{body['eval_id']}", "workflow_id": _WF},
             )
         if path == "/evals":
             return httpx.Response(
@@ -294,77 +424,32 @@ def _api(requests: list[httpx.Request]) -> httpx.Client:
                     "page": 1,
                     "page_size": 200,
                     "status_counts": {},
-                    "evals": [
-                        {
-                            "eval_id": "eval-1",
-                            "name": "n",
-                            "goal": "g",
-                            "starting_workflow_id": None,
-                            "tags": ["verifier-seed-v1:v1", f"case:{_CASE}"],
-                            "frozen": True,
-                            "archived": False,
-                            "created_at": None,
-                            "updated_at": None,
-                            "run_count": 1,
-                            "run_status_counts": {"completed": 1},
-                            "baseline_repos": [
-                                {
-                                    "repository": "syntropic137/syntropic137",
-                                    "requested_ref": _PIN,
-                                    "commit_sha": _PIN,
-                                }
-                            ],
-                        }
-                    ],
+                    "evals": [self._eval()],
                 },
             )
+        if path == "/evals/eval-1":
+            return httpx.Response(200, json=self._eval())
         if path == "/evals/eval-1/runs":
+            ids = ["exec-1"] + (["exec-attached"] if self.attached else [])
             return httpx.Response(
                 200,
                 json={
-                    "total": 1,
+                    "total": len(ids),
                     "page": 1,
                     "page_size": 200,
                     "executions": [
                         {
-                            "workflow_execution_id": "exec-1",
-                            "workflow_id": "eval-verify-pinned-v1",
+                            "workflow_execution_id": i,
+                            "workflow_id": _WF,
                             "workflow_name": "w",
                             "status": "completed",
                         }
+                        for i in ids
                     ],
                 },
             )
-        if path == "/executions/exec-1":
-            return httpx.Response(
-                200,
-                json={
-                    "workflow_execution_id": "exec-1",
-                    "workflow_id": "eval-verify-pinned-v1",
-                    "workflow_name": "w",
-                    "status": "completed",
-                    "review_verdict": "blocked",
-                    "total_cost_usd": "3.75",
-                    "total_duration_seconds": 640.2,
-                    "unknown_duration_phase_count": 0,
-                    "total_input_tokens": 1,
-                    "total_output_tokens": 1,
-                    "total_cache_creation_tokens": 0,
-                    "total_cache_read_tokens": 0,
-                    "total_tokens": 2,
-                    "artifact_ids": ["art-1"],
-                    "phases": [
-                        {
-                            "phase_id": "verify",
-                            "name": "v",
-                            "status": "completed",
-                            "artifact_id": "art-1",
-                            "model": "claude-opus-5-5",
-                            "requested_model": "opus",
-                        }
-                    ],
-                },
-            )
+        if path in ("/executions/exec-1", "/executions/exec-attached"):
+            return self._execution(path.rsplit("/", 1)[1])
         if path == "/artifacts/art-1/content":
             return httpx.Response(
                 200,
@@ -377,16 +462,23 @@ def _api(requests: list[httpx.Request]) -> httpx.Client:
             )
         return httpx.Response(404, json={"detail": path})
 
-    return httpx.Client(base_url="http://api", transport=httpx.MockTransport(handle))
+
+_LAUNCHED = Launch(
+    suite="verifier-seed-v1:v1",
+    case=_CASE,
+    eval_id="eval-1",
+    run_id="exec-1",
+    commit=_PIN,
+    workflow_id=_WF,
+)
 
 
 @pytest.mark.unit
 def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     loaded = load_suite(DEFAULT_SUITE)
-    requests: list[httpx.Request] = []
-    rows = score_suite(loaded, _api(requests))
+    server = _Server(loaded)
+    rows, unrecorded = score_suite(loaded, server.client(), [_LAUNCHED])
 
-    assert requests[0].url.params.get_list("tag") == ["verifier-seed-v1:v1"]
     scored = [r for r in rows if r.case == _CASE]
     assert len(scored) == 1
     row = scored[0]
@@ -395,54 +487,122 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert row.cost_usd == Decimal("3.75")
     assert row.models == "verify=claude-opus-5-5"
     assert {r.status for r in rows if r.case != _CASE} == {"not launched"}
+    assert unrecorded == ()
 
     table = render(loaded, rows)
     assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/4 passed" in table
 
 
 @pytest.mark.unit
-def test_launch_pins_each_case_and_starts_its_run_in_that_eval() -> None:
+def test_an_attached_run_with_a_matching_blocked_report_is_never_scored() -> None:
     loaded = load_suite(DEFAULT_SUITE)
-    requests: list[httpx.Request] = []
-    lines = launch_suite(loaded, _api(requests))
+    server = _Server(loaded, attached=True)
+    rows, unrecorded = score_suite(loaded, server.client(), [_LAUNCHED])
 
-    creates = [json.loads(r.content) for r in requests if r.url.path == "/evals"]
-    starts = [json.loads(r.content) for r in requests if r.url.path.endswith("/execute")]
+    assert [r.run_id for r in rows if r.score] == ["exec-1"]
+    assert all(r.run_id != "exec-attached" for r in rows)
+    assert len(unrecorded) == 1 and unrecorded[0].startswith("exec-attached")
+
+
+@pytest.mark.unit
+def test_a_tagged_eval_run_with_no_launch_record_does_not_pass() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    rows, unrecorded = score_suite(loaded, _Server(loaded).client(), [])
+
+    assert not any(r.score and r.score.passed for r in rows)
+    assert {r.status for r in rows} == {"not launched"}
+    assert unrecorded and unrecorded[0].startswith("exec-1")
+
+
+@pytest.mark.unit
+def test_a_launched_run_whose_eval_pins_another_commit_is_rejected() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    server.eval_pin = "0" * 40
+    rows, _ = score_suite(loaded, server.client(), [_LAUNCHED])
+
+    row = next(r for r in rows if r.case == _CASE)
+    assert row.score is None and row.status.startswith("rejected: eval eval-1 pins")
+
+
+@pytest.mark.unit
+def test_a_launched_run_of_another_workflow_is_rejected() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    server.run_workflow = "sdlc-reverify-pr-v1"
+    rows, _ = score_suite(loaded, server.client(), [_LAUNCHED])
+
+    row = next(r for r in rows if r.case == _CASE)
+    assert row.score is None and row.status.startswith("rejected: ran workflow")
+
+
+@pytest.mark.unit
+def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    ledger = tmp_path / "launches.jsonl"
+    lines = launch_suite(loaded, server.client(), ledger)
+
+    paths = [(r.method, r.url.path) for r in server.requests]
+    assert paths[0] == ("POST", "/workflows/from-yaml")
+    assert paths[1] == ("GET", f"/workflows/{_WF}")
+    assert "prompt_file" not in server.requests[0].content.decode()
+    creates = [json.loads(r.content) for r in server.requests if r.url.path == "/evals"]
+    starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [c["baseline_repos"][0]["requested_ref"] for c in creates] == [
         c.commit for c in loaded.cases
     ]
     assert all("verifier-seed-v1:v1" in c["tags"] for c in creates)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert all(
-        r.url.path == "/workflows/eval-verify-pinned-v1/execute"
-        for r in requests
-        if r.method == "POST" and r.url.path != "/evals"
-    )
-    assert len(lines) == 4
+    assert len(lines) == 5
+
+    recorded = read_launches(ledger)
+    assert [(x.case, x.commit, x.eval_id, x.run_id) for x in recorded] == [
+        (c.id, c.commit, f"eval-{c.commit[:6]}", f"exec-for-eval-{c.commit[:6]}")
+        for c in loaded.cases
+    ]
+    assert {x.workflow_id for x in recorded} == {_WF}
 
 
 @pytest.mark.unit
-def test_launch_stops_when_the_server_pins_another_commit() -> None:
+def test_launch_creates_no_eval_when_the_server_definition_differs(tmp_path: Path) -> None:
     loaded = load_suite(DEFAULT_SUITE)
+    phases = _phases_of(loaded)
+    phases[0] = replace(phases[0], model="sonnet")
+    server = _Server(loaded, served_phases=phases)
+
+    with pytest.raises(RuntimeError, match="differs from"):
+        launch_suite(loaded, server.client(), tmp_path / "launches.jsonl")
+    assert not any(r.url.path == "/evals" for r in server.requests)
+    assert not (tmp_path / "launches.jsonl").exists()
+
+
+@pytest.mark.unit
+def test_launch_stops_when_the_server_pins_another_commit(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    inner = server.handle
 
     def wrong_pin(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "eval_id": "e",
-                "baseline_repos": [
-                    {
-                        "repository": "syntropic137/syntropic137",
-                        "requested_ref": "x",
-                        "commit_sha": "0" * 40,
-                    }
-                ],
-            },
-        )
+        if request.method == "POST" and request.url.path == "/evals":
+            return httpx.Response(
+                200,
+                json={
+                    "eval_id": "e",
+                    "baseline_repos": [
+                        {
+                            "repository": "syntropic137/syntropic137",
+                            "requested_ref": "x",
+                            "commit_sha": "0" * 40,
+                        }
+                    ],
+                },
+            )
+        return inner(request)
 
     client = httpx.Client(base_url="http://api", transport=httpx.MockTransport(wrong_pin))
     with pytest.raises(RuntimeError, match="pinned"):
-        launch_suite(loaded, client)
+        launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
 
 @pytest.mark.unit
