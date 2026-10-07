@@ -1,0 +1,4 @@
+{"suite":"verifier-seed-v1:v1","case":"binary-artifact-minio-key","eval_id":"eval-ba8c2aba01b1414495f021b11ca5f8a6","run_id":"exec-0014a3de808d","commit":"b2f680f00b4e154b94fa4802a92ead30429e7b98","workflow_id":"eval-verify-pinned-v1"}
+{"suite":"verifier-seed-v1:v1","case":"codex-cost-limit","eval_id":"eval-eb93f4482e5a4a0da14c76ba724797d0","run_id":"exec-d58cc7c768c8","commit":"123b25204fce5052f1b0ab494d2c59fa607624ad","workflow_id":"eval-verify-pinned-v1"}
+{"suite":"verifier-seed-v1:v1","case":"execution-id-as-eval-id","eval_id":"eval-732d1230751e42d8bc1e8e643c23e8da","run_id":"exec-01377c8e4faf","commit":"7047b1c3daf1c4057d63eeb478cadd676d712bf5","workflow_id":"eval-verify-pinned-v1"}
+{"suite":"verifier-seed-v1:v1","case":"shared-esp-stream","eval_id":"eval-45f40a9869f044078e0d8b44e5312403","run_id":"exec-707cefadabf8","commit":"6646da278d17a16e16549cf77b0749b25d8e8040","workflow_id":"eval-verify-pinned-v1"}
