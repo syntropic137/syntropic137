@@ -196,16 +196,10 @@ sys.exit(1 if busy else 0)
 PY
 }
 
-# The drain's and the probe's bounds are DEADLINES on a monotonic clock, not counters of sleeps:
-# a counter that adds 10 per poll let one slow GET after another stretch a 600s
-# bound past 90 minutes. Every probe HTTP call is capped to what is left.
+# The drain's and the probe's bounds are DEADLINES on this monotonic clock,
+# not counters of sleeps: a counter that adds 10 per poll let one slow GET after
+# another stretch the probe's 600s bound past 90 minutes.
 mono_now() { python3 -c 'import time; print(int(time.monotonic()))'; }
-left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
-    local l=$(( $1 - $(mono_now) ))
-    if [ "$l" -gt 90 ]; then l=90; fi
-    if [ "$l" -lt 0 ]; then l=0; fi
-    echo "$l"
-}
 
 # Close or open the admission gate (#1387). THE DRAIN ALONE ONLY OBSERVES:
 # `drained` is a statement about one instant, and nothing used to stop a
@@ -526,6 +520,13 @@ maintenance false "" || die "$TAG is live but the clear did not complete; retry 
 # same admission as everyone else's work, and a failed probe never re-closes it.
 api_post() { api_curl -m "${4:-90}" -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
 
+# Every probe HTTP call is capped to what is left of its deadline.
+left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
+    local l=$(( $1 - $(mono_now) ))
+    if [ "$l" -gt 90 ]; then l=90; fi
+    if [ "$l" -lt 0 ]; then l=0; fi
+    echo "$l"
+}
 nap() {  # $1: deadline; sleep the poll interval, never past the deadline
     local t
     t="$(left "$1")"
