@@ -715,7 +715,7 @@ export interface paths {
         };
         /**
          * List Eval Runs Endpoint
-         * @description The executions currently in an eval: the execution list, filtered by eval.
+         * @description The executions currently in an eval, newest first, each with what it ran and its score.
          *
          *     An eval with no runs, or one the read model has not caught up with, is an
          *     empty page rather than a 404.
@@ -723,6 +723,28 @@ export interface paths {
         get: operations["list_eval_runs_endpoint_evals__eval_id__runs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/runs/{execution_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Score Eval Run Endpoint
+         * @description Record a verdict on one run. Re-scoring replaces the run's current score.
+         *
+         *     Allowed on frozen and archived evals: judging a run is not editing the eval.
+         */
+        post: operations["score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3511,6 +3533,149 @@ export interface components {
             run_status_counts: {
                 [key: string]: number;
             };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+        };
+        /**
+         * EvalRunListResponse
+         * @description One page of an eval's current runs, newest first (Evals v2).
+         */
+        EvalRunListResponse: {
+            /** Items */
+            items: components["schemas"]["EvalRunResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /**
+         * EvalRunModelResponse
+         * @description The model one phase of a run ACTUALLY ran, as its harness reported it.
+         */
+        EvalRunModelResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Model */
+            model: string;
+        };
+        /**
+         * EvalRunResponse
+         * @description One run of an eval: one data point of how the eval changes over time (Evals v2).
+         */
+        EvalRunResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Status */
+            status: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version?: string | null;
+            /** Models */
+            models: components["schemas"]["EvalRunModelResponse"][];
+            /** Total Cost Usd */
+            total_cost_usd: string | null;
+            /** Total Cost Display */
+            total_cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Display */
+            duration_display: string;
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Score */
+            score: number | null;
+            /** Evidence Excerpt */
+            evidence_excerpt: string | null;
+            /** Scorer */
+            scorer: string | null;
+            /** Scorer Version */
+            scorer_version: string | null;
+            /** Scored At */
+            scored_at: string | null;
+        };
+        /**
+         * EvalRunScoreRequest
+         * @description A scorer's verdict on one run of an eval. Re-scoring replaces the current score.
+         */
+        EvalRunScoreRequest: {
+            verdict: components["schemas"]["Verdict"];
+            /** Score */
+            score?: number | null;
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
+            /** Scorer */
+            scorer: string;
+            /** Scorer Version */
+            scorer_version: string;
+        };
+        /**
+         * EvalRunScoreResponse
+         * @description The run's score as recorded (Evals v2).
+         */
+        EvalRunScoreResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Execution Id */
+            execution_id: string;
+            verdict: components["schemas"]["Verdict"];
+            /** Score */
+            score: number | null;
+            /** Evidence */
+            evidence: string;
+            /** Scorer */
+            scorer: string;
+            /** Scorer Version */
+            scorer_version: string;
+            /** Scored At */
+            scored_at: string;
+        };
+        /**
+         * EvalVariantResponse
+         * @description Every run of an eval with the same workflow and the same OBSERVED models (Evals v2).
+         */
+        EvalVariantResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Models */
+            models: string[];
+            /** Run Count */
+            run_count: number;
+            /** Pass Count */
+            pass_count: number;
+            /** Pass Rate */
+            pass_rate: number | null;
+            /** Pass Rate Display */
+            pass_rate_display: string;
+            /** Avg Cost Usd */
+            avg_cost_usd: string | null;
+            /** Avg Cost Display */
+            avg_cost_display: string;
+            /** Last Run At */
+            last_run_at: string | null;
         };
         /**
          * EventListResponse
@@ -8581,6 +8746,16 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * Verdict
+         * @description What a scorer concluded about one run of an eval.
+         *
+         *     ``ERROR`` is the scorer's own failure to reach a conclusion (the run left
+         *     nothing to judge, or the scorer broke), never a judgement that the run
+         *     failed. It counts as scored, and not as passed.
+         * @enum {string}
+         */
+        Verdict: "PASS" | "FAIL" | "ERROR";
+        /**
          * WorkflowDefaultEvalResponse
          * @description A workflow's default eval after an edit, read from the aggregate (#967).
          */
@@ -10242,11 +10417,59 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExecutionListResponse"];
+                    "application/json": components["schemas"]["EvalRunListResponse"];
                 };
             };
             /** @description No eval has this id in the eval read model (it may still be catching up) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunScoreRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunScoreResponse"];
+                };
+            };
+            /** @description No eval has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The execution is not currently a run of this eval */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
