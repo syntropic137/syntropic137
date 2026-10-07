@@ -9,9 +9,10 @@ from .errors import (
     EvalFrozenError,
     EvalNotCreatedError,
     EvalRuleError,
+    EvalRunNotMemberError,
 )
 from .EvalAggregate import EvalAggregate, EvalCreation
-from .value_objects import MAX_GOAL_LENGTH, EvalId, EvalName, Goal
+from .value_objects import MAX_GOAL_LENGTH, EvalId, EvalName, Goal, Verdict
 
 __all__ = [
     "MAX_GOAL_LENGTH",
@@ -25,5 +26,7 @@ __all__ = [
     "EvalName",
     "EvalNotCreatedError",
     "EvalRuleError",
+    "EvalRunNotMemberError",
     "Goal",
+    "Verdict",
 ]

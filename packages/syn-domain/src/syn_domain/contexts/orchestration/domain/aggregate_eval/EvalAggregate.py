@@ -16,7 +16,12 @@ one-way switches:
   readable, and keeps the runs it already has.
 
 Runs are NOT recorded here. An execution owns its own eval membership, so this
-stream does not grow with every run and attaching one is a single write.
+stream does not grow with every run and attaching one is a single write. What
+IS recorded here is a run's SCORE (``EvalRunScored``): judging a run is a fact
+about the experiment, so it is allowed on a frozen eval, and on an archived one
+(its runs stay readable, and a migration archives duplicates after moving their
+runs). Whether the execution is a member is decided by the slice handler, which
+reads the run's own stream first.
 
 The aggregate never resolves a ref: every ``RepositoryBaseline`` it receives
 already carries a full commit sha, resolved by the slice handler through
@@ -63,6 +68,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.FreezeEvalCommand import (
         FreezeEvalCommand,
     )
+    from syn_domain.contexts.orchestration.domain.commands.RecordEvalRunScoreCommand import (
+        RecordEvalRunScoreCommand,
+    )
     from syn_domain.contexts.orchestration.domain.commands.UpdateEvalCommand import (
         UpdateEvalCommand,
     )
@@ -77,6 +85,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.EvalFrozenEvent import (
         EvalFrozenEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.EvalRunScoredEvent import (
+        EvalRunScoredEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import (
         BaselineRepoPayload as UpdatedBaselinePayload,
@@ -364,6 +375,32 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
             )
         )
 
+    @command_handler("RecordEvalRunScoreCommand")
+    def record_run_score(self, command: RecordEvalRunScoreCommand) -> None:
+        """Record a score for a run the caller has established is a member.
+
+        Every score is recorded, even one equal to the current score: re-scoring
+        is itself a fact (a new ``scored_at``), and history lives in the stream.
+        """
+        from syn_domain.contexts.orchestration.domain.events.EvalRunScoredEvent import (
+            EvalRunScoredEvent,
+        )
+
+        if not self.exists:
+            raise EvalNotCreatedError
+        self._apply(
+            EvalRunScoredEvent(
+                eval_id=str(self.id),
+                execution_id=command.execution_id,
+                verdict=command.verdict.value,
+                score=command.score,
+                evidence=command.evidence,
+                scorer=command.scorer,
+                scorer_version=command.scorer_version,
+                scored_at=datetime.now(UTC),
+            )
+        )
+
     def _require_open(self, action: str) -> None:
         if not self.exists:
             raise EvalNotCreatedError
@@ -429,6 +466,10 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
     def on_eval_frozen(self, event: EvalFrozenEvent) -> None:
         self._is_frozen = True
         self._frozen_at = event.frozen_at
+
+    @event_sourcing_handler("EvalRunScored")
+    def on_eval_run_scored(self, _event: EvalRunScoredEvent) -> None:
+        """Scores are read from the projection; nothing here decides on them."""
 
     @event_sourcing_handler("EvalArchived")
     def on_eval_archived(self, event: EvalArchivedEvent) -> None:

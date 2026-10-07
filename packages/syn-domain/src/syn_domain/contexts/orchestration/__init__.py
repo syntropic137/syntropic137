@@ -90,7 +90,12 @@ from syn_domain.contexts.orchestration.domain import (
     WorkflowTemplateAggregate,
     WorkspaceAggregate,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId, Goal
+from syn_domain.contexts.orchestration.domain.aggregate_eval import (
+    EvalId,
+    EvalRunNotMemberError,
+    Goal,
+    Verdict,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
     ResumeExecutionCommand,
@@ -156,6 +161,9 @@ from syn_domain.contexts.orchestration.domain.commands import (
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.RecordEvalRunScoreCommand import (
+    RecordEvalRunScoreCommand,
 )
 from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
     RequestExecutionCommand,
@@ -264,6 +272,9 @@ from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     PullRequestCommenter,
     QuarantineNoticeProcessManager,
 )
+from syn_domain.contexts.orchestration.slices.record_eval_run_score import (
+    RecordEvalRunScoreHandler,
+)
 from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
 )
@@ -351,6 +362,7 @@ __all__ = [
     "EvalChoice",
     "EvalId",
     "EvalMembershipResult",
+    "EvalRunNotMemberError",
     "EvalUnavailableError",
     # Value objects - execution
     "ExecutablePhase",
@@ -398,6 +410,8 @@ __all__ = [
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",
     "ReclaimableDir",
+    "RecordEvalRunScoreCommand",
+    "RecordEvalRunScoreHandler",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
@@ -435,6 +449,7 @@ __all__ = [
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
     "UpdateWorkflowTemplateCommand",
+    "Verdict",
     "WithdrawExecutionRequestCommand",
     "WorkflowClassification",
     "WorkflowDefinition",
