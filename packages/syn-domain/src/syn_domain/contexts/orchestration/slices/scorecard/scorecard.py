@@ -30,6 +30,8 @@ from syn_domain.contexts.orchestration.slices.scorecard.run_record import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from syn_domain.contexts.orchestration.slices.scorecard.run_record import ScorecardPhase
+
 # The owner's one-week go/no-go, 2026-10-07 -> 2026-10-14.
 TARGET_PLATFORM_FAILURE_FREE_RATE = 0.85
 TARGET_MEDIAN_VERIFY_TOKENS = 3_000_000
@@ -243,13 +245,7 @@ def _phase_stats(
     observed = cost_by_session_model or {}
     rows: list[PhaseTypeStats] = []
     for phase_type in PhaseType:
-        phases = [
-            p
-            for run in runs
-            for p in run.phases
-            if p.phase_type is phase_type
-            and (model is None or model in observed.get(p.session_id or "", {}))
-        ]
+        phases = _phases_of(runs, phase_type, model, observed)
         if not phases:
             continue
         costs = (
@@ -257,32 +253,54 @@ def _phase_stats(
             if model is None
             else [observed[p.session_id or ""][model] for p in phases]
         )
-        tokens = [float(p.total_tokens) for p in phases]
-        all_tokens = sum(p.total_tokens for p in phases)
-        counted = [
-            (p.total_tokens, tool_calls_by_session[p.session_id])
-            for p in phases
-            if p.session_id and p.session_id in tool_calls_by_session
-        ]
-        calls = sum(c for _, c in counted)
-        rows.append(
-            PhaseTypeStats(
-                phase_type=phase_type,
-                phase_count=len(phases),
-                median_tokens=percentile(tokens, 0.5),
-                p90_tokens=percentile(tokens, 0.9),
-                cache_read_share=(
-                    sum(p.cache_read_tokens for p in phases) / all_tokens if all_tokens else None
-                ),
-                median_tool_calls=percentile([float(c) for _, c in counted], 0.5),
-                tokens_per_tool_call=(sum(t for t, _ in counted) / calls if calls else None),
-                phases_with_tool_counts=len(counted),
-                median_cost_usd=percentile(costs, 0.5),
-                p90_cost_usd=percentile(costs, 0.9),
-                phases_with_cost=len(costs),
-            )
-        )
+        rows.append(_stats_of(phase_type, phases, costs, tool_calls_by_session))
     return tuple(rows)
+
+
+def _phases_of(
+    runs: Sequence[ScorecardRun],
+    phase_type: PhaseType,
+    model: str | None,
+    observed: Mapping[str, Mapping[str, Decimal]],
+) -> list[ScorecardPhase]:
+    return [
+        p
+        for run in runs
+        for p in run.phases
+        if p.phase_type is phase_type
+        and (model is None or model in observed.get(p.session_id or "", {}))
+    ]
+
+
+def _stats_of(
+    phase_type: PhaseType,
+    phases: Sequence[ScorecardPhase],
+    costs: list[Decimal],
+    tool_calls_by_session: Mapping[str, int],
+) -> PhaseTypeStats:
+    tokens = [float(p.total_tokens) for p in phases]
+    all_tokens = sum(p.total_tokens for p in phases)
+    counted = [
+        (p.total_tokens, tool_calls_by_session[p.session_id])
+        for p in phases
+        if p.session_id and p.session_id in tool_calls_by_session
+    ]
+    calls = sum(c for _, c in counted)
+    return PhaseTypeStats(
+        phase_type=phase_type,
+        phase_count=len(phases),
+        median_tokens=percentile(tokens, 0.5),
+        p90_tokens=percentile(tokens, 0.9),
+        cache_read_share=(
+            sum(p.cache_read_tokens for p in phases) / all_tokens if all_tokens else None
+        ),
+        median_tool_calls=percentile([float(c) for _, c in counted], 0.5),
+        tokens_per_tool_call=(sum(t for t, _ in counted) / calls if calls else None),
+        phases_with_tool_counts=len(counted),
+        median_cost_usd=percentile(costs, 0.5),
+        p90_cost_usd=percentile(costs, 0.9),
+        phases_with_cost=len(costs),
+    )
 
 
 def _intervals(

@@ -49,6 +49,7 @@ if TYPE_CHECKING:
         ScorecardRun,
         TargetResult,
     )
+    from syn_domain.contexts.orchestration.slices.scorecard.scorecard import DailyPoint
 
 MAX_WINDOW_DAYS = 30
 _WINDOW = re.compile(r"^(\d{1,2})d$")
@@ -185,6 +186,23 @@ def _target(target: TargetResult) -> ScorecardTargetResponse:
     )
 
 
+def _daily_point(d: DailyPoint) -> ScorecardDailyPointResponse:
+    return ScorecardDailyPointResponse(
+        day=d.day,
+        counts=_counts(d.counts),
+        cost_usd=str(d.cost_usd),
+        cost_display=format_cost(d.cost_usd),
+        median_verify_tokens=d.median_verify_tokens,
+        median_verify_tokens_display=_tokens(d.median_verify_tokens),
+        median_verify_cost_usd=_usd(d.median_verify_cost_usd),
+        median_verify_cost_display=format_cost(d.median_verify_cost_usd),
+        peak_concurrency=d.peak_concurrency,
+        phases=[_phase(p) for p in d.phases],
+        by_workflow=[_row(r) for r in d.by_workflow],
+        by_model=[_row(r) for r in d.by_model],
+    )
+
+
 def render(card: Scorecard, window: str) -> ScorecardResponse:
     days = f"the {card.window_days} UTC day{'s' if card.window_days > 1 else ''} to now"
     throughput = card.throughput
@@ -215,23 +233,7 @@ def render(card: Scorecard, window: str) -> ScorecardResponse:
             "observed that model, and only those phases (and that model's share of their "
             "cost) in its phase statistics."
         ),
-        daily=[
-            ScorecardDailyPointResponse(
-                day=d.day,
-                counts=_counts(d.counts),
-                cost_usd=str(d.cost_usd),
-                cost_display=format_cost(d.cost_usd),
-                median_verify_tokens=d.median_verify_tokens,
-                median_verify_tokens_display=_tokens(d.median_verify_tokens),
-                median_verify_cost_usd=_usd(d.median_verify_cost_usd),
-                median_verify_cost_display=format_cost(d.median_verify_cost_usd),
-                peak_concurrency=d.peak_concurrency,
-                phases=[_phase(p) for p in d.phases],
-                by_workflow=[_row(r) for r in d.by_workflow],
-                by_model=[_row(r) for r in d.by_model],
-            )
-            for d in card.daily
-        ],
+        daily=[_daily_point(d) for d in card.daily],
         daily_scope=(
             "One point per UTC day in the window, over the chains whose final run ended "
             "that day: the same outcome, phase, workflow and model rules as the window's "
