@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agentic_isolation.providers.base import ExecuteResult
 
 from syn_adapters.session_inventory.workspace_location import workspace_capture_location
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
@@ -23,7 +24,10 @@ async def test_workflow_launch_mounts_local_spool_without_remote_settings(
         capture_source_instance_id="installation",
     )
     workspace = MagicMock(id="container", metadata={})
-    provider = MagicMock(create=AsyncMock(return_value=workspace))
+    provider = MagicMock(
+        create=AsyncMock(return_value=workspace),
+        execute=AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr="")),
+    )
     monkeypatch.setattr(adapter, "_provider", provider)
     monkeypatch.setattr(
         "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
