@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration._shared.eval_choice import (
 from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
     EvalMembershipResult,
 )
+from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
@@ -377,6 +378,7 @@ __all__ = [
     # Query services
     "ExecutionCostQueryService",
     "ExecutionJournal",
+    "ExecutionListReads",
     "ExecutionRequestAggregate",
     "ExecutionRequestStartProcessManager",
     "ExecutionRequestStartRecord",

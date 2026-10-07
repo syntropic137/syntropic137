@@ -30,7 +30,7 @@ from syn_api.types import (
     ExecutionEvalRunResponse,
     Ok,
 )
-from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
+from syn_domain.contexts.orchestration import ExecutionListReads
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import (
     EvalRunFacts,
     EvalRunsSummary,
