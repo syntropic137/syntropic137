@@ -34,6 +34,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent imp
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
     ExecutionTagsRemovedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+    NextPhaseReadyEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
     WorkspaceProvisionedForPhaseEvent,
 )
@@ -422,15 +425,16 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         existing["phases"] = phases
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
-    async def on_next_phase_ready(self, event_data: dict) -> None:
+    async def on_next_phase_ready(self, event_data: NextPhaseReadyEvent) -> None:
         """Handle NextPhaseReady: record the phases a review verdict skipped (PC-63).
 
         Without this a run certified at its first review reads as finished
         short of its total, because the rounds it never needed stay in the
         denominator.
         """
-        execution_id = event_data.get("execution_id")
-        skipped = event_data.get("skipped_phase_ids") or []
+        event = NextPhaseReadyEvent.model_validate(event_data)
+        execution_id = event.execution_id
+        skipped = event.skipped_phase_ids
         if not execution_id or not skipped:
             return
 

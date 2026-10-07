@@ -31,6 +31,8 @@ from syn_domain.contexts.orchestration.slices.list_executions.projection import 
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
         PhaseProgress,
     )
@@ -56,6 +58,7 @@ _IMPLEMENT_V3 = [
     )
 ]
 _EXECUTION = "exec-progress"
+_ReadModel = WorkflowExecutionListProjection | WorkflowExecutionDetailProjection
 
 
 class _Run:
@@ -66,28 +69,30 @@ class _Run:
         self.detail = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
         self.completed = 0
 
-    async def _apply(self, handler: str, payload: dict[str, object]) -> None:
+    async def _apply(self, handle: Callable[[_ReadModel], Awaitable[None]]) -> None:
         for projection in (self.listing, self.detail):
-            await getattr(projection, handler)(payload)
+            await handle(projection)
 
     async def start(self) -> None:
         await self._apply(
-            "on_workflow_execution_started",
-            {
-                "execution_id": _EXECUTION,
-                "workflow_id": "sdlc-implement-v3",
-                "workflow_name": "implement-v3",
-                "started_at": "2026-10-06T00:00:00+00:00",
-                "total_phases": len(_IMPLEMENT_V3),
-                "phases": [],
-            },
+            lambda read_model: read_model.on_workflow_execution_started(
+                {
+                    "execution_id": _EXECUTION,
+                    "workflow_id": "sdlc-implement-v3",
+                    "workflow_name": "implement-v3",
+                    "started_at": "2026-10-06T00:00:00+00:00",
+                    "total_phases": len(_IMPLEMENT_V3),
+                    "phases": [],
+                },
+            )
         )
 
     async def complete(self, phase: PhaseDefinition, verdict: ReviewVerdict | None) -> None:
         """The phase completes and the aggregate decides what runs next."""
         await self._apply(
-            "on_phase_completed",
-            {"execution_id": _EXECUTION, "phase_id": phase.phase_id, "duration_seconds": 1.0},
+            lambda read_model: read_model.on_phase_completed(
+                {"execution_id": _EXECUTION, "phase_id": phase.phase_id, "duration_seconds": 1.0},
+            )
         )
         self.completed += 1
         decided = next_phase(_IMPLEMENT_V3, phase.order, verdict)
@@ -97,29 +102,33 @@ class _Run:
                 execution_id=_EXECUTION,
                 completed_phase_id=phase.phase_id,
             )
-            await self._apply("on_next_phase_ready", event.model_dump(mode="json"))
+            await self._apply(
+                lambda read_model: read_model.on_next_phase_ready(event.model_dump(mode="json"))
+            )
 
     async def finish(self) -> None:
         await self._apply(
-            "on_workflow_completed",
-            {
-                "execution_id": _EXECUTION,
-                "completed_at": datetime(2026, 10, 6, 1, tzinfo=UTC).isoformat(),
-                "completed_phases": self.completed,
-                "total_phases": len(_IMPLEMENT_V3),
-            },
+            lambda read_model: read_model.on_workflow_completed(
+                {
+                    "execution_id": _EXECUTION,
+                    "completed_at": datetime(2026, 10, 6, 1, tzinfo=UTC).isoformat(),
+                    "completed_phases": self.completed,
+                    "total_phases": len(_IMPLEMENT_V3),
+                },
+            )
         )
 
     async def fail(self) -> None:
         await self._apply(
-            "on_workflow_failed",
-            {
-                "execution_id": _EXECUTION,
-                "failed_at": datetime(2026, 10, 6, 1, tzinfo=UTC).isoformat(),
-                "error_message": "agent crashed",
-                "completed_phases": self.completed,
-                "total_phases": len(_IMPLEMENT_V3),
-            },
+            lambda read_model: read_model.on_workflow_failed(
+                {
+                    "execution_id": _EXECUTION,
+                    "failed_at": datetime(2026, 10, 6, 1, tzinfo=UTC).isoformat(),
+                    "error_message": "agent crashed",
+                    "completed_phases": self.completed,
+                    "total_phases": len(_IMPLEMENT_V3),
+                },
+            )
         )
 
     async def progress(self) -> PhaseProgress:
@@ -223,6 +232,8 @@ class TestPhaseProgress:
         again = decided.event(
             workflow_id="sdlc-implement-v3", execution_id=_EXECUTION, completed_phase_id="reverify"
         )
-        await run._apply("on_next_phase_ready", again.model_dump(mode="json"))
+        await run._apply(
+            lambda read_model: read_model.on_next_phase_ready(again.model_dump(mode="json"))
+        )
 
         assert (await run.progress()).skipped == 4
