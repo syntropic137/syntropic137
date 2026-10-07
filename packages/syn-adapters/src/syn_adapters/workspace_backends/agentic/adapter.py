@@ -9,6 +9,7 @@ See ADR-021: Isolated Workspace Architecture
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shlex
@@ -114,6 +115,10 @@ _WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
     "UV_CACHE_DIR": "/workspace/.cache/uv",
     "npm_config_cache": "/workspace/.cache/npm",
 }
+
+
+#: Reaps still running after the provision that started them was cancelled.
+_PENDING_REAPS: set[asyncio.Task[None]] = set()
 
 
 def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
@@ -390,18 +395,47 @@ class AgenticIsolationAdapter:
         tmpdir = environment.get("TMPDIR")
         if not tmpdir:
             return
-        result = await self._provider.execute(
-            workspace,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
-            shlex.join(["mkdir", "-p", tmpdir]),
-        )
+        # The container exists and no caller holds a handle to it yet, so
+        # nobody else can reap it: every way out of here but success - a
+        # failed mkdir, a provider error, a cancelled provision - destroys it.
+        try:
+            result = await self._provider.execute(
+                workspace,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                shlex.join(["mkdir", "-p", tmpdir]),
+            )
+        except BaseException:
+            await self._reap_unregistered(workspace, execution_id)
+            raise
         if result.exit_code != 0:
-            # The container exists and no caller holds a handle to it yet, so
-            # nobody else can reap it.
-            await self._provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+            await self._reap_unregistered(workspace, execution_id)
             raise WorkspaceProvisionError(
                 f"Workspace provisioning failed for execution {execution_id}: "
                 f"could not create TMPDIR {tmpdir} (exit {result.exit_code}): "
                 f"{(result.stderr or result.stdout or '').strip()[:300] or 'no output'}"
+            )
+
+    async def _reap_unregistered(self, workspace: object, execution_id: str) -> None:
+        """Destroy a container no handle was returned for, whatever happens meanwhile.
+
+        Shielded: a second cancellation (the provision being torn down while
+        it reaps) must not stop the reap, or the container leaks exactly as if
+        there had been no reap. A reap that itself fails is logged, not raised,
+        so the caller's original error is the one that propagates.
+        """
+        reap = asyncio.create_task(self._provider.destroy(workspace))  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        # The event loop holds tasks weakly: keep the reap alive even when the
+        # cancellation below returns before it finishes.
+        _PENDING_REAPS.add(reap)
+        reap.add_done_callback(_PENDING_REAPS.discard)
+        try:
+            await asyncio.shield(reap)
+        except asyncio.CancelledError:
+            # The shielded reap keeps running; the cancellation is the caller's.
+            raise
+        except Exception:
+            logger.exception(
+                "Could not destroy workspace for execution %s after a failed provision",
+                execution_id,
             )
 
     async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:

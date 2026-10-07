@@ -14,6 +14,7 @@ Verified in a live workspace before writing this:
 
 from __future__ import annotations
 
+import asyncio
 import shlex
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -216,3 +217,60 @@ class TestTmpdirExistsBeforeAnythingRuns:
             await _create(provider)
 
         assert len(provider.destroyed) == 1, "the container must not leak"
+
+
+@dataclass
+class _MkdirHangs(_WorkspaceFilesystem):
+    """A provider whose mkdir never returns, so the provision can be cancelled in it."""
+
+    mkdir_started: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def execute(self, workspace: object, command: str, **_: object) -> ExecuteResult:
+        self.commands.append(shlex.split(command))
+        self.mkdir_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+@dataclass
+class _MkdirHangsAndReapIsSlow(_MkdirHangs):
+    """The reap yields first, so a second cancellation lands while it runs."""
+
+    async def destroy(self, workspace: object) -> None:
+        await asyncio.sleep(0.05)
+        self.destroyed.append(workspace)
+
+
+class TestCancelledProvisionDoesNotLeak:
+    """Cancelled during the mkdir, the container exists but no handle does (#1706 review).
+
+    Nothing else can reap it: `create` has not returned, so the caller has no
+    handle, and the adapter has not registered it. So `create` must.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancelling_during_mkdir_destroys_the_container_and_propagates(self) -> None:
+        provider = _MkdirHangs()
+        task = asyncio.ensure_future(_create(provider))
+        await provider.mkdir_started.wait()
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert len(provider.destroyed) == 1, "the cancelled provision leaked its container"
+
+    @pytest.mark.asyncio
+    async def test_a_second_cancellation_cannot_interrupt_the_reap(self) -> None:
+        provider = _MkdirHangsAndReapIsSlow()
+        task = asyncio.ensure_future(_create(provider))
+        await provider.mkdir_started.wait()
+
+        task.cancel()
+        await asyncio.sleep(0)  # the reap has started and is sleeping
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.1)  # let the shielded reap finish
+
+        assert len(provider.destroyed) == 1, "the second cancellation stopped the reap"
