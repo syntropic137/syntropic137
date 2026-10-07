@@ -47,9 +47,9 @@ _SPAN = "<event span lookup>"
 #: issues at the top of the page's transaction.
 _PLAN = "<custom plans>"
 
-#: The ``SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`` that
-#: ``custom_plans`` issues first, so the span and the reads it bounds share a
-#: snapshot.
+#: The ``BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`` that ``custom_plans``
+#: opens with, so the span and the reads it bounds share a snapshot. A round
+#: trip of its own, and the only statement the snapshot costs.
 _SNAPSHOT = "<one read-only snapshot>"
 
 
@@ -105,15 +105,14 @@ class _CountingConnection:
         #: The ``(lower, upper)`` time bound each ``agent_events`` read bound.
         self.bounds: list[tuple[object, object]] = []
 
-    def transaction(self) -> _Transaction:
+    def transaction(self, *, isolation: str, readonly: bool) -> _Transaction:
+        assert (isolation, readonly) == ("repeatable_read", True)
+        self.calls.append(_SNAPSHOT)
         return _Transaction()
 
     async def execute(self, query: str, *_args: object) -> str:
-        if "REPEATABLE READ, READ ONLY" in query:
-            self.calls.append(_SNAPSHOT)
-        else:
-            assert "plan_cache_mode" in query, query
-            self.calls.append(_PLAN)
+        assert "plan_cache_mode" in query, query
+        self.calls.append(_PLAN)
         return "SET"
 
     def _span_row(self, ids: list[str]) -> list[dict[str, date | None]]:
@@ -206,10 +205,11 @@ async def test_cost_for_fifty_sessions_takes_six_round_trips() -> None:
     results = await q.calculate_many(ids)
 
     assert len(results) == 50
-    # Six statements and one connection for fifty sessions. Three read the
+    # Six round trips and one connection for fifty sessions. Three read the
     # page; the token_usage fallback is skipped because every session had a
     # usable summary. The other three are E2's time bound (agent_event_span):
-    # the read-only snapshot and plan setting, then ONE span lookup for the
+    # the BEGIN that opens the read-only snapshot, the plan setting, then ONE
+    # span lookup for the
     # whole page, which bounds every read after it - still fixed, not per
     # session. The per-session loop
     # this replaced would show 150-200 calls and 50 acquisitions, which is

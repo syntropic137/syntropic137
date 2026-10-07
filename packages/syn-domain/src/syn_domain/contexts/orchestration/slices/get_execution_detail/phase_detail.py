@@ -118,6 +118,14 @@ class PhaseDetail:
     comment, a push): ``none``, ``succeeded``, ``denied`` or ``failed``, or
     ``None`` when it said nothing. A report, not a measurement - see
     `SideEffectStatus`."""
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result, from
+    ``AgentExecutionCompleted`` (PC-83). Not always the declared one: a phase
+    whose provider was at capacity or out of quota re-runs once on its
+    ``fallback_agent``. ``None`` until the agent finishes, and on every phase
+    recorded before the event carried it."""
+    agent_model: str | None = None
+    """The model that agent was asked for, beside ``agent_provider``."""
     failure_classification: str | None = None
     """Why this phase failed, as `FailureClassification` stores it; ``None``
     for a phase that did not fail. Written only by `FailedPhaseRecord`."""
@@ -204,6 +212,8 @@ class PhaseDetail:
             "exit_code": self.exit_code,
             "deliverable_recovered": self.deliverable_recovered,
             "reported_side_effects": self.reported_side_effects,
+            "agent_provider": self.agent_provider,
+            "agent_model": self.agent_model,
             "failure_classification": self.failure_classification,
             "reported_failure_reason": self.reported_failure_reason,
         }
@@ -232,6 +242,8 @@ class PhaseDetail:
             exit_code=data.get("exit_code"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=_side_effects(data.get("reported_side_effects")),
+            agent_provider=data.get("agent_provider"),
+            agent_model=data.get("agent_model"),
             failure_classification=data.get("failure_classification"),
             reported_failure_reason=data.get("reported_failure_reason"),
         )

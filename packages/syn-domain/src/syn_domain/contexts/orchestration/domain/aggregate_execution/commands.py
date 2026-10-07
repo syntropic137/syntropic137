@@ -405,11 +405,16 @@ class AgentExecutionCompletedCommand:
         last_agent_message: str | None = None,
         reported_side_effects: SideEffectStatus | None = None,
         reported_review_verdict: ReviewVerdict | None = None,
+        agent_provider: str | None = None,
+        agent_model: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.session_id = session_id
         self.exit_code = exit_code
+        self.agent_provider = agent_provider
+        self.agent_model = agent_model
+
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.cache_creation_tokens = cache_creation_tokens
@@ -417,6 +422,16 @@ class AgentExecutionCompletedCommand:
         self.last_agent_message = last_agent_message
         self.reported_side_effects = reported_side_effects
         self.reported_review_verdict = reported_review_verdict
+
+    def produced_by(self, *, provider: str, model: str | None) -> None:
+        """Name the agent that produced this result (PC-83).
+
+        Set by the one frame that knows - `run_phase_agent`, which chose
+        between the phase's agent and its fallback - rather than by the
+        handler, which runs whatever command it is given.
+        """
+        self.agent_provider = provider
+        self.agent_model = model
 
 
 class ArtifactsCollectedCommand:

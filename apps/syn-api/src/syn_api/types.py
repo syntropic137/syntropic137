@@ -516,6 +516,13 @@ class PhaseRefResponse(BaseModel):
     """The shorthand spelling when the stored row held a bare string."""
 
 
+class FallbackAgentResponse(BaseModel):
+    """The agent a phase is re-run on when its own provider cannot serve it (PC-83)."""
+
+    provider: str
+    model: str | None = None
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -555,6 +562,9 @@ class PhaseDefinitionResponse(BaseModel):
     # The obligation beside the permission (#894): a phase declaring it fails
     # unless its delegate succeeded.
     require_delegation: bool = False
+    # PC-83: re-run once on this agent after capacity outlived the retries, or
+    # a spent quota. None when the phase declared no fallback.
+    fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
     sandbox: str = DEFAULT_PHASE_SANDBOX
@@ -1582,6 +1592,11 @@ class PhaseExecution(BaseModel):
     """
     requested_model: str | None = None
     """The model the phase REQUESTED (often an alias such as ``opus``), or None."""
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result, or null
+    (PC-83). Differs from the declared provider when the phase fell back to its
+    ``fallback_agent`` on capacity or quota; ``requested_model`` is then the
+    fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order

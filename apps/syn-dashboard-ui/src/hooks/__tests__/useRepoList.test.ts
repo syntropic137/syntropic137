@@ -9,7 +9,8 @@
  *    from `/repos` alone.
  * 2. Privacy for a repo the App reaches comes from the App, not from the
  *    stored flag: `syn repo register` sends `is_private: false` for every
- *    repo, so a private repo rendered as public.
+ *    repo, so a private repo rendered as public. For a repo the App does not
+ *    reach, that same stored false is unknown privacy, not public.
  * 3. Rows are keyed by `repo_id`, the Repo aggregate's own identity, never by
  *    name. Two organizations that each registered `acme/api`, a Gitea
  *    `acme/worker` beside a GitHub one, and `ACME/web` beside `acme/web` in
@@ -69,6 +70,23 @@ const REGISTERED = [
     system_id: 'sys-2',
     is_private: false,
   },
+  // Stored private, but GitHub says public now.
+  {
+    repo_id: 'repo-6',
+    organization_id: 'org-a',
+    provider: 'github',
+    full_name: 'acme/docs',
+    system_id: null,
+    is_private: true,
+  },
+  // Registered by an older client that stored no privacy at all.
+  {
+    repo_id: 'repo-7',
+    organization_id: 'org-a',
+    provider: 'github',
+    full_name: 'acme/legacy',
+    system_id: null,
+  },
 ]
 const SYSTEMS = [
   { system_id: 'sys-1', name: 'Storefront' },
@@ -125,6 +143,7 @@ describe('useRepoList', () => {
       'acme/api',
       'acme/docs',
       'acme/infra',
+      'acme/legacy',
       'acme/web',
       'acme/web',
       'acme/worker',
@@ -138,7 +157,7 @@ describe('useRepoList', () => {
     expect(infra).toMatchObject({
       registered: false,
       attachment: 'attached',
-      isPrivate: true,
+      privacy: 'private',
       system: null,
     })
     const web = rows.find((r) => r.fullName === 'acme/web')
@@ -151,13 +170,27 @@ describe('useRepoList', () => {
     const api = rows.filter((r) => r.fullName === 'acme/api')
     expect(api).toHaveLength(2)
     for (const row of api) {
-      expect(row).toMatchObject({ registered: true, attachment: 'attached', isPrivate: true })
+      expect(row).toMatchObject({ registered: true, attachment: 'attached', privacy: 'private' })
     }
   })
 
-  it('keeps the stored privacy for a registered repo the App does not reach', async () => {
+  it('shows public when the App reports a registered repo as public', async () => {
     const rows = await readyRows()
-    expect(rows.find((r) => r.fullName === 'acme/web')?.isPrivate).toBe(true)
+    // Stored true, public on GitHub: the live answer wins in both directions.
+    const worker = rows.find((r) => r.key === 'repo-6')
+    expect(worker).toMatchObject({ registered: true, attachment: 'attached', privacy: 'public' })
+  })
+
+  it('keeps a stored private for a registered repo the App does not reach', async () => {
+    const rows = await readyRows()
+    expect(rows.find((r) => r.key === 'repo-2')?.privacy).toBe('private')
+  })
+
+  it('calls a stored false unknown, not public, when the App does not reach the repo', async () => {
+    const rows = await readyRows()
+    // `syn repo register` stores false for every repo, so it says nothing.
+    expect(rows.find((r) => r.key === 'repo-5')?.privacy).toBe('unknown')
+    expect(rows.find((r) => r.key === 'repo-7')?.privacy).toBe('unknown')
   })
 
   it('keeps one row per organization that registered the same name', async () => {
@@ -181,14 +214,14 @@ describe('useRepoList', () => {
     // The Gitea repo and the App's GitHub repo are two connected repos.
     expect(workers).toHaveLength(2)
     const gitea = workers.find((r) => r.key === 'repo-4')
-    expect(gitea).toMatchObject({ registered: true, attachment: 'not-attached', isPrivate: true })
+    expect(gitea).toMatchObject({ registered: true, attachment: 'not-attached', privacy: 'private' })
     expect(workers.find((r) => !r.registered)).toMatchObject({ attachment: 'attached' })
   })
 
   it('still lists App-reachable repos when the App lookup is partial', async () => {
     stubFetch('partial')
     const rows = await readyRows()
-    expect(rows).toHaveLength(8)
+    expect(rows).toHaveLength(9)
     expect(rows.find((r) => r.fullName === 'acme/web')?.attachment).toBe('unknown')
     // A partial GitHub lookup says nothing about a Gitea repo.
     expect(rows.find((r) => r.key === 'repo-4')?.attachment).toBe('not-attached')

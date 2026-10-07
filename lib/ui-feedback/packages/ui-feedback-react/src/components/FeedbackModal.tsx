@@ -10,12 +10,13 @@ import { useFeedback } from '../FeedbackContext';
 import { useFeedbackForm } from '../hooks/useFeedbackForm';
 import type { FeedbackType, MediaUpload, Priority } from '../types';
 import { BadgeDropdown } from './BadgeDropdown';
+import { PinMarker } from './FeedbackOverlays';
 import { CloseIcon } from './icons';
 import { ScreenshotUploader } from './ScreenshotUploader';
 import { VoiceRecorder } from './VoiceRecorder';
 
 export function FeedbackModal() {
-  const { isOpen, locationContext, closeModal, addMedia, removeMedia, pendingMedia, submitFeedback } = useFeedback();
+  const { isOpen, locationContext, openFeedbackMode, closeModal, addMedia, removeMedia, pendingMedia, submitFeedback } = useFeedback();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const form = useFeedbackForm({ locationContext, addMedia, submitFeedback, closeModal });
@@ -26,6 +27,7 @@ export function FeedbackModal() {
 
   return (
     <div className="ui-feedback-modal-overlay" onClick={form.handleClose}>
+      <PinMarker locationContext={locationContext} />
       <div className="ui-feedback-modal" onClick={(e) => e.stopPropagation()}>
         <div className="ui-feedback-modal-header">
           <div className="ui-feedback-modal-header-content">
@@ -36,6 +38,14 @@ export function FeedbackModal() {
         </div>
 
         <div className="ui-feedback-modal-body">
+          {locationContext.elementLabel && (
+            <div className="ui-feedback-pinned-to">
+              <span className="ui-feedback-pinned-to-label">
+                Pinned to <code>{locationContext.elementLabel}</code>
+              </span>
+              <button type="button" className="ui-feedback-btn ui-feedback-btn--secondary" onClick={openFeedbackMode}>Re-pick</button>
+            </div>
+          )}
           <div className="ui-feedback-badge-row">
             <BadgeDropdown options={FEEDBACK_TYPES} value={form.feedbackType} onChange={(v) => form.setFeedbackType(v as FeedbackType)} className="ui-feedback-badge--type" hotkey="1" />
             <BadgeDropdown options={PRIORITIES} value={form.priority} onChange={(v) => form.setPriority(v as Priority)} className="ui-feedback-badge--priority" hotkey="2" />

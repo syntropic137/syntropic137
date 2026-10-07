@@ -668,6 +668,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             last_agent_message=command.last_agent_message,
             reported_side_effects=command.reported_side_effects,
             reported_review_verdict=command.reported_review_verdict,
+            agent_provider=command.agent_provider,
+            agent_model=command.agent_model,
         )
         self._apply(event)
 

@@ -68,6 +68,7 @@ from syn_domain.contexts.orchestration._shared.template_launch import (
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PHASE_ID_PATTERN,
     RESERVED_INPUT_NAMES,
+    FallbackAgentYamlDefinition,
     WorkflowDefinition,
     is_phase_id,
     validate_workflow_yaml,
@@ -372,6 +373,8 @@ __all__ = [
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
+    # Value objects - workflow
+    "FallbackAgentYamlDefinition",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     "Goal",
@@ -386,7 +389,6 @@ __all__ = [
     "IsolationConfig",
     "LaunchEval",
     "OrphanedWorkspace",
-    # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
     "PhaseProgress",

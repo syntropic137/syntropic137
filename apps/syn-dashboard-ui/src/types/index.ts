@@ -51,7 +51,12 @@ export interface PhaseDefinition {
   /** e.g. "gpt-sol → gpt-6-sol"; the bare model otherwise. Render verbatim. */
   model_display?: string | null
   provider: string | null
+  /** Skills the phase DECLARES, as written; a version may be a tag, not a SHA. */
+  skills?: PhaseRef[]
 }
+
+/** A declared skill or plugin reference, aliased to the generated schema rather than restated. */
+export type PhaseRef = components['schemas']['PhaseRefResponse']
 
 export interface WorkflowResponse {
   id: string

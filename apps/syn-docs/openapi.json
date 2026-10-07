@@ -4653,7 +4653,7 @@
           "github"
         ],
         "summary": "List Accessible Repos Endpoint",
-        "description": "List repositories accessible to the GitHub App.\n\nQueries all active installations and aggregates results when no\ninstallation_id is provided. The installation list is cached locally with\na 1-hour TTL: if empty or stale, it bootstraps automatically from the\nGitHub API without requiring a webhook URL. Stale data is kept as a\nfallback if the GitHub API is unreachable during refresh.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
+        "description": "List repositories accessible to the GitHub App.\n\nWith no installation_id, aggregates every installation. The last complete\nlisting is cached and served as ``complete`` while under a minute old;\notherwise GitHub is asked live, and an older listing is served as\n``partial`` only if GitHub cannot be asked. The GitHub App's\n``installation`` and ``installation_repositories`` webhooks invalidate the\ncache at once. A single installation_id is always asked live.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
         "operationId": "list_accessible_repos_endpoint_github_repos_get",
         "parameters": [
           {
@@ -11661,6 +11661,31 @@
         "title": "FailurePatternResponse",
         "description": "A recurring failure pattern within a system."
       },
+      "FallbackAgentResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "title": "FallbackAgentResponse",
+        "description": "The agent a phase is re-run on when its own provider cannot serve it (PC-83)."
+      },
       "FeatureDisabledDetail": {
         "properties": {
           "feature": {
@@ -14832,6 +14857,16 @@
             "title": "Require Delegation",
             "default": false
           },
+          "fallback_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackAgentResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "clone_repos": {
             "type": "boolean",
             "title": "Clone Repos",
@@ -15067,6 +15102,17 @@
               }
             ],
             "title": "Requested Model"
+          },
+          "agent_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Provider"
           },
           "cost_by_model": {
             "additionalProperties": {

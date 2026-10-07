@@ -1,0 +1,880 @@
+"""Tests for scripts/eval_suite.py and the suites it reads (#967 step 8).
+
+The checked-in suite is validated for real: its files must parse, agree with
+the workflow they name, and (on a full clone) pin commits that exist and that
+the recorded fix descends from. The scorer and the launcher are driven through
+an HTTP transport that answers with the API's own response shapes, so a field
+the script reads under the wrong name fails here rather than on the owner's
+first scored run.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+from dataclasses import asdict, dataclass, replace
+from decimal import Decimal
+from pathlib import Path
+
+import httpx
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from eval_suite import (
+    DEFAULT_SUITE,
+    ROOT,
+    Case,
+    DefinitionError,
+    Expected,
+    Launch,
+    LoadedSuite,
+    check_commits,
+    launch_suite,
+    load_suite,
+    read_launches,
+    render,
+    score_report,
+    score_suite,
+)
+
+from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _copy_suite(tmp_path: Path) -> Path:
+    target = tmp_path / "suite"
+    shutil.copytree(DEFAULT_SUITE, target)
+    return target
+
+
+# ---------------------------------------------------------------------------
+# The checked-in suite
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+
+    assert loaded.suite.tag == "verifier-seed-v1:v1"
+    assert loaded.suite.workflow.id == "eval-verify-pinned-v1"
+    assert loaded.suite.workflow.models == {"verify": "opus"}
+    assert {c.source_pr for c in loaded.cases} == {1574, 1649, 1652, 1654}
+
+
+def _is_shallow() -> bool:
+    return _git(ROOT, "rev-parse", "--is-shallow-repository") == "true"
+
+
+@pytest.mark.skipif(_is_shallow(), reason="a shallow clone does not hold the pinned commits")
+@pytest.mark.unit
+def test_every_seed_pins_a_real_commit_before_its_fix() -> None:
+    assert check_commits(load_suite(DEFAULT_SUITE), ROOT) == []
+
+
+# ---------------------------------------------------------------------------
+# Definition validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_a_model_change_without_the_suite_record_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    suite_yaml = suite_dir / "suite.yaml"
+    suite_yaml.write_text(suite_yaml.read_text().replace("verify: opus", "verify: sonnet"))
+
+    with pytest.raises(DefinitionError, match="the workflow declares"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_a_task_that_names_the_source_pr_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "codex-cost-limit.yaml"
+    case.write_text(case.read_text().replace("The change under review", "PR #1654"))
+
+    with pytest.raises(DefinitionError, match="names #1654"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_an_abbreviated_sha_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "codex-cost-limit.yaml"
+    case.write_text(
+        case.read_text().replace("123b25204fce5052f1b0ab494d2c59fa607624ad", "123b25204")
+    )
+
+    with pytest.raises(DefinitionError, match="full 40-character"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_a_case_file_must_be_named_for_its_case(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    cases = suite_dir / "cases"
+    (cases / "codex-cost-limit.yaml").rename(cases / "renamed.yaml")
+
+    with pytest.raises(DefinitionError, match="file name must be the case id"):
+        load_suite(suite_dir)
+
+
+# ---------------------------------------------------------------------------
+# check_commits against a repository built for the purpose
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def history(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """A repo with bug -> fix (touching bug.py) -> unrelated (touching other.py)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "bug.py").write_text("broken\n")
+    (repo / "other.py").write_text("x\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "bug")
+    bug = _git(repo, "rev-parse", "HEAD")
+    (repo / "bug.py").write_text("fixed\n")
+    _git(repo, "commit", "-qam", "fix")
+    fix = _git(repo, "rev-parse", "HEAD")
+    (repo / "other.py").write_text("y\n")
+    _git(repo, "commit", "-qam", "unrelated")
+    unrelated = _git(repo, "rev-parse", "HEAD")
+    return repo, bug, fix, unrelated
+
+
+def _one_case_suite(tmp_path: Path, commit: str, fix: str, file: str) -> Path:
+    suite_dir = _copy_suite(tmp_path)
+    cases = suite_dir / "cases"
+    for p in cases.glob("*.yaml"):
+        p.unlink()
+    (cases / "seed.yaml").write_text(
+        json.dumps(
+            {
+                "id": "seed",
+                "source_pr": 1,
+                "commit": commit,
+                "fix_commit": fix,
+                "task": "Review it.",
+                "expected": {"files": [file], "keywords": [["broken"]]},
+            }
+        )
+    )
+    return suite_dir
+
+
+@pytest.mark.unit
+def test_check_passes_a_pin_its_fix_descends_from(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    repo, bug, fix, _ = history
+    assert check_commits(load_suite(_one_case_suite(tmp_path, bug, fix, "bug.py")), repo) == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_pin_after_its_fix(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    repo, bug, fix, _ = history
+    problems = check_commits(load_suite(_one_case_suite(tmp_path, fix, bug, "bug.py")), repo)
+    assert any("is not an ancestor" in p for p in problems)
+
+
+@pytest.mark.unit
+def test_check_refuses_a_fix_that_does_not_touch_the_expected_file(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    repo, _, fix, unrelated = history
+    problems = check_commits(load_suite(_one_case_suite(tmp_path, fix, unrelated, "bug.py")), repo)
+    assert problems == ["seed: the fix changes none of ['bug.py']"]
+
+
+@pytest.mark.unit
+def test_check_refuses_a_sha_the_repo_does_not_hold(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    repo, bug, _, _ = history
+    problems = check_commits(load_suite(_one_case_suite(tmp_path, bug, "f" * 40, "bug.py")), repo)
+    assert problems == [f"seed: no such commit {'f' * 40} (try `git fetch origin`)"]
+
+
+@pytest.mark.unit
+def test_check_refuses_a_file_absent_at_the_pin(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    repo, bug, fix, _ = history
+    problems = check_commits(load_suite(_one_case_suite(tmp_path, bug, fix, "missing.py")), repo)
+    assert "seed: missing.py does not exist at " + bug[:12] in problems
+
+
+# ---------------------------------------------------------------------------
+# score_report
+# ---------------------------------------------------------------------------
+
+_EXPECTED = Expected(
+    files=("packages/syn-adapters/src/syn_adapters/storage/artifact_storage/minio.py",),
+    keywords=(("key",), ("404", "not found")),
+)
+
+
+def _report(*blocking: tuple[str, str], non_blocking: str = "None.") -> str:
+    """A report in the shape the verify prompt asks for: one block per (file, defect)."""
+    blocks = "\n\n".join(
+        f"### Finding {n}\n- File: `{file}`\n- Defect: {defect}\n- Why blocking: it ships broken."
+        for n, (file, defect) in enumerate(blocking, start=1)
+    )
+    return (
+        f"VERDICT: BLOCKED\n\n## BLOCKING\n\n{blocks or 'None.'}\n\n"
+        f"## NON-BLOCKING\n\n{non_blocking}\n"
+    )
+
+
+_FINDING = _report(
+    ("minio.py:212", "download() builds the id-only key; upload keys by execution, so reads 404.")
+)
+
+
+@pytest.mark.unit
+def test_a_blocked_report_naming_file_and_defect_passes() -> None:
+    assert score_report(_EXPECTED, "blocked", _FINDING).passed
+
+
+@pytest.mark.unit
+def test_a_certified_run_fails_even_when_the_report_names_the_defect() -> None:
+    score = score_report(_EXPECTED, "certified", _FINDING)
+    assert score.matched and not score.passed
+
+
+@pytest.mark.unit
+def test_a_report_that_misses_the_file_does_not_match() -> None:
+    report = _report(("storage.py:10", "the object key does not match, so reads 404"))
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.named_file is None and not score.passed
+
+
+@pytest.mark.unit
+def test_a_report_missing_a_keyword_group_says_which() -> None:
+    score = score_report(_EXPECTED, "blocked", _report(("minio.py", "uses the wrong key")))
+    assert score.missing_keywords == (("404", "not found"),) and not score.passed
+
+
+@pytest.mark.unit
+def test_a_benign_mention_beside_an_unrelated_blocker_fails() -> None:
+    """The false pass verification found at b80c4a68: the seed's file is named
+    only to clear it, and an unrelated blocking defect supplies the verdict."""
+    seed = _case("binary-artifact-minio-key").expected
+    report = _report(
+        ("other.py:40", "the retry loop never backs off, so a 404 from the API is hammered."),
+        non_blocking="- minio.py: upload/download key handling looks fine; no mismatch found.",
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.findings == 1 and score.named_file is None and not score.passed
+
+
+@pytest.mark.unit
+def test_the_file_and_the_defect_must_be_in_the_same_blocking_finding() -> None:
+    seed = _case("binary-artifact-minio-key").expected
+    report = _report(
+        ("minio.py:12", "the bucket name is read from an unvalidated setting."),
+        ("other.py:40", "the object key does not match the uploaded one, so the read is a 404."),
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.findings == 2 and not score.passed
+
+
+@pytest.mark.unit
+def test_the_seed_file_named_inside_the_defect_counts() -> None:
+    """verifier-seed-v1 first run (exec-707cefadabf8): the verifier filed the entry
+    point (direct_start.py) and named the root-cause modules in its Defect. That is
+    the correct finding and must pass."""
+    seed = _case("shared-esp-stream").expected
+    report = (
+        "VERDICT: BLOCKED\n\n## BLOCKING\n\n### Finding 1\n"
+        "- File: `apps/syn-api/src/syn_api/routes/executions/direct_start.py:48`\n"
+        "- Defect: The ExecutionRequest is written under aggregate id = the execution id "
+        "(`RequestExecutionCommand.aggregate_id` returns `execution_id`, "
+        "`RequestExecutionCommand.py:35-37`). The WorkflowExecution uses the same aggregate id. "
+        "The production store keys a stream by aggregate id alone, so `ExecutionRequest-exec-X` and "
+        "`WorkflowExecution-exec-X` are one stream; the start's NO_STREAM append conflicts, "
+        "it is treated as a duplicate and every direct start silently never runs.\n"
+        "- Why blocking: breaks POST /execute.\n"
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.named_file is not None, score
+    assert score.passed, score
+
+
+@pytest.mark.unit
+def test_a_seed_file_named_only_in_why_blocking_does_not_count() -> None:
+    """Codex review at 70fbbb14: the seed file appears only in another finding's
+    'Why blocking' text. File and defect must come from the File and Defect fields."""
+    seed = _case("binary-artifact-minio-key").expected
+    report = (
+        "VERDICT: BLOCKED\n\n## BLOCKING\n\n### Retry loop\n\n"
+        "- File: `other.py:40`\n"
+        "- Defect: retry loop hammers the API on 404.\n"
+        "- Why blocking: outage risk. minio.py key handling looks fine; no mismatch found.\n"
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.findings == 1 and score.named_file is None and not score.passed
+
+
+@pytest.mark.unit
+def test_a_non_blocking_subsection_nested_under_blocking_is_not_a_finding() -> None:
+    """Codex review at 70fbbb14: '### NON-BLOCKING' under '## BLOCKING' was read as
+    another blocking finding, so a benign mention there passed."""
+    seed = _case("binary-artifact-minio-key").expected
+    report = (
+        "VERDICT: BLOCKED\n\n## BLOCKING\n\n### Retry loop\n\n"
+        "- File: `other.py:40`\n- Defect: retry loop hammers the API.\n- Why blocking: outage.\n\n"
+        "### NON-BLOCKING\n\n"
+        "- File: `minio.py:212`\n- Defect: object key does not match the uploaded key, so reads 404 not found.\n"
+        "- Why blocking: n/a, looks fine.\n"
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.findings == 1 and score.named_file is None and not score.passed
+
+
+@pytest.mark.unit
+def test_prose_under_blocking_outside_a_finding_block_is_not_a_finding() -> None:
+    report = (
+        "VERDICT: BLOCKED\n\n## BLOCKING\n\n"
+        "minio.py:212 download() builds the id-only key, so reads 404.\n"
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.findings == 0 and not score.passed
+
+
+@pytest.mark.unit
+def test_a_hash_line_in_a_code_fence_does_not_end_the_finding() -> None:
+    report = _report(
+        (
+            "minio.py:212",
+            "download() builds the id-only key:\n\n```python\n# id only\n```\n\nso reads 404.",
+        )
+    )
+    assert score_report(_EXPECTED, "blocked", report).passed
+
+
+@pytest.mark.unit
+def test_a_longer_file_name_ending_in_the_seed_file_does_not_name_it() -> None:
+    report = _report(("test_minio.py:5", "the fixture key does not match, so reads 404."))
+    assert score_report(_EXPECTED, "blocked", report).named_file is None
+
+
+def _case(case_id: str) -> Case:
+    return next(c for c in load_suite(DEFAULT_SUITE).cases if c.id == case_id)
+
+
+# Natural, correct descriptions of each seed's defect, worded independently of
+# the keyword tables - including the three per seed the verification probe at
+# ca52f38c wrote, of which the scorer then passed 1 in 12. Each must pass.
+_PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
+    "binary-artifact-minio-key": (
+        (
+            "minio.py:212",
+            "upload() stores the blob under an execution-scoped object name, but download() asks "
+            "for the bare artifact ID, so the binary content is never read back.",
+        ),
+        (
+            "artifact_storage/minio.py",
+            "the reader asks MinIO for a different object than the writer created, so production "
+            "returns NoSuchKey for every binary artifact.",
+        ),
+        (
+            "minio.py:198-230",
+            "the read path discards the execution prefix the write path added, and cannot "
+            "retrieve the blob it just stored.",
+        ),
+        (
+            "minio.py",
+            "the key computed on upload and the key computed on download disagree, so the "
+            "content endpoint answers 404 for binary artifacts.",
+        ),
+    ),
+    "codex-cost-limit": (
+        (
+            "CodexStreamProcessor.py",
+            "Codex supplies token usage only when execution finishes; max_cost_usd is checked "
+            "after all spending has occurred.",
+        ),
+        (
+            "CodexStreamProcessor.py:88",
+            "token totals are emitted at completion, so the cap cannot interrupt a Codex phase "
+            "that is running over budget.",
+        ),
+        (
+            "syn_shared/agents.py:41",
+            "for codex the consumption is revealed at shutdown, after the budget is already "
+            "exceeded; the limit is declared but never enforced.",
+        ),
+        (
+            "CodexStreamProcessor.py:120",
+            "the Codex CLI reports usage once, in turn.completed, so a running cost never exists "
+            "to compare against the limit.",
+        ),
+    ),
+    "execution-id-as-eval-id": (
+        (
+            "eval_admission.py:52",
+            "an execution ID loaded as an Eval reads the execution's stream, so an existing "
+            "execution makes an absent eval seem present.",
+        ),
+        (
+            "EvalAggregate.py",
+            "a workflow run ID used as an eval ID loads that run's events, and those unrelated "
+            "events satisfy the existence check.",
+        ),
+        (
+            "eval_edit.py:30",
+            "the store hands back execution events, which are replayed as an eval that never had "
+            "an EvalCreated event, and the attach is accepted.",
+        ),
+    ),
+    "shared-esp-stream": (
+        (
+            "RequestExecutionCommand.py:22",
+            "the request and the workflow execution are written to the same event stream, so the "
+            "second aggregate collides with the first.",
+        ),
+        (
+            "ExecutionRequestAggregate.py",
+            "both records reuse one stream identifier, and the request's events contaminate the "
+            "execution's state when it is loaded.",
+        ),
+        (
+            "ExecutionRequestAggregate.py:15",
+            "the request and the run occupy one stream, and the second write conflicts on the "
+            "expected version, so the start is dropped.",
+        ),
+        (
+            "RequestExecutionCommand.py",
+            "aggregate_id is the execution_id, and ESP keys streams by id alone, so the two "
+            "aggregates share a stream.",
+        ),
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("case_id", "file", "defect"),
+    [(case, file, defect) for case, found in _PARAPHRASES.items() for file, defect in found],
+)
+def test_a_natural_correct_finding_passes(case_id: str, file: str, defect: str) -> None:
+    seed = _case(case_id).expected
+    report = _report(("other.py:3", "an unrelated defect."), (file, defect))
+    score = score_report(seed, "blocked", report)
+    assert score.passed, score
+
+
+@pytest.mark.unit
+def test_every_seed_has_at_least_three_paraphrases() -> None:
+    assert {c.id for c in load_suite(DEFAULT_SUITE).cases} == set(_PARAPHRASES)
+    assert all(len(found) >= 3 for found in _PARAPHRASES.values())
+
+
+# Blocking findings that name a seed's file but describe a different defect.
+_WRONG_DEFECTS: dict[str, tuple[str, str]] = {
+    "binary-artifact-minio-key": (
+        "minio.py:12",
+        "the bucket name is read from an unvalidated setting.",
+    ),
+    "codex-cost-limit": (
+        "CodexStreamProcessor.py:30",
+        "a malformed JSON line raises instead of being logged.",
+    ),
+    "execution-id-as-eval-id": (
+        "EvalAggregate.py:70",
+        "archive does not check the caller's permission.",
+    ),
+    "shared-esp-stream": (
+        "ExecutionRequestAggregate.py:9",
+        "the request's priority field is never validated.",
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("case_id", "found"), list(_WRONG_DEFECTS.items()))
+def test_the_seed_file_with_a_different_defect_fails(case_id: str, found: tuple[str, str]) -> None:
+    score = score_report(_case(case_id).expected, "blocked", _report(found))
+    assert score.named_file is not None and not score.passed, score
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("case_id", list(_PARAPHRASES))
+def test_a_correct_finding_outside_blocking_fails(case_id: str) -> None:
+    file, defect = _PARAPHRASES[case_id][0]
+    report = _report(("other.py:3", "an unrelated defect."), non_blocking=f"- {file}: {defect}")
+    assert not score_report(_case(case_id).expected, "blocked", report).passed
+
+
+# ---------------------------------------------------------------------------
+# score_suite and launch_suite against the API's response shapes
+# ---------------------------------------------------------------------------
+
+_CASE = "binary-artifact-minio-key"
+_PIN = "b2f680f00b4e154b94fa4802a92ead30429e7b98"
+_WF = "eval-verify-pinned-v1"
+
+
+@dataclass(frozen=True)
+class _ServedPhase:
+    phase_id: str
+    prompt_template: str | None
+    model: str
+
+
+def _phases_of(loaded: LoadedSuite) -> list[_ServedPhase]:
+    """The phases the server would serve back for the checked-in workflow."""
+    local = WorkflowDefinition.from_file(ROOT / loaded.suite.workflow.path)
+    return [
+        _ServedPhase(p.id, p.prompt_template, loaded.suite.workflow.models[p.id])
+        for p in local.phases
+    ]
+
+
+class _Server:
+    """A fresh API server: no workflow installed until `/workflows/from-yaml` installs one.
+
+    `eval-1` pins the case's commit and holds `exec-1` (launched) and, when
+    `attached` is set, `exec-attached`: a blocked run with a matching report
+    that was attached afterwards, as the API allows without copying the baseline.
+    """
+
+    def __init__(
+        self,
+        loaded: LoadedSuite,
+        *,
+        attached: bool = False,
+        served_phases: list[_ServedPhase] | None = None,
+    ) -> None:
+        self.requests: list[httpx.Request] = []
+        self.installed: str | None = None
+        self.phases = served_phases if served_phases is not None else _phases_of(loaded)
+        self.attached = attached
+        self.eval_pin = _PIN
+        self.run_workflow = _WF
+
+    def client(self) -> httpx.Client:
+        return httpx.Client(base_url="http://api", transport=httpx.MockTransport(self.handle))
+
+    def _execution(self, run_id: str) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "workflow_execution_id": run_id,
+                "workflow_id": self.run_workflow,
+                "workflow_name": "w",
+                "status": "completed",
+                "review_verdict": "blocked",
+                "total_cost_usd": "3.75",
+                "total_duration_seconds": 640.2,
+                "unknown_duration_phase_count": 0,
+                "total_input_tokens": 1,
+                "total_output_tokens": 1,
+                "total_cache_creation_tokens": 0,
+                "total_cache_read_tokens": 0,
+                "total_tokens": 2,
+                "artifact_ids": ["art-1"],
+                "phases": [
+                    {
+                        "phase_id": "verify",
+                        "name": "v",
+                        "status": "completed",
+                        "artifact_id": "art-1",
+                        "model": "claude-opus-5-5",
+                        "requested_model": "opus",
+                    }
+                ],
+            },
+        )
+
+    def _eval(self) -> dict[str, object]:
+        return {
+            "eval_id": "eval-1",
+            "name": "n",
+            "goal": "g",
+            "starting_workflow_id": None,
+            "tags": ["verifier-seed-v1:v1", f"case:{_CASE}"],
+            "frozen": True,
+            "archived": False,
+            "created_at": None,
+            "updated_at": None,
+            "run_count": 1,
+            "run_status_counts": {"completed": 1},
+            "baseline_repos": [
+                {
+                    "repository": "syntropic137/syntropic137",
+                    "requested_ref": self.eval_pin,
+                    "commit_sha": self.eval_pin,
+                }
+            ],
+        }
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        path = request.url.path
+        if request.method == "POST" and path == "/workflows/from-yaml":
+            definition = WorkflowDefinition.from_yaml(request.content.decode())
+            self.installed = definition.id
+            return httpx.Response(
+                201,
+                json={
+                    "id": definition.id,
+                    "name": definition.name,
+                    "workflow_type": "custom",
+                    "classification": "standard",
+                    "repository_url": "",
+                    "requires_repos": True,
+                    "status": "created",
+                    "warnings": [],
+                },
+            )
+        if path == f"/workflows/{_WF}" and request.method == "GET":
+            if self.installed != _WF:
+                return httpx.Response(404, json={"detail": "Workflow not found"})
+            return httpx.Response(
+                200,
+                json={
+                    "id": _WF,
+                    "name": "w",
+                    "workflow_type": "custom",
+                    "classification": "standard",
+                    "requires_repos": True,
+                    "phases": [asdict(p) for p in self.phases],
+                },
+            )
+        if request.method == "POST" and path == "/evals":
+            body = json.loads(request.content)
+            pin = body["baseline_repos"][0]["requested_ref"]
+            return httpx.Response(
+                200,
+                json={
+                    "eval_id": f"eval-{pin[:6]}",
+                    "name": body["name"],
+                    "goal": body["goal"],
+                    "starting_workflow_id": body["starting_workflow_id"],
+                    "tags": body["tags"],
+                    "baseline_repos": [
+                        {
+                            "repository": "syntropic137/syntropic137",
+                            "requested_ref": pin,
+                            "commit_sha": pin,
+                        }
+                    ],
+                },
+            )
+        if request.method == "POST" and path.endswith("/execute"):
+            # The real route 404s when the workflow repository has no such id.
+            if path != f"/workflows/{self.installed}/execute":
+                return httpx.Response(404, json={"detail": "Workflow not found"})
+            body = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={"execution_id": f"exec-for-{body['eval_id']}", "workflow_id": _WF},
+            )
+        if path == "/evals":
+            return httpx.Response(
+                200,
+                json={
+                    "total": 1,
+                    "page": 1,
+                    "page_size": 200,
+                    "status_counts": {},
+                    "evals": [self._eval()],
+                },
+            )
+        if path == "/evals/eval-1":
+            return httpx.Response(200, json=self._eval())
+        if path == "/evals/eval-1/runs":
+            ids = ["exec-1"] + (["exec-attached"] if self.attached else [])
+            return httpx.Response(
+                200,
+                json={
+                    "total": len(ids),
+                    "page": 1,
+                    "page_size": 200,
+                    "executions": [
+                        {
+                            "workflow_execution_id": i,
+                            "workflow_id": _WF,
+                            "workflow_name": "w",
+                            "status": "completed",
+                        }
+                        for i in ids
+                    ],
+                },
+            )
+        if path in ("/executions/exec-1", "/executions/exec-attached"):
+            return self._execution(path.rsplit("/", 1)[1])
+        if path == "/artifacts/art-1/content":
+            return httpx.Response(
+                200,
+                json={
+                    "artifact_id": "art-1",
+                    "content": _FINDING,
+                    "content_type": "text/markdown",
+                    "size_bytes": 10,
+                },
+            )
+        return httpx.Response(404, json={"detail": path})
+
+
+_LAUNCHED = Launch(
+    suite="verifier-seed-v1:v1",
+    case=_CASE,
+    eval_id="eval-1",
+    run_id="exec-1",
+    commit=_PIN,
+    workflow_id=_WF,
+)
+
+
+@pytest.mark.unit
+def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    rows, unrecorded = score_suite(loaded, server.client(), [_LAUNCHED])
+
+    scored = [r for r in rows if r.case == _CASE]
+    assert len(scored) == 1
+    row = scored[0]
+    assert row.run_id == "exec-1"
+    assert row.score is not None and row.score.verdict == "blocked" and row.score.passed
+    assert row.cost_usd == Decimal("3.75")
+    assert row.models == "verify=claude-opus-5-5"
+    assert {r.status for r in rows if r.case != _CASE} == {"not launched"}
+    assert unrecorded == ()
+
+    table = render(loaded, rows)
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/4 passed" in table
+
+
+@pytest.mark.unit
+def test_an_attached_run_with_a_matching_blocked_report_is_never_scored() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded, attached=True)
+    rows, unrecorded = score_suite(loaded, server.client(), [_LAUNCHED])
+
+    assert [r.run_id for r in rows if r.score] == ["exec-1"]
+    assert all(r.run_id != "exec-attached" for r in rows)
+    assert len(unrecorded) == 1 and unrecorded[0].startswith("exec-attached")
+
+
+@pytest.mark.unit
+def test_a_tagged_eval_run_with_no_launch_record_does_not_pass() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    rows, unrecorded = score_suite(loaded, _Server(loaded).client(), [])
+
+    assert not any(r.score and r.score.passed for r in rows)
+    assert {r.status for r in rows} == {"not launched"}
+    assert unrecorded and unrecorded[0].startswith("exec-1")
+
+
+@pytest.mark.unit
+def test_a_launched_run_whose_eval_pins_another_commit_is_rejected() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    server.eval_pin = "0" * 40
+    rows, _ = score_suite(loaded, server.client(), [_LAUNCHED])
+
+    row = next(r for r in rows if r.case == _CASE)
+    assert row.score is None and row.status.startswith("rejected: eval eval-1 pins")
+
+
+@pytest.mark.unit
+def test_a_launched_run_of_another_workflow_is_rejected() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    server.run_workflow = "sdlc-reverify-pr-v1"
+    rows, _ = score_suite(loaded, server.client(), [_LAUNCHED])
+
+    row = next(r for r in rows if r.case == _CASE)
+    assert row.score is None and row.status.startswith("rejected: ran workflow")
+
+
+@pytest.mark.unit
+def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    ledger = tmp_path / "launches.jsonl"
+    lines = launch_suite(loaded, server.client(), ledger)
+
+    paths = [(r.method, r.url.path) for r in server.requests]
+    assert paths[0] == ("POST", "/workflows/from-yaml")
+    assert paths[1] == ("GET", f"/workflows/{_WF}")
+    assert "prompt_file" not in server.requests[0].content.decode()
+    creates = [json.loads(r.content) for r in server.requests if r.url.path == "/evals"]
+    starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
+    assert [c["baseline_repos"][0]["requested_ref"] for c in creates] == [
+        c.commit for c in loaded.cases
+    ]
+    assert all("verifier-seed-v1:v1" in c["tags"] for c in creates)
+    assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
+    assert len(lines) == 5
+
+    recorded = read_launches(ledger)
+    assert [(x.case, x.commit, x.eval_id, x.run_id) for x in recorded] == [
+        (c.id, c.commit, f"eval-{c.commit[:6]}", f"exec-for-eval-{c.commit[:6]}")
+        for c in loaded.cases
+    ]
+    assert {x.workflow_id for x in recorded} == {_WF}
+
+
+@pytest.mark.unit
+def test_launch_creates_no_eval_when_the_server_definition_differs(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    phases = _phases_of(loaded)
+    phases[0] = replace(phases[0], model="sonnet")
+    server = _Server(loaded, served_phases=phases)
+
+    with pytest.raises(RuntimeError, match="differs from"):
+        launch_suite(loaded, server.client(), tmp_path / "launches.jsonl")
+    assert not any(r.url.path == "/evals" for r in server.requests)
+    assert not (tmp_path / "launches.jsonl").exists()
+
+
+@pytest.mark.unit
+def test_launch_stops_when_the_server_pins_another_commit(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    inner = server.handle
+
+    def wrong_pin(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/evals":
+            return httpx.Response(
+                200,
+                json={
+                    "eval_id": "e",
+                    "baseline_repos": [
+                        {
+                            "repository": "syntropic137/syntropic137",
+                            "requested_ref": "x",
+                            "commit_sha": "0" * 40,
+                        }
+                    ],
+                },
+            )
+        return inner(request)
+
+    client = httpx.Client(base_url="http://api", transport=httpx.MockTransport(wrong_pin))
+    with pytest.raises(RuntimeError, match="pinned"):
+        launch_suite(loaded, client, tmp_path / "launches.jsonl")
+
+
+@pytest.mark.unit
+def test_a_run_that_reported_no_verdict_fails() -> None:
+    assert not score_report(_EXPECTED, None, _FINDING).passed
