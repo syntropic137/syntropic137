@@ -87,6 +87,7 @@ from syn_domain.contexts.orchestration import (
     DelegationFailure,
     EvalId,
     FailureClassification,
+    PhaseProgress,
     QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
@@ -591,6 +592,43 @@ class WorkflowDetail(BaseModel):
     installed from a package or predates install provenance."""
 
 
+class PhaseProgressInfo(BaseModel):
+    """How far through its phases an execution is, skipped phases accounted for.
+
+    ``total_phases`` is what the workflow defines, and a review that certifies
+    skips the repair rounds after it (PC-63), so ``completed/total`` read
+    "6/10" for a run that finished. Clients render ``display`` and draw
+    ``percent``; they never divide the raw counts themselves.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    completed: int
+    """Phases that ran to completion."""
+    skipped: int
+    """Phases a review verdict made unnecessary; they will never run."""
+    possible: int
+    """The most phases this run can complete: defined, less the skipped."""
+    remaining_possible: int
+    """Phases that could still run. Zero once the run has ended."""
+    percent: int
+    """Completed as a share of ``possible``, 0-100. A completed run is 100."""
+    display: str
+    """E.g. ``6 of 6 (4 phases not needed)``, ``phase 3 of up to 10``."""
+
+    @classmethod
+    def of(cls, progress: PhaseProgress) -> PhaseProgressInfo:
+        """The response shape of the domain's answer."""
+        return cls(
+            completed=progress.completed,
+            skipped=progress.skipped,
+            possible=progress.possible,
+            remaining_possible=progress.remaining_possible,
+            percent=progress.percent,
+            display=progress.display,
+        )
+
+
 class ExecutionSummary(BaseModel):
     """Summary of a workflow execution run."""
 
@@ -604,6 +642,7 @@ class ExecutionSummary(BaseModel):
     completed_at: datetime | str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -1613,6 +1652,7 @@ class ExecutionDetailFull(BaseModel):
     phase one carries one phase and a total of 3, and the gap is the phases
     that never started (#1147)."""
     completed_phases: int = 0
+    phase_progress: PhaseProgressInfo
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0

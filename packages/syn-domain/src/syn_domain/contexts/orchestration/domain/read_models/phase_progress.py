@@ -72,6 +72,8 @@ class PhaseProgress:
         if self.status == ExecutionStatus.RUNNING and self.possible > 0:
             current = min(self.completed + 1, self.possible)
             return f"phase {current} of up to {self.possible}{self._not_needed()}"
+        if self.completed == 0:
+            return "not started"
         return f"{self.completed} of up to {self.possible}"
 
     def _not_needed(self) -> str:

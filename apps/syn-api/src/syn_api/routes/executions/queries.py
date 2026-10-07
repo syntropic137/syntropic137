@@ -24,6 +24,7 @@ from syn_api.types import (
     ExecutionSummary,
     Ok,
     PhaseExecution,
+    PhaseProgressInfo,
     Result,
 )
 from syn_domain import tool_call_counts
@@ -197,6 +198,7 @@ def _build_execution_summary_response(
         completed_at=_to_str(e.completed_at),
         completed_phases=e.completed_phases,
         total_phases=e.total_phases,
+        phase_progress=e.phase_progress,
         total_tokens=totals.total_tokens,
         total_tokens_display=format_tokens(totals.total_tokens),
         total_input_tokens=totals.input_tokens,
@@ -376,6 +378,7 @@ def _to_execution_summary(
         completed_at=s.completed_at,
         completed_phases=s.completed_phases,
         total_phases=s.total_phases,
+        phase_progress=PhaseProgressInfo.of(s.phase_progress),
         total_tokens=s.total_tokens,
         total_input_tokens=s.total_input_tokens,
         total_output_tokens=s.total_output_tokens,
@@ -568,6 +571,7 @@ async def get_detail(
             phases=phases,
             total_phases=detail.total_phases,
             completed_phases=detail.completed_phases,
+            phase_progress=PhaseProgressInfo.of(detail.phase_progress),
             total_tokens=enriched.total_tokens,
             total_cost_usd=enriched.total_cost_usd,
             unpriced_observation_count=enriched.unpriced_observation_count,
@@ -617,6 +621,7 @@ async def list_active(
                 completed_at=s.completed_at,
                 completed_phases=s.completed_phases,
                 total_phases=s.total_phases,
+                phase_progress=PhaseProgressInfo.of(s.phase_progress),
                 total_tokens=s.total_tokens,
                 total_cost_usd=_enrichment_for(
                     cost_by_execution, s.workflow_execution_id
@@ -808,6 +813,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         phases=phases,
         total_phases=detail.total_phases,
         completed_phases=detail.completed_phases,
+        phase_progress=detail.phase_progress,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
         total_cache_creation_tokens=total_cache_creation,

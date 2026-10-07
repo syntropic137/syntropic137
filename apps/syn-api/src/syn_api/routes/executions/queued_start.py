@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING
 
 from syn_api._wiring_admission import get_execution_budget
 from syn_api.execution_budget import StartPath
+from syn_api.types import PhaseProgressInfo
 from syn_domain.contexts.orchestration import (
     OWED_STATUSES,
     ExecutionRequestStartProcessManager,
     ExecutionRequestStartRecord,
     FailureClassification,
+    PhaseProgress,
     read_start_record,
 )
 
@@ -175,6 +177,9 @@ async def not_yet_started(
         phases=[],
         total_phases=0,
         completed_phases=0,
+        phase_progress=PhaseProgressInfo.of(
+            PhaseProgress(status=_status(position, record), completed=0, skipped=0, defined=0)
+        ),
         artifact_ids=[],
         error_message=_error_message(position, record),
         failure_classification=FailureClassification.UNCLASSIFIED,

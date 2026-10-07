@@ -37,12 +37,14 @@ from syn_api.types import (
     Err,
     ExecutionSummary,
     Ok,
+    PhaseProgressInfo,
     Result,
     WorkflowError,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
+    PhaseProgress,
     EvalChoice,
     EvalId,
     EvalUnavailableError,
@@ -341,6 +343,8 @@ class ExecutionStatusResponse(BaseModel):
     current_phase: str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
+    """Progress with skipped repair rounds accounted for; what clients render."""
     started_at: str | None = None
     completed_at: str | None = None
     error: str | None = None
@@ -451,6 +455,16 @@ async def execute(
             status=result.status,
             completed_phases=result.metrics.completed_phases,
             total_phases=result.metrics.total_phases,
+            # The run's result carries no skips; the list and detail reads,
+            # built from NextPhaseReady, are where those are counted.
+            phase_progress=PhaseProgressInfo.of(
+                PhaseProgress(
+                    status=str(result.status),
+                    completed=result.metrics.completed_phases,
+                    skipped=0,
+                    defined=result.metrics.total_phases,
+                )
+            ),
             total_tokens=result.metrics.total_tokens,
             # Lane 2: cost is enriched via execution_cost projection at query time (#695)
             total_cost_usd=Decimal("0"),
@@ -927,6 +941,7 @@ async def get_execution_status_endpoint(
         current_phase=current_phase,
         completed_phases=completed_phases,
         total_phases=total_phases,
+        phase_progress=detail.phase_progress,
         started_at=str(_to_datetime(detail.started_at)) if detail.started_at else None,
         completed_at=str(_to_datetime(detail.completed_at)) if detail.completed_at else None,
         error=detail.error_message,
@@ -952,6 +967,7 @@ async def list_active_executions_endpoint(
             current_phase=None,
             completed_phases=s.completed_phases,
             total_phases=s.total_phases,
+            phase_progress=s.phase_progress,
             started_at=str(_to_datetime(s.started_at)) if s.started_at else None,
             completed_at=str(_to_datetime(s.completed_at)) if s.completed_at else None,
             error=s.error_message,

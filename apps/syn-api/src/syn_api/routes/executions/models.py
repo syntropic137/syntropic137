@@ -14,6 +14,7 @@ from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
     PhaseActivityInfo,
+    PhaseProgressInfo,
     PhaseStartConfig,
     StartPinsStatus,
 )
@@ -289,6 +290,8 @@ class ExecutionDetailResponse(BaseModel):
     """
     completed_phases: int = 0
     """Phases that finished. Same field, same meaning, as on the list view."""
+    phase_progress: PhaseProgressInfo
+    """Progress with skipped repair rounds accounted for; what clients render."""
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
@@ -422,6 +425,8 @@ class ExecutionSummaryResponse(BaseModel):
     completed_at: str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
+    """Progress with skipped repair rounds accounted for; what clients render."""
     total_tokens: int
     total_tokens_display: str = "0"
     total_input_tokens: int
