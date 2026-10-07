@@ -465,6 +465,9 @@ export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
 /** Why a phase's start pins are or are not shown; only `not_recorded` reads as "not recorded". */
 export type StartPinsStatus = components['schemas']['PhaseExecutionInfo']['start_pins_status']
 
+/** One declared phase and where it stands, aliased to the generated schema rather than restated. */
+export type PlannedPhaseInfo = components['schemas']['PlannedPhaseInfo']
+
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
@@ -486,6 +489,12 @@ export interface ExecutionDetailResponse {
   total_phases: number
   completed_phases: number
   phase_progress: PhaseProgressInfo
+  /**
+   * Every phase the run declared, in order, each with its status (feedback
+   * cee46909): what ran, and what is pending, skipped or inherited. Render
+   * `status_display` and style by `status`; never work the status out here.
+   */
+  phase_plan: PlannedPhaseInfo[]
   total_input_tokens: number
   total_output_tokens: number
   total_cache_creation_tokens: number
