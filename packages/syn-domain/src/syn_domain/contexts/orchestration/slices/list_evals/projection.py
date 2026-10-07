@@ -8,8 +8,15 @@ count, the status tally and the member rows are read from there at query time,
 filtered by ``eval_id`` in the store's query, and cannot disagree with the
 Executions view or double-count a replayed event.
 
-Pure and replay-safe: every handler overwrites the Eval's own document, so
-replaying the stream any number of times yields the same state.
+The one run fact the Eval stream DOES own is a run's score (``EvalRunScored``,
+Evals v2). Each is kept as its own document, keyed by (eval, execution), so a
+re-score overwrites the run's current score and history stays in the stream.
+A score is read beside the run, never instead of it: an execution that is no
+longer a member keeps its document, and the runs view simply never asks for it.
+
+Pure and replay-safe: every handler overwrites the Eval's own document or one
+score document, so replaying the stream any number of times yields the same
+state.
 """
 
 from __future__ import annotations
@@ -26,7 +33,11 @@ from syn_domain.contexts.orchestration.domain.events.EvalCreatedEvent import (
     EvalCreatedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.EvalFrozenEvent import EvalFrozenEvent
+from syn_domain.contexts.orchestration.domain.events.EvalRunScoredEvent import (
+    EvalRunScoredEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import EvalUpdatedEvent
+from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
 from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
     EvalBaselineRepo,
     EvalDetail,
@@ -51,7 +62,9 @@ class EvalListProjection(AutoDispatchProjection):
     """Builds the eval list and eval detail read models from Eval events."""
 
     PROJECTION_NAME = "evals"
-    VERSION = 1
+    SCORES = "eval_run_scores"
+    VERSION = 2
+    """2: run scores (``EvalRunScored``) in ``SCORES``."""
 
     def __init__(self, store: ProjectionStore):
         self._store = store
@@ -66,6 +79,7 @@ class EvalListProjection(AutoDispatchProjection):
     async def clear_all_data(self) -> None:
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
+            await self._store.delete_all(self.SCORES)
 
     async def on_eval_created(self, event_data: EvalCreatedEvent) -> None:
         event = EvalCreatedEvent.model_validate(event_data)
@@ -126,6 +140,30 @@ class EvalListProjection(AutoDispatchProjection):
                     update={"archived": True, "updated_at": event.archived_at.isoformat()}
                 )
             )
+
+    async def on_eval_run_scored(self, event_data: EvalRunScoredEvent) -> None:
+        event = EvalRunScoredEvent.model_validate(event_data)
+        score = EvalRunScore(
+            eval_id=event.eval_id,
+            execution_id=event.execution_id,
+            verdict=event.verdict,
+            score=event.score,
+            evidence=event.evidence,
+            scorer=event.scorer,
+            scorer_version=event.scorer_version,
+            scored_at=event.scored_at.isoformat(),
+        )
+        await self._store.save(
+            self.SCORES,
+            _score_key(event.eval_id, event.execution_id),
+            score.model_dump(mode="json"),
+        )
+
+    async def scores(self, eval_id: str) -> dict[str, EvalRunScore]:
+        """Every run's current score in the eval, by execution id, members or not."""
+        documents = await self._store.query(self.SCORES, filters={"eval_id": eval_id})
+        scores = (EvalRunScore.model_validate(document) for document in documents)
+        return {score.execution_id: score for score in scores}
 
     async def page(
         self,
@@ -211,6 +249,11 @@ def _baseline(
         )
         for repo in repos
     )
+
+
+def _score_key(eval_id: str, execution_id: str) -> str:
+    # "/" is outside both id alphabets, so no two (eval, execution) pairs collide.
+    return f"{eval_id}/{execution_id}"
 
 
 def _from_document(document: ProjectionRecord) -> EvalRecord:
