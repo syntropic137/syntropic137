@@ -105,6 +105,7 @@ async def test_workspace_without_a_phase_has_no_phase_label() -> None:
 
     assert not [arg for arg in argv if arg.startswith("--label=syn.phase_id")]
 
+
 _HINT_KEYS = (
     "PYTEST_XDIST_AUTO_NUM_WORKERS",
     "VITEST_MAX_WORKERS",

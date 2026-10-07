@@ -17,7 +17,10 @@ each tool is told the number directly.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 def cpu_concurrency_env(cpu_limit_cores: float | None) -> dict[str, str]:
