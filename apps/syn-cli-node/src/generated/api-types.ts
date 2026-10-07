@@ -3307,7 +3307,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -3779,6 +3779,8 @@ export interface components {
              */
             completed_phases: number;
             phase_progress: components["schemas"]["PhaseProgressInfo"];
+            /** Phase Plan */
+            phase_plan: components["schemas"]["PlannedPhaseInfo"][];
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */
@@ -4951,6 +4953,31 @@ export interface components {
             };
         };
         /**
+         * HeldProjectionHealth
+         * @description A projection held below an event it failed to apply (ESP #391).
+         *
+         *     It is retried there with backoff and never checkpointed past it, so it is
+         *     behind and stays behind until the handler is fixed or the projection is
+         *     rebuilt. Every other projection keeps consuming.
+         */
+        HeldProjectionHealth: {
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Event Type
+             * @description Type of the event it failed to apply.
+             */
+            event_type: string;
+            /**
+             * Global Nonce
+             * @description Global nonce of the event it is held at.
+             */
+            global_nonce: number;
+        };
+        /**
          * IdentityBinding
          * @description A platform session or registered invocation represents native transcript work.
          */
@@ -5855,6 +5882,24 @@ export interface components {
             resolved_sha: string;
             /** Source Url */
             source_url: string;
+        };
+        /**
+         * PlannedPhaseInfo
+         * @description One phase the run declared, and where it stands (feedback cee46909).
+         *
+         *     ``ExecutionDetail.phase_plan`` lists every declared phase, so a client
+         *     shows what is left as well as what ran. Clients render ``status_display``
+         *     and style by ``status``; they never work the status out themselves.
+         */
+        PlannedPhaseInfo: {
+            /** Phase Id */
+            phase_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Status Display */
+            status_display: string;
         };
         /**
          * Priority
@@ -7594,13 +7639,17 @@ export interface components {
          *     runbook already read. The fields from ``running`` down are
          *     ``CoordinatorSubscriptionService.get_status()``; the ones from
          *     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
-         *     ``lifecycle._describe_subscription_health``.
+         *     ``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).
          *
          *     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
          *     rather than a default: ``lag is None`` means the coordinator is not up yet,
          *     so there is nothing whose progress could be measured — which is not the same
-         *     as "not behind", and must not serialize as ``lag: 0``. When the probe itself
-         *     fails, ``status`` is "unknown" and nothing else is known at all.
+         *     as "not behind", and must not serialize as ``lag: 0``. When the lag or
+         *     dropped-start probe fails, the lag fields are absent but what the
+         *     coordinator itself knows (``running``, ``held_projections``, ``halted_at``)
+         *     is still published, and still sets ``status``: a halt at an undecodable
+         *     head event is exactly when the lag probe fails too. ``status`` is "unknown"
+         *     only when none of those fires.
          *
          *     ``ReadModelLag``'s fields are restated here because the block is flat on the
          *     wire and a generated client has to be able to see them. That restatement is
@@ -7610,10 +7659,10 @@ export interface components {
         SubscriptionHealth: {
             /**
              * Status
-             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed.
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed.
              * @enum {string}
              */
-            status: "healthy" | "degraded" | "dropped_events" | "stalled" | "catching_up" | "unknown";
+            status: "healthy" | "degraded" | "halted" | "dropped_events" | "held" | "stalled" | "catching_up" | "unknown";
             /**
              * Running
              * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
@@ -7629,6 +7678,16 @@ export interface components {
              * @description Whether a realtime (SSE) projection is attached.
              */
             realtime_enabled?: boolean | null;
+            /**
+             * Held Projections
+             * @description Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed.
+             */
+            held_projections?: components["schemas"]["HeldProjectionHealth"][] | null;
+            /**
+             * Halted At
+             * @description Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted.
+             */
+            halted_at?: number | null;
             /**
              * Is Catching Up
              * @description True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable.

@@ -9717,6 +9717,8 @@
           "projection_catchup",
           "projection_stalled",
           "projection_dropped_event",
+          "projection_held",
+          "subscription_halted",
           "event_poller",
           "check_run_poller",
           "anthropic_api_key",
@@ -10684,6 +10686,13 @@
           "phase_progress": {
             "$ref": "#/components/schemas/PhaseProgressInfo"
           },
+          "phase_plan": {
+            "items": {
+              "$ref": "#/components/schemas/PlannedPhaseInfo"
+            },
+            "type": "array",
+            "title": "Phase Plan"
+          },
           "total_input_tokens": {
             "type": "integer",
             "title": "Total Input Tokens"
@@ -10887,6 +10896,7 @@
           "workflow_name",
           "status",
           "phase_progress",
+          "phase_plan",
           "total_input_tokens",
           "total_output_tokens",
           "total_cache_creation_tokens",
@@ -13329,6 +13339,34 @@
         "title": "HeatmapDayBucketResponse",
         "description": "Single day's aggregated activity."
       },
+      "HeldProjectionHealth": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as in projection_checkpoints."
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "description": "Type of the event it failed to apply."
+          },
+          "global_nonce": {
+            "type": "integer",
+            "title": "Global Nonce",
+            "description": "Global nonce of the event it is held at."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "event_type",
+          "global_nonce"
+        ],
+        "title": "HeldProjectionHealth",
+        "description": "A projection held below an event it failed to apply (ESP #391).\n\nIt is retried there with backoff and never checkpointed past it, so it is\nbehind and stays behind until the handler is fixed or the projection is\nrebuilt. Every other projection keeps consuming."
+      },
       "IdentityBinding": {
         "properties": {
           "owner": {
@@ -15513,6 +15551,36 @@
         ],
         "title": "PinnedSkillInfo",
         "description": "One skill a phase was given at start, at the version it was resolved to (#1454)."
+      },
+      "PlannedPhaseInfo": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "status_display": {
+            "type": "string",
+            "title": "Status Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "name",
+          "status",
+          "status_display"
+        ],
+        "title": "PlannedPhaseInfo",
+        "description": "One phase the run declared, and where it stands (feedback cee46909).\n\n``ExecutionDetail.phase_plan`` lists every declared phase, so a client\nshows what is left as well as what ran. Clients render ``status_display``\nand style by ``status``; they never work the status out themselves."
       },
       "Priority": {
         "type": "string",
@@ -18582,13 +18650,15 @@
             "enum": [
               "healthy",
               "degraded",
+              "halted",
               "dropped_events",
+              "held",
               "stalled",
               "catching_up",
               "unknown"
             ],
             "title": "Status",
-            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed."
+            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed."
           },
           "running": {
             "anyOf": [
@@ -18625,6 +18695,33 @@
             ],
             "title": "Realtime Enabled",
             "description": "Whether a realtime (SSE) projection is attached."
+          },
+          "held_projections": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HeldProjectionHealth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Projections",
+            "description": "Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed."
+          },
+          "halted_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Halted At",
+            "description": "Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted."
           },
           "is_catching_up": {
             "anyOf": [
@@ -18724,7 +18821,7 @@
           "status"
         ],
         "title": "SubscriptionHealth",
-        "description": "The read-path block of ``GET /health``: is the subscription up, and is it behind.\n\nFLAT, not nested, because that is the wire shape `syn health` and the deploy\nrunbook already read. The fields from ``running`` down are\n``CoordinatorSubscriptionService.get_status()``; the ones from\n``is_catching_up`` down are ``ReadModelLag``, spread into the same object by\n``lifecycle._describe_subscription_health``.\n\nEVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact\nrather than a default: ``lag is None`` means the coordinator is not up yet,\nso there is nothing whose progress could be measured \u2014 which is not the same\nas \"not behind\", and must not serialize as ``lag: 0``. When the probe itself\nfails, ``status`` is \"unknown\" and nothing else is known at all.\n\n``ReadModelLag``'s fields are restated here because the block is flat on the\nwire and a generated client has to be able to see them. That restatement is\nthe one place this model can drift from its producer, so\n``test_health_contract.py`` asserts the two field sets still match."
+        "description": "The read-path block of ``GET /health``: is the subscription up, and is it behind.\n\nFLAT, not nested, because that is the wire shape `syn health` and the deploy\nrunbook already read. The fields from ``running`` down are\n``CoordinatorSubscriptionService.get_status()``; the ones from\n``is_catching_up`` down are ``ReadModelLag``, spread into the same object by\n``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).\n\nEVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact\nrather than a default: ``lag is None`` means the coordinator is not up yet,\nso there is nothing whose progress could be measured \u2014 which is not the same\nas \"not behind\", and must not serialize as ``lag: 0``. When the lag or\ndropped-start probe fails, the lag fields are absent but what the\ncoordinator itself knows (``running``, ``held_projections``, ``halted_at``)\nis still published, and still sets ``status``: a halt at an undecodable\nhead event is exactly when the lag probe fails too. ``status`` is \"unknown\"\nonly when none of those fires.\n\n``ReadModelLag``'s fields are restated here because the block is flat on the\nwire and a generated client has to be able to see them. That restatement is\nthe one place this model can drift from its producer, so\n``test_health_contract.py`` asserts the two field sets still match."
       },
       "SystemActionResponse": {
         "properties": {

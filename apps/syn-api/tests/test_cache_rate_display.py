@@ -104,6 +104,7 @@ async def _execution_response(monkeypatch: pytest.MonkeyPatch, phases: list[Phas
                 workflow_name="wf",
                 status="completed",
                 phases=phases,
+                phase_plan=[],
                 phase_progress=PhaseProgressInfo.of(
                     PhaseProgress(status="completed", completed=0, skipped=0, defined=0)
                 ),
