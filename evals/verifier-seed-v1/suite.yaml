@@ -22,6 +22,10 @@
 # workflow it ran and the cases it held. `score` scores each version's runs
 # against its own cases only. Never edit a history entry or a ledger line.
 id: verifier-seed-v1
+# The stable name the case evals carry, `suite:verifier-seed` + `case:<id>`. Every
+# version and verifier runs into those same evals; the run carries
+# `suite-version:<n>` and `verifier:<workflow id>`.
+eval_suite: verifier-seed
 version: 2
 goal: >
   Does the verifier block a change that carries a known escaped bug, and name

@@ -729,7 +729,10 @@ class _Server:
         self.attached = attached
         self.eval_pin = _PIN
         self.run_workflow = loaded.workflow.id
-        self.tag = loaded.tag
+        self.tag = loaded.suite.suite_tag
+        self.existing = False
+        """When set, every case already has its stable eval `eval-<pin[:6]>`."""
+        self.scores: list[tuple[str, dict[str, object]]] = []
 
     def client(self) -> httpx.Client:
         return httpx.Client(base_url="http://api", transport=httpx.MockTransport(self.handle))
@@ -787,6 +790,16 @@ class _Server:
             ],
         }
 
+    def _stable(self, case_id: str) -> dict[str, object]:
+        pin = next(c.commit for c in load_suite(DEFAULT_SUITE).cases if c.id == case_id)
+        return {
+            "eval_id": f"eval-{pin[:6]}",
+            "tags": [self.tag, f"case:{case_id}"],
+            "baseline_repos": [
+                {"repository": "syntropic137/syntropic137", "requested_ref": pin, "commit_sha": pin}
+            ],
+        }
+
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
@@ -820,6 +833,9 @@ class _Server:
                     "phases": [asdict(p) for p in self.phases],
                 },
             )
+        if request.method == "POST" and path.endswith("/score"):
+            self.scores.append((path, json.loads(request.content)))
+            return httpx.Response(200, json={})
         if request.method == "POST" and path == "/evals":
             body = json.loads(request.content)
             pin = body["baseline_repos"][0]["requested_ref"]
@@ -829,7 +845,7 @@ class _Server:
                     "eval_id": f"eval-{pin[:6]}",
                     "name": body["name"],
                     "goal": body["goal"],
-                    "starting_workflow_id": body["starting_workflow_id"],
+                    "starting_workflow_id": body.get("starting_workflow_id"),
                     "tags": body["tags"],
                     "baseline_repos": [
                         {
@@ -854,7 +870,13 @@ class _Server:
             )
         if path == "/evals":
             # The real list filters by tag: another verifier's tag finds nothing.
-            evals = [self._eval()] if request.url.params.get("tag") == self.tag else []
+            tags = set(request.url.params.get_list("tag"))
+            # `eval-1` is what `score` finds. A launch installs first and, on
+            # this fresh server, finds no case eval unless `existing` is set.
+            scoring = self.installed is None
+            evals = [self._eval()] if scoring and tags == {self.tag, f"case:{_CASE}"} else []
+            if self.existing and self.tag in tags:
+                evals = [self._stable(t.removeprefix("case:")) for t in tags if t != self.tag]
             return httpx.Response(
                 200,
                 json={
@@ -875,12 +897,12 @@ class _Server:
                     "total": len(ids),
                     "page": 1,
                     "page_size": 200,
-                    "executions": [
+                    "items": [
                         {
-                            "workflow_execution_id": i,
+                            "execution_id": i,
                             "workflow_id": _WF,
-                            "workflow_name": "w",
                             "status": "completed",
+                            "models": [{"phase_id": "verify", "model": "claude-opus-5-5"}],
                         }
                         for i in ids
                     ],
@@ -989,12 +1011,17 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
     assert paths[0] == ("POST", "/workflows/from-yaml")
     assert paths[1] == ("GET", f"/workflows/{_WF}")
     assert "prompt_file" not in server.requests[0].content.decode()
-    creates = [json.loads(r.content) for r in server.requests if r.url.path == "/evals"]
+    creates = [
+        json.loads(r.content)
+        for r in server.requests
+        if r.method == "POST" and r.url.path == "/evals"
+    ]
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [c["baseline_repos"][0]["requested_ref"] for c in creates] == [
         c.commit for c in loaded.cases
     ]
-    assert all(loaded.tag in c["tags"] for c in creates)
+    assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
+    assert all(s["tags"] == ["suite-version:2", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1068,10 +1095,16 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
 
     paths = [(r.method, r.url.path) for r in server.requests]
     assert paths[1] == ("GET", f"/workflows/{_CODEX_WF}")
-    creates = [json.loads(r.content) for r in server.requests if r.url.path == "/evals"]
-    assert {c["starting_workflow_id"] for c in creates} == {_CODEX_WF}
-    assert all(f"verifier-seed-v1:v2:{_CODEX_WF}" in c["tags"] for c in creates)
-    assert all("verifier-seed-v1:v2:eval-verify-pinned-v1" not in c["tags"] for c in creates)
+    creates = [
+        json.loads(r.content)
+        for r in server.requests
+        if r.method == "POST" and r.url.path == "/evals"
+    ]
+    # The case evals are shared by every verifier; the run says which one it was.
+    assert all("starting_workflow_id" not in c for c in creates)
+    starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:2", f"verifier:{_CODEX_WF}")}
+    assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
@@ -1161,9 +1194,12 @@ class _LedgerServer:
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         parts = path.strip("/").split("/")
+        if request.method == "POST" and path.endswith("/score"):
+            return httpx.Response(200, json={})
         if path == "/evals":
-            tag = request.url.params.get("tag")
-            evals = [self._eval(x) for x in self.by_eval.values() if x.suite == tag]
+            # Before the duplicate migration: no eval carries the stable suite tag.
+            tags = set(request.url.params.get_list("tag"))
+            evals = [self._eval(x) for x in self.by_eval.values() if {x.suite} == tags]
             return httpx.Response(
                 200,
                 json={
@@ -1178,14 +1214,9 @@ class _LedgerServer:
             return httpx.Response(200, json=self._eval(self.by_eval[parts[1]]))
         if parts[0] == "evals" and parts[2:] == ["runs"]:
             x = self.by_eval[parts[1]]
-            run = {
-                "workflow_execution_id": x.run_id,
-                "workflow_id": x.workflow_id,
-                "workflow_name": "w",
-                "status": "completed",
-            }
+            run = {"execution_id": x.run_id, "workflow_id": x.workflow_id, "status": "completed"}
             return httpx.Response(
-                200, json={"total": 1, "page": 1, "page_size": 200, "executions": [run]}
+                200, json={"total": 1, "page": 1, "page_size": 200, "items": [run]}
             )
         if parts[0] == "executions":
             x = self.by_run[parts[1]]
@@ -1516,3 +1547,32 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
 
     assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
     assert not templates.by_id[_CODEX_WF].is_archived
+
+
+@pytest.mark.unit
+def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    server.existing = True
+
+    launch_suite(loaded, server.client(), tmp_path / "launches.jsonl")
+
+    assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
+    starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
+    assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:2", f"verifier:{_WF}")}
+
+
+@pytest.mark.unit
+def test_score_records_each_verdict_on_the_eval() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+
+    score_suite(loaded, server.client(), [_LAUNCHED])
+
+    [(path, body)] = server.scores
+    assert path == "/evals/eval-1/runs/exec-1/score"
+    assert body["verdict"] == "PASS"
+    assert body["score"] == 1.0
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "2")
+    assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
