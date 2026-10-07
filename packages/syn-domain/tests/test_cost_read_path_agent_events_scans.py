@@ -202,10 +202,11 @@ _EXPECTED_SPAN_LOOKUPS: dict[_Case, tuple[str, ...]] = {
     ),
     _case("GET /costs/executions (list)", _Branch.SUMMARISED): (_EXECUTION_SPAN,),
     _case("GET /costs/executions (list)", _Branch.IN_PROGRESS): (),
-    _case("GET /executions (one page, by id)", _Branch.SUMMARISED): (
-        _EXECUTION_SPAN,
-        _EXECUTION_SPAN,
-    ),
+    # One lookup, not two: the phase costs read a subset of the page's ids, so
+    # the page's span already bounds them (#1693). The second lookup was a
+    # whole round trip on every dashboard poll, 7 ms p50 and 200 ms at worst
+    # on the loaded selfhost, for bounds the caller already held.
+    _case("GET /executions (one page, by id)", _Branch.SUMMARISED): (_EXECUTION_SPAN,),
     _case("GET /executions (one page, by id)", _Branch.IN_PROGRESS): (_EXECUTION_SPAN,),
     _case("GET /costs/executions/{id} (detail)", _Branch.SUMMARISED): (_EXECUTION_SPAN,),
     _case("GET /costs/executions/{id} (detail)", _Branch.IN_PROGRESS): (_EXECUTION_SPAN,),

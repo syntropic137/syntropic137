@@ -269,7 +269,9 @@ class ExecutionCostQueryService:
             # compress_orderby - the same defect as on the sessions list, and
             # the reason /executions took 4-30s (#1322).
             tool_counts = await tool_call_counts.by_execution(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-            return await self._assemble(conn, summary_rows, token_rows, tool_counts)
+            # The phase costs read a subset of these ids, so this span already
+            # bounds them; looking it up again was a wasted round trip (#1693).
+            return await self._assemble(conn, summary_rows, token_rows, tool_counts, span=span)
 
     async def _assemble(
         self,
@@ -277,10 +279,18 @@ class ExecutionCostQueryService:
         summary_rows: list[asyncpg.Record],
         token_rows: list[asyncpg.Record],
         tool_counts: dict[str, int],
+        *,
+        span: agent_event_span.EventSpan | None = None,
     ) -> list[ExecutionCost]:
-        """Build ``ExecutionCost`` records from already-fetched summary/token rows."""
+        """Build ``ExecutionCost`` records from already-fetched summary/token rows.
+
+        ``span``, when given, must cover every execution in ``summary_rows``;
+        the phase costs are then bounded by it rather than by a fresh lookup.
+        """
         summary_rows_by_execution = self._group_rows_by_execution(summary_rows)
-        phase_map = await self._fetch_phase_cost_map(conn, list(summary_rows_by_execution))
+        phase_map = await self._fetch_phase_cost_map(
+            conn, list(summary_rows_by_execution), span=span
+        )
 
         results: list[ExecutionCost] = []
         for eid, rows in summary_rows_by_execution.items():
@@ -309,7 +319,11 @@ class ExecutionCostQueryService:
         return rows_by_execution
 
     async def _fetch_phase_cost_map(
-        self, conn: object, execution_ids: list[str]
+        self,
+        conn: object,
+        execution_ids: list[str],
+        *,
+        span: agent_event_span.EventSpan | None = None,
     ) -> dict[str, PhaseCosts]:
         """Fetch per-execution, per-phase costs, priced like the execution total.
 
@@ -326,7 +340,8 @@ class ExecutionCostQueryService:
         """
         if not execution_ids:
             return {}
-        span = await agent_event_span.for_executions(conn, execution_ids)  # type: ignore[arg-type]  # the caller's asyncpg connection
+        if span is None:
+            span = await agent_event_span.for_executions(conn, execution_ids)  # type: ignore[arg-type]  # the caller's asyncpg connection
         rows = await conn.fetch(  # type: ignore[union-attr]
             _COST_BY_PHASE_QUERY, SESSION_SUMMARY, execution_ids, span.lower, span.upper
         )
