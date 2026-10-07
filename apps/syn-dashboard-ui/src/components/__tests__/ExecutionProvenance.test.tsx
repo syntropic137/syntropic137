@@ -65,6 +65,8 @@ describe('DispatchedTask', () => {
   })
 })
 
+const DIGEST = '3b1f9c0de4a7e5f2b8d6c4a2e0f8d6b4c2a0e8f6d4b2a0c8e6f4d2b0a8c6e4f2'
+
 const PINS: PhaseStartConfig = {
   provider: 'claude',
   requested_model: 'claude-opus-5-5',
@@ -73,7 +75,9 @@ const PINS: PhaseStartConfig = {
     {
       name: 'architecture',
       version: 'v2.3.1',
-      resolved_sha: '9f1c0de4',
+      // What `_compute_tree_sha` produces: SHA-256 over the skill's files,
+      // not a commit, so it must never become a GitHub ref.
+      resolved_sha: DIGEST,
       source_url: 'https://github.com/syntropic137/software-leverage-points',
     },
   ],
@@ -90,14 +94,16 @@ describe('PhaseStartPins', () => {
     expect(text).not.toContain('Start config: not recorded')
   })
 
-  it('shows and links the SHA a skill resolved to at start, not just its tag', () => {
+  it('links the declared version, and shows the content digest unlinked', () => {
     render(<PhaseStartPins pins={PINS} status="recorded" />)
     const skill = screen.getByTestId('skill-ref')
     expect(skill.textContent).toContain('syntropic137/software-leverage-points')
-    expect(skill.textContent).toContain('9f1c0de4')
-    expect(screen.getByRole('link', { name: 'Source of architecture at 9f1c0de4', hidden: true }).getAttribute('href')).toBe(
-      'https://github.com/syntropic137/software-leverage-points/tree/9f1c0de4',
-    )
+    expect(skill.textContent).toContain('v2.3.1')
+    expect(skill.textContent).toContain(`sha256:${DIGEST.slice(0, 7)}`)
+    const links = screen.getAllByRole('link', { hidden: true })
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      'https://github.com/syntropic137/software-leverage-points/tree/v2.3.1',
+    ])
   })
 
   it('says skill use is not recorded yet, never that a declared skill went unused', () => {
@@ -108,7 +114,7 @@ describe('PhaseStartPins', () => {
 
   it('says "not recorded" for a run from before #1454, and guesses nothing', () => {
     const { container } = render(<PhaseStartPins pins={null} status="not_recorded" />)
-    expect(container.textContent).toBe('Start config: not recorded')
+    expect(container.textContent).toBe('Start config: not recorded · skill use not recorded yet')
   })
 
   it.each([
@@ -116,7 +122,7 @@ describe('PhaseStartPins', () => {
     ['the server sent no status at all', undefined],
   ])('never calls it "not recorded" when %s', (_why, status) => {
     const { container } = render(<PhaseStartPins pins={null} status={status} />)
-    expect(container.textContent).toBe('Start config: unavailable')
+    expect(container.textContent).toBe('Start config: unavailable · skill use not recorded yet')
   })
 
   it('does not read an empty tool list as "no tools"', () => {

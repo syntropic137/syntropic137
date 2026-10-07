@@ -21,6 +21,14 @@ describe('sourceRepoLabel', () => {
     )
   })
 
+  // What `SkillRef` keeps as `source_url` for its ssh spellings.
+  it.each(['git@github.com:org/skills', 'git+ssh://git@github.com/org/skills', 'ssh://git@github.com/org/skills.git'])(
+    'names an ssh GitHub source %s by org/repo',
+    (url) => {
+      expect(sourceRepoLabel(url)).toBe('org/skills')
+    },
+  )
+
   it('shows any other source as given', () => {
     expect(sourceRepoLabel('git@gitlab.com:org/repo.git')).toBe('git@gitlab.com:org/repo.git')
   })
@@ -33,11 +41,22 @@ describe('sourceUrlAtRef', () => {
     )
   })
 
+  it.each(['git@github.com:org/skills', 'git+ssh://git@github.com/org/skills'])(
+    'links an ssh GitHub source %s over https',
+    (url) => {
+      expect(sourceUrlAtRef(url, 'v1')).toBe('https://github.com/org/skills/tree/v1')
+    },
+  )
+
   it.each([
     ['a non-GitHub host', 'https://gitlab.com/org/repo'],
-    ['an ssh source', 'git@github.com:org/repo.git'],
+    ['an ssh source on another host', 'git@gitlab.com:org/repo.git'],
     ['a URL that is not a repo root', 'https://github.com/org'],
   ])('builds no link for %s', (_why, url) => {
     expect(sourceUrlAtRef(url, SHA)).toBeNull()
+  })
+
+  it('builds no link for a version pinned by content hash, which is no git ref', () => {
+    expect(sourceUrlAtRef('https://github.com/org/skills', `sha256-${'a'.repeat(64)}`)).toBeNull()
   })
 })

@@ -143,14 +143,18 @@ describe('workflow Phase Pipeline card', () => {
                 name_overridden: false,
                 raw: null,
               },
-              { name: null, source_url: null, version: null, name_overridden: false, raw: './skills/repo-conventions' },
+              // `PhaseRefDetail.from_stored("acme/skills/foo@v1")`: a remote
+              // shorthand the API keeps whole, which is not a local skill.
+              { name: null, source_url: null, version: null, name_overridden: false, raw: 'acme/skills/foo@v1' },
+              // `SkillRef("git@github.com:org/skills@v1")` through `from_stored`.
+              { name: 'skills', source_url: 'git@github.com:org/skills', version: 'v1', name_overridden: false, raw: null },
             ],
           },
         ]}
         phaseMetrics={undefined}
       />,
     )
-    const [pinned, local] = screen.getAllByTestId('skill-ref')
+    const [pinned, shorthand, ssh] = screen.getAllByTestId('skill-ref')
     expect(pinned.textContent).toContain('architecture')
     expect(pinned.textContent).toContain('syntropic137/software-leverage-points')
     expect(pinned.textContent).toContain('7e48aad')
@@ -158,8 +162,12 @@ describe('workflow Phase Pipeline card', () => {
     expect(screen.getByRole('link', { name: 'Source of architecture at 7e48aad' }).getAttribute('href')).toBe(
       `https://github.com/syntropic137/software-leverage-points/tree/${sha}`,
     )
-    expect(local.textContent).toContain('./skills/repo-conventions')
-    expect(local.textContent).toContain('local to the workflow')
+    expect(shorthand.textContent).toContain('acme/skills/foo@v1')
+    expect(shorthand.textContent).not.toMatch(/local/i)
+    expect(ssh.textContent).toContain('org/skills @ v1')
+    expect(screen.getByRole('link', { name: 'Source of skills at v1' }).getAttribute('href')).toBe(
+      'https://github.com/org/skills/tree/v1',
+    )
   })
 
   it('says a phase declares no skills rather than leaving it blank', () => {

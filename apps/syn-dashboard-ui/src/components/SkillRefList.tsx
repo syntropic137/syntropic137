@@ -4,9 +4,12 @@
  *
  * One component for both the skills a workflow DECLARES and the skills an
  * execution was PINNED to at start, so the two pages cannot drift into
- * describing the same skill differently. A pinned skill carries the SHA its
- * version resolved to, and that SHA is what is shown and linked: the version
- * may be a tag that has moved since.
+ * describing the same skill differently.
+ *
+ * The link always goes to the declared `version`, the git ref the author
+ * wrote. A pinned skill also carries `resolved_sha`, but that is a SHA-256
+ * over the skill's files, not a commit: it is shown as the content digest the
+ * run actually had, and never linked, because GitHub has no page for it.
  */
 
 import { ExternalLink } from 'lucide-react'
@@ -18,15 +21,15 @@ export interface SkillRefLike {
   name?: string | null
   source_url?: string | null
   version?: string | null
-  /** Pinned skills only: the commit `version` resolved to at start. */
+  /** Pinned skills only: SHA-256 of the skill's files at start. Not a git ref. */
   resolved_sha?: string
-  /** Declared skills only: the shorthand as written, e.g. a local `./skills/x`. */
+  /** Declared skills only: a shorthand string the API kept whole, unsplit. */
   raw?: string | null
 }
 
 function SkillRefItem({ skill }: { skill: SkillRefLike }) {
   const name = skill.name ?? skill.raw ?? 'unnamed skill'
-  const ref = skill.resolved_sha ?? skill.version ?? null
+  const ref = skill.version ?? null
   const href = skill.source_url && ref ? sourceUrlAtRef(skill.source_url, ref) : null
   return (
     <li className="flex flex-col" data-testid="skill-ref">
@@ -35,9 +38,6 @@ function SkillRefItem({ skill }: { skill: SkillRefLike }) {
         <span className="flex flex-wrap items-center gap-1 text-[var(--color-text-muted)]" title={`${skill.source_url}${ref ? ` @ ${ref}` : ''}`}>
           {sourceRepoLabel(skill.source_url)}
           {ref && <> @ <code>{shortRef(ref)}</code></>}
-          {skill.resolved_sha && skill.version && skill.version !== skill.resolved_sha && (
-            <> ({skill.version})</>
-          )}
           {href && (
             <a
               className="text-[var(--color-accent)] hover:underline"
@@ -52,7 +52,12 @@ function SkillRefItem({ skill }: { skill: SkillRefLike }) {
           )}
         </span>
       ) : (
-        <span className="text-[var(--color-text-muted)]">local to the workflow</span>
+        <span className="text-[var(--color-text-muted)]">as written in the workflow</span>
+      )}
+      {skill.resolved_sha && (
+        <span className="text-[var(--color-text-muted)]" title={`sha256:${skill.resolved_sha}`}>
+          content <code>sha256:{shortRef(skill.resolved_sha)}</code>
+        </span>
       )}
     </li>
   )

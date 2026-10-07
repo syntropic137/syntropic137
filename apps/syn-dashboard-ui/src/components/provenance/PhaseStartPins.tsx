@@ -2,6 +2,8 @@ import type { PhaseStartConfig, StartPinsStatus } from '../../types'
 import { SkillRefList } from '../SkillRefList'
 import './provenance.css'
 
+const SKILL_USE_UNKNOWN = 'use not recorded yet'
+
 /**
  * What a phase had when its execution started: model, tools, skills (#1454).
  *
@@ -12,6 +14,9 @@ import './provenance.css'
  * start event was not read, so what it recorded is unknown. An empty tool list
  * is NOT "no tools": the phase declared no restriction and ran with the
  * harness's default set.
+ *
+ * Skill USE is unknown in every branch, pins or not: the execution API does
+ * not report which skills were invoked yet (#1269), so each branch says so.
  */
 export function PhaseStartPins({
   pins,
@@ -26,7 +31,7 @@ export function PhaseStartPins({
         className="provenance-pins provenance-muted"
         title="The execution's start event could not be read just now; this says nothing about what it recorded"
       >
-        Start config: unavailable
+        Start config: unavailable &middot; skill {SKILL_USE_UNKNOWN}
       </p>
     )
   }
@@ -36,7 +41,7 @@ export function PhaseStartPins({
         className="provenance-pins provenance-muted"
         title="This execution started before phase configuration was pinned at start (#1454)"
       >
-        Start config: not recorded
+        Start config: not recorded &middot; skill {SKILL_USE_UNKNOWN}
       </p>
     )
   }
@@ -77,7 +82,7 @@ export function PhaseStartPins({
           once it is in the generated types, render it here by its status.
           Until then this says so, never "not used".
         */}
-        <dd>use not recorded yet</dd>
+        <dd>{SKILL_USE_UNKNOWN}</dd>
       </dl>
     </details>
   )
