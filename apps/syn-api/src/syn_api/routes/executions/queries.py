@@ -259,18 +259,23 @@ async def _load_execution_enrichment(
     if not execution_ids:
         return {}
     try:
-        costs = await manager.execution_cost.list_costs_for_ids(execution_ids)
+        read = await manager.execution_cost.list_costs_for_ids(execution_ids)
     except Exception:
         logger.debug("Failed to load execution cost enrichment", exc_info=True)
         return {}
-    out: dict[str, _ExecutionEnrichment] = {}
-    for eid, ec in costs.items():
+    # An execution with tool calls and no token telemetry yet carries its
+    # count and nothing else: its token fields stay None, so the domain
+    # summary's totals win rather than a zero nobody measured.
+    out = {
+        eid: _ExecutionEnrichment(tool_call_count=count) for eid, count in read.tool_calls.items()
+    }
+    for ec in read.costs:
         # Summed explicitly rather than read from ExecutionCost.total_tokens.
         # This path and the cost path must arrive at the same number by
         # independent routes, which is what makes the cross-read-model test in
         # test_cross_read_model_token_totals.py a real check (issue #873).
         total = ec.input_tokens + ec.output_tokens + ec.cache_creation_tokens + ec.cache_read_tokens
-        out[eid] = _ExecutionEnrichment(
+        out[ec.execution_id] = _ExecutionEnrichment(
             total_cost_usd=ec.total_cost_usd,
             unpriced_observation_count=ec.unpriced_observation_count,
             input_tokens=ec.input_tokens,

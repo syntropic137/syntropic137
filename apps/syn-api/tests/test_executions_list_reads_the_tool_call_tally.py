@@ -37,6 +37,8 @@ from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE, TOOL_EXECUTION_COMPL
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from syn_api.routes.executions.models import ExecutionSummaryResponse
+
 pytestmark = pytest.mark.unit
 
 _EXECUTION = "exec-1322"
@@ -149,6 +151,15 @@ class _Pool:
         return _Acquire(self._conn)
 
 
+#: What the domain summary already knows about the execution's tokens, from
+#: phases it completed before this turn. None of it is in Lane 2.
+_DOMAIN_INPUT = 60
+_DOMAIN_OUTPUT = 30
+_DOMAIN_CACHE_CREATION = 7
+_DOMAIN_CACHE_READ = 3
+_DOMAIN_TOTAL = 100
+
+
 def _summary() -> WorkflowExecutionSummary:
     return WorkflowExecutionSummary(
         workflow_execution_id=_EXECUTION,
@@ -157,9 +168,13 @@ def _summary() -> WorkflowExecutionSummary:
         status="running",
         started_at="2026-10-07T08:00:00+00:00",
         completed_at=None,
-        completed_phases=0,
+        completed_phases=1,
         total_phases=2,
-        total_tokens=0,
+        total_tokens=_DOMAIN_TOTAL,
+        total_input_tokens=_DOMAIN_INPUT,
+        total_output_tokens=_DOMAIN_OUTPUT,
+        total_cache_creation_tokens=_DOMAIN_CACHE_CREATION,
+        total_cache_read_tokens=_DOMAIN_CACHE_READ,
     )
 
 
@@ -195,8 +210,17 @@ class _EventStore:
 async def _one_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[_RecordingConnection, _Pool, int]:
+    conn, pool, response = await _one_response(monkeypatch)
+    return conn, pool, response.tool_call_count
+
+
+async def _one_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[_RecordingConnection, _Pool, ExecutionSummaryResponse]:
+    """One list page, as the endpoint composes its single row."""
     from syn_api import _wiring
     from syn_api.routes.executions.queries import (
+        _build_execution_summary_response,
         _load_execution_list_data,
         _to_execution_summary,
     )
@@ -214,8 +238,13 @@ async def _one_page(
         20,
         0,
     )
-    [summary] = [_to_execution_summary(s, enrichment) for s in page.rows]
-    return conn, pool, summary.tool_call_count
+    [response] = [
+        _build_execution_summary_response(
+            _to_execution_summary(s, enrichment), enrichment.get(s.workflow_execution_id)
+        )
+        for s in page.rows
+    ]
+    return conn, pool, response
 
 
 async def test_one_list_page_makes_exactly_the_pinned_round_trips(
@@ -243,3 +272,22 @@ async def test_no_statement_counts_tool_events(monkeypatch: pytest.MonkeyPatch) 
     for statement, args in zip(conn.statements, conn.args, strict=True):
         assert TOOL_EXECUTION_COMPLETED not in statement
         assert TOOL_EXECUTION_COMPLETED not in {str(arg) for arg in args}
+
+
+async def test_a_tally_without_tokens_leaves_the_domain_token_totals_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tool calls are not a token observation, so they cannot report zero tokens.
+
+    Lane 2 has no summary and no ``token_usage`` row for this execution, only
+    its tally. The tokens the domain summary holds are the only ones anybody
+    measured, and carrying the tally must not replace them with zeros.
+    """
+    _conn, _pool, response = await _one_response(monkeypatch)
+
+    assert response.tool_call_count == 11
+    assert response.total_input_tokens == _DOMAIN_INPUT
+    assert response.total_output_tokens == _DOMAIN_OUTPUT
+    assert response.total_cache_creation_tokens == _DOMAIN_CACHE_CREATION
+    assert response.total_cache_read_tokens == _DOMAIN_CACHE_READ
+    assert response.total_tokens == _DOMAIN_TOTAL

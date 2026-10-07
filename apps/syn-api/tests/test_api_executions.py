@@ -11,6 +11,9 @@ import pytest
 
 from syn_api.types import Err, Ok
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+    ExecutionCostsForIds,
+)
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
@@ -571,9 +574,12 @@ class _CountingExecutionCostProjection:
             "loop (issue #1077)"
         )
 
-    async def list_costs_for_ids(self, execution_ids: list[str]) -> dict[str, ExecutionCost]:
+    async def list_costs_for_ids(self, execution_ids: list[str]) -> ExecutionCostsForIds:
         self.list_calls.append(list(execution_ids))
-        return {eid: c for eid, c in self.costs_by_id.items() if eid in execution_ids}
+        return ExecutionCostsForIds(
+            costs=[c for eid, c in self.costs_by_id.items() if eid in execution_ids],
+            tool_calls={},
+        )
 
 
 @dataclass
