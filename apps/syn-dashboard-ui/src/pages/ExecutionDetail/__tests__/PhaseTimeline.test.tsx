@@ -89,7 +89,7 @@ function renderTimeline(phases: Phase[], overrides: Partial<ExecutionDetailRespo
 
 /** The header roll-up lives in the metrics strip above the phase cards. */
 function headerStrip(): string {
-  const strip = document.querySelector('.flex.items-center.gap-4')
+  const strip = document.querySelector('.phase-pipeline-stats')
   return strip?.textContent ?? ''
 }
 

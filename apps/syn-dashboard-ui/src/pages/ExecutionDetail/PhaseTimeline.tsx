@@ -234,7 +234,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
     <Card>
       <CardHeader title="Phase Pipeline" subtitle="Execution phases with per-phase metrics" />
       <CardContent>
-        <div className="flex items-center gap-4 mb-4 text-sm text-[var(--color-text-secondary)]">
+        <div className="phase-pipeline-stats flex flex-wrap items-center gap-x-4 gap-y-2 mb-4 text-sm text-[var(--color-text-secondary)]">
           <div className="flex items-center gap-1.5">
             <Layers className="h-4 w-4 text-[var(--color-text-muted)]" />
             <span className="font-medium">{plan.length} phases</span>
