@@ -232,7 +232,7 @@ class TestReadEvals:
         runs = (await client.get(f"/evals/{eval_id}/runs")).json()
         executions = (await client.get("/executions", params={"eval_id": eval_id})).json()
 
-        ids = [row["workflow_execution_id"] for row in runs["executions"]]
+        ids = [row["execution_id"] for row in runs["items"]]
         assert ids == ["exec-eval-967-in"]
         assert runs["total"] == 1
         assert [row["workflow_execution_id"] for row in executions["executions"]] == ids

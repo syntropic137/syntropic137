@@ -54,6 +54,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval.errors import (
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import (
     EvalId,
     Goal,
+    Verdict,
 )
 
 if TYPE_CHECKING:
@@ -185,6 +186,19 @@ class _EvalChange:
         )
 
 
+@dataclass(frozen=True)
+class RunScore:
+    """A run's current score, as the Eval stream last recorded it."""
+
+    execution_id: str
+    verdict: Verdict
+    score: float | None
+    evidence: str
+    scorer: str
+    scorer_version: str
+    scored_at: datetime
+
+
 @aggregate("Eval")
 class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
     """Eval aggregate root. Command handlers decide; event handlers record."""
@@ -205,6 +219,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
         self._frozen_at: datetime | None = None
         self._archived_at: datetime | None = None
         self._created_as: EvalCreation | None = None
+        self._scores: dict[str, RunScore] = {}
 
     def get_aggregate_type(self) -> str:
         return self._aggregate_type
@@ -270,6 +285,10 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
     @property
     def archived_at(self) -> datetime | None:
         return self._archived_at
+
+    def run_score(self, execution_id: str) -> RunScore | None:
+        """The run's current score: the last one recorded for it, or None."""
+        return self._scores.get(execution_id)
 
     def was_created_by(self, request: EvalCreation) -> bool:
         """Whether ``request`` is a retry of the create that made this eval.
@@ -468,8 +487,16 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
         self._frozen_at = event.frozen_at
 
     @event_sourcing_handler("EvalRunScored")
-    def on_eval_run_scored(self, _event: EvalRunScoredEvent) -> None:
-        """Scores are read from the projection; nothing here decides on them."""
+    def on_eval_run_scored(self, event: EvalRunScoredEvent) -> None:
+        self._scores[event.execution_id] = RunScore(
+            execution_id=event.execution_id,
+            verdict=Verdict(event.verdict),
+            score=event.score,
+            evidence=event.evidence,
+            scorer=event.scorer,
+            scorer_version=event.scorer_version,
+            scored_at=event.scored_at,
+        )
 
     @event_sourcing_handler("EvalArchived")
     def on_eval_archived(self, event: EvalArchivedEvent) -> None:

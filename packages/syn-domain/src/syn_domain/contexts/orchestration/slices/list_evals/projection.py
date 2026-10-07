@@ -56,6 +56,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import (
         BaselineRepoPayload as UpdatedBaselineRepoPayload,
     )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
+        WorkflowExecutionSummary,
+    )
 
 
 class EvalListProjection(AutoDispatchProjection):
@@ -224,10 +227,23 @@ class EvalListProjection(AutoDispatchProjection):
         record = await self._record(eval_id)
         if record is None:
             return None
-        runs = await self._runs.page(
-            eval_id=eval_id, statuses=run_statuses, offset=offset, limit=limit
-        )
+        runs = await self.members(eval_id, statuses=run_statuses, offset=offset, limit=limit)
         return EvalDetail(record=record, runs=runs)
+
+    async def members(
+        self,
+        eval_id: str,
+        *,
+        statuses: Collection[str] | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> Page[WorkflowExecutionSummary]:
+        """One page of the Eval's current member executions, newest first.
+
+        Read from the execution list alone, so a run is listed as soon as its
+        own stream is projected, even before the Eval's record catches up.
+        """
+        return await self._runs.page(eval_id=eval_id, statuses=statuses, offset=offset, limit=limit)
 
     async def _record(self, eval_id: str) -> EvalRecord | None:
         document = await self._store.get(self.PROJECTION_NAME, eval_id)

@@ -93,6 +93,7 @@ from syn_domain.contexts.orchestration import (
     ReviewVerdict,
     SideEffectStatus,
     TagSet,
+    Verdict,
 )
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
@@ -101,6 +102,7 @@ from syn_domain.contexts.orchestration import (
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
+from syn_shared.display.formatters import EM_DASH
 from syn_shared.observed_model import format_observed_model
 
 # ---------------------------------------------------------------------------
@@ -1043,6 +1045,23 @@ class EvalArchivedResponse(BaseModel):
     archived: bool
 
 
+class EvalVariantResponse(BaseModel):
+    """Every run of an eval with the same workflow and the same OBSERVED models (Evals v2)."""
+
+    workflow_id: str
+    models: list[str]
+    """Sorted, unique models the runs' phases reported running. Never an alias."""
+    run_count: int
+    pass_count: int
+    pass_rate: float | None
+    """PASS over this variant's scored runs, 0..1. Null when none is scored."""
+    pass_rate_display: str
+    avg_cost_usd: Decimal | None
+    """Mean over the runs whose cost is known. Null when none is."""
+    avg_cost_display: str
+    last_run_at: str | None
+
+
 class EvalResponse(BaseModel):
     """An eval as the eval read model holds it, with its run tally (#967)."""
 
@@ -1061,6 +1080,87 @@ class EvalResponse(BaseModel):
     """Executions currently in the eval. A detached run is not counted."""
     run_status_counts: dict[str, int]
     """Those executions tallied by execution status."""
+    scored_count: int = 0
+    """Runs with a score. ``ERROR`` counts as scored, and not as passed."""
+    pass_rate: float | None = None
+    """PASS over scored runs, 0..1. Null when no run is scored."""
+    pass_rate_display: str = EM_DASH
+    last_run_at: str | None = None
+    """When the newest run started, ISO 8601 UTC."""
+    last_verdict: Verdict | None = None
+    """The verdict of the newest run that has one."""
+    variants: list[EvalVariantResponse] = Field(default_factory=list)
+    """The eval's runs grouped by workflow and the models its phases actually ran."""
+
+
+class EvalRunModelResponse(BaseModel):
+    """The model one phase of a run ACTUALLY ran, as its harness reported it."""
+
+    phase_id: str
+    model: str
+
+
+class EvalRunResponse(BaseModel):
+    """One run of an eval: one data point of how the eval changes over time (Evals v2)."""
+
+    execution_id: str
+    started_at: str | None
+    completed_at: str | None
+    status: str
+    workflow_id: str
+    workflow_version: str | None = None
+    """The workflow template version the run started from. Null: no event records
+    it on the run today, and the template's CURRENT version would be wrong for
+    any run that started before an update."""
+    models: list[EvalRunModelResponse]
+    """Observed per phase; a phase with no reported model is omitted."""
+    total_cost_usd: Decimal | None
+    total_cost_display: str
+    duration_seconds: float | None
+    duration_display: str
+    verdict: Verdict | None
+    score: float | None
+    evidence_excerpt: str | None
+    """The start of the scorer's markdown evidence; the full text is on the score."""
+    scorer: str | None
+    scorer_version: str | None
+    scored_at: str | None
+
+
+class EvalRunListResponse(BaseModel):
+    """One page of an eval's current runs, newest first (Evals v2)."""
+
+    items: list[EvalRunResponse]
+    total: int
+    """Every current run of the eval, whatever the page size."""
+    page: int
+    page_size: int
+
+
+class EvalRunScoreRequest(BaseModel):
+    """A scorer's verdict on one run of an eval. Re-scoring replaces the current score."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Verdict
+    score: float | None = Field(default=None, ge=0.0, le=1.0)
+    evidence: str = ""
+    """Markdown."""
+    scorer: str = Field(min_length=1)
+    scorer_version: str = Field(min_length=1)
+
+
+class EvalRunScoreResponse(BaseModel):
+    """The run's score as recorded (Evals v2)."""
+
+    eval_id: str
+    execution_id: str
+    verdict: Verdict
+    score: float | None
+    evidence: str
+    scorer: str
+    scorer_version: str
+    scored_at: str
 
 
 class EvalListResponse(BaseModel):
