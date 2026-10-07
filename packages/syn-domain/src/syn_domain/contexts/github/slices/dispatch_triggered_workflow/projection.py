@@ -121,6 +121,20 @@ def _to_str_dict(value: _EventValue) -> dict[str, str]:
     return {str(k): str(v) for k, v in value.items()}
 
 
+def _repos_from_slug(repo_slug: object) -> list[RepositoryRef]:
+    """Typed repository identity for a trigger's ``repository`` input, if valid."""
+    if not isinstance(repo_slug, str) or not repo_slug:
+        return []
+    try:
+        return [RepositoryRef.from_slug(repo_slug)]
+    except ValueError:
+        logger.warning(
+            "Invalid repository slug '%s' in trigger inputs, skipping typed conversion",
+            repo_slug,
+        )
+        return []
+
+
 class WorkflowDispatchProjection(ProcessManager):
     """Dispatches workflow executions when triggers fire.
 
@@ -319,16 +333,7 @@ class WorkflowDispatchProjection(ProcessManager):
             str_inputs = {}
 
         # ADR-063: extract repository identity at the boundary
-        repos: list[RepositoryRef] = []
-        repo_slug = str_inputs.get("repository", "")
-        if isinstance(repo_slug, str) and repo_slug:
-            try:
-                repos = [RepositoryRef.from_slug(repo_slug)]
-            except ValueError:
-                logger.warning(
-                    "Invalid repository slug '%s' in trigger inputs, skipping typed conversion",
-                    repo_slug,
-                )
+        repos = _repos_from_slug(str_inputs.get("repository", ""))
 
         # #1387: `run_workflow` either raises an AdmissionRefusedError - which
         # _dispatch_record records as `paused` - or hands back the admission
