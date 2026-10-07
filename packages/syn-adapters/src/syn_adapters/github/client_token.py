@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from syn_adapters.github.client_retry import is_mint_retryable_status
+
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
 
@@ -84,8 +86,21 @@ def check_token_response(response: httpx.Response, iid: str) -> None:
     Raises:
         GitHubAuthError: On 401, 403 (non-rate-limit), or 404.
         GitHubRateLimitError: On 403 with rate limit.
+        GitHubUnavailableError: On 429 or any 5xx. GitHub failed to answer;
+            nothing an operator configures would change that, so it must
+            not be recorded as AUTH. The transport normally raises this
+            itself once its retries are spent; this is the backstop.
     """
-    from syn_adapters.github.client import GitHubAuthError, GitHubRateLimitError
+    from syn_adapters.github.client import (
+        GitHubAuthError,
+        GitHubRateLimitError,
+        GitHubUnavailableError,
+    )
+
+    status = response.status_code
+    if is_mint_retryable_status(status):
+        msg = f"GitHub unavailable minting a token for installation {iid}: HTTP {status}"
+        raise GitHubUnavailableError(msg, status_code=status)
 
     if response.status_code == 401:
         msg = "JWT authentication failed - check App ID and private key"
@@ -315,10 +330,13 @@ async def installation_token(
             f"/app/installations/{iid}/access_tokens",
             headers={"Authorization": f"Bearer {jwt_token}"},
             json=body.to_json(),
-            # Retried only when the connection could not be made. A response
-            # lost after GitHub minted would mint a second token, and the
-            # first - live for an hour - could never reach the ledger that
-            # revokes it (#1593).
+            # Retried through 5xx, 429 and lost responses by the transport
+            # (`client_retry.TokenMintRetryPolicy`). A response lost after
+            # GitHub minted means the retry mints a second token and the
+            # first - live for an hour - never reaches the ledger that revokes
+            # it. Accepted by the owner on 2026-10-07: GitHub's mint returned
+            # 500 in bursts that failed whole phases, and resumes landed
+            # inside the same bursts.
         )
 
         check_token_response(response, iid)

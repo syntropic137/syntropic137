@@ -140,7 +140,7 @@ def _upstream(reason: str) -> Exception:
 def _github(status_or_drop: int | None) -> Exception:
     """What a real `GitHubAppClient` raises minting a token over a scripted network.
 
-    None drops every connection, so the retrying transport exhausts its three
+    None drops every connection, so the retrying transport exhausts its mint
     attempts; an int answers the mint with that status. Built by the production
     client and transport, not by hand, so the exception's kind is the one a
     provisioning failure actually carries (#1593).
@@ -148,7 +148,7 @@ def _github(status_or_drop: int | None) -> Exception:
     import httpx
 
     from syn_adapters.github.client import GitHubAppClient
-    from syn_adapters.github.client_retry import RetryPolicy
+    from syn_adapters.github.client_retry import RetryPolicy, TokenMintRetryPolicy
 
     def answer(_request: httpx.Request) -> httpx.Response:
         if status_or_drop is None:
@@ -160,6 +160,7 @@ def _github(status_or_drop: int | None) -> Exception:
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(GitHubAppClient, "_generate_jwt", lambda _self: "jwt")
         patch.setattr(RetryPolicy, "delay_after", lambda _self, _attempt: 0.0)
+        patch.setattr(TokenMintRetryPolicy, "delay_after", lambda _self, *_args: 0.0)
         try:
             asyncio.run(client.get_installation_token("7"))
         except Exception as raised:

@@ -91,9 +91,10 @@ but nobody registered shows as "Not registered" (feedback 29714ff9).
 
 A connected repo's **privacy** is whatever GitHub reports for it when the App
 reaches it, not the `is_private` recorded at registration: `syn repo register`
-sends `is_private: false` for every repository, so the stored flag is not
-evidence of anything. The stored flag is used only for a Repo the App does not
-reach.
+sends `is_private: false` for every repository, so a stored `false` is not
+evidence of anything. For a Repo the App does not reach, a stored `true` still
+means private (someone said so), but a stored `false` or none means the
+privacy is **unknown**, and the page says so rather than showing it as public.
 
 Installing the App does not register a Repo: no installation webhook issues
 `RegisterRepo`. That is why this definition is a union and not just "a Repo".

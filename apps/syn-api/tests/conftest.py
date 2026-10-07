@@ -30,3 +30,11 @@ def _roomy_workspace_volume(monkeypatch: pytest.MonkeyPatch) -> None:
         _RoomyDisk(), degraded_below_percent=10.0, refuse_admission_below_percent=5.0
     )
     monkeypatch.setattr("syn_api._wiring_admission.get_disk_space_guard", lambda: guard)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_repo_listing_cache() -> None:
+    """Each test starts with no cached `/github/repos` listing."""
+    from syn_api.services.github_repo_listing_cache import reset_repo_listing_cache
+
+    reset_repo_listing_cache()

@@ -369,7 +369,10 @@ async def cleanup_orphaned_containers() -> CleanupResult:
         # directory; its files stay until a later startup can reap it.
         reclaimable = None
     if reclaimable is not None:
-        _remove_reclaimed_dirs(reclaimable)
+        # Off the event loop: an rmtree of a 150k-entry workspace froze the API for
+        # up to 49s per directory at startup (2026-10-07), and every exec
+        # deadline with it.
+        await asyncio.to_thread(_remove_reclaimed_dirs, reclaimable)
     return CleanupResult(fully_reaped=not failures, failures=tuple(failures))
 
 

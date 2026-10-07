@@ -23,6 +23,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     TASK_INPUT_KEY,
 )
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,17 @@ class PhaseExecutionDetail:
     permission to grant, not a run to repeat.
     """
 
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result (PC-83).
+
+    Not always the declared one: on capacity or quota the phase re-runs once on
+    its ``fallback_agent``. ``None`` when nothing recorded it, which includes
+    every phase that completed before PC-83.
+    """
+
+    agent_model: str | None = None
+    """The model that agent was asked for, beside ``agent_provider``."""
+
     observed_branches: tuple[BranchObservation, ...] | None = None
     """How this failed phase's branches stood when it died (#1200).
 
@@ -191,6 +203,8 @@ class PhaseExecutionDetail:
             "reported_side_effects": (
                 None if self.reported_side_effects is None else self.reported_side_effects.value
             ),
+            "agent_provider": self.agent_provider,
+            "agent_model": self.agent_model,
             "observed_branches": (
                 None
                 if self.observed_branches is None
@@ -235,6 +249,8 @@ class PhaseExecutionDetail:
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             reported_side_effects=SideEffectStatus.from_stored(data.get("reported_side_effects")),
+            agent_provider=data.get("agent_provider"),
+            agent_model=data.get("agent_model"),
             observed_branches=_observed_branches(data.get("observed_branches")),
             exit_code=_exit_code(data.get("exit_code")),
             failure_classification=(
@@ -299,6 +315,9 @@ class WorkflowExecutionDetail:
 
     completed_phases: int = 0
     """Phases that finished, as accumulated and then restated by the terminal event."""
+
+    skipped_phase_ids: tuple[str, ...] = ()
+    """Phases a review verdict made unnecessary (PC-63): they will never run."""
 
     artifact_ids: tuple[str, ...] = field(default_factory=tuple)
     """IDs of all artifacts produced."""
@@ -386,6 +405,16 @@ class WorkflowExecutionDetail:
         return self.inputs.get(TASK_INPUT_KEY)
 
     @property
+    def phase_progress(self) -> PhaseProgress:
+        """How far through its phases the run is, skipped phases accounted for."""
+        return PhaseProgress(
+            status=self.status,
+            completed=self.completed_phases,
+            skipped=len(self.skipped_phase_ids),
+            defined=self.total_phases,
+        )
+
+    @property
     def deliverable_produced(self) -> bool:
         """True when any phase stored an artifact.
 
@@ -433,6 +462,7 @@ class WorkflowExecutionDetail:
             total_duration_seconds=data.get("total_duration_seconds", 0.0),
             total_phases=data.get("total_phases", 0),
             completed_phases=data.get("completed_phases", 0),
+            skipped_phase_ids=tuple(data.get("skipped_phase_ids") or ()),
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
             # Through `from_stored` for the reason it exists: a row written
@@ -480,6 +510,7 @@ class WorkflowExecutionDetail:
             "total_duration_seconds": self.total_duration_seconds,
             "total_phases": self.total_phases,
             "completed_phases": self.completed_phases,
+            "skipped_phase_ids": list(self.skipped_phase_ids),
             "artifact_ids": list(self.artifact_ids),
             "error_message": self.error_message,
             "failure_classification": self.failure_classification.value,

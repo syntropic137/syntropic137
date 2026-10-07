@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
-from pydantic import SerializerFunctionWrapHandler, model_serializer, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
@@ -44,6 +44,12 @@ class ExecutionResumedEvent(DomainEvent):
 
     #: The phase the resume begins at - the first one not inherited.
     resume_phase_id: str
+
+    #: Phases before `resume_phase_id` that a certified review skipped (#1681),
+    #: in phase order. The resume never runs them, and its progress counts them
+    #: as not needed rather than as work still to do. Written only when there
+    #: are some, so every other resume's event is as it was.
+    inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
     resumed_at: datetime
 
     #: Set when the parent was CANCELLED and the request said, separately and
@@ -78,6 +84,10 @@ class ExecutionResumedEvent(DomainEvent):
         this execution for every phase it ran, so only phases it inherited
         from further up are written.
         """
-        payload = handler(self)
+        payload = {
+            k: v
+            for k, v in handler(self).items()
+            if not (k == "inherited_skipped_phase_ids" and not v)
+        }
         owners = owners_to_carry(self.inherited_phases, self.execution_id)
         return {**payload, INHERITED_PHASE_OWNERS: owners} if owners else payload

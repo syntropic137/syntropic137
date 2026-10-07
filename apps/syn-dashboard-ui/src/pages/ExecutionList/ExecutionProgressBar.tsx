@@ -1,5 +1,5 @@
 /**
- * Slim progress bar with a "completed/total" label, used in the Executions
+ * Slim progress bar labelled with the API's phase progress, used in the Executions
  * table's Progress column. Moved out of executionColumns.tsx so the column
  * file exports only column defs (react-refresh/only-export-components).
  */
@@ -9,7 +9,9 @@ import type { ExecutionListItem } from '../../types'
 import { REFUSED, TASK_FAILED, outcomeTone } from '../../utils/executionOutcome'
 
 export function ExecutionProgressBar({ exec }: { exec: ExecutionListItem }) {
-  const pct = exec.total_phases > 0 ? (exec.completed_phases / exec.total_phases) * 100 : 0
+  // The API's progress, not completed/total: total counts the repair rounds a
+  // certifying review skipped, so a finished run read "6/10" (PC-63).
+  const progress = exec.phase_progress
   // Coloured by outcome rather than by status: a correct refusal is amber
   // here for the same reason its badge is, and the bar and the badge sit in
   // the same row, so a bar that decided for itself would contradict the badge
@@ -28,11 +30,11 @@ export function ExecutionProgressBar({ exec }: { exec: ExecutionListItem }) {
             tone === 'pending' && 'bg-slate-500',
             tone === 'cancelled' && 'bg-slate-400',
           )}
-          style={{ width: `${pct}%` }}
+          style={{ width: `${progress.percent}%` }}
         />
       </div>
       <span className="text-xs text-[var(--color-text-muted)]">
-        {exec.completed_phases}/{exec.total_phases}
+        {progress.display}
       </span>
     </div>
   )

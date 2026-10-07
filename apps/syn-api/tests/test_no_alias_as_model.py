@@ -43,6 +43,7 @@ _ALIASES = sorted({*ModelAlias, *CodexModelAlias})
 _DEFINITION_FIELDS: frozenset[tuple[str, str]] = frozenset(
     {
         ("PhaseDefinitionResponse", "model"),
+        ("FallbackAgentResponse", "model"),
         ("UpdatePhasePromptRequest", "model"),
     }
 )

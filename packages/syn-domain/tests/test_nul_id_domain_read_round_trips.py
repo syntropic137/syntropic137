@@ -117,7 +117,7 @@ class _AgentEvents:
     async def execute(self, _query: str, *_args: object) -> str:
         return ""
 
-    def transaction(self) -> _Transaction:
+    def transaction(self, *, isolation: str | None = None, readonly: bool = False) -> _Transaction:
         return _Transaction()
 
 

@@ -103,6 +103,31 @@ class InputDeclaration(BaseModel):
     default: str | None = None
 
 
+class FallbackAgent(BaseModel):
+    """The agent a phase is re-run on, once, when its own provider cannot serve it (PC-83).
+
+    Only for an upstream that refused the WHOLE attempt: capacity that outlived
+    every retry, or a spent quota. Anything else the primary reported is the
+    phase's answer and is not second-guessed by a different model. The phase's
+    sandbox, tools, budget and prompt all apply unchanged.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str
+    """'claude' or 'codex', from the workflow YAML ``fallback_agent.provider``."""
+
+    model: str | None = None
+    """Model for the fallback run; None resolves to the provider's default."""
+
+
+def stored_fallback_agent(stored: object) -> FallbackAgent | None:
+    """A phase's fallback agent as a projection stored it, or None when it declared none."""
+    if stored is None:
+        return None
+    return FallbackAgent.model_validate(stored)
+
+
 class PhaseDefinition(BaseModel):
     """Definition of a workflow phase.
 
@@ -216,6 +241,10 @@ class PhaseDefinition(BaseModel):
     harness reported success (#894). Distinct from ``allow_delegation``, which
     is a permission and never gated. Sourced from the workflow YAML
     ``agent.require_delegation`` field."""
+
+    fallback_agent: FallbackAgent | None = None
+    """Re-run the phase once on this agent when the primary's upstream could
+    not serve it (PC-83). Sourced from the workflow YAML ``fallback_agent``."""
 
     # Workflow-author-declared plugin refs at phase scope (issue #726). PR1 carries
     # them through the YAML to the domain; PR2's resolution service rewrites them

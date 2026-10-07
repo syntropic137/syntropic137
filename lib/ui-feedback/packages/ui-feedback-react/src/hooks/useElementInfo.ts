@@ -5,6 +5,7 @@
 import { useCallback } from 'react';
 import type { LocationContext } from '../types';
 import { getCssSelector, getXPath } from '../utils/getElementPath';
+import { describeElement } from '../utils/describeElement';
 import { getComponentInfo } from '../utils/getReactComponent';
 
 export interface UseElementInfoResult {
@@ -26,6 +27,7 @@ export function useElementInfo(): UseElementInfoResult {
   const captureFromElement = useCallback(
     (element: Element, x?: number, y?: number): LocationContext => {
       const rect = element.getBoundingClientRect();
+      const componentName = getComponentInfo(element) ?? undefined;
 
       return {
         url: window.location.href,
@@ -36,7 +38,8 @@ export function useElementInfo(): UseElementInfoResult {
         clickY: y ?? Math.round(rect.top + rect.height / 2),
         cssSelector: getCssSelector(element),
         xpath: getXPath(element),
-        componentName: getComponentInfo(element) ?? undefined,
+        componentName,
+        elementLabel: describeElement(element, componentName),
       };
     },
     []

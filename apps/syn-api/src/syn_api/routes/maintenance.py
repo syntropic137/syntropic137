@@ -17,7 +17,10 @@ from fastapi import APIRouter, HTTPException
 
 from syn_api._wiring_admission import get_admission_gate
 from syn_api.types import MaintenanceModeResponse, SetMaintenanceModeRequest
-from syn_domain.contexts._shared import AdmissionAnnouncementFailedError
+from syn_domain.contexts._shared import (
+    AdmissionAnnouncementFailedError,
+    AdmissionDrainTimeoutError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,11 @@ async def set_maintenance_mode(request: SetMaintenanceModeRequest) -> Maintenanc
     still asleep and nothing else will re-offer them, so reporting success here
     would close the deploy over work that never runs. Repeating the clear
     re-announces, which is why this is a retryable status and not a 500.
+
+    Pausing waits only for starts that already hold an execution slot and have
+    not written their start event, and only for a bound (#1617). Starts queued
+    for a slot stay queued and start after the clear. A pause that runs out of
+    that bound answers 503 with the flag NOT set: admission is still open.
     """
     try:
         mode = await get_admission_gate().set_mode(
@@ -66,6 +74,9 @@ async def set_maintenance_mode(request: SetMaintenanceModeRequest) -> Maintenanc
             reason=request.reason,
             actor=request.actor,
         )
+    except AdmissionDrainTimeoutError as exc:
+        logger.error("Execution admission was not paused: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     except AdmissionAnnouncementFailedError as exc:
         logger.exception(
             "Execution admission re-opened but the announcement failed; work "

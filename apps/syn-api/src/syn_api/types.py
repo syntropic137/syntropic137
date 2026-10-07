@@ -87,6 +87,7 @@ from syn_domain.contexts.orchestration import (
     DelegationFailure,
     EvalId,
     FailureClassification,
+    PhaseProgress,
     QuarantinedRef,
     ReportedFailureReason,
     ReviewVerdict,
@@ -515,6 +516,13 @@ class PhaseRefResponse(BaseModel):
     """The shorthand spelling when the stored row held a bare string."""
 
 
+class FallbackAgentResponse(BaseModel):
+    """The agent a phase is re-run on when its own provider cannot serve it (PC-83)."""
+
+    provider: str
+    model: str | None = None
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -554,6 +562,9 @@ class PhaseDefinitionResponse(BaseModel):
     # The obligation beside the permission (#894): a phase declaring it fails
     # unless its delegate succeeded.
     require_delegation: bool = False
+    # PC-83: re-run once on this agent after capacity outlived the retries, or
+    # a spent quota. None when the phase declared no fallback.
+    fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
     sandbox: str = DEFAULT_PHASE_SANDBOX
@@ -591,6 +602,52 @@ class WorkflowDetail(BaseModel):
     installed from a package or predates install provenance."""
 
 
+class PhaseProgressInfo(BaseModel):
+    """How far through its phases an execution is, skipped phases accounted for.
+
+    ``total_phases`` is what the workflow defines, and a review that certifies
+    skips the repair rounds after it (PC-63), so ``completed/total`` read
+    "6/10" for a run that finished. Clients render ``display`` and draw
+    ``percent``; they never divide the raw counts themselves.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    completed: int
+    """Phases that ran to completion."""
+    skipped: int
+    """Phases a review verdict made unnecessary; they will never run."""
+    possible: int
+    """The most phases this run can complete: defined, less the skipped."""
+    remaining_possible: int
+    """Phases that could still run. Zero once the run has ended."""
+    percent: int
+    """Completed as a share of ``possible``, 0-100. A completed run is 100."""
+    display: str
+    """E.g. ``6 of 6 (4 phases not needed)``, ``phase 3 of up to 10``."""
+
+    @classmethod
+    def of(cls, progress: PhaseProgress) -> PhaseProgressInfo:
+        """The response shape of the domain's answer."""
+        return cls(
+            completed=progress.completed,
+            skipped=progress.skipped,
+            possible=progress.possible,
+            remaining_possible=progress.remaining_possible,
+            percent=progress.percent,
+            display=progress.display,
+        )
+
+    @classmethod
+    def without_skips(cls, status: str, completed: int, defined: int) -> PhaseProgressInfo:
+        """Progress from a run result, which carries no skips.
+
+        The list and detail reads, built from NextPhaseReady, are where skips
+        are counted.
+        """
+        return cls.of(PhaseProgress(status=status, completed=completed, skipped=0, defined=defined))
+
+
 class ExecutionSummary(BaseModel):
     """Summary of a workflow execution run."""
 
@@ -604,6 +661,7 @@ class ExecutionSummary(BaseModel):
     completed_at: datetime | str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -1534,6 +1592,11 @@ class PhaseExecution(BaseModel):
     """
     requested_model: str | None = None
     """The model the phase REQUESTED (often an alias such as ``opus``), or None."""
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result, or null
+    (PC-83). Differs from the declared provider when the phase fell back to its
+    ``fallback_agent`` on capacity or quota; ``requested_model`` is then the
+    fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
@@ -1613,6 +1676,7 @@ class ExecutionDetailFull(BaseModel):
     phase one carries one phase and a total of 3, and the gap is the phases
     that never started (#1147)."""
     completed_phases: int = 0
+    phase_progress: PhaseProgressInfo
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0

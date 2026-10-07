@@ -6,6 +6,7 @@ Handles copy_to, copy_from and their helper methods.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -46,21 +47,6 @@ def resolve_workspace_path(handle: IsolationHandle) -> Path | None:
         )
         return None
     return workspace_path
-
-
-def log_workspace_contents(workspace_path: Path) -> None:
-    """Log workspace directory contents at DEBUG level."""
-    if not logger.isEnabledFor(logging.DEBUG):
-        return
-    try:
-        all_files = list(workspace_path.rglob("*"))
-        logger.debug(
-            "copy_from: Found %d total files in workspace: %s",
-            len(all_files),
-            [str(f.relative_to(workspace_path)) for f in all_files[:20]],
-        )
-    except Exception as e:
-        logger.debug("copy_from: Failed to list files: %s", e)
 
 
 def _normalize_pattern(pattern: str) -> str:
@@ -138,6 +124,14 @@ async def copy_from_workspace(
 ) -> list[tuple[str, bytes]]:
     """Copy files from workspace via mounted volume.
 
+    Runs in a worker thread. The glob, the stats and the reads are blocking
+    filesystem calls against a bind mount, and every one of them used to run
+    on the API's event loop - the loop that also owns every other execution's
+    `docker exec` deadlines. On the selfhost that froze the whole API for
+    60-190s at a time, once per phase end (exec-27fed66a653d: 139s). A
+    neighbour's setup-phase exec then found its deadline already passed and its
+    process already gone, and came back as exit -1 with no output.
+
     Args:
         handle: Handle from create()
         patterns: Glob patterns to match
@@ -145,11 +139,26 @@ async def copy_from_workspace(
     Returns:
         List of (relative_path, content) tuples for matching files
     """
+    return await asyncio.to_thread(_copy_from_workspace_blocking, handle, patterns)
+
+
+def _copy_from_workspace_blocking(
+    handle: IsolationHandle,
+    patterns: list[str],
+) -> list[tuple[str, bytes]]:
+    """The blocking half of `copy_from_workspace`. Never call on the event loop.
+
+    There is deliberately no listing of the whole workspace here. One used to
+    run "at DEBUG", and DEBUG is always enabled on the logger even when no
+    handler prints it (agentic_logging sets the root logger to DEBUG and
+    filters at the handler), so it walked every repository, node_modules and
+    virtualenv in the workspace - 130-170k entries - to build a message that
+    was then thrown away.
+    """
     workspace_path = resolve_workspace_path(handle)
     if workspace_path is None:
         return []
 
-    log_workspace_contents(workspace_path)
     results = collect_matching_files(workspace_path, patterns)
 
     logger.info(

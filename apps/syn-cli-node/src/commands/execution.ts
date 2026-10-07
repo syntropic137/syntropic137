@@ -79,7 +79,7 @@ const listCommand: CommandDef = {
         ex.workflow_name,
         formatStatus(ex.status),
         formatTimestamp(ex.started_at),
-        `${ex.completed_phases}/${ex.total_phases}`,
+        ex.phase_progress.display,
         formatTokens(ex.total_tokens),
         formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count),
         reposCell,

@@ -64,6 +64,12 @@ class AgentExecutionCompletedEvent(DomainEvent):
     #: Carried here for the same restart reason: the aggregate decides the next
     #: phase from it at collection, a later to-do item.
     reported_review_verdict: ReviewVerdict | None = None
+    #: The agent that PRODUCED this result, which is not always the one the
+    #: phase declared: a phase whose provider was at capacity or out of quota
+    #: is re-run once on its `fallback_agent` (PC-83). None on events written
+    #: before that existed, which ran on the phase's declared agent.
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
     @field_validator("last_agent_message")
     @classmethod

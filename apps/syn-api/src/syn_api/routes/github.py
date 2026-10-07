@@ -1,12 +1,15 @@
 """GitHub App query routes.
 
-Exposes live-query endpoints for GitHub App data (accessible repos,
-installations). These hit the GitHub API directly — not projections.
+Exposes query endpoints for GitHub App data (accessible repos, installations).
+These answer from the GitHub API, not projections; the all-installations
+listing is cached briefly (see ``github_repo_listing_cache``).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -17,6 +20,12 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, HTTPException
 
 from syn_api._wiring import ensure_connected
+from syn_api.services.github_repo_listing_cache import (
+    REFRESH_AFTER,
+    CachedRepoListing,
+    RepoListingCache,
+    get_repo_listing_cache,
+)
 from syn_api.types import (
     Err,
     GitHubError,
@@ -163,10 +172,8 @@ async def _sync_installations(
 async def _repos_for_installation(
     client: _RepoLister,
     installation_id: str,
-    seen_ids: set[int],
-    include_private: bool,
 ) -> list[GitHubRepoResponse] | None:
-    """Fetch repos for one installation, skipping IDs already in seen_ids.
+    """Fetch every repo one installation reaches, private ones included.
 
     Returns None if GitHub could not be asked, so the caller can tell a failed
     lookup apart from an installation that reaches no repos.
@@ -180,38 +187,92 @@ async def _repos_for_installation(
             exc_info=True,
         )
         return None
-    result: list[GitHubRepoResponse] = []
-    for repo in _build_repo_list(raw_repos, installation_id, include_private):
-        if repo.github_id not in seen_ids:
-            seen_ids.add(repo.github_id)
-            result.append(repo)
-    return result
+    return _build_repo_list(raw_repos, installation_id, include_private=True)
 
 
 async def _aggregate_all_installations(
     client: _RepoLister,
     include_private: bool,
 ) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
-    """Query all active installations and return deduplicated repos."""
+    """Return the repos every installation reaches, from the cache when it can.
+
+    A listing younger than ``FRESH_FOR`` is served as complete without asking
+    GitHub, and past ``REFRESH_AFTER`` a background refresh starts. Otherwise
+    GitHub is asked live, as before the cache existed, so nothing older than
+    ``FRESH_FOR`` is ever served as complete. If GitHub cannot be asked at all,
+    an older listing is served as ``partial``.
+    """
+    cache = get_repo_listing_cache()
+    cached = await cache.get()
+    if cached is not None and cached.is_fresh():
+        if cached.age() >= REFRESH_AFTER:
+            _revalidate_in_background(client, cache)
+        repos, lookup = cached.repos, GitHubRepoLookup.COMPLETE
+    else:
+        repos, lookup = await _ask_github(client, cache)
+        if lookup == GitHubRepoLookup.UNAVAILABLE and cached is not None:
+            repos, lookup = cached.repos, GitHubRepoLookup.PARTIAL
+    if not include_private:
+        repos = [r for r in repos if not r.private]
+    return repos, lookup
+
+
+_Listing = tuple[list[GitHubRepoResponse], GitHubRepoLookup]
+_revalidation: asyncio.Task[_Listing] | None = None
+
+
+def _revalidate_in_background(client: _RepoLister, cache: RepoListingCache) -> None:
+    """Start refreshing the cache unless this process already is."""
+    global _revalidation
+    if _revalidation is not None and not _revalidation.done():
+        return
+    _revalidation = asyncio.create_task(_ask_github(client, cache))
+    _revalidation.add_done_callback(_log_revalidation_failure)
+
+
+def _log_revalidation_failure(task: asyncio.Task[_Listing]) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning("GitHub repo listing refresh failed", exc_info=task.exception())
+
+
+async def _ask_github(
+    client: _RepoLister,
+    cache: RepoListingCache,
+) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
+    """Ask GitHub for every installation's repos, and cache a complete answer.
+
+    Installations are asked concurrently. A listing that is not complete is
+    returned but never cached, so the cache only ever holds what GitHub
+    confirmed in full. The generation is read before GitHub is asked, so an
+    invalidation that lands while GitHub answers outranks this answer.
+    """
     from syn_domain.contexts.github.slices.get_installation.projection import (
         get_installation_projection,
     )
 
+    generation = await cache.generation()
+    started_at = datetime.now(UTC)
     installations, installations_current = await _known_installations(
         client, get_installation_projection()
     )
-
+    answers = await asyncio.gather(
+        *(_repos_for_installation(client, inst.installation_id) for inst in installations)
+    )
     seen_ids: set[int] = set()
     repos: list[GitHubRepoResponse] = []
-    answered = 0
-    for inst in installations:
-        found = await _repos_for_installation(
-            client, inst.installation_id, seen_ids, include_private
+    for found in answers:
+        for repo in found or []:
+            if repo.github_id not in seen_ids:
+                seen_ids.add(repo.github_id)
+                repos.append(repo)
+    answered = sum(found is not None for found in answers)
+    lookup = _lookup_of(len(installations), answered, installations_current)
+    if lookup == GitHubRepoLookup.COMPLETE and generation is not None:
+        # Aged from when GitHub was asked, not when it finished answering.
+        await cache.put(
+            CachedRepoListing(repos=repos, fetched_at=started_at, generation=generation)
         )
-        if found is not None:
-            answered += 1
-            repos.extend(found)
-    return repos, _lookup_of(len(installations), answered, installations_current)
+    return repos, lookup
 
 
 async def _known_installations(
@@ -274,11 +335,12 @@ async def list_accessible_repos_endpoint(
 ) -> GitHubRepoListResponse:
     """List repositories accessible to the GitHub App.
 
-    Queries all active installations and aggregates results when no
-    installation_id is provided. The installation list is cached locally with
-    a 1-hour TTL: if empty or stale, it bootstraps automatically from the
-    GitHub API without requiring a webhook URL. Stale data is kept as a
-    fallback if the GitHub API is unreachable during refresh.
+    With no installation_id, aggregates every installation. The last complete
+    listing is cached and served as ``complete`` while under a minute old;
+    otherwise GitHub is asked live, and an older listing is served as
+    ``partial`` only if GitHub cannot be asked. The GitHub App's
+    ``installation`` and ``installation_repositories`` webhooks invalidate the
+    cache at once. A single installation_id is always asked live.
 
     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
     the App's reach (``complete``) or merely went unseen because GitHub failed.

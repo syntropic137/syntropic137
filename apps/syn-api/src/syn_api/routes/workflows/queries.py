@@ -13,9 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.types import (
     Err,
+    FallbackAgentResponse,
     InputDeclarationResponse,
     Ok,
     PhaseDefinitionResponse,
+    PhaseProgressInfo,
     PhaseRefResponse,
     Result,
     WorkflowDetail,
@@ -131,6 +133,8 @@ class ExecutionRunSummary(BaseModel):
     completed_at: str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
+    """Progress with skipped repair rounds accounted for; what clients render."""
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     error_message: str | None = None
@@ -211,6 +215,11 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         provider=p.provider,
         allow_delegation=p.allow_delegation,
         require_delegation=p.require_delegation,
+        fallback_agent=(
+            FallbackAgentResponse(provider=p.fallback_agent.provider, model=p.fallback_agent.model)
+            if p.fallback_agent is not None
+            else None
+        ),
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
         sandbox=p.sandbox,
@@ -498,6 +507,17 @@ def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
     return ["    agent:", *entries] if entries else []
 
 
+def _yaml_fallback_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The phase's ``fallback_agent`` block, so an exported package reinstalls with it (PC-83)."""
+    fallback = phase.fallback_agent
+    if fallback is None:
+        return []
+    lines = ["    fallback_agent:", f"      provider: {_yaml_quote(fallback.provider)}"]
+    if fallback.model:
+        lines.append(f"      model: {_yaml_quote(fallback.model)}")
+    return lines
+
+
 def _yaml_ref_entry(key: str, ref: PhaseRefResponse) -> list[str]:
     """One ref, in the spelling ITS loader accepts.
 
@@ -608,6 +628,7 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if not phase.delivers_repo_changes:
         lines.append("    delivers_repo_changes: false")
     lines.extend(_yaml_agent_lines(phase))
+    lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))
     return lines
@@ -896,6 +917,7 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
                 completed_at=str(e.completed_at) if e.completed_at else None,
                 completed_phases=e.completed_phases,
                 total_phases=e.total_phases,
+                phase_progress=e.phase_progress,
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 error_message=e.error_message,
