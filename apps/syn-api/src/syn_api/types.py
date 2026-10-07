@@ -628,6 +628,15 @@ class PhaseProgressInfo(BaseModel):
             display=progress.display,
         )
 
+    @classmethod
+    def without_skips(cls, status: str, completed: int, defined: int) -> PhaseProgressInfo:
+        """Progress from a run result, which carries no skips.
+
+        The list and detail reads, built from NextPhaseReady, are where skips
+        are counted.
+        """
+        return cls.of(PhaseProgress(status=status, completed=completed, skipped=0, defined=defined))
+
 
 class ExecutionSummary(BaseModel):
     """Summary of a workflow execution run."""
