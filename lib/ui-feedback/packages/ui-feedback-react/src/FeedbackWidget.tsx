@@ -11,9 +11,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FeedbackList } from './components/FeedbackList';
 import { FeedbackModal } from './components/FeedbackModal';
-import { ElementHighlight, FeedbackModeOverlay, PinMarker } from './components/FeedbackOverlays';
+import { ElementHighlight, FeedbackModeOverlay } from './components/FeedbackOverlays';
 import type { HoverHighlight } from './hooks/useHoverHighlight';
-import type { LocationContext } from './types';
 import { WidgetButton } from './components/WidgetButton';
 import { useFeedback } from './FeedbackContext';
 import { useClickOutside } from './hooks/useClickOutside';
@@ -38,7 +37,7 @@ function handleMenuShortcut(
 export function FeedbackWidget() {
   const {
     isFeedbackMode, isOpen, config,
-    openFeedbackMode, closeFeedbackMode, openModal, locationContext,
+    openFeedbackMode, closeFeedbackMode, openModal,
   } = useFeedback();
 
   const { captureFromElement } = useElementInfo();
@@ -106,7 +105,7 @@ export function FeedbackWidget() {
         </div>
       )}
 
-      <OverlayElements isFeedbackMode={isFeedbackMode} hoverHighlight={hoverHighlight} locationContext={locationContext} isOpen={isOpen} />
+      <OverlayElements isFeedbackMode={isFeedbackMode} hoverHighlight={hoverHighlight} />
 
       <FeedbackModal />
 
@@ -117,14 +116,13 @@ export function FeedbackWidget() {
   );
 }
 
-function OverlayElements({ isFeedbackMode, hoverHighlight, locationContext, isOpen }: {
-  isFeedbackMode: boolean; hoverHighlight: HoverHighlight | null; locationContext: LocationContext | null; isOpen: boolean;
+function OverlayElements({ isFeedbackMode, hoverHighlight }: {
+  isFeedbackMode: boolean; hoverHighlight: HoverHighlight | null;
 }) {
   return (
     <>
       {isFeedbackMode && <FeedbackModeOverlay />}
       {isFeedbackMode && hoverHighlight && <ElementHighlight highlight={hoverHighlight} />}
-      {locationContext && isOpen && <PinMarker locationContext={locationContext} />}
     </>
   );
 }

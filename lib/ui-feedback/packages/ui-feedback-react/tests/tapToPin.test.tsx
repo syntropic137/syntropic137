@@ -90,6 +90,10 @@ describe('FeedbackWidget', () => {
     const label = 'button "Cancel execution" \u00b7 <ExecutionRow>';
     expect(screen.getByText(label)).toBeTruthy();
     expect(document.querySelector('.ui-feedback-pinned-highlight')?.getAttribute('data-label')).toBe(label);
+    // The marker shares the overlay's stacking context and comes before the
+    // modal, so it paints over the backdrop but never over the modal's controls.
+    const overlayChildren = [...document.querySelector('.ui-feedback-modal-overlay')!.children].map((el) => el.className);
+    expect(overlayChildren).toEqual(['ui-feedback-pinned-highlight', 'ui-feedback-pin', 'ui-feedback-modal']);
 
     await act(async () => { screen.getByRole('button', { name: 'Re-pick' }).click(); });
     expect(screen.queryByText('Leave Feedback')).toBeNull();

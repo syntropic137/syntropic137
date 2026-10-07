@@ -10,6 +10,7 @@ import { useFeedback } from '../FeedbackContext';
 import { useFeedbackForm } from '../hooks/useFeedbackForm';
 import type { FeedbackType, MediaUpload, Priority } from '../types';
 import { BadgeDropdown } from './BadgeDropdown';
+import { PinMarker } from './FeedbackOverlays';
 import { CloseIcon } from './icons';
 import { ScreenshotUploader } from './ScreenshotUploader';
 import { VoiceRecorder } from './VoiceRecorder';
@@ -26,6 +27,7 @@ export function FeedbackModal() {
 
   return (
     <div className="ui-feedback-modal-overlay" onClick={form.handleClose}>
+      <PinMarker locationContext={locationContext} />
       <div className="ui-feedback-modal" onClick={(e) => e.stopPropagation()}>
         <div className="ui-feedback-modal-header">
           <div className="ui-feedback-modal-header-content">

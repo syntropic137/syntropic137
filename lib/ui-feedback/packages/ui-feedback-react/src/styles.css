@@ -170,6 +170,7 @@ body.ui-feedback-mode-active * {
 }
 
 .ui-feedback-modal {
+  position: relative;
   width: 100%;
   max-width: 540px;
   max-height: 90vh;
@@ -852,11 +853,11 @@ body.ui-feedback-mode-active * {
    Location Pin
    ===================================================== */
 
-/* Above the modal backdrop so the pinned element stays visible while the
-   modal is open; outline only, and never intercepts input. */
+/* Rendered inside the modal overlay, before the modal: above the backdrop so
+   the pinned element stays visible, below the modal so it never paints over
+   its controls. Outline only, and never intercepts input. */
 .ui-feedback-pinned-highlight {
   position: fixed;
-  z-index: 100001;
   pointer-events: none;
   border: 2px solid var(--feedback-primary);
   border-radius: 4px;
@@ -902,7 +903,6 @@ body.ui-feedback-mode-active * {
 
 .ui-feedback-pin {
   position: fixed;
-  z-index: 100001;
   width: 24px;
   height: 24px;
   margin-left: -12px;
