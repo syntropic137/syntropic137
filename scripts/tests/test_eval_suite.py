@@ -53,6 +53,7 @@ def _copy_suite(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
@@ -67,6 +68,7 @@ def _is_shallow() -> bool:
 
 
 @pytest.mark.skipif(_is_shallow(), reason="a shallow clone does not hold the pinned commits")
+@pytest.mark.unit
 def test_every_seed_pins_a_real_commit_before_its_fix() -> None:
     assert check_commits(load_suite(DEFAULT_SUITE), ROOT) == []
 
@@ -76,6 +78,7 @@ def test_every_seed_pins_a_real_commit_before_its_fix() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_model_change_without_the_suite_record_is_refused(tmp_path: Path) -> None:
     suite_dir = _copy_suite(tmp_path)
     suite_yaml = suite_dir / "suite.yaml"
@@ -85,6 +88,7 @@ def test_a_model_change_without_the_suite_record_is_refused(tmp_path: Path) -> N
         load_suite(suite_dir)
 
 
+@pytest.mark.unit
 def test_a_task_that_names_the_source_pr_is_refused(tmp_path: Path) -> None:
     suite_dir = _copy_suite(tmp_path)
     case = suite_dir / "cases" / "codex-cost-limit.yaml"
@@ -94,6 +98,7 @@ def test_a_task_that_names_the_source_pr_is_refused(tmp_path: Path) -> None:
         load_suite(suite_dir)
 
 
+@pytest.mark.unit
 def test_an_abbreviated_sha_is_refused(tmp_path: Path) -> None:
     suite_dir = _copy_suite(tmp_path)
     case = suite_dir / "cases" / "codex-cost-limit.yaml"
@@ -105,6 +110,7 @@ def test_an_abbreviated_sha_is_refused(tmp_path: Path) -> None:
         load_suite(suite_dir)
 
 
+@pytest.mark.unit
 def test_a_case_file_must_be_named_for_its_case(tmp_path: Path) -> None:
     suite_dir = _copy_suite(tmp_path)
     cases = suite_dir / "cases"
@@ -161,6 +167,7 @@ def _one_case_suite(tmp_path: Path, commit: str, fix: str, file: str) -> Path:
     return suite_dir
 
 
+@pytest.mark.unit
 def test_check_passes_a_pin_its_fix_descends_from(
     tmp_path: Path, history: tuple[Path, str, str, str]
 ) -> None:
@@ -168,6 +175,7 @@ def test_check_passes_a_pin_its_fix_descends_from(
     assert check_commits(load_suite(_one_case_suite(tmp_path, bug, fix, "bug.py")), repo) == []
 
 
+@pytest.mark.unit
 def test_check_refuses_a_pin_after_its_fix(
     tmp_path: Path, history: tuple[Path, str, str, str]
 ) -> None:
@@ -176,6 +184,7 @@ def test_check_refuses_a_pin_after_its_fix(
     assert any("is not an ancestor" in p for p in problems)
 
 
+@pytest.mark.unit
 def test_check_refuses_a_fix_that_does_not_touch_the_expected_file(
     tmp_path: Path, history: tuple[Path, str, str, str]
 ) -> None:
@@ -184,6 +193,7 @@ def test_check_refuses_a_fix_that_does_not_touch_the_expected_file(
     assert problems == ["seed: the fix changes none of ['bug.py']"]
 
 
+@pytest.mark.unit
 def test_check_refuses_a_sha_the_repo_does_not_hold(
     tmp_path: Path, history: tuple[Path, str, str, str]
 ) -> None:
@@ -192,6 +202,7 @@ def test_check_refuses_a_sha_the_repo_does_not_hold(
     assert problems == [f"seed: no such commit {'f' * 40} (try `git fetch origin`)"]
 
 
+@pytest.mark.unit
 def test_check_refuses_a_file_absent_at_the_pin(
     tmp_path: Path, history: tuple[Path, str, str, str]
 ) -> None:
@@ -211,20 +222,24 @@ _EXPECTED = Expected(
 _FINDING = "BLOCKING: minio.py:212 download() builds the id-only key; upload keys by execution, so reads 404."
 
 
+@pytest.mark.unit
 def test_a_blocked_report_naming_file_and_defect_passes() -> None:
     assert score_report(_EXPECTED, "blocked", _FINDING).passed
 
 
+@pytest.mark.unit
 def test_a_certified_run_fails_even_when_the_report_names_the_defect() -> None:
     score = score_report(_EXPECTED, "certified", _FINDING)
     assert score.matched and not score.passed
 
 
+@pytest.mark.unit
 def test_a_report_that_misses_the_file_does_not_match() -> None:
     score = score_report(_EXPECTED, "blocked", "the object key does not match, so reads 404")
     assert score.named_file is None and not score.passed
 
 
+@pytest.mark.unit
 def test_a_report_missing_a_keyword_group_says_which() -> None:
     score = score_report(_EXPECTED, "blocked", "minio.py uses the wrong key")
     assert score.missing_keywords == (("404", "not found"),) and not score.passed
@@ -365,6 +380,7 @@ def _api(requests: list[httpx.Request]) -> httpx.Client:
     return httpx.Client(base_url="http://api", transport=httpx.MockTransport(handle))
 
 
+@pytest.mark.unit
 def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     loaded = load_suite(DEFAULT_SUITE)
     requests: list[httpx.Request] = []
@@ -384,6 +400,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/4 passed" in table
 
 
+@pytest.mark.unit
 def test_launch_pins_each_case_and_starts_its_run_in_that_eval() -> None:
     loaded = load_suite(DEFAULT_SUITE)
     requests: list[httpx.Request] = []
@@ -404,6 +421,7 @@ def test_launch_pins_each_case_and_starts_its_run_in_that_eval() -> None:
     assert len(lines) == 4
 
 
+@pytest.mark.unit
 def test_launch_stops_when_the_server_pins_another_commit() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
@@ -427,5 +445,6 @@ def test_launch_stops_when_the_server_pins_another_commit() -> None:
         launch_suite(loaded, client)
 
 
+@pytest.mark.unit
 def test_a_run_that_reported_no_verdict_fails() -> None:
     assert not score_report(_EXPECTED, None, _FINDING).passed
