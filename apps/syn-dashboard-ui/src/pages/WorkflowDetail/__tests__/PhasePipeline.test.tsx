@@ -37,9 +37,9 @@ const IMPLEMENT: PhaseDefinition = {
   name: 'Implement (codex)',
   order: 2,
   model: 'gpt-sol',
-  resolved_model: 'gpt-6-sol',
+  resolved_model: 'gpt-6.1-sol',
   resolution_basis: 'translated',
-  model_display: 'gpt-sol → gpt-6-sol',
+  model_display: 'gpt-sol → gpt-6.1-sol',
   provider: 'codex',
 }
 
@@ -63,7 +63,7 @@ describe('workflow Phase Pipeline card', () => {
   it('shows what the model alias resolves to, beside the provider', () => {
     render(<PhasePipeline phases={[PLAN, IMPLEMENT]} phaseMetrics={undefined} />)
     expect(screen.getByText('opus → claude-opus-5-5')).toBeTruthy()
-    expect(screen.getByText('gpt-sol → gpt-6-sol')).toBeTruthy()
+    expect(screen.getByText('gpt-sol → gpt-6.1-sol')).toBeTruthy()
     expect(screen.getByText('Claude')).toBeTruthy()
     expect(screen.getByText('Codex')).toBeTruthy()
   })

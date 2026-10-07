@@ -2,7 +2,7 @@
  * The model a phase DEFINITION asks for, and what that resolves to.
  *
  * Renders the API's `model_display` verbatim ("opus → claude-opus-5-5",
- * "gpt-sol → gpt-6-sol"), falling back to the raw `model` for a server that
+ * "gpt-sol → gpt-6.1-sol"), falling back to the raw `model` for a server that
  * sends no display. One component so the phase pipeline card and the phase
  * editor cannot drift into showing different things for the same phase.
  */

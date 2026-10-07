@@ -48,7 +48,7 @@ export interface PhaseDefinition {
   resolved_model?: string | null
   /** "translated" (platform rewrites it, codex) or "expected" (the CLI picks, claude). */
   resolution_basis?: 'translated' | 'expected' | null
-  /** e.g. "gpt-sol → gpt-6-sol"; the bare model otherwise. Render verbatim. */
+  /** e.g. "gpt-sol → gpt-6.1-sol"; the bare model otherwise. Render verbatim. */
   model_display?: string | null
   provider: string | null
 }
