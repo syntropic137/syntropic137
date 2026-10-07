@@ -73,13 +73,15 @@ _DROPPED: dict[str, object] = {
 class _Host:
     """``counts`` are successive status_counts bodies, the last repeating.
 
-    ``health_delay`` holds every /health answer back, in seconds; ``running``
-    is the whole running collection, served in the pages the client asks for.
+    ``health_delay`` and ``counts_delay`` hold every /health and status_counts
+    answer back, in seconds; ``running`` is the whole running collection,
+    served in the pages the client asks for.
     """
 
     health: dict[str, object]
     counts: list[dict[str, int]]
     health_delay: float = 0.0
+    counts_delay: float = 0.0
     running: list[dict[str, str]] = field(default_factory=lambda: [_LONG_ROW])
     count_reads: int = 0
     requests: list[tuple[str, str, bytes]] = field(default_factory=list)
@@ -113,6 +115,7 @@ def host() -> Iterator[tuple[_Host, str]]:
                 time.sleep(state.health_delay)
                 self._answer(state.health)
             elif self.path == "/api/v1/executions?page_size=1":
+                time.sleep(state.counts_delay)
                 counts = state.counts[min(state.count_reads, len(state.counts) - 1)]
                 state.count_reads += 1
                 self._answer({"executions": [], "total": 0, "status_counts": counts})
@@ -170,18 +173,20 @@ def _gate_and_drain() -> str:
 
 
 def _run(
-    tmp: Path, api: str, *, budget: int | str, override: str = ""
+    tmp: Path, api: str, *, budget: int | str, override: str = "", replace: str = ""
 ) -> subprocess.CompletedProcess[str]:
     """``budget`` is SYN_PIT_DRAIN_TIMEOUT, parsed by the script's own lines.
 
-    ``override`` runs after that parsing, to reach states it now forbids.
+    ``override`` runs after that parsing, to reach states it now forbids;
+    ``replace`` runs after the script's functions, to redefine one of them.
     """
     functions = [
         "api_curl",
         "api",
         "maintenance",
-        "mono_now",
-        "left",
+        "mono_ms",
+        "ms_left",
+        "ms_to_s",
         "cap",
         "projections_healthy",
         "drained",
@@ -202,6 +207,7 @@ def _run(
             "die() { printf 'PIT STOP ABORTED: %s\\n' \"$*\" >&2; exit 1; }",
             "sleep() { :; }",
             *(_definition(name) for name in functions),
+            replace,
         ]
     )
     return subprocess.run(
@@ -299,7 +305,8 @@ def test_every_check_prints_the_subscription_status_and_reasons(
         "subscription": {"status": "catching_up", "is_catching_up": True, "lag": 40},
     }
 
-    proc = _run(tmp_path, api, budget=0)
+    # 1s, not 0: a spent budget starts no read, so a 0s budget prints no check.
+    proc = _run(tmp_path, api, budget=1)
 
     assert "'status': 'catching_up'" in proc.stdout
     assert "projection_lagging" in proc.stdout
@@ -345,6 +352,52 @@ def test_a_slow_read_cannot_carry_the_drain_past_its_budget(
     assert "DRAINED-AND-CONTINUING" not in proc.stdout
     assert "drain budget of 1s spent" in proc.stderr
     assert elapsed < 3.0, f"the drain took {elapsed:.2f}s on a 1s budget"
+    assert _admission_puts(state) == [True, False]
+    _no_secret_leaked(proc)
+
+
+def test_two_prompt_reads_that_together_outlast_the_budget_do_not_drain(
+    tmp_path: Path, host: tuple[_Host, str]
+) -> None:
+    """A 1s budget, and a /health and a status_counts that each answer in 0.8s.
+
+    Each read alone fits the budget and both report a drained platform, but
+    the second cannot finish before the deadline. Capping each read at a whole
+    second let both finish and returned the late verdict as drained (rc 0).
+    """
+    state, api = host
+    state.health_delay = 0.8
+    state.counts_delay = 0.8
+    state.counts = [{"completed": 4}]
+
+    proc = _run(tmp_path, api, budget=1)
+
+    assert proc.returncode != 0
+    assert "DRAINED-AND-CONTINUING" not in proc.stdout
+    assert "drain budget of 1s spent" in proc.stderr
+    assert _admission_puts(state) == [True, False]
+    _no_secret_leaked(proc)
+
+
+def test_a_drained_verdict_from_after_the_deadline_is_refused(
+    tmp_path: Path, host: tuple[_Host, str]
+) -> None:
+    """A status read that ignores its cap and reports drained 1.5s into a 1s budget.
+
+    Capping stops a slow read; it does not make a late answer true. Whatever
+    held the read past the deadline, its verdict describes a moment after it.
+    """
+    state, api = host
+    late = (
+        'status_counts() { if [ -n "${1:-}" ]; then command sleep 1.5; fi; echo "   (drained)"; }'
+    )
+
+    proc = _run(tmp_path, api, budget=1, replace=late)
+
+    assert proc.returncode != 0
+    assert "DRAINED-AND-CONTINUING" not in proc.stdout
+    assert "drained only after the deadline" in proc.stdout
+    assert "drain budget of 1s spent" in proc.stderr
     assert _admission_puts(state) == [True, False]
     _no_secret_leaked(proc)
 

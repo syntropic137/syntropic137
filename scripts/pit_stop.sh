@@ -180,16 +180,20 @@ DISK
 # A drain is a statement about ONE instant: this returns 0 only when every
 # status key present is terminal. Read from status_counts, which is tallied over
 # the whole collection, never from a page of rows (see the runbook, section 1).
-# Returns 0 drained, 1 not yet, 2 the read path dropped events (see above).
-# Every read is capped to what is left of $1, the drain's deadline, so a slow
-# answer cannot carry the drain past its budget, let alone return a verdict
-# from after it.
-drained() {  # $1: deadline from mono_now
+# Returns 0 drained, 1 not yet, 2 the read path dropped events (see above), 3
+# the deadline passed. $1 is the drain's deadline in ms. No read starts once it
+# has passed, each is capped to what is left of it, and a drained verdict that
+# lands after it is not one: whole-second caps let two prompt reads that each
+# fit the budget finish together past it and drain (#1699).
+drained() {  # $1: deadline from mono_ms
     local rc=0
+    [ "$(ms_left "$1")" -gt 0 ] || return 3
     projections_healthy "$(cap "$1")" || rc=$?
     if [ "$rc" = 2 ]; then return 2; fi
     if [ "$rc" != 0 ]; then echo "   read path is not at the event-store head yet"; return 1; fi
-    status_counts "$(cap "$1")"
+    [ "$(ms_left "$1")" -gt 0 ] || return 3
+    status_counts "$(cap "$1")" || return 1
+    if [ "$(ms_left "$1")" -le 0 ]; then echo "   drained only after the deadline: not a drain"; return 3; fi
 }
 
 # The busy-or-not reading of status_counts, printed; 0 only when every status
@@ -217,12 +221,24 @@ left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
     if [ "$l" -lt 0 ]; then l=0; fi
     echo "$l"
 }
-# A curl -m for a read against a deadline. Never 0: `curl -m 0` means NO limit.
-cap() {  # $1: deadline from mono_now
-    local l
-    l="$(left "$1")"
-    if [ "$l" -lt 1 ]; then l=1; fi
+# The drain's deadline is in milliseconds: a whole-second clock rounds up to a
+# second of slack per read, which is the late verdict drained() refuses.
+mono_ms() { python3 -c 'import time; print(int(time.monotonic() * 1000))'; }
+ms_left() {  # $1: deadline from mono_ms; ms left, 0 once passed
+    local l=$(( $1 - $(mono_ms) ))
+    if [ "$l" -lt 0 ]; then l=0; fi
     echo "$l"
+}
+# Milliseconds as decimal seconds, for curl -m and sleep.
+ms_to_s() { printf '%d.%03d\n' "$(( $1 / 1000 ))" "$(( $1 % 1000 ))"; }
+# A curl -m for a read against the drain's deadline, at most 90s. Only asked
+# while time is left, so never 0: `curl -m 0` means NO limit.
+cap() {  # $1: deadline from mono_ms
+    local l
+    l="$(ms_left "$1")"
+    if [ "$l" -gt 90000 ]; then l=90000; fi
+    if [ "$l" -lt 1 ]; then l=1; fi
+    ms_to_s "$l"
 }
 
 # Close or open the admission gate (#1387). THE DRAIN ALONE ONLY OBSERVES:
@@ -301,7 +317,7 @@ abort_drain() {
 DRAINED=0
 drain_loop() {
     local deadline rc t
-    deadline=$(( $(mono_now) + DRAIN_TIMEOUT ))
+    deadline=$(( $(mono_ms) + DRAIN_TIMEOUT * 1000 ))
     while :; do
         rc=0
         drained "$deadline" || rc=$?
@@ -309,13 +325,13 @@ drain_loop() {
         if [ "$rc" = 2 ]; then
             abort_drain "the read path DROPPED execution starts (subscription.status=dropped_events, #1696). Waiting cannot fix it. Repair the executions named above with $DROPPED_RUNBOOK, then re-run with --swap-only"
         fi
-        t="$(left "$deadline")"
-        if [ "$t" -le 0 ]; then
+        t="$(ms_left "$deadline")"
+        if [ "$rc" = 3 ] || [ "$t" -le 0 ]; then
             running_executions
             abort_drain "drain budget of ${DRAIN_TIMEOUT}s spent with executions still in flight (listed above); none was cancelled. Choose: WAIT (re-run with --swap-only; SYN_PIT_DRAIN_TIMEOUT sets the budget), or INTERRUPT them yourself, re-run, and resume them after the pit stop"
         fi
-        if [ "$t" -gt 60 ]; then t=60; fi
-        sleep "$t"
+        if [ "$t" -gt 60000 ]; then t=60000; fi
+        sleep "$(ms_to_s "$t")"
     done
 }
 
