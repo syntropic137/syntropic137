@@ -1708,7 +1708,7 @@ class ExecutionDetailFull(BaseModel):
     that never started (#1147)."""
     completed_phases: int = 0
     phase_progress: PhaseProgressInfo
-    phase_plan: list[PlannedPhaseInfo] = Field(default_factory=list)
+    phase_plan: list[PlannedPhaseInfo]
     """Every phase the run declared, in order, with where each stands. Counts
     the same phases ``total_phases`` does; ``phases`` is only the ones that ran."""
     total_tokens: int = 0

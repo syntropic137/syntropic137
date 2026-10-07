@@ -298,7 +298,7 @@ class ExecutionDetailResponse(BaseModel):
     """Phases that finished. Same field, same meaning, as on the list view."""
     phase_progress: PhaseProgressInfo
     """Progress with skipped repair rounds accounted for; what clients render."""
-    phase_plan: list[PlannedPhaseInfo] = Field(default_factory=list)
+    phase_plan: list[PlannedPhaseInfo]
     """Every phase the run declared, in order, with where each stands: ran here,
     ``pending``, ``skipped`` or ``inherited`` (feedback cee46909).
 

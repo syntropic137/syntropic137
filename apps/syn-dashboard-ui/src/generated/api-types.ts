@@ -3774,6 +3774,8 @@ export interface components {
              */
             completed_phases: number;
             phase_progress: components["schemas"]["PhaseProgressInfo"];
+            /** Phase Plan */
+            phase_plan: components["schemas"]["PlannedPhaseInfo"][];
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */
@@ -5822,6 +5824,24 @@ export interface components {
             resolved_sha: string;
             /** Source Url */
             source_url: string;
+        };
+        /**
+         * PlannedPhaseInfo
+         * @description One phase the run declared, and where it stands (feedback cee46909).
+         *
+         *     ``ExecutionDetail.phase_plan`` lists every declared phase, so a client
+         *     shows what is left as well as what ran. Clients render ``status_display``
+         *     and style by ``status``; they never work the status out themselves.
+         */
+        PlannedPhaseInfo: {
+            /** Phase Id */
+            phase_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Status Display */
+            status_display: string;
         };
         /**
          * Priority
