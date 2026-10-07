@@ -1,0 +1,13 @@
+name: get-scorecard
+type: query
+projection: ScorecardProjection
+subscribes_to:
+  - ExecutionRequestedEvent
+  - WorkflowExecutionStartedEvent
+  - PhaseCompletedEvent
+  - AgentExecutionCompletedEvent
+  - WorkflowCompletedEvent
+  - WorkflowFailedEvent
+  - ExecutionCancelledEvent
+  - WorkflowInterruptedEvent
+returns: Scorecard

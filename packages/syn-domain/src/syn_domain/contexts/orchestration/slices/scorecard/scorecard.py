@@ -1,0 +1,397 @@
+"""The platform scorecard: what a window of runs achieved and what it cost.
+
+Pure: given the window's run records and their Lane-2 costs, it decides every
+number. The API reads the inputs and renders the result; it decides nothing.
+
+Every count is over RESUME CHAINS, not executions. A chain is an execution and
+every resume of it; its outcome is its final run's, and it is in the window when
+that final run ended in the window. Its cost is the cost of every run in it,
+failed and superseded ones included, wherever in time they ran.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from enum import StrEnum
+from typing import TYPE_CHECKING
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+)
+from syn_domain.contexts.orchestration.slices.scorecard.phase_type import PhaseType
+from syn_domain.contexts.orchestration.slices.scorecard.projection import day_key
+from syn_domain.contexts.orchestration.slices.scorecard.run_record import (
+    RunOutcome,
+    ScorecardRun,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+# The owner's one-week go/no-go, 2026-10-07 -> 2026-10-14.
+TARGET_PLATFORM_FAILURE_FREE_RATE = 0.85
+TARGET_MEDIAN_VERIFY_TOKENS = 3_000_000
+TARGET_COST_PER_MERGED_PR_USD = Decimal("5")
+TARGET_CONCURRENCY = 20
+
+MERGED_PR_UNAVAILABLE = (
+    "Not recorded: no event says which PR a run produced, and only failed runs "
+    "record their branches, so merged PRs cannot be attributed yet."
+)
+
+
+def percentile(values: Sequence[float], fraction: float) -> float | None:
+    """Nearest-rank percentile; None for no values, never a made-up zero."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(1, -(-int(fraction * 100) * len(ordered) // 100))
+    return ordered[min(rank, len(ordered)) - 1]
+
+
+@dataclass(frozen=True)
+class OutcomeCounts:
+    completed: int = 0
+    failed_platform: int = 0
+    failed_task: int = 0
+    failed_correct_refusal: int = 0
+    failed_unclassified: int = 0
+    cancelled: int = 0
+    completed_platform_failure_free: int = 0
+
+    @property
+    def total(self) -> int:
+        return (
+            self.completed
+            + self.failed_platform
+            + self.failed_task
+            + self.failed_correct_refusal
+            + self.failed_unclassified
+            + self.cancelled
+        )
+
+    @property
+    def platform_failure_free_rate(self) -> float | None:
+        """Chains that completed and never failed on the platform, over chains
+        that finished other than by cancellation. None when there are none."""
+        denominator = self.total - self.cancelled
+        return self.completed_platform_failure_free / denominator if denominator else None
+
+
+@dataclass(frozen=True)
+class OutcomeRow:
+    key: str
+    counts: OutcomeCounts
+
+
+@dataclass(frozen=True)
+class PhaseTypeStats:
+    phase_type: PhaseType
+    phase_count: int
+    median_tokens: float | None
+    p90_tokens: float | None
+    cache_read_share: float | None
+    median_tool_calls: float | None
+    tokens_per_tool_call: float | None
+    phases_with_tool_counts: int
+
+
+@dataclass(frozen=True)
+class DailyPoint:
+    day: str
+    counts: OutcomeCounts
+    cost_usd: Decimal
+    median_verify_tokens: float | None
+    peak_concurrency: int
+
+
+@dataclass(frozen=True)
+class Throughput:
+    average_concurrency: float
+    peak_concurrency: int
+    median_queue_wait_seconds: float | None
+    p90_queue_wait_seconds: float | None
+    queue_waits_measured: int
+
+
+class TargetStatus(StrEnum):
+    ON_TRACK = "on_track"
+    OFF_TRACK = "off_track"
+    NO_DATA = "no_data"
+
+
+@dataclass(frozen=True)
+class TargetResult:
+    name: str
+    actual: float | None
+    target: float
+    higher_is_better: bool
+    status: TargetStatus
+
+
+@dataclass(frozen=True)
+class Scorecard:
+    window_start: datetime
+    window_end: datetime
+    window_days: int
+    counts: OutcomeCounts
+    by_workflow: tuple[OutcomeRow, ...]
+    by_model: tuple[OutcomeRow, ...]
+    phases: tuple[PhaseTypeStats, ...]
+    daily: tuple[DailyPoint, ...]
+    throughput: Throughput
+    total_cost_usd: Decimal
+    executions_costed: int
+    executions_in_chains: int
+    merged_prs: int | None
+    cost_per_merged_pr_usd: Decimal | None
+    merged_pr_scope: str
+    targets: tuple[TargetResult, ...]
+
+
+@dataclass(frozen=True)
+class _Chain:
+    final: ScorecardRun
+    members: tuple[ScorecardRun, ...]
+
+
+def _tally(chains: Sequence[_Chain]) -> OutcomeCounts:
+    fields = dict.fromkeys(
+        (
+            "completed",
+            "failed_platform",
+            "failed_task",
+            "failed_correct_refusal",
+            "failed_unclassified",
+            "cancelled",
+            "completed_platform_failure_free",
+        ),
+        0,
+    )
+    for chain in chains:
+        final = chain.final
+        if final.outcome is RunOutcome.COMPLETED:
+            fields["completed"] += 1
+            if not any(
+                m.failure_classification is FailureClassification.PLATFORM for m in chain.members
+            ):
+                fields["completed_platform_failure_free"] += 1
+        elif final.outcome is RunOutcome.CANCELLED:
+            fields["cancelled"] += 1
+        elif final.failure_classification is FailureClassification.PLATFORM:
+            fields["failed_platform"] += 1
+        elif final.failure_classification is FailureClassification.TASK:
+            fields["failed_task"] += 1
+        elif final.failure_classification is FailureClassification.CORRECT_REFUSAL:
+            fields["failed_correct_refusal"] += 1
+        else:
+            fields["failed_unclassified"] += 1
+    return OutcomeCounts(**fields)
+
+
+def _phase_stats(
+    runs: Sequence[ScorecardRun], tool_calls_by_session: Mapping[str, int]
+) -> tuple[PhaseTypeStats, ...]:
+    rows: list[PhaseTypeStats] = []
+    for phase_type in PhaseType:
+        phases = [p for run in runs for p in run.phases if p.phase_type is phase_type]
+        if not phases:
+            continue
+        tokens = [float(p.total_tokens) for p in phases]
+        all_tokens = sum(p.total_tokens for p in phases)
+        counted = [
+            (p.total_tokens, tool_calls_by_session[p.session_id])
+            for p in phases
+            if p.session_id and p.session_id in tool_calls_by_session
+        ]
+        calls = sum(c for _, c in counted)
+        rows.append(
+            PhaseTypeStats(
+                phase_type=phase_type,
+                phase_count=len(phases),
+                median_tokens=percentile(tokens, 0.5),
+                p90_tokens=percentile(tokens, 0.9),
+                cache_read_share=(
+                    sum(p.cache_read_tokens for p in phases) / all_tokens if all_tokens else None
+                ),
+                median_tool_calls=percentile([float(c) for _, c in counted], 0.5),
+                tokens_per_tool_call=(sum(t for t, _ in counted) / calls if calls else None),
+                phases_with_tool_counts=len(counted),
+            )
+        )
+    return tuple(rows)
+
+
+def _intervals(
+    runs: Sequence[ScorecardRun], start: datetime, end: datetime
+) -> list[tuple[datetime, datetime]]:
+    spans: list[tuple[datetime, datetime]] = []
+    for run in runs:
+        if run.started_at is None:
+            continue
+        lo = max(run.started_at, start)
+        hi = min(run.ended_at or end, end)
+        if hi > lo:
+            spans.append((lo, hi))
+    return spans
+
+
+def _peak(spans: Sequence[tuple[datetime, datetime]]) -> int:
+    # Ends sort before starts at the same instant: back-to-back runs are not concurrent.
+    edges = sorted([(s, 1) for s, _ in spans] + [(e, -1) for _, e in spans])
+    peak = current = 0
+    for _, delta in edges:
+        current += delta
+        peak = max(peak, current)
+    return peak
+
+
+def _target(name: str, actual: float | None, target: float, *, higher: bool) -> TargetResult:
+    if actual is None:
+        status = TargetStatus.NO_DATA
+    elif (actual >= target) if higher else (actual <= target):
+        status = TargetStatus.ON_TRACK
+    else:
+        status = TargetStatus.OFF_TRACK
+    return TargetResult(name, actual, target, higher, status)
+
+
+def _verify_median(runs: Sequence[ScorecardRun]) -> float | None:
+    return percentile(
+        [
+            float(p.total_tokens)
+            for run in runs
+            for p in run.phases
+            if p.phase_type is PhaseType.VERIFY
+        ],
+        0.5,
+    )
+
+
+def compute_scorecard(
+    *,
+    runs: Mapping[str, ScorecardRun],
+    cost_by_execution: Mapping[str, Decimal],
+    tool_calls_by_session: Mapping[str, int],
+    now: datetime,
+    window_days: int,
+) -> Scorecard:
+    """Score the ``window_days`` UTC days ending today.
+
+    ``runs`` must hold every run that ended in the window, every run still
+    running, and every member of their resume chains, keyed by execution id.
+    """
+    today = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = today - timedelta(days=window_days - 1)
+    end = now
+    days = [day_key(start + timedelta(days=i)) for i in range(window_days)]
+
+    chains = [
+        _Chain(run, tuple(runs[i] for i in run.chain if i in runs))
+        for run in runs.values()
+        if run.is_final
+        and run.outcome is not RunOutcome.RUNNING
+        and run.ended_at is not None
+        and start <= run.ended_at <= end
+    ]
+    members = [m for chain in chains for m in chain.members]
+
+    def chain_cost(chain: _Chain) -> Decimal:
+        return sum(
+            (cost_by_execution.get(m.execution_id, Decimal(0)) for m in chain.members), Decimal(0)
+        )
+
+    by_workflow: dict[str, list[_Chain]] = {}
+    by_model: dict[str, list[_Chain]] = {}
+    for chain in chains:
+        by_workflow.setdefault(chain.final.workflow_name or chain.final.workflow_id, []).append(
+            chain
+        )
+        for model in dict.fromkeys(m for member in chain.members for m in member.models):
+            by_model.setdefault(model, []).append(chain)
+
+    started = [run for run in runs.values() if run.started_at is not None]
+    spans = _intervals(started, start, end)
+    window_seconds = (end - start).total_seconds()
+    waits = [
+        (run.started_at - run.requested_at).total_seconds()
+        for run in started
+        if run.requested_at is not None
+        and run.started_at is not None
+        and start <= run.started_at <= end
+    ]
+
+    daily: list[DailyPoint] = []
+    for i, day in enumerate(days):
+        day_start = start + timedelta(days=i)
+        day_end = min(day_start + timedelta(days=1), end)
+        day_chains = [c for c in chains if c.final.ended_at and day_key(c.final.ended_at) == day]
+        daily.append(
+            DailyPoint(
+                day=day,
+                counts=_tally(day_chains),
+                cost_usd=sum((chain_cost(c) for c in day_chains), Decimal(0)),
+                median_verify_tokens=_verify_median([m for c in day_chains for m in c.members]),
+                peak_concurrency=_peak(_intervals(started, day_start, day_end)),
+            )
+        )
+
+    counts = _tally(chains)
+    throughput = Throughput(
+        average_concurrency=(
+            sum((hi - lo).total_seconds() for lo, hi in spans) / window_seconds
+            if window_seconds > 0
+            else 0.0
+        ),
+        peak_concurrency=_peak(spans),
+        median_queue_wait_seconds=percentile(waits, 0.5),
+        p90_queue_wait_seconds=percentile(waits, 0.9),
+        queue_waits_measured=len(waits),
+    )
+    verify_median = _verify_median(members)
+
+    return Scorecard(
+        window_start=start,
+        window_end=end,
+        window_days=window_days,
+        counts=counts,
+        by_workflow=tuple(OutcomeRow(k, _tally(v)) for k, v in sorted(by_workflow.items())),
+        by_model=tuple(OutcomeRow(k, _tally(v)) for k, v in sorted(by_model.items())),
+        phases=_phase_stats(members, tool_calls_by_session),
+        daily=tuple(daily),
+        throughput=throughput,
+        total_cost_usd=sum((chain_cost(c) for c in chains), Decimal(0)),
+        executions_costed=sum(1 for m in members if m.execution_id in cost_by_execution),
+        executions_in_chains=len(members),
+        merged_prs=None,
+        cost_per_merged_pr_usd=None,
+        merged_pr_scope=MERGED_PR_UNAVAILABLE,
+        targets=(
+            _target(
+                "Platform-failure-free completion",
+                counts.platform_failure_free_rate,
+                TARGET_PLATFORM_FAILURE_FREE_RATE,
+                higher=True,
+            ),
+            _target(
+                "Median verify tokens",
+                verify_median,
+                TARGET_MEDIAN_VERIFY_TOKENS,
+                higher=False,
+            ),
+            _target(
+                "Cost per merged PR (USD)",
+                None,
+                float(TARGET_COST_PER_MERGED_PR_USD),
+                higher=False,
+            ),
+            _target(
+                "Stable concurrency",
+                throughput.average_concurrency if spans else None,
+                TARGET_CONCURRENCY,
+                higher=True,
+            ),
+        ),
+    )
