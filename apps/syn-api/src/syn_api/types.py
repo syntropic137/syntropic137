@@ -1109,9 +1109,9 @@ class EvalRunResponse(BaseModel):
     status: str
     workflow_id: str
     workflow_version: str | None = None
-    """The workflow template version the run started from. Null: no event records
-    it on the run today, and the template's CURRENT version would be wrong for
-    any run that started before an update."""
+    """The workflow's installed version (or source digest, when it has no version)
+    as the run launched it, recorded on the run's start event. Null for a run
+    started before that was recorded, a resume, or a template with neither."""
     models: list[EvalRunModelResponse]
     """Observed per phase; a phase with no reported model is omitted."""
     total_cost_usd: Decimal | None

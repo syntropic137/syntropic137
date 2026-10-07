@@ -717,8 +717,8 @@ export interface paths {
          * List Eval Runs Endpoint
          * @description The executions currently in an eval, newest first, each with what it ran and its score.
          *
-         *     An eval with no runs, or one the read model has not caught up with, is an
-         *     empty page rather than a 404.
+         *     The eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an id
+         *     matching no eval is a 404. An eval with no runs is an empty page.
          */
         get: operations["list_eval_runs_endpoint_evals__eval_id__runs_get"];
         put?: never;

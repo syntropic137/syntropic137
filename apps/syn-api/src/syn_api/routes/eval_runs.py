@@ -74,6 +74,7 @@ async def _facts(row: WorkflowExecutionSummary, scores: dict[str, EvalRunScore])
     return EvalRunFacts(
         execution_id=execution_id,
         workflow_id=row.workflow_id,
+        workflow_version=row.workflow_version,
         status=row.status,
         started_at=_iso(row.started_at),
         completed_at=_iso(row.completed_at),
@@ -135,7 +136,7 @@ def _run_response(run: EvalRunFacts) -> EvalRunResponse:
         completed_at=run.completed_at,
         status=run.status,
         workflow_id=run.workflow_id,
-        workflow_version=None,
+        workflow_version=run.workflow_version,
         models=[EvalRunModelResponse(phase_id=m.phase_id, model=m.model) for m in run.models],
         total_cost_usd=run.total_cost_usd,
         total_cost_display=format_cost(run.total_cost_usd),

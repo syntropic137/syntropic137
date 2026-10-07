@@ -152,6 +152,7 @@ def _run(
     return EvalRunFacts(
         execution_id=execution_id,
         workflow_id=workflow_id,
+        workflow_version=None,
         status="completed",
         started_at=started_at,
         completed_at=None,

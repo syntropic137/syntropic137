@@ -142,6 +142,7 @@ async def _run(
     model: str,
     cost: str,
     started_at: str,
+    workflow_version: str | None = None,
 ) -> None:
     """A run whose one phase was declared as an alias and RAN ``model``."""
     from syn_api._wiring import (
@@ -162,6 +163,7 @@ async def _run(
             launch_eval=None
             if eval_id is None
             else LaunchEval(EvalId(eval_id), EvalSelection.EXPLICIT),
+            workflow_version=workflow_version,
         )
     )
     aggregate._handle_command(  # pyright: ignore[reportPrivateUsage]
@@ -215,7 +217,8 @@ async def _two_by_two(client: AsyncClient, lane2: _Lane2) -> str:
         ("r5", "wf-b", SONNET, "0.25", "2026-10-05T00:00:00+00:00", None),
     ]
     for execution_id, workflow_id, model, cost, started_at, verdict in runs:
-        await _run(lane2, eval_id, execution_id, workflow_id, model, cost, started_at)
+        version = "2.0.0" if execution_id == "r2" else "1.0.0"
+        await _run(lane2, eval_id, execution_id, workflow_id, model, cost, started_at, version)
         if verdict is not None:
             response = await _score(client, eval_id, execution_id, verdict)
             assert response.status_code == 200, response.text
@@ -253,9 +256,31 @@ class TestRuns:
         assert r2["evidence_excerpt"] == "## FAIL\n\nchecked r2"
         assert r2["scorer"] == "eval_suite.py"
         assert r2["scored_at"] is not None
-        assert r2["workflow_version"] is None
+        # The version each run launched from, not the template's current one:
+        # r2 started from 2.0.0 between runs of 1.0.0.
+        assert r2["workflow_version"] == "2.0.0"
+        assert body["items"][4]["workflow_version"] == "1.0.0"
         unscored = body["items"][0]
         assert (unscored["verdict"], unscored["score"], unscored["scorer"]) == (None, None, None)
+
+    async def test_a_unique_prefix_of_the_eval_id_lists_its_runs(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        body = (await client.get(f"/evals/{eval_id[:12]}/runs")).json()
+
+        assert body["total"] == 5
+        assert body["items"][0]["execution_id"] == "r5"
+
+    async def test_an_eval_id_matching_no_eval_is_404(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        await _two_by_two(client, lane2)
+
+        response = await client.get("/evals/eval-0000000000000000/runs")
+
+        assert response.status_code == 404, response.text
 
     async def test_total_is_invariant_under_page_size(
         self, client: AsyncClient, lane2: _Lane2

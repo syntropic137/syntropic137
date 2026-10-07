@@ -57,6 +57,8 @@ class EvalRunFacts:
 
     execution_id: str
     workflow_id: str
+    workflow_version: str | None
+    """The installed version or source digest the run launched from; None if unrecorded."""
     status: str
     started_at: str | None
     completed_at: str | None

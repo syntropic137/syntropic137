@@ -383,15 +383,16 @@ async def list_eval_runs_endpoint(
 ) -> EvalRunListResponse:
     """The executions currently in an eval, newest first, each with what it ran and its score.
 
-    An eval with no runs, or one the read model has not caught up with, is an
-    empty page rather than a 404.
+    The eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an id
+    matching no eval is a 404. An eval with no runs is an empty page.
     """
-    checked = str(_eval_id(eval_id))
+    from syn_api.prefix_resolver import resolve_or_raise
+
     await ensure_connected()
+    manager = get_projection_mgr()
+    eval_id = await resolve_or_raise(manager.store, "evals", eval_id, "Eval")
     wanted = [s.strip() for s in statuses.split(",") if s.strip()] if statuses else None
-    return await eval_run_page(
-        get_projection_mgr(), checked, page=page, page_size=page_size, statuses=wanted
-    )
+    return await eval_run_page(manager, eval_id, page=page, page_size=page_size, statuses=wanted)
 
 
 @router.post(

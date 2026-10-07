@@ -2495,7 +2495,7 @@
           "evals"
         ],
         "summary": "List Eval Runs Endpoint",
-        "description": "The executions currently in an eval, newest first, each with what it ran and its score.\n\nAn eval with no runs, or one the read model has not caught up with, is an\nempty page rather than a 404.",
+        "description": "The executions currently in an eval, newest first, each with what it ran and its score.\n\nThe eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an id\nmatching no eval is a 404. An eval with no runs is an empty page.",
         "operationId": "list_eval_runs_endpoint_evals__eval_id__runs_get",
         "parameters": [
           {

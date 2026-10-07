@@ -522,6 +522,7 @@ class ExecuteWorkflowHandler:
                 ),
                 tags=tags,
                 launch_eval=launch_eval,
+                workflow_version=workflow.package_version or workflow.source_digest,
             )
         except StreamAlreadyExistsError:
             logger.warning(

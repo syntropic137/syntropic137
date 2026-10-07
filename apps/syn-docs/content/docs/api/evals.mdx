@@ -79,10 +79,10 @@ _openapi:
           ran and its score.
 
 
-          An eval with no runs, or one the read model has not caught up with, is
-          an
+          The eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an
+          id
 
-          empty page rather than a 404.
+          matching no eval is a 404. An eval with no runs is an empty page.
         heading: list-eval-runs-endpoint
       - content: >-
           Record a verdict on one run. Re-scoring replaces the run's current

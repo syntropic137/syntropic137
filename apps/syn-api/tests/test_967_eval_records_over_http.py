@@ -228,6 +228,9 @@ class TestReadEvals:
         other = await _create(client)
         await _launch_into(eval_id, "exec-eval-967-in")
         await _launch_into(other, "exec-eval-967-out")
+        # The eval id resolves against the eval read model, as on show (#508).
+        assert (await client.get(f"/evals/{eval_id}/runs")).status_code == 404  # lagging
+        await _catch_up()
 
         runs = (await client.get(f"/evals/{eval_id}/runs")).json()
         executions = (await client.get("/executions", params={"eval_id": eval_id})).json()
