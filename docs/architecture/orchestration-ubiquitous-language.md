@@ -142,7 +142,7 @@ Linking a merged pull request to every Resume Chain that produced it.
 **Unclear:** no event records the PR a run produced, and only a failed run
 records its branches (`observed_branches`), so the Scorecard reports merged PRs
 and cost per merged PR as not recorded. When it is built, the GitHub lookup
-belongs in a ProcessManager, never in `ScorecardProjection`.
+belongs in a ProcessManager, never in `ScorecardProjection` (#1728).
 
 ## Unresolved Findings
 

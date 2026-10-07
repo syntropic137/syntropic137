@@ -38,7 +38,7 @@ TARGET_CONCURRENCY = 20
 
 MERGED_PR_UNAVAILABLE = (
     "Not recorded: no event says which PR a run produced, and only failed runs "
-    "record their branches, so merged PRs cannot be attributed yet."
+    "record their branches, so merged PRs cannot be attributed yet (#1728)."
 )
 
 
