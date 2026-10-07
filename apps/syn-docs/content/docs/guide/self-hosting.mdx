@@ -141,6 +141,55 @@ The gateway exposes two ports with different auth policies:
 
 See the [Tunnels guide](/docs/guide/tunnels) for full setup instructions.
 
+## Pausing admission (maintenance mode)
+
+Maintenance mode stops the deployment from **admitting** new executions while
+running executions carry on. Use it before a deploy that recreates the API
+container, so nothing new starts that the swap would kill. It is a property of
+the deployment, not of an execution; there is no paused execution.
+
+```bash
+# Read the current state
+curl -u "admin:$SYN_API_PASSWORD" "$SYN_API_URL/api/v1/maintenance"
+
+# Pause admission
+curl -X PUT -u "admin:$SYN_API_PASSWORD" "$SYN_API_URL/api/v1/maintenance" \
+  -H 'Content-Type: application/json' \
+  -d '{"active": true, "reason": "deploying v0.34", "actor": "ops"}'
+
+# Reopen admission
+curl -X PUT -u "admin:$SYN_API_PASSWORD" "$SYN_API_URL/api/v1/maintenance" \
+  -H 'Content-Type: application/json' -d '{"active": false}'
+```
+
+Request body (`SetMaintenanceModeRequest`): `active` (required), `reason`
+(up to 500 characters, echoed to every refused caller), `actor` (up to 200
+characters). Response (`MaintenanceModeResponse`): `active`, `reason`, `since`
+(null while open), `actor`. There is no `syn` command for it; `just pit-stop`
+sets and clears it around a deploy.
+
+While it is active:
+
+- A direct start (`syn workflow run`, `POST /workflows/{id}/execute`) is refused
+  with **409** and the detail `Execution admission is paused since <time>:
+  <reason>. Running executions are unaffected; retry once maintenance mode
+  clears.`
+- A trigger that fires is recorded as `paused` rather than failed, and is
+  offered again when admission reopens.
+- Starts already **queued** for an execution slot stay queued and start after
+  the clear.
+
+Behaviour and limits:
+
+- The state is durable: a restarted API container reads it and stays closed.
+- A `PUT` answers only once the state is stored. Pausing waits, for a bounded
+  time, only for starts that already hold a slot and have not written their
+  start event; it does not wait for queued starts. If that bound runs out, the
+  answer is **503**, the flag is **not** set, and admission is still open:
+  retry the pause.
+- Clearing answers **503** if admission reopened but the work parked during the
+  pause could not be woken. Admission is open; repeat the clear to re-announce.
+
 ## Tunnels (Optional)
 
 For secure external access and GitHub Actions webhook delivery, set up a tunnel. Syntropic137 includes built-in Cloudflare Tunnel support via a Docker Compose profile.
