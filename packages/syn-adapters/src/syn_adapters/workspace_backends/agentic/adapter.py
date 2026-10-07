@@ -29,6 +29,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_from_workspace,
     copy_files_to_workspace,
 )
+from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     apply_session_store_env,
     deployment_identity,
@@ -224,12 +225,16 @@ class AgenticIsolationAdapter:
         return WorkspaceDockerProvider.is_available()
 
     def _build_environment(self, config: IsolationConfig) -> dict[str, str]:
-        """Build the container environment, including the session-store block."""
+        """Build the container environment: tool defaults, CPU hints, session store."""
         # Remote export remains optional. Controlled workflow launches add the
         # local provider and durable mount after this host-owned contract is built.
         # Caller-supplied capture settings never override configured credentials.
-        return apply_session_store_env(
+        defaults = with_cpu_hints(
             _with_executable_tmpdir(config.environment or {}),
+            config.security_policy.cpu_limit_cores,
+        )
+        return apply_session_store_env(
+            defaults,
             self._session_store,
             execution_id=config.execution_id,
             workspace_id=config.workspace_id,
