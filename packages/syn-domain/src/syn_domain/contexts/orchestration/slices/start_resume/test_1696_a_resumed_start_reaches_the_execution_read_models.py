@@ -221,16 +221,11 @@ def _fails_once_for[**P](
 
 
 class TestAFailedStartIsNotSteppedOver:
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "#1696: needs ProjectionHandlerFailedError from event-sourcing-platform; "
-            "delete this marker in the gitlink bump that brings it in"
-        ),
-    )
+    @pytest.mark.xfail(strict=True, reason="#1696: needs the ESP coordinator fix")
     async def test_a_resume_start_that_hit_a_store_blip_is_applied_on_redelivery(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Strict until the gitlink carries ProjectionHandlerFailedError; delete the marker then."""
         history = await _history()
         started = _started_at(history)
         store = InMemoryProjectionStore()
