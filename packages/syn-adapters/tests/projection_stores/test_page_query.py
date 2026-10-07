@@ -17,6 +17,7 @@ from syn_adapters.projection_stores.postgres_page_keys import (
     _ISO_TIMESTAMP,
     _folds,
     build_page_query,
+    instant_sql,
 )
 from syn_domain.pagination import coerce_datetime
 from syn_domain.projection_page import PageQuery, StatusOf
@@ -46,7 +47,8 @@ def test_every_filter_and_the_page_are_in_the_one_statement() -> None:
     assert "data->'tags' @> $2::text::jsonb" in sql
     assert "unnest($4::text[], $5::text[])" in sql
     assert "$3::text) > 0" in sql
-    assert "instant < $6::timestamptz" in sql
+    # In the scan's WHERE, on the expression the window index is built on.
+    assert f"{instant_sql('started_at')} >= $6::timestamptz" in sql
     assert "status = ANY($7::text[])" in sql
     assert "LIMIT 20 OFFSET 40" in sql
     assert "o'brien" not in sql
