@@ -76,6 +76,8 @@ type _Failure = Exception | int | _TruncatedBody | httpx.Response
 @dataclass
 class _Clock:
     now: float = 0.0
+    #: Extra seconds every sleep overruns by: an event loop under load.
+    oversleep: float = 0.0
 
 
 @dataclass
@@ -96,6 +98,8 @@ class _Network:
     mint_seconds: float = 0.0
     #: The read timeout each mint attempt carried.
     mint_timeouts: list[float] = field(default_factory=list)
+    #: (start, end) of each mint attempt on the fake clock.
+    mint_spans: list[tuple[float, float]] = field(default_factory=list)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -103,10 +107,12 @@ class _Network:
         if path == _MINT:
             timeout = request.extensions["timeout"]["read"]
             self.mint_timeouts.append(timeout)
+            started = self.clock.now
             if self.mint_seconds:
                 self.clock.now += min(self.mint_seconds, timeout)
-                if self.mint_seconds > timeout:
-                    raise httpx.ReadTimeout("slow mint")
+            self.mint_spans.append((started, self.clock.now))
+            if self.mint_seconds > timeout:
+                raise httpx.ReadTimeout("slow mint")
         scripted = self.failures.get(path)
         if scripted:
             return self._fail(scripted.pop(0))
@@ -163,7 +169,7 @@ def slept(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> list[float]:
 
     async def record(seconds: float) -> None:
         delays.append(seconds)
-        clock.now += seconds
+        clock.now += seconds + clock.oversleep
         await real_sleep(0)
 
     monkeypatch.setattr(client_retry.asyncio, "sleep", record)
@@ -545,3 +551,30 @@ async def test_a_post_to_a_lookalike_path_gets_no_mint_retries(network: _Network
 
     assert response.status_code == 500
     assert network.sent == [path]
+
+
+@pytest.mark.anyio
+async def test_a_wait_that_overruns_starts_no_attempt_past_the_deadline(
+    network: _Network, clock: _Clock, monkeypatch: pytest.MonkeyPatch, setup_timeout: None
+) -> None:
+    """Review 2 of #1709: a late wake-up must be rechecked, not floored to a fresh 5 s.
+
+    Timeout 20 s -> deadline 15 s. The first mint takes 5 s and gets a 500; a
+    5 s wait is planned, but the loop wakes at 16 s. Retrying then would run
+    to 21 s.
+    """
+    monkeypatch.setenv("SETUP_PHASE_TIMEOUT_SECONDS", "20")
+    reset_settings()
+    monkeypatch.setattr(random, "uniform", lambda low, _high: low)
+    network.mint_seconds = 5.0
+    clock.oversleep = 6.0
+    network.failures[_MINT] = _all_500()
+
+    with pytest.raises(GitHubUnavailableError) as raised:
+        await _provision()
+
+    deadline = 20 * MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT
+    assert network.mint_spans == [(0.0, 5.0)]
+    assert all(start <= deadline and end <= deadline for start, end in network.mint_spans)
+    assert "after 1 attempt(s)" in str(raised.value)
+    assert failure_account(raised.value).upstream is UpstreamFailureKind.UNAVAILABLE

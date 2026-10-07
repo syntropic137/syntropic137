@@ -272,34 +272,15 @@ class RetryingTransport(httpx.AsyncBaseTransport):
         retry_after: float | None = None
         made = 0
         for attempt in range(1, policy.attempts + 1):
-            if attempt > 1:
-                delay = policy.delay_after(attempt - 1, retry_after)
-                if deadline - (_now() + delay) < policy.min_attempt_seconds:
-                    logger.warning(
-                        "GitHub token mint %s: not retrying after attempt %d/%d (status=%s, "
-                        "%s); waiting %.1fs would leave no time before the deadline",
-                        request.url.path,
-                        made,
-                        policy.attempts,
-                        _status_text(status_code),
-                        failure,
-                        delay,
-                    )
+            if attempt == 1:
+                # The first attempt always runs, given at least the minimum.
+                remaining = max(deadline - _now(), policy.min_attempt_seconds)
+            else:
+                outcome = _Outcome(made, failure, status_code)
+                waited = await self._wait_to_retry(request, deadline, outcome, retry_after)
+                if waited is None:
                     break
-                logger.warning(
-                    "GitHub token mint %s attempt %d/%d failed (status=%s, %s); retrying in "
-                    "%.1fs. GitHub may already have minted a token we never received: an "
-                    "orphan, live for up to an hour, that the issuance ledger cannot revoke "
-                    "(accepted trade-off, owner decision 2026-10-07)",
-                    request.url.path,
-                    made,
-                    policy.attempts,
-                    _status_text(status_code),
-                    failure,
-                    delay,
-                )
-                await self._sleep(delay)
-            remaining = max(deadline - _now(), policy.min_attempt_seconds)
+                remaining = waited
             _cap_timeouts(request, remaining)
             made = attempt
             try:
@@ -320,8 +301,71 @@ class RetryingTransport(httpx.AsyncBaseTransport):
                 status_code = response.status_code
         raise _unavailable(request, made, failure, status_code) from last_error
 
+    async def _wait_to_retry(
+        self,
+        request: httpx.Request,
+        deadline: float,
+        last: _Outcome,
+        retry_after: float | None,
+    ) -> float | None:
+        """Back off before the next mint attempt; the seconds left for it, or None to stop.
+
+        Checked twice: before the wait, whether the wait leaves time for an
+        attempt; after it, whether it still does - a loaded event loop can
+        wake late, and a retry must never run past the deadline.
+        """
+        policy = self._mint_policy
+        delay = policy.delay_after(last.attempts, retry_after)
+        if deadline - (_now() + delay) < policy.min_attempt_seconds:
+            _log_mint_stop(request, policy, last, f"waiting {delay:.1f}s would leave too little")
+            return None
+        logger.warning(
+            "GitHub token mint %s attempt %d/%d failed (status=%s, %s); retrying in "
+            "%.1fs. GitHub may already have minted a token we never received: an "
+            "orphan, live for up to an hour, that the issuance ledger cannot revoke "
+            "(accepted trade-off, owner decision 2026-10-07)",
+            request.url.path,
+            last.attempts,
+            policy.attempts,
+            _status_text(last.status_code),
+            last.failure,
+            delay,
+        )
+        await self._sleep(delay)
+        remaining = deadline - _now()
+        if remaining < policy.min_attempt_seconds:
+            _log_mint_stop(
+                request, policy, last, f"the wait overran, {max(remaining, 0.0):.1f}s left"
+            )
+            return None
+        return remaining
+
     async def aclose(self) -> None:
         await self._inner.aclose()
+
+
+@dataclass(frozen=True)
+class _Outcome:
+    """How the mint's attempts so far ended: how many, and how the last failed."""
+
+    attempts: int
+    failure: str
+    status_code: int | None
+
+
+def _log_mint_stop(
+    request: httpx.Request, policy: TokenMintRetryPolicy, last: _Outcome, why: str
+) -> None:
+    logger.warning(
+        "GitHub token mint %s: not retrying after attempt %d/%d (status=%s, %s); %s "
+        "before the deadline",
+        request.url.path,
+        last.attempts,
+        policy.attempts,
+        _status_text(last.status_code),
+        last.failure,
+        why,
+    )
 
 
 def _status_text(status_code: int | None) -> str:
