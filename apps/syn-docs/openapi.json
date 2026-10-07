@@ -10631,6 +10631,17 @@
             "type": "string",
             "title": "Workflow Id"
           },
+          "workflow_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Version"
+          },
           "models": {
             "items": {
               "type": "string"
@@ -10702,7 +10713,7 @@
           "last_run_at"
         ],
         "title": "EvalVariantResponse",
-        "description": "Every run of an eval with the same workflow and the same OBSERVED models (Evals v2)."
+        "description": "Every run of an eval with the same workflow, workflow version and OBSERVED models.\n\n(Evals v2.) Two versions of one workflow are two variants: an edit between\nruns is a different treatment, and pooling them would hide its effect."
       },
       "EventListResponse": {
         "properties": {
@@ -11380,6 +11391,16 @@
             "type": "object",
             "title": "Inputs"
           },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionEvalRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "resume_start": {
             "anyOf": [
               {
@@ -11470,6 +11491,76 @@
         ],
         "title": "ExecutionEvalResponse",
         "description": "An execution's eval membership after an edit, read from the aggregate (#967)."
+      },
+      "ExecutionEvalRunResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "eval_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Name"
+          },
+          "association_kind": {
+            "type": "string",
+            "enum": [
+              "launched",
+              "attached"
+            ],
+            "title": "Association Kind"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "scored_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scored At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "eval_name",
+          "association_kind",
+          "verdict",
+          "score",
+          "scored_at"
+        ],
+        "title": "ExecutionEvalRunResponse",
+        "description": "The eval an execution is a run of, and that run's current verdict (Evals v2).\n\nCarried on ``GET /executions/{id}`` so an execution page can link to its eval\nand show how the run was judged without a second request."
       },
       "ExecutionHistoryResponse": {
         "properties": {

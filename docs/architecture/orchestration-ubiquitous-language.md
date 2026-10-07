@@ -451,10 +451,14 @@ Run is judged `PASS` or `FAIL`: no data is not 0%.
 
 ## Variant
 
-The Runs of one Eval that share a Workflow and the same sorted, unique set of
-observed models. Each Variant has its own run count, pass count, Pass Rate,
-average cost (over Runs whose cost is known) and last run. Two workflows under
-two models make four Variants of one Eval.
+The Runs of one Eval that share a Workflow, the workflow version they launched
+from, and the same sorted, unique set of observed models. Each Variant has its
+own run count, pass count, Pass Rate, average cost (over Runs whose cost is
+known) and last run. Two workflows under two models make four Variants of one
+Eval; editing a workflow between Runs makes a fifth, because a different
+version is a different treatment and pooling them would hide its effect. Runs
+with no recorded version group together. Derived at read time from each Run's
+execution detail (the observed models and cost are Lane 2 facts), never stored.
 
 ## Suite
 

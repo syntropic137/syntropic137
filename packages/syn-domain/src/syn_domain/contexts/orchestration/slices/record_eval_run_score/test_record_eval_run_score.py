@@ -148,11 +148,12 @@ def _run(
     verdict: Verdict | None,
     cost: str | None,
     started_at: str,
+    version: str | None = None,
 ) -> EvalRunFacts:
     return EvalRunFacts(
         execution_id=execution_id,
         workflow_id=workflow_id,
-        workflow_version=None,
+        workflow_version=version,
         status="completed",
         started_at=started_at,
         completed_at=None,
@@ -211,6 +212,25 @@ class TestSummarize:
         # Unscored run 5 counts as a run, not as a scored one.
         assert (mixed.run_count, mixed.pass_count, mixed.pass_rate) == (2, 1, 1.0)
         assert mixed.avg_cost_usd == Decimal("5.00")
+
+    def test_two_versions_of_one_workflow_are_two_variants(self) -> None:
+        opus = "claude-opus-5-5"
+        runs = [
+            _run("1", "wf-a", [opus], Verdict.PASS, "1.00", "2026-10-01T00:00:00+00:00", "1.0.0"),
+            _run("2", "wf-a", [opus], Verdict.FAIL, "3.00", "2026-10-02T00:00:00+00:00", "2.0.0"),
+            _run("3", "wf-a", [opus], Verdict.PASS, "2.00", "2026-10-03T00:00:00+00:00", "2.0.0"),
+            _run("4", "wf-a", [opus], Verdict.FAIL, None, "2026-10-04T00:00:00+00:00"),
+        ]
+
+        summary = summarize(runs)
+
+        by_version = {v.workflow_version: v for v in summary.variants}
+        assert set(by_version) == {"1.0.0", "2.0.0", None}
+        assert (by_version["1.0.0"].run_count, by_version["1.0.0"].pass_rate) == (1, 1.0)
+        assert (by_version["2.0.0"].run_count, by_version["2.0.0"].pass_count) == (2, 1)
+        assert by_version["2.0.0"].avg_cost_usd == Decimal("2.50")
+        assert by_version[None].run_count == 1
+        assert {v.models for v in summary.variants} == {(opus,)}
 
     def test_no_runs_has_no_rate(self) -> None:
         summary = summarize([])

@@ -27,17 +27,21 @@ from syn_api.types import (
     EvalRunModelResponse,
     EvalRunResponse,
     EvalVariantResponse,
+    ExecutionEvalRunResponse,
     Ok,
 )
+from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import (
     EvalRunFacts,
     EvalRunsSummary,
     PhaseModel,
     summarize,
 )
+from syn_domain.contexts.orchestration.slices.list_evals.projection import EvalListProjection
 from syn_shared.display.formatters import EM_DASH, format_cost, format_duration_seconds
 
 if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
@@ -115,6 +119,7 @@ def variant_responses(summary: EvalRunsSummary) -> list[EvalVariantResponse]:
     return [
         EvalVariantResponse(
             workflow_id=v.workflow_id,
+            workflow_version=v.workflow_version,
             models=list(v.models),
             run_count=v.run_count,
             pass_count=v.pass_count,
@@ -165,4 +170,33 @@ async def eval_run_page(
     )
     return EvalRunListResponse(
         items=[_run_response(run) for run in runs], total=total, page=page, page_size=page_size
+    )
+
+
+async def execution_eval_run(
+    store: ProjectionStoreProtocol, execution_id: str
+) -> ExecutionEvalRunResponse | None:
+    """The eval the execution is a current run of, with its current verdict.
+
+    Membership is the execution list's row (the same ``eval_id`` the runs view
+    filters on), so this and ``GET /evals/{id}/runs`` cannot disagree about
+    whether the execution is a run. Read from the store the execution detail
+    route already holds, like its resume-start record. None in no eval.
+    """
+    row = await ExecutionListReads(store).get_by_id(execution_id)
+    if row is None or row.eval_id is None:
+        return None
+    kind = row.association_kind
+    if kind not in ("launched", "attached"):
+        return None
+    evals = EvalListProjection(store)
+    record = await evals.record(row.eval_id)
+    score = await evals.score(row.eval_id, execution_id)
+    return ExecutionEvalRunResponse(
+        eval_id=row.eval_id,
+        eval_name=None if record is None else record.name,
+        association_kind=kind,
+        verdict=None if score is None else score.verdict,
+        score=None if score is None else score.score,
+        scored_at=None if score is None else score.scored_at,
     )

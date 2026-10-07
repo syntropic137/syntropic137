@@ -371,20 +371,6 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             key for key, document in documents.items() if document.get("started_at") is not None
         }
 
-    async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
-        """Get a specific execution by ID.
-
-        Args:
-            execution_id: The execution ID.
-
-        Returns:
-            Execution summary or None if not found.
-        """
-        data = await self._store.get(self.PROJECTION_NAME, execution_id)
-        if data:
-            return WorkflowExecutionSummary.from_dict(data)
-        return None
-
     async def get_all(
         self,
         limit: int = 100,

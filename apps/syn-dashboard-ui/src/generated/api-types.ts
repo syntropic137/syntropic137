@@ -3660,11 +3660,16 @@ export interface components {
         };
         /**
          * EvalVariantResponse
-         * @description Every run of an eval with the same workflow and the same OBSERVED models (Evals v2).
+         * @description Every run of an eval with the same workflow, workflow version and OBSERVED models.
+         *
+         *     (Evals v2.) Two versions of one workflow are two variants: an edit between
+         *     runs is a different treatment, and pooling them would hide its effect.
          */
         EvalVariantResponse: {
             /** Workflow Id */
             workflow_id: string;
+            /** Workflow Version */
+            workflow_version?: string | null;
             /** Models */
             models: string[];
             /** Run Count */
@@ -4004,6 +4009,7 @@ export interface components {
             inputs?: {
                 [key: string]: string;
             };
+            eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
@@ -4020,6 +4026,29 @@ export interface components {
             association_kind: ("launched" | "attached") | null;
             /** Launched Eval Id */
             launched_eval_id: string | null;
+        };
+        /**
+         * ExecutionEvalRunResponse
+         * @description The eval an execution is a run of, and that run's current verdict (Evals v2).
+         *
+         *     Carried on ``GET /executions/{id}`` so an execution page can link to its eval
+         *     and show how the run was judged without a second request.
+         */
+        ExecutionEvalRunResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Eval Name */
+            eval_name: string | null;
+            /**
+             * Association Kind
+             * @enum {string}
+             */
+            association_kind: "launched" | "attached";
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Score */
+            score: number | null;
+            /** Scored At */
+            scored_at: string | null;
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {

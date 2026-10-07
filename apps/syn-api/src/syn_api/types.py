@@ -1077,9 +1077,15 @@ class EvalArchivedResponse(BaseModel):
 
 
 class EvalVariantResponse(BaseModel):
-    """Every run of an eval with the same workflow and the same OBSERVED models (Evals v2)."""
+    """Every run of an eval with the same workflow, workflow version and OBSERVED models.
+
+    (Evals v2.) Two versions of one workflow are two variants: an edit between
+    runs is a different treatment, and pooling them would hide its effect.
+    """
 
     workflow_id: str
+    workflow_version: str | None = None
+    """The installed version (or source digest) the runs launched from. Null if unrecorded."""
     models: list[ObservedModelId]
     """Sorted, unique models the runs' phases reported running. Never an alias."""
     run_count: int
@@ -1192,6 +1198,25 @@ class EvalRunScoreResponse(BaseModel):
     scorer: str
     scorer_version: str
     scored_at: str
+
+
+class ExecutionEvalRunResponse(BaseModel):
+    """The eval an execution is a run of, and that run's current verdict (Evals v2).
+
+    Carried on ``GET /executions/{id}`` so an execution page can link to its eval
+    and show how the run was judged without a second request.
+    """
+
+    eval_id: str
+    eval_name: str | None
+    """The eval's name. Null only while the eval's own record has not been projected."""
+    association_kind: Literal["launched", "attached"]
+    """How the run joined: chosen at launch, or attached afterwards."""
+    verdict: Verdict | None
+    """The run's current verdict. Null until a scorer records one."""
+    score: float | None
+    scored_at: str | None
+    """When the current verdict was recorded, ISO 8601 UTC."""
 
 
 class EvalListResponse(BaseModel):

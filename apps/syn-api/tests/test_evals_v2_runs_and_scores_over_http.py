@@ -317,24 +317,33 @@ class TestSummary:
             assert body["pass_rate_display"] == "67%"
             assert body["last_run_at"] == "2026-10-05T00:00:00+00:00"
             assert body["last_verdict"] == "ERROR"
-            variants = {(v["workflow_id"], tuple(v["models"])): v for v in body["variants"]}
-            assert set(variants) == {
-                ("wf-a", (OPUS,)),
-                ("wf-a", (SONNET,)),
-                ("wf-b", (OPUS,)),
-                ("wf-b", (SONNET,)),
+            variants = {
+                (v["workflow_id"], v["workflow_version"], tuple(v["models"])): v
+                for v in body["variants"]
             }
-            wf_a_opus = variants["wf-a", (OPUS,)]
-            assert (wf_a_opus["run_count"], wf_a_opus["pass_count"]) == (2, 1)
-            assert wf_a_opus["pass_rate"] == pytest.approx(0.5)
-            assert Decimal(wf_a_opus["avg_cost_usd"]) == Decimal("2.00")
-            assert wf_a_opus["avg_cost_display"] == "$2.00"
-            assert wf_a_opus["last_run_at"] == "2026-10-02T00:00:00+00:00"
-            assert variants["wf-b", (SONNET,)]["pass_rate"] is None
-            assert variants["wf-b", (SONNET,)]["pass_rate_display"] == "—"
+            # r2 ran wf-a 2.0.0: a different treatment from r1's 1.0.0, so its own variant.
+            assert set(variants) == {
+                ("wf-a", "1.0.0", (OPUS,)),
+                ("wf-a", "2.0.0", (OPUS,)),
+                ("wf-a", "1.0.0", (SONNET,)),
+                ("wf-b", "1.0.0", (OPUS,)),
+                ("wf-b", "1.0.0", (SONNET,)),
+            }
+            v1_opus = variants["wf-a", "1.0.0", (OPUS,)]
+            assert (v1_opus["run_count"], v1_opus["pass_count"]) == (1, 1)
+            assert v1_opus["pass_rate"] == pytest.approx(1.0)
+            assert Decimal(v1_opus["avg_cost_usd"]) == Decimal("1.00")
+            assert v1_opus["avg_cost_display"] == "$1.00"
+            assert v1_opus["last_run_at"] == "2026-10-01T00:00:00+00:00"
+            v2_opus = variants["wf-a", "2.0.0", (OPUS,)]
+            assert (v2_opus["run_count"], v2_opus["pass_count"]) == (1, 0)
+            assert v2_opus["pass_rate"] == pytest.approx(0.0)
+            assert Decimal(v2_opus["avg_cost_usd"]) == Decimal("3.00")
+            assert variants["wf-b", "1.0.0", (SONNET,)]["pass_rate"] is None
+            assert variants["wf-b", "1.0.0", (SONNET,)]["pass_rate_display"] == "—"
             # ERROR-only: nothing was judged, so no rate rather than 0%.
-            assert variants["wf-b", (OPUS,)]["pass_count"] == 0
-            assert variants["wf-b", (OPUS,)]["pass_rate"] is None
+            assert variants["wf-b", "1.0.0", (OPUS,)]["pass_count"] == 0
+            assert variants["wf-b", "1.0.0", (OPUS,)]["pass_rate"] is None
 
 
 class TestScore:
@@ -386,6 +395,57 @@ class TestScore:
         response = await _score(client, eval_id, "r1", "MAYBE")
 
         assert response.status_code == 422
+
+
+class TestExecutionDetailCarriesItsEval:
+    """``GET /executions/{id}``'s ``eval``: the badge on the execution page."""
+
+    async def test_a_scored_run_names_its_eval_and_current_verdict(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        shown = (await client.get("/executions/r2")).json()["eval"]
+
+        assert shown["eval_id"] == eval_id
+        assert shown["eval_name"] == "verifier-seed: case-1"
+        assert shown["association_kind"] == "launched"
+        assert (shown["verdict"], shown["score"]) == ("FAIL", 0.0)
+        assert shown["scored_at"] is not None
+
+    async def test_a_rescore_moves_the_badge(self, client: AsyncClient, lane2: _Lane2) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        assert (await _score(client, eval_id, "r2", "PASS")).status_code == 200
+        await _catch_up()
+
+        assert (await client.get("/executions/r2")).json()["eval"]["verdict"] == "PASS"
+
+    async def test_an_unscored_run_has_its_eval_and_no_verdict(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        shown = (await client.get("/executions/r5")).json()["eval"]
+
+        assert (shown["eval_id"], shown["verdict"], shown["scored_at"]) == (eval_id, None, None)
+
+    async def test_a_run_in_no_eval_has_none(self, client: AsyncClient, lane2: _Lane2) -> None:
+        await _run(lane2, None, "ordinary", "wf-a", OPUS, "1", "2026-10-01T00:00:00+00:00")
+
+        response = await client.get("/executions/ordinary")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["eval"] is None
+
+    async def test_a_detached_run_loses_the_badge(self, client: AsyncClient, lane2: _Lane2) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        detached = await client.delete("/executions/r2/eval", params={"eval_id": eval_id})
+        await _project_executions()
+
+        assert detached.status_code == 200, detached.text
+        assert (await client.get("/executions/r2")).json()["eval"] is None
 
 
 async def _start_resumed_child(

@@ -88,6 +88,13 @@ class ExecutionListReads:
             to_row=lambda record: WorkflowExecutionSummary.from_dict(dict(record)),
         )
 
+    async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
+        """One execution's row, or None when the list has not projected it."""
+        data = await self._store.get(WORKFLOW_EXECUTIONS, execution_id)
+        if data:
+            return WorkflowExecutionSummary.from_dict(data)
+        return None
+
     async def run_tallies(self, eval_ids: Collection[str]) -> dict[str, dict[str, int]]:
         """Each Eval's current member executions tallied by status, in one read.
 

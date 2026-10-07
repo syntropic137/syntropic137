@@ -169,6 +169,15 @@ class EvalListProjection(AutoDispatchProjection):
         scores = (EvalRunScore.model_validate(document) for document in documents)
         return {score.execution_id: score for score in scores}
 
+    async def score(self, eval_id: str, execution_id: str) -> EvalRunScore | None:
+        """The run's current score in the eval, or None if it was never scored."""
+        document = await self._store.get(self.SCORES, _score_key(eval_id, execution_id))
+        return None if document is None else EvalRunScore.model_validate(document)
+
+    async def record(self, eval_id: str) -> EvalRecord | None:
+        """The Eval's own record (name, Goal, Baseline), without its runs."""
+        return await self._record(eval_id)
+
     async def page(
         self,
         *,

@@ -76,9 +76,11 @@ class EvalRunFacts:
 
 @dataclass(frozen=True)
 class EvalVariant:
-    """Every run of the eval with the same workflow and the same observed models."""
+    """Every run of the eval with the same workflow, workflow version and observed models."""
 
     workflow_id: str
+    workflow_version: str | None
+    """The installed version or source digest the runs launched from; None if unrecorded."""
     models: tuple[str, ...]
     run_count: int
     pass_count: int
@@ -122,16 +124,21 @@ def summarize(runs: Iterable[EvalRunFacts]) -> EvalRunsSummary:
     """Run count, pass rate, newest verdict and the variants of one eval's runs."""
     ordered = _newest_first(runs)
     scored_count, _, pass_rate = _pass_rate(ordered)
-    groups: dict[tuple[str, tuple[str, ...]], list[EvalRunFacts]] = {}
+    # The version is part of the key: a workflow edited between two runs is a
+    # different treatment, and pooling them would hide the change being measured.
+    # An unrecorded version sorts as "" and groups with the other unrecorded runs.
+    groups: dict[tuple[str, str, tuple[str, ...]], list[EvalRunFacts]] = {}
     for run in ordered:
-        groups.setdefault((run.workflow_id, run.variant_models), []).append(run)
+        key = (run.workflow_id, run.workflow_version or "", run.variant_models)
+        groups.setdefault(key, []).append(run)
     variants = []
-    for (workflow_id, models), members in sorted(groups.items()):
+    for (workflow_id, _version, models), members in sorted(groups.items()):
         _, passed, rate = _pass_rate(members)
         costs = [r.total_cost_usd for r in members if r.total_cost_usd is not None]
         variants.append(
             EvalVariant(
                 workflow_id=workflow_id,
+                workflow_version=members[0].workflow_version,
                 models=models,
                 run_count=len(members),
                 pass_count=passed,
