@@ -844,6 +844,101 @@ class TestBuildAgentEnv:
             await _build_agent_env(workspace, "sess-1")
 
 
+def _imports(context: str) -> list[str]:
+    return [line.removeprefix("@") for line in context.splitlines() if line.startswith("@")]
+
+
+async def _provisioned_context(
+    files: dict[str, str],
+    *,
+    repos: list[str] | None = None,
+    execute_error: Exception | None = None,
+) -> str:
+    """Run the real WorkspaceProvisionHandler.handle() and return the context it injected.
+
+    ``files`` is what the clone put on disk: ``cat`` of a listed path succeeds
+    with its content, of anything else fails the way a missing file does.
+    """
+    from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        AgentConfiguration,
+        ExecutablePhase,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        WorkspaceProvisionHandler,
+    )
+
+    async def execute(command: list[str], **_kwargs: object) -> ExecutionResult:
+        if execute_error is not None:
+            raise execute_error
+        if command[:2] == ["cat", "--"] and command[2] in files:
+            return ExecutionResult(
+                exit_code=0, success=True, duration_ms=1.0, stdout=files[command[2]]
+            )
+        return ExecutionResult(
+            exit_code=1, success=False, duration_ms=1.0, stderr="No such file or directory"
+        )
+
+    workspace = AsyncMock()
+    workspace.proxy_url = "http://envoy:10000"
+    workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+    workspace.inject_files = AsyncMock()
+    workspace.execute = AsyncMock(side_effect=execute)
+    workspace.workspace_id = "ws-test"
+    workspace_cm = AsyncMock()
+    workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
+    workspace_service = MagicMock()
+    workspace_service.create_workspace.return_value = workspace_cm
+
+    async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
+        return "Do the task"
+
+    def fake_command_builder(_phase: object, prompt: str) -> list[str]:
+        return ["claude", "--print", prompt]
+
+    handler = WorkspaceProvisionHandler(
+        workspace_service=workspace_service,
+        prompt_builder=fake_prompt_builder,
+        command_builder=fake_command_builder,
+    )
+    phase = ExecutablePhase(
+        phase_id="phase-1",
+        name="Test Phase",
+        order=1,
+        description="",
+        agent_config=AgentConfiguration(),
+        prompt_template="Do the task",
+        output_artifact_types=("text",),
+    )
+    with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+        mock_secrets_instance = MagicMock()
+        mock_secrets_instance.build_setup_script.return_value = "#!/bin/bash\necho ok\n"
+        MockSecrets.create = AsyncMock(return_value=mock_secrets_instance)
+        await handler.handle(
+            todo=TodoItem(
+                execution_id="exec-1", action=TodoAction.PROVISION_WORKSPACE, phase_id="phase-1"
+            ),
+            phase=phase,
+            workflow_id="wf-1",
+            session_id="sess-1",
+            repos=repos or ["https://github.com/org/repo-a"],
+        )
+
+    injected = [
+        dict(c.args[0])
+        for c in workspace.inject_files.call_args_list
+        if any(name == "CLAUDE.md" for name, _ in c.args[0])
+    ]
+    assert len(injected) == 1, "the workspace context is injected exactly once"
+    (files_injected,) = injected
+    # Each harness reads one of these two files, so both carry the same imports.
+    assert files_injected["AGENTS.md"] == files_injected["CLAUDE.md"]
+    return files_injected["CLAUDE.md"].decode()
+
+
 # =========================================================================
 # WorkspaceProvisionHandler — _generate_workspace_context
 # =========================================================================
@@ -853,174 +948,99 @@ class TestBuildAgentEnv:
 class TestWorkspaceProvisionHandler:
     """Tests for WorkspaceProvisionHandler static helpers and inject behaviour."""
 
-    def test_generate_workspace_context_empty(self) -> None:
-        """Empty repos list returns empty string (no inject)."""
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
-        )
-
-        assert WorkspaceProvisionHandler._generate_workspace_context([]) == ""
-
-    def test_generate_workspace_context_single_repo(self) -> None:
-        """Single repo produces AGENTS.md + CLAUDE.md @-import lines."""
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
-        )
-
-        context = WorkspaceProvisionHandler._generate_workspace_context(
-            ["https://github.com/org/repo-a"]
-        )
-        assert "@/workspace/repos/repo-a/AGENTS.md" in context
-        assert "@/workspace/repos/repo-a/CLAUDE.md" in context
-
-    def test_generate_workspace_context_points_at_the_phase_deadline(self) -> None:
-        """#1546: the instructions name the env var the deadline is set in, once."""
+    def test_generate_workspace_context_imports_each_path_then_the_deadline(self) -> None:
+        """#1546: one @-import per path, then a pointer at the deadline env var, once."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
             WorkspaceProvisionHandler,
         )
         from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE
 
         context = WorkspaceProvisionHandler._generate_workspace_context(
-            ["https://github.com/org/repo-a", "https://github.com/org/repo-b"]
+            ["/workspace/repos/repo-a/CLAUDE.md", "/workspace/repos/repo-b/AGENTS.md"]
         )
+        assert context.splitlines()[:2] == [
+            "@/workspace/repos/repo-a/CLAUDE.md",
+            "@/workspace/repos/repo-b/AGENTS.md",
+        ]
         assert context.count(f"${ENV_SYN_PHASE_DEADLINE}") == 2
         assert context.count("This phase is killed at") == 1
-
-    def test_generate_workspace_context_multi_repo(self) -> None:
-        """Two repos produce four @-import lines (AGENTS + CLAUDE per repo)."""
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
-        )
-
-        context = WorkspaceProvisionHandler._generate_workspace_context(
-            [
-                "https://github.com/org/repo-a",
-                "https://github.com/org/repo-b",
-            ]
-        )
-        assert context.count("@/workspace/repos/") == 4
-        assert "@/workspace/repos/repo-a/AGENTS.md" in context
-        assert "@/workspace/repos/repo-a/CLAUDE.md" in context
-        assert "@/workspace/repos/repo-b/AGENTS.md" in context
-        assert "@/workspace/repos/repo-b/CLAUDE.md" in context
-
-    def test_generate_workspace_context_agents_before_claude(self) -> None:
-        """AGENTS.md @-import appears before CLAUDE.md for each repo."""
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
-        )
-
-        context = WorkspaceProvisionHandler._generate_workspace_context(
-            ["https://github.com/org/repo-a"]
-        )
-        agents_pos = context.index("AGENTS.md")
-        claude_pos = context.index("CLAUDE.md")
-        assert agents_pos < claude_pos
-
-    def test_generate_workspace_context_strips_git_suffix(self) -> None:
-        """.git suffix is stripped from repo name."""
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
-        )
-
-        context = WorkspaceProvisionHandler._generate_workspace_context(
-            ["https://github.com/org/repo-a.git"]
-        )
-        assert "@/workspace/repos/repo-a/AGENTS.md" in context
-        assert ".git" not in context
-
-    def test_generate_workspace_context_ends_with_newline(self) -> None:
-        """Generated content ends with a newline."""
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
-        )
-
-        context = WorkspaceProvisionHandler._generate_workspace_context(
-            ["https://github.com/org/repo-a"]
-        )
         assert context.endswith("\n")
 
     @pytest.mark.anyio
-    async def test_handle_injects_both_agents_and_claude_md(self) -> None:
-        """handle() injects AGENTS.md and CLAUDE.md with identical content."""
-        from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
-        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-            AgentConfiguration,
-            ExecutablePhase,
+    async def test_identical_agents_and_claude_md_are_imported_once(self) -> None:
+        """A byte-identical AGENTS.md is the same instructions: import CLAUDE.md alone."""
+        body = "# Repo\n" + "rules " * 2000
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": body,
+                "/workspace/repos/repo-a/CLAUDE.md": body,
+            }
         )
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
+        assert _imports(context) == ["/workspace/repos/repo-a/CLAUDE.md"]
+
+    @pytest.mark.anyio
+    async def test_different_agents_and_claude_md_are_both_imported(self) -> None:
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": "# For every agent\n" + "a " * 400,
+                "/workspace/repos/repo-a/CLAUDE.md": "# For Claude\n",
+            }
         )
+        assert _imports(context) == [
+            "/workspace/repos/repo-a/AGENTS.md",
+            "/workspace/repos/repo-a/CLAUDE.md",
+        ]
 
-        workspace = AsyncMock()
-        workspace.proxy_url = "http://envoy:10000"
-        workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
-        workspace.inject_files = AsyncMock()
-        workspace.workspace_id = "ws-test"
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("present", ["AGENTS.md", "CLAUDE.md"])
+    async def test_only_the_file_that_exists_is_imported(self, present: str) -> None:
+        path = f"/workspace/repos/repo-a/{present}"
+        context = await _provisioned_context({path: "# Instructions\n"})
+        assert _imports(context) == [path]
 
-        workspace_cm = AsyncMock()
-        workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
-
-        workspace_service = MagicMock()
-        workspace_service.create_workspace.return_value = workspace_cm
-
-        async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
-            return "Do the task"
-
-        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-            return ["claude", "--print", prompt]
-
-        handler = WorkspaceProvisionHandler(
-            workspace_service=workspace_service,
-            prompt_builder=fake_prompt_builder,
-            command_builder=fake_command_builder,
+    @pytest.mark.anyio
+    async def test_breadcrumb_agents_md_imports_only_its_target(self) -> None:
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": "See [CLAUDE.md](CLAUDE.md).\n",
+                "/workspace/repos/repo-a/CLAUDE.md": "# The real instructions\n",
+            }
         )
+        assert _imports(context) == ["/workspace/repos/repo-a/CLAUDE.md"]
 
-        todo = TodoItem(
-            execution_id="exec-1",
-            action=TodoAction.PROVISION_WORKSPACE,
-            phase_id="phase-1",
+    @pytest.mark.anyio
+    async def test_unreadable_instruction_files_are_both_imported(self) -> None:
+        """A transport failure must not cost the agent its instructions."""
+        context = await _provisioned_context({}, execute_error=OSError("exec transport died"))
+        assert _imports(context) == [
+            "/workspace/repos/repo-a/AGENTS.md",
+            "/workspace/repos/repo-a/CLAUDE.md",
+        ]
+
+    @pytest.mark.anyio
+    async def test_repo_without_instruction_files_still_gets_the_deadline(self) -> None:
+        context = await _provisioned_context({})
+        assert _imports(context) == []
+        assert "This phase is killed at" in context
+
+    @pytest.mark.anyio
+    async def test_each_repo_is_deduped_on_its_own(self) -> None:
+        """Repo names come from the URL, .git stripped; each repo keeps its own files."""
+        same = "# Same\n"
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": same,
+                "/workspace/repos/repo-a/CLAUDE.md": same,
+                "/workspace/repos/repo-b/AGENTS.md": "# B agents\n",
+                "/workspace/repos/repo-b/CLAUDE.md": "# B claude\n",
+            },
+            repos=["https://github.com/org/repo-a.git", "https://github.com/org/repo-b"],
         )
-        phase = ExecutablePhase(
-            phase_id="phase-1",
-            name="Test Phase",
-            order=1,
-            description="",
-            agent_config=AgentConfiguration(),
-            prompt_template="Do the task",
-            output_artifact_types=("text",),
-        )
-
-        repos = ["https://github.com/org/repo-a"]
-
-        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
-            mock_secrets_instance = MagicMock()
-            mock_secrets_instance.build_setup_script.return_value = "#!/bin/bash\necho ok\n"
-            MockSecrets.create = AsyncMock(return_value=mock_secrets_instance)
-
-            result = await handler.handle(
-                todo=todo,
-                phase=phase,
-                workflow_id="wf-1",
-                session_id="sess-1",
-                repos=repos,
-            )
-
-        # inject_files should be called with both AGENTS.md and CLAUDE.md
-        inject_calls = workspace.inject_files.call_args_list
-        # Find the call that contains AGENTS.md and CLAUDE.md
-        context_inject = next(
-            c
-            for c in inject_calls
-            if any("AGENTS.md" in str(f) or "CLAUDE.md" in str(f) for f in c.args[0])
-        )
-        files_injected = dict(context_inject.args[0])
-        assert "AGENTS.md" in files_injected
-        assert "CLAUDE.md" in files_injected
-        assert files_injected["AGENTS.md"] == files_injected["CLAUDE.md"], (
-            "AGENTS.md and CLAUDE.md must have identical content"
-        )
-        assert result is not None
+        assert _imports(context) == [
+            "/workspace/repos/repo-a/CLAUDE.md",
+            "/workspace/repos/repo-b/AGENTS.md",
+            "/workspace/repos/repo-b/CLAUDE.md",
+        ]
 
     @pytest.mark.anyio
     async def test_handle_no_repos_skips_context_inject(self) -> None:

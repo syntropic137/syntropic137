@@ -7,7 +7,7 @@ Reports ProvisionWorkspaceCompletedCommand to the aggregate.
 
 ADR-058: Repos are pre-cloned during setup phase. After setup, synthetic
 /workspace/AGENTS.md and /workspace/CLAUDE.md are injected with @-imports
-of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
+of each repo's distinct instruction files, so Claude starts fully hydrated.
 """
 
 from __future__ import annotations
@@ -202,6 +202,35 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
                 f"{prior_sha!r} vs {skill.resolved_sha!r}",
             )
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
+
+
+#: An AGENTS.md this small that names CLAUDE.md is a pointer to it (the
+#: breadcrumb convention), not a second set of instructions.
+_BREADCRUMB_MAX_BYTES: Final[int] = 512
+
+
+def _instruction_imports(
+    agents_path: str, agents_md: str | None, claude_path: str, claude_md: str | None
+) -> list[str]:
+    """Return the repo instruction files worth importing, each distinct one once.
+
+    ``None`` means the file is not in the checkout. AGENTS.md is dropped when it
+    says nothing CLAUDE.md does not: a byte-identical copy, or a breadcrumb
+    pointing at it. CLAUDE.md is the one kept because it is the canonical file
+    (AGENTS.md is the breadcrumb), and because Claude Code reads it natively.
+    """
+    if agents_md is not None and claude_md is not None:
+        is_copy = agents_md == claude_md
+        is_breadcrumb = (
+            len(agents_md.encode()) <= _BREADCRUMB_MAX_BYTES and "CLAUDE.md" in agents_md
+        )
+        if is_copy or is_breadcrumb:
+            agents_md = None
+    return [
+        path
+        for path, content in ((agents_path, agents_md), (claude_path, claude_md))
+        if content is not None
+    ]
 
 
 _DEADLINE_NOTICE = (
@@ -544,20 +573,29 @@ class WorkspaceProvisionHandler:
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)
-        # Both files are identical: direct @-imports of each repo's AGENTS.md and
-        # CLAUDE.md. Direct imports keep repo content at L2 (not L3 via indirection),
-        # preserving maximum @import depth for repo-internal context.
+        # Both files are identical: direct @-imports of each repo's distinct
+        # instruction files. Direct imports keep repo content at L2 (not L3 via
+        # indirection), preserving maximum @import depth for repo-internal context.
         #
         # Only for repos that are actually ON DISK. Every line of this file is
         # `@/workspace/repos/<name>/...`, so emitting it for a phase that did
         # not clone would point the agent at paths that do not exist.
         cloned_repos = effective_repos if clone_repos else []
-        context = self._generate_workspace_context(cloned_repos)
-        if context:
+        if cloned_repos:
+            imports = [
+                path
+                for url in cloned_repos
+                for path in await self._repo_instruction_imports(workspace, self._repo_name(url))
+            ]
+            context = self._generate_workspace_context(imports)
             await workspace.inject_files(
                 [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
             )
-            logger.info("Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(cloned_repos))
+            logger.info(
+                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s), %d import(s))",
+                len(cloned_repos),
+                len(imports),
+            )
 
     async def _materialize_claude_plugins(
         self,
@@ -753,6 +791,31 @@ class WorkspaceProvisionHandler:
         return url.rstrip("/").split("/")[-1].removesuffix(".git")
 
     @staticmethod
+    async def _repo_instruction_imports(workspace: ManagedWorkspace, name: str) -> list[str]:
+        """Return the paths of a cloned repo's instruction files to @-import.
+
+        Every one of these bytes is resent on every turn of every phase, so a
+        repo whose AGENTS.md duplicates its CLAUDE.md must not be loaded twice
+        (see ``_instruction_imports``). If the files cannot be read, both are
+        imported, as before: a duplicate costs tokens, a missing file costs the
+        agent its instructions.
+        """
+        agents_path = f"/workspace/repos/{name}/AGENTS.md"
+        claude_path = f"/workspace/repos/{name}/CLAUDE.md"
+        try:
+            agents = await workspace.execute(["cat", "--", agents_path], timeout_seconds=30)
+            claude = await workspace.execute(["cat", "--", claude_path], timeout_seconds=30)
+        except Exception as exc:
+            logger.warning("could not read instruction files of %s, importing both: %s", name, exc)
+            return [agents_path, claude_path]
+        return _instruction_imports(
+            agents_path,
+            agents.stdout if agents.exit_code == 0 else None,
+            claude_path,
+            claude.stdout if claude.exit_code == 0 else None,
+        )
+
+    @staticmethod
     async def _install_attribution_hook(workspace: ManagedWorkspace) -> None:
         """Put the operator co-authorship hook where the image's own git config looks.
 
@@ -859,27 +922,20 @@ class WorkspaceProvisionHandler:
         )
 
     @staticmethod
-    def _generate_workspace_context(repos: list[str]) -> str:
+    def _generate_workspace_context(imports: Sequence[str]) -> str:
         """Generate content for both /workspace/CLAUDE.md and /workspace/AGENTS.md.
 
-        Both files receive identical content: direct @-imports of each repo's
-        AGENTS.md then CLAUDE.md. Direct imports (not via an intermediary file)
-        keep repo content at depth L2, leaving L3-L5 for repo-internal imports
-        within Claude Code's 5-level absolute limit. Non-existent files are
-        silently ignored by Claude Code's @import system.
+        Both files receive identical content: a direct @-import of each path in
+        ``imports`` (see ``_repo_instruction_imports``). Direct imports (not via
+        an intermediary file) keep repo content at depth L2, leaving L3-L5 for
+        repo-internal imports within Claude Code's 5-level absolute limit.
 
         AGENTS.md is the Linux Foundation AAIF standard (Dec 2025), loaded by 15+
         platforms. CLAUDE.md is required because Claude Code does not auto-load
         AGENTS.md (issue #6235). Both files ensure full hydration regardless of
         which platform runs the agent.
         """
-        if not repos:
-            return ""
-        lines: list[str] = []
-        for url in repos:
-            name = WorkspaceProvisionHandler._repo_name(url)
-            lines.append(f"@/workspace/repos/{name}/AGENTS.md")
-            lines.append(f"@/workspace/repos/{name}/CLAUDE.md")
+        lines = [f"@{path}" for path in imports]
         # A pointer, not a time (#1546). This file is written before the
         # phase's clock starts, so a timestamp here would disagree with the
         # one the agent is killed on; the env var is set from that clock.
