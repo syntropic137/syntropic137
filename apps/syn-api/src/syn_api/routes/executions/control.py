@@ -270,9 +270,7 @@ async def cancel_execution_endpoint(
     except HTTPException as not_found:
         # A rebuild hides queued starts' executions no more than started ones,
         # so a prefix it could not expand is still offered to the withdrawal.
-        if not_found.status_code != 404 and not isinstance(
-            not_found, ExecutionReadModelRebuilding
-        ):
+        if not_found.status_code != 404 and not isinstance(not_found, ExecutionReadModelRebuilding):
             raise
         withdrawn = await _withdraw_queued(execution_id, reason)
         if withdrawn is None:
