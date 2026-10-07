@@ -10,10 +10,12 @@ task: >
   given. Review the Eval aggregate and the admission and edit paths that load
   it, and judge them against the production ESP event store.
 expected:
+  # Repo-relative. The report must name one of them; it is matched by file
+  # name, because a verifier writes `minio.py:212` as often as the full path.
   files:
-    - EvalAggregate.py
-    - eval_admission.py
-    - eval_edit.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_eval/EvalAggregate.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/eval_admission.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/eval_edit.py
   keywords:
     - [execution]
     - [stream]

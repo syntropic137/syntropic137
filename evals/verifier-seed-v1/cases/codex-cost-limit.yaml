@@ -9,9 +9,11 @@ task: >
   declared, validated and enforced for each agent provider, and judge it
   against what each provider's CLI actually reports while a phase runs.
 expected:
+  # Repo-relative. The report must name one of them; it is matched by file
+  # name, because a verifier writes `minio.py:212` as often as the full path.
   files:
-    - CodexStreamProcessor.py
-    - agents.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
+    - packages/syn-shared/src/syn_shared/agents.py
   keywords:
     - [codex]
     - [usage, token, cost]

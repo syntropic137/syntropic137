@@ -11,9 +11,11 @@ task: >
   admission path that dispatches the execution, and judge them against the
   production ESP event store.
 expected:
+  # Repo-relative. The report must name one of them; it is matched by file
+  # name, because a verifier writes `minio.py:212` as often as the full path.
   files:
-    - RequestExecutionCommand.py
-    - ExecutionRequestAggregate.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/domain/commands/RequestExecutionCommand.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
   keywords:
     - [stream]
     - [aggregate_id, aggregate id, execution_id, execution id, same id]

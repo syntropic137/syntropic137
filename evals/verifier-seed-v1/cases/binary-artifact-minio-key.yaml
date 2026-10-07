@@ -10,8 +10,10 @@ task: >
   the read path behind the artifact content endpoint, and judge them against
   production MinIO.
 expected:
+  # Repo-relative. The report must name one of them; it is matched by file
+  # name, because a verifier writes `minio.py:212` as often as the full path.
   files:
-    - minio.py
+    - packages/syn-adapters/src/syn_adapters/storage/artifact_storage/minio.py
   keywords:
     - [key, object name, path]
-    - [404, not found, NoSuchKey, mismatch, does not match, different]
+    - ["404", not found, NoSuchKey, mismatch, does not match, different]
