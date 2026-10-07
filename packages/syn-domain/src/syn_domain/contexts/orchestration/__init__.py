@@ -393,9 +393,9 @@ __all__ = [
     "PhaseDefinition",
     "PhaseExecutionType",
     "PhaseProgress",
-    "PlannedPhase",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "PlannedPhase",
     "PullRequestCommenter",
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",
