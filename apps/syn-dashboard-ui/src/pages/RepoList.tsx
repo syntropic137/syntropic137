@@ -36,7 +36,7 @@ function PrivacyMark({ privacy }: { privacy: Privacy }) {
   if (privacy === 'unknown') {
     return (
       <span
-        className={MUTED_BADGE}
+        className={`${MUTED_BADGE} whitespace-nowrap`}
         title="Privacy not visible: the GitHub App cannot reach this repo, and registration does not record it"
       >
         Privacy unknown
@@ -61,7 +61,7 @@ function RepoTable({ repos }: { repos: RepoRow[] }) {
           {repos.map((repo) => (
             <tr key={repo.key} className="border-b border-[var(--color-border)] last:border-0">
               <td className="px-4 py-2 text-[var(--color-text-primary)]">
-                <span className="inline-flex items-center gap-1.5">
+                <span className="inline-flex flex-wrap items-center gap-1.5">
                   {repo.fullName}
                   <PrivacyMark privacy={repo.privacy} />
                 </span>
