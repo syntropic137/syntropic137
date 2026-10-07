@@ -9,10 +9,9 @@ resume, the same on replay.
 
 What did lose them is the coordinator. A handler that failed was logged and
 stepped over, and the projection's next event checkpointed past it. That is
-fixed in event-sourcing-platform (`ProjectionHandlerFailedError`), and the
-second class pins it from this side: it is a strict xfail until the
-`lib/event-sourcing-platform` gitlink carries the fix, and the bump that
-brings it in must delete the marker, because the test then passes.
+fixed in event-sourcing-platform (`ProjectionHandlerFailedError`) and pinned
+by its own test; the gitlink bump that brings it in should add the
+store-blip-on-a-resume-start case here, which the pinned version loses.
 
 The event store here is keyed by aggregate id alone and numbers events in
 the order they are saved, which is all a projection sees of the real one
@@ -51,8 +50,6 @@ from syn_domain.contexts.orchestration.slices.start_resume.test_start_resume imp
 from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from event_sourcing import DomainEvent, EventEnvelope
 
 pytestmark = pytest.mark.unit
@@ -202,44 +199,3 @@ class TestEveryStartLands:
             await coordinator.dispatch_event(envelope)
 
         assert {name: await store.get_all(name) for name in READ_MODELS} == before
-
-
-def _fails_once_for[**P](
-    key: str, save: Callable[P, Awaitable[None]]
-) -> Callable[P, Awaitable[None]]:
-    """``save``, except the first write of ``key`` raises, the way a store blip does."""
-    failed = False
-
-    async def blipping(*args: P.args, **kwargs: P.kwargs) -> None:
-        nonlocal failed
-        if not failed and key in args:
-            failed = True
-            raise ConnectionError("projection store unavailable")
-        await save(*args, **kwargs)
-
-    return blipping
-
-
-class TestAFailedStartIsNotSteppedOver:
-    @pytest.mark.xfail(strict=True, reason="#1696: needs the ESP coordinator fix")
-    async def test_a_resume_start_that_hit_a_store_blip_is_applied_on_redelivery(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Strict until the gitlink carries ProjectionHandlerFailedError; delete the marker then."""
-        history = await _history()
-        started = _started_at(history)
-        store = InMemoryProjectionStore()
-        monkeypatch.setattr(store, "save", _fails_once_for(RESUME, store.save))
-        coordinator = _coordinator(store)
-
-        for envelope in history:
-            try:
-                await coordinator.dispatch_event(envelope)
-            except Exception:  # ProjectionHandlerFailedError, once the gitlink carries it
-                # What start() does after a failed attempt: deliver it again
-                # from the held checkpoint.
-                await coordinator.dispatch_event(envelope)
-
-        list_row = await store.get(WorkflowExecutionListProjection.PROJECTION_NAME, RESUME)
-        assert list_row is not None
-        assert _instant(list_row["started_at"]) == started[RESUME]
