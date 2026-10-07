@@ -259,6 +259,12 @@ class Score(_Frozen):
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _BLOCKING_HEADING = re.compile(r"^[\W\d]*blocking\b", re.IGNORECASE)
+#: A heading that names non-blocking content (``NON-BLOCKING``, ``Not blocking``,
+#: ``Nits``) at ANY depth: nothing under it is a blocking finding, even when it
+#: is nested inside the ``BLOCKING`` section.
+_NON_BLOCKING_HEADING = re.compile(r"\b(non[\s-]*blocking|not\s+blocking|nits?|minor)\b", re.IGNORECASE)
+#: The structured fields the verify prompt requires in each finding block.
+_FIELD = re.compile(r"^\s*[-*]?\s*(file|defect|why blocking)\s*:\s*(.*)$", re.IGNORECASE)
 
 
 def blocking_findings(report: str) -> list[str]:
@@ -274,6 +280,7 @@ def blocking_findings(report: str) -> list[str]:
     findings: list[list[str]] = []
     section: int | None = None
     finding: int | None = None
+    skip: int | None = None
     fenced = False
     for line in report.splitlines():
         if line.lstrip().startswith(("```", "~~~")):
@@ -282,18 +289,45 @@ def blocking_findings(report: str) -> list[str]:
         if heading:
             depth = len(heading.group(1))
             title = heading.group(2).replace("*", "").replace("_", "")
+            if skip is not None and depth <= skip:
+                skip = None
             if section is not None and depth <= section:
                 section = finding = None
+            if _NON_BLOCKING_HEADING.search(title):
+                # Non-blocking content at any depth is never a finding.
+                skip = depth
+                finding = None
+                continue
             if section is None:
                 if _BLOCKING_HEADING.match(title):
                     section = depth
                 continue
+            if skip is not None:
+                continue
             if finding is None or depth <= finding:
                 finding = depth
                 findings.append([])
-        if finding is not None:
+        if finding is not None and skip is None:
             findings[-1].append(line)
     return ["\n".join(lines) for lines in findings]
+
+
+def finding_fields(finding: str) -> dict[str, str]:
+    """The ``File``, ``Defect`` and ``Why blocking`` values of one finding block.
+
+    A field's value runs from its label to the next field label, so a
+    multi-line ``Defect`` is read whole.
+    """
+    fields: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in finding.splitlines():
+        match = _FIELD.match(line)
+        if match:
+            current = match.group(1).lower()
+            fields[current] = [match.group(2)]
+        elif current is not None:
+            fields[current].append(line)
+    return {name: "\n".join(lines).strip() for name, lines in fields.items()}
 
 
 def _normalise(text: str) -> str:
@@ -323,8 +357,12 @@ def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Sc
     findings = blocking_findings(report)
     best: tuple[str | None, tuple[tuple[str, ...], ...]] = (None, expected.keywords)
     for text in findings:
-        named = next((f for f in expected.files if _names(text, f)), None)
-        lowered = _normalise(text)
+        # The file must be in the finding's File field and the defect in its
+        # Defect field: a benign mention in "Why blocking" or a stray line does
+        # not name the seed (codex review of #1683).
+        fields = finding_fields(text)
+        named = next((f for f in expected.files if _names(fields.get("file", ""), f)), None)
+        lowered = _normalise(fields.get("defect", ""))
         missing = tuple(
             g for g in expected.keywords if not any(_normalise(w) in lowered for w in g)
         )

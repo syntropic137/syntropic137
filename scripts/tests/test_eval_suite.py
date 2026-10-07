@@ -294,6 +294,37 @@ def test_the_file_and_the_defect_must_be_in_the_same_blocking_finding() -> None:
 
 
 @pytest.mark.unit
+def test_a_seed_file_named_only_in_why_blocking_does_not_count() -> None:
+    """Codex review at 70fbbb14: the seed file appears only in another finding's
+    'Why blocking' text. File and defect must come from the File and Defect fields."""
+    seed = _case("binary-artifact-minio-key").expected
+    report = (
+        "VERDICT: BLOCKED\n\n## BLOCKING\n\n### Retry loop\n\n"
+        "- File: `other.py:40`\n"
+        "- Defect: retry loop hammers the API on 404.\n"
+        "- Why blocking: outage risk. minio.py key handling looks fine; no mismatch found.\n"
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.findings == 1 and score.named_file is None and not score.passed
+
+
+@pytest.mark.unit
+def test_a_non_blocking_subsection_nested_under_blocking_is_not_a_finding() -> None:
+    """Codex review at 70fbbb14: '### NON-BLOCKING' under '## BLOCKING' was read as
+    another blocking finding, so a benign mention there passed."""
+    seed = _case("binary-artifact-minio-key").expected
+    report = (
+        "VERDICT: BLOCKED\n\n## BLOCKING\n\n### Retry loop\n\n"
+        "- File: `other.py:40`\n- Defect: retry loop hammers the API.\n- Why blocking: outage.\n\n"
+        "### NON-BLOCKING\n\n"
+        "- File: `minio.py:212`\n- Defect: object key does not match the uploaded key, so reads 404 not found.\n"
+        "- Why blocking: n/a, looks fine.\n"
+    )
+    score = score_report(seed, "blocked", report)
+    assert score.findings == 1 and score.named_file is None and not score.passed
+
+
+@pytest.mark.unit
 def test_prose_under_blocking_outside_a_finding_block_is_not_a_finding() -> None:
     report = (
         "VERDICT: BLOCKED\n\n## BLOCKING\n\n"
