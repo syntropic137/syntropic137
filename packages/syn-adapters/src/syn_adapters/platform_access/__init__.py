@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
@@ -130,6 +130,19 @@ def _scope_allows(scope: PlatformScope, method: str, path: str) -> bool:
     return first in _READ_RESOURCES
 
 
+@dataclass(frozen=True)
+class WorkspacePlatformGrant:
+    """One phase's access to the API: what its agent is given, and what teardown revokes."""
+
+    api_url: str
+    token: str = field(repr=False)
+
+    @property
+    def env(self) -> dict[str, str]:
+        """The variables the ``syn`` CLI already reads (``apps/syn-cli-node/src/config.ts``)."""
+        return {"SYN_API_URL": self.api_url, "SYN_API_TOKEN": self.token}
+
+
 class PlatformTokenService:
     """Issues, revokes and checks platform tokens.
 
@@ -142,10 +155,12 @@ class PlatformTokenService:
         store: PlatformTokenStore | None,
         *,
         max_ttl_seconds: int,
+        workspace_api_url: str = "http://syn-platform.internal",
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
         self._max_ttl = max_ttl_seconds
+        self._api_url = workspace_api_url
         self._now = now or (lambda: datetime.now(UTC))
 
     @property
@@ -166,6 +181,12 @@ class PlatformTokenService:
         await self._store.put(_hash(token), grant, self._max_ttl)
         logger.info("Issued %s platform token for execution %s", scope, execution_id)
         return token
+
+    async def grant_workspace(self, execution_id: str) -> WorkspacePlatformGrant | None:
+        """A read-only grant for one workspace, or ``None`` while access is OFF."""
+        if self._store is None:
+            return None
+        return WorkspacePlatformGrant(self._api_url, await self.issue(execution_id))
 
     async def revoke(self, token: str) -> None:
         """Make ``token`` unusable immediately. Idempotent."""
@@ -198,4 +219,5 @@ __all__ = [
     "PlatformTokenService",
     "PlatformTokenStore",
     "RedisPlatformTokenStore",
+    "WorkspacePlatformGrant",
 ]

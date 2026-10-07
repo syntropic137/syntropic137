@@ -291,6 +291,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
             config=ws_config,
             environment=_build_workspace_env(),
             capture_source_instance_id=capture_source_id,
+            platform_tokens=get_platform_token_service(),
         ),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,
@@ -1314,6 +1315,8 @@ def get_platform_token_service() -> PlatformTokenService:
             store = RedisPlatformTokenStore(resilient_redis_client(settings.redis_url))
         logger.info("Workspace platform access ENABLED (read-only tokens, ADR-072)")
     _platform_token_service_singleton = PlatformTokenService(
-        store, max_ttl_seconds=access.token_ttl_seconds
+        store,
+        max_ttl_seconds=access.token_ttl_seconds,
+        workspace_api_url=access.workspace_api_url,
     )
     return _platform_token_service_singleton

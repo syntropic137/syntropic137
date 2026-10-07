@@ -106,6 +106,9 @@ PASSTHROUGH_HOSTS = {
     "pypi.org",
     "files.pythonhosted.org",
     "registry.npmjs.org",
+    # Syntropic137 API (ADR-072). The workspace presents its own platform
+    # token; nothing is injected, and the API checks that token's scope.
+    "syn-platform.internal",
 }
 
 

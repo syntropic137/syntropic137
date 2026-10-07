@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
 
+    from syn_adapters.platform_access import WorkspacePlatformGrant
     from syn_adapters.workspace_backends.service.credential_keeper import CredentialLapse
     from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
     from syn_adapters.workspace_backends.service.setup_phase_secrets import (
@@ -92,6 +93,10 @@ class ManagedWorkspace:
     #: `finally`) and so only readable after `__aexit__`. None before teardown,
     #: and when the backend measured nothing.
     teardown_usage: WorkspaceUsage | None = None
+    #: This phase's read-only access to the Syntropic137 API (ADR-072), set by
+    #: `create_workspace` and revoked by its teardown. None while platform
+    #: access is OFF, which is the default.
+    platform_grant: WorkspacePlatformGrant | None = field(default=None, repr=False)
 
     @property
     def path(self) -> Path:
