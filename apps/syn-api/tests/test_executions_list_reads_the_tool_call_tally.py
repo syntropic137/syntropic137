@@ -187,7 +187,15 @@ class _Manager:
         self.execution_cost = ExecutionCostProjection(store=None, pool=pool)  # type: ignore[arg-type]  # a recording double
 
 
-async def _one_page() -> tuple[_RecordingConnection, _Pool, int]:
+class _EventStore:
+    def __init__(self, pool: _Pool) -> None:
+        self.pool = pool
+
+
+async def _one_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[_RecordingConnection, _Pool, int]:
+    from syn_api import _wiring
     from syn_api.routes.executions.queries import (
         _load_execution_list_data,
         _to_execution_summary,
@@ -195,6 +203,10 @@ async def _one_page() -> tuple[_RecordingConnection, _Pool, int]:
 
     conn = _RecordingConnection()
     pool = _Pool(conn)
+    # The route's own way to the database is the same recorder, so a read it
+    # issued beside the cost read - the duplicate this replaced - is counted.
+    store = _EventStore(pool)
+    monkeypatch.setattr(_wiring, "get_event_store_instance", lambda: store)
     page, enrichment = await _load_execution_list_data(
         _Manager(pool),  # type: ignore[arg-type]  # a recording double
         None,
@@ -206,23 +218,27 @@ async def _one_page() -> tuple[_RecordingConnection, _Pool, int]:
     return conn, pool, summary.tool_call_count
 
 
-async def test_one_list_page_makes_exactly_the_pinned_round_trips() -> None:
-    conn, pool, _count = await _one_page()
+async def test_one_list_page_makes_exactly_the_pinned_round_trips(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, pool, _count = await _one_page(monkeypatch)
 
     assert conn.kinds == _EXPECTED_ROUND_TRIPS
-    assert pool.acquisitions == 1, "the enrichment took more than one connection"
+    assert pool.acquisitions == 1, "the list page took more than one connection"
 
 
-async def test_the_tally_is_read_once_and_its_count_reaches_the_summary() -> None:
-    conn, _pool, count = await _one_page()
+async def test_the_tally_is_read_once_and_its_count_reaches_the_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, _pool, count = await _one_page(monkeypatch)
 
     assert conn.kinds.count(_TALLY) == 1
     assert count == 11
 
 
-async def test_no_statement_counts_tool_events() -> None:
+async def test_no_statement_counts_tool_events(monkeypatch: pytest.MonkeyPatch) -> None:
     """The scan #1322 removed is not put back by the single read."""
-    conn, _pool, _count = await _one_page()
+    conn, _pool, _count = await _one_page(monkeypatch)
 
     for statement, args in zip(conn.statements, conn.args, strict=True):
         assert TOOL_EXECUTION_COMPLETED not in statement
