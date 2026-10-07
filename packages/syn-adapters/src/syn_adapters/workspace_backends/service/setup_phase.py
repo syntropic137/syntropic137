@@ -21,6 +21,7 @@ import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
+from syn_adapters.workspace_backends.exec_status_lost import is_status_lost
 from syn_shared.display import format_exit_code
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
@@ -113,28 +114,7 @@ async def run_setup_phase(
     )
 
     try:
-        # Stage the codex auth file INSIDE the try so the finally-block cleanup
-        # always runs even if this injection raises. The docker copy path IGNORES
-        # base_path (it always writes under the /workspace mount), so we cannot
-        # inject straight to ~/.codex; we stage it under .setup/ and the setup
-        # script (SetupPhaseSecrets._append_codex_auth) relocates it to
-        # ~/.codex/auth.json (0600) and removes the staged copy. The secret
-        # contents never appear in the setup script text (only the file carries them).
-        if secrets.codex_auth_json:
-            await ws.inject_files(
-                [(".setup/codex-auth.json", secrets.codex_auth_json.encode())],
-                base_path="/workspace",
-            )
-
-        # Run setup script WITH secrets
-        logger.info("Running secret-injection setup script (workspace=%s)", ws.workspace_id)
-        from syn_shared.settings import get_settings
-
-        result = await ws.execute(
-            ["bash", "/workspace/.setup/setup.sh"],
-            environment=setup_env,
-            timeout_seconds=get_settings().setup_phase_timeout_seconds,
-        )
+        result = await _run_setup_script(ws, secrets, script, setup_env)
 
         if result.exit_code != 0:
             # Names the ADR-024 step, not "the setup phase": a workflow phase of
@@ -160,6 +140,69 @@ async def run_setup_phase(
             "Secret-injection setup complete, transient material cleared (workspace=%s)",
             ws.workspace_id,
         )
+
+
+#: One retry, and only of an exec whose status was LOST (no status, no output,
+#: no timeout - see `exec_status_lost`). The script is written to be re-run
+#: (every clone is `[ -d ]`-guarded, credential files are replaced, #1393),
+#: so a second run costs seconds, where giving up discarded the whole execution: four
+#: verify/reverify phases on 2026-10-06/07 ended this way while the script
+#: itself had very likely finished. A status that WAS reported - any exit
+#: code, a timeout - is an answer and is never retried.
+_SETUP_ATTEMPTS: Final = 2
+_SETUP_RETRY_BACKOFF_SECONDS: Final = 1.0
+
+
+async def _run_setup_script(
+    ws: ManagedWorkspace,
+    secrets: SetupPhaseSecrets,
+    script: str,
+    setup_env: dict[str, str],
+) -> ExecutionResult:
+    """Run the setup script, once more if the first run's status was lost."""
+    from syn_shared.settings import get_settings
+
+    for attempt in range(1, _SETUP_ATTEMPTS + 1):
+        if attempt > 1:
+            # Restage both: the first run may have got as far as relocating
+            # and removing the staged codex credential.
+            await ws.inject_files([(".setup/setup.sh", script.encode())], base_path="/workspace")
+        # Stage the codex auth file INSIDE the caller's try so its finally-block
+        # cleanup always runs even if this injection raises. The docker copy
+        # path IGNORES base_path (it always writes under the /workspace mount),
+        # so we cannot inject straight to ~/.codex; we stage it under .setup/
+        # and the setup script (SetupPhaseSecrets._append_codex_auth) relocates
+        # it to ~/.codex/auth.json (0600) and removes the staged copy. The
+        # secret contents never appear in the setup script text.
+        if secrets.codex_auth_json:
+            await ws.inject_files(
+                [(".setup/codex-auth.json", secrets.codex_auth_json.encode())],
+                base_path="/workspace",
+            )
+
+        logger.info(
+            "Running secret-injection setup script (workspace=%s, attempt=%d/%d)",
+            ws.workspace_id,
+            attempt,
+            _SETUP_ATTEMPTS,
+        )
+        result = await ws.execute(
+            ["bash", "/workspace/.setup/setup.sh"],
+            environment=setup_env,
+            timeout_seconds=get_settings().setup_phase_timeout_seconds,
+        )
+        if not is_status_lost(result) or attempt == _SETUP_ATTEMPTS:
+            return result
+        logger.warning(
+            "Secret-injection setup returned no status (workspace=%s, attempt=%d/%d); "
+            "re-running it: %s",
+            ws.workspace_id,
+            attempt,
+            _SETUP_ATTEMPTS,
+            result.stderr,
+        )
+        await asyncio.sleep(_SETUP_RETRY_BACKOFF_SECONDS)
+    raise AssertionError("unreachable: the last attempt always returns")
 
 
 _CODEX_STAGED_AUTH = "/workspace/.setup/codex-auth.json"
@@ -216,6 +259,23 @@ class _GuardOutcome(NamedTuple):
             + ", ".join(f"#{i} {seen}" for i, seen in enumerate(self.attempts, 1))
             + "]"
         )
+
+
+#: Bound on the diagnosis quoted per attempt, so four attempts stay readable.
+_ATTEMPT_DETAIL_CHARS: Final = 400
+
+
+def _attempt_record(result: ExecutionResult) -> str:
+    """One attempt, as the operator reads it in the fail-closed error.
+
+    A lost status carries its diagnosis (container state, timing against the
+    deadline). Without it, four attempts read "exit=-1 (no exit status)" four
+    times and the run ended with nothing to act on (exec-ff7e0c990b00).
+    """
+    record = f"exit={format_exit_code(result.exit_code)}"
+    if is_status_lost(result):
+        record += f" ({result.stderr[:_ATTEMPT_DETAIL_CHARS]})"
+    return record
 
 
 async def _wait_before_retry(attempt: int) -> None:
@@ -287,7 +347,7 @@ async def _remove_staged_credential(ws: ManagedWorkspace) -> _GuardOutcome:
             ["rm", "-f", "--", _CODEX_STAGED_AUTH],
             timeout_seconds=_EXEC_TIMEOUT_SECONDS,
         )
-        attempts.append(f"exit={format_exit_code(removal.exit_code)}")
+        attempts.append(_attempt_record(removal))
         if removal.exit_code == 0:
             return _GuardOutcome(succeeded=True, attempts=tuple(attempts))
         logger.warning(
