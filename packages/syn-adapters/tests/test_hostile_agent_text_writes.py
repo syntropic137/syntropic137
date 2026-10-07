@@ -96,6 +96,7 @@ class FakeConn:
 
     def __init__(self, calls: list[tuple[str, tuple[object, ...]]]) -> None:
         self._calls = calls
+        self.transactions: list[tuple[str | None, bool]] = []
 
     async def execute(self, query: str, *args: object) -> str:
         self._calls.append((query, args))
@@ -113,8 +114,15 @@ class FakeConn:
         self._calls.append((table, (kwargs.get("source"),)))
         return "COPY 1"
 
-    def transaction(self) -> FakeTransaction:
-        """The write path wraps the row and its tool-call tally in one (#1322)."""
+    def transaction(
+        self, *, isolation: str | None = None, readonly: bool = False
+    ) -> FakeTransaction:
+        """The write path wraps the row and its tool-call tally in one (#1322).
+
+        The read path opens its snapshot here too, with the isolation and
+        read-only settings carried by the BEGIN itself, so they are recorded.
+        """
+        self.transactions.append((isolation, readonly))
         return FakeTransaction()
 
 
@@ -641,10 +649,14 @@ async def test_agent_events_are_queried_under_the_id_they_were_stored_under() ->
     )
     stored_session, stored_execution = pool.args[2], pool.args[3]
 
+    pool.conn.transactions.clear()
     await query_session_events(pool, hostile_session)  # type: ignore[arg-type]  # see above
     queried_session = pool.args[0]
     await query_execution_events(pool, hostile_execution)  # type: ignore[arg-type]  # see above
     queried_execution = pool.args[0]
+    assert pool.conn.transactions == [("repeatable_read", True)], (
+        "the bounded execution read opens one read-only REPEATABLE READ snapshot"
+    )
 
     for value in (stored_session, stored_execution, queried_session, queried_execution):
         assert_postgres_would_accept(value)
