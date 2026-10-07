@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.types import (
     Err,
+    FallbackAgentResponse,
     InputDeclarationResponse,
     Ok,
     PhaseDefinitionResponse,
@@ -211,6 +212,11 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         provider=p.provider,
         allow_delegation=p.allow_delegation,
         require_delegation=p.require_delegation,
+        fallback_agent=(
+            FallbackAgentResponse(provider=p.fallback_agent.provider, model=p.fallback_agent.model)
+            if p.fallback_agent is not None
+            else None
+        ),
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
         sandbox=p.sandbox,
@@ -498,6 +504,17 @@ def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
     return ["    agent:", *entries] if entries else []
 
 
+def _yaml_fallback_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The phase's ``fallback_agent`` block, so an exported package reinstalls with it (PC-83)."""
+    fallback = phase.fallback_agent
+    if fallback is None:
+        return []
+    lines = ["    fallback_agent:", f"      provider: {_yaml_quote(fallback.provider)}"]
+    if fallback.model:
+        lines.append(f"      model: {_yaml_quote(fallback.model)}")
+    return lines
+
+
 def _yaml_ref_entry(key: str, ref: PhaseRefResponse) -> list[str]:
     """One ref, in the spelling ITS loader accepts.
 
@@ -608,6 +625,7 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if not phase.delivers_repo_changes:
         lines.append("    delivers_repo_changes: false")
     lines.extend(_yaml_agent_lines(phase))
+    lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))
     return lines

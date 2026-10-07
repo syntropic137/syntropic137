@@ -11645,6 +11645,31 @@
         "title": "FailurePatternResponse",
         "description": "A recurring failure pattern within a system."
       },
+      "FallbackAgentResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "title": "FallbackAgentResponse",
+        "description": "The agent a phase is re-run on when its own provider cannot serve it (PC-83)."
+      },
       "FeatureDisabledDetail": {
         "properties": {
           "feature": {
@@ -14816,6 +14841,16 @@
             "title": "Require Delegation",
             "default": false
           },
+          "fallback_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackAgentResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "clone_repos": {
             "type": "boolean",
             "title": "Clone Repos",
@@ -15051,6 +15086,17 @@
               }
             ],
             "title": "Requested Model"
+          },
+          "agent_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Provider"
           },
           "cost_by_model": {
             "additionalProperties": {

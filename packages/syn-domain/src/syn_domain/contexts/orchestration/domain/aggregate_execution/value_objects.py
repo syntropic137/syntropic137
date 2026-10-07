@@ -1105,6 +1105,13 @@ class ExecutablePhase:
     # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
 
+    # The agent this phase is re-run on, ONCE, when its own provider cannot
+    # serve it at all: capacity that outlived every retry, or a spent quota
+    # (PC-83). Resolved at the execution boundary with the phase's own tools,
+    # sandbox and delegation, so the rerun differs only in who runs it. None is
+    # "no fallback declared", and the phase fails as it always did.
+    fallback_agent: AgentConfiguration | None = None
+
     @property
     def effective_timeout_seconds(self) -> int:
         """The budget this phase actually runs under: its own, else its agent's.

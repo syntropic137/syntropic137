@@ -86,6 +86,8 @@ _EVERY_FIELD: Mapping[str, object] = {
     # NOT the default ("full-access"), so only the caller's value arriving
     # satisfies the assertion; a dropped mapping falls back and fails it.
     "sandbox": "workspace-write",
+    # NOT the default (None). Claude for the same #1376 reason as `provider`.
+    "fallback_agent": {"provider": "claude", "model": "claude-sonnet-5"},
     "claude_plugins": ["owner/repo@abc123"],
     # Skill refs name a SKILL inside a repo; plugin refs name the repo.
     # The model rejects the plugin spelling here, which is how I learned it.
@@ -137,6 +139,11 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.timeout_seconds == 2400
     assert phase.max_cost_usd == 12.5
     assert phase.allowed_tools == ["Read", "Grep"]
+    assert phase.fallback_agent is not None
+    assert (phase.fallback_agent.provider, phase.fallback_agent.model) == (
+        "claude",
+        "claude-sonnet-5",
+    )
     # False cannot be produced by any fallback here: the domain field, the
     # `p.get` default and `PhaseYamlDefinition` all default to True, so only
     # the caller's value arriving satisfies this (#1187).

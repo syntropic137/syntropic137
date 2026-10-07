@@ -38,6 +38,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.source_commits im
 )
 from syn_shared.agents import (
     AgentProvider,
+    require_enforceable_cost_limit,
     require_executable_provider,
     require_runnable_sandbox,
 )
@@ -272,6 +273,35 @@ def _grant_skill_invocation(
     if not skills or not config.allowed_tools or ToolName.SKILL in config.allowed_tools:
         return config
     return replace(config, allowed_tools=(*config.allowed_tools, ToolName.SKILL))
+
+
+def _fallback_agent_config(phase: object, primary: AgentConfiguration) -> AgentConfiguration | None:
+    """The phase's declared `fallback_agent`, resolved like its primary (PC-83).
+
+    The primary's configuration with only WHO runs it changed: the same tools,
+    sandbox and delegation, so a fallback run cannot do anything the phase was
+    not already allowed to do. A None model resolves to the fallback
+    provider's own default in `AgentConfiguration`, never to the primary's.
+
+    The same execution-boundary refusals as the primary, for the same reason:
+    a stored template never saw the YAML validator that also refuses these.
+    """
+    declared = getattr(phase, "fallback_agent", None)
+    if declared is None:
+        return None
+    phase_id: str | None = getattr(phase, "phase_id", None)
+    provider = require_executable_provider(declared.provider, phase_id=phase_id)
+    if provider is AgentProvider.CODEX and primary.allowed_tools:
+        raise UnsupportedToolPolicyForProviderError(
+            provider=str(provider), phase_id=phase_id, declared=list(primary.allowed_tools)
+        )
+    # The phase's cost limit binds whichever agent runs it, and codex cannot
+    # stop at one (#1376). Refused here, before any workspace is paid for,
+    # rather than discovered when the primary fails over.
+    require_enforceable_cost_limit(
+        provider, getattr(phase, "max_cost_usd", None), phase_id=phase_id
+    )
+    return replace(primary, provider=declared.provider, model=declared.model)
 
 
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
@@ -632,6 +662,9 @@ class ExecuteWorkflowHandler:
                     order=phase.order,
                     description=phase.description,
                     agent_config=agent_config,
+                    # Resolved from the FINAL primary config, after the skill
+                    # grant, so the fallback runs under exactly its tools.
+                    fallback_agent=_fallback_agent_config(phase, agent_config),
                     prompt_template=phase.prompt_template or "",
                     # Passed through whole. Collapsing to `[0] or "text"` here
                     # is what erased the difference between a phase that
