@@ -84,9 +84,9 @@ The agent (provider and model) a Phase declares under `fallback_agent`, to be
 re-run on once when its own agent's upstream could not serve it: capacity that
 outlived every retry, or a Quota Exhaustion (PC-83). The Phase's tools, budget
 and sandbox bind the fallback too, so the provider rules that refuse an `agent`
-refuse a `fallback_agent` at install. **Unclear:** declared, validated, stored
-and served, but not yet acted on at execution: the re-run itself is the
-outstanding half of PC-83.
+refuse a `fallback_agent` at install. Acted on at execution (#1663): one
+attempt, only when the primary's failed attempt got nowhere, drawn from the
+same phase deadline as every attempt before it.
 
 ## Review Verdict
 

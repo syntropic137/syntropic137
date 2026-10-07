@@ -190,6 +190,29 @@ Behaviour and limits:
 - Clearing answers **503** if admission reopened but the work parked during the
   pause could not be woken. Admission is open; repeat the clear to re-announce.
 
+## Disk space on the workspace volume
+
+Workspace directories are the largest thing the platform writes, and on a
+single host they share a filesystem with Postgres. Free space on that
+filesystem is measured and acted on before it runs out:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `SYN_DISK_PATH` | empty: the workspace directory (`SYN_WORKSPACE_CONTAINER_DIR`, default `/workspaces`) | Directory whose filesystem is measured |
+| `SYN_DISK_DEGRADED_BELOW_PERCENT` | `10` | Below this percent free, `/health` reports `degraded` (reason `disk_space`) |
+| `SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT` | `5` | Below this percent free, new executions are refused. Must not exceed the degraded threshold |
+
+`/health` carries a `disk` block (`DiskSpaceHealth`): `path`, `state`
+(`ok`, `unmeasurable`, `low`, `critical`), `free_percent`, `free_bytes`
+(both null when unmeasurable), `degraded_below_percent` and
+`refuse_admission_below_percent`. `low` and `unmeasurable` degrade `/health`;
+only `critical` refuses work.
+
+While `critical`, a new execution is refused with **507** before anything is
+written, with a detail naming the percent free, the path and both thresholds.
+Recover by freeing space (old workspace directories on the workspace volume,
+unused Docker images) and retry.
+
 ## Tunnels (Optional)
 
 For secure external access and GitHub Actions webhook delivery, set up a tunnel. Syntropic137 includes built-in Cloudflare Tunnel support via a Docker Compose profile.

@@ -268,6 +268,29 @@ with a `start_queue` object: `path` (`resume`), `position` (1 is next),
 stream yet. A queued start survives an API restart. Maintenance mode also holds
 it: a resume admitted before a pause starts after admission reopens.
 
+## Cancelling a queued start
+
+A direct start (`syn workflow run`, `POST /workflows/{id}/execute`) that is
+still waiting for a slot can be cancelled the same way as a running execution:
+
+```bash
+syn control cancel <execution-id> --force --reason "no longer needed"
+# or
+curl -X POST "$SYN_API_URL/api/v1/executions/<execution-id>/cancel" \
+  -u "${SYN_API_USER:-admin}:$SYN_API_PASSWORD" \
+  -H 'Content-Type: application/json' -d '{"reason": "no longer needed"}'
+```
+
+- The start's request is **withdrawn**, durably, before the answer returns. It
+  never runs: not when a slot frees, and not after an API restart.
+- The response (`ControlResponse`) has `success: true`, `state: "cancelled"` and
+  `message: "Withdrawn before it started: it will not run"`. Afterwards
+  `syn execution show <execution-id>` reports it as `cancelled`.
+- If the start won the race and began before the withdrawal landed, it is
+  cancelled like any running execution and the response is the ordinary cancel
+  response, never "will not run".
+- `syn control cancel` refuses without `--force` (or `-f`).
+
 ## Over the API
 
 ```bash

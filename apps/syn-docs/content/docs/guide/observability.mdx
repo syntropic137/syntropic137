@@ -147,6 +147,33 @@ docker run --rm --network syn-dev_agent-net curlimages/curl \
 # → {"status": "healthy"}
 ```
 
+## Workspace resource usage
+
+When a phase's workspace is torn down, what it consumed is recorded as one
+`workspace_resource_usage` observation on the phase's session (with its
+`execution_id`, `phase_id` and `workspace_id`):
+
+| Field | Meaning |
+| --- | --- |
+| `cpu_usage_seconds`, `cpu_throttled_seconds`, `nr_throttled` | CPU time used, time throttled, and throttle count |
+| `memory_peak_bytes` | Peak memory |
+| `oom_kills` | OOM kills inside the workspace |
+| `disk_bytes_at_teardown` | Size of the workspace directory before it was deleted |
+| `net_rx_bytes`, `net_tx_bytes` | Network bytes received and sent |
+| `delete_failures` | Paths the cleanup could not delete (`[]` when it removed everything) |
+
+```bash
+curl -s "http://localhost:8080/events/sessions/<session-id>?event_type=workspace_resource_usage" | jq '.events[].data'
+```
+
+Limits:
+
+- Telemetry only. It is not a domain event, it never changes a phase result,
+  and a failed write is logged and dropped.
+- Each field can be `null` on its own: a measurement that could not be read is
+  unknown, not zero. When nothing was measured, no observation is written.
+- Values appear only once the workspace provider reports them.
+
 ## Token Cost Optimization
 
 Workspace images include built-in optimizations that reduce token consumption, and the observability pipeline captures the evidence.

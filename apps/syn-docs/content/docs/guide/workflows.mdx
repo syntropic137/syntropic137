@@ -22,6 +22,11 @@ syn workflow run research-package-v1 --task "Investigate event sourcing patterns
 syn workflow installed
 ```
 
+`--task` (`-t`) must say something. `syn workflow run <name> -t ""` (or a
+whitespace-only task) is refused by the CLI before any request is sent, and the
+API answers **422** for a `task` that is empty or whitespace-only. To run a
+workflow that takes no task, omit `-t` (or the `task` field) entirely.
+
 ## Installing Packages
 
 Workflow packages can be installed from local directories or git repositories:
@@ -190,6 +195,43 @@ it is handed, so it is a genuinely independent read of the work.
 
 A phase-level `model:` key, sitting outside the `agent` block, takes precedence
 over `agent.model`. If you set both, the outer one wins.
+
+### Fallback agent (`fallback_agent`)
+
+A phase may name a second agent to run on, **once**, when its own provider could
+not serve it at all:
+
+```yaml title="workflow.yaml"
+phases:
+  - id: implement
+    name: Implement
+    order: 1
+    prompt_file: phases/implement.md
+    agent:
+      provider: claude
+      model: opus
+    fallback_agent:
+      provider: codex       # required: claude or codex
+      model: gpt-sol        # optional: omitted means the provider's default
+```
+
+- **When it runs:** only after the primary failed for **capacity** (after every
+  retry was spent) or **quota** (never retried). Any other failure, including
+  `auth`, `rate_limited` and `unavailable`, is the phase's answer and the
+  fallback does not run.
+- **Only if the primary got nowhere.** An attempt that did any work (edited a
+  file, ran a command, pushed) is not re-run on the fallback, for the same reason
+  it is not retried.
+- **One attempt.** The fallback is not itself retried.
+- **Shared limits.** It runs with the phase's prompt, tools, sandbox and budget,
+  and draws on the **same** phase deadline as the primary's attempts, so
+  declaring one never buys the phase more time. If too little time is left, it
+  does not start. The provider rules that bind `agent` bind `fallback_agent` at
+  validate and install (for example, `max_cost_usd` refuses a codex fallback).
+- **What is recorded:** the execution records the agent that actually produced
+  the result. If the fallback also fails, its error starts with
+  `Primary agent <provider>/<model> failed: <reason>` so both failures are
+  visible.
 
 ### What `sandbox` actually does
 
