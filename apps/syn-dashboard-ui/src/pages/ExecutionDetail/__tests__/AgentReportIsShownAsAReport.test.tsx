@@ -30,6 +30,7 @@ import type {
   PhaseExecutionDetail,
   ReportedFailureReason,
 } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 vi.mock('../../../api/executions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../api/executions')>()),
@@ -123,7 +124,7 @@ beforeEach(() => {
 })
 
 async function renderPage(execution: ExecutionDetailResponse): Promise<HTMLElement> {
-  vi.mocked(getExecution).mockResolvedValue(execution)
+  vi.mocked(getExecution).mockResolvedValue(withPlanOfPhases(execution))
   const { container } = render(
     <MemoryRouter initialEntries={[`/executions/${EXECUTION_ID}`]}>
       <Routes>

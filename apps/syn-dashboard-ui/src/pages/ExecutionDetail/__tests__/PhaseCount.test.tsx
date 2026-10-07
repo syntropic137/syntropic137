@@ -19,6 +19,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ExecutionDetailResponse, PhaseExecutionDetail } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 const useExecutionData = vi.fn()
 
@@ -89,7 +90,7 @@ function diedInPhaseTwo(
 
 function renderExecution(execution: ExecutionDetailResponse) {
   useExecutionData.mockReturnValue({
-    execution,
+    execution: execution && withPlanOfPhases(execution),
     artifactDetails: {},
     loading: false,
     error: null,

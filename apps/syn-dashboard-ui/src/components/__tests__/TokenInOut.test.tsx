@@ -17,6 +17,7 @@ import { PhaseTimeline } from '../../pages/ExecutionDetail/PhaseTimeline'
 import { ExecutionCostSummary } from '../ExecutionCostSummary'
 import { SessionCostCard } from '../SessionCostCard'
 import { TokenInOut } from '../TokenInOut'
+import { withPlanOfPhases } from '../../test/phasePlanFixtures'
 
 // Plan phase of exec-105b88d56234.
 const PLAN = { fresh: 6, cacheWrite: 33928, cacheRead: 66399, output: 1047 }
@@ -79,7 +80,7 @@ describe('every In/Out card agrees with the execution header', () => {
     } as unknown as ExecutionDetailResponse
     const { container } = render(
       <MemoryRouter>
-        <PhaseTimeline execution={execution} now={Date.now()} />
+        <PhaseTimeline execution={withPlanOfPhases(execution)} now={Date.now()} />
       </MemoryRouter>,
     )
     expect(segmentTotal(container, 'in')).toBe((100333).toLocaleString())

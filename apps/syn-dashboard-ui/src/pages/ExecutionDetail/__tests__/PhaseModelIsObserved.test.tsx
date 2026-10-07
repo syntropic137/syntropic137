@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest'
 import { UNATTRIBUTED_MODEL_KEY, UNATTRIBUTED_MODEL_LABEL } from '../../../constants/models'
 import type { ExecutionDetailResponse } from '../../../types'
 import { PhaseTimeline } from '../PhaseTimeline'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
@@ -63,7 +64,7 @@ function renderPhases(phases: Phase[]) {
   } as unknown as ExecutionDetailResponse
   return render(
     <MemoryRouter>
-      <PhaseTimeline execution={execution} now={Date.now()} />
+      <PhaseTimeline execution={withPlanOfPhases(execution)} now={Date.now()} />
     </MemoryRouter>,
   )
 }

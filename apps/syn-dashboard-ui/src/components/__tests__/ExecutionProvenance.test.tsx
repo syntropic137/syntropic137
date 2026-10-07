@@ -13,6 +13,7 @@ import { DispatchedTask } from '../provenance/DispatchedTask'
 import { PhaseStartPins } from '../provenance/PhaseStartPins'
 import { PhaseTimeline } from '../../pages/ExecutionDetail/PhaseTimeline'
 import type { ExecutionDetailResponse, PhaseStartConfig, StartPinsStatus } from '../../types'
+import { withPlanOfPhases } from '../../test/phasePlanFixtures'
 
 /**
  * Leading and trailing whitespace, indentation, a blank line and trailing
@@ -189,7 +190,7 @@ describe('PhaseTimeline carries each phase its own pins', () => {
     } as unknown as ExecutionDetailResponse // test fixture: only the fields the timeline reads
     const { container } = render(
       <MemoryRouter>
-        <PhaseTimeline execution={execution} now={0} />
+        <PhaseTimeline execution={withPlanOfPhases(execution)} now={0} />
       </MemoryRouter>,
     )
     const text = container.textContent ?? ''

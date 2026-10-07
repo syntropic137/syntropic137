@@ -18,6 +18,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { PhaseTimeline } from '../PhaseTimeline'
 import type { ExecutionDetailResponse } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
@@ -81,7 +82,7 @@ function execution(
 function renderTimeline(phases: Phase[], overrides: Partial<ExecutionDetailResponse> = {}) {
   return render(
     <MemoryRouter>
-      <PhaseTimeline execution={execution(phases, overrides)} now={Date.now()} />
+      <PhaseTimeline execution={withPlanOfPhases(execution(phases, overrides))} now={Date.now()} />
     </MemoryRouter>,
   )
 }
