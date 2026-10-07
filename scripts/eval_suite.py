@@ -58,6 +58,7 @@ import argparse
 import hashlib
 import os
 import re
+import statistics
 import subprocess
 import sys
 import time
@@ -588,6 +589,8 @@ class _Execution(_Read):
     status: str
     review_verdict: Verdict | None = None
     total_cost_usd: Decimal = Decimal(0)
+    total_tokens: int = 0
+    """Input, output, cache creation and cache reads: what a turn re-reads is counted."""
     total_duration_seconds: float | None = None
     unknown_duration_phase_count: int = 0
     phases: list[_Phase] = Field(default_factory=list)
@@ -661,6 +664,7 @@ class ScoredRun(_Frozen):
     status: str
     score: Score | None
     cost_usd: Decimal | None
+    tokens: int | None
     duration: str
     models: str
 
@@ -700,6 +704,7 @@ def _row(case: str, eval_id: str, run_id: str | None, status: str) -> ScoredRun:
         status=status,
         score=None,
         cost_usd=None,
+        tokens=None,
         duration="-",
         models="-",
     )
@@ -761,6 +766,7 @@ def score_suite(
                     status=run.status,
                     score=score,
                     cost_usd=run.total_cost_usd,
+                    tokens=run.total_tokens,
                     duration=_duration_of(run),
                     models=_models_of(run),
                 )
@@ -788,6 +794,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
         "matched",
         "pass",
         "cost",
+        "tokens",
         "duration",
         "models",
     )
@@ -811,6 +818,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
                 else "-",
                 ("PASS" if s.passed else "FAIL") if s else "-",
                 f"${r.cost_usd:.2f}" if r.cost_usd is not None else "-",
+                f"{r.tokens:,}" if r.tokens is not None else "-",
                 r.duration,
                 r.models,
             )
@@ -820,9 +828,15 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
         "  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in lines
     )
     passed = sum(1 for r in rows if r.score and r.score.passed)
+    tokens = [r.tokens for r in rows if r.tokens is not None]
+    median = (
+        f"  median tokens {statistics.median(tokens):,.0f} over {len(tokens)} run(s)"
+        if tokens
+        else ""
+    )
     return (
         f"suite {loaded.tag}  version {loaded.version}  workflow {loaded.workflow.id}  "
-        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed"
+        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed{median}"
         + "".join(f"\nignored: {line}" for line in unrecorded)
     )
 

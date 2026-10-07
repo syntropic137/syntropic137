@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -141,6 +142,58 @@ def test_the_two_verify_workflows_differ_only_in_the_agent() -> None:
     agent = codex_def.phases[0].agent
     assert agent is not None
     assert (agent.provider, agent.model, agent.sandbox) == ("codex", "gpt-sol", "workspace-write")
+
+
+_SDLC_VERIFY = ROOT / "workflows/sdlc/implement-v3/phases/verify.md"
+_BUDGET = "## Spend context like it costs money, because it does"
+_GATES = "## Run the gates"
+
+
+def _sections(prompt: Path) -> dict[str, str]:
+    """A prompt's `## ` sections by heading, each byte for byte with its body."""
+    parts = re.split(r"(?m)^(?=## )", prompt.read_text(encoding="utf-8"))
+    return {p.split("\n", 1)[0]: p for p in parts[1:]}
+
+
+def _sdlc_eval(which: str) -> Path:
+    return ROOT / f"workflows/evals/verify-pinned-sdlc-{which}/phases/verify.md"
+
+
+@pytest.mark.unit
+def test_the_lean_eval_prompt_quotes_the_sdlc_verify_prompt_byte_for_byte() -> None:
+    """The eval measures the prompt the workflow runs, not a paraphrase that drifts from it."""
+    sdlc, lean = _sections(_SDLC_VERIFY), _sections(_sdlc_eval("lean"))
+    quoted = [h for h in lean if h in sdlc]
+    assert {_BUDGET, _GATES, "## Attack the tests", "## Attack the change"} <= set(quoted)
+    for heading in quoted:
+        assert lean[heading] == sdlc[heading], f"{heading!r} drifted from {_SDLC_VERIFY}"
+
+
+@pytest.mark.unit
+def test_the_lean_and_baseline_eval_prompts_differ_only_in_the_budget_and_gates() -> None:
+    """A token difference between the pair must be the prompt change, not the adaptation."""
+    lean_text = _sdlc_eval("lean").read_text(encoding="utf-8")
+    base_text = _sdlc_eval("baseline").read_text(encoding="utf-8")
+    lean, base = _sections(_sdlc_eval("lean")), _sections(_sdlc_eval("baseline"))
+    assert lean_text.split("\n## ", 1)[0] == base_text.split("\n## ", 1)[0]
+    assert _BUDGET in lean and _BUDGET not in base
+    assert list(base) == [h for h in lean if h != _BUDGET]
+    for heading in base:
+        if heading != _GATES:
+            assert lean[heading] == base[heading], heading
+    assert lean[_GATES] != base[_GATES]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("which", ["lean", "baseline"])
+def test_the_sdlc_eval_workflows_are_the_codex_workflow_but_for_identity(which: str) -> None:
+    def comparable(doc: dict[str, object]) -> dict[str, object]:
+        return {k: v for k, v in doc.items() if k not in ("id", "name", "description")}
+
+    ours = _workflow_yaml(f"workflows/evals/verify-pinned-sdlc-{which}/workflow.yaml")
+    codex = _workflow_yaml("workflows/evals/verify-pinned-codex/workflow.yaml")
+    assert comparable(ours) == comparable(codex)
+    assert ours["id"] == f"eval-verify-pinned-sdlc-{which}-v1"
 
 
 def _is_shallow() -> bool:
@@ -750,7 +803,7 @@ class _Server:
                 "total_output_tokens": 1,
                 "total_cache_creation_tokens": 0,
                 "total_cache_read_tokens": 0,
-                "total_tokens": 2,
+                "total_tokens": 1_234_567,
                 "artifact_ids": ["art-1"],
                 "phases": [
                     {
@@ -933,6 +986,10 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
 
     table = render(loaded, rows)
     assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/6 passed" in table
+    # Tokens are the measure a prompt-cost change is judged by (#1726): each
+    # run's total, and the median over the runs that reported one.
+    assert row.tokens == 1_234_567
+    assert "1,234,567" in table and "median tokens 1,234,567 over 1 run(s)" in table
 
 
 @pytest.mark.unit
