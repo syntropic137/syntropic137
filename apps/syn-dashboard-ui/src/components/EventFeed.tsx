@@ -1,10 +1,6 @@
-import { Activity, ExternalLink, GitCommit, GitMerge, Wifi, WifiOff } from 'lucide-react'
+import { Activity, ExternalLink, GitCommit, Wifi, WifiOff } from 'lucide-react'
 
 import { useEventFeed, type GitEvent } from '../hooks/useEventFeed'
-
-function shortHash(hash: string | undefined): string {
-  return hash ? hash.slice(0, 7) : '???????'
-}
 
 function relativeTime(isoString: string | undefined): string {
   if (!isoString) return ''
@@ -20,17 +16,15 @@ function relativeTime(isoString: string | undefined): string {
 }
 
 function EventRow({ event }: { event: GitEvent }) {
-  const { data, event_type } = event
-  const isCommit = event_type === 'git_commit'
-  const Icon = isCommit ? GitCommit : GitMerge
+  const { data } = event
 
   return (
     <div className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-[var(--color-bg-secondary)] transition-colors">
-      <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0 text-[var(--color-text-muted)]" />
+      <GitCommit className="h-3.5 w-3.5 mt-0.5 shrink-0 text-[var(--color-text-muted)]" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 flex-wrap">
           <code className="text-xs font-mono text-[var(--color-accent)]">
-            {shortHash(data.commit_hash)}
+            {data.commit_hash.slice(0, 7)}
           </code>
           {data.branch && (
             <span className="text-xs text-[var(--color-text-muted)]">
@@ -99,7 +93,7 @@ export function EventFeed() {
             </p>
           </div>
         ) : (
-          events.map((event, i) => <EventRow key={event.data.commit_hash ?? event.time ?? i} event={event} />)
+          events.map((event, i) => <EventRow key={`${event.data.commit_hash}-${i}`} event={event} />)
         )}
       </div>
     </div>
