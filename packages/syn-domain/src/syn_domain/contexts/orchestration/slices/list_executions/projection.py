@@ -23,6 +23,7 @@ from syn_domain.contexts.orchestration._shared.execution_list_reads import (
     ExecutionListReads,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration._shared.unapplied_start import UnappliableStartError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
     AssociationKind,
 )
@@ -93,7 +94,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         """
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
-            return
+            raise UnappliableStartError(self.PROJECTION_NAME)
 
         # Extract repos from inputs field (ADR-058: stored as comma-separated string)
         repos_raw = event_data.get("inputs", {}).get("repos", "")

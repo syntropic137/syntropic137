@@ -24,9 +24,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import MemoryCheckpointStore, SubscriptionCoordinator
+from event_sourcing import MemoryCheckpointStore, ProjectionResult, SubscriptionCoordinator
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration._shared.unapplied_start import UnappliableStartError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ResumeExecutionCommand,
     WorkflowExecutionAggregate,
@@ -186,16 +187,67 @@ class TestEveryStartLands:
         for name in READ_MODELS:
             assert await again.get_all(name) == await first.get_all(name)
 
-    async def test_redelivered_history_changes_nothing(self) -> None:
-        """A reconnect re-sends what is at or below the checkpoint: it must be a no-op."""
+    async def test_redelivered_history_writes_nothing(self) -> None:
+        """A reconnect re-sends what is at or below the checkpoint: it must apply none of it.
+
+        The rows are cleared before the redelivery, so any event the
+        coordinator hands a handler again writes a row back. Comparing the
+        rows to themselves could not tell a skipped event from one reapplied
+        to the same result.
+        """
         history = await _history()
         store = InMemoryProjectionStore()
         coordinator = _coordinator(store)
         for envelope in history:
             await coordinator.dispatch_event(envelope)
-        before = {name: await store.get_all(name) for name in READ_MODELS}
+        for name in READ_MODELS:
+            assert await store.get_all(name)
+            await store.delete_all(name)
 
         for envelope in history:
             await coordinator.dispatch_event(envelope)
 
-        assert {name: await store.get_all(name) for name in READ_MODELS} == before
+        assert {name: await store.get_all(name) for name in READ_MODELS} == {
+            name: [] for name in READ_MODELS
+        }
+
+
+class TestAStartThatCannotBeAppliedIsNotPassed:
+    """A start naming no execution fails the dispatch instead of checkpointing past it.
+
+    Returning without a write is read as SUCCESS and checkpointed, which is a
+    silent skip. The resume path never writes such a start; the read models
+    still must not pass one quietly if one is ever stored.
+    """
+
+    @pytest.mark.parametrize("read_model", READ_MODELS)
+    async def test_the_checkpoint_stays_below_it_and_the_error_is_logged(
+        self, read_model: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        history = await _history()
+        first = history[0]
+        assert first.metadata.event_type == "WorkflowExecutionStarted"
+        malformed = first.model_copy(
+            update={
+                "event": first.event.model_copy(update={"execution_id": ""}),
+                "metadata": first.metadata.model_copy(update={"global_nonce": 2}),
+            }
+        )
+        store = InMemoryProjectionStore()
+        projection = {
+            WorkflowExecutionListProjection.PROJECTION_NAME: WorkflowExecutionListProjection,
+            WorkflowExecutionDetailProjection.PROJECTION_NAME: WorkflowExecutionDetailProjection,
+        }[read_model](store)
+        checkpoints = MemoryCheckpointStore()
+
+        assert await projection.handle_event(first, checkpoints) == ProjectionResult.SUCCESS
+        rows = await store.get_all(read_model)
+        result = await projection.handle_event(malformed, checkpoints)
+
+        assert result == ProjectionResult.FAILURE
+        checkpoint = await checkpoints.get_checkpoint(read_model)
+        assert checkpoint is not None
+        assert checkpoint.global_position == 1
+        assert await store.get_all(read_model) == rows
+        raised = [r.exc_info[1] for r in caplog.records if r.exc_info]
+        assert any(isinstance(e, UnappliableStartError) for e in raised)
