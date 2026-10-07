@@ -1,0 +1,359 @@
+"""Evals v2 over HTTP: runs as data points, scores, pass rate and variants.
+
+Through the real app, routes, handlers, aggregates, event-store repositories and
+read models. The only seam stubbed is Lane 2 - the session and execution cost
+queries - because that is where the OBSERVED model and the cost come from, and
+it is TimescaleDB in production. Every phase below DECLARES the alias ``opus``
+or ``sonnet``; only the stub knows the concrete model, so a run reporting the
+alias, or a variant grouping by it, fails here.
+"""
+
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("APP_ENVIRONMENT", "test")
+
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.orchestration import TagSet, WorkflowExecutionAggregate
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
+from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    StartExecutionCommand,
+    StartPhaseCommand,
+)
+from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+from syn_domain.testing.fake_revision_resolver import FakeRevisionResolver
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator
+
+pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+SHA = "c" * 40
+OPUS = "claude-opus-5-5"
+SONNET = "claude-sonnet-5"
+_ALIAS_OF = {OPUS: "opus", SONNET: "sonnet"}
+
+
+@pytest.fixture(autouse=True)
+def _reset_storage() -> Iterator[None]:
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_adapters.projections.manager import reset_projection_manager
+    from syn_adapters.storage import reset_storage
+
+    reset_storage()
+    reset_projection_manager()
+    store = get_projection_store()
+    if hasattr(store, "_data"):
+        store._data.clear()  # pyright: ignore[reportAttributeAccessIssue]  # in-memory store only
+    if hasattr(store, "_state"):
+        store._state.clear()  # pyright: ignore[reportAttributeAccessIssue]  # in-memory store only
+    yield
+    reset_storage()
+    reset_projection_manager()
+
+
+class _Lane2:
+    """What TimescaleDB would answer: per session, the model that RAN; per run, its cost."""
+
+    def __init__(self) -> None:
+        self.observed: dict[str, str] = {}
+        self.costs: dict[str, Decimal] = {}
+
+    async def get_session_cost(self, session_id: str) -> SessionCost | None:
+        model = self.observed.get(session_id)
+        if model is None:
+            return None
+        return SessionCost(
+            session_id=session_id, agent_model=model, requested_model=_ALIAS_OF[model]
+        )
+
+    async def get_execution_cost(self, execution_id: str) -> ExecutionCost | None:
+        cost = self.costs.get(execution_id)
+        if cost is None:
+            return None
+        return ExecutionCost(
+            execution_id=execution_id, total_cost_usd=cost, input_tokens=10, output_tokens=10
+        )
+
+
+@pytest.fixture
+async def lane2(monkeypatch: pytest.MonkeyPatch) -> _Lane2:
+    from syn_api._wiring import ensure_connected, get_projection_mgr
+
+    await ensure_connected()
+    fake = _Lane2()
+    manager = get_projection_mgr()
+    monkeypatch.setattr(manager.session_cost, "get_session_cost", fake.get_session_cost)
+    monkeypatch.setattr(manager.execution_cost, "get_execution_cost", fake.get_execution_cost)
+    return fake
+
+
+@pytest.fixture
+async def client(monkeypatch: pytest.MonkeyPatch, lane2: _Lane2) -> AsyncIterator[AsyncClient]:
+    from syn_api.main import create_app
+
+    fake = FakeRevisionResolver(shas={("acme/app", "main"): SHA})
+    monkeypatch.setattr("syn_api.routes.evals.get_revision_resolver", lambda: fake)
+    async with AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://t") as c:
+        yield c
+
+
+async def _catch_up() -> None:
+    """Replay the store into the eval read model, as the coordinator would."""
+    from event_sourcing.client.memory import MemoryEventStoreClient
+    from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
+
+    from syn_adapters.projections.manager import get_projection_manager
+    from syn_adapters.storage.event_store_client import get_event_store_client
+    from syn_domain.testing.stored_replay import replay
+
+    store_client = get_event_store_client()
+    assert isinstance(store_client, MemoryEventStoreClient)
+    await replay(store_client, MemoryCheckpointStore(), get_projection_manager().eval_list)
+
+
+async def _create(client: AsyncClient) -> str:
+    response = await client.post(
+        "/evals",
+        json={
+            "name": "verifier-seed: case-1",
+            "goal": "Does the verifier refuse a bad change?",
+            "baseline_repos": [{"repository": "acme/app", "requested_ref": "main"}],
+            "tags": ["suite:verifier-seed", "case:case-1"],
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["eval_id"]
+
+
+async def _run(
+    lane2: _Lane2,
+    eval_id: str | None,
+    execution_id: str,
+    workflow_id: str,
+    model: str,
+    cost: str,
+    started_at: str,
+) -> None:
+    """A run whose one phase was declared as an alias and RAN ``model``."""
+    from syn_api._wiring import (
+        get_workflow_execution_repository,
+        sync_published_events_to_projections,
+    )
+
+    session_id = f"sess-{execution_id}"
+    aggregate = WorkflowExecutionAggregate()
+    aggregate._handle_command(  # pyright: ignore[reportPrivateUsage]
+        StartExecutionCommand(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            workflow_name=workflow_id,
+            total_phases=1,
+            inputs={},
+            tags=TagSet(),
+            launch_eval=None
+            if eval_id is None
+            else LaunchEval(EvalId(eval_id), EvalSelection.EXPLICIT),
+        )
+    )
+    aggregate._handle_command(  # pyright: ignore[reportPrivateUsage]
+        StartPhaseCommand(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            phase_id="verify",
+            phase_name="Verify",
+            phase_order=0,
+            session_id=session_id,
+        )
+    )
+    await get_workflow_execution_repository().save_new(aggregate)
+    await sync_published_events_to_projections()
+    lane2.observed[session_id] = model
+    lane2.costs[execution_id] = Decimal(cost)
+    await _pin_started_at(execution_id, started_at)
+
+
+async def _pin_started_at(execution_id: str, started_at: str) -> None:
+    """Runs start within one test's milliseconds; spread them so "newest" is decidable."""
+    from syn_adapters.projections.manager import get_projection_manager
+
+    store = get_projection_manager().store
+    row = await store.get("workflow_executions", execution_id)
+    assert row is not None
+    await store.save("workflow_executions", execution_id, {**row, "started_at": started_at})
+
+
+async def _score(client: AsyncClient, eval_id: str, execution_id: str, verdict: str):
+    return await client.post(
+        f"/evals/{eval_id}/runs/{execution_id}/score",
+        json={
+            "verdict": verdict,
+            "score": 1.0 if verdict == "PASS" else 0.0,
+            "evidence": f"## {verdict}\n\nchecked {execution_id}",
+            "scorer": "eval_suite.py",
+            "scorer_version": "2",
+        },
+    )
+
+
+async def _two_by_two(client: AsyncClient, lane2: _Lane2) -> str:
+    """Two workflows x two observed models, one eval; wf-a/opus has two runs."""
+    eval_id = await _create(client)
+    runs = [
+        ("r1", "wf-a", OPUS, "1.00", "2026-10-01T00:00:00+00:00", "PASS"),
+        ("r2", "wf-a", OPUS, "3.00", "2026-10-02T00:00:00+00:00", "FAIL"),
+        ("r3", "wf-a", SONNET, "0.50", "2026-10-03T00:00:00+00:00", "PASS"),
+        ("r4", "wf-b", OPUS, "2.00", "2026-10-04T00:00:00+00:00", "ERROR"),
+        ("r5", "wf-b", SONNET, "0.25", "2026-10-05T00:00:00+00:00", None),
+    ]
+    for execution_id, workflow_id, model, cost, started_at, verdict in runs:
+        await _run(lane2, eval_id, execution_id, workflow_id, model, cost, started_at)
+        if verdict is not None:
+            response = await _score(client, eval_id, execution_id, verdict)
+            assert response.status_code == 200, response.text
+    await _catch_up()
+    return eval_id
+
+
+class TestRuns:
+    async def test_a_run_reports_the_model_that_ran_not_the_alias(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        body = (await client.get(f"/evals/{eval_id}/runs")).json()
+
+        by_id = {row["execution_id"]: row for row in body["items"]}
+        assert by_id["r3"]["models"] == [{"phase_id": "verify", "model": SONNET}]
+        assert by_id["r1"]["models"] == [{"phase_id": "verify", "model": OPUS}]
+        assert all(m["model"] not in ("opus", "sonnet") for r in body["items"] for m in r["models"])
+
+    async def test_runs_are_newest_first_with_cost_and_score(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        body = (await client.get(f"/evals/{eval_id}/runs")).json()
+
+        assert [row["execution_id"] for row in body["items"]] == ["r5", "r4", "r3", "r2", "r1"]
+        r2 = body["items"][3]
+        assert r2["workflow_id"] == "wf-a"
+        assert Decimal(r2["total_cost_usd"]) == Decimal("3.00")
+        assert r2["total_cost_display"] == "$3.00"
+        assert r2["verdict"] == "FAIL"
+        assert r2["score"] == 0.0
+        assert r2["evidence_excerpt"] == "## FAIL\n\nchecked r2"
+        assert r2["scorer"] == "eval_suite.py"
+        assert r2["scored_at"] is not None
+        assert r2["workflow_version"] is None
+        unscored = body["items"][0]
+        assert (unscored["verdict"], unscored["score"], unscored["scorer"]) == (None, None, None)
+
+    async def test_total_is_invariant_under_page_size(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        pages = [
+            (await client.get(f"/evals/{eval_id}/runs", params={"page": p, "page_size": 2})).json()
+            for p in (1, 2, 3)
+        ]
+        whole = (await client.get(f"/evals/{eval_id}/runs", params={"page_size": 50})).json()
+
+        assert {page["total"] for page in pages} == {5}
+        assert whole["total"] == 5
+        paged = [row["execution_id"] for page in pages for row in page["items"]]
+        assert paged == [row["execution_id"] for row in whole["items"]]
+
+
+class TestSummary:
+    async def test_variants_and_pass_rate_over_two_workflows_by_two_models(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        listed = (await client.get("/evals", params={"tag": "suite:verifier-seed"})).json()
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+
+        [row] = listed["evals"]
+        for body in (row, shown):
+            assert body["run_count"] == 5
+            assert body["scored_count"] == 4
+            assert body["pass_rate"] == pytest.approx(0.5)
+            assert body["pass_rate_display"] == "50%"
+            assert body["last_run_at"] == "2026-10-05T00:00:00+00:00"
+            assert body["last_verdict"] == "ERROR"
+            variants = {(v["workflow_id"], tuple(v["models"])): v for v in body["variants"]}
+            assert set(variants) == {
+                ("wf-a", (OPUS,)),
+                ("wf-a", (SONNET,)),
+                ("wf-b", (OPUS,)),
+                ("wf-b", (SONNET,)),
+            }
+            wf_a_opus = variants["wf-a", (OPUS,)]
+            assert (wf_a_opus["run_count"], wf_a_opus["pass_count"]) == (2, 1)
+            assert wf_a_opus["pass_rate"] == pytest.approx(0.5)
+            assert Decimal(wf_a_opus["avg_cost_usd"]) == Decimal("2.00")
+            assert wf_a_opus["avg_cost_display"] == "$2.00"
+            assert wf_a_opus["last_run_at"] == "2026-10-02T00:00:00+00:00"
+            assert variants["wf-b", (SONNET,)]["pass_rate"] is None
+            assert variants["wf-b", (SONNET,)]["pass_rate_display"] == "—"
+
+
+class TestScore:
+    async def test_rescoring_replaces_the_current_score(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        response = await _score(client, eval_id, "r2", "PASS")
+        await _catch_up()
+
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        assert (receipt["execution_id"], receipt["verdict"], receipt["score"]) == (
+            "r2",
+            "PASS",
+            1.0,
+        )
+        runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+        assert next(r for r in runs if r["execution_id"] == "r2")["verdict"] == "PASS"
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+        assert shown["pass_rate"] == pytest.approx(3 / 4)
+
+    async def test_a_non_member_cannot_be_scored(self, client: AsyncClient, lane2: _Lane2) -> None:
+        eval_id = await _create(client)
+        other = await _create(client)
+        await _run(lane2, other, "elsewhere", "wf-a", OPUS, "1", "2026-10-01T00:00:00+00:00")
+        await _run(lane2, None, "ordinary", "wf-a", OPUS, "1", "2026-10-01T00:00:00+00:00")
+
+        refused = [
+            await _score(client, eval_id, "elsewhere", "PASS"),
+            await _score(client, eval_id, "ordinary", "PASS"),
+            await _score(client, eval_id, "no-such-run", "PASS"),
+        ]
+
+        assert [r.status_code for r in refused] == [409, 409, 409]
+        assert (await _score(client, "eval-missing", "elsewhere", "PASS")).status_code == 409
+
+    async def test_an_unknown_eval_is_404_for_a_member_run(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        response = await _score(client, "eval-missing", "anything", "PASS")
+
+        assert response.status_code in (404, 409)
+
+    async def test_a_bad_verdict_is_422(self, client: AsyncClient, lane2: _Lane2) -> None:
+        eval_id = await _create(client)
+
+        response = await _score(client, eval_id, "r1", "MAYBE")
+
+        assert response.status_code == 422
