@@ -26,7 +26,6 @@ from syn_api.types import (
     PhaseExecution,
     Result,
 )
-from syn_domain import tool_call_counts
 from syn_domain.contexts.orchestration import (
     MAX_START_ATTEMPTS,
     InvalidTagsError,
@@ -235,6 +234,8 @@ class _ExecutionEnrichment:
     cache_creation_tokens: int | None = None
     cache_read_tokens: int | None = None
     total_tokens: int | None = None
+    tool_call_count: int = 0
+    """From the tool-call tally, read with the costs rather than beside them."""
 
 
 def _enrichment_for(
@@ -277,38 +278,9 @@ async def _load_execution_enrichment(
             cache_creation_tokens=ec.cache_creation_tokens,
             cache_read_tokens=ec.cache_read_tokens,
             total_tokens=total,
+            tool_call_count=ec.tool_calls,
         )
     return out
-
-
-async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
-    """Tool calls per execution, read from the tally.
-
-    This used to be a ``COUNT(*)`` over ``agent_events`` filtered on
-    ``event_type``, which is in neither of that hypertable's compression keys
-    and so could only be answered by decompressing every segment of every
-    execution on the page - 4-30s for one page of the list this serves
-    (#1322). ``tool_call_counts`` keeps the number instead of deriving it.
-
-    Keyed by the execution id AS the tally holds it: the writer sanitises the
-    id (AgentEvent's validator), so both the ids bound here and the keys of the
-    returned mapping have to be in that spelling, or a caller looks its count
-    up under a name the result never carries (#1241).
-    """
-    try:
-        from syn_adapters.postgres_text import pg_safe
-        from syn_api._wiring import get_event_store_instance
-
-        execution_ids = [pg_safe(eid) for eid in execution_ids]
-        event_store = get_event_store_instance()
-        pool = event_store.pool
-        if pool is None:
-            return {}
-        async with pool.acquire() as conn:
-            return await tool_call_counts.by_execution(conn, execution_ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-    except Exception:
-        logger.debug("Could not read tool counts from the tally", exc_info=True)
-        return {}
 
 
 # -- Service functions --------------------------------------------------------
@@ -325,7 +297,7 @@ async def _load_execution_list_data(
     search: str | None = None,
     tags: TagSet | None = None,
     eval_id: str | None = None,
-) -> tuple[Page[WorkflowExecutionSummary], dict[str, int], dict[str, _ExecutionEnrichment]]:
+) -> tuple[Page[WorkflowExecutionSummary], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
     Shared by ``list_()`` and ``list_executions_endpoint`` so a single request
@@ -354,15 +326,14 @@ async def _load_execution_list_data(
             limit=limit,
         )
     execution_ids = [s.workflow_execution_id for s in page.rows]
-    tool_counts = await _fetch_tool_counts(execution_ids) if page.rows else {}
-    # Enrich each execution's cost + token totals from the Lane 2 execution_cost projection (#695)
+    # Cost, tokens and tool calls from the Lane 2 execution_cost read (#695),
+    # which reads the tool-call tally itself: one read of it, not two.
     cost_by_execution = await _load_execution_enrichment(manager, execution_ids)
-    return page, tool_counts, cost_by_execution
+    return page, cost_by_execution
 
 
 def _to_execution_summary(
     s: WorkflowExecutionSummary,
-    tool_counts: dict[str, int],
     cost_by_execution: dict[str, _ExecutionEnrichment],
 ) -> ExecutionSummary:
     """Build an ExecutionSummary from a domain summary plus already-loaded enrichment."""
@@ -385,7 +356,7 @@ def _to_execution_summary(
         reported_failure_reason=s.reported_failure_reason,
         total_cost_usd=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
-        tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
+        tool_call_count=enrichment.tool_call_count,
         error_message=s.error_message,
         repos=list(s.repos),
         tags=list(s.tags),
@@ -400,10 +371,10 @@ async def list_(
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
-    page, tool_counts, cost_by_execution = await _load_execution_list_data(
+    page, cost_by_execution = await _load_execution_list_data(
         manager, workflow_id, [status] if status else None, limit, offset
     )
-    return Ok([_to_execution_summary(s, tool_counts, cost_by_execution) for s in page.rows])
+    return Ok([_to_execution_summary(s, cost_by_execution) for s in page.rows])
 
 
 async def get(
@@ -682,7 +653,7 @@ async def list_executions_endpoint(
     offset = (page - 1) * page_size
     await ensure_connected()
     manager = get_projection_mgr()
-    execution_page, tool_counts, cost_by_execution = await _load_execution_list_data(
+    execution_page, cost_by_execution = await _load_execution_list_data(
         manager,
         None,
         parse_statuses(statuses, status),
@@ -697,7 +668,7 @@ async def list_executions_endpoint(
     return ExecutionListResponse(
         executions=[
             _build_execution_summary_response(
-                _to_execution_summary(s, tool_counts, cost_by_execution),
+                _to_execution_summary(s, cost_by_execution),
                 cost_by_execution.get(s.workflow_execution_id),
             )
             for s in execution_page.rows

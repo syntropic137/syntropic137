@@ -1,44 +1,67 @@
-"""``GET /executions`` reads tool calls from the tally, not from events (#1322).
+"""``GET /executions`` reads tool calls from the tally, once (#1322).
 
-The fifth copy of the slow count lived in the route itself, under a
-``try/except Exception: return {}`` - so the 4-30s page never failed, it just
-took 4-30s. Same table, same unindexable ``event_type`` filter, same fix.
+The route used to read the tally itself AND have the cost read read it again
+for the same ids, then throw the second answer away. Now the cost read is the
+only reader, and the route takes the count from it. So this pins, for one list
+page, every round trip the enrichment makes - a regression that puts the
+second read back, or any other statement, changes the list and fails here.
 
-The sibling proof for the four domain read paths is
-``packages/syn-domain/tests/test_cost_read_path_agent_events_scans.py``, which
-inventories what each of them still reads from ``agent_events``; this one
-covers the route's own query, and that its fail-soft behaviour survived the
-change - a dashboard that 500s because a tally row is missing is worse than
-one showing a dash.
+The fixture's execution has tool calls and NOTHING else: no summary, no
+``token_usage`` row. That is a live execution whose harness reports usage at
+the end of a turn, and it is the case that would read 0 tool calls if the count
+only travelled with a cost row. It could not show 11 without the tally reaching
+the summary through the cost read.
+
+The sibling proof for the domain read paths is
+``packages/syn-domain/tests/test_cost_read_path_agent_events_scans.py``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from datetime import date
+from typing import TYPE_CHECKING
 
 import pytest
 
 from syn_domain import tool_call_counts
-from syn_shared.events import TOOL_EXECUTION_COMPLETED
+from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
+    WorkflowExecutionSummary,
+)
+from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
+    ExecutionCostProjection,
+)
+from syn_domain.pagination import Page
+from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE, TOOL_EXECUTION_COMPLETED
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 pytestmark = pytest.mark.unit
 
 _EXECUTION = "exec-1322"
+_DAY = date(2026, 10, 7)
+
+#: What one list page's enrichment sends, in order, and nothing else. The BEGIN
+#: carries the read-only snapshot (``agent_event_span.custom_plans``), so it is
+#: not followed by a ``SET TRANSACTION``.
+_BEGIN = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
+_PLAN = "plan setting"
+_SPAN = "day span"
+_SUMMARY = "session_summary read"
+_TOKENS = "token_usage read"
+_TALLY = "tool-call tally"
+_EXPECTED_ROUND_TRIPS = [_BEGIN, _PLAN, _SPAN, _SUMMARY, _TOKENS, _TALLY]
 
 
 @dataclass(frozen=True)
-class _TallyRow:
-    """One tally row, read by column name the way asyncpg's ``Record`` is.
+class _Row:
+    """A row read by column name the way asyncpg's ``Record`` is."""
 
-    Named and typed fields rather than a str-keyed dict, because the shape is
-    fixed: it is the two columns ``_BY_EXECUTION_IDS_SQL`` selects. Raising
-    ``KeyError`` for anything else is what a ``Record`` does, so a read path
-    that asks for a column this query never selected fails here rather than
-    being handed a value Postgres would not have had.
-    """
-
-    execution_id: str
-    cnt: int
+    execution_id: str = _EXECUTION
+    cnt: int = 11
+    first_day: date = _DAY
+    last_day: date = _DAY
 
     def __getitem__(self, column: str) -> object:
         if column not in {f.name for f in fields(self)}:
@@ -46,17 +69,63 @@ class _TallyRow:
         return getattr(self, column)
 
 
+def _kind(statement: str, args: tuple[object, ...]) -> str:
+    if statement == _BEGIN:
+        return _BEGIN
+    if "plan_cache_mode" in statement:
+        return _PLAN
+    if "agent_event_day_rollup" in statement:
+        return _SPAN
+    if tool_call_counts.TABLE in statement:
+        return _TALLY
+    # The two agent_events reads differ by the event type they bind.
+    if "agent_events" in statement and SESSION_SUMMARY in args:
+        return _SUMMARY
+    if "agent_events" in statement and TOKEN_USAGE in args:
+        return _TOKENS
+    return f"unaccounted: {statement}"
+
+
 class _RecordingConnection:
+    """Answers the span and the tally, and nothing else: an execution with tool calls only."""
+
     def __init__(self) -> None:
         self.statements: list[str] = []
         self.args: list[tuple[object, ...]] = []
 
-    async def fetch(self, query: str, *args: object) -> list[_TallyRow]:
+    def _record(self, query: str, args: tuple[object, ...]) -> None:
         self.statements.append(query)
         self.args.append(args)
-        if tool_call_counts.TABLE not in query:
-            return []
-        return [_TallyRow(execution_id=_EXECUTION, cnt=11)]
+
+    def transaction(self, *, isolation: str, readonly: bool) -> _Transaction:
+        assert (isolation, readonly) == ("repeatable_read", True)
+        return _Transaction(self)
+
+    async def execute(self, query: str, *args: object) -> str:
+        self._record(query, args)
+        return "SET"
+
+    async def fetch(self, query: str, *args: object) -> list[_Row]:
+        self._record(query, args)
+        if "agent_event_day_rollup" in query or tool_call_counts.TABLE in query:
+            return [_Row()]
+        return []
+
+    @property
+    def kinds(self) -> list[str]:
+        return [_kind(s, args) for s, args in zip(self.statements, self.args, strict=True)]
+
+
+class _Transaction:
+    def __init__(self, conn: _RecordingConnection) -> None:
+        self._conn = conn
+
+    async def __aenter__(self) -> None:
+        # The BEGIN is a round trip like any other.
+        self._conn._record(_BEGIN, ())
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
 
 
 class _Acquire:
@@ -73,46 +142,88 @@ class _Acquire:
 class _Pool:
     def __init__(self, conn: _RecordingConnection) -> None:
         self._conn = conn
+        self.acquisitions = 0
 
     def acquire(self) -> _Acquire:
+        self.acquisitions += 1
         return _Acquire(self._conn)
 
 
-class _EventStore:
-    def __init__(self, pool: _Pool | None) -> None:
-        self.pool = pool
+def _summary() -> WorkflowExecutionSummary:
+    return WorkflowExecutionSummary(
+        workflow_execution_id=_EXECUTION,
+        workflow_id="wf-1",
+        workflow_name="Workflow",
+        status="running",
+        started_at="2026-10-07T08:00:00+00:00",
+        completed_at=None,
+        completed_phases=0,
+        total_phases=2,
+        total_tokens=0,
+    )
 
 
-def _install(monkeypatch: pytest.MonkeyPatch, store: _EventStore) -> None:
-    from syn_api import _wiring
+class _ExecutionList:
+    async def page(
+        self,
+        *,
+        statuses: Collection[str] | None,
+        started_after: object,
+        started_before: object,
+        search: str | None,
+        tags: object,
+        eval_id: str | None,
+        offset: int,
+        limit: int | None,
+    ) -> Page[WorkflowExecutionSummary]:
+        return Page(rows=[_summary()], total=1, status_counts={"running": 1})
 
-    monkeypatch.setattr(_wiring, "get_event_store_instance", lambda: store)
+
+class _Manager:
+    def __init__(self, pool: _Pool) -> None:
+        self.workflow_execution_list = _ExecutionList()
+        # The real cost read, over the recording pool. Its store is never
+        # touched when it has a pool: it reads TimescaleDB directly.
+        self.execution_cost = ExecutionCostProjection(store=None, pool=pool)  # type: ignore[arg-type]  # a recording double
 
 
-async def test_the_route_counts_tools_from_the_tally(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from syn_api.routes.executions.queries import _fetch_tool_counts
+async def _one_page() -> tuple[_RecordingConnection, _Pool, int]:
+    from syn_api.routes.executions.queries import (
+        _load_execution_list_data,
+        _to_execution_summary,
+    )
 
     conn = _RecordingConnection()
-    _install(monkeypatch, _EventStore(_Pool(conn)))
+    pool = _Pool(conn)
+    page, enrichment = await _load_execution_list_data(
+        _Manager(pool),  # type: ignore[arg-type]  # a recording double
+        None,
+        None,
+        20,
+        0,
+    )
+    [summary] = [_to_execution_summary(s, enrichment) for s in page.rows]
+    return conn, pool, summary.tool_call_count
 
-    counts = await _fetch_tool_counts([_EXECUTION])
 
-    assert counts == {_EXECUTION: 11}
-    assert conn.statements, "the route asked the database nothing"
+async def test_one_list_page_makes_exactly_the_pinned_round_trips() -> None:
+    conn, pool, _count = await _one_page()
+
+    assert conn.kinds == _EXPECTED_ROUND_TRIPS
+    assert pool.acquisitions == 1, "the enrichment took more than one connection"
+
+
+async def test_the_tally_is_read_once_and_its_count_reaches_the_summary() -> None:
+    conn, _pool, count = await _one_page()
+
+    assert conn.kinds.count(_TALLY) == 1
+    assert count == 11
+
+
+async def test_no_statement_counts_tool_events() -> None:
+    """The scan #1322 removed is not put back by the single read."""
+    conn, _pool, _count = await _one_page()
+
     for statement, args in zip(conn.statements, conn.args, strict=True):
-        assert "agent_events" not in statement, f"still reading agent_events: {statement}"
         assert TOOL_EXECUTION_COMPLETED not in statement
         assert TOOL_EXECUTION_COMPLETED not in {str(arg) for arg in args}
-
-
-async def test_a_missing_tally_leaves_the_page_renderable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No pool, no counts, no exception - the list is more than one column."""
-    _install(monkeypatch, _EventStore(None))
-
-    from syn_api.routes.executions.queries import _fetch_tool_counts
-
-    assert await _fetch_tool_counts([_EXECUTION]) == {}

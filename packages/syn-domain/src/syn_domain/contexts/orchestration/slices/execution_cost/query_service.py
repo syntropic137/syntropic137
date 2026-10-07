@@ -271,7 +271,16 @@ class ExecutionCostQueryService:
             tool_counts = await tool_call_counts.by_execution(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             # The phase costs read a subset of these ids, so this span already
             # bounds them; looking it up again was a wasted round trip (#1693).
-            return await self._assemble(conn, summary_rows, token_rows, tool_counts, span=span)
+            costs = await self._assemble(conn, summary_rows, token_rows, tool_counts, span=span)
+        # An execution can call tools before it reports a token: a harness may
+        # report usage at the end of a turn. Its tool calls are still its own,
+        # and /executions reads them from here and nowhere else.
+        costed = {cost.execution_id for cost in costs}
+        return costs + [
+            self._build_from_token_usage(eid, [], tool_counts)
+            for eid in tool_counts
+            if eid not in costed
+        ]
 
     async def _assemble(
         self,
