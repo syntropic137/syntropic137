@@ -16,6 +16,11 @@
 #
 # v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
 # v2: two cases added (#1679, #1680) and the codex verifier.
+#
+# EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
+# runs launches.jsonl still holds: the tag exactly as those runs carry it, the
+# workflow it ran and the cases it held. `score` scores each version's runs
+# against its own cases only. Never edit a history entry or a ledger line.
 id: verifier-seed-v1
 version: 2
 goal: >
@@ -34,3 +39,13 @@ workflows:
     path: workflows/evals/verify-pinned-codex/workflow.yaml
     models:
       verify: gpt-sol
+history:
+  # v1 predates the workflow suffix in the tag.
+  - version: 1
+    tag: verifier-seed-v1:v1
+    workflow: eval-verify-pinned-v1
+    cases:
+      - binary-artifact-minio-key
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - shared-esp-stream

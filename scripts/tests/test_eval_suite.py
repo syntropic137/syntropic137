@@ -39,6 +39,7 @@ from eval_suite import (
     render,
     score_report,
     score_suite,
+    versions_run,
 )
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
@@ -224,23 +225,28 @@ def history(tmp_path: Path) -> tuple[Path, str, str, str]:
     return repo, bug, fix, unrelated
 
 
-def _one_case_suite(tmp_path: Path, commit: str, fix: str, file: str) -> Path:
+def _one_case_suite(
+    tmp_path: Path, commit: str, fix: str, file: str, first_fix: str | None = None
+) -> Path:
     suite_dir = _copy_suite(tmp_path)
+    suite_file = suite_dir / "suite.yaml"
+    suite = yaml.safe_load(suite_file.read_text())
+    suite.pop("history", None)  # it names the real cases, which this suite drops
+    suite_file.write_text(yaml.safe_dump(suite))
     cases = suite_dir / "cases"
     for p in cases.glob("*.yaml"):
         p.unlink()
-    (cases / "seed.yaml").write_text(
-        json.dumps(
-            {
-                "id": "seed",
-                "source_pr": 1,
-                "commit": commit,
-                "fix_commit": fix,
-                "task": "Review it.",
-                "expected": {"files": [file], "keywords": [["broken"]]},
-            }
-        )
-    )
+    case: dict[str, object] = {
+        "id": "seed",
+        "source_pr": 1,
+        "commit": commit,
+        "fix_commit": fix,
+        "task": "Review it.",
+        "expected": {"files": [file], "keywords": [["broken"]]},
+    }
+    if first_fix is not None:
+        case["first_fix_commit"] = first_fix
+    (cases / "seed.yaml").write_text(json.dumps(case))
     return suite_dir
 
 
@@ -258,7 +264,37 @@ def test_check_refuses_a_pin_after_its_fix(
 ) -> None:
     repo, bug, fix, _ = history
     problems = check_commits(load_suite(_one_case_suite(tmp_path, fix, bug, "bug.py")), repo)
-    assert any("is not an ancestor" in p for p in problems)
+    assert any("first parent" in p for p in problems)
+
+
+@pytest.mark.unit
+def test_check_refuses_a_pin_that_is_an_older_ancestor_of_the_fix(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    # An ancestor is not enough: the pin must be the tree just before the fix,
+    # or the run reviews code the fix never saw (PR #1700 review).
+    repo, bug, fix, unrelated = history
+    problems = check_commits(load_suite(_one_case_suite(tmp_path, bug, unrelated, "bug.py")), repo)
+    assert problems == [
+        f"seed: pins {bug[:12]}, but the fix {unrelated[:12]}'s first parent is {fix[:12]}; "
+        "pin the tree just before the fix"
+    ]
+
+
+@pytest.mark.unit
+def test_check_passes_a_pin_before_the_first_commit_of_a_fix_series(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    repo, bug, fix, unrelated = history
+    suite = _one_case_suite(tmp_path, bug, unrelated, "bug.py", first_fix=fix)
+    assert check_commits(load_suite(suite), repo) == []
+
+
+@pytest.mark.skipif(_is_shallow(), reason="a shallow clone does not hold the pinned commits")
+@pytest.mark.unit
+@pytest.mark.parametrize("case", load_suite(DEFAULT_SUITE).cases, ids=lambda c: c.id)
+def test_every_committed_case_pins_its_fixs_first_parent(case: Case) -> None:
+    assert _git(ROOT, "rev-parse", f"{case.fix_start}^1") == case.commit
 
 
 @pytest.mark.unit
@@ -1052,3 +1088,208 @@ def test_a_codex_run_scores_in_the_codex_table() -> None:
     row = next(r for r in rows if r.case == _CASE)
     assert row.score is not None and row.score.passed
     assert unrecorded == ()
+
+
+# ---------------------------------------------------------------------------
+# Every version keeps its score (PR #1700 review)
+# ---------------------------------------------------------------------------
+
+# evals/verifier-seed-v1/launches.jsonl as v1 committed it, copied verbatim.
+# Never edit these: they are what the owner's recorded 4/4 rests on.
+_V1_LEDGER = """\
+{"suite":"verifier-seed-v1:v1","case":"binary-artifact-minio-key","eval_id":"eval-ba8c2aba01b1414495f021b11ca5f8a6","run_id":"exec-0014a3de808d","commit":"b2f680f00b4e154b94fa4802a92ead30429e7b98","workflow_id":"eval-verify-pinned-v1"}
+{"suite":"verifier-seed-v1:v1","case":"codex-cost-limit","eval_id":"eval-eb93f4482e5a4a0da14c76ba724797d0","run_id":"exec-d58cc7c768c8","commit":"123b25204fce5052f1b0ab494d2c59fa607624ad","workflow_id":"eval-verify-pinned-v1"}
+{"suite":"verifier-seed-v1:v1","case":"execution-id-as-eval-id","eval_id":"eval-732d1230751e42d8bc1e8e643c23e8da","run_id":"exec-01377c8e4faf","commit":"7047b1c3daf1c4057d63eeb478cadd676d712bf5","workflow_id":"eval-verify-pinned-v1"}
+{"suite":"verifier-seed-v1:v1","case":"shared-esp-stream","eval_id":"eval-45f40a9869f044078e0d8b44e5312403","run_id":"exec-707cefadabf8","commit":"6646da278d17a16e16549cf77b0749b25d8e8040","workflow_id":"eval-verify-pinned-v1"}
+"""
+_V1_CASES = {
+    "binary-artifact-minio-key",
+    "codex-cost-limit",
+    "execution-id-as-eval-id",
+    "shared-esp-stream",
+}
+
+
+class _LedgerServer:
+    """Answers for each ledger line as the server holding that run would.
+
+    Each eval carries the tag the line records and pins the line's commit;
+    each run is a blocked verify whose report correctly names its case's defect.
+    """
+
+    def __init__(self, launches: list[Launch]) -> None:
+        self.by_eval = {x.eval_id: x for x in launches}
+        self.by_run = {x.run_id: x for x in launches}
+
+    def client(self) -> httpx.Client:
+        return httpx.Client(base_url="http://api", transport=httpx.MockTransport(self.handle))
+
+    def _eval(self, x: Launch) -> dict[str, object]:
+        return {
+            "eval_id": x.eval_id,
+            "name": "n",
+            "goal": "g",
+            "starting_workflow_id": x.workflow_id,
+            "tags": [x.suite, f"case:{x.case}", f"workflow:{x.workflow_id}"],
+            "frozen": True,
+            "archived": False,
+            "created_at": None,
+            "updated_at": None,
+            "run_count": 1,
+            "run_status_counts": {"completed": 1},
+            "baseline_repos": [
+                {
+                    "repository": "syntropic137/syntropic137",
+                    "requested_ref": x.commit,
+                    "commit_sha": x.commit,
+                }
+            ],
+        }
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        parts = path.strip("/").split("/")
+        if path == "/evals":
+            tag = request.url.params.get("tag")
+            evals = [self._eval(x) for x in self.by_eval.values() if x.suite == tag]
+            return httpx.Response(
+                200,
+                json={
+                    "total": len(evals),
+                    "page": 1,
+                    "page_size": 200,
+                    "status_counts": {},
+                    "evals": evals,
+                },
+            )
+        if parts[0] == "evals" and len(parts) == 2:
+            return httpx.Response(200, json=self._eval(self.by_eval[parts[1]]))
+        if parts[0] == "evals" and parts[2:] == ["runs"]:
+            x = self.by_eval[parts[1]]
+            run = {
+                "workflow_execution_id": x.run_id,
+                "workflow_id": x.workflow_id,
+                "workflow_name": "w",
+                "status": "completed",
+            }
+            return httpx.Response(
+                200, json={"total": 1, "page": 1, "page_size": 200, "executions": [run]}
+            )
+        if parts[0] == "executions":
+            x = self.by_run[parts[1]]
+            return httpx.Response(
+                200,
+                json={
+                    "workflow_execution_id": x.run_id,
+                    "workflow_id": x.workflow_id,
+                    "workflow_name": "w",
+                    "status": "completed",
+                    "review_verdict": "blocked",
+                    "total_cost_usd": "2.00",
+                    "total_duration_seconds": 300.0,
+                    "unknown_duration_phase_count": 0,
+                    "total_input_tokens": 1,
+                    "total_output_tokens": 1,
+                    "total_cache_creation_tokens": 0,
+                    "total_cache_read_tokens": 0,
+                    "total_tokens": 2,
+                    "artifact_ids": [f"art-{x.run_id}"],
+                    "phases": [
+                        {
+                            "phase_id": "verify",
+                            "name": "v",
+                            "status": "completed",
+                            "artifact_id": f"art-{x.run_id}",
+                            "model": "claude-opus-5-5",
+                            "requested_model": "opus",
+                        }
+                    ],
+                },
+            )
+        if parts[0] == "artifacts":
+            x = self.by_run[parts[1].removeprefix("art-")]
+            return httpx.Response(
+                200,
+                json={
+                    "artifact_id": parts[1],
+                    "content": _report(_PARAPHRASES[x.case][0]),
+                    "content_type": "text/markdown",
+                    "size_bytes": 10,
+                },
+            )
+        return httpx.Response(404, json={"detail": path})
+
+
+def _v1_ledger(tmp_path: Path) -> list[Launch]:
+    ledger = tmp_path / "launches.jsonl"
+    ledger.write_text(_V1_LEDGER)
+    return read_launches(ledger)
+
+
+@pytest.mark.unit
+def test_the_v1_fixture_is_the_committed_ledger_verbatim() -> None:
+    committed = (DEFAULT_SUITE / "launches.jsonl").read_text().splitlines()
+    assert _V1_LEDGER.splitlines() == committed[: len(_V1_LEDGER.splitlines())]
+
+
+@pytest.mark.unit
+def test_v1_loads_its_own_four_cases_under_its_legacy_tag() -> None:
+    v1 = load_suite(DEFAULT_SUITE, version=1)
+
+    assert v1.tag == "verifier-seed-v1:v1"
+    assert v1.workflow.id == _WF
+    assert {c.id for c in v1.cases} == _V1_CASES
+    assert not v1.is_current
+
+
+@pytest.mark.unit
+def test_the_committed_v1_ledger_scores_four_of_four_against_the_v1_cases(
+    tmp_path: Path,
+) -> None:
+    launches = _v1_ledger(tmp_path)
+    v1 = load_suite(DEFAULT_SUITE, version=1)
+    rows, unrecorded = score_suite(v1, _LedgerServer(launches).client(), launches)
+
+    assert {r.case for r in rows} == _V1_CASES
+    assert all(r.status == "completed" for r in rows), [r.status for r in rows]
+    assert [r.run_id for r in rows] == [x.run_id for x in launches]
+    assert all(r.score and r.score.passed for r in rows)
+    assert unrecorded == ()
+    assert "4/4 passed" in render(v1, rows)
+
+
+@pytest.mark.unit
+def test_v1_runs_never_count_toward_v2(tmp_path: Path) -> None:
+    launches = _v1_ledger(tmp_path)
+    v2 = load_suite(DEFAULT_SUITE)
+    rows, unrecorded = score_suite(v2, _LedgerServer(launches).client(), launches)
+
+    assert len(rows) == 6 and {r.status for r in rows} == {"not launched"}
+    assert unrecorded == ()
+
+
+@pytest.mark.unit
+def test_score_prints_every_version_the_workflow_ran() -> None:
+    suite = load_suite(DEFAULT_SUITE).suite
+    assert versions_run(suite, _WF) == [1, 2]
+    assert versions_run(suite, _CODEX_WF) == [2]
+
+
+@pytest.mark.unit
+def test_a_past_version_under_a_workflow_it_never_ran_is_refused() -> None:
+    with pytest.raises(DefinitionError, match="version 1 ran only"):
+        load_suite(DEFAULT_SUITE, workflow=_CODEX_WF, version=1)
+
+
+@pytest.mark.unit
+def test_an_unknown_version_is_refused() -> None:
+    with pytest.raises(DefinitionError, match="version 7 is not one of"):
+        load_suite(DEFAULT_SUITE, version=7)
+
+
+@pytest.mark.unit
+def test_a_history_entry_naming_a_missing_case_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    (suite_dir / "cases" / "codex-cost-limit.yaml").unlink()
+    with pytest.raises(DefinitionError, match=r"history v1 names no such case\(s\)"):
+        load_suite(suite_dir)

@@ -12,13 +12,20 @@ evals carrying the suite's tag.
 
     uv run python scripts/eval_suite.py check  [--suite DIR]   # offline dry run
     uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--api-url URL]
-    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--api-url URL]
+    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--api-url URL]
 
 SAME CASES, DIFFERENT VERIFIER. A suite lists one or more workflows; each
 differs from the others only in who verifies. ``--workflow`` picks one (the
 first listed by default), and the suite tag carries it -
 ``<id>:v<version>:<workflow id>`` - so each workflow's runs are their own
 eval set and their own score table. ``check`` validates every listed workflow.
+
+EVERY VERSION KEEPS ITS SCORE. ``suite.yaml`` ``history`` records each earlier
+version still in the ledger: its tag exactly as its runs carry it (v1 predates
+the workflow suffix: ``verifier-seed-v1:v1``), the workflow it ran and the
+cases it held. ``score`` prints one table per version the selected workflow
+ran - each version's runs against its own case set, never another's - and
+``--version N`` scores one. ``launch`` only ever launches the current version.
 
 ``check`` needs only git. ``launch`` installs the suite's workflow from the
 checked-in file (refusing to go on unless the server then holds exactly that
@@ -78,6 +85,18 @@ class WorkflowRef(_Frozen):
     """Phase id -> the model that phase declares. Must match the workflow file."""
 
 
+class PastVersion(_Frozen):
+    """An earlier suite version whose runs the ledger still records."""
+
+    version: int = Field(ge=1)
+    tag: str = Field(min_length=1)
+    """The tag its evals and ledger lines carry, verbatim - never recomputed."""
+    workflow: str = Field(min_length=1)
+    """The one workflow it ran; must be one of the suite's `workflows`."""
+    cases: tuple[str, ...] = Field(min_length=1)
+    """The case ids it held. Cases added later are not part of its score."""
+
+
 class Suite(_Frozen):
     id: str = Field(pattern=r"^[a-z0-9._/:-]+$")
     version: int = Field(ge=1)
@@ -85,6 +104,12 @@ class Suite(_Frozen):
     repository: str = Field(pattern=r"^[^/\s]+/[^/\s]+$")
     workflows: tuple[WorkflowRef, ...] = Field(min_length=1)
     """The verifiers the same cases run under. The first is the default."""
+    history: tuple[PastVersion, ...] = ()
+    """Earlier versions, so their recorded runs still score against their own cases."""
+
+    @property
+    def current_tag_prefix(self) -> str:
+        return f"{self.id}:v{self.version}"
 
     @field_validator("workflows")
     @classmethod
@@ -116,14 +141,20 @@ class Case(_Frozen):
     commit: str
     """Full SHA the run is pinned to. The bug is present here."""
     fix_commit: str
-    """Full SHA of the commit that fixed it; `commit` must be its ancestor."""
+    """Full SHA of the commit that fixed it (the last, when the fix is a series)."""
+    first_fix_commit: str | None = None
+    """When the fix is a series of commits, the first of them; default `fix_commit`.
+
+    `commit` must be this commit's first parent: the tree just before the fix,
+    so the bug is present and nothing of the fix is.
+    """
     task: str = Field(min_length=1)
     expected: Expected
 
-    @field_validator("commit", "fix_commit")
+    @field_validator("commit", "fix_commit", "first_fix_commit")
     @classmethod
-    def _full_sha(cls, value: str) -> str:
-        if not _SHA.fullmatch(value):
+    def _full_sha(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA.fullmatch(value):
             raise ValueError(f"{value!r} is not a full 40-character lowercase SHA")
         return value
 
@@ -131,21 +162,37 @@ class Case(_Frozen):
     def tag(self) -> str:
         return f"case:{self.id}"
 
+    @property
+    def fix_start(self) -> str:
+        """The first commit of the fix; `commit` must be its first parent."""
+        return self.first_fix_commit or self.fix_commit
+
 
 class LoadedSuite(_Frozen):
     suite: Suite
     cases: tuple[Case, ...]
+    """The cases of the selected version: every case for the current one."""
     workflow: WorkflowRef
     """The one of `suite.workflows` this run of the script launches or scores."""
+    version: int
+    """The selected version: `suite.version`, or one recorded in `suite.history`."""
+    tag: str
+    """The tag every eval of this version and workflow carries; the ledger and `score` name it.
+
+    From v2 the workflow is in it, so two verifiers over the same cases never
+    share an eval set, a ledger row or a score table. A past version's tag is
+    read from `history` verbatim, so its recorded runs keep scoring.
+    """
 
     @property
-    def tag(self) -> str:
-        """The tag every eval of this suite version and workflow carries; the ledger and `score` name it.
+    def is_current(self) -> bool:
+        return self.version == self.suite.version
 
-        The workflow is in it so two verifiers over the same cases never share
-        an eval set, a ledger row or a score table.
-        """
-        return f"{self.suite.id}:v{self.suite.version}:{self.workflow.id}"
+
+def versions_run(suite: Suite, workflow: str) -> list[int]:
+    """Every version `workflow` ran or runs, oldest first: what `score` prints by default."""
+    past = [h.version for h in suite.history if h.workflow == workflow]
+    return [*sorted(past), suite.version]
 
 
 class DefinitionError(ValueError):
@@ -167,11 +214,18 @@ def declared_models(workflow_file: Path) -> dict[str, str]:
     return models
 
 
-def load_suite(directory: Path, root: Path = ROOT, workflow: str | None = None) -> LoadedSuite:
-    """Parse and cross-check a suite, selecting `workflow` (default: the first listed).
+def load_suite(
+    directory: Path,
+    root: Path = ROOT,
+    workflow: str | None = None,
+    version: int | None = None,
+) -> LoadedSuite:
+    """Parse and cross-check a suite, selecting `workflow` and `version`.
 
-    Every listed workflow is checked against its file, not only the selected
-    one. Raises `DefinitionError` naming every problem found.
+    `workflow` defaults to the first listed (for a past version: the one it
+    ran), `version` to the current one. Every listed workflow and every
+    history entry is checked, not only the selected ones. Raises
+    `DefinitionError` naming every problem found.
     """
     try:
         suite = Suite.model_validate(_read_yaml(directory / "suite.yaml"))
@@ -196,7 +250,18 @@ def load_suite(directory: Path, root: Path = ROOT, workflow: str | None = None) 
 
     for ref in suite.workflows:
         problems.extend(_workflow_problems(ref, root))
-    chosen = suite.workflows[0].id if workflow is None else workflow
+    problems.extend(_history_problems(suite, set(ids)))
+
+    past = next((h for h in suite.history if h.version == version), None)
+    if version is not None and version != suite.version and past is None:
+        known = sorted([h.version for h in suite.history] + [suite.version])
+        problems.append(f"version {version} is not one of the suite's {known}")
+    if past is None:
+        chosen = suite.workflows[0].id if workflow is None else workflow
+    else:
+        chosen = past.workflow if workflow is None else workflow
+        if chosen != past.workflow:
+            problems.append(f"version {past.version} ran only {past.workflow!r}, not {chosen!r}")
     selected = next((ref for ref in suite.workflows if ref.id == chosen), None)
     if selected is None:
         problems.append(
@@ -204,7 +269,40 @@ def load_suite(directory: Path, root: Path = ROOT, workflow: str | None = None) 
         )
     if problems or selected is None:
         raise DefinitionError("\n".join(problems))
-    return LoadedSuite(suite=suite, cases=cases, workflow=selected)
+    if past is None:
+        return LoadedSuite(
+            suite=suite,
+            cases=cases,
+            workflow=selected,
+            version=suite.version,
+            tag=f"{suite.current_tag_prefix}:{selected.id}",
+        )
+    return LoadedSuite(
+        suite=suite,
+        cases=tuple(c for c in cases if c.id in past.cases),
+        workflow=selected,
+        version=past.version,
+        tag=past.tag,
+    )
+
+
+def _history_problems(suite: Suite, case_ids: set[str]) -> list[str]:
+    """Where `history` contradicts itself, the current version or the case files."""
+    problems: list[str] = []
+    versions = [h.version for h in suite.history]
+    if len(set(versions)) != len(versions):
+        problems.append(f"duplicate history versions: {sorted(versions)}")
+    workflow_ids = {r.id for r in suite.workflows}
+    for h in suite.history:
+        if h.version >= suite.version:
+            problems.append(f"history v{h.version} is not before the current v{suite.version}")
+        if h.workflow not in workflow_ids:
+            problems.append(f"history v{h.version} ran {h.workflow!r}, not a listed workflow")
+        if h.tag.startswith(f"{suite.current_tag_prefix}:"):
+            problems.append(f"history v{h.version} tag {h.tag!r} is the current version's")
+        if missing := sorted(set(h.cases) - case_ids):
+            problems.append(f"history v{h.version} names no such case(s) {missing}")
+    return problems
 
 
 def _workflow_problems(ref: WorkflowRef, root: Path) -> list[str]:
@@ -238,15 +336,17 @@ def _git_ok(repo: Path, *args: str) -> bool:
 def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
     """Problems with each case's pinned history in `repo`; empty when every case holds.
 
-    For each case: both SHAs are commits here, the pin is an ancestor of the
-    fix, every expected file exists at the pin, and the fix changes at least
-    one of them - so the files are where the bug lived, not a guess.
+    For each case: every SHA is a commit here, the pin is the first parent of
+    the fix's first commit (the tree just before the fix, not merely some
+    ancestor of it), that commit leads to the fix, every expected file exists
+    at the pin, and the fix changes at least one of them - so the files are
+    where the bug lived, not a guess.
     """
     problems: list[str] = []
     for case in loaded.cases:
         missing = [
             s
-            for s in (case.commit, case.fix_commit)
+            for s in dict.fromkeys((case.commit, case.fix_start, case.fix_commit))
             if not _git_ok(repo, "cat-file", "-e", f"{s}^{{commit}}")
         ]
         if missing:
@@ -254,9 +354,21 @@ def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
                 f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"
             )
             continue
-        if not _git_ok(repo, "merge-base", "--is-ancestor", case.commit, case.fix_commit):
+        parent = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", f"{case.fix_start}^1"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        if parent != case.commit:
             problems.append(
-                f"{case.id}: {case.commit[:12]} is not an ancestor of the fix {case.fix_commit[:12]}"
+                f"{case.id}: pins {case.commit[:12]}, but the fix {case.fix_start[:12]}'s "
+                f"first parent is {parent[:12] or '(none)'}; pin the tree just before the fix"
+            )
+        if not _git_ok(repo, "merge-base", "--is-ancestor", case.fix_start, case.fix_commit):
+            problems.append(
+                f"{case.id}: the fix's first commit {case.fix_start[:12]} is not an ancestor "
+                f"of {case.fix_commit[:12]}"
             )
         for path in case.expected.files:
             if not _git_ok(repo, "cat-file", "-e", f"{case.commit}:{path}"):
@@ -505,7 +617,7 @@ class Launch(_Frozen):
     """One run `launch` started: the only association `score` trusts."""
 
     suite: str
-    """The suite tag, `<id>:v<version>`."""
+    """The tag of the version launched: `<id>:v<version>:<workflow id>` (v1: `<id>:v1`)."""
     case: str
     eval_id: str
     run_id: str
@@ -604,7 +716,7 @@ def _launch_problem(
 def score_suite(
     loaded: LoadedSuite, client: httpx.Client, launches: list[Launch]
 ) -> tuple[list[ScoredRun], tuple[str, ...]]:
-    """Score every run the launch ledger records for this suite version.
+    """Score every run the launch ledger records for the selected version and workflow.
 
     Returns one row per launched run (and one per case never launched), and a
     line per run found in a tagged eval that the ledger does not record: those
@@ -696,7 +808,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
     )
     passed = sum(1 for r in rows if r.score and r.score.passed)
     return (
-        f"suite {loaded.tag}  workflow {loaded.workflow.id}  "
+        f"suite {loaded.tag}  version {loaded.version}  workflow {loaded.workflow.id}  "
         f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed"
         + "".join(f"\nignored: {line}" for line in unrecorded)
     )
@@ -866,6 +978,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="which of the suite's workflows to launch or score (default: the first listed)",
     )
+    parser.add_argument(
+        "--version",
+        type=int,
+        default=None,
+        help="score this version only (default: every version the workflow ran)",
+    )
     parser.add_argument("--api-url", default=None, help="defaults to DEV__API_URL / localhost")
     parser.add_argument(
         "--launches",
@@ -875,10 +993,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    to_score: list[LoadedSuite] = []
     try:
         loaded = load_suite(args.suite, workflow=args.workflow)
+        if args.command == "score":
+            versions = (
+                [args.version]
+                if args.version is not None
+                else versions_run(loaded.suite, loaded.workflow.id)
+            )
+            to_score = [
+                load_suite(args.suite, workflow=loaded.workflow.id, version=v) for v in versions
+            ]
     except DefinitionError as exc:
         print(f"❌ {args.suite}:\n{exc}", file=sys.stderr)
+        return 1
+    if args.version is not None and args.command != "score":
+        print(
+            "❌ --version selects what `score` reads; launch runs the current version only",
+            file=sys.stderr,
+        )
         return 1
 
     if args.command in ("check", "launch"):
@@ -899,9 +1033,14 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(launch_suite(loaded, client, ledger)))
             print(f"recorded in {ledger}: commit it, `score` reads only the runs it names")
             return 0
-        rows, unrecorded = score_suite(loaded, client, read_launches(ledger))
-    print(render(loaded, rows, unrecorded))
-    return 0 if rows and all(r.score and r.score.passed for r in rows) else 1
+        launches = read_launches(ledger)
+        tables = [(v, *score_suite(v, client, launches)) for v in to_score]
+    print("\n\n".join(render(v, rows, unrecorded) for v, rows, unrecorded in tables))
+    return (
+        0
+        if all(rows and all(r.score and r.score.passed for r in rows) for _, rows, _ in tables)
+        else 1
+    )
 
 
 if __name__ == "__main__":

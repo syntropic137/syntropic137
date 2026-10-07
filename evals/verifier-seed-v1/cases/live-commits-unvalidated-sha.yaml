@@ -1,9 +1,9 @@
 id: live-commits-unvalidated-sha
 source_pr: 1679
-# The head of the change that shipped the bug (d8012384d, merged as 9b7fe6790),
-# which its verify certified. The fix's parent 4c16d8f95 holds the same bytes
-# in useEventFeed.ts; pinning the certified head reproduces what was reviewed.
-commit: d8012384d978ec196a59904fd642140ed0ee5693
+# The fix's first parent: main just before the fix, with the bug and none of
+# the fix. Its useEventFeed.ts is byte-identical to the head #1668's verify
+# certified (d8012384d, merged as 9b7fe6790).
+commit: 4c16d8f95fca32a282210510fca70bebe7e8f902
 fix_commit: 137d35c9ade5caa904925124efcb06b950ffc14e
 task: >
   The change under review fixes the dashboard's Live Commits card, which
