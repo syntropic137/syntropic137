@@ -6,8 +6,35 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from event_sourcing import DomainEvent, EventEnvelope, EventMetadata, ProjectionResult
+from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+    ResumeOrigin,
+)
+from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
+    AgentExecutionCompletedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+    ExecutionCancelledEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
+    ExecutionRequestedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+    PhaseCompletedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+    WorkflowCompletedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+    WorkflowFailedEvent,
+)
 from syn_domain.contexts.orchestration.slices.scorecard import (
     PhaseType,
     ScorecardProjection,
@@ -22,8 +49,68 @@ NOW = datetime(2026, 10, 7, 18, 0, tzinfo=UTC)
 T0 = NOW - timedelta(hours=10)
 
 
-def _at(hours: float) -> str:
-    return (T0 + timedelta(hours=hours)).isoformat()
+def _at(hours: float) -> datetime:
+    return T0 + timedelta(hours=hours)
+
+
+async def _deliver(projection: ScorecardProjection, event: DomainEvent) -> None:
+    """Through ``handle_event``: the payload the handler gets is the real ``model_dump()``."""
+    envelope = EventEnvelope(
+        event=event,
+        metadata=EventMetadata(
+            aggregate_id="execution",
+            aggregate_type="WorkflowExecution",
+            aggregate_nonce=1,
+            event_type=event.event_type,
+            global_nonce=1,
+        ),
+    )
+    result = await projection.handle_event(envelope, MemoryCheckpointStore())
+    assert result is ProjectionResult.SUCCESS
+
+
+def _started(
+    execution_id: str, *, start: float, parent: str | None = None
+) -> WorkflowExecutionStartedEvent:
+    resumed_from = (
+        ResumeOrigin(parent_execution_id=parent, inherited_phases=[], resume_phase_id="verify")
+        if parent
+        else None
+    )
+    return WorkflowExecutionStartedEvent(
+        workflow_id="wf",
+        execution_id=execution_id,
+        workflow_name="implement",
+        started_at=_at(start),
+        total_phases=2,
+        inputs={},
+        resumed_from=resumed_from,
+    )
+
+
+def _failed(
+    execution_id: str,
+    *,
+    end: float,
+    classification: FailureClassification,
+    phase_id: str | None = None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> WorkflowFailedEvent:
+    return WorkflowFailedEvent(
+        workflow_id="wf",
+        execution_id=execution_id,
+        failed_at=_at(end),
+        failed_phase_id=phase_id,
+        error_message="phase failed",
+        failure_classification=classification,
+        failed_phase_input_tokens=input_tokens,
+        failed_phase_output_tokens=output_tokens,
+        failed_phase_cache_read_tokens=cache_read_tokens,
+        completed_phases=0,
+        total_phases=2,
+    )
 
 
 async def _run(
@@ -33,53 +120,69 @@ async def _run(
     start: float,
     end: float,
     outcome: str,
-    classification: str | None = None,
+    classification: FailureClassification = FailureClassification.UNCLASSIFIED,
     parent: str | None = None,
     verify_tokens: int = 0,
     model: str = "claude-opus-5-5-20260901",
 ) -> None:
-    await projection.on_execution_requested(
-        {"execution_id": execution_id, "workflow_id": "wf", "requested_at": _at(start - 0.5)}
+    await _deliver(
+        projection,
+        ExecutionRequestedEvent(
+            execution_id=execution_id, workflow_id="wf", requested_at=_at(start - 0.5)
+        ),
     )
-    await projection.on_workflow_execution_started(
-        {
-            "execution_id": execution_id,
-            "workflow_id": "wf",
-            "workflow_name": "implement",
-            "started_at": _at(start),
-            "total_phases": 2,
-            "inputs": {},
-            "resumed_from": {"parent_execution_id": parent} if parent else None,
-        }
+    await _deliver(projection, _started(execution_id, start=start, parent=parent))
+    await _deliver(
+        projection,
+        AgentExecutionCompletedEvent(
+            workflow_id="wf",
+            execution_id=execution_id,
+            phase_id="verify",
+            session_id=f"s-{execution_id}",
+            completed_at=_at(start + 0.1),
+            agent_model=model,
+        ),
     )
-    await projection.on_agent_execution_completed(
-        {"execution_id": execution_id, "phase_id": "verify", "agent_model": model}
-    )
-    await projection.on_phase_completed(
-        {
-            "execution_id": execution_id,
-            "phase_id": "verify",
-            "session_id": f"s-{execution_id}",
-            "success": True,
-            "total_tokens": verify_tokens,
-            "cache_read_tokens": verify_tokens // 2,
-        }
+    await _deliver(
+        projection,
+        PhaseCompletedEvent(
+            workflow_id="wf",
+            execution_id=execution_id,
+            phase_id="verify",
+            completed_at=_at(start + 0.1),
+            success=True,
+            session_id=f"s-{execution_id}",
+            total_tokens=verify_tokens,
+            cache_read_tokens=verify_tokens // 2,
+        ),
     )
     if outcome == "completed":
-        await projection.on_workflow_completed(
-            {"execution_id": execution_id, "completed_at": _at(end)}
+        await _deliver(
+            projection,
+            WorkflowCompletedEvent(
+                workflow_id="wf",
+                execution_id=execution_id,
+                completed_at=_at(end),
+                total_phases=2,
+                completed_phases=2,
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_tokens=verify_tokens,
+                total_duration_seconds=(end - start) * 3600,
+                artifact_ids=[],
+            ),
         )
     elif outcome == "failed":
-        await projection.on_workflow_failed(
-            {
-                "execution_id": execution_id,
-                "failed_at": _at(end),
-                "failure_classification": classification,
-            }
-        )
+        await _deliver(projection, _failed(execution_id, end=end, classification=classification))
     else:
-        await projection.on_execution_cancelled(
-            {"execution_id": execution_id, "cancelled_at": _at(end), "phase_id": "verify"}
+        await _deliver(
+            projection,
+            ExecutionCancelledEvent(
+                workflow_id="wf",
+                execution_id=execution_id,
+                phase_id="verify",
+                cancelled_at=_at(end),
+            ),
         )
 
 
@@ -108,7 +211,7 @@ async def test_resumed_chain_counts_once_and_carries_its_failed_runs_cost() -> N
         start=0,
         end=1,
         outcome="failed",
-        classification="platform",
+        classification=FailureClassification.PLATFORM,
         verify_tokens=8_000_000,
     )
     await _run(
@@ -120,7 +223,7 @@ async def test_resumed_chain_counts_once_and_carries_its_failed_runs_cost() -> N
         start=2.5,
         end=4,
         outcome="failed",
-        classification="task",
+        classification=FailureClassification.TASK,
         verify_tokens=1_000_000,
         model="gpt-5.4",
     )
@@ -156,10 +259,15 @@ async def test_resumed_chain_counts_once_and_carries_its_failed_runs_cost() -> N
 @pytest.mark.asyncio
 async def test_a_superseded_run_is_not_an_outcome_while_its_resume_runs() -> None:
     projection = ScorecardProjection(InMemoryProjectionStore())
-    await _run(projection, "a", start=0, end=1, outcome="failed", classification="platform")
-    await projection.on_workflow_execution_started(
-        {"execution_id": "b", "started_at": _at(2), "resumed_from": {"parent_execution_id": "a"}}
+    await _run(
+        projection,
+        "a",
+        start=0,
+        end=1,
+        outcome="failed",
+        classification=FailureClassification.PLATFORM,
     )
+    await _deliver(projection, _started("b", start=2, parent="a"))
 
     card = await _score(projection, {})
 
@@ -170,7 +278,7 @@ async def test_a_superseded_run_is_not_an_outcome_while_its_resume_runs() -> Non
 @pytest.mark.asyncio
 async def test_a_failure_recorded_before_classification_is_its_own_bucket() -> None:
     projection = ScorecardProjection(InMemoryProjectionStore())
-    await _run(projection, "a", start=0, end=1, outcome="failed", classification=None)
+    await _run(projection, "a", start=0, end=1, outcome="failed")
     await _run(projection, "b", start=0, end=1, outcome="cancelled")
 
     card = await _score(projection, {})
@@ -193,26 +301,18 @@ async def test_a_failed_verify_counts_toward_the_verify_tokens_it_spent() -> Non
     projection = ScorecardProjection(InMemoryProjectionStore())
     await _run(projection, "a", start=0, end=1, outcome="completed", verify_tokens=1_000_000)
     await _run(projection, "b", start=1, end=2, outcome="completed", verify_tokens=2_000_000)
-    await projection.on_workflow_execution_started(
-        {
-            "execution_id": "c",
-            "workflow_id": "wf",
-            "workflow_name": "implement",
-            "started_at": _at(2),
-        }
+    await _deliver(projection, _started("c", start=2))
+    failure = _failed(
+        "c",
+        end=3,
+        classification=FailureClassification.TASK,
+        phase_id="verify",
+        input_tokens=9_000_000,
+        output_tokens=500_000,
+        cache_read_tokens=7_000_000,
     )
-    failure = {
-        "execution_id": "c",
-        "failed_at": _at(3),
-        "failure_classification": "task",
-        "failed_phase_id": "verify",
-        "failed_phase_input_tokens": 9_000_000,
-        "failed_phase_output_tokens": 500_000,
-        "failed_phase_cache_creation_tokens": 0,
-        "failed_phase_cache_read_tokens": 7_000_000,
-    }
-    await projection.on_workflow_failed(failure)
-    await projection.on_workflow_failed(failure)  # redelivered: recorded once
+    await _deliver(projection, failure)
+    await _deliver(projection, failure)  # redelivered: recorded once
 
     card = await _score(projection, {})
 
