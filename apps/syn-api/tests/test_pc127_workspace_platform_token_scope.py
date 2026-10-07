@@ -84,6 +84,9 @@ async def test_read_token_reaches_a_read_route(
         ("GET", "/github/installations"),
         ("GET", "/organizations"),
         ("GET", "/costs"),
+        ("GET", "/executions/../workflows"),
+        ("GET", "/executions/./../triggers"),
+        ("GET", "//workflows"),
     ],
 )
 async def test_read_token_cannot_write_or_read_outside_its_scope(
@@ -165,3 +168,17 @@ def test_in_memory_store_refuses_production(monkeypatch: pytest.MonkeyPatch) -> 
     finally:
         monkeypatch.undo()
         reset_settings()
+
+
+@pytest.mark.parametrize(
+    "path", ["/executions/../workflows", "/executions/./x", "/executions//x", "//executions"]
+)
+async def test_dot_and_empty_segments_are_refused_as_the_api_receives_them(
+    service: PlatformTokenService, path: str
+) -> None:
+    # Called directly: an HTTP client may normalize these before sending, and
+    # Envoy (no normalize_path) forwards them as written.
+    token = await service.issue("exec-pc127")
+    denial = await service.authorize(f"Bearer {token}", "GET", path)
+    assert denial is not None
+    assert denial.status == 403

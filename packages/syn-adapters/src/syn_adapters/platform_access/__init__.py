@@ -126,8 +126,12 @@ def _hash(token: str) -> str:
 def _scope_allows(scope: PlatformScope, method: str, path: str) -> bool:
     if scope is not PlatformScope.READ or method.upper() not in _READ_METHODS:
         return False
-    first = path.lstrip("/").split("/", 1)[0]
-    return first in _READ_RESOURCES
+    # Envoy does not normalize paths by default, so a dot or empty segment
+    # could name one resource here and route to another downstream.
+    segments = path.removeprefix("/").removesuffix("/").split("/")
+    if any(segment in ("", ".", "..") for segment in segments):
+        return False
+    return segments[0] in _READ_RESOURCES
 
 
 @dataclass(frozen=True)
