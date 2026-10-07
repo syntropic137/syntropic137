@@ -13,7 +13,9 @@ pytestmark = pytest.mark.unit
 
 SCRIPT = Path(__file__).resolve().parents[1] / "generate-architecture-docs.py"
 
-README = """| Context | Aggregates | Purpose |
+README = """The system is organized into 9 bounded contexts following VSA:
+
+| Context | Aggregates | Purpose |
 |---------|------------|---------|
 | **`orchestration`** | Workspace | Workflow execution |
 | **`artifacts`** | Artifact | Artifact storage |
@@ -37,6 +39,7 @@ def _manifest(reverse: bool) -> dict[str, object]:
         event_to_projections = {k: list(reversed(v)) for k, v in event_to_projections.items()}
     return {
         "generated_at": "2026-10-07T00:00:00Z",
+        "bounded_contexts": [{"name": "orchestration"}, {"name": "artifacts"}],
         "domain": {
             "aggregates": aggregates,
             "commands": [],
@@ -47,18 +50,21 @@ def _manifest(reverse: bool) -> dict[str, object]:
     }
 
 
-def _generate(tmp_path: Path, reverse: bool) -> dict[str, str]:
-    root = tmp_path / ("reversed" if reverse else "forward")
+def _run(root: Path, readme: str, manifest: dict[str, object]) -> subprocess.CompletedProcess[str]:
     root.mkdir()
-    (root / "README.md").write_text(README)
-    manifest = root / "manifest.json"
-    manifest.write_text(json.dumps(_manifest(reverse)))
-    subprocess.run(
-        [sys.executable, str(SCRIPT), "--manifest", str(manifest), "--out-root", str(root)],
-        check=True,
+    (root / "README.md").write_text(readme)
+    (root / "manifest.json").write_text(json.dumps(manifest))
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--manifest", "manifest.json", "--out-root", "."],
         capture_output=True,
+        text=True,
         cwd=root,
     )
+
+
+def _generate(tmp_path: Path, reverse: bool) -> dict[str, str]:
+    root = tmp_path / ("reversed" if reverse else "forward")
+    _run(root, README, _manifest(reverse)).check_returncode()
     return {
         name: (root / name).read_text()
         for name in (
@@ -87,3 +93,46 @@ def test_canonicalize_sorts_maps_and_arrays_recursively() -> None:
     spec.loader.exec_module(module)
     canonical = module.canonicalize({"b": [3, 1, 2], "a": [{"n": "y"}, {"n": "x"}]})
     assert json.dumps(canonical) == '{"a": [{"n": "x"}, {"n": "y"}], "b": [1, 2, 3]}'
+
+
+def test_readme_context_count_follows_the_manifest(tmp_path: Path) -> None:
+    readme = _generate(tmp_path, reverse=False)["README.md"]
+    assert "organized into 2 bounded contexts" in readme
+
+
+def test_readme_missing_a_context_row_fails(tmp_path: Path) -> None:
+    readme = README.replace("| **`orchestration`** | Workspace | Workflow execution |\n", "")
+    result = _run(tmp_path / "missing", readme, _manifest(reverse=False))
+    assert result.returncode != 0
+    assert "missing rows for orchestration" in result.stderr
+
+
+def test_readme_row_for_an_unknown_context_fails(tmp_path: Path) -> None:
+    readme = README.replace("`artifacts`", "`retired_context`")
+    result = _run(tmp_path / "unknown", readme, _manifest(reverse=False))
+    assert result.returncode != 0
+    assert "missing rows for artifacts" in result.stderr
+    assert "unknown contexts retired_context" in result.stderr
+
+
+def test_docs_site_counts_and_aggregate_table_are_generated(tmp_path: Path) -> None:
+    root = tmp_path / "docs"
+    page = root / "apps/syn-docs/content/docs/architecture/index.mdx"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "**Commands (42):** ...\n\n| Context | Aggregates | Key |\n|---|---|---|\n"
+        "| `orchestration` | Workspace | Workflows |\n| `artifacts` | Artifact | Storage |\n"
+    )
+    manifest = _manifest(reverse=False)
+    manifest["domain"]["commands"] = [{"name": "A"}, {"name": "B"}]  # type: ignore[index]
+    (root / "README.md").write_text(README)
+    (root / "manifest.json").write_text(json.dumps(manifest))
+    subprocess.run(
+        [sys.executable, str(SCRIPT), "--manifest", "manifest.json", "--out-root", "."],
+        check=True,
+        capture_output=True,
+        cwd=root,
+    )
+    content = page.read_text()
+    assert "**Commands (2):**" in content
+    assert "| `orchestration` | Eval, Workspace | Workflows |" in content

@@ -63,11 +63,11 @@ The domain is organized into bounded contexts. Each context owns its aggregates 
 
 | Context | Aggregates | Key Responsibilities |
 |---------|------------|----------------------|
-| `orchestration` | Workspace, Workflow, WorkflowExecution | Workspace lifecycle, workflow definitions, multi-phase execution |
-| `agent_sessions` | AgentSession | Agent session recording, tool timelines, token and cost tracking |
+| `orchestration` | ClaudePluginRegistration, Eval, ExecutionRequest, GlobalClaudePluginRegistry, SkillRegistration, WorkflowExecution, WorkflowTemplate, Workspace | Workspace lifecycle, workflow definitions, multi-phase execution |
+| `agent_sessions` | AgentSession, InventoryClock, InventoryReconciliation | Agent session recording, tool timelines, token and cost tracking |
 | `github` | Installation, TriggerRule | GitHub App integration, webhook and polling event ingestion, trigger evaluation |
 | `artifacts` | Artifact | Output storage: code files, reports, design documents |
-| `organization` | Organization, System, Repo | Org hierarchy, system and repo management, cost rollup |
+| `organization` | Organization, Repo, RepoClaim, System | Org hierarchy, system and repo management, cost rollup |
 
 Aggregates are the sole decision-makers for their state. No service or engine is allowed to decide "what's next" for an aggregate: that logic lives in the aggregate itself.
 

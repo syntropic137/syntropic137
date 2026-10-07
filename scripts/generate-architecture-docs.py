@@ -240,24 +240,81 @@ just docs-regen
     return content
 
 
-def update_readme_aggregates(manifest: dict[str, Any], readme_content: str) -> str:
+def manifest_contexts(manifest: dict[str, Any]) -> set[str]:
+    """Every bounded context the manifest knows, with or without aggregates."""
+    contexts = {context["name"] for context in manifest.get("bounded_contexts", [])}
+    contexts.update(a["context"] for a in manifest.get("domain", {}).get("aggregates", []))
+    return contexts
+
+
+README_ROW = re.compile(r"^(\| \*\*`(\w+)`\*\* \|)[^|]*\|", flags=re.M)
+# apps/syn-docs/content/docs/architecture/index.mdx: ``| `<context>` | <aggregates> | ... |``
+DOCS_ROW = re.compile(r"^(\| `(\w+)` \|)[^|]*\|", flags=re.M)
+
+
+def update_readme_aggregates(
+    manifest: dict[str, Any], readme_content: str, row: re.Pattern[str] = README_ROW
+) -> str:
     """Rewrite the Aggregates column of README's bounded-context table.
 
     Rows look like ``| **`<context>`** | <aggregates> | <purpose> |``. Only the
-    middle cell is generated; the purpose stays hand-written.
+    middle cell is generated; the purpose stays hand-written, so a context the
+    table lacks, or one the manifest no longer has, cannot be generated and is
+    an error rather than a row silently left as it was.
     """
     by_context: dict[str, list[str]] = {}
     for aggregate in manifest.get("domain", {}).get("aggregates", []):
         name = aggregate["name"].removesuffix("Aggregate")
         by_context.setdefault(aggregate["context"], []).append(name)
 
+    expected = manifest_contexts(manifest)
+    listed = {match.group(2) for match in row.finditer(readme_content)}
+    missing, unknown = sorted(expected - listed), sorted(listed - expected)
+    if missing or unknown:
+        raise SystemExit(
+            "❌ bounded-context table does not match the manifest:"
+            + (f" missing rows for {', '.join(missing)};" if missing else "")
+            + (f" rows for unknown contexts {', '.join(unknown)};" if unknown else "")
+            + " add or remove the row (the Purpose cell is hand-written)."
+        )
+
     def replace_row(match: re.Match[str]) -> str:
         names = sorted(by_context.get(match.group(2), []))
-        if not names:
-            return match.group(0)
-        return f"{match.group(1)} {', '.join(names)} |"
+        return f"{match.group(1)} {', '.join(names) or '-'} |"
 
-    return re.sub(r"^(\| \*\*`(\w+)`\*\* \|)[^|]*\|", replace_row, readme_content, flags=re.M)
+    content = row.sub(replace_row, readme_content)
+    return re.sub(
+        r"organized into \d+ bounded contexts",
+        f"organized into {len(expected)} bounded contexts",
+        content,
+    )
+
+
+DOCS_SITE_PAGES = (
+    Path("apps/syn-docs/content/docs/guide/architecture.mdx"),
+    Path("apps/syn-docs/content/docs/architecture/index.mdx"),
+)
+
+
+def update_docs_site(manifest: dict[str, Any], out_root: Path) -> None:
+    """Regenerate the counts and aggregate table on the public docs pages."""
+    domain = manifest.get("domain", {})
+    counts = {
+        "Commands": len(domain.get("commands", [])),
+        "Events": len(domain.get("events", [])),
+        "Projections": len(domain.get("projections", [])),
+    }
+    for page in DOCS_SITE_PAGES:
+        path = out_root / page
+        if not path.exists():
+            print(f"⚠️  {page} not found, skipping")
+            continue
+        content = path.read_text()
+        for label, count in counts.items():
+            content = re.sub(rf"\*\*{label} \(\d+\):\*\*", f"**{label} ({count}):**", content)
+        if DOCS_ROW.search(content):
+            content = update_readme_aggregates(manifest, content, DOCS_ROW)
+        path.write_text(content)
 
 
 def update_readme_counts(manifest: dict[str, Any], out_root: Path) -> bool:
@@ -365,6 +422,7 @@ def main() -> None:
     # 3. Update README counts
     print("📝 Updating README.md component counts...")
     update_readme_counts(manifest, out_root)
+    update_docs_site(manifest, out_root)
     print()
 
     # Validate manual docs

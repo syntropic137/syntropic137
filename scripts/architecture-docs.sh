@@ -21,6 +21,8 @@ GENERATED=(
     docs/architecture/projection-subscriptions.md
     docs/architecture/event-flows/README.md
     README.md
+    apps/syn-docs/content/docs/guide/architecture.mdx
+    apps/syn-docs/content/docs/architecture/index.mdx
 )
 
 mode=write
@@ -51,8 +53,13 @@ if [[ "$mode" == write ]]; then
 else
     out_root=$(mktemp -d)
     trap 'rm -rf "$out_root"' EXIT
-    # README.md is edited in place (only its counts row), so seed the copy.
-    cp README.md "$out_root/README.md"
+    # README.md and the docs pages are edited in place (only their generated
+    # cells), so seed the copies.
+    for page in README.md apps/syn-docs/content/docs/guide/architecture.mdx \
+        apps/syn-docs/content/docs/architecture/index.mdx; do
+        mkdir -p "$out_root/$(dirname "$page")"
+        cp "$page" "$out_root/$page"
+    done
 fi
 
 # Canonicalises $MANIFEST in place, so it must run before the visualizer.
