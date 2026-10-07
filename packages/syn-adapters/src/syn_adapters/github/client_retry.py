@@ -20,7 +20,9 @@ anything about retrying. What it decides:
 - THE ONE EXCEPTION, THE TOKEN MINT (owner decision, 2026-10-07):
   ``POST /app/installations/{id}/access_tokens`` is also sent again after a
   dropped response, a 5xx or a 429, on a longer `TokenMintRetryPolicy`
-  (5 attempts, ~5/10/20/40 s, Retry-After honoured, 90 s budget). The cost is
+  (5 attempts, ~5/10/20/40 s, Retry-After honoured), all inside a deadline of
+  3/4 of the configured setup phase timeout that counts request time as well
+  as waits. The cost is
   accepted knowingly: GitHub may have minted a token we never received - an
   orphan, scoped to the requested repos and permissions, live for about an
   hour, which the #725 ledger cannot revoke because it never saw it. The
@@ -40,6 +42,7 @@ import asyncio
 import logging
 import random
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -72,13 +75,18 @@ _HTTP_SERVER_ERROR_FIRST = 500
 _HTTP_SERVER_ERROR_LAST = 599
 
 #: Token-mint retry shape: 5 attempts waiting ~5, 10, 20, 40 s (75 s nominal),
-#: each stretched by up to 20 % jitter, never more than 90 s of waiting in all.
-#: The budget keeps the whole retry below the setup phase timeout (120 s by
-#: default), Retry-After included.
+#: each stretched by up to 10 % jitter (82.5 s at most), so all five fit the
+#: default deadline below when GitHub answers promptly.
 MINT_ATTEMPTS = 5
 MINT_BASE_DELAY_SECONDS = 5.0
-MINT_JITTER_FRACTION = 0.2
-MINT_BACKOFF_BUDGET_SECONDS = 90.0
+MINT_JITTER_FRACTION = 0.1
+#: The whole mint - every request, every wait, Retry-After included - must end
+#: within this share of the CONFIGURED setup phase timeout (90 s of the 120 s
+#: default). The rest is the margin for everything else provisioning does.
+MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT = 0.75
+#: An attempt is not started with less than this left before the deadline: it
+#: could not get an answer in time, and would only mint another orphan.
+MINT_MIN_ATTEMPT_SECONDS = 5.0
 
 
 def is_token_mint(request: httpx.Request) -> bool:
@@ -114,6 +122,18 @@ def retry_after_seconds(response: httpx.Response) -> float | None:
     return max(0.0, (when - datetime.now(UTC)).total_seconds())
 
 
+def _now() -> float:
+    """Monotonic seconds; the mint deadline's clock. A module function so tests can fake it."""
+    return time.monotonic()
+
+
+def _setup_phase_timeout_seconds() -> float:
+    """The configured setup phase timeout (``SETUP_PHASE_TIMEOUT_SECONDS``)."""
+    from syn_shared.settings import get_settings
+
+    return float(get_settings().setup_phase_timeout_seconds)
+
+
 async def _sleep(seconds: float) -> None:
     """Back off without blocking the API's event loop. Never `time.sleep`."""
     await asyncio.sleep(seconds)
@@ -142,27 +162,31 @@ class TokenMintRetryPolicy:
     """How long to keep minting an installation token through a GitHub 5xx burst.
 
     The wait before attempt n+1 is ``base_delay * 2**(n-1)`` stretched by up to
-    ``jitter_fraction``, or the server's Retry-After when it sent one. Every
-    wait is clamped to what is left of ``budget_seconds``; once that is spent
-    the mint gives up rather than outlive the setup phase that is waiting on it.
+    ``jitter_fraction``, or the server's Retry-After when it sent one. All of it
+    - requests and waits - runs against one monotonic deadline: ``deadline_seconds``
+    when set, else `MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT` of the configured
+    setup phase timeout. The mint gives up rather than outlive the setup phase
+    that is waiting on it.
     """
 
     attempts: int = MINT_ATTEMPTS
     base_delay_seconds: float = MINT_BASE_DELAY_SECONDS
     jitter_fraction: float = MINT_JITTER_FRACTION
-    budget_seconds: float = MINT_BACKOFF_BUDGET_SECONDS
+    deadline_seconds: float | None = None
+    min_attempt_seconds: float = MINT_MIN_ATTEMPT_SECONDS
 
-    def delay_after(self, attempt: int, retry_after: float | None, waited: float) -> float | None:
-        """Seconds to wait before attempt ``attempt + 1``; None when the budget is spent."""
-        remaining = self.budget_seconds - waited
-        if remaining <= 0:
-            return None
+    def deadline(self) -> float:
+        """Seconds the whole mint may take, read when the mint starts."""
+        if self.deadline_seconds is not None:
+            return self.deadline_seconds
+        return _setup_phase_timeout_seconds() * MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT
+
+    def delay_after(self, attempt: int, retry_after: float | None) -> float:
+        """Seconds to wait before attempt ``attempt + 1``."""
         if retry_after is not None:
-            wanted = retry_after
-        else:
-            nominal = self.base_delay_seconds * 2 ** (attempt - 1)
-            wanted = nominal * (1 + random.uniform(0, self.jitter_fraction))
-        return min(wanted, remaining)
+            return retry_after
+        nominal = self.base_delay_seconds * 2 ** (attempt - 1)
+        return nominal * (1 + random.uniform(0, self.jitter_fraction))
 
 
 class RetryingTransport(httpx.AsyncBaseTransport):
@@ -235,19 +259,32 @@ class RetryingTransport(httpx.AsyncBaseTransport):
         A 4xx other than 429 is GitHub's answer about the App and is returned
         at once for the caller to classify. No token value is ever logged: a
         response is only read here when it is not retried.
+
+        Every attempt is capped to the time left before the deadline, and none
+        is started - nor any wait begun - unless it can finish before it. The
+        error then names the attempts actually made.
         """
         policy = self._mint_policy
+        deadline = _now() + policy.deadline()
         failure = ""
         last_error: Exception | None = None
         status_code: int | None = None
         retry_after: float | None = None
-        waited = 0.0
-        attempt = 0
+        made = 0
         for attempt in range(1, policy.attempts + 1):
             if attempt > 1:
-                delay = policy.delay_after(attempt - 1, retry_after, waited)
-                if delay is None:
-                    attempt -= 1
+                delay = policy.delay_after(attempt - 1, retry_after)
+                if deadline - (_now() + delay) < policy.min_attempt_seconds:
+                    logger.warning(
+                        "GitHub token mint %s: not retrying after attempt %d/%d (status=%s, "
+                        "%s); waiting %.1fs would leave no time before the deadline",
+                        request.url.path,
+                        made,
+                        policy.attempts,
+                        _status_text(status_code),
+                        failure,
+                        delay,
+                    )
                     break
                 logger.warning(
                     "GitHub token mint %s attempt %d/%d failed (status=%s, %s); retrying in "
@@ -255,33 +292,50 @@ class RetryingTransport(httpx.AsyncBaseTransport):
                     "orphan, live for up to an hour, that the issuance ledger cannot revoke "
                     "(accepted trade-off, owner decision 2026-10-07)",
                     request.url.path,
-                    attempt - 1,
+                    made,
                     policy.attempts,
-                    status_code if status_code is not None else "none",
+                    _status_text(status_code),
                     failure,
                     delay,
                 )
                 await self._sleep(delay)
-                waited += delay
+            remaining = max(deadline - _now(), policy.min_attempt_seconds)
+            _cap_timeouts(request, remaining)
+            made = attempt
             try:
-                response = await self._inner.handle_async_request(request)
-                if not is_mint_retryable_status(response.status_code):
-                    return await _buffered(response)
-            except (*_UNSENT_ERRORS, *_AMBIGUOUS_ERRORS) as exc:
+                async with asyncio.timeout(remaining):
+                    response = await self._inner.handle_async_request(request)
+                    if not is_mint_retryable_status(response.status_code):
+                        return await _buffered(response)
+                    retry_after = retry_after_seconds(response)
+                    await response.aclose()
+            except (*_UNSENT_ERRORS, *_AMBIGUOUS_ERRORS, TimeoutError) as exc:
                 failure = f"{type(exc).__name__}: {exc}"
                 last_error = exc
                 status_code = None
                 retry_after = None
             else:
-                retry_after = retry_after_seconds(response)
-                await response.aclose()
                 failure = f"HTTP {response.status_code}"
                 last_error = None
                 status_code = response.status_code
-        raise _unavailable(request, attempt, failure, status_code) from last_error
+        raise _unavailable(request, made, failure, status_code) from last_error
 
     async def aclose(self) -> None:
         await self._inner.aclose()
+
+
+def _status_text(status_code: int | None) -> str:
+    return "none" if status_code is None else str(status_code)
+
+
+def _cap_timeouts(request: httpx.Request, seconds: float) -> None:
+    """Shrink every httpx timeout on this request to at most ``seconds``."""
+    current = request.extensions.get("timeout")
+    capped: dict[str, float] = {}
+    for phase in ("connect", "read", "write", "pool"):
+        value = current.get(phase) if isinstance(current, dict) else None
+        capped[phase] = seconds if not isinstance(value, int | float) else min(value, seconds)
+    request.extensions["timeout"] = capped
 
 
 def _unavailable(

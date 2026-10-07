@@ -32,18 +32,18 @@ from syn_adapters.github.client import (
 )
 from syn_adapters.github.client_retry import (
     MINT_ATTEMPTS,
-    MINT_BACKOFF_BUDGET_SECONDS,
+    MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT,
     RetryPolicy,
 )
 from syn_adapters.workspace_backends.service import setup_phase_secrets
 from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import failure_account
-from syn_shared.settings.config import Settings
+from syn_shared.settings.config import Settings, reset_settings
 from syn_shared.upstream_failure import UpstreamFailureKind
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
 
 pytestmark = pytest.mark.unit
 
@@ -74,6 +74,11 @@ type _Failure = Exception | int | _TruncatedBody | httpx.Response
 
 
 @dataclass
+class _Clock:
+    now: float = 0.0
+
+
+@dataclass
 class _Network:
     """GitHub behind a flaky network: each path fails as scripted, then answers."""
 
@@ -84,10 +89,24 @@ class _Network:
     sent: list[str] = field(default_factory=list)
     #: Every token GitHub issued, whether or not its holder ever heard of it.
     minted: list[str] = field(default_factory=list)
+    #: The fake monotonic clock the mint deadline reads; sleeps advance it.
+    clock: _Clock = field(default_factory=lambda: _Clock())
+    #: How long each mint request takes on the fake clock before it answers.
+    #: A request is cut off at the read timeout the transport set on it.
+    mint_seconds: float = 0.0
+    #: The read timeout each mint attempt carried.
+    mint_timeouts: list[float] = field(default_factory=list)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.sent.append(path)
+        if path == _MINT:
+            timeout = request.extensions["timeout"]["read"]
+            self.mint_timeouts.append(timeout)
+            if self.mint_seconds:
+                self.clock.now += min(self.mint_seconds, timeout)
+                if self.mint_seconds > timeout:
+                    raise httpx.ReadTimeout("slow mint")
         scripted = self.failures.get(path)
         if scripted:
             return self._fail(scripted.pop(0))
@@ -125,18 +144,26 @@ class _Settings:
 
 
 @pytest.fixture
-def slept(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    fake = _Clock()
+    monkeypatch.setattr(client_retry, "_now", lambda: fake.now)
+    return fake
+
+
+@pytest.fixture
+def slept(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> list[float]:
     """Every backoff the transport awaited, in order. Nothing really sleeps.
 
     Patched at ``asyncio.sleep`` itself: a backoff that bypassed it - a
     ``time.sleep`` that would block the API's event loop - waits for real and
-    is missing here.
+    is missing here. Each wait advances the fake clock the deadline reads.
     """
     delays: list[float] = []
     real_sleep = asyncio.sleep
 
     async def record(seconds: float) -> None:
         delays.append(seconds)
+        clock.now += seconds
         await real_sleep(0)
 
     monkeypatch.setattr(client_retry.asyncio, "sleep", record)
@@ -144,8 +171,8 @@ def slept(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 
 @pytest.fixture
-def network(monkeypatch: pytest.MonkeyPatch, slept: list[float]) -> _Network:
-    net = _Network()
+def network(monkeypatch: pytest.MonkeyPatch, slept: list[float], clock: _Clock) -> _Network:
+    net = _Network(clock=clock)
     transport = httpx.MockTransport(net.handle)
     monkeypatch.setattr(
         "syn_adapters.github.GitHubAppClient",
@@ -260,8 +287,8 @@ async def test_a_mint_answered_500_twice_then_201_succeeds(
     assert network.sent.count(_MINT) == 3
     assert len(slept) == 2
     # Exponential: ~5 s then ~10 s, each stretched by at most the jitter.
-    assert 5.0 <= slept[0] <= 6.0
-    assert 10.0 <= slept[1] <= 12.0
+    assert 5.0 <= slept[0] <= 5.5
+    assert 10.0 <= slept[1] <= 11.0
     assert "status=500" in caplog.text
 
 
@@ -312,29 +339,100 @@ async def test_a_mint_that_stays_unavailable_fails_resumable_naming_its_attempts
     assert not account.upstream.needs_operator
 
 
-@pytest.mark.anyio
-@pytest.mark.parametrize("retry_after", [None, "3600"])
-async def test_the_whole_mint_backoff_ends_inside_the_setup_phase_timeout(
-    network: _Network,
-    slept: list[float],
-    monkeypatch: pytest.MonkeyPatch,
-    retry_after: str | None,
-) -> None:
-    """Worst case - every jitter at its ceiling, or GitHub asking for an hour - stays bounded."""
-    monkeypatch.setattr(random, "uniform", lambda _low, high: high)
-    headers = {} if retry_after is None else {"Retry-After": retry_after}
-    network.failures[_MINT] = [
-        httpx.Response(500, headers=headers, json={"message": "scripted"})
+@pytest.fixture
+def setup_timeout(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Settings are cached; drop the cache around a test that configures them."""
+    reset_settings()
+    yield
+    monkeypatch.undo()
+    reset_settings()
+
+
+def _all_500(headers: dict[str, str] | None = None) -> list[_Failure]:
+    return [
+        httpx.Response(500, headers=headers or {}, json={"message": "scripted"})
         for _ in range(MINT_ATTEMPTS)
     ]
+
+
+@pytest.mark.anyio
+async def test_the_whole_mint_ends_inside_the_default_setup_phase_timeout(
+    network: _Network, clock: _Clock, monkeypatch: pytest.MonkeyPatch, setup_timeout: None
+) -> None:
+    """Worst-case jitter still sends all five, and the whole mint ends before the deadline."""
+    monkeypatch.setattr(random, "uniform", lambda _low, high: high)
+    network.failures[_MINT] = _all_500()
 
     with pytest.raises(GitHubUnavailableError):
         await _provision()
 
-    setup_timeout = Settings().setup_phase_timeout_seconds
-    assert sum(slept) <= MINT_BACKOFF_BUDGET_SECONDS < setup_timeout
-    # Spans most of the budget, so a burst of ~1 min is ridden out.
-    assert sum(slept) >= 75.0
+    configured = Settings().setup_phase_timeout_seconds
+    assert network.sent.count(_MINT) == MINT_ATTEMPTS
+    assert clock.now <= configured * MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT < configured
+    # Spans most of it, so a burst of ~1 min is ridden out.
+    assert clock.now >= 75.0
+
+
+@pytest.mark.anyio
+async def test_a_retry_after_past_the_deadline_stops_the_retries_at_once(
+    network: _Network, clock: _Clock, setup_timeout: None
+) -> None:
+    network.failures[_MINT] = _all_500({"Retry-After": "3600"})
+
+    with pytest.raises(GitHubUnavailableError) as raised:
+        await _provision()
+
+    assert network.sent.count(_MINT) == 1
+    assert "after 1 attempt(s)" in str(raised.value)
+    assert clock.now == 0.0
+    assert failure_account(raised.value).upstream is UpstreamFailureKind.UNAVAILABLE
+
+
+@pytest.mark.anyio
+async def test_a_configured_60s_setup_timeout_bounds_the_whole_mint(
+    network: _Network, clock: _Clock, monkeypatch: pytest.MonkeyPatch, setup_timeout: None
+) -> None:
+    """Review of #1709: a fixed 90 s budget overran a configured 60 s timeout."""
+    monkeypatch.setenv("SETUP_PHASE_TIMEOUT_SECONDS", "60")
+    reset_settings()
+    monkeypatch.setattr(random, "uniform", lambda _low, high: high)
+    network.failures[_MINT] = _all_500()
+
+    with pytest.raises(GitHubUnavailableError) as raised:
+        await _provision()
+
+    deadline = 60 * MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT
+    assert clock.now <= deadline < 60
+    sends = network.sent.count(_MINT)
+    assert 1 < sends < MINT_ATTEMPTS
+    assert f"after {sends} attempt(s)" in str(raised.value)
+    assert failure_account(raised.value).upstream is UpstreamFailureKind.UNAVAILABLE
+
+
+@pytest.mark.anyio
+async def test_slow_mint_requests_count_against_the_deadline(
+    network: _Network, clock: _Clock, monkeypatch: pytest.MonkeyPatch, setup_timeout: None
+) -> None:
+    """Review of #1709: four 30 s read timeouts plus backoff overran 120 s.
+
+    Request time is on the same clock as the waits; each attempt is cut to
+    the time left, and none starts that could not finish in time.
+    """
+    monkeypatch.setattr(random, "uniform", lambda low, _high: low)
+    network.mint_seconds = 45.0  # hangs past the client's 30 s read timeout
+
+    with pytest.raises(GitHubUnavailableError) as raised:
+        await _provision()
+
+    configured = Settings().setup_phase_timeout_seconds
+    deadline = configured * MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT
+    assert clock.now <= deadline < configured
+    sends = network.sent.count(_MINT)
+    assert sends < MINT_ATTEMPTS
+    assert f"after {sends} attempt(s)" in str(raised.value)
+    # The last attempt was capped to what was left, not the client's 30 s.
+    assert network.mint_timeouts[-1] < 30.0
+    assert failure_account(raised.value).upstream is UpstreamFailureKind.UNAVAILABLE
 
 
 @pytest.mark.anyio
