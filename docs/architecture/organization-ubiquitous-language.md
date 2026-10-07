@@ -48,20 +48,32 @@ installation can reach, whether or not anyone registered it.
 
 A Repo's identity is `(organization_id, provider, full_name)`, so two
 organizations that each registered `acme/api` are two Repos, and a Gitea
-`acme/api` is not the GitHub one. Connected repos are counted by that identity.
+`acme/api` is not the GitHub one. The uniqueness claim that enforces this
+(`aggregate_repo_claim/claim_id.py`) hashes the triple **without folding
+case**, so `Acme/API` and `acme/api` in one organization both register and are
+two Repos as well, each with its own `repo_id` and possibly its own System.
 
-A GitHub App installation reports no organization, so one of its repositories
-can only be matched to a Repo by full name, case-insensitively - and only to a
-Repo whose `provider` is `github`, because no GitHub App can reach a Gitea or
-GitLab repository however it is named. A Repo so matched is one connected repo
-with the repository the App reaches; a repository the App reaches that matches
-no registered GitHub Repo is a connected repo of its own.
+Connected repos are therefore counted by Repo, and a registered one is
+identified by its `repo_id`, never by its name: a name is not an identity here,
+in any spelling.
+
+A GitHub App installation reports no organization and no `repo_id`, so one of
+its repositories can only be matched to a Repo by full name. That match folds
+case, because GitHub itself treats `owner/name` case-insensitively, and it is
+made only against a Repo whose `provider` is `github`, because no GitHub App
+can reach a Gitea or GitLab repository however it is named. Case folding
+belongs to this match alone, and never to a Repo's own identity.
+
+A Repo so matched is one connected repo with the repository the App reaches; a
+repository the App reaches that matches no registered GitHub Repo is a
+connected repo of its own.
 
 Two consequences, both deliberate:
 
-- A name registered by several organizations stays one connected repo per
-  organization. The App's single answer for that name applies to each of them,
-  since the App is all that knows whether it can reach the name at all.
+- A name registered more than once - by several organizations, or twice in one
+  organization in different cases - stays one connected repo per Repo. The
+  App's single answer for that name applies to each of them, since the App is
+  all that knows whether it can reach the name at all.
 - A repository on another provider is never "Attached", and a partial App
   lookup leaves it "Not attached" rather than "Unknown": the answer does not
   depend on GitHub.

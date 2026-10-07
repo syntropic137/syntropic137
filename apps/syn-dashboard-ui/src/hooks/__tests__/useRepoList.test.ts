@@ -10,11 +10,14 @@
  * 2. Privacy for a repo the App reaches comes from the App, not from the
  *    stored flag: `syn repo register` sends `is_private: false` for every
  *    repo, so a private repo rendered as public.
- * 3. Rows are keyed by a Repo's domain identity,
- *    `(organization_id, provider, full_name)`. Two organizations that each
- *    registered `acme/api`, and a Gitea `acme/worker` beside a GitHub one,
- *    used to collapse into one row - losing a row, its System, and labelling a
- *    non-GitHub repo "Attached".
+ * 3. Rows are keyed by `repo_id`, the Repo aggregate's own identity, never by
+ *    name. Two organizations that each registered `acme/api`, a Gitea
+ *    `acme/worker` beside a GitHub one, and `ACME/web` beside `acme/web` in
+ *    one organization, used to collapse into one row - losing a row, its
+ *    System, and labelling a non-GitHub repo "Attached". Repo uniqueness is
+ *    claimed on `(organization_id, provider, full_name)` with no case folding
+ *    (`aggregate_repo_claim/claim_id.py`), so case-variant names are two
+ *    Repos and the page owes them two rows.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
@@ -56,8 +59,21 @@ const REGISTERED = [
     system_id: null,
     is_private: true,
   },
+  // Same organization and provider as repo-2, differing only in case. The
+  // repo claim does not fold case, so this is a second Repo, not the same one.
+  {
+    repo_id: 'repo-5',
+    organization_id: 'org-a',
+    provider: 'github',
+    full_name: 'ACME/web',
+    system_id: 'sys-2',
+    is_private: false,
+  },
 ]
-const SYSTEMS = [{ system_id: 'sys-1', name: 'Storefront' }]
+const SYSTEMS = [
+  { system_id: 'sys-1', name: 'Storefront' },
+  { system_id: 'sys-2', name: 'Checkout' },
+]
 const APP_REACHABLE = ['Acme/API', 'acme/worker', 'acme/infra', 'acme/docs']
 /** What GitHub reports as private right now, lower-cased. */
 const PRIVATE_IN_APP = new Set(['acme/api', 'acme/infra'])
@@ -102,11 +118,14 @@ describe('useRepoList', () => {
 
   it('lists the union of registered and App-reachable repos', async () => {
     const rows = await readyRows()
-    expect(rows.map((r) => r.fullName)).toEqual([
+    // Lower-cased because `localeCompare` decides where `ACME/web` falls
+    // relative to `acme/web`, and that ordering is not what is under test.
+    expect(rows.map((r) => r.fullName.toLowerCase())).toEqual([
       'acme/api',
       'acme/api',
       'acme/docs',
       'acme/infra',
+      'acme/web',
       'acme/web',
       'acme/worker',
       'acme/worker',
@@ -144,7 +163,16 @@ describe('useRepoList', () => {
   it('keeps one row per organization that registered the same name', async () => {
     const rows = await readyRows()
     const keys = rows.filter((r) => r.fullName === 'acme/api').map((r) => r.key)
-    expect(keys).toEqual(['org-a|github|acme/api', 'org-b|github|acme/api'])
+    expect(keys).toEqual(['repo-1', 'repo-3'])
+  })
+
+  it('keeps both repos when one organization registered two spellings of a name', async () => {
+    const rows = await readyRows()
+    // Two Repos: the claim on (organization_id, provider, full_name) folds no
+    // case, so both registrations succeeded and both own a System.
+    const byKey = new Map(rows.map((r) => [r.key, r]))
+    expect(byKey.get('repo-2')).toMatchObject({ fullName: 'acme/web', system: 'Storefront' })
+    expect(byKey.get('repo-5')).toMatchObject({ fullName: 'ACME/web', system: 'Checkout' })
   })
 
   it('never attaches a non-GitHub repo that shares a name with an App repo', async () => {
@@ -152,7 +180,7 @@ describe('useRepoList', () => {
     const workers = rows.filter((r) => r.fullName === 'acme/worker')
     // The Gitea repo and the App's GitHub repo are two connected repos.
     expect(workers).toHaveLength(2)
-    const gitea = workers.find((r) => r.key === 'org-a|gitea|acme/worker')
+    const gitea = workers.find((r) => r.key === 'repo-4')
     expect(gitea).toMatchObject({ registered: true, attachment: 'not-attached', isPrivate: true })
     expect(workers.find((r) => !r.registered)).toMatchObject({ attachment: 'attached' })
   })
@@ -160,9 +188,9 @@ describe('useRepoList', () => {
   it('still lists App-reachable repos when the App lookup is partial', async () => {
     stubFetch('partial')
     const rows = await readyRows()
-    expect(rows).toHaveLength(7)
+    expect(rows).toHaveLength(8)
     expect(rows.find((r) => r.fullName === 'acme/web')?.attachment).toBe('unknown')
     // A partial GitHub lookup says nothing about a Gitea repo.
-    expect(rows.find((r) => r.key === 'org-a|gitea|acme/worker')?.attachment).toBe('not-attached')
+    expect(rows.find((r) => r.key === 'repo-4')?.attachment).toBe('not-attached')
   })
 })

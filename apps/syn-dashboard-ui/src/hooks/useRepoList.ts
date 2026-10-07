@@ -10,11 +10,14 @@
  * system are registered by definition, so `/systems` adds names, not rows; a
  * repo only named in some execution's inputs is not connected and not listed.
  *
- * Rows are keyed by a registered repo's domain identity -
- * `(organization_id, provider, full_name)` - not by name alone, so two
- * organizations that each registered `acme/api`, or a Gitea `acme/api`
- * alongside a GitHub one, stay two rows instead of silently collapsing into
- * one (which lost a row and its System).
+ * Rows are keyed by `repo_id`, a registered repo's aggregate identity, and
+ * never by its name. Two organizations that each registered `acme/api`, a
+ * Gitea `acme/api` beside a GitHub one, and `Acme/API` beside `acme/api` in
+ * one organization, are each distinct Repos, and keying by name silently
+ * collapsed them: one row vanished, with its System. Repo uniqueness is a
+ * claim on `(organization_id, provider, full_name)` taken with no case
+ * folding (`aggregate_repo_claim/claim_id.py`), so even case-variant names
+ * are two Repos.
  *
  * A repo carries only its system's id, so the name is joined here; a system
  * the listing does not know (deleted, or the systems request failed) falls back
@@ -50,9 +53,9 @@ const GITHUB = 'github'
 
 export interface RepoRow {
   /**
-   * Row identity: `organization_id|provider|lower-cased full name` for a
-   * registered repo, since that triple is a Repo's domain identity. GitHub
-   * treats `owner/name` case-insensitively, so the name is lower-cased.
+   * Row identity: a registered repo's `repo_id`, the Repo aggregate's own id.
+   * An App-only repo has no Repo, so it is keyed `@github-app|<name>` with
+   * the name folded. Never a registered repo's name: see above.
    */
   key: string
   fullName: string
@@ -73,10 +76,6 @@ const UNKNOWN_ACCESS: AppAccess = { repos: [], complete: false }
 /** What the App knows about a repo it reaches, by lower-cased full name. */
 type AppEntries = ReadonlyMap<string, { isPrivate: boolean }>
 
-function rowKey(organizationId: string, provider: string, fullName: string): string {
-  return `${organizationId}|${provider}|${fullName.toLowerCase()}`
-}
-
 function registeredRow(
   repo: RepoSummary,
   systemNames: Map<string, string>,
@@ -95,7 +94,7 @@ function registeredRow(
       ? 'not-attached'
       : 'unknown'
   return {
-    key: rowKey(repo.organization_id ?? '', provider, fullName),
+    key: repo.repo_id,
     fullName,
     registered: true,
     system: systemId ? (systemNames.get(systemId) ?? systemId) : null,
@@ -131,10 +130,11 @@ function connectedRepoRows(
   for (const { fullName, isPrivate } of access.repos) {
     const name = fullName.toLowerCase()
     if (registeredGitHubNames.has(name)) continue
-    // No organization is known for an unregistered repo, so it is keyed under
-    // the App rather than under one.
-    rows.set(rowKey('@github-app', GITHUB, fullName), {
-      key: rowKey('@github-app', GITHUB, fullName),
+    // No Repo exists for it, so there is no repo_id to key it by. GitHub
+    // names are case-insensitive, so the App's own name is folded here.
+    const key = `@github-app|${name}`
+    rows.set(key, {
+      key,
       fullName,
       registered: false,
       system: null,
