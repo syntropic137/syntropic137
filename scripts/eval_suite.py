@@ -149,7 +149,9 @@ def load_suite(directory: Path, root: Path = ROOT) -> LoadedSuite:
         if path.stem != case.id:
             problems.append(f"{path.name}: file name must be the case id {case.id!r}")
         if f"#{case.source_pr}" in case.task:
-            problems.append(f"{case.id}: task names #{case.source_pr}; the agent could fetch the fix")
+            problems.append(
+                f"{case.id}: task names #{case.source_pr}; the agent could fetch the fix"
+            )
     ids = [c.id for c in cases]
     if len(set(ids)) != len(ids):
         problems.append(f"duplicate case ids: {sorted(ids)}")
@@ -191,12 +193,20 @@ def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
     """
     problems: list[str] = []
     for case in loaded.cases:
-        missing = [s for s in (case.commit, case.fix_commit) if not _git_ok(repo, "cat-file", "-e", f"{s}^{{commit}}")]
+        missing = [
+            s
+            for s in (case.commit, case.fix_commit)
+            if not _git_ok(repo, "cat-file", "-e", f"{s}^{{commit}}")
+        ]
         if missing:
-            problems.append(f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)")
+            problems.append(
+                f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"
+            )
             continue
         if not _git_ok(repo, "merge-base", "--is-ancestor", case.commit, case.fix_commit):
-            problems.append(f"{case.id}: {case.commit[:12]} is not an ancestor of the fix {case.fix_commit[:12]}")
+            problems.append(
+                f"{case.id}: {case.commit[:12]} is not an ancestor of the fix {case.fix_commit[:12]}"
+            )
         for path in case.expected.files:
             if not _git_ok(repo, "cat-file", "-e", f"{case.commit}:{path}"):
                 problems.append(f"{case.id}: {path} does not exist at {case.commit[:12]}")
@@ -355,45 +365,95 @@ def score_suite(loaded: LoadedSuite, client: httpx.Client) -> list[ScoredRun]:
     for case in loaded.cases:
         mine = [e for e in evals if case.tag in e.tags]
         if not mine:
-            rows.append(ScoredRun(case=case.id, eval_id="-", run_id=None, status="not launched",
-                                  score=None, cost_usd=None, duration="-", models="-"))
+            rows.append(
+                ScoredRun(
+                    case=case.id,
+                    eval_id="-",
+                    run_id=None,
+                    status="not launched",
+                    score=None,
+                    cost_usd=None,
+                    duration="-",
+                    models="-",
+                )
+            )
         for ev in mine:
             runs = _get(client, _RunList, f"/evals/{ev.eval_id}/runs", page_size=200).executions
             if not runs:
-                rows.append(ScoredRun(case=case.id, eval_id=ev.eval_id, run_id=None, status="no run",
-                                      score=None, cost_usd=None, duration="-", models="-"))
+                rows.append(
+                    ScoredRun(
+                        case=case.id,
+                        eval_id=ev.eval_id,
+                        run_id=None,
+                        status="no run",
+                        score=None,
+                        cost_usd=None,
+                        duration="-",
+                        models="-",
+                    )
+                )
             for summary in runs:
                 run = _get(client, _Execution, f"/executions/{summary.workflow_execution_id}")
                 score = score_report(case.expected, run.review_verdict, _report_of(client, run))
-                rows.append(ScoredRun(case=case.id, eval_id=ev.eval_id, run_id=run.workflow_execution_id,
-                                      status=run.status, score=score, cost_usd=run.total_cost_usd,
-                                      duration=_duration_of(run), models=_models_of(run)))
+                rows.append(
+                    ScoredRun(
+                        case=case.id,
+                        eval_id=ev.eval_id,
+                        run_id=run.workflow_execution_id,
+                        status=run.status,
+                        score=score,
+                        cost_usd=run.total_cost_usd,
+                        duration=_duration_of(run),
+                        models=_models_of(run),
+                    )
+                )
     return rows
 
 
 def render(loaded: LoadedSuite, rows: list[ScoredRun]) -> str:
-    header = ("case", "run id", "status", "verdict", "matched", "pass", "cost", "duration", "models")
+    header = (
+        "case",
+        "run id",
+        "status",
+        "verdict",
+        "matched",
+        "pass",
+        "cost",
+        "duration",
+        "models",
+    )
     lines = [header]
     for r in rows:
         s = r.score
-        lines.append((
-            r.case,
-            r.run_id or "-",
-            r.status,
-            (s.verdict or "none") if s else "-",
-            ("yes" if s.matched else f"no{'' if s.named_file else ' (file)'}"
-             f"{' (keywords: ' + '; '.join('/'.join(g) for g in s.missing_keywords) + ')' if s.missing_keywords else ''}")
-            if s else "-",
-            ("PASS" if s.passed else "FAIL") if s else "-",
-            f"${r.cost_usd:.2f}" if r.cost_usd is not None else "-",
-            r.duration,
-            r.models,
-        ))
+        lines.append(
+            (
+                r.case,
+                r.run_id or "-",
+                r.status,
+                (s.verdict or "none") if s else "-",
+                (
+                    "yes"
+                    if s.matched
+                    else f"no{'' if s.named_file else ' (file)'}"
+                    f"{' (keywords: ' + '; '.join('/'.join(g) for g in s.missing_keywords) + ')' if s.missing_keywords else ''}"
+                )
+                if s
+                else "-",
+                ("PASS" if s.passed else "FAIL") if s else "-",
+                f"${r.cost_usd:.2f}" if r.cost_usd is not None else "-",
+                r.duration,
+                r.models,
+            )
+        )
     widths = [max(len(row[i]) for row in lines) for i in range(len(header))]
-    table = "\n".join("  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in lines)
+    table = "\n".join(
+        "  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in lines
+    )
     passed = sum(1 for r in rows if r.score and r.score.passed)
-    return (f"suite {loaded.suite.tag}  workflow {loaded.suite.workflow.id}  "
-            f"declared models {loaded.suite.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed")
+    return (
+        f"suite {loaded.suite.tag}  workflow {loaded.suite.workflow.id}  "
+        f"declared models {loaded.suite.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -406,26 +466,36 @@ def launch_suite(loaded: LoadedSuite, client: httpx.Client) -> list[str]:
     s = loaded.suite
     out: list[str] = []
     for case in loaded.cases:
-        response = client.post("/evals", json={
-            "name": f"{s.id} v{s.version}: {case.id}",
-            "goal": s.goal,
-            "starting_workflow_id": s.workflow.id,
-            "baseline_repos": [{"repository": s.repository, "requested_ref": case.commit}],
-            "tags": [s.tag, case.tag, f"workflow:{s.workflow.id}"],
-        })
+        response = client.post(
+            "/evals",
+            json={
+                "name": f"{s.id} v{s.version}: {case.id}",
+                "goal": s.goal,
+                "starting_workflow_id": s.workflow.id,
+                "baseline_repos": [{"repository": s.repository, "requested_ref": case.commit}],
+                "tags": [s.tag, case.tag, f"workflow:{s.workflow.id}"],
+            },
+        )
         response.raise_for_status()
         created = _Created.model_validate(response.json())
         pinned = [b.commit_sha for b in created.baseline_repos]
         if pinned != [case.commit]:
-            raise RuntimeError(f"{case.id}: eval {created.eval_id} pinned {pinned}, expected {case.commit}")
-        response = client.post(f"/workflows/{s.workflow.id}/execute", json={
-            "task": case.task,
-            "repos": [s.repository],
-            "eval_id": created.eval_id,
-        })
+            raise RuntimeError(
+                f"{case.id}: eval {created.eval_id} pinned {pinned}, expected {case.commit}"
+            )
+        response = client.post(
+            f"/workflows/{s.workflow.id}/execute",
+            json={
+                "task": case.task,
+                "repos": [s.repository],
+                "eval_id": created.eval_id,
+            },
+        )
         response.raise_for_status()
         started = _Started.model_validate(response.json())
-        out.append(f"{case.id}: eval {created.eval_id} @ {case.commit[:12]} -> run {started.execution_id}")
+        out.append(
+            f"{case.id}: eval {created.eval_id} @ {case.commit[:12]} -> run {started.execution_id}"
+        )
     return out
 
 
@@ -445,10 +515,14 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("command", choices=("check", "launch", "score"))
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
-    parser.add_argument("--repo", type=Path, default=ROOT, help="git checkout holding the pinned commits")
+    parser.add_argument(
+        "--repo", type=Path, default=ROOT, help="git checkout holding the pinned commits"
+    )
     parser.add_argument("--api-url", default=None, help="defaults to DEV__API_URL / localhost")
     args = parser.parse_args(argv)
 
@@ -463,7 +537,9 @@ def main(argv: list[str] | None = None) -> int:
         if problems:
             print("❌ " + "\n❌ ".join(problems), file=sys.stderr)
             return 1
-        print(f"✅ {loaded.suite.tag}: {len(loaded.cases)} case(s), every pinned commit and file checked")
+        print(
+            f"✅ {loaded.suite.tag}: {len(loaded.cases)} case(s), every pinned commit and file checked"
+        )
         if args.command == "check":
             print("\n".join(describe_launch(loaded)))
             return 0
