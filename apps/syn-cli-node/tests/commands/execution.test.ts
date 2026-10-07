@@ -42,8 +42,18 @@ describe("execution commands", () => {
               workflow_name: "my-workflow",
               status: "completed",
               started_at: "2026-01-01T00:00:00Z",
-              completed_phases: 3,
-              total_phases: 3,
+              // Certified at its first review (PC-63): 6 of 10 defined
+              // phases ran, and the 4 repair phases were never needed.
+              completed_phases: 6,
+              total_phases: 10,
+              phase_progress: {
+                completed: 6,
+                skipped: 4,
+                possible: 6,
+                remaining_possible: 0,
+                percent: 100,
+                display: "6 of 6 (4 phases not needed)",
+              },
               total_tokens: 5000,
               total_cost_usd: "0.05",
             },
@@ -56,7 +66,9 @@ describe("execution commands", () => {
       const out = stdout();
       expect(out).toContain("exec-001");
       expect(out).toContain("my-workflow");
-      expect(out).toContain("3/3");
+      // The API's progress, verbatim; the CLI never divides the raw counts.
+      expect(out).toContain("6 of 6 (4 phases not needed)");
+      expect(out).not.toContain("6/10");
     });
 
     it("sends every --tag as a repeated ?tag= query parameter (#967)", async () => {
