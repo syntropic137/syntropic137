@@ -1024,6 +1024,29 @@ class TestWorkspaceProvisionHandler:
         assert _imports(context) == ["/workspace/repos/repo-a/CLAUDE.md"]
 
     @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "agents_md",
+        ["@claude.md\n", "See [claude.md](claude.md).\n"],
+        ids=["import", "link"],
+    )
+    async def test_breadcrumb_to_a_differently_cased_file_is_kept(self, agents_md: str) -> None:
+        """Paths are case-sensitive on Linux: claude.md is not CLAUDE.md.
+
+        Dropping this AGENTS.md would leave the lowercase file unreachable.
+        """
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": agents_md,
+                "/workspace/repos/repo-a/claude.md": "# Lowercase instructions\n",
+                "/workspace/repos/repo-a/CLAUDE.md": "# Uppercase instructions\n",
+            }
+        )
+        assert _imports(context) == [
+            "/workspace/repos/repo-a/AGENTS.md",
+            "/workspace/repos/repo-a/CLAUDE.md",
+        ]
+
+    @pytest.mark.anyio
     async def test_unreadable_instruction_files_are_both_imported(self) -> None:
         """A transport failure must not cost the agent its instructions."""
         context = await _provisioned_context({}, execute_error=OSError("exec transport died"))

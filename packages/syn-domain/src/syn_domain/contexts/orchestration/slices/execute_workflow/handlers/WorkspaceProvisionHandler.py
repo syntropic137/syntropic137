@@ -13,10 +13,8 @@ of each repo's distinct instruction files, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
-from enum import Enum
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
@@ -36,6 +34,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
     require_codex_sandbox,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.instruction_imports import (
+    repo_instruction_imports,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
     install_skill,
@@ -204,75 +205,6 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
                 f"{prior_sha!r} vs {skill.resolved_sha!r}",
             )
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
-
-
-class _Unread(Enum):
-    """Why an instruction file has no content to compare."""
-
-    #: Confirmed not in the checkout: there is nothing to import.
-    ABSENT = "absent"
-    #: The read failed (transport, timeout, permission): the file may be there,
-    #: so its import is kept rather than guessed away.
-    UNREADABLE = "unreadable"
-
-
-#: Exit status of ``_READ_INSTRUCTION_FILE`` when the path does not exist. Any
-#: other failure is UNREADABLE, never ABSENT.
-_ABSENT_EXIT: Final[int] = 3
-_READ_INSTRUCTION_FILE: Final[str] = f'[ -e "$1" ] || exit {_ABSENT_EXIT}; exec cat -- "$1"'
-
-#: The whole of a breadcrumb AGENTS.md: one line that only points at the
-#: CLAUDE.md beside it, as an @-import or a Markdown link, optionally led by
-#: "See"/"Read"/"Follow". Anything else in the file is an instruction of its own.
-_BREADCRUMB = re.compile(
-    r"(?:(?:see|read|follow)\s+)?"
-    r"(?:@(?:\./)?CLAUDE\.md|\[`?(?:\./)?CLAUDE\.md`?\]\((?:\./)?CLAUDE\.md\))\.?",
-    re.IGNORECASE,
-)
-
-
-def _instruction_imports(
-    agents_path: str,
-    agents_md: str | _Unread,
-    claude_path: str,
-    claude_md: str | _Unread,
-) -> list[str]:
-    """Return the repo instruction files worth importing, each distinct one once.
-
-    AGENTS.md is dropped only when it says nothing CLAUDE.md does not: a
-    byte-identical copy of a CLAUDE.md that was read, or a breadcrumb pointing at
-    a CLAUDE.md that is not confirmed absent. CLAUDE.md is the one kept because
-    it is the canonical file (AGENTS.md is the breadcrumb), and because Claude
-    Code reads it natively. A file that could not be read is still imported.
-    """
-    if isinstance(agents_md, str) and claude_md is not _Unread.ABSENT:
-        is_copy = agents_md == claude_md
-        is_breadcrumb = _BREADCRUMB.fullmatch(agents_md.strip()) is not None
-        if is_copy or is_breadcrumb:
-            agents_md = _Unread.ABSENT
-    return [
-        path
-        for path, content in ((agents_path, agents_md), (claude_path, claude_md))
-        if content is not _Unread.ABSENT
-    ]
-
-
-async def _read_instruction_file(workspace: ManagedWorkspace, path: str) -> str | _Unread:
-    """Read one instruction file, telling a confirmed absence from a failed read."""
-    result = await workspace.execute(
-        ["sh", "-c", _READ_INSTRUCTION_FILE, "sh", path], timeout_seconds=30
-    )
-    if result.exit_code == 0 and not result.timed_out:
-        return result.stdout
-    if result.exit_code == _ABSENT_EXIT and not result.timed_out:
-        return _Unread.ABSENT
-    logger.warning(
-        "could not read %s (exit %d), importing it anyway: %s",
-        path,
-        result.exit_code,
-        result.stderr,
-    )
-    return _Unread.UNREADABLE
 
 
 _DEADLINE_NOTICE = (
@@ -628,9 +560,7 @@ class WorkspaceProvisionHandler:
             # checkout on disk, so its files are imported once, first spelling first.
             names = list(dict.fromkeys(self._repo_name(url) for url in cloned_repos))
             imports = [
-                path
-                for name in names
-                for path in await self._repo_instruction_imports(workspace, name)
+                path for name in names for path in await repo_instruction_imports(workspace, name)
             ]
             context = self._generate_workspace_context(imports)
             await workspace.inject_files(
@@ -836,26 +766,6 @@ class WorkspaceProvisionHandler:
         return url.rstrip("/").split("/")[-1].removesuffix(".git")
 
     @staticmethod
-    async def _repo_instruction_imports(workspace: ManagedWorkspace, name: str) -> list[str]:
-        """Return the paths of a cloned repo's instruction files to @-import.
-
-        Every one of these bytes is resent on every turn of every phase, so a
-        repo whose AGENTS.md duplicates its CLAUDE.md must not be loaded twice
-        (see ``_instruction_imports``). If the files cannot be read, both are
-        imported, as before: a duplicate costs tokens, a missing file costs the
-        agent its instructions.
-        """
-        agents_path = f"/workspace/repos/{name}/AGENTS.md"
-        claude_path = f"/workspace/repos/{name}/CLAUDE.md"
-        try:
-            agents = await _read_instruction_file(workspace, agents_path)
-            claude = await _read_instruction_file(workspace, claude_path)
-        except Exception as exc:
-            logger.warning("could not read instruction files of %s, importing both: %s", name, exc)
-            return [agents_path, claude_path]
-        return _instruction_imports(agents_path, agents, claude_path, claude)
-
-    @staticmethod
     async def _install_attribution_hook(workspace: ManagedWorkspace) -> None:
         """Put the operator co-authorship hook where the image's own git config looks.
 
@@ -966,7 +876,7 @@ class WorkspaceProvisionHandler:
         """Generate content for both /workspace/CLAUDE.md and /workspace/AGENTS.md.
 
         Both files receive identical content: a direct @-import of each path in
-        ``imports`` (see ``_repo_instruction_imports``). Direct imports (not via
+        ``imports`` (see ``repo_instruction_imports``). Direct imports (not via
         an intermediary file) keep repo content at depth L2, leaving L3-L5 for
         repo-internal imports within Claude Code's 5-level absolute limit.
 
