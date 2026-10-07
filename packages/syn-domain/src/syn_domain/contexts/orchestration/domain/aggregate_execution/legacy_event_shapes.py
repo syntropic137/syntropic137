@@ -44,11 +44,11 @@ class LegacyEventShapeError(ValueError):
 
     A ``ValueError`` because it is raised inside event validators, and pydantic
     reports only ``ValueError`` / ``AssertionError`` from a validator as a
-    ``ValidationError``. That is the one exception the event store's ADR-023
-    fallback (``on_invalid_payload="generic"``, ESP v0.17.0) turns into a
-    ``GenericDomainEvent``. Any other type escapes the decoder: ESP v0.16 caught
-    every exception, v0.17 does not, and a refused legacy payload then fails
-    the read instead of replaying generic.
+    ``ValidationError``, which ESP v0.17.0 turns into ``EventPayloadError``, and
+    that is the one error ``LegacyShapeTolerantGrpcClient`` may admit as a
+    ``GenericDomainEvent`` (see ``replays_generic``). Any other type escapes the
+    decoder: ESP v0.16 caught every exception, v0.17 does not, and a refused
+    legacy payload then fails the read instead of replaying generic.
     """
 
 
@@ -173,3 +173,26 @@ def upcast_forked_payload(payload: object) -> object:
     if "cancellation_overridden" not in upcast:
         upcast["cancellation_overridden"] = False
     return upcast
+
+
+#: The stored type whose name changed meaning on 2026-09-29.
+_RESUMED_EVENT_TYPE = "ExecutionResumed"
+
+
+def replays_generic(event_type: str, payload: object) -> bool:
+    """Whether a stored payload its typed class refuses may replay generic.
+
+    The event store raises on a payload its registered class rejects (ESP
+    ADR-027), which halts every projection at that event. That is right for a
+    corrupt or unexpected payload: replayed generic, an event such as an
+    `ExecutionRequested` missing its `workflow_id` would be checkpointed past
+    without being applied. It is wrong for a KNOWN legacy shape this domain
+    reads deliberately from a generic event, and there is exactly one: the
+    pre-rename un-pause `ExecutionResumed`, which the aggregate and
+    `ResumeStartProcessManager` recognise and ignore. An AMBIGUOUS payload is
+    not a legacy shape and is not admitted.
+    """
+    return (
+        event_type == _RESUMED_EVENT_TYPE
+        and shape_of_resumed_payload(payload) is ResumedEventShape.PRE_RENAME_UNPAUSE
+    )

@@ -58,6 +58,7 @@ from syn_api.types import (
     Ok,
     Result,
     SubscriptionHealth,
+    SubscriptionHealthStatus,
 )
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
@@ -73,6 +74,8 @@ if TYPE_CHECKING:
 
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
+    from syn_adapters.subscriptions.read_model_lag import ReadModelLag
+    from syn_adapters.subscriptions.unapplied_starts import UnappliedStart
     from syn_api._wiring_admission import BackgroundWorkflowDispatcher
     from syn_domain.contexts.github.services import (
         CheckRunIngestionService,
@@ -601,42 +604,65 @@ async def _describe_subscription_health() -> SubscriptionHealthResult:
 
     try:
         sub_status = _state.subscription_service.get_status()
+    except Exception:
+        logger.debug("subscription status read failed", exc_info=True)
+        return SubscriptionHealth(status="unknown"), ()
+
+    # What the coordinator itself knows - running, held, halted - is read from
+    # memory and is published whatever happens to the probes below. A halt at
+    # an undecodable head event is exactly the state in which the lag probe,
+    # which reads that head, fails too; a failing checkpoint store is a likely
+    # cause of a hold. Letting either probe failure blank the verdict would
+    # report "unknown" with mode "full" while the coordinator knows it is stuck.
+    held = bool(sub_status.held_projections)
+    halted = sub_status.halted_at is not None
+
+    def publish(
+        status: SubscriptionHealthStatus,
+        lag: ReadModelLag | None = None,
+        unapplied: list[UnappliedStart] | None = None,
+    ) -> SubscriptionHealth:
+        return SubscriptionHealth(
+            status=status,
+            running=sub_status.running,
+            projection_count=sub_status.projection_count,
+            realtime_enabled=sub_status.realtime_enabled,
+            held_projections=[
+                HeldProjectionHealth(
+                    projection=entry.projection_name,
+                    event_type=entry.event_type,
+                    global_nonce=entry.global_nonce,
+                )
+                for entry in sub_status.held_projections
+            ],
+            halted_at=sub_status.halted_at,
+            unapplied_starts=unapplied,
+            **(lag.model_dump() if lag is not None else {}),
+        )
+
+    try:
         lag = await asyncio.wait_for(
             _state.subscription_service.describe_read_model_lag(),
             timeout=_LAG_PROBE_TIMEOUT_S,
         )
         # Never scans on this path: the latest background reconciliation (#1545).
         drops = await _state.subscription_service.describe_unapplied_starts()
-        unapplied = list(drops.unapplied) if drops is not None else None
-        verdict = _judge_read_path(
-            running=sub_status.running,
-            lag=lag,
-            dropped_events=bool(unapplied),
-            held=bool(sub_status.held_projections),
-            halted=sub_status.halted_at is not None,
-        )
-
-        health = SubscriptionHealth(
-            status=verdict.status,
-            running=sub_status.running,
-            projection_count=sub_status.projection_count,
-            realtime_enabled=sub_status.realtime_enabled,
-            held_projections=[
-                HeldProjectionHealth(
-                    projection=held.projection_name,
-                    event_type=held.event_type,
-                    global_nonce=held.global_nonce,
-                )
-                for held in sub_status.held_projections
-            ],
-            halted_at=sub_status.halted_at,
-            unapplied_starts=unapplied,
-            **(lag.model_dump() if lag is not None else {}),
-        )
-        return health, verdict.degraded_reasons
     except Exception:
         logger.debug("subscription health probe failed", exc_info=True)
-        return SubscriptionHealth(status="unknown"), ()
+        # Only the coordinator's own signals can fire; none firing is "unknown".
+        verdict = _judge_read_path(running=sub_status.running, lag=None, held=held, halted=halted)
+        status = verdict.status if verdict.degraded_reasons else "unknown"
+        return publish(status), verdict.degraded_reasons
+
+    unapplied = list(drops.unapplied) if drops is not None else None
+    verdict = _judge_read_path(
+        running=sub_status.running,
+        lag=lag,
+        dropped_events=bool(unapplied),
+        held=held,
+        halted=halted,
+    )
+    return publish(verdict.status, lag, unapplied), verdict.degraded_reasons
 
 
 # ── Service init functions ─────────────────────────────────────────

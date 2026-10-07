@@ -23,26 +23,8 @@ from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from event_sourcing import EventStoreClient
-    from event_sourcing.core.envelope import InvalidPayloadPolicy
 
 logger = logging.getLogger(__name__)
-
-
-#: What the gRPC client does with a stored payload its registered class rejects.
-#:
-#: ESP v0.17.0 (ADR-027) changed the default from "return a
-#: `GenericDomainEvent`" (ADR-023) to "raise `EventPayloadError`", and a raised
-#: decode error halts the subscription coordinator at that event. This domain is
-#: built on the old contract: `legacy_event_shapes` refuses a pre-rename
-#: `ExecutionResumed` (an un-pause) in its validator precisely so it replays as
-#: a generic event the aggregate and `ResumeStartProcessManager` then ignore,
-#: and `start_pins` / `replay` read retired keys off generic events. Under
-#: "raise" one such stored event would stop every projection and make its
-#: execution unloadable. A scan of the production store at the v0.17.0 upgrade
-#: (104,315 events) found none that fail typed validation, so "generic" changes
-#: nothing there; it is kept for every other store and for history we have not
-#: seen. Moving to "raise" means an upcaster for each legacy shape first.
-INVALID_PAYLOAD_POLICY: InvalidPayloadPolicy = "generic"
 
 
 # Global client instance (managed lifecycle)
@@ -85,7 +67,7 @@ def _create_memory_client() -> EventStoreClient:
 
 def _create_grpc_client() -> EventStoreClient:
     """Create a gRPC client for development/production."""
-    from event_sourcing import EventStoreClientFactory
+    from syn_adapters.storage.legacy_tolerant_client import LegacyShapeTolerantGrpcClient
 
     settings = get_settings()
 
@@ -98,11 +80,11 @@ def _create_grpc_client() -> EventStoreClient:
         },
     )
 
-    return EventStoreClientFactory.create_grpc_client(
-        host=settings.event_store_host,
-        port=settings.event_store_port,
+    # Strict decoding (ESP ADR-027), admitting only the legacy payload shapes
+    # the domain reads on purpose: see `legacy_tolerant_client`.
+    return LegacyShapeTolerantGrpcClient(
+        address=f"{settings.event_store_host}:{settings.event_store_port}",
         tenant_id=settings.event_store_tenant_id,
-        on_invalid_payload=INVALID_PAYLOAD_POLICY,
     )
 
 

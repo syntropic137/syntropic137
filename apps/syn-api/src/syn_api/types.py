@@ -2340,8 +2340,12 @@ class SubscriptionHealth(_OmitsAbsentFields):
     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
     rather than a default: ``lag is None`` means the coordinator is not up yet,
     so there is nothing whose progress could be measured — which is not the same
-    as "not behind", and must not serialize as ``lag: 0``. When the probe itself
-    fails, ``status`` is "unknown" and nothing else is known at all.
+    as "not behind", and must not serialize as ``lag: 0``. When the lag or
+    dropped-start probe fails, the lag fields are absent but what the
+    coordinator itself knows (``running``, ``held_projections``, ``halted_at``)
+    is still published, and still sets ``status``: a halt at an undecodable
+    head event is exactly when the lag probe fails too. ``status`` is "unknown"
+    only when none of those fires.
 
     ``ReadModelLag``'s fields are restated here because the block is flat on the
     wire and a generated client has to be able to see them. That restatement is

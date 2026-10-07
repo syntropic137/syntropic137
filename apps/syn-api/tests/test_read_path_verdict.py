@@ -73,7 +73,9 @@ class _SubscriptionServiceStub:
         drops: UnappliedStartsReport | None = None,
         held: tuple[HeldProjection, ...] = (),
         halted_at: int | None = None,
+        probe_fails: bool = False,
     ) -> None:
+        self._probe_fails = probe_fails
         self._running = running
         self._lag = lag
         self._drops = drops
@@ -90,6 +92,9 @@ class _SubscriptionServiceStub:
         )
 
     async def describe_read_model_lag(self) -> ReadModelLag | None:
+        if self._probe_fails:
+            # What a halt at an undecodable HEAD does: the probe reads the head too.
+            raise RuntimeError("Cannot decode event 'Boom' v1: payload is not JSON")
         return self._lag
 
     async def describe_unapplied_starts(self) -> UnappliedStartsReport | None:
@@ -138,9 +143,10 @@ async def health_payload() -> AsyncIterator[HealthProbe]:
         drops: UnappliedStartsReport | None = None,
         held: tuple[HeldProjection, ...] = (),
         halted_at: int | None = None,
+        probe_fails: bool = False,
     ) -> dict:
         lifecycle._state.subscription_service = _SubscriptionServiceStub(  # type: ignore[assignment]  # stub
-            running, lag, drops, held, halted_at
+            running, lag, drops, held, halted_at, probe_fails
         )
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -384,3 +390,48 @@ def test_halted_and_held_rank_by_what_they_stop() -> None:
 
     dead = _judge_read_path(running=False, lag=None, halted=True)
     assert dead.status == "degraded"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_halt_is_reported_when_the_lag_probe_fails_on_the_same_event(
+    health_payload: HealthProbe,
+) -> None:
+    """#1737 review: the halted head is the event the lag probe cannot read either.
+
+    A probe failure used to blank the whole block to "unknown" with no reason,
+    so /health said mode "full" while the coordinator knew it was stopped.
+    """
+    body = await health_payload(True, None, halted_at=HEAD, probe_fails=True)
+
+    subscription = body["subscription"]
+    assert subscription["status"] == "halted"
+    assert subscription["halted_at"] == HEAD
+    assert body["mode"] == "degraded"
+    assert body["degraded_reasons"] == ["subscription_halted"]
+    assert "lag" not in subscription
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_hold_is_reported_when_the_lag_probe_fails(
+    health_payload: HealthProbe,
+) -> None:
+    """A failing checkpoint store can both cause a hold and fail the probe."""
+    body = await health_payload(True, None, held=(HELD,), probe_fails=True)
+
+    assert body["subscription"]["status"] == "held"
+    assert body["subscription"]["held_projections"][0]["projection"] == "resume_start_todo"
+    assert body["degraded_reasons"] == ["projection_held"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_failed_probe_with_nothing_known_is_still_unknown(
+    health_payload: HealthProbe,
+) -> None:
+    """The control: a probe failure alone is not invented into a degradation."""
+    body = await health_payload(True, None, probe_fails=True)
+
+    assert body["subscription"]["status"] == "unknown"
+    assert body.get("degraded_reasons", []) == []

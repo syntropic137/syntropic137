@@ -17,6 +17,12 @@ The legacy un-pause ``ExecutionResumed`` is the case that matters: its
 validator refuses it on purpose (``legacy_event_shapes``) so that it replays
 generic and owes nothing. Under the v0.17 default it would halt every
 projection instead.
+
+It is also the ONLY rejected payload admitted (#1737 review). Admitting every
+rejected payload, as ``on_invalid_payload="generic"`` does, would let an
+``ExecutionRequested`` missing its ``workflow_id`` replay generic and be
+checkpointed past unapplied. Anything that is not a known legacy shape must
+still raise, so the coordinator halts where it can be seen.
 """
 
 from __future__ import annotations
@@ -62,7 +68,9 @@ V016_RESUME = ExecutionResumedEvent(
 )
 
 
-def _stored(payload: str, *, event_version: int = 1) -> eventstore_pb2.EventData:
+def _stored(
+    payload: str, *, event_version: int = 1, event_type: str = "ExecutionResumed"
+) -> eventstore_pb2.EventData:
     """A row as the v0.16 client appended it; ``payload`` is its JSON text."""
     return eventstore_pb2.EventData(
         meta=eventstore_pb2.EventMetadata(
@@ -71,7 +79,7 @@ def _stored(payload: str, *, event_version: int = 1) -> eventstore_pb2.EventData
             aggregate_type="WorkflowExecution",
             aggregate_nonce=3,
             global_nonce=41,
-            event_type="ExecutionResumed",
+            event_type=event_type,
             event_version=event_version,
             content_type="application/json",
         ),
@@ -159,3 +167,37 @@ class TestAPre017ResumeStillReplaysTyped:
         )
 
         assert await store.get(ResumeStartProcessManager.PROJECTION_NAME, PARENT) is not None
+
+
+class TestOnlyTheKnownLegacyShapeIsAdmitted:
+    """A rejected payload that is not a known legacy shape fails closed."""
+
+    REQUEST_WITHOUT_WORKFLOW = json.dumps(
+        {"execution_id": "exec-1", "requested_at": "2026-10-01T00:00:00+00:00"}
+    )
+
+    def test_a_request_missing_its_workflow_raises(self) -> None:
+        stored = _stored(self.REQUEST_WITHOUT_WORKFLOW, event_type="ExecutionRequested")
+
+        with pytest.raises(EventPayloadError):
+            _shipped_client()._proto_to_envelope(stored)  # pyright: ignore[reportPrivateUsage]
+
+    def test_a_blanket_generic_policy_would_have_admitted_it(self) -> None:
+        """The control: the narrowing is what refuses it, not the payload."""
+        stored = _stored(self.REQUEST_WITHOUT_WORKFLOW, event_type="ExecutionRequested")
+        lenient = GrpcEventStoreClient(on_invalid_payload="generic")
+
+        envelope = lenient._proto_to_envelope(stored)  # pyright: ignore[reportPrivateUsage]
+
+        assert isinstance(envelope.event, GenericDomainEvent)
+
+    def test_an_ambiguous_resumed_payload_raises(self) -> None:
+        """Neither marker is not a legacy shape; it is refused, not guessed."""
+        stored = _stored(json.dumps({"workflow_id": "wf-1", "execution_id": PARENT}))
+
+        with pytest.raises(EventPayloadError):
+            _shipped_client()._proto_to_envelope(stored)  # pyright: ignore[reportPrivateUsage]
+
+    def test_a_payload_that_is_not_json_raises(self) -> None:
+        with pytest.raises(EventPayloadError):
+            _shipped_client()._proto_to_envelope(_stored("{not json"))  # pyright: ignore[reportPrivateUsage]
