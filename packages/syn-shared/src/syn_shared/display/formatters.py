@@ -420,7 +420,7 @@ an em dash)."""
 def format_model_definition(model: str | None) -> str | None:
     """Render a DEFINED model with what its alias resolves to.
 
-    ``"gpt-sol" -> "gpt-sol \u2192 gpt-6-sol"``, ``"opus" -> "opus \u2192
+    ``"gpt-sol" -> "gpt-sol \u2192 gpt-6.1-sol"``, ``"opus" -> "opus \u2192
     claude-opus-5-5"``. A concrete or unknown id round-trips unchanged and
     ``None`` stays ``None``. Definition surfaces only: a run-time surface shows
     the OBSERVED model, never an alias target (ADR-067 D9).
@@ -439,8 +439,8 @@ def format_phase_model_definition(resolution: PhaseModelResolution) -> str:
     """Render a phase definition's model as the chain execution follows.
 
     ``opus`` -> ``opus \u2192 claude-opus-5-5``; a stale ``opus`` on a codex
-    phase -> ``opus \u2192 gpt-sol \u2192 gpt-6-sol``; unset on codex ->
-    ``default \u2192 gpt-sol \u2192 gpt-6-sol``; a concrete id -> itself.
+    phase -> ``opus \u2192 gpt-sol \u2192 gpt-6.1-sol``; unset on codex ->
+    ``default \u2192 gpt-sol \u2192 gpt-6.1-sol``; a concrete id -> itself.
     """
     parts: list[str] = []
     if resolution.substituted:
