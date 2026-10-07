@@ -39,6 +39,17 @@ workflows:
     path: workflows/evals/verify-pinned-codex/workflow.yaml
     models:
       verify: gpt-sol
+  # The sdlc-implement-v3 verify prompt before and after its context budget
+  # (#1726). Same cases, same model, same adaptation: the pair measures what
+  # the prompt change does to tokens and to detection.
+  - id: eval-verify-pinned-sdlc-baseline-v1
+    path: workflows/evals/verify-pinned-sdlc-baseline/workflow.yaml
+    models:
+      verify: gpt-sol
+  - id: eval-verify-pinned-sdlc-lean-v1
+    path: workflows/evals/verify-pinned-sdlc-lean/workflow.yaml
+    models:
+      verify: gpt-sol
 history:
   # v1 predates the workflow suffix in the tag.
   - version: 1

@@ -1,0 +1,51 @@
+id: eval-verify-pinned-sdlc-baseline-v1
+name: "Eval: the sdlc-implement-v3 verify prompt (baseline) on the pinned checkout, codex (v1)"
+description: >
+  eval-verify-pinned-codex-v1 with a different prompt: the verify prompt as it was before the context budget, main @ 5ccb519e8, adapted to a
+  pinned checkout. The adaptation is the same for the lean and baseline
+  workflows, so the difference between their scores and token counts is the
+  prompt change alone.
+type: custom
+classification: standard
+requires_repos: true
+
+inputs:
+  - name: task
+    description: "What the change under review claims to do, and where to look"
+    required: true
+
+# SAME CASES, DIFFERENT PROMPT. phases/verify.md is the eval prompt's header,
+# rules and report shape wrapped around the sdlc-implement-v3 verify phase's
+# review sections, quoted byte for byte. Left out is what needs a branch, a PR
+# or an implement report the eval does not have: checkout, CI reading, UI
+# screenshots and the fix-phase hand-off. scripts/tests/test_eval_suite.py
+# fails when the lean prompt's quoted sections drift from
+# workflows/sdlc/implement-v3/phases/verify.md, or when the lean and baseline
+# prompts differ by anything but the budget section and the gate commands.
+# Below this comment the file is workflows/evals/verify-pinned-codex's.
+#
+# THE MODEL IS PART OF THE MEASUREMENT: gpt-sol, as the sdlc verify phase.
+# evals/verifier-seed-v1/suite.yaml records it.
+
+phases:
+  - id: verify
+    name: Verify the pinned checkout independently
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    delivers_repo_changes: false
+    # No allowed_tools: codex enforces a filesystem sandbox, not a tool
+    # vocabulary, so the validator refuses a tool list on it. The sandbox is
+    # workspace-write, not read-only: read-only is refused at authoring and at
+    # execution (require_runnable_sandbox) because it blocks the report's write
+    # to artifacts/output/. The prompt's rule against fetching or checking out
+    # another ref is what keeps the review on the pinned commit, exactly as it
+    # does for the claude workflow, whose Bash could fetch too.
+    agent:
+      provider: codex
+      model: gpt-sol
+      sandbox: workspace-write
+    prompt_file: phases/verify.md
