@@ -23,6 +23,10 @@ from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdap
 from syn_adapters.workspace_backends.agentic.cpu_hints import cpu_concurrency_env
 from syn_adapters.workspace_backends.service.workspace_lifecycle import build_isolation_config
 from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
+from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    IsolationConfig,
+    SecurityPolicy,
+)
 from syn_shared.settings.workspace import WorkspaceSettings
 
 pytestmark = pytest.mark.unit
@@ -50,7 +54,11 @@ async def _docker_run_argv(
         phase_id=phase_id,
         extra_environment=phase_environment,
     )
+    return await _render_docker_run(isolation_config)
 
+
+async def _render_docker_run(isolation_config: IsolationConfig) -> list[str]:
+    """Create through the adapter against a double provider; render the real argv."""
     workspace = MagicMock()
     workspace.id = "ws-1"
     workspace.metadata = {"workspace_dir": "/tmp/ws-1"}
@@ -109,6 +117,8 @@ async def test_workspace_without_a_phase_has_no_phase_label() -> None:
 _HINT_KEYS = (
     "PYTEST_XDIST_AUTO_NUM_WORKERS",
     "VITEST_MAX_WORKERS",
+    "VITEST_MAX_THREADS",
+    "VITEST_MAX_FORKS",
     "CARGO_BUILD_JOBS",
     "MAKEFLAGS",
     "UV_CONCURRENT_BUILDS",
@@ -131,15 +141,15 @@ async def test_cpu_limit_sizes_tools_in_docker_run(cpu_limit: str, expected: str
     assert {key: env.get(key) for key in _HINT_KEYS} == {
         "PYTEST_XDIST_AUTO_NUM_WORKERS": expected,
         "VITEST_MAX_WORKERS": expected,
+        "VITEST_MAX_THREADS": expected,
+        "VITEST_MAX_FORKS": expected,
         "CARGO_BUILD_JOBS": expected,
         "MAKEFLAGS": f"-j{expected}",
         "UV_CONCURRENT_BUILDS": expected,
         "OMP_NUM_THREADS": expected,
         "RAYON_NUM_THREADS": expected,
     }
-    # vitest 4 reads only VITEST_MAX_WORKERS; NODE_OPTIONS does not size workers.
-    assert "VITEST_MAX_THREADS" not in env
-    assert "VITEST_MAX_FORKS" not in env
+    # NODE_OPTIONS carries unrelated flags and does not size workers.
     assert "NODE_OPTIONS" not in env
 
 
@@ -168,3 +178,17 @@ def test_no_cpu_limit_injects_nothing(cpu_limit_cores: float | None) -> None:
     # a default of 2.0. Docker reads 0 as "no limit", so this is what an
     # unlimited workspace would get.
     assert cpu_concurrency_env(cpu_limit_cores) == {}
+
+
+@pytest.mark.asyncio
+async def test_no_cpu_limit_puts_no_hints_on_docker_run() -> None:
+    """The same, at the consumer: `--cpus=0` (unlimited) carries no `-e` hints."""
+    argv = await _render_docker_run(
+        IsolationConfig(
+            execution_id="exec-1",
+            workspace_id="ws-1",
+            security_policy=SecurityPolicy(cpu_limit_cores=0),
+        )
+    )
+
+    assert not set(_HINT_KEYS) & _env_flags(argv).keys()

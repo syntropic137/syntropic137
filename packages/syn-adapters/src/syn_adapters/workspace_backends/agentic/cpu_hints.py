@@ -29,9 +29,11 @@ def cpu_concurrency_env(cpu_limit_cores: float | None) -> dict[str, str]:
     No limit (``None``, or a non-positive value, which Docker reads as
     unlimited) yields an empty mapping: the tools' own detection is then right.
 
-    Each variable is one a tool reads at the version we can verify:
-    vitest 4 reads only ``VITEST_MAX_WORKERS`` - ``VITEST_MAX_THREADS`` and
-    ``VITEST_MAX_FORKS`` were dropped, so they are deliberately absent.
+    Each variable is one a tool reads at a version we checked. Vitest renamed
+    its: 4.x (pinned in this repo) reads only ``VITEST_MAX_WORKERS``, while
+    1.x-3.x read only ``VITEST_MAX_THREADS`` / ``VITEST_MAX_FORKS``. A workspace
+    runs whatever repo it was given, so all three are set; each version ignores
+    the names it does not know.
     ``NODE_OPTIONS`` is left alone; it does not control worker counts.
     """
     if cpu_limit_cores is None or cpu_limit_cores <= 0:
@@ -39,7 +41,9 @@ def cpu_concurrency_env(cpu_limit_cores: float | None) -> dict[str, str]:
     n = str(max(1, math.ceil(cpu_limit_cores)))
     return {
         "PYTEST_XDIST_AUTO_NUM_WORKERS": n,
-        "VITEST_MAX_WORKERS": n,
+        "VITEST_MAX_WORKERS": n,  # vitest 4.x
+        "VITEST_MAX_THREADS": n,  # vitest 1.x-3.x, threads pool
+        "VITEST_MAX_FORKS": n,  # vitest 1.x-3.x, forks pool
         "CARGO_BUILD_JOBS": n,
         "MAKEFLAGS": f"-j{n}",
         "UV_CONCURRENT_BUILDS": n,
