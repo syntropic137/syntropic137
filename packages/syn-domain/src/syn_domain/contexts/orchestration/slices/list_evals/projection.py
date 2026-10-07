@@ -27,6 +27,7 @@ from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import Verdict
 from syn_domain.contexts.orchestration.domain.events.EvalArchivedEvent import EvalArchivedEvent
 from syn_domain.contexts.orchestration.domain.events.EvalCreatedEvent import (
     BaselineRepoPayload,
@@ -149,7 +150,7 @@ class EvalListProjection(AutoDispatchProjection):
         score = EvalRunScore(
             eval_id=event.eval_id,
             execution_id=event.execution_id,
-            verdict=event.verdict,
+            verdict=Verdict(event.verdict),
             score=event.score,
             evidence=event.evidence,
             scorer=event.scorer,
