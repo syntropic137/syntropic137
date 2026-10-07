@@ -422,21 +422,27 @@ class AgenticIsolationAdapter:
         there had been no reap. A reap that itself fails is logged, not raised,
         so the caller's original error is the one that propagates.
         """
-        reap = asyncio.create_task(self._provider.destroy(workspace))  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        provider = self._provider
+
+        async def reap_and_log() -> None:
+            # Logged inside the task: a second cancellation can return the
+            # caller before the reap finishes, and nothing would see its error.
+            try:
+                await provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+            except Exception:
+                logger.exception(
+                    "Could not destroy workspace for execution %s after a failed provision",
+                    execution_id,
+                )
+
+        reap = asyncio.create_task(reap_and_log())
         # The event loop holds tasks weakly: keep the reap alive even when the
         # cancellation below returns before it finishes.
         _PENDING_REAPS.add(reap)
         reap.add_done_callback(_PENDING_REAPS.discard)
-        try:
-            await asyncio.shield(reap)
-        except asyncio.CancelledError:
-            # The shielded reap keeps running; the cancellation is the caller's.
-            raise
-        except Exception:
-            logger.exception(
-                "Could not destroy workspace for execution %s after a failed provision",
-                execution_id,
-            )
+        # The shielded reap keeps running if this await is cancelled; the
+        # cancellation is the caller's and propagates.
+        await asyncio.shield(reap)
 
     async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:
         """Destroy an isolated workspace.

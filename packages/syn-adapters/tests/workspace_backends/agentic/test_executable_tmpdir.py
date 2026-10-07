@@ -241,6 +241,14 @@ class _MkdirHangsAndReapIsSlow(_MkdirHangs):
         self.destroyed.append(workspace)
 
 
+class _MkdirHangsAndReapFails(_MkdirHangs):
+    """The reap yields, then fails: a second cancellation has already returned the caller."""
+
+    async def destroy(self, workspace: object) -> None:
+        await asyncio.sleep(0.05)
+        raise RuntimeError("docker rm failed")
+
+
 class TestCancelledProvisionDoesNotLeak:
     """Cancelled during the mkdir, the container exists but no handle does (#1706 review).
 
@@ -274,3 +282,23 @@ class TestCancelledProvisionDoesNotLeak:
         await asyncio.sleep(0.1)  # let the shielded reap finish
 
         assert len(provider.destroyed) == 1, "the second cancellation stopped the reap"
+
+    @pytest.mark.asyncio
+    async def test_a_reap_that_fails_after_a_second_cancellation_is_still_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        provider = _MkdirHangsAndReapFails()
+        task = asyncio.ensure_future(_create(provider))
+        await provider.mkdir_started.wait()
+
+        task.cancel()
+        await asyncio.sleep(0)  # the reap has started and is sleeping
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        with caplog.at_level("ERROR"):
+            await asyncio.sleep(0.1)  # let the shielded reap fail
+
+        assert "Could not destroy workspace" in caplog.text, (
+            "a reap that failed after the caller left went unlogged"
+        )
