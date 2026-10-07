@@ -8,8 +8,8 @@
  * price.
  */
 
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { PhaseDefinition, PhaseMetrics } from '../../../types'
 import { PhasePipeline } from '../PhasePipeline'
@@ -168,6 +168,24 @@ describe('workflow Phase Pipeline card', () => {
     expect(screen.getByRole('link', { name: 'Source of skills at v1' }).getAttribute('href')).toBe(
       'https://github.com/org/skills/tree/v1',
     )
+  })
+
+  it('Enter on a skill source link follows the link and does not toggle the phase', () => {
+    // Codex review of #1676: Enter bubbled from the link to the card's handler,
+    // which called preventDefault (no navigation) and toggled selection.
+    const onPhaseSelect = vi.fn()
+    render(
+      <PhasePipeline
+        phases={[{ ...PLAN, skills: [{ name: 'architecture', source_url: 'https://github.com/syntropic137/software-leverage-points', version: '7e48aad9c7186bb03b8b0df899f56b7cd3b2a454', name_overridden: false, raw: null }] }]}
+        onPhaseSelect={onPhaseSelect}
+      />,
+    )
+    const link = screen.getByRole('link', { name: /Source of architecture/ })
+    const notPrevented = fireEvent.keyDown(link, { key: 'Enter' })
+    expect(onPhaseSelect).not.toHaveBeenCalled()
+    expect(notPrevented).toBe(true)
+    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter' })
+    expect(onPhaseSelect).toHaveBeenCalledWith('plan')
   })
 
   it('says a phase declares no skills rather than leaving it blank', () => {

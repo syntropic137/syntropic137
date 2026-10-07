@@ -46,6 +46,9 @@ function PhaseCard({
       tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
       onKeyDown={onClick ? (e) => {
+        // Only the card itself: Enter on a link inside it (a skill's source
+        // link) must follow the link, not toggle the phase.
+        if (e.target !== e.currentTarget) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onClick()
