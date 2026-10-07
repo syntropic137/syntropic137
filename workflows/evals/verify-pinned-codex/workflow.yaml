@@ -1,0 +1,50 @@
+id: eval-verify-pinned-codex-v1
+name: "Eval: verify the pinned checkout, read-only, on codex (v1)"
+description: >
+  eval-verify-pinned-v1 with a different verifier: the same single verify phase
+  and the same prompt over the commit the workspace was provisioned at, run on
+  codex. The verifier-seed eval suite (evals/verifier-seed-v1) launches either
+  workflow over the same cases, so the two verifiers' scores compare directly.
+type: custom
+classification: standard
+requires_repos: true
+
+inputs:
+  - name: task
+    description: "What the change under review claims to do, and where to look"
+    required: true
+
+# SAME CASES, DIFFERENT VERIFIER (#967 step 8). This file is
+# workflows/evals/verify-pinned/workflow.yaml with only the verify phase's
+# agent changed, so a score difference is the verifier and nothing else.
+# phases/verify.md is a byte-identical copy of that workflow's prompt, and
+# scripts/tests/test_eval_suite.py fails when the prompts or any field but
+# the agent block (and this file's id, name and description) diverge. Change
+# the prompt in both or in neither.
+#
+# THE MODEL IS PART OF THE MEASUREMENT. evals/verifier-seed-v1/suite.yaml
+# records this workflow's id and each phase's model, and the test fails when
+# they disagree. Change the model here and bump the suite's version with it.
+
+phases:
+  - id: verify
+    name: Verify the pinned checkout independently
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    delivers_repo_changes: false
+    # No allowed_tools: codex enforces a filesystem sandbox, not a tool
+    # vocabulary, so the validator refuses a tool list on it. The sandbox is
+    # workspace-write, not read-only: read-only is refused at authoring and at
+    # execution (require_runnable_sandbox) because it blocks the report's write
+    # to artifacts/output/. The prompt's rule against fetching or checking out
+    # another ref is what keeps the review on the pinned commit, exactly as it
+    # does for the claude workflow, whose Bash could fetch too.
+    agent:
+      provider: codex
+      model: gpt-sol
+      sandbox: workspace-write
+    prompt_file: phases/verify.md
