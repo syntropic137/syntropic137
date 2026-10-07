@@ -282,7 +282,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # (#1147). total_phases is required on the event, so there is no
             # default worth defending here; 0 would be a run with no phases.
             "total_phases": event_data.get("total_phases", 0),
-            "completed_phases": inherited_phase_count(event_data),
+            "completed_phases": inherited_phase_count(event_data.get("resumed_from")),
             # Held here, not served from here: `on_phase_started` moves each
             # budget onto the phase that it belongs to, which is where a
             # reader needs it next to that phase's elapsed time (#1262).

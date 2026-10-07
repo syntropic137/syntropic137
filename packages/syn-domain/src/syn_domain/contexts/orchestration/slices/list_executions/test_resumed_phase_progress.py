@@ -50,6 +50,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
         PhaseProgress,
     )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
+        WorkflowExecutionDetail,
+    )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
+        WorkflowExecutionSummary,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -185,7 +191,7 @@ class _Stream:
 
     async def _apply_from_empty(
         self,
-    ) -> tuple[PhaseProgress, dict[str, object], dict[str, object]]:
+    ) -> tuple[PhaseProgress, WorkflowExecutionSummary, WorkflowExecutionDetail]:
         listing = WorkflowExecutionListProjection(InMemoryProjectionStore())
         detail = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
         for applied in self.events:
@@ -196,7 +202,7 @@ class _Stream:
         assert summary is not None
         assert detailed is not None
         assert summary.phase_progress == detailed.phase_progress
-        return summary.phase_progress, summary.to_dict(), detailed.to_dict()
+        return summary.phase_progress, summary, detailed
 
 
 class TestResumedPhaseProgress:

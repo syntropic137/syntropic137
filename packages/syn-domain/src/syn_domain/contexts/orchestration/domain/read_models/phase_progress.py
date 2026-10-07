@@ -23,7 +23,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
+
+    from pydantic import JsonValue
 
 
 @dataclass(frozen=True)
@@ -103,8 +105,11 @@ def record_skips(recorded: Sequence[str], skipped: Sequence[str]) -> list[str]:
     return list(dict.fromkeys([*recorded, *skipped]))
 
 
-def inherited_phase_count(started: Mapping[str, object]) -> int:
-    """Phases a resumed run took over completed from its parent, read off its start.
+def inherited_phase_count(resumed_from: JsonValue) -> int:
+    """Phases a resumed run took over completed from its parent.
+
+    ``resumed_from`` is the field of that name on the run's
+    `WorkflowExecutionStarted`, as stored.
 
     A resume never emits `PhaseCompleted` for the prefix it inherits
     (ADR-014 s7), so a read model that counts from zero shows a run resumed at
@@ -113,7 +118,6 @@ def inherited_phase_count(started: Mapping[str, object]) -> int:
     includes the prefix, restates this figure rather than adding to it.
     Zero for a fresh run.
     """
-    origin = started.get("resumed_from")
-    if origin is None:
+    if resumed_from is None:
         return 0
-    return len(ResumeOrigin.model_validate(origin).inherited_phases)
+    return len(ResumeOrigin.model_validate(resumed_from).inherited_phases)
