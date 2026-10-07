@@ -33,7 +33,7 @@ def test_a_run_certified_at_round_one_reads_six_of_six() -> None:
         skipped_phase_ids=("fix_2", "reverify_2", "fix_3", "reverify_3"),
     )
 
-    response = _build_execution_summary_response(_to_execution_summary(row, {}, {}))
+    response = _build_execution_summary_response(_to_execution_summary(row, {}))
 
     assert response.phase_progress.display == "6 of 6 (4 phases not needed)"
     assert response.phase_progress.skipped == 4
