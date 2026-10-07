@@ -399,8 +399,11 @@ Membership is the Execution's (`eval_membership`), never the Eval's. A Run
 carries what the dashboard compares: its Workflow, the models its phases
 OBSERVED (the model that ran, as recorded on the session, never the alias a
 phase declared - `opus` is not a model), its cost and duration, and its Score
-if it has one. A Run's workflow version is not recorded on the Execution yet,
-so the read path reports none rather than guess.
+if it has one. A Run's workflow version is the one it LAUNCHED from: the
+template's installed package version, or its source digest when it has none,
+written on the Execution's start event. Never the template's current version,
+which is wrong for every Run that started before an update. A Run started
+before this was recorded, or a resume, reports none rather than guess.
 
 ## Score
 
