@@ -45,6 +45,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhas
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
     inherited_phase_count,
+    inherited_phase_ids,
     record_skips,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
@@ -125,7 +126,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # populate agent_provider / agent_model, the agent that actually ran.
     # v17: both branches bumped 15 -> 16 independently; a deployment already
     # at either 16 would miss the other's rebuild, so the merge bumps once more.
-    VERSION = 17
+    # v18: declared_phases and inherited_phase_ids from WorkflowExecutionStarted
+    # (feedback cee46909), so every run, not only new ones, shows the phases
+    # it has still to do.
+    VERSION = 18
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -249,19 +253,35 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # all. A phase with no stated budget is absent rather than 0, which is
         # what keeps an unknown budget reading as None downstream instead of as
         # a number nobody set.
+        #
+        # The same loop keeps every phase the run declared, in order, so the
+        # detail view can show the phases still to come and not only the ones
+        # that started (feedback cee46909). Off the event `total_phases` is
+        # read from, so the list and the progress denominator agree.
         definitions = event_data.get("phase_definitions")
         phase_budgets: dict[str, int] = {}
+        declared_phases: list[dict[str, str | int]] = []
         for definition in definitions if isinstance(definitions, list) else []:
             if not isinstance(definition, dict):
                 continue
             phase_id = definition.get("phase_id")
+            if not isinstance(phase_id, str) or not phase_id:
+                continue
             timeout = definition.get("timeout_seconds")
-            if isinstance(phase_id, str) and phase_id and isinstance(timeout, int):
+            if isinstance(timeout, int):
                 phase_budgets[phase_id] = timeout
+            name = definition.get("name")
+            order = definition.get("order")
+            declared_phases.append(
+                {
+                    "phase_id": phase_id,
+                    "name": name if isinstance(name, str) and name else phase_id,
+                    "order": order if isinstance(order, int) else len(declared_phases),
+                }
+            )
 
-        # Create initial phases from workflow definition (all pending)
-        # Note: In a full implementation, we'd get phase names from workflow
-        # For now, phases are populated as they start/complete
+        # `phases` holds only the phases that started; `declared_phases` is
+        # every phase, and the read model derives where each one stands.
         detail = {
             "execution_id": execution_id,
             "workflow_id": event_data.get("workflow_id", ""),
@@ -270,6 +290,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "started_at": event_data.get("started_at"),
             "completed_at": None,
             "phases": [],  # Populated as phases start/complete
+            "declared_phases": declared_phases,
+            "inherited_phase_ids": inherited_phase_ids(event_data.get("resumed_from")),
             "total_input_tokens": 0,
             "total_output_tokens": 0,
             "total_cache_creation_tokens": 0,
