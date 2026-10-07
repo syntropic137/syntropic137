@@ -10,7 +10,7 @@
 
 This diagram shows which events feed which projections in the Syn137 system.
 
-**Total Relationships:** 76 events → 26 projections
+**Total Relationships:** 81 events → 27 projections
 
 ```mermaid
 graph LR
@@ -36,31 +36,31 @@ graph LR
         p6[ExecutionTodoProjection]
         p7[GlobalClaudePluginsProjection]
         p8[InstallationProjection]
-        p9[RepoCorrelationProjection]
-        p10[RepoCostProjection]
-        p11[RepoHealthProjection]
-        p12[RepoProjection]
-        p13[SessionCostProjection]
-        p14[SessionListProjection]
-        p15[SkillLockProjection]
+        p9[OrganizationProjection]
+        p10[RepoCorrelationProjection]
+        p11[RepoCostProjection]
+        p12[RepoHealthProjection]
+        p13[RepoProjection]
+        p14[SessionCostProjection]
+        p15[SessionListProjection]
     end
 
     e4 --> p6
     e7 --> p6
     e5 --> p6
     e8 --> p3
-    e9 --> p9
+    e9 --> p10
     e3 --> p3
     e3 --> p6
-    e3 --> p10
     e3 --> p11
+    e3 --> p12
     e1 --> p3
     e1 --> p6
-    e1 --> p9
+    e1 --> p10
     e2 --> p3
     e2 --> p6
-    e2 --> p10
     e2 --> p11
+    e2 --> p12
     e6 --> p6
     e10 --> p3
 ```
@@ -69,9 +69,9 @@ graph LR
 
 ## Statistics
 
-- **Events with projections:** 76
-- **Unique projections:** 26
-- **Total event-to-projection mappings:** 123
+- **Events with projections:** 81
+- **Unique projections:** 27
+- **Total event-to-projection mappings:** 130
 
 ---
 
