@@ -9,8 +9,9 @@ nothing; otherwise ``POST /evals/<execution-id>/archive`` or
 ``syn workflow run --eval <execution-id>`` appends Eval events to the
 execution's stream.
 
-The store here is keyed the way the server keys it; ``MemoryEventStoreClient``
-keys by the whole stream name and hides this.
+``MemoryEventStoreClient`` keys a stream by aggregate id alone, as the server
+does, since ESP v0.17.0 (event-sourcing-platform#345); before that it keyed by
+the whole stream name and hid this.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import os
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 import pytest
-from event_sourcing import DomainEvent, EventEnvelope, EventStoreRepository
+from event_sourcing import EventStoreRepository
 from event_sourcing.client.memory import MemoryEventStoreClient
 
 from syn_adapters.storage.repositories import RepositoryAdapter
@@ -46,33 +47,8 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 EXECUTION_ID = "exec-967-foreign"
 
 
-class _ServerKeyedClient(MemoryEventStoreClient):
-    """One keyspace for every aggregate type, as on the ESP server."""
-
-    @staticmethod
-    def _key(stream_name: str) -> str:
-        _, _, aggregate_id = stream_name.partition("-")
-        return aggregate_id
-
-    async def read_events(
-        self, stream_name: str, from_version: int | None = None
-    ) -> list[EventEnvelope[DomainEvent]]:
-        return await super().read_events(self._key(stream_name), from_version)
-
-    async def append_events(
-        self,
-        stream_name: str,
-        events: list[EventEnvelope[DomainEvent]],
-        expected_version: int | None = None,
-    ) -> None:
-        await super().append_events(self._key(stream_name), events, expected_version)
-
-    async def stream_exists(self, stream_name: str) -> bool:
-        return await super().stream_exists(self._key(stream_name))
-
-
-async def _world() -> tuple[_ServerKeyedClient, RepositoryAdapter[EvalAggregate]]:
-    client = _ServerKeyedClient()
+async def _world() -> tuple[MemoryEventStoreClient, RepositoryAdapter[EvalAggregate]]:
+    client = MemoryEventStoreClient()
     executions = RepositoryAdapter(
         EventStoreRepository(
             client,
@@ -102,7 +78,7 @@ async def _world() -> tuple[_ServerKeyedClient, RepositoryAdapter[EvalAggregate]
     return client, evals
 
 
-async def _stream(client: _ServerKeyedClient) -> list[str]:
+async def _stream(client: MemoryEventStoreClient) -> list[str]:
     return [e.event.event_type for e in await client.read_events(f"Eval-{EXECUTION_ID}")]
 
 

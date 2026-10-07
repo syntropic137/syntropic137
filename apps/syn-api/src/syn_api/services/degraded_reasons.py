@@ -28,6 +28,10 @@ class DegradedReason(StrEnum):
     PROJECTION_CATCHUP = "projection_catchup"
     PROJECTION_STALLED = "projection_stalled"
     PROJECTION_DROPPED_EVENT = "projection_dropped_event"
+    #: A projection failed to apply an event and is held below it (ESP #391).
+    PROJECTION_HELD = "projection_held"
+    #: The subscription stopped at an undecodable stored event (ESP ADR-026).
+    SUBSCRIPTION_HALTED = "subscription_halted"
     EVENT_POLLER = "event_poller"
     CHECK_RUN_POLLER = "check_run_poller"
     ANTHROPIC_API_KEY = "anthropic_api_key"

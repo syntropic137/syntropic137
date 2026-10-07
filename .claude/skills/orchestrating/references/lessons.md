@@ -6,6 +6,9 @@ with a pointer to the change.
 
 ## Verification
 
+- **An eval measures its environment as much as its subject.** The first verify-prompt A/B scored 1/6 vs 0/4 because the eval sandbox had no package-index network, so the verifier blocked on failed installs (#1726). The eval environment must match production for the thing being measured; environment failures score ERROR, not FAIL.
+- **A verifier suite needs clean controls.** Without bug-free cases, a verifier that blocks everything scores 100% (research #1725).
+
 - **Test doubles diverge from real backends.** The in-memory event store keys
   streams by `Type-id`; the ESP server keys them by aggregate id alone (ESP
   #344). In-memory artifact storage keys objects by id; MinIO keys them by path.
@@ -22,6 +25,10 @@ with a pointer to the change.
 
 ## Dispatch and prompts
 
+- **Read the existing epics, ADRs and plans before briefing a design.** Three briefs on 2026-10-07 (token retry, two-host spike, executor Step 3) contradicted designs already written (#1593, #1612, #1310) and were refused at premise. The premise phase is cheap insurance; the miss was the orchestrator's.
+- **Give a run every repo a fix may touch (`-R`).** The workspace token is scoped to the declared repos; a #1696 fix that needed an ESP change dead-ended (PC-121).
+- **A run that needs platform data cannot get it from inside a workspace** (no API route or credentials, PC-127). Measure first and paste the data into the brief, or do that part locally.
+
 - **Name the trap.** A run that is told "the last attempt failed because X;
   prove with Y that you did not" avoids X.
 - **Premise phases correctly refuse false premises.** A refusal is the system
@@ -34,6 +41,11 @@ with a pointer to the change.
   empty task runs at full cost and does nothing; it is now refused at admission.
 
 ## Platform and deploy
+
+- **Check what the deployment actually runs, including the event store.** Silent dropped events were the v0.15.1 event store (no commit-order lock) left pinned by hand while main used v0.16.0; pit stops never moved it (#1708).
+- **A forced swap orphans every run, and a read-model rebuild hides orphans from startup reconciliation** (PC-123). Prefer the gated pit stop now that pause no longer deadlocks (#1688).
+- **Disk is a hard stop.** At ~96% the API refuses new executions with 507. Check disk every tick; this host also carries other projects.
+- **Concurrency is CPU-bound on this host.** At 10 runs load is ~27 on 16 cores and provision steps start timing out (PC-126); memory stays ~15%. Cut per-run CPU and tokens before raising the cap.
 
 - **Prove a deploy with a real start.** The pit stop probe does this since #1644.
   Keep the probe workflow installed and unarchived.
@@ -58,6 +70,10 @@ with a pointer to the change.
   review.** Say so when you rely on one.
 
 ## Orchestrator mechanics
+
+- **Merge watchers use `if ...; then merge; fi`, never `cmd ; merge`.** A `;` merges on red CI (PC-118).
+- **Never install an eval workflow by hand.** `eval_suite.py launch` owns install and provenance; a manual install stamped 0.0.0 and blocked the launch (PC-119).
+- **Grep exec ids from the execution list, not from command output** that echoes the task text (PC-84 repeated).
 
 - **Use the pinned helpers.** Ad-hoc `curl` with `$(...)`, `git add -A` and
   heredocs containing secrets trip the security hook.
