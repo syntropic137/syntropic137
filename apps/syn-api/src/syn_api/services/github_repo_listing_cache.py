@@ -9,7 +9,9 @@ stores it.
 Only complete listings are stored, so a cached listing never claims more than
 GitHub once confirmed. Each listing carries the cache generation read before
 GitHub was asked; invalidating bumps the generation, so a refresh that read
-GitHub before a webhook and writes after it stores a listing nobody will serve. Production keeps it in Redis, shared across replicas and
+GitHub before a webhook and writes after it stores nothing. The write is a
+compare-and-set on the generation, so that late refresh cannot overwrite a
+newer refresh's listing either. Production keeps it in Redis, shared across replicas and
 surviving a restart; a lost or unreachable Redis costs speed, never
 correctness, because a miss means asking GitHub live as before (ADR-060: no
 in-memory store outside test/offline).
@@ -48,6 +50,26 @@ _RETAINED_FOR = timedelta(hours=1)
 _KEY = "syn:github:repo_listing"
 _GENERATION_KEY = "syn:github:repo_listing:generation"
 
+# Each script is one Redis command, so nothing interleaves between its check and
+# its write. KEYS[1] is the listing, KEYS[2] the generation.
+
+# Store ARGV[1] for ARGV[3] seconds only if ARGV[2] is still the generation.
+PUT_IF_CURRENT = """
+if tonumber(redis.call('GET', KEYS[2]) or '0') ~= tonumber(ARGV[2]) then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
+return 1
+"""
+
+# Bump the generation and drop the listing together, so no listing stored under
+# the new generation can land between the two and then be deleted.
+INVALIDATE = """
+redis.call('INCR', KEYS[2])
+redis.call('DEL', KEYS[1])
+return 1
+"""
+
 
 class CachedRepoListing(BaseModel):
     """A listing GitHub confirmed complete, with the time it was asked."""
@@ -77,7 +99,9 @@ class RepoListingCache(Protocol):
         """The current generation, or None if it cannot be read (then do not put)."""
         ...
 
-    async def put(self, listing: CachedRepoListing) -> None: ...
+    async def put(self, listing: CachedRepoListing) -> None:
+        """Store the listing only if its generation is still the current one."""
+        ...
 
     async def invalidate(self) -> None:
         """Bump the generation, so no listing stored before now is served."""
@@ -117,16 +141,21 @@ class RedisRepoListingCache:
 
     async def put(self, listing: CachedRepoListing) -> None:
         try:
-            await self._redis.set(
-                _KEY, listing.model_dump_json(), ex=int(_RETAINED_FOR.total_seconds())
+            await self._redis.eval(  # type: ignore[misc]  # redis-py stubs type eval as str
+                PUT_IF_CURRENT,
+                2,
+                _KEY,
+                _GENERATION_KEY,
+                listing.model_dump_json(),
+                str(listing.generation),
+                str(int(_RETAINED_FOR.total_seconds())),
             )
         except Exception:
             logger.warning("Could not store GitHub repo listing cache", exc_info=True)
 
     async def invalidate(self) -> None:
         try:
-            await self._redis.incr(_GENERATION_KEY)
-            await self._redis.delete(_KEY)
+            await self._redis.eval(INVALIDATE, 2, _KEY, _GENERATION_KEY)  # type: ignore[misc]
         except Exception:
             # The entry then lives until FRESH_FOR runs out: the TTL bound holds.
             logger.warning("Could not invalidate GitHub repo listing cache", exc_info=True)
@@ -149,7 +178,8 @@ class InMemoryRepoListingCache(InMemoryAdapter):
         return self._generation
 
     async def put(self, listing: CachedRepoListing) -> None:
-        self._listing = listing
+        if listing.generation == self._generation:
+            self._listing = listing
 
     async def invalidate(self) -> None:
         self._generation += 1
