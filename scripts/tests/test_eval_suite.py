@@ -1466,3 +1466,53 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
+
+
+@pytest.mark.unit
+def test_an_edited_prompt_relaunched_over_an_archived_template_without_a_bump_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Codex review of #1705: archiving must not open the republish hole.
+
+    Launch v2, archive its workflow, edit an inlined prompt, relaunch without
+    bumping the suite. The same version under a new digest is a republish
+    whether or not the template is archived, so the real handler refuses it,
+    the archived record is untouched and no eval is created.
+    """
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    templates = _Templates()
+    _, client = _provenanced_server(loaded, templates)
+    launch_suite(loaded, client, tmp_path / "launches.jsonl")
+    launched = install_provenance(loaded, _document(loaded)).source_digest
+    templates.archive(_CODEX_WF)
+
+    root = tmp_path / "root"
+    workflow_dir = (root / loaded.workflow.path).parent
+    shutil.copytree((ROOT / loaded.workflow.path).parent, workflow_dir)
+    prompt = workflow_dir / "phases" / "verify.md"
+    prompt.write_text(prompt.read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8")
+
+    server, client = _provenanced_server(loaded, templates)
+    with pytest.raises(RuntimeError, match=r"different source.*bump the suite version"):
+        launch_suite(loaded, client, tmp_path / "launches.jsonl", root=root)
+
+    stored = templates.by_id[_CODEX_WF]
+    assert stored.is_archived
+    assert stored.source_digest == launched
+    assert not any(r.url.path == "/evals" for r in server.requests)
+
+
+@pytest.mark.unit
+def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> None:
+    """The recovery the archived exemption exists for still needs no bump or force."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    templates = _Templates()
+    _, client = _provenanced_server(loaded, templates)
+    launch_suite(loaded, client, tmp_path / "launches.jsonl")
+    templates.archive(_CODEX_WF)
+
+    _, client = _provenanced_server(loaded, templates)
+    lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
+
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert not templates.by_id[_CODEX_WF].is_archived
