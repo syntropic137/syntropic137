@@ -202,12 +202,27 @@ class Settings(BaseSettings):
         ),
     )
 
+    syn_host_id: str | None = Field(
+        default=None,
+        description=(
+            "Identity of the host whose workspace and sidecar containers this API "
+            "creates, stamped on them as the syn.host_id label. Defaults to the "
+            "API container's hostname. Set it explicitly when that hostname is not "
+            "stable: without a compose `hostname:` it is the container id, which "
+            "changes every time the API container is recreated."
+        ),
+    )
+
     # =========================================================================
     # VALIDATORS - Convert empty strings to None
     # =========================================================================
 
     @field_validator(
-        "esp_event_store_db_url", "syn_observability_db_url", "event_store_url", mode="before"
+        "esp_event_store_db_url",
+        "syn_observability_db_url",
+        "event_store_url",
+        "syn_host_id",
+        mode="before",
     )
     @classmethod
     def empty_str_to_none(cls, v: str | None) -> str | None:

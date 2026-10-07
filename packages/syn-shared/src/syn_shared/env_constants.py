@@ -28,6 +28,11 @@ Model aliases are NOT here - they are not env var names. They live in
 
 ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
 
+# Stamped into the API image by its build (`pit_stop.sh` passes the tag), never
+# chosen per deployment, so deliberately not a Settings field (see
+# syn_api.build_info). Empty in compose and dry-run builds.
+ENV_BUILD_IMAGE_TAG = "SYN_BUILD_IMAGE_TAG"
+
 # Per-dispatch identity, supplied only after durable invocation registration.
 ENV_AGENTIC_INVOCATION_ID = "AGENTIC_INVOCATION_ID"
 ENV_AGENTIC_ATTEMPT_ID = "AGENTIC_ATTEMPT_ID"
