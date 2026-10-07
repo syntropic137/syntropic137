@@ -30,6 +30,8 @@ from changelog import (
 )
 
 URL = "https://example.test/org/repo"
+EM_DASH = "\N{EM DASH}"
+EN_DASH = "\N{EN DASH}"
 
 
 # --- grouping -----------------------------------------------------------------
@@ -87,7 +89,7 @@ def test_release_notes_skips_fenced_code_and_prose_only_has_no_bullet() -> None:
 @pytest.mark.unit
 def test_entry_prefers_release_note_and_drops_its_trailing_pr_ref() -> None:
     pr = MergedPullRequest(42, "feat(cli): add tags", 0)
-    body = "### Release notes\r\n- Executions can carry tags — repeatable (#42)\r\n"
+    body = "### Release notes\r\n- Executions can carry tags " + EM_DASH + " repeatable (#42)\r\n"
     entry = make_entry(pr, body)
     assert entry.render() == "- Executions can carry tags - repeatable (#42)"
     assert entry.category is Category.ADDED
@@ -99,7 +101,7 @@ def test_entry_prefers_release_note_and_drops_its_trailing_pr_ref() -> None:
 
 @pytest.mark.unit
 def test_plain_text_replaces_em_and_en_dashes() -> None:
-    assert plain_text("fix: a—b – c  d") == "fix: a - b - c d"
+    assert plain_text("fix: a" + EM_DASH + "b " + EN_DASH + " c  d") == "fix: a - b - c d"
 
 
 # --- prerelease handling ------------------------------------------------------
@@ -142,8 +144,15 @@ def _merge_pr(
     _git(repo, "commit", "-q", "-m", title, when=when)
     _git(repo, "checkout", "-q", into)
     _git(
-        repo, "merge", "-q", "--no-ff", branch,
-        "-m", f"Merge pull request #{number} from org/{branch}", "-m", title,
+        repo,
+        "merge",
+        "-q",
+        "--no-ff",
+        branch,
+        "-m",
+        f"Merge pull request #{number} from org/{branch}",
+        "-m",
+        title,
         when=when,
     )
 
@@ -151,8 +160,15 @@ def _merge_pr(
 def _release(repo: Path, tag: str, when: int, release_pr: int) -> None:
     _git(repo, "checkout", "-q", "release")
     _git(
-        repo, "merge", "-q", "--no-ff", "main",
-        "-m", f"Merge pull request #{release_pr} from org/main", "-m", "Release",
+        repo,
+        "merge",
+        "-q",
+        "--no-ff",
+        "main",
+        "-m",
+        f"Merge pull request #{release_pr} from org/main",
+        "-m",
+        "Release",
         when=when,
     )
     _git(repo, "tag", tag)
@@ -176,22 +192,32 @@ def repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
     _merge_pr(path, 4, "chore/four", "chore: remove the old flag", T0 + 3 * DAY)
     _release(path, "v0.2.0", T0 + 3 * DAY + 60, release_pr=5)
 
-    # A PR that reached main via another branch, merged by hand as `Merge #6`.
-    _git(path, "checkout", "-q", "-b", "side", "main")
-    _merge_pr(path, 7, "feat/seven", "feat: nested — via side", T0 + 4 * DAY)
+    # A PR that reached main via another branch, merged by hand as `Merge #6`;
+    # not on main's first-parent line, so a --first-parent walk would miss #7.
+    _git(path, "branch", "side", "main")
+    _merge_pr(
+        path, 7, "feat/seven", "feat: nested " + EM_DASH + " via side", T0 + 4 * DAY, into="side"
+    )
     _git(path, "checkout", "-q", "main")
-    _git(path, "reset", "-q", "--hard", "HEAD~1")  # undo: main must not have #7 directly
-    _git(path, "checkout", "-q", "side")
-    _git(path, "merge", "-q", "--no-ff", "feat/seven", "-m", "Merge pull request #7 from org/feat/seven", "-m", "feat: nested — via side", when=T0 + 4 * DAY)
-    _git(path, "checkout", "-q", "main")
-    _git(path, "merge", "-q", "--no-ff", "side", "-m", "Merge #6 (side work) into main", when=T0 + 5 * DAY)
+    _git(
+        path,
+        "merge",
+        "-q",
+        "--no-ff",
+        "side",
+        "-m",
+        "Merge #6 (side work) into main",
+        when=T0 + 5 * DAY,
+    )
     _merge_pr(path, 8, "security/eight", "security(deps): bump", T0 + 6 * DAY)
     return path
 
 
 @pytest.mark.unit
 def test_sections_by_tag_newest_first(repo: Path) -> None:
-    text = build_changelog(repo, {8: "## Release notes\n- Patched a CVE.\n"}, repo_url=URL, first_version=(0, 0, 0))
+    text = build_changelog(
+        repo, {8: "## Release notes\n- Patched a CVE.\n"}, repo_url=URL, first_version=(0, 0, 0)
+    )
     expected_tail = """
 ## [Unreleased]
 

@@ -50,10 +50,13 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_URL = "https://github.com/syntropic137/syntropic137"
@@ -71,6 +74,7 @@ RELEASE_NOTES_HEADING = re.compile(r"^#{1,6}\s*release notes\s*:?\s*$", re.IGNOR
 HEADING = re.compile(r"^#{1,6}\s")
 FENCE = re.compile(r"^\s*(```|~~~)")
 BULLET = re.compile(r"^\s*[-*+]\s+(.*)$")
+DASHES = re.compile("\\s*[\N{EM DASH}\N{EN DASH}]\\s*")
 TRAILING_PR_REF = re.compile(r"\s*\(#\d+\)$")
 
 # Unit and record separators: neither can appear in a commit message.
@@ -160,7 +164,7 @@ class PendingRelease:
 
 def plain_text(text: str) -> str:
     """One line, ASCII hyphens: em and en dashes become `` - ``."""
-    text = re.sub(r"\s*[—–]\s*", " - ", text)
+    text = DASHES.sub(" - ", text)
     return " ".join(text.split())
 
 
@@ -289,15 +293,29 @@ def fetch_bodies(repo: Path, since: int) -> dict[int, str]:
     try:
         output = subprocess.run(
             [
-                "gh", "pr", "list", "--repo", REPO_URL.removeprefix("https://github.com/"),
-                "--state", "merged", "--limit", "2000",
-                "--search", f"merged:>={day.isoformat()}",
-                "--json", "number,body",
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                REPO_URL.removeprefix("https://github.com/"),
+                "--state",
+                "merged",
+                "--limit",
+                "2000",
+                "--search",
+                f"merged:>={day.isoformat()}",
+                "--json",
+                "number,body",
             ],
-            cwd=repo, check=True, capture_output=True, text=True,
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout
     except subprocess.CalledProcessError as error:
-        print(f"changelog: gh failed ({error.stderr.strip()}); using PR titles only", file=sys.stderr)
+        print(
+            f"changelog: gh failed ({error.stderr.strip()}); using PR titles only", file=sys.stderr
+        )
         return {}
     bodies: dict[int, str] = {}
     for item in json.loads(output):
@@ -326,7 +344,9 @@ def collect_sections(
     sections: list[tuple[Section, list[MergedPullRequest]]] = []
     if pending is not None:
         sections.append((Section(None, None, pending.version, ()), []))
-        sections.append((Section(pending.version, pending.date, latest_version, ()), unreleased_prs))
+        sections.append(
+            (Section(pending.version, pending.date, latest_version, ()), unreleased_prs)
+        )
     else:
         sections.append((Section(None, None, latest_version, ()), unreleased_prs))
 
@@ -393,11 +413,7 @@ def build_changelog(
 
 
 def oldest_merge(repo: Path, first_version: tuple[int, int, int]) -> int | None:
-    stamps = [
-        pr.merged_at
-        for _, prs in collect_sections(repo, None, first_version)
-        for pr in prs
-    ]
+    stamps = [pr.merged_at for _, prs in collect_sections(repo, None, first_version) for pr in prs]
     return min(stamps) if stamps else None
 
 
@@ -417,7 +433,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="exit 1 if the file is stale")
     parser.add_argument("--offline", action="store_true", help="git only; do not call gh")
     parser.add_argument("--release", metavar="X.Y.Z", help="file Unreleased under this version")
-    parser.add_argument("--date", metavar="YYYY-MM-DD", help="date for --release (default: today, UTC)")
+    parser.add_argument(
+        "--date", metavar="YYYY-MM-DD", help="date for --release (default: today, UTC)"
+    )
     parser.add_argument("--output", type=Path, default=REPO_ROOT / "CHANGELOG.md")
     args = parser.parse_args(argv)
 
