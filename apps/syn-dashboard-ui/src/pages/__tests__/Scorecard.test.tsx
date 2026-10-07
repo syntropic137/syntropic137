@@ -45,6 +45,11 @@ const BODY: ScorecardData = {
       tokens_per_tool_call: 200_000,
       tokens_per_tool_call_display: '200.0k',
       phases_with_tool_counts: 4,
+      median_cost_usd: '1.75',
+      median_cost_display: '$1.75',
+      p90_cost_usd: '4.20',
+      p90_cost_display: '$4.20',
+      phases_with_cost: 4,
     },
   ],
   phases_scope: 'Completed phases.',
@@ -56,6 +61,8 @@ const BODY: ScorecardData = {
       cost_display: '$9.50',
       median_verify_tokens: 8_800_000,
       median_verify_tokens_display: '8.8M',
+      median_verify_cost_usd: '1.75',
+      median_verify_cost_display: '$1.75',
       peak_concurrency: 6,
     },
   ],
@@ -116,6 +123,8 @@ describe('Scorecard', () => {
     expect(screen.getByText('No data')).toBeTruthy()
     expect(screen.getByText('target ≤ 3.0M')).toBeTruthy()
     expect(screen.getByText('Failed: platform')).toBeTruthy()
+    expect(screen.getByText('$1.75')).toBeTruthy()
+    expect(screen.getByText('$4.20')).toBeTruthy()
     expect(screen.getByText('Not recorded: no event says which PR a run produced.')).toBeTruthy()
     expect(String(fetchMock.mock.calls[0][0])).toContain('/insights/scorecard?window=7d')
 

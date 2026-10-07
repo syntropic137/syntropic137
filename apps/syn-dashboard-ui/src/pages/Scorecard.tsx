@@ -178,7 +178,7 @@ export function Scorecard() {
           </div>
 
           <Card className="mt-4 min-w-0">
-            <CardHeader title="Tokens per phase type" />
+            <CardHeader title="Tokens and cost per phase type" />
             <CardContent>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[32rem] text-sm">
@@ -191,6 +191,8 @@ export function Scorecard() {
                       <th className="py-1 text-right font-medium">Cache read</th>
                       <th className="py-1 text-right font-medium">Tool calls</th>
                       <th className="py-1 text-right font-medium">Tokens/call</th>
+                      <th className="py-1 text-right font-medium">Median cost</th>
+                      <th className="py-1 text-right font-medium">p90 cost</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -203,6 +205,8 @@ export function Scorecard() {
                         <td className="py-1.5 text-right">{p.cache_read_share_display}</td>
                         <td className="py-1.5 text-right">{p.median_tool_calls_display}</td>
                         <td className="py-1.5 text-right">{p.tokens_per_tool_call_display}</td>
+                        <td className="py-1.5 text-right">{p.median_cost_display}</td>
+                        <td className="py-1.5 text-right">{p.p90_cost_display}</td>
                       </tr>
                     ))}
                   </tbody>
