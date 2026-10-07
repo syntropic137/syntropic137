@@ -10,7 +10,10 @@ first scored run.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -33,6 +36,7 @@ from eval_suite import (
     Launch,
     LoadedSuite,
     check_commits,
+    install_provenance,
     launch_suite,
     load_suite,
     read_launches,
@@ -42,7 +46,15 @@ from eval_suite import (
     versions_run,
 )
 
+from syn_domain.contexts.orchestration import (
+    ArchiveWorkflowTemplateCommand,
+    CreateWorkflowTemplateHandler,
+    WorkflowTemplateAggregate,
+    WorkflowTemplateConflictError,
+    build_command_from_definition,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_shared.agents import PhaseModelDefaults
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -1293,3 +1305,214 @@ def test_a_history_entry_naming_a_missing_case_is_refused(tmp_path: Path) -> Non
     (suite_dir / "cases" / "codex-cost-limit.yaml").unlink()
     with pytest.raises(DefinitionError, match=r"history v1 names no such case\(s\)"):
         load_suite(suite_dir)
+
+
+# ---------------------------------------------------------------------------
+# Install provenance: the real aggregate decides, as the route does
+# ---------------------------------------------------------------------------
+
+
+class _Templates:
+    """The workflow repository and publisher the install handler needs, held in a dict."""
+
+    def __init__(self) -> None:
+        self.by_id: dict[str, WorkflowTemplateAggregate] = {}
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowTemplateAggregate | None:
+        return self.by_id.get(aggregate_id)
+
+    async def save(self, aggregate: WorkflowTemplateAggregate) -> None:
+        assert aggregate.id is not None
+        self.by_id[aggregate.id] = aggregate
+
+    async def publish(self, events: object) -> None:
+        return None
+
+    def install(
+        self,
+        document: str,
+        *,
+        version: str | None,
+        source_digest: str | None,
+        package_name: str | None = None,
+        force: bool = False,
+    ) -> bool:
+        """What `POST /workflows/from-yaml` does: the real command and handler. True if changed."""
+        command = build_command_from_definition(
+            WorkflowDefinition.from_yaml(document),
+            version=version,
+            source_digest=source_digest,
+            package_name=package_name,
+            force=force,
+        )
+        handler = CreateWorkflowTemplateHandler(self, self, model_defaults=PhaseModelDefaults())
+        return asyncio.run(handler.handle(command)).changed
+
+    def archive(self, workflow_id: str) -> None:
+        aggregate = self.by_id[workflow_id]
+        aggregate.archive_workflow(ArchiveWorkflowTemplateCommand(workflow_id=workflow_id))
+        aggregate.mark_events_as_committed()
+
+
+def _provenanced_server(loaded: LoadedSuite, templates: _Templates) -> tuple[_Server, httpx.Client]:
+    """`_Server`, with `from-yaml` answered by the real install rules (409 on a conflict)."""
+    server = _Server(loaded)
+    inner = server.handle
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/workflows/from-yaml":
+            server.requests.append(request)
+            params = request.url.params
+            try:
+                changed = templates.install(
+                    request.content.decode(),
+                    version=params.get("version"),
+                    source_digest=params.get("source_digest"),
+                    force=params.get("force") == "true",
+                )
+            except WorkflowTemplateConflictError as e:
+                return httpx.Response(409, json={"detail": str(e)})
+            server.installed = loaded.workflow.id
+            return httpx.Response(
+                201,
+                json={"id": loaded.workflow.id, "status": "created" if changed else "unchanged"},
+            )
+        return inner(request)
+
+    return server, httpx.Client(base_url="http://api", transport=httpx.MockTransport(handle))
+
+
+def _document(loaded: LoadedSuite) -> str:
+    """The document `launch` uploads, as the first install request carried it."""
+    server = _Server(loaded)
+    launch_suite(loaded, server.client(), Path(os.devnull))
+    return server.requests[0].content.decode()
+
+
+@pytest.mark.unit
+def test_launch_installs_with_the_suite_version_and_the_document_digest(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    server = _Server(loaded)
+    launch_suite(loaded, server.client(), tmp_path / "launches.jsonl")
+
+    install = server.requests[0]
+    document = install.content.decode()
+    digest = hashlib.sha256(install.content).hexdigest()
+    assert install.url.params.get("version") == f"{loaded.suite.version}.0.0"
+    assert install.url.params.get("source_digest") == f"sha256:{digest}"
+    assert "force" not in install.url.params
+    assert install_provenance(loaded, document).source_digest == f"sha256:{digest}"
+
+
+@pytest.mark.unit
+def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    templates = _Templates()
+    ledger = tmp_path / "launches.jsonl"
+
+    _, client = _provenanced_server(loaded, templates)
+    first = launch_suite(loaded, client, ledger)
+    _, client = _provenanced_server(loaded, templates)
+    again = launch_suite(loaded, client, ledger)
+
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 2.0.0")
+
+
+@pytest.mark.unit
+def test_a_changed_workflow_without_a_version_bump_is_refused_before_any_eval(
+    tmp_path: Path,
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    templates = _Templates()
+    document = _document(loaded)
+    provenance = install_provenance(loaded, document)
+    # The server holds this suite version under another digest: the republish signature.
+    templates.install(document, version=provenance.version, source_digest="sha256:" + "0" * 64)
+
+    server, client = _provenanced_server(loaded, templates)
+    with pytest.raises(RuntimeError, match=r"different source.*bump the suite version"):
+        launch_suite(loaded, client, tmp_path / "launches.jsonl")
+    assert not any(r.url.path == "/evals" for r in server.requests)
+
+
+@pytest.mark.unit
+def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
+    tmp_path: Path,
+) -> None:
+    """The VPS state that blocked the provenance-less launch (2026-10-07).
+
+    `syn workflow install workflows/evals/verify-pinned-codex` records version
+    0.0.0 (no manifest), no digest and package name; `syn workflow delete -f`
+    archives it. An install declaring no version is refused (provenance guard).
+    `launch` declares 2.0.0 + digest: a different version on an archived
+    template, so the update is accepted, the template is active again and the
+    recorded provenance is the suite's. No `force` is needed.
+    """
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    templates = _Templates()
+    document = _document(loaded)
+    templates.install(
+        document, version="0.0.0", source_digest=None, package_name="verify-pinned-codex"
+    )
+    templates.archive(_CODEX_WF)
+    with pytest.raises(WorkflowTemplateConflictError, match="declares no version"):
+        templates.install(document, version=None, source_digest=None)
+
+    _, client = _provenanced_server(loaded, templates)
+    lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
+
+    stored = templates.by_id[_CODEX_WF]
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert not stored.is_archived
+    assert stored.source_digest == install_provenance(loaded, document).source_digest
+
+
+@pytest.mark.unit
+def test_an_edited_prompt_relaunched_over_an_archived_template_without_a_bump_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Codex review of #1705: archiving must not open the republish hole.
+
+    Launch v2, archive its workflow, edit an inlined prompt, relaunch without
+    bumping the suite. The same version under a new digest is a republish
+    whether or not the template is archived, so the real handler refuses it,
+    the archived record is untouched and no eval is created.
+    """
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    templates = _Templates()
+    _, client = _provenanced_server(loaded, templates)
+    launch_suite(loaded, client, tmp_path / "launches.jsonl")
+    launched = install_provenance(loaded, _document(loaded)).source_digest
+    templates.archive(_CODEX_WF)
+
+    root = tmp_path / "root"
+    workflow_dir = (root / loaded.workflow.path).parent
+    shutil.copytree((ROOT / loaded.workflow.path).parent, workflow_dir)
+    prompt = workflow_dir / "phases" / "verify.md"
+    prompt.write_text(prompt.read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8")
+
+    server, client = _provenanced_server(loaded, templates)
+    with pytest.raises(RuntimeError, match=r"different source.*bump the suite version"):
+        launch_suite(loaded, client, tmp_path / "launches.jsonl", root=root)
+
+    stored = templates.by_id[_CODEX_WF]
+    assert stored.is_archived
+    assert stored.source_digest == launched
+    assert not any(r.url.path == "/evals" for r in server.requests)
+
+
+@pytest.mark.unit
+def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> None:
+    """The recovery the archived exemption exists for still needs no bump or force."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF)
+    templates = _Templates()
+    _, client = _provenanced_server(loaded, templates)
+    launch_suite(loaded, client, tmp_path / "launches.jsonl")
+    templates.archive(_CODEX_WF)
+
+    _, client = _provenanced_server(loaded, templates)
+    lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
+
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert not templates.by_id[_CODEX_WF].is_archived
