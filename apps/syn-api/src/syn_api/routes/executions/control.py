@@ -5,6 +5,7 @@ Cancel, inject, and state inspection for running executions.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Literal
 
@@ -25,15 +26,79 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["control"])
 
 
+#: How long a prefix miss waits to learn whether the read model is rebuilding.
+#: The probe reads the database; past this the miss stays the 404 it always was.
+_REBUILD_PROBE_TIMEOUT_S = 2.0
+
+
+class ExecutionReadModelRebuilding(HTTPException):
+    """409: a prefix the execution read model cannot expand while it is rebuilt (#1555).
+
+    Not a 404, because the execution may well exist: the read model that maps
+    prefixes to ids has not replayed it yet. The full id does not need that read
+    model, so the detail says to use it.
+    """
+
+    def __init__(self, partial_id: str) -> None:
+        super().__init__(
+            status_code=409,
+            detail=(
+                f"Cannot resolve execution id prefix '{partial_id}': the execution read "
+                "model is rebuilding and has not replayed every execution yet. Retry once "
+                "it catches up (see /health), or pass the full execution id, which is "
+                "resolved from the event store."
+            ),
+        )
+
+
 async def _resolve_execution_id(execution_id: str) -> str:
-    """Resolve a (possibly partial) execution ID via prefix matching."""
-    from syn_api._wiring import get_projection_mgr
+    """The full id of the execution a command names, or raise why there is none.
+
+    A full id is answered by the event store, which is authoritative, so a
+    command keeps working while `workflow_execution_details` is being rebuilt
+    (#1555). Only a prefix needs that read model, to expand it; a prefix it
+    cannot find while rebuilding is `ExecutionReadModelRebuilding`, not 404.
+    """
+    from syn_api._wiring import get_projection_mgr, get_workflow_execution_repository
     from syn_api.prefix_resolver import resolve_or_raise
 
-    mgr = get_projection_mgr()
-    return await resolve_or_raise(
-        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    if await get_workflow_execution_repository().exists(execution_id):
+        return execution_id
+    try:
+        return await resolve_or_raise(
+            get_projection_mgr().store, "workflow_execution_details", execution_id, "Execution"
+        )
+    except HTTPException as miss:
+        if miss.status_code == 404 and await _execution_read_model_rebuilding():
+            raise ExecutionReadModelRebuilding(execution_id) from miss
+        raise
+
+
+async def _execution_read_model_rebuilding() -> bool:
+    """Whether `workflow_execution_details` is replaying history right now.
+
+    False when that cannot be told - no subscription, or a probe that failed or
+    hung - so a miss stays the 404 it was before this question was asked.
+    """
+    from syn_api.services.lifecycle import _state
+    from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
+        WorkflowExecutionDetailProjection,
     )
+
+    service = _state.subscription_service
+    if service is None:
+        return False
+    try:
+        lag = await asyncio.wait_for(
+            service.describe_read_model_lag(), timeout=_REBUILD_PROBE_TIMEOUT_S
+        )
+    except Exception:
+        logger.warning("Read model lag probe failed; reporting a prefix miss as 404", exc_info=True)
+        return False
+    if lag is None or not lag.is_catching_up:
+        return False
+    name = WorkflowExecutionDetailProjection.PROJECTION_NAME
+    return any(behind.projection == name for behind in lag.lagging_projections)
 
 
 # =============================================================================
@@ -203,7 +268,11 @@ async def cancel_execution_endpoint(
     try:
         resolved = await _resolve_execution_id(execution_id)
     except HTTPException as not_found:
-        if not_found.status_code != 404:
+        # A rebuild hides queued starts' executions no more than started ones,
+        # so a prefix it could not expand is still offered to the withdrawal.
+        if not_found.status_code != 404 and not isinstance(
+            not_found, ExecutionReadModelRebuilding
+        ):
             raise
         withdrawn = await _withdraw_queued(execution_id, reason)
         if withdrawn is None:
@@ -254,13 +323,7 @@ async def inject_context_endpoint(
 @router.get("/executions/{execution_id}/state", response_model=StateResponse)
 async def get_execution_state_endpoint(execution_id: str) -> StateResponse:
     """Get current execution state."""
-    from syn_api._wiring import get_projection_mgr
-    from syn_api.prefix_resolver import resolve_or_raise
-
-    mgr = get_projection_mgr()
-    execution_id = await resolve_or_raise(
-        mgr.store, "workflow_execution_details", execution_id, "Execution"
-    )
+    execution_id = await _resolve_execution_id(execution_id)
     result = await get_state(execution_id)
 
     if isinstance(result, Err):
