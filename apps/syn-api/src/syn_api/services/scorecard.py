@@ -85,6 +85,7 @@ async def build_scorecard(
     store: ProjectionStore,
     read_costs: Callable[[Iterable[str]], Awaitable[Mapping[str, ExecutionSpend]]],
     read_tool_calls: Callable[[Iterable[str]], Awaitable[Mapping[str, int]]],
+    read_session_models: Callable[[Iterable[str]], Awaitable[Mapping[str, Mapping[str, Decimal]]]],
     window: str,
     now: datetime | None = None,
 ) -> ScorecardResponse:
@@ -96,6 +97,7 @@ async def build_scorecard(
         runs=runs,
         spend_by_execution=await read_costs(list(runs)),
         tool_calls_by_session=await read_tool_calls(sessions),
+        cost_by_session_model=await read_session_models(sessions),
         now=moment,
         window_days=window_days,
     )
@@ -201,12 +203,17 @@ def render(card: Scorecard, window: str) -> ScorecardResponse:
         by_model=[_row(r) for r in card.by_model],
         phases=[_phase(p) for p in card.phases],
         phases_scope=(
-            "Completed phases of every run in those chains, failed and resumed runs included, "
+            "Completed and failed phases of every run in those chains, resumed runs included, "
             "grouped by phase_id (fix_2 is a fix; finalize_pr and open_pr are finalize; "
             "quickfix is implement; anything else is other). Tool calls come from each "
             "phase's session tally; phases_with_tool_counts says how many had one. Cost is the "
             "Lane-2 cost its execution recorded for that phase_id, failed phases included; "
-            "median and p90 cost are over the phases_with_cost phases that had one."
+            "median and p90 cost are over the phases_with_cost phases that had one. "
+            "by_model keys are the models each phase's session REPORTED in its Lane-2 "
+            "usage, never the configured agent or an alias; a phase with no observed model "
+            "is in no model row. A model row counts a chain's outcome if any of its phases "
+            "observed that model, and only those phases (and that model's share of their "
+            "cost) in its phase statistics."
         ),
         daily=[
             ScorecardDailyPointResponse(

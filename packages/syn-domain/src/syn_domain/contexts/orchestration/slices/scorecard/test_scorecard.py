@@ -191,6 +191,7 @@ async def _score(
     projection: ScorecardProjection,
     costs: dict[str, Decimal],
     phase_costs: dict[str, dict[str, Decimal]] | None = None,
+    session_models: dict[str, dict[str, Decimal]] | None = None,
 ):
     days = ["2026-10-07"]
     loaded = {r.execution_id: r for r in await projection.runs_for_days(days)}
@@ -205,6 +206,7 @@ async def _score(
             for i, c in costs.items()
         },
         tool_calls_by_session={"s-a": 10, "s-b": 30},
+        cost_by_session_model=session_models or {},
         now=NOW,
         window_days=1,
     )
@@ -236,7 +238,15 @@ async def test_resumed_chain_counts_once_and_carries_its_failed_runs_cost() -> N
         model="gpt-5.4",
     )
 
-    card = await _score(projection, {"a": Decimal("3"), "b": Decimal("2"), "c": Decimal("1")})
+    card = await _score(
+        projection,
+        {"a": Decimal("3"), "b": Decimal("2"), "c": Decimal("1")},
+        session_models={
+            "s-a": {"claude-opus-5-5-20260901": Decimal("3")},
+            "s-b": {"claude-opus-5-5-20260901": Decimal("2")},
+            "s-c": {"gpt-5.4": Decimal("1")},
+        },
+    )
 
     # a and b are one chain: completed, but not platform-failure-free.
     assert card.counts.total == 2

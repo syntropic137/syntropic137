@@ -139,8 +139,16 @@ async def test_the_response_carries_a_resumed_chains_full_cost_and_one_outcome()
         ),
     )
 
+    async def _session_models(_ids: object) -> dict[str, dict[str, Decimal]]:
+        return {"s1": {"claude-opus-5-5-20260901": Decimal("1.50")}}
+
     response = await build_scorecard(
-        store=store, read_costs=_costs, read_tool_calls=_tool_calls, window="1d", now=NOW
+        store=store,
+        read_costs=_costs,
+        read_tool_calls=_tool_calls,
+        read_session_models=_session_models,
+        window="1d",
+        now=NOW,
     )
 
     assert response.counts.total == 1
@@ -158,6 +166,7 @@ async def test_the_response_carries_a_resumed_chains_full_cost_and_one_outcome()
     assert response.daily[-1].median_verify_cost_display == "$1.50"
     verify_target = next(t for t in response.targets if t.name == "Median verify tokens")
     assert verify_target.status == "on_track"
+    assert [row.key for row in response.by_model] == ["claude-opus-5-5-20260901"]
     assert response.delivery.merged_prs is None
     assert response.daily[-1].day == "2026-10-07"
 

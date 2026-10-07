@@ -83,8 +83,6 @@ class ScorecardRun(BaseModel):
     """Set on failed runs only; a failure recorded before #1357 reads UNCLASSIFIED."""
     chain: tuple[str, ...] = ()
     superseded_by: str | None = None
-    models: tuple[str, ...] = ()
-    """Observed models (``agent_model`` as the harness reported it), in first-seen order."""
     phases: tuple[ScorecardPhase, ...] = ()
     phase_sessions: tuple[PhaseSession, ...] = ()
     """The latest recorded session of each phase, one entry per phase id."""

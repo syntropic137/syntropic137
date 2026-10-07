@@ -290,10 +290,15 @@ async def get_scorecard_endpoint(
     from decimal import Decimal
 
     from syn_adapters.projection_stores import get_projection_store
-    from syn_api._wiring import get_event_store_instance, get_execution_cost_query
+    from syn_api._wiring import (
+        get_event_store_instance,
+        get_execution_cost_query,
+        get_session_cost_query,
+    )
     from syn_api.services.scorecard import WindowError, build_scorecard
     from syn_domain import tool_call_counts
     from syn_domain.contexts.orchestration import ExecutionSpend
+    from syn_shared.observed_model import UNKNOWN_MODEL_KEY, is_model_alias
 
     await ensure_connected()
 
@@ -314,11 +319,25 @@ async def get_scorecard_endpoint(
         async with pool.acquire() as conn:
             return await tool_call_counts.by_session(conn, list(session_ids))  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
 
+    async def read_session_models(
+        session_ids: Iterable[str],
+    ) -> dict[str, dict[str, Decimal]]:
+        sessions = await get_session_cost_query().get_many(list(session_ids))
+        return {
+            session_id: {
+                model: Decimal(cost)
+                for model, cost in session.cost_by_model.items()
+                if model != UNKNOWN_MODEL_KEY and not is_model_alias(model)
+            }
+            for session_id, session in sessions.items()
+        }
+
     try:
         return await build_scorecard(
             store=get_projection_store(),
             read_costs=read_costs,
             read_tool_calls=read_tool_calls,
+            read_session_models=read_session_models,
             window=window,
         )
     except WindowError as error:

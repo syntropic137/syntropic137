@@ -230,14 +230,11 @@ class ScorecardProjection(AutoDispatchProjection):
 
     async def on_agent_execution_completed(self, event_data: AgentExecutionCompletedEvent) -> None:
         event = AgentExecutionCompletedEvent.model_validate(event_data)
+        # ``agent_model`` is NOT read: it is the agent the phase was configured
+        # with (possibly an alias), not what ran. Observed models come from the
+        # session's Lane-2 usage, joined at read time through this session.
         if event.session_id:
             await self._record_session(event.execution_id, event.phase_id, event.session_id)
-        model = event.agent_model
-        if not model:
-            return  # written before PC-83: no observed model, never a guessed one
-        run = await self._load(event.execution_id)
-        if model not in run.models:
-            await self._save(run.model_copy(update={"models": (*run.models, model)}))
 
     async def on_workflow_completed(self, event_data: WorkflowCompletedEvent) -> None:
         event = WorkflowCompletedEvent.model_validate(event_data)

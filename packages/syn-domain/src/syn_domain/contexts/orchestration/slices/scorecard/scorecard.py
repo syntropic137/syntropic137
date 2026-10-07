@@ -228,13 +228,32 @@ def _phase_stats(
     runs: Sequence[ScorecardRun],
     tool_calls_by_session: Mapping[str, int],
     spend: Mapping[str, ExecutionSpend],
+    *,
+    model: str | None = None,
+    cost_by_session_model: Mapping[str, Mapping[str, Decimal]] | None = None,
 ) -> tuple[PhaseTypeStats, ...]:
+    """Per phase type; with ``model``, only the phases whose session observed it.
+
+    A model's phase cost is what that model cost in the phase's session, not
+    the whole phase: a session that observed two models splits its spend.
+    """
+    observed = cost_by_session_model or {}
     rows: list[PhaseTypeStats] = []
     for phase_type in PhaseType:
-        phases = [p for run in runs for p in run.phases if p.phase_type is phase_type]
+        phases = [
+            p
+            for run in runs
+            for p in run.phases
+            if p.phase_type is phase_type
+            and (model is None or model in observed.get(p.session_id or "", {}))
+        ]
         if not phases:
             continue
-        costs = _phase_costs(runs, spend, phase_type)
+        costs = (
+            _phase_costs(runs, spend, phase_type)
+            if model is None
+            else [observed[p.session_id or ""][model] for p in phases]
+        )
         tokens = [float(p.total_tokens) for p in phases]
         all_tokens = sum(p.total_tokens for p in phases)
         counted = [
@@ -330,18 +349,36 @@ def _chains_ended_between(
     ]
 
 
+def _observed_models(
+    chain: _Chain, cost_by_session_model: Mapping[str, Mapping[str, Decimal]]
+) -> dict[str, None]:
+    """Every model a phase session of this chain observed, in first-seen order."""
+    return dict.fromkeys(
+        m
+        for member in chain.members
+        for p in member.phases
+        for m in cost_by_session_model.get(p.session_id or "", {})
+    )
+
+
 def _breakdown(
     chains: Sequence[_Chain],
     tool_calls_by_session: Mapping[str, int],
     spend: Mapping[str, ExecutionSpend],
     *,
-    by_model: bool,
+    cost_by_session_model: Mapping[str, Mapping[str, Decimal]] | None = None,
 ) -> tuple[OutcomeRow, ...]:
+    """By workflow, or by observed model when ``cost_by_session_model`` is given.
+
+    By model, a chain's OUTCOME counts under every model one of its phases
+    observed (a mixed-model chain is one outcome for each), while its PHASES
+    count only under the models their own session observed.
+    """
     groups: dict[str, list[_Chain]] = {}
     for chain in chains:
         keys = (
-            dict.fromkeys(m for member in chain.members for m in member.models)
-            if by_model
+            _observed_models(chain, cost_by_session_model)
+            if cost_by_session_model is not None
             else (chain.final.workflow_name or chain.final.workflow_id,)
         )
         for key in keys:
@@ -350,7 +387,13 @@ def _breakdown(
         OutcomeRow(
             k,
             _tally(v),
-            _phase_stats([m for c in v for m in c.members], tool_calls_by_session, spend),
+            _phase_stats(
+                [m for c in v for m in c.members],
+                tool_calls_by_session,
+                spend,
+                model=k if cost_by_session_model is not None else None,
+                cost_by_session_model=cost_by_session_model,
+            ),
         )
         for k, v in sorted(groups.items())
     )
@@ -440,6 +483,7 @@ def compute_scorecard(
     runs: Mapping[str, ScorecardRun],
     spend_by_execution: Mapping[str, ExecutionSpend],
     tool_calls_by_session: Mapping[str, int],
+    cost_by_session_model: Mapping[str, Mapping[str, Decimal]],
     now: datetime,
     window_days: int,
 ) -> Scorecard:
@@ -447,6 +491,8 @@ def compute_scorecard(
 
     ``runs`` must hold every run that ended in the window, every run still
     running, and every member of their resume chains, keyed by execution id.
+    ``cost_by_session_model`` is each phase session's Lane-2 cost by the model
+    the harness REPORTED; aliases and unknown models must already be excluded.
     """
     today = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     start = today - timedelta(days=window_days - 1)
@@ -461,8 +507,13 @@ def compute_scorecard(
         window_end=now,
         window_days=window_days,
         counts=counts,
-        by_workflow=_breakdown(chains, tool_calls_by_session, spend_by_execution, by_model=False),
-        by_model=_breakdown(chains, tool_calls_by_session, spend_by_execution, by_model=True),
+        by_workflow=_breakdown(chains, tool_calls_by_session, spend_by_execution),
+        by_model=_breakdown(
+            chains,
+            tool_calls_by_session,
+            spend_by_execution,
+            cost_by_session_model=cost_by_session_model,
+        ),
         phases=_phase_stats(members, tool_calls_by_session, spend_by_execution),
         daily=_daily(chains, started, spend_by_execution, start, now, window_days),
         throughput=throughput,
