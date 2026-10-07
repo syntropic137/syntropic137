@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -88,6 +89,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_outputs,
     inherited_phase_ids,
     record_continuation,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
+    preserve_interrupted_run,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
@@ -205,7 +209,11 @@ class WorkflowExecutionProcessor:
         remote_branches: RemoteBranchPort | None = None,
         owed_cancelled_work: ProjectionStore | None = None,
         delegation_evidence: DelegationEvidencePort | None = None,
+        interrupt_budget_seconds: float = 60.0,
     ) -> None:
+        #: How long a shutdown waits for a run's work to be saved and the run
+        #: recorded INTERRUPTED before tearing it down (#1381).
+        self._interrupt_budget_seconds = interrupt_budget_seconds
         self._session_repo = session_repository
         #: Read as a phase that declared delegation completes, to show its
         #: delegate actually ran (#894). See `phase_delegation`.
@@ -459,6 +467,22 @@ class WorkflowExecutionProcessor:
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
             )
+        except asyncio.CancelledError:
+            # Platform shutdown (#1381): neither path above saves the work on a
+            # cancel, so save it and record the run INTERRUPTED before the
+            # teardown below, then let the cancel go on.
+            await preserve_interrupted_run(
+                aggregate=aggregate,
+                runtime=self._runtimes.of(execution_id),
+                workspaces=self._workspaces_for(execution_id, {}),
+                journal=self._journal,
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                phase_id=dispatch_ctx.current_phase_id,
+                kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
+                budget_seconds=self._interrupt_budget_seconds,
+            )
+            raise
         finally:
             # A shutdown may cancel the minutes-long agent await before either
             # terminal path runs. Tear down only this execution's runtime,
