@@ -203,6 +203,21 @@ async def test_an_invoked_skill_appears_on_its_phase() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_skill_named_after_a_long_argument_is_still_identified() -> None:
+    # The input preview is cut at 500 characters. With `args` first, the cut
+    # falls before `skill`, so a name read back from the preview is lost; the
+    # skill has to be recorded whole, as its own field.
+    long_args = {"args": "x" * 520, "skill": "architecture"}
+    ops = await _timeline(_recorded_tool_use("toolu_long", "Skill", long_args))
+    assert '"skill"' not in (ops[0].input_preview or "")  # the shape this guards
+
+    use = (await _as_client_sees_it(ops, "claude")).skill_use
+
+    assert [(s.name, s.count) for s in use.invoked] == [("architecture", 1)]
+    assert use.declared_not_invoked == ["principles-and-patterns"]
+
+
+@pytest.mark.asyncio
 async def test_no_skill_call_reads_declared_not_invoked_rather_than_missing() -> None:
     ops = await _timeline(
         _recorded_tool_use("toolu_a", "Read", {"file_path": "/workspace/pyproject.toml"}),

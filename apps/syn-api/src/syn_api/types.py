@@ -1225,6 +1225,12 @@ class ToolOperation(BaseModel):
     tool_use_id: str | None = None
     input_preview: str | None = None
     output_preview: str | None = None
+    skill_name: str | None = None
+    """The skill a `Skill` call invoked, recorded whole on its start (#1269).
+
+    Carried from `syn_adapters.projections.session_tools.ToolOperation` by
+    `model_validate(from_attributes=True)`; the names must stay identical.
+    """
     # Structured git data (v2 events - preferred).
     # AliasChoices: JSON clients send "git", from_attributes reads "git_data"
     # from the projection dataclass (which uses git_data to avoid shadowing).

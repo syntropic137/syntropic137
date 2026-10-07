@@ -4,8 +4,7 @@ Declaring a skill installs it in the workspace; nothing about that says the
 agent ever reached for it, and 1,911 recorded operations across 25 sessions
 held no `Skill` call at all. This is the one place that turns a phase's start
 pins and its Lane 2 timeline into that fact, so no caller has to know which
-harness can be observed, which rows are a skill call, or where the skill's
-name sits in the call's input.
+harness can be observed or which rows are a skill call.
 
 The asymmetry is the harness's, not ours. Claude invokes a skill through its
 `Skill` tool, so the call is on the timeline like any other. Codex has no such
@@ -16,13 +15,14 @@ read as a measurement that the skills were ignored.
 
 from __future__ import annotations
 
-import json
-import re
 from collections import Counter
 from typing import TYPE_CHECKING
 
 from syn_adapters.projections.session_tools import call_identity
 from syn_api.types import InvokedSkillInfo, PhaseSkillUseInfo
+from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    SKILL_TOOL_NAME,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.events import TOOL_EXECUTION_STARTED
 
@@ -31,36 +31,14 @@ if TYPE_CHECKING:
 
     from syn_api.types import PhaseStartConfig, ToolOperation
 
-#: The claude tool that invokes a skill, as the stream names it.
-SKILL_TOOL_NAME = "Skill"
-
 #: Harnesses whose skill use reaches the timeline. Anything else is
 #: ``not_observable``, so a new harness is not silently reported as unused.
 _OBSERVABLE_PROVIDERS = frozenset({AgentProvider.CLAUDE.value})
 
-#: The preview is ``json.dumps(input)[:500]``, so a long ``args`` can cut the
-#: JSON short. The name comes first in the observed shape and survives that.
-_SKILL_FIELD = re.compile(r'"skill"\s*:\s*"([^"]+)"')
-
-#: Named when a call was observed but its skill could not be read - counted,
-#: so a call is never dropped for having an unreadable input.
+#: Named when a call was observed but its start carried no skill name (a
+#: completion with no start, or a row recorded before #1269) - counted, so a
+#: call is never dropped for lacking one.
 UNIDENTIFIED_SKILL = "(unidentified)"
-
-
-def _skill_name(input_preview: str | None) -> str:
-    """The skill a `Skill` call invoked, read from its recorded input."""
-    if not input_preview:
-        return UNIDENTIFIED_SKILL
-    try:
-        parsed: object = json.loads(input_preview)
-    except ValueError:
-        parsed = None
-    if isinstance(parsed, dict):
-        name = parsed.get("skill")  # pyright: ignore[reportUnknownMemberType]
-        if isinstance(name, str) and name:
-            return name
-    match = _SKILL_FIELD.search(input_preview)
-    return match.group(1) if match else UNIDENTIFIED_SKILL
 
 
 def summarize_skill_use(
@@ -89,7 +67,7 @@ def summarize_skill_use(
             continue
         identity = call_identity(op)
         if op.operation_type == TOOL_EXECUTION_STARTED or identity not in names:
-            names[identity] = _skill_name(op.input_preview)
+            names[identity] = op.skill_name or UNIDENTIFIED_SKILL
     counts = Counter(names.values())
     return PhaseSkillUseInfo(
         status="observed",

@@ -413,7 +413,11 @@ class _CodexRows:
         return
 
     async def record_tool_started(
-        self, tool_name: str, tool_use_id: str, input_preview: str
+        self,
+        tool_name: str,
+        tool_use_id: str,
+        input_preview: str,
+        skill_name: str | None = None,
     ) -> None:
         self._append(
             TOOL_EXECUTION_STARTED,
