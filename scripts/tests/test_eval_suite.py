@@ -656,8 +656,7 @@ def _phases_of(loaded: LoadedSuite) -> list[_ServedPhase]:
     """The phases the server would serve back for the checked-in workflow."""
     local = WorkflowDefinition.from_file(ROOT / loaded.workflow.path)
     return [
-        _ServedPhase(p.id, p.prompt_template, loaded.workflow.models[p.id])
-        for p in local.phases
+        _ServedPhase(p.id, p.prompt_template, loaded.workflow.models[p.id]) for p in local.phases
     ]
 
 

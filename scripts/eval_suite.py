@@ -773,9 +773,7 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
             f"server definition of {w.id} differs from {w.path} "
             f"in phase(s) {differs} (prompt or model); no eval was created"
         )
-    return (
-        f"workflow {w.id}: {installed.status}, server definition matches {w.path}"
-    )
+    return f"workflow {w.id}: {installed.status}, server definition matches {w.path}"
 
 
 def launch_suite(
@@ -841,7 +839,7 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
         f"workflow {w.id} (models {w.models}); also runnable with --workflow: "
         f"{', '.join(others) or '(none)'}",
         f"first: POST /workflows/from-yaml {w.path} (prompts inlined), then "
-        f"GET /workflows/{w.id} must match its phases, prompts and models {w.models}"
+        f"GET /workflows/{w.id} must match its phases, prompts and models {w.models}",
     ] + [
         f"{c.id}: POST /evals baseline {s.repository}@{c.commit} tags [{loaded.tag}, {c.tag}]; "
         f"then POST /workflows/{w.id}/execute with that eval_id; run recorded in launches.jsonl"
@@ -888,9 +886,7 @@ def main(argv: list[str] | None = None) -> int:
         if problems:
             print("❌ " + "\n❌ ".join(problems), file=sys.stderr)
             return 1
-        print(
-            f"✅ {loaded.tag}: {len(loaded.cases)} case(s), every pinned commit and file checked"
-        )
+        print(f"✅ {loaded.tag}: {len(loaded.cases)} case(s), every pinned commit and file checked")
         if args.command == "check":
             print("\n".join(describe_launch(loaded)))
             return 0
