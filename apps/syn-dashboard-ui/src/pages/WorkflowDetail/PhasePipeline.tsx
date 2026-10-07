@@ -1,12 +1,27 @@
 import { clsx } from 'clsx'
+import type { KeyboardEvent } from 'react'
 import { GitBranch } from 'lucide-react'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import { PhaseModelBadge } from '../../components/PhaseModelBadge'
+import { SkillRefList } from '../../components/SkillRefList'
 import { providerLabel } from '../../constants/agentProviders'
 import type { PhaseDefinition, PhaseMetrics } from '../../types'
 import { formatCostWithCoverage } from '../../utils/formatters'
 import { defaultPhaseStyle } from './workflowConstants'
+
+/**
+ * Keyboard activation for a clickable card. Only keys pressed on the card
+ * itself count: Enter on a link inside it (a skill's source link) must follow
+ * the link, not toggle the phase.
+ */
+function activateOnOwnKey(e: KeyboardEvent<HTMLDivElement>, onClick: () => void) {
+  if (e.target !== e.currentTarget) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    onClick()
+  }
+}
 
 interface PhasePipelineProps {
   phases: PhaseDefinition[]
@@ -44,12 +59,7 @@ function PhaseCard({
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
-      onKeyDown={onClick ? (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onClick()
-        }
-      } : undefined}
+      onKeyDown={onClick ? (e) => activateOnOwnKey(e, onClick) : undefined}
       className={clsx(
         'flex min-w-[180px] flex-col rounded-lg border p-4 transition-all',
         onClick && 'cursor-pointer hover:border-[var(--color-accent)]/50',
@@ -72,6 +82,10 @@ function PhaseCard({
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-muted)]">
         <span>{providerLabel(phase.provider ?? phase.agent_type)}</span>
         <PhaseModelBadge model={phase.model} modelDisplay={phase.model_display} />
+      </div>
+      <div className="mt-2 text-xs" data-testid="phase-skills">
+        <span className="block text-[var(--color-text-secondary)]">Skills</span>
+        <SkillRefList skills={phase.skills ?? []} />
       </div>
       {phaseMetric && <PhaseMetricLine metric={phaseMetric} />}
     </div>

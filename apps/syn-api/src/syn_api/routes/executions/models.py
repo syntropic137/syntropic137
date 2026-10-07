@@ -112,6 +112,11 @@ class PhaseExecutionInfo(BaseModel):
     """
     requested_model: str | None
     """The model the phase REQUESTED (often an alias), or null if not recorded."""
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result, or null
+    (PC-83). Differs from the declared provider when the phase fell back to its
+    ``fallback_agent`` on capacity or quota; ``requested_model`` is then the
+    fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order

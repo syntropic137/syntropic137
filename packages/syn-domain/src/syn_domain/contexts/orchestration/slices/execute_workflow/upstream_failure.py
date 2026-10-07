@@ -15,10 +15,14 @@ changes whenever a CLI does, and is not decided here.
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
 __all__ = [
     "UPSTREAM_FAILURES",
+    "QuotaExhaustion",
     "StreamReasonUpstreamFailureReader",
     "UpstreamFailureError",
     "UpstreamFailureKind",
@@ -34,10 +38,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     api_error_label,
     api_error_with_message,
 )
-from syn_shared.upstream_failure import UpstreamFailureError, UpstreamFailureKind
+from syn_shared.upstream_failure import QuotaExhaustion, UpstreamFailureError, UpstreamFailureKind
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 
 class UpstreamFailureReader(Protocol):
@@ -47,11 +51,106 @@ class UpstreamFailureReader(Protocol):
         """The kind, or None when the attempt reported no fault at all."""
         ...
 
+    def quota_of(self, reason: str | None) -> QuotaExhaustion | None:
+        """Whose quota is spent and until when, or None when ``reason`` is not a quota fault.
+
+        `kind_of` is `QUOTA` exactly when this is not None.
+        """
+        ...
+
 
 #: The one sentence codex says about its own capacity, observed in #1303. Codex
 #: does not promise to keep saying it; a new phrasing reads as `UNKNOWN`,
 #: which is not retried - the safe direction to be wrong in.
 _CODEX_AT_CAPACITY = "Selected model is at capacity. Please try a different model."
+
+
+#: What codex says when the account's allowance is spent, as fragments of the
+#: one real line observed 2026-10-06 (PC-83): "You've hit your usage limit.
+#: Visit https://chatgpt.com/codex/settings/usage to purchase more credits or
+#: try again at Oct 9th, 2026 9:10 PM." Fragments, not the whole line, so the
+#: reset date and URL may change without the match breaking; matched
+#: case-insensitively and only inside codex's own fault line.
+_CODEX_QUOTA_PHRASES: tuple[str, ...] = ("hit your usage limit", "purchase more credits")
+
+#: What claude says when the account's allowance is spent. EMPTY, deliberately:
+#: no real claude quota message exists in this repo, agentic-workspace or any
+#: fixture, and a spelling invented here would match nothing claude writes.
+#: Until it is filled a claude quota failure reads as UNKNOWN - not retried,
+#: and no fallback run.
+# TODO(#1669): capture the real claude usage-limit line (its sentence, any
+# `|<epoch>` reset suffix, any "resets ..." phrase and its zone, and which
+# stream channel carries it) and add it here with a reset reader.
+_CLAUDE_QUOTA_PHRASES: tuple[str, ...] = ()
+
+#: Codex's reset time, when it names a date. The CLI prints no zone; the
+#: workspace container runs in UTC, so the time is read as UTC. A time with no
+#: date ("try again at 9:10 PM") cannot be placed and reads as unstated.
+_CODEX_QUOTA_RESET = re.compile(
+    r"try again at (?P<month>[A-Z][a-z]{2})[a-z]* (?P<day>\d{1,2})(?:st|nd|rd|th)?, "
+    r"(?P<year>\d{4}) (?P<hour>\d{1,2}):(?P<minute>\d{2}) ?(?P<ampm>[AP]M)"
+)
+
+
+def _codex_quota_reset(message: str) -> datetime | None:
+    match = _CODEX_QUOTA_RESET.search(message)
+    if match is None:
+        return None
+    try:
+        stamp = datetime.strptime(
+            "{month} {day} {year} {hour}:{minute} {ampm}".format(**match.groupdict()),
+            "%b %d %Y %I:%M %p",
+        )
+    except ValueError:
+        return None
+    return stamp.replace(tzinfo=UTC)
+
+
+def _no_reset(_message: str) -> datetime | None:
+    return None
+
+
+@dataclass(frozen=True)
+class _QuotaSpelling:
+    """How one provider says its quota is spent: where, in which words, and until when.
+
+    ``fault_line`` is the prefix the provider's own stream processor writes on
+    a fault. A phrase counts only after it, so agent prose that quotes one
+    cannot forge a quota - which would buy a run on the fallback agent.
+    """
+
+    provider: str
+    fault_line: str
+    phrases: tuple[str, ...]
+    resets_at: Callable[[str], datetime | None]
+
+    def quota_of(self, reason: str) -> QuotaExhaustion | None:
+        if not reason.startswith(self.fault_line):
+            return None
+        message = reason.removeprefix(self.fault_line)
+        folded = message.casefold()
+        if not any(phrase.casefold() in folded for phrase in self.phrases):
+            return None
+        return QuotaExhaustion(provider=self.provider, resets_at=self.resets_at(message))
+
+
+#: One entry per provider. Adding a provider's quota words is a data change here.
+_QUOTA_SPELLINGS: tuple[_QuotaSpelling, ...] = (
+    _QuotaSpelling(
+        provider="codex",
+        fault_line=codex_fault_reason(""),
+        phrases=_CODEX_QUOTA_PHRASES,
+        resets_at=_codex_quota_reset,
+    ),
+    # Which fault line claude's quota arrives on is unknown too (#1669); the
+    # API-error prefix is where every other claude upstream fault is written.
+    _QuotaSpelling(
+        provider="claude",
+        fault_line=api_error_with_message(ApiErrorType.RATE_LIMIT, ""),
+        phrases=_CLAUDE_QUOTA_PHRASES,
+        resets_at=_no_reset,
+    ),
+)
 
 
 def _claude_spellings(
@@ -105,12 +204,27 @@ class StreamReasonUpstreamFailureReader:
         api_error_with_message(ApiErrorType.PERMISSION, ""),
     )
 
+    def quota_of(self, reason: str | None) -> QuotaExhaustion | None:
+        # A quota is never retried, so a forged one can at worst stop a retry
+        # UNKNOWN would not have made either - but it can buy a run on the
+        # fallback agent, so each provider's words are read only inside that
+        # provider's own fault line. See `_QuotaSpelling`.
+        if reason is None:
+            return None
+        for spelling in _QUOTA_SPELLINGS:
+            quota = spelling.quota_of(reason)
+            if quota is not None:
+                return quota
+        return None
+
     def kind_of(self, reason: str | None) -> UpstreamFailureKind | None:
         if reason is None:
             return None
         kind = self._KINDS.get(reason)
         if kind is not None:
             return kind
+        if self.quota_of(reason) is not None:
+            return UpstreamFailureKind.QUOTA
         if reason.startswith(self._AUTH_PREFIXES):
             return UpstreamFailureKind.AUTH
         return UpstreamFailureKind.UNKNOWN

@@ -1429,11 +1429,12 @@ export interface paths {
          * List Accessible Repos Endpoint
          * @description List repositories accessible to the GitHub App.
          *
-         *     Queries all active installations and aggregates results when no
-         *     installation_id is provided. The installation list is cached locally with
-         *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
-         *     GitHub API without requiring a webhook URL. Stale data is kept as a
-         *     fallback if the GitHub API is unreachable during refresh.
+         *     With no installation_id, aggregates every installation. The last complete
+         *     listing is cached and served as ``complete`` while under a minute old;
+         *     otherwise GitHub is asked live, and an older listing is served as
+         *     ``partial`` only if GitHub cannot be asked. The GitHub App's
+         *     ``installation`` and ``installation_repositories`` webhooks invalidate the
+         *     cache at once. A single installation_id is always asked live.
          *
          *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
          *     the App's reach (``complete``) or merely went unseen because GitHub failed.
@@ -4264,6 +4265,16 @@ export interface components {
             last_seen: string;
         };
         /**
+         * FallbackAgentResponse
+         * @description The agent a phase is re-run on when its own provider cannot serve it (PC-83).
+         */
+        FallbackAgentResponse: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
+        };
+        /**
          * FeatureDisabledDetail
          * @description Why a flag-gated route refuses to run.
          */
@@ -5578,6 +5589,7 @@ export interface components {
              * @default false
              */
             require_delegation: boolean;
+            fallback_agent?: components["schemas"]["FallbackAgentResponse"] | null;
             /**
              * Clone Repos
              * @default true
@@ -5661,6 +5673,8 @@ export interface components {
             model?: string | null;
             /** Requested Model */
             requested_model: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;

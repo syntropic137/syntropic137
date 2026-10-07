@@ -43,9 +43,18 @@ async def _apply_installation_repositories_changed(
 
 
 async def _handle_installation_event(event_type: str, action: str, payload: dict[str, Any]) -> None:
-    """Process installation created/deleted events (best-effort)."""
+    """Process installation created/deleted events (best-effort).
+
+    Any installation event can change which repos the App reaches, so every
+    one drops the cached `/github/repos` listing, before and regardless of the
+    projection update below.
+    """
     if event_type not in ("installation", "installation_repositories"):
         return
+
+    from syn_api.services.github_repo_listing_cache import get_repo_listing_cache
+
+    await get_repo_listing_cache().invalidate()
 
     try:
         if event_type == "installation" and action == "created":
