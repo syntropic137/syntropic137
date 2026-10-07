@@ -181,15 +181,17 @@ def release_notes_bullet(body: str) -> str | None:
     in_fence = False
     collected: list[str] = []
     for line in lines:
-        if not in_section:
-            in_section = RELEASE_NOTES_HEADING.match(line.strip()) is not None
-            continue
+        # Fences are tracked from the first line: a ``## Release notes`` inside
+        # a fenced example is code, not the section.
         if FENCE.match(line):
             if collected:
                 break
             in_fence = not in_fence
             continue
         if in_fence:
+            continue
+        if not in_section:
+            in_section = RELEASE_NOTES_HEADING.match(line.strip()) is not None
             continue
         if HEADING.match(line):
             break
@@ -254,6 +256,25 @@ def tag_date(repo: Path, tag: str) -> str:
     """The tagged commit's date in UTC, so the output never depends on a TZ."""
     stamp = int(git(repo, "log", "-1", "--format=%ct", f"{tag}^{{commit}}").strip())
     return dt.datetime.fromtimestamp(stamp, dt.UTC).date().isoformat()
+
+
+class IncompleteHistoryError(Exception):
+    """The clone cannot answer which PRs shipped in which release."""
+
+
+def require_complete_history(repo: Path, first_version: tuple[int, int, int]) -> None:
+    """Refuse a shallow clone or one without release tags.
+
+    CI's default checkout is ``fetch-depth: 1`` without tags. There, ``git log``
+    finds no merges and no tags, and the changelog would be silently rewritten
+    as an empty Unreleased section. Failing is the only honest answer.
+    """
+    fix = "run `git fetch --unshallow --tags origin` (or check out with fetch-depth: 0)"
+    if git(repo, "rev-parse", "--is-shallow-repository").strip() == "true":
+        raise IncompleteHistoryError(f"shallow clone: merge history is missing; {fix}")
+    if not any(version >= first_version for version, _ in stable_tags(repo)):
+        floor = ".".join(str(part) for part in first_version)
+        raise IncompleteHistoryError(f"no release tag at or after v{floor}; {fix}")
 
 
 def merged_pull_requests(repo: Path, rev_range: str) -> list[MergedPullRequest]:
@@ -336,6 +357,7 @@ def collect_sections(
     first_version: tuple[int, int, int] = FIRST_VERSION,
 ) -> list[tuple[Section, list[MergedPullRequest]]]:
     """Every section, newest first, with the PRs that belong to it (no text yet)."""
+    require_complete_history(repo, first_version)
     tags = stable_tags(repo)
     latest = tags[0][1] if tags else None
     unreleased_prs = merged_pull_requests(repo, f"{latest}..HEAD" if latest else "HEAD")
@@ -443,11 +465,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     date: str | None = args.date
     pending = pending_release(release, date)
     bodies: dict[int, str] = {}
-    if not args.offline:
-        since = oldest_merge(REPO_ROOT, FIRST_VERSION)
-        if since is not None:
-            bodies = fetch_bodies(REPO_ROOT, since)
-    text = build_changelog(REPO_ROOT, bodies, pending)
+    try:
+        if not args.offline:
+            since = oldest_merge(REPO_ROOT, FIRST_VERSION)
+            if since is not None:
+                bodies = fetch_bodies(REPO_ROOT, since)
+        text = build_changelog(REPO_ROOT, bodies, pending)
+    except IncompleteHistoryError as error:
+        print(f"changelog: {error}; nothing written", file=sys.stderr)
+        return 2
 
     output: Path = args.output
     if args.check:

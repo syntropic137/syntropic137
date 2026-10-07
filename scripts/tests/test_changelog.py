@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from changelog import (
     Category,
+    IncompleteHistoryError,
     MergedPullRequest,
     PendingRelease,
     build_changelog,
@@ -84,6 +85,18 @@ def test_release_notes_skips_fenced_code_and_prose_only_has_no_bullet() -> None:
     prose = "## Release notes\n\nWorkflows can now cap cost.\n\n## Testing\n- a bullet\n"
     assert release_notes_bullet(prose) is None
     assert release_notes_bullet("## Summary\n- a bullet\n") is None
+
+
+@pytest.mark.unit
+def test_release_notes_heading_inside_a_fence_is_not_the_section() -> None:
+    body = (
+        "## Summary\n\nPR template example:\n\n"
+        "```markdown\n## Release notes\n- This text is an example, not a release note.\n```\n\n"
+        "## Release notes\n\n- The real shipped change.\n"
+    )
+    assert release_notes_bullet(body) == "The real shipped change."
+    tilde = "~~~\n## Release notes\n- example\n~~~\nno real section\n"
+    assert release_notes_bullet(tilde) is None
 
 
 @pytest.mark.unit
@@ -273,4 +286,36 @@ def test_first_version_floor_and_pending_release(repo: Path) -> None:
 
 @pytest.mark.unit
 def test_output_is_deterministic(repo: Path) -> None:
-    assert build_changelog(repo, repo_url=URL) == build_changelog(repo, repo_url=URL)
+    first = build_changelog(repo, repo_url=URL, first_version=(0, 0, 0))
+    assert first == build_changelog(repo, repo_url=URL, first_version=(0, 0, 0))
+
+
+# --- incomplete clones --------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_shallow_clone_without_tags_is_refused(repo: Path, tmp_path: Path) -> None:
+    # The shape CI's checkout gives: depth 1, no tags.
+    clone = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", "--no-tags", f"file://{repo}", str(clone)],
+        check=True,
+        capture_output=True,
+    )
+    with pytest.raises(IncompleteHistoryError, match="shallow clone"):
+        build_changelog(clone, repo_url=URL, first_version=(0, 0, 0))
+
+
+@pytest.mark.unit
+def test_full_clone_without_tags_is_refused(repo: Path, tmp_path: Path) -> None:
+    clone = tmp_path / "untagged"
+    subprocess.run(
+        ["git", "clone", "-q", "--no-tags", f"file://{repo}", str(clone)],
+        check=True,
+        capture_output=True,
+    )
+    with pytest.raises(IncompleteHistoryError, match=r"no release tag at or after v0\.2\.0"):
+        build_changelog(clone, repo_url=URL, first_version=(0, 2, 0))
+    # Tags older than the first version do not count as the history it needs.
+    with pytest.raises(IncompleteHistoryError, match=r"v9\.0\.0"):
+        build_changelog(repo, repo_url=URL, first_version=(9, 0, 0))
