@@ -109,6 +109,28 @@
       ],
       "document_sha256": "e415b6b2ef430f4d63e526324fff380183ca16e73bd44179c227144132e7024b"
     },
+    "workflows/evals/verify-pinned-sdlc-baseline/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "a3c49aebb7c922c7509113b87030e217e2c401196beca2e2e069440f29ac8e5a"
+    },
+    "workflows/evals/verify-pinned-sdlc-lean/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "8c07d643bca8f9a29da5f0ec201047fb374b2fe4ca87b2c077d19665a63e2314"
+    },
     "workflows/examples/claude-delegates-to-codex.yaml": {
       "phases": [
         {
