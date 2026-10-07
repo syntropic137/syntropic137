@@ -24,7 +24,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
     _codex_auth_staged_for,
 )
-from syn_shared.agents import DEFAULT_CODEX_MODEL, AgentProvider
+from syn_shared.agents import DEFAULT_CODEX_MODEL, AgentProvider, UnenforceableCostLimitError
 
 pytestmark = pytest.mark.unit
 
@@ -64,6 +64,25 @@ def test_a_codex_fallback_on_a_tool_scoped_phase_is_refused() -> None:
 
     with pytest.raises(UnsupportedToolPolicyForProviderError):
         _fallback_agent_config(phase, _build_agent_config_from_phase(phase))
+
+
+def test_a_codex_fallback_on_a_cost_capped_stored_phase_is_refused() -> None:
+    # Built straight from the stored shape, so neither the YAML nor the API
+    # validator has seen it: codex reports usage only at the end of a run and
+    # cannot stop at a cost limit (#1376).
+    phase = _phase(FallbackAgent(provider="codex"), max_cost_usd=5.0)
+
+    with pytest.raises(UnenforceableCostLimitError):
+        _fallback_agent_config(phase, _build_agent_config_from_phase(phase))
+
+
+def test_a_claude_fallback_on_a_cost_capped_phase_is_allowed() -> None:
+    phase = _phase(FallbackAgent(provider="claude"), max_cost_usd=5.0)
+
+    fallback = _fallback_agent_config(phase, _build_agent_config_from_phase(phase))
+
+    assert fallback is not None
+    assert fallback.provider == AgentProvider.CLAUDE
 
 
 def test_a_codex_fallback_stages_codex_auth_in_a_claude_phase() -> None:

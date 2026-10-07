@@ -38,6 +38,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.source_commits im
 )
 from syn_shared.agents import (
     AgentProvider,
+    require_enforceable_cost_limit,
     require_executable_provider,
     require_runnable_sandbox,
 )
@@ -294,6 +295,12 @@ def _fallback_agent_config(phase: object, primary: AgentConfiguration) -> AgentC
         raise UnsupportedToolPolicyForProviderError(
             provider=str(provider), phase_id=phase_id, declared=list(primary.allowed_tools)
         )
+    # The phase's cost limit binds whichever agent runs it, and codex cannot
+    # stop at one (#1376). Refused here, before any workspace is paid for,
+    # rather than discovered when the primary fails over.
+    require_enforceable_cost_limit(
+        provider, getattr(phase, "max_cost_usd", None), phase_id=phase_id
+    )
     return replace(primary, provider=declared.provider, model=declared.model)
 
 
