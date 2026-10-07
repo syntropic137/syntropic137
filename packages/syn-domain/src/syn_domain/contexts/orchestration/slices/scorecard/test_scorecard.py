@@ -16,6 +16,8 @@ from syn_domain.contexts.orchestration.slices.scorecard import (
     phase_type_of,
 )
 
+pytestmark = pytest.mark.unit
+
 NOW = datetime(2026, 10, 7, 18, 0, tzinfo=UTC)
 T0 = NOW - timedelta(hours=10)
 

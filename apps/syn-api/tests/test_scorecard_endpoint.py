@@ -15,6 +15,8 @@ from syn_domain.contexts.orchestration.slices.scorecard import ScorecardProjecti
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+pytestmark = pytest.mark.unit
+
 NOW = datetime(2026, 10, 7, 18, 0, tzinfo=UTC)
 
 
