@@ -60,7 +60,7 @@ Filling them is #1716. Until then, size from the estimates and say so.
 
 | Input | Value | Status |
 |---|---|---|
-| Phase deadlines summed | 14,400 s per run (premise 1200, implement 3600, verify 3600, fix 3600, reverify 1800, finalize 600) | read from `workflows/sdlc/implement-v3/workflow.yaml` |
+| Phase deadlines summed | 14,400 s with one repair round (premise 1200, implement 3600, verify 3600, fix 3600, reverify 1800, finalize 600); 25,200 s with all three rounds (`fix_2`/`reverify_2`/`fix_3`/`reverify_3` reuse the round deadlines) | `workflows/sdlc/implement-v3/workflow.yaml:72-268` |
 | CPU demand of an active run | about 1.2 CPU: 1.5-2.2 CPU while gating x about 0.65 gate duty | **estimate** (#1600, #1585) |
 | Workspace CPU cap | 2.0 per workspace | `packages/syn-shared/src/syn_shared/settings/workspace.py:42` |
 | Workspace RAM | 0.5-1 GB used; 4096 MB cap by default, 8 GB on the VPS | used: **estimate**; cap: `workspace.py:39` |
