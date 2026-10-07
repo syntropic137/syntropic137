@@ -47,7 +47,7 @@ describe('TokenInOut', () => {
 describe('every In/Out card agrees with the execution header', () => {
   it('phase timeline card', () => {
     const phase = {
-      workflow_phase_id: 'plan',
+      phase_id: 'plan',
       name: 'Plan (claude)',
       status: 'completed',
       session_id: null,

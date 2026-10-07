@@ -408,8 +408,12 @@ export interface ExecutionListItem {
 export type ExecutionListResponse = components['schemas']['ExecutionListResponse']
 
 export interface PhaseExecutionDetail {
-  /** Explicit naming for OTel correlation (ADR-028) */
-  workflow_phase_id: string
+  /**
+   * The phase's id, under the name the wire uses (`PhaseExecutionInfo.phase_id`).
+   * This read `workflow_phase_id`, which the server never sent, so the timeline
+   * could not match a phase that ran to its place in `phase_plan`.
+   */
+  phase_id: string
   name: string
   status: string
   session_id: string | null

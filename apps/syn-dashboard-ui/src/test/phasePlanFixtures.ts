@@ -12,7 +12,7 @@ type PlannedPhase = ExecutionDetailResponse['phase_plan'][number]
  */
 export function planOf(phases: readonly Phase[]): PlannedPhase[] {
   return phases.map((p) => ({
-    phase_id: p.workflow_phase_id,
+    phase_id: p.phase_id,
     name: p.name,
     status: p.status,
     status_display: p.status,

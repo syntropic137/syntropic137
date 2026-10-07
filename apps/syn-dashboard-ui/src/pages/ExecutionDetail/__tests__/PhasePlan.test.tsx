@@ -19,7 +19,7 @@ type Phase = ExecutionDetailResponse['phases'][number]
 type Planned = ExecutionDetailResponse['phase_plan'][number]
 
 const ranHere = {
-  workflow_phase_id: 'review',
+  phase_id: 'review',
   name: 'Review',
   status: 'completed',
   session_id: null,

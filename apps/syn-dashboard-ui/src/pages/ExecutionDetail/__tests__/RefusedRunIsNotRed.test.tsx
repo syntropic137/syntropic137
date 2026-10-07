@@ -45,7 +45,7 @@ function failedPhase(failure_classification: FailureClassification): PhaseExecut
   // the timeline colours each card from its phase, not from the run.
   return {
     failure_classification,
-    workflow_phase_id: 'phase-1',
+    phase_id: 'phase-1',
     name: 'review',
     status: 'failed',
     session_id: null,

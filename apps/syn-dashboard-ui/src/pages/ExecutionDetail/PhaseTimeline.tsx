@@ -197,7 +197,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
   // draws a phase that ran with its full card.
   const phases = execution.phases
   const plan = execution.phase_plan
-  const ran = new Map(phases.map((p) => [p.workflow_phase_id, p]))
+  const ran = new Map(phases.map((p) => [p.phase_id, p]))
   // Read from the execution, not from the phases below. Lane 1 leaves a running
   // phase's counts at 0, so a roll-up summed from the cards reported "0 tokens"
   // for the whole of a live run - directly under a headline card already
@@ -271,7 +271,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
                     <PhaseStartPins pins={phase.pinned_at_start} status={phase.start_pins_status} />
                     <Link
                       className="phase-inventory-link"
-                      to={sessionInventoryHref(execution.workflow_execution_id, phase.workflow_phase_id)}
+                      to={sessionInventoryHref(execution.workflow_execution_id, phase.phase_id)}
                       aria-label={`Sessions for phase ${phase.name}`}
                     >
                       Sessions

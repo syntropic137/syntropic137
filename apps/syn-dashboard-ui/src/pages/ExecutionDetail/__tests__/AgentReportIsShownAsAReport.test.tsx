@@ -58,7 +58,7 @@ const ERROR_MESSAGE = 'Phase implement reported success=false: stopping here.'
 
 function failedPhase(): PhaseExecutionDetail {
   return {
-    workflow_phase_id: 'phase-1',
+    phase_id: 'phase-1',
     name: 'implement',
     status: 'failed',
     // Its own classification, as the API sends it (#1592): the card is

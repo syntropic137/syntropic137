@@ -43,7 +43,7 @@ function midPhaseExecution(
     completed_at: null,
     phases: [
       {
-        workflow_phase_id: 'phase-1',
+        phase_id: 'phase-1',
         name: 'implement',
         status: 'running',
         session_id: 'sess-1',

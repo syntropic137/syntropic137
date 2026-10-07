@@ -21,7 +21,7 @@ type Phase = ExecutionDetailResponse['phases'][number]
 
 function phase(overrides: Partial<Phase>): Phase {
   return {
-    workflow_phase_id: 'p1',
+    phase_id: 'p1',
     name: 'Phase',
     status: 'completed',
     session_id: null,
@@ -128,7 +128,7 @@ describe('Phase Pipeline model label', () => {
     renderPhases(
       aliases.map((alias, i) =>
         phase({
-          workflow_phase_id: `p${i}`,
+          phase_id: `p${i}`,
           model: null,
           requested_model: alias,
           model_display: `unknown (requested: ${alias})`,

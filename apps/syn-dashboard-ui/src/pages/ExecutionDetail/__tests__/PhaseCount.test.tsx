@@ -31,7 +31,7 @@ const { ExecutionDetail } = await import('../ExecutionDetail')
 
 function phase(name: string, status: string): PhaseExecutionDetail {
   return {
-    workflow_phase_id: name,
+    phase_id: name,
     name,
     status,
     session_id: null,
