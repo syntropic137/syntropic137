@@ -54,7 +54,14 @@ from syn_domain.contexts.orchestration import (
     build_command_from_definition,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
-from syn_shared.agents import PhaseModelDefaults
+from syn_shared.agents import (
+    CODEX_MODEL_IDS,
+    ModelId,
+    PhaseModelDefaults,
+    resolve_codex_model_alias,
+    resolve_model_alias,
+)
+from syn_shared.pricing import resolve_model_pricing
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -134,9 +141,6 @@ def test_the_same_cases_load_under_each_pinned_codex_verifier(variant: str, slug
 def test_each_pinned_codex_slug_is_a_priced_codex_model_and_not_an_alias(slug: str) -> None:
     """What the variant passes to `codex exec --model` is the slug itself, and
     it prices as itself: a run is never costed at the gpt-sol target's rate."""
-    from syn_shared.agents import CODEX_MODEL_IDS, ModelId, resolve_codex_model_alias, resolve_model_alias
-    from syn_shared.pricing import resolve_model_pricing
-
     assert resolve_model_alias(slug) is None
     assert resolve_codex_model_alias(slug) == slug
     assert ModelId(slug) in CODEX_MODEL_IDS
