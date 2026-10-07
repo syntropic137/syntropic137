@@ -32,6 +32,14 @@ checked-in file (refusing to go on unless the server then holds exactly that
 definition), creates the evals and starts real agent runs, which cost money:
 never run it from CI. ``score`` only reads.
 
+INSTALL PROVENANCE. ``launch`` installs with ``version`` = the suite version
+(``<n>.0.0``) and ``source_digest`` = sha256 of the exact YAML document it
+uploads. The server's install rules then do the rest: a byte-identical
+re-launch is a no-op, an archived workflow is restored, and a workflow file
+changed without a suite version bump is refused (409, digest mismatch) before
+any eval exists. Never install without provenance: once the server records a
+version, an install that declares none is refused by design.
+
 THE LAUNCH LEDGER. ``launch`` appends one line per started run to
 ``<suite>/launches.jsonl`` (commit it: the workspace that launched is
 ephemeral). ``score`` scores only the runs that ledger names, and only after
@@ -47,6 +55,7 @@ Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -599,6 +608,10 @@ class _Workflow(_Read):
     phases: list[_PhaseDefinition]
 
 
+class _ErrorBody(_Read):
+    detail: str
+
+
 class _Installed(_Read):
     id: str
     status: str
@@ -844,6 +857,15 @@ def _basic_auth() -> httpx.BasicAuth | None:
     return httpx.BasicAuth(user, password) if user and password else None
 
 
+def _detail(response: httpx.Response) -> str:
+    """The API's error detail, or the raw body when it sent none."""
+    try:
+        body = _ErrorBody.model_validate(response.json())
+    except (ValueError, ValidationError):
+        return response.text
+    return body.detail
+
+
 def _workflow_document(loaded: LoadedSuite, root: Path) -> str:
     """The suite's workflow as one YAML document, its prompt files inlined.
 
@@ -856,20 +878,51 @@ def _workflow_document(loaded: LoadedSuite, root: Path) -> str:
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 
 
+class Provenance(_Frozen):
+    """What `launch` declares when it installs: the suite version and the document's digest."""
+
+    version: str
+    source_digest: str
+
+
+def install_provenance(loaded: LoadedSuite, document: str) -> Provenance:
+    """Deterministic install provenance for the suite's workflow document.
+
+    The version is the suite's, so changing a listed workflow without bumping
+    the suite reuses a version under a new digest, which the server refuses as
+    a republish. The digest covers the uploaded bytes, prompts inlined, so a
+    prompt-file edit changes it too.
+    """
+    digest = hashlib.sha256(document.encode("utf-8")).hexdigest()
+    return Provenance(version=f"{loaded.suite.version}.0.0", source_digest=f"sha256:{digest}")
+
+
 def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROOT) -> str:
     """Install the suite's workflow, then prove the server holds exactly it.
 
-    Install is load-or-create and a byte-identical reinstall is a no-op, so
-    this is safe on every launch. The read-back is what makes the suite's
-    recorded workflow and models true of the runs: a server whose definition
-    differs in a phase, a prompt or a model is refused before any eval exists.
+    Install is load-or-create with explicit provenance (`install_provenance`):
+    a byte-identical reinstall is a no-op and an archived template is restored,
+    so this is safe on every launch. A 409 (same version, other content) stops
+    the launch with the server's reason. The read-back is what makes the
+    suite's recorded workflow and models true of the runs: a server whose
+    definition differs in a phase, a prompt or a model is refused before any
+    eval exists.
     """
     w = loaded.workflow
+    document = _workflow_document(loaded, root)
+    provenance = install_provenance(loaded, document)
     response = client.post(
         "/workflows/from-yaml",
-        content=_workflow_document(loaded, root).encode("utf-8"),
+        params={"version": provenance.version, "source_digest": provenance.source_digest},
+        content=document.encode("utf-8"),
         headers={"content-type": "application/yaml"},
     )
+    if response.status_code == 409:
+        raise RuntimeError(
+            f"server refused to install {w.id} as version {provenance.version} "
+            f"({provenance.source_digest}): {_detail(response)}. If {w.path} changed, "
+            "bump the suite version; no eval was created"
+        )
     response.raise_for_status()
     installed = _Installed.model_validate(response.json())
     if installed.id != w.id:
@@ -885,7 +938,10 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
             f"server definition of {w.id} differs from {w.path} "
             f"in phase(s) {differs} (prompt or model); no eval was created"
         )
-    return f"workflow {w.id}: {installed.status}, server definition matches {w.path}"
+    return (
+        f"workflow {w.id}: {installed.status} as {provenance.version} "
+        f"({provenance.source_digest[:19]}), server definition matches {w.path}"
+    )
 
 
 def launch_suite(
@@ -950,7 +1006,8 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
     return [
         f"workflow {w.id} (models {w.models}); also runnable with --workflow: "
         f"{', '.join(others) or '(none)'}",
-        f"first: POST /workflows/from-yaml {w.path} (prompts inlined), then "
+        f"first: POST /workflows/from-yaml {w.path} (prompts inlined) as version "
+        f"{loaded.suite.version}.0.0 with its sha256 digest, then "
         f"GET /workflows/{w.id} must match its phases, prompts and models {w.models}",
     ] + [
         f"{c.id}: POST /evals baseline {s.repository}@{c.commit} tags [{loaded.tag}, {c.tag}]; "
