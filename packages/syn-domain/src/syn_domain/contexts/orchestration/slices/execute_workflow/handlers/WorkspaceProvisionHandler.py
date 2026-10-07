@@ -13,8 +13,10 @@ of each repo's distinct instruction files, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
+from enum import Enum
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
@@ -204,33 +206,73 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
 
 
-#: An AGENTS.md this small that names CLAUDE.md is a pointer to it (the
-#: breadcrumb convention), not a second set of instructions.
-_BREADCRUMB_MAX_BYTES: Final[int] = 512
+class _Unread(Enum):
+    """Why an instruction file has no content to compare."""
+
+    #: Confirmed not in the checkout: there is nothing to import.
+    ABSENT = "absent"
+    #: The read failed (transport, timeout, permission): the file may be there,
+    #: so its import is kept rather than guessed away.
+    UNREADABLE = "unreadable"
+
+
+#: Exit status of ``_READ_INSTRUCTION_FILE`` when the path does not exist. Any
+#: other failure is UNREADABLE, never ABSENT.
+_ABSENT_EXIT: Final[int] = 3
+_READ_INSTRUCTION_FILE: Final[str] = f'[ -e "$1" ] || exit {_ABSENT_EXIT}; exec cat -- "$1"'
+
+#: The whole of a breadcrumb AGENTS.md: one line that only points at the
+#: CLAUDE.md beside it, as an @-import or a Markdown link, optionally led by
+#: "See"/"Read"/"Follow". Anything else in the file is an instruction of its own.
+_BREADCRUMB = re.compile(
+    r"(?:(?:see|read|follow)\s+)?"
+    r"(?:@(?:\./)?CLAUDE\.md|\[`?(?:\./)?CLAUDE\.md`?\]\((?:\./)?CLAUDE\.md\))\.?",
+    re.IGNORECASE,
+)
 
 
 def _instruction_imports(
-    agents_path: str, agents_md: str | None, claude_path: str, claude_md: str | None
+    agents_path: str,
+    agents_md: str | _Unread,
+    claude_path: str,
+    claude_md: str | _Unread,
 ) -> list[str]:
     """Return the repo instruction files worth importing, each distinct one once.
 
-    ``None`` means the file is not in the checkout. AGENTS.md is dropped when it
-    says nothing CLAUDE.md does not: a byte-identical copy, or a breadcrumb
-    pointing at it. CLAUDE.md is the one kept because it is the canonical file
-    (AGENTS.md is the breadcrumb), and because Claude Code reads it natively.
+    AGENTS.md is dropped only when it says nothing CLAUDE.md does not: a
+    byte-identical copy of a CLAUDE.md that was read, or a breadcrumb pointing at
+    a CLAUDE.md that is not confirmed absent. CLAUDE.md is the one kept because
+    it is the canonical file (AGENTS.md is the breadcrumb), and because Claude
+    Code reads it natively. A file that could not be read is still imported.
     """
-    if agents_md is not None and claude_md is not None:
+    if isinstance(agents_md, str) and claude_md is not _Unread.ABSENT:
         is_copy = agents_md == claude_md
-        is_breadcrumb = (
-            len(agents_md.encode()) <= _BREADCRUMB_MAX_BYTES and "CLAUDE.md" in agents_md
-        )
+        is_breadcrumb = _BREADCRUMB.fullmatch(agents_md.strip()) is not None
         if is_copy or is_breadcrumb:
-            agents_md = None
+            agents_md = _Unread.ABSENT
     return [
         path
         for path, content in ((agents_path, agents_md), (claude_path, claude_md))
-        if content is not None
+        if content is not _Unread.ABSENT
     ]
+
+
+async def _read_instruction_file(workspace: ManagedWorkspace, path: str) -> str | _Unread:
+    """Read one instruction file, telling a confirmed absence from a failed read."""
+    result = await workspace.execute(
+        ["sh", "-c", _READ_INSTRUCTION_FILE, "sh", path], timeout_seconds=30
+    )
+    if result.exit_code == 0 and not result.timed_out:
+        return result.stdout
+    if result.exit_code == _ABSENT_EXIT and not result.timed_out:
+        return _Unread.ABSENT
+    logger.warning(
+        "could not read %s (exit %d), importing it anyway: %s",
+        path,
+        result.exit_code,
+        result.stderr,
+    )
+    return _Unread.UNREADABLE
 
 
 _DEADLINE_NOTICE = (
@@ -582,10 +624,13 @@ class WorkspaceProvisionHandler:
         # not clone would point the agent at paths that do not exist.
         cloned_repos = effective_repos if clone_repos else []
         if cloned_repos:
+            # Two spellings of one repo (".git", a trailing slash) are one
+            # checkout on disk, so its files are imported once, first spelling first.
+            names = list(dict.fromkeys(self._repo_name(url) for url in cloned_repos))
             imports = [
                 path
-                for url in cloned_repos
-                for path in await self._repo_instruction_imports(workspace, self._repo_name(url))
+                for name in names
+                for path in await self._repo_instruction_imports(workspace, name)
             ]
             context = self._generate_workspace_context(imports)
             await workspace.inject_files(
@@ -803,17 +848,12 @@ class WorkspaceProvisionHandler:
         agents_path = f"/workspace/repos/{name}/AGENTS.md"
         claude_path = f"/workspace/repos/{name}/CLAUDE.md"
         try:
-            agents = await workspace.execute(["cat", "--", agents_path], timeout_seconds=30)
-            claude = await workspace.execute(["cat", "--", claude_path], timeout_seconds=30)
+            agents = await _read_instruction_file(workspace, agents_path)
+            claude = await _read_instruction_file(workspace, claude_path)
         except Exception as exc:
             logger.warning("could not read instruction files of %s, importing both: %s", name, exc)
             return [agents_path, claude_path]
-        return _instruction_imports(
-            agents_path,
-            agents.stdout if agents.exit_code == 0 else None,
-            claude_path,
-            claude.stdout if claude.exit_code == 0 else None,
-        )
+        return _instruction_imports(agents_path, agents, claude_path, claude)
 
     @staticmethod
     async def _install_attribution_hook(workspace: ManagedWorkspace) -> None:

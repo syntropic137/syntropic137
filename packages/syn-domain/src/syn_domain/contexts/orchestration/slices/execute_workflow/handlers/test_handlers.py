@@ -6,6 +6,7 @@ correct commands back to the aggregate.
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -853,11 +854,14 @@ async def _provisioned_context(
     *,
     repos: list[str] | None = None,
     execute_error: Exception | None = None,
+    read_results: dict[str, object] | None = None,
 ) -> str:
     """Run the real WorkspaceProvisionHandler.handle() and return the context it injected.
 
-    ``files`` is what the clone put on disk: ``cat`` of a listed path succeeds
-    with its content, of anything else fails the way a missing file does.
+    ``files`` is what the clone put on disk: reading a listed path succeeds
+    with its content, reading anything else fails the way a missing file does
+    (the read script's own exit status). ``read_results`` overrides the result
+    for a path, for failures the provider returns as values.
     """
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -874,13 +878,20 @@ async def _provisioned_context(
     async def execute(command: list[str], **_kwargs: object) -> ExecutionResult:
         if execute_error is not None:
             raise execute_error
-        if command[:2] == ["cat", "--"] and command[2] in files:
+        path = command[-1]
+        if read_results is not None and path in read_results:
+            result = read_results[path]
+            assert isinstance(result, ExecutionResult)
+            return result
+        if path in files:
+            return ExecutionResult(exit_code=0, success=True, duration_ms=1.0, stdout=files[path])
+        if command[:2] == ["sh", "-c"] and path.endswith(".md"):
+            # Run the handler's real read script against a path that is not there.
+            proc = subprocess.run(command, capture_output=True, text=True, check=False)
             return ExecutionResult(
-                exit_code=0, success=True, duration_ms=1.0, stdout=files[command[2]]
+                exit_code=proc.returncode, success=False, duration_ms=1.0, stderr=proc.stderr
             )
-        return ExecutionResult(
-            exit_code=1, success=False, duration_ms=1.0, stderr="No such file or directory"
-        )
+        return ExecutionResult(exit_code=1, success=False, duration_ms=1.0)
 
     workspace = AsyncMock()
     workspace.proxy_url = "http://envoy:10000"
@@ -1041,6 +1052,111 @@ class TestWorkspaceProvisionHandler:
             "/workspace/repos/repo-b/AGENTS.md",
             "/workspace/repos/repo-b/CLAUDE.md",
         ]
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "agents_md",
+        [
+            "Never commit secrets. CLAUDE.md contains the style guide.\n",
+            "@CLAUDE.md\nRun all tests before pushing.\n",
+            "See [CLAUDE.md](docs/CLAUDE.md).\n",
+            "Never commit secrets. See [CLAUDE.md](CLAUDE.md).\n",
+        ],
+        ids=["mention", "pointer-plus-rule", "other-target", "rule-plus-pointer"],
+    )
+    async def test_agents_md_that_is_not_only_a_pointer_is_kept(self, agents_md: str) -> None:
+        """Short is not disposable: only a whole-file pointer at this CLAUDE.md is dropped."""
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": agents_md,
+                "/workspace/repos/repo-a/CLAUDE.md": "# Style\n",
+            }
+        )
+        assert _imports(context) == [
+            "/workspace/repos/repo-a/AGENTS.md",
+            "/workspace/repos/repo-a/CLAUDE.md",
+        ]
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "agents_md",
+        ["@CLAUDE.md\n", "@./CLAUDE.md", "\n  Read [`CLAUDE.md`](./CLAUDE.md)  \n"],
+        ids=["import", "dot-import", "read-link"],
+    )
+    async def test_pure_pointer_agents_md_imports_only_its_target(self, agents_md: str) -> None:
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": agents_md,
+                "/workspace/repos/repo-a/CLAUDE.md": "# The real instructions\n",
+            }
+        )
+        assert _imports(context) == ["/workspace/repos/repo-a/CLAUDE.md"]
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("exit_code", "timed_out"),
+        [(-1, False), (-1, True), (1, False), (3, True)],
+        ids=["transport", "timeout", "permission", "timeout-with-absent-status"],
+    )
+    @pytest.mark.parametrize("unreadable", ["AGENTS.md", "CLAUDE.md"])
+    async def test_a_failed_read_keeps_the_import(
+        self, unreadable: str, exit_code: int, timed_out: bool
+    ) -> None:
+        """A failure returned as a value is not absence: the file may be there."""
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
+
+        body = "# Same\n"
+        path = f"/workspace/repos/repo-a/{unreadable}"
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": body,
+                "/workspace/repos/repo-a/CLAUDE.md": body,
+            },
+            read_results={
+                path: ExecutionResult(
+                    exit_code=exit_code,
+                    success=False,
+                    duration_ms=1.0,
+                    timed_out=timed_out,
+                    stderr="read failed",
+                )
+            },
+        )
+        assert _imports(context) == [
+            "/workspace/repos/repo-a/AGENTS.md",
+            "/workspace/repos/repo-a/CLAUDE.md",
+        ]
+
+    @pytest.mark.anyio
+    async def test_one_spelling_per_repo_is_imported_once(self) -> None:
+        """Repo spellings the resolver accepts as distinct still name one checkout."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        refs = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(
+                repos=[
+                    RepositoryRef.parse("https://github.com/org/repo-a.git"),
+                    RepositoryRef.parse("https://github.com/org/repo-a/"),
+                ]
+            ),
+            {},
+            _make_workflow_stub(),
+        )
+        repos = [r.https_url for r in refs]
+        assert len(repos) == 2, "the resolver keeps both spellings; the handler must not"
+        body = "# Same\n"
+        context = await _provisioned_context(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": body,
+                "/workspace/repos/repo-a/CLAUDE.md": body,
+            },
+            repos=repos,
+        )
+        assert _imports(context) == ["/workspace/repos/repo-a/CLAUDE.md"]
 
     @pytest.mark.anyio
     async def test_handle_no_repos_skips_context_inject(self) -> None:
