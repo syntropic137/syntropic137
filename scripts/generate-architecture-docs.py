@@ -240,6 +240,26 @@ just docs-regen
     return content
 
 
+def update_readme_aggregates(manifest: dict[str, Any], readme_content: str) -> str:
+    """Rewrite the Aggregates column of README's bounded-context table.
+
+    Rows look like ``| **`<context>`** | <aggregates> | <purpose> |``. Only the
+    middle cell is generated; the purpose stays hand-written.
+    """
+    by_context: dict[str, list[str]] = {}
+    for aggregate in manifest.get("domain", {}).get("aggregates", []):
+        name = aggregate["name"].removesuffix("Aggregate")
+        by_context.setdefault(aggregate["context"], []).append(name)
+
+    def replace_row(match: re.Match[str]) -> str:
+        names = sorted(by_context.get(match.group(2), []))
+        if not names:
+            return match.group(0)
+        return f"{match.group(1)} {', '.join(names)} |"
+
+    return re.sub(r"^(\| \*\*`(\w+)`\*\* \|)[^|]*\|", replace_row, readme_content, flags=re.M)
+
+
 def update_readme_counts(manifest: dict[str, Any], out_root: Path) -> bool:
     """Update CQRS component counts in README.md."""
     domain = manifest.get("domain", {})
@@ -259,6 +279,8 @@ def update_readme_counts(manifest: dict[str, Any], out_root: Path) -> bool:
     replacement = f"| CQRS | Commands ({commands_count}) → Events ({events_count}) → Projections ({projections_count}) |"
 
     updated_content = re.sub(pattern, replacement, readme_content)
+
+    updated_content = update_readme_aggregates(manifest, updated_content)
 
     if updated_content != readme_content:
         readme_path.write_text(updated_content)
@@ -296,7 +318,7 @@ def main() -> None:
     parser.add_argument(
         "--out-root",
         type=Path,
-        default=Path("."),
+        default=Path(),
         help="Directory standing in for the repo root; README.md is updated in place there",
     )
     args = parser.parse_args()

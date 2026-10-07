@@ -113,9 +113,9 @@ The system is organized into 5 bounded contexts following Vertical Slice Archite
 
 | Context | Aggregates | Purpose |
 |---------|------------|---------|
-| **`orchestration`** | Workspace, WorkflowTemplate, WorkflowExecution | Workflow execution and workspace management |
-| **`organization`** | Organization, System, Repo | Organization hierarchy, system and repo management |
-| **`agent_sessions`** | AgentSession | Agent sessions and observability metrics |
+| **`orchestration`** | ClaudePluginRegistration, Eval, ExecutionRequest, GlobalClaudePluginRegistry, SkillRegistration, WorkflowExecution, WorkflowTemplate, Workspace | Workflow execution and workspace management |
+| **`organization`** | Organization, Repo, RepoClaim, System | Organization hierarchy, system and repo management |
+| **`agent_sessions`** | AgentSession, InventoryClock, InventoryReconciliation | Agent sessions and observability metrics |
 | **`github`** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | **`artifacts`** | Artifact | Artifact storage and retrieval |
 
