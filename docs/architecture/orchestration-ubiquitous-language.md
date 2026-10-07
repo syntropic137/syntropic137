@@ -387,6 +387,58 @@ An Eval does not list its runs. An Execution records which Eval it belongs to,
 so attaching a run is one write to the Execution and the Eval's stream does not
 grow with every run. (Evals plan, #967.)
 
+An Eval is long-lived: the same experiment is run again and again, under
+different workflows and models, and every run adds a data point to the same
+Eval. Its summary (run count, scored count, Pass Rate, last run and last
+Verdict, Variants) is derived at read time and never stored on it.
+
+## Run
+
+An Execution that is a member of an Eval, seen from the Eval: one data point.
+Membership is the Execution's (`eval_membership`), never the Eval's. A Run
+carries what the dashboard compares: its Workflow, the models its phases
+OBSERVED (the model that ran, as recorded on the session, never the alias a
+phase declared - `opus` is not a model), its cost and duration, and its Score
+if it has one. A Run's workflow version is not recorded on the Execution yet,
+so the read path reports none rather than guess.
+
+## Score
+
+A judgement of one Run, recorded on the Eval: a Verdict, an optional number
+from 0 to 1, Evidence (markdown: why), the scorer that produced it and its
+version, and when. `RecordEvalRunScore` -> `EvalRunScored`. Only a member Run
+can be scored (409 otherwise). Scoring is allowed on a Frozen or Archived Eval:
+judging a run is not editing what the Eval measures. Re-scoring REPLACES the
+Run's current Score; the earlier Scores stay in the Eval's events. Unlike
+membership, Scores do grow the Eval's stream, one event per judgement.
+
+## Verdict
+
+`PASS`, `FAIL` or `ERROR` (`Verdict`, a StrEnum). `ERROR` means the Run could
+not be judged (it did not finish, or produced nothing to judge): it counts as
+scored and not as passed. Not the same word as a Review Verdict, which is a
+phase's own `certified` / `blocked` about a change; a scorer reads the Review
+Verdict and records a Verdict about the Run.
+
+## Pass Rate
+
+`PASS` Runs divided by scored Runs. None (shown as an em dash) when no Run is
+scored: no data is not 0%.
+
+## Variant
+
+The Runs of one Eval that share a Workflow and the same sorted, unique set of
+observed models. Each Variant has its own run count, pass count, Pass Rate,
+average cost (over Runs whose cost is known) and last run. Two workflows under
+two models make four Variants of one Eval.
+
+## Suite
+
+A tag on Evals, not a record: `suite:<name>` plus `case:<case id>` names one
+case's Eval, and that Eval is reused by every version of the suite and every
+verifier (`scripts/eval_suite.py`). What differs between Runs goes on the Run
+as tags: `suite-version:<n>` and `verifier:<workflow id>`.
+
 ## Goal
 
 What an Eval sets out to measure, in a sentence or a paragraph. Trimmed, never
@@ -543,6 +595,9 @@ The workspace image that carries a Scripted Agent is still called the stub
 image in agentic-workspace; that names the image, not these models.
 
 ## Words we do not use
+
+- **Suite** (as a record or an aggregate). A suite is a tag on Evals. There is
+  no Suite stream, and a second aggregate for it was rejected (evals v2).
 
 - **Lock** (an Eval). The word is Freeze. "Lock" already means the skill and
   plugin lock files here, and an Eval is not locked against reading or
