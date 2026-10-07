@@ -32,6 +32,13 @@ Statuses: `not_started`, `running`, `completed`, `failed`, `cancelled`,
 describes a start that has no Execution yet (see Queued Start). There is no paused Execution - see
 "Words we do not use".
 
+`interrupted` is what the platform records when it shuts down under a running
+Execution (#1381). The in-flight Phase's unpushed work is saved to a quarantine
+ref first. Nobody decided the work should stop, so it can be resumed, like
+`failed`. When the shutdown budget (`SYN_EXECUTION_INTERRUPT_BUDGET_S`) runs
+out before the event is written, the Execution stays `running`, and the next
+start's reconciliation fails it as `OrphanedByRestart`.
+
 ## Phase
 
 One step of a Workflow inside an Execution, with its own agent, model, prompt

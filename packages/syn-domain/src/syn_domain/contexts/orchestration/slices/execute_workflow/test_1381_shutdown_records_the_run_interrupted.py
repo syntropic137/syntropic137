@@ -32,11 +32,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     QuarantinedWork,
     SavedWork,
 )
-from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
-    ExecutionTodoProjection,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+)
+from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+    ExecutionTodoProjection,
 )
 
 if TYPE_CHECKING:
