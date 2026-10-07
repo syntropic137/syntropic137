@@ -33,7 +33,9 @@
  * The App also reports the repo's live privacy, which is what the row shows
  * for a repo it reaches: `syn repo register` sends `is_private: false`
  * unconditionally, so the stored flag says "public" for every CLI-registered
- * repo and a private one rendered without its lock.
+ * repo and a private one rendered without its lock. For a repo the App does
+ * not reach, a stored `true` is still believed, but a stored `false` is what
+ * registration sends regardless, so that privacy is unknown, never public.
  */
 
 import { useEffect, useState } from 'react'
@@ -47,6 +49,8 @@ import {
 } from '../api/repos'
 
 export type Attachment = 'attached' | 'not-attached' | 'unknown'
+
+export type Privacy = 'private' | 'public' | 'unknown'
 
 /** The only provider a GitHub App installation can reach. */
 const GITHUB = 'github'
@@ -65,7 +69,7 @@ export interface RepoRow {
   system: string | null
   /** Whether a GitHub App installation can reach it, so the platform can act on it. */
   attachment: Attachment
-  isPrivate: boolean
+  privacy: Privacy
 }
 
 export type RepoListState =
@@ -74,7 +78,12 @@ export type RepoListState =
 const UNKNOWN_ACCESS: AppAccess = { repos: [], complete: false }
 
 /** What the App knows about a repo it reaches, by lower-cased full name. */
-type AppEntries = ReadonlyMap<string, { isPrivate: boolean }>
+type AppEntries = ReadonlyMap<string, { privacy: Privacy }>
+
+/** GitHub's own answer, which is never unknown. */
+function appPrivacy(isPrivate: boolean): Privacy {
+  return isPrivate ? 'private' : 'public'
+}
 
 function registeredRow(
   repo: RepoSummary,
@@ -100,8 +109,8 @@ function registeredRow(
     system: systemId ? (systemNames.get(systemId) ?? systemId) : null,
     attachment,
     // The App's answer is live; the stored flag is whatever registration sent,
-    // and `syn repo register` always sends false.
-    isPrivate: app ? app.isPrivate : (repo.is_private ?? false),
+    // and `syn repo register` always sends false, so only a stored true is news.
+    privacy: app ? app.privacy : repo.is_private ? 'private' : 'unknown',
   }
 }
 
@@ -113,7 +122,7 @@ function connectedRepoRows(
 ): RepoRow[] {
   const systemNames = new Map(systems.map((s) => [s.system_id, s.name]))
   const appEntries: AppEntries = new Map(
-    access.repos.map((r) => [r.fullName.toLowerCase(), { isPrivate: r.isPrivate }]),
+    access.repos.map((r) => [r.fullName.toLowerCase(), { privacy: appPrivacy(r.isPrivate) }]),
   )
   const rows = new Map<string, RepoRow>()
   // Names already covered by a registered GitHub repo, whichever organization
@@ -139,7 +148,7 @@ function connectedRepoRows(
       registered: false,
       system: null,
       attachment: 'attached',
-      isPrivate,
+      privacy: appPrivacy(isPrivate),
     })
   }
   return [...rows.values()].sort(
