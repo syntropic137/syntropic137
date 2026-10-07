@@ -40,7 +40,10 @@ from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import 
 from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
     WorkspaceProvisionedForPhaseEvent,
 )
-from syn_domain.contexts.orchestration.domain.read_models.phase_progress import record_skips
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
+    inherited_phase_count,
+    record_skips,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -279,7 +282,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # (#1147). total_phases is required on the event, so there is no
             # default worth defending here; 0 would be a run with no phases.
             "total_phases": event_data.get("total_phases", 0),
-            "completed_phases": 0,
+            "completed_phases": inherited_phase_count(event_data),
             # Held here, not served from here: `on_phase_started` moves each
             # budget onto the phase that it belongs to, which is where a
             # reader needs it next to that phase's elapsed time (#1262).

@@ -45,7 +45,10 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
 )
-from syn_domain.contexts.orchestration.domain.read_models.phase_progress import record_skips
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
+    inherited_phase_count,
+    record_skips,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
@@ -115,7 +118,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             status="running",
             started_at=event_data.get("started_at"),
             completed_at=None,
-            completed_phases=0,
+            completed_phases=inherited_phase_count(event_data),
             total_phases=event_data.get("total_phases", 0),
             total_tokens=0,
             total_input_tokens=0,

@@ -19,10 +19,11 @@ from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
+    ResumeOrigin,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -100,3 +101,19 @@ def record_skips(recorded: Sequence[str], skipped: Sequence[str]) -> list[str]:
     count its skips twice.
     """
     return list(dict.fromkeys([*recorded, *skipped]))
+
+
+def inherited_phase_count(started: Mapping[str, object]) -> int:
+    """Phases a resumed run took over completed from its parent, read off its start.
+
+    A resume never emits `PhaseCompleted` for the prefix it inherits
+    (ADR-014 s7), so a read model that counts from zero shows a run resumed at
+    phase 3 of 10 as "phase 1". The aggregate seeds its own count the same way
+    (`WorkflowExecutionAggregate._inherit`), so a terminal event's total, which already
+    includes the prefix, restates this figure rather than adding to it.
+    Zero for a fresh run.
+    """
+    origin = started.get("resumed_from")
+    if origin is None:
+        return 0
+    return len(ResumeOrigin.model_validate(origin).inherited_phases)
