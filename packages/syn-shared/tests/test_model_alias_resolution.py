@@ -36,7 +36,7 @@ pytestmark = pytest.mark.unit
     [
         ("gpt-sol", ModelId.GPT_6_SOL, AliasResolutionBasis.TRANSLATED),
         ("opus", ModelId.CLAUDE_OPUS_5_5, AliasResolutionBasis.EXPECTED),
-        ("sonnet", ModelId.CLAUDE_SONNET_5, AliasResolutionBasis.EXPECTED),
+        ("sonnet", ModelId.CLAUDE_SONNET_5_5, AliasResolutionBasis.EXPECTED),
         ("haiku", ModelId.CLAUDE_HAIKU_4_5, AliasResolutionBasis.EXPECTED),
         ("fable", ModelId.CLAUDE_FABLE_5, AliasResolutionBasis.EXPECTED),
     ],
@@ -90,7 +90,7 @@ class TestFormatModelDefinition:
         [
             ("gpt-sol", "gpt-sol → gpt-6-sol"),
             ("opus", "opus → claude-opus-5-5"),
-            ("sonnet", "sonnet → claude-sonnet-5"),
+            ("sonnet", "sonnet → claude-sonnet-5-5"),
             ("haiku", "haiku → claude-haiku-4-5-20251001"),
             ("fable", "fable → claude-fable-5"),
         ],
@@ -120,7 +120,7 @@ class TestDefinitionModelFollowsExecution:
         [
             ("codex", "gpt-sol", "gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),
             ("claude", "opus", "opus \u2192 claude-opus-5-5", "claude-opus-5-5"),
-            (None, "sonnet", "sonnet \u2192 claude-sonnet-5", "claude-sonnet-5"),
+            (None, "sonnet", "sonnet \u2192 claude-sonnet-5-5", "claude-sonnet-5-5"),
             ("codex", "gpt-6-sol", "gpt-6-sol", None),
             ("claude", "some-future-model", "some-future-model", None),
             ("codex", "opus", "opus \u2192 gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),

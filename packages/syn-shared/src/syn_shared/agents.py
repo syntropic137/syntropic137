@@ -324,6 +324,7 @@ class ModelId(StrEnum):
 
     # --- Current generation (verified 2026-09-24) ---
     CLAUDE_OPUS_5_5 = "claude-opus-5-5"
+    CLAUDE_SONNET_5_5 = "claude-sonnet-5-5"  # verified 2026-10-07
     GPT_6_SOL = "gpt-6-sol"
     # --- ADR-067 phase 0 generation (verified 2026-08-16) ---
     CLAUDE_OPUS_5 = "claude-opus-5"
@@ -373,7 +374,11 @@ CLAUDE_MODEL_ALIAS_TARGETS: dict[ModelAlias, ModelId] = {
     # claude-code 2.1.280 moved `opus` to Opus 5.5; probed on 2.1.281, the CLI
     # reports it as exactly `claude-opus-5-5` (no `[1m]` suffix).
     ModelAlias.OPUS: ModelId.CLAUDE_OPUS_5_5,
-    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5,
+    # `sonnet` means the newest Sonnet. claude-code 2.1.281, the pinned CLI on
+    # 2026-10-07, predates Sonnet 5.5 and still resolves it to Sonnet 5; the
+    # first CLI carrying `claude-sonnet-5-5` seen was 2.1.293. Until that pin
+    # lands this is ahead of the CLI, and the observed model wins (see below).
+    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5_5,
     ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
     ModelAlias.FABLE: ModelId.CLAUDE_FABLE_5,
 }
@@ -502,6 +507,7 @@ class PhaseModelDefaults:
 CLAUDE_MODEL_IDS: frozenset[ModelId] = frozenset(
     {
         ModelId.CLAUDE_OPUS_5_5,
+        ModelId.CLAUDE_SONNET_5_5,
         ModelId.CLAUDE_OPUS_5,
         ModelId.CLAUDE_SONNET_5,
         ModelId.CLAUDE_FABLE_5,
