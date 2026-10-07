@@ -37,8 +37,15 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent imp
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
     ExecutionTagsRemovedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+    NextPhaseReadyEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
     WorkspaceProvisionedForPhaseEvent,
+)
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
+    inherited_phase_count,
+    record_skips,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
@@ -111,9 +118,14 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # main without bumping from 13, while PC-63 bumped 13 -> 14. A deployment
     # that had already rebuilt at this branch's 14 would never rebuild for
     # delegation_failure, so the merge takes the higher and bumps once more.
-    # v16: rebuild so stored AgentExecutionCompleted events populate
-    # agent_provider / agent_model, the agent that actually ran (PC-83).
-    VERSION = 16
+    # v16: skipped_phase_ids from NextPhaseReady, so a run certified early
+    # stops reading as finished short of its total. Rebuilt so every run
+    # since PC-63 gets its skips, not only new ones.
+    # v16 (main, PC-83): rebuild so stored AgentExecutionCompleted events
+    # populate agent_provider / agent_model, the agent that actually ran.
+    # v17: both branches bumped 15 -> 16 independently; a deployment already
+    # at either 16 would miss the other's rebuild, so the merge bumps once more.
+    VERSION = 17
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -277,7 +289,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # (#1147). total_phases is required on the event, so there is no
             # default worth defending here; 0 would be a run with no phases.
             "total_phases": event_data.get("total_phases", 0),
-            "completed_phases": 0,
+            "completed_phases": inherited_phase_count(event_data.get("resumed_from")),
+            # Skips a certified review made in the parent (#1681), so a resume
+            # does not count rounds it will never run as work still to do.
+            "skipped_phase_ids": list(event_data.get("inherited_skipped_phase_ids") or []),
             # Held here, not served from here: `on_phase_started` moves each
             # budget onto the phase that it belongs to, which is where a
             # reader needs it next to that phase's elapsed time (#1262).
@@ -451,6 +466,26 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["phases"] = phases
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_next_phase_ready(self, event_data: NextPhaseReadyEvent) -> None:
+        """Handle NextPhaseReady: record the phases a review verdict skipped (PC-63).
+
+        Without this a run certified at its first review reads as finished
+        short of its total, because the rounds it never needed stay in the
+        denominator.
+        """
+        event = NextPhaseReadyEvent.model_validate(event_data)
+        execution_id = event.execution_id
+        skipped = event.skipped_phase_ids
+        if not execution_id or not skipped:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["skipped_phase_ids"] = record_skips(
+                existing.get("skipped_phase_ids") or [], skipped
+            )
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_workflow_completed(self, event_data: dict) -> None:
         """Handle WorkflowCompleted event.

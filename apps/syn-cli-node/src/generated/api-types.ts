@@ -3773,6 +3773,7 @@ export interface components {
              * @default 0
              */
             completed_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */
@@ -3925,6 +3926,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /**
              * Total Tokens
              * @default 0
@@ -4045,6 +4047,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -4085,6 +4088,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Total Tokens */
             total_tokens: number;
             /**
@@ -5769,6 +5773,29 @@ export interface components {
             success: boolean;
             /** Error Message */
             error_message?: string | null;
+        };
+        /**
+         * PhaseProgressInfo
+         * @description How far through its phases an execution is, skipped phases accounted for.
+         *
+         *     ``total_phases`` is what the workflow defines, and a review that certifies
+         *     skips the repair rounds after it (PC-63), so ``completed/total`` read
+         *     "6/10" for a run that finished. Clients render ``display`` and draw
+         *     ``percent``; they never divide the raw counts themselves.
+         */
+        PhaseProgressInfo: {
+            /** Completed */
+            completed: number;
+            /** Skipped */
+            skipped: number;
+            /** Possible */
+            possible: number;
+            /** Remaining Possible */
+            remaining_possible: number;
+            /** Percent */
+            percent: number;
+            /** Display */
+            display: string;
         };
         /**
          * PhaseRefResponse

@@ -107,6 +107,10 @@ A Phase the Execution decided will never run, because a Review Verdict made it
 unnecessary. Recorded on the `NextPhaseReady` decision as `skipped_phase_ids`.
 Never started, never completed, never billed.
 
+A Resume carries the skips before its Resume Phase forward as
+`inherited_skipped_phase_ids`: a Skipped Phase is not a gap in the completed
+prefix, so a Resume neither runs it nor counts it as work still to do (#1681).
+
 ## Unresolved Findings
 
 How a `completed` Execution ended when its last Review Verdict was `blocked`:
@@ -215,7 +219,7 @@ chain of Resumes, not the immediate predecessor.
 ## Resume Phase
 
 The Phase a resumed Execution starts at: the first Phase, in order, that the
-original did not complete. Restarted from its beginning.
+original neither completed nor skipped. Restarted from its beginning.
 
 A Resume Phase that had already STARTED in the original may have pushed or
 published something, and re-running it repeats that, so resuming such an

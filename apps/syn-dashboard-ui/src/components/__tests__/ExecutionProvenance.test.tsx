@@ -177,6 +177,7 @@ describe('PhaseTimeline carries each phase its own pins', () => {
       ],
       total_phases: 3,
       completed_phases: 3,
+      phase_progress: { completed: 3, skipped: 0, possible: 3, remaining_possible: 0, percent: 100, display: '3 of 3' },
       total_input_tokens: 0,
       total_output_tokens: 0,
       total_cache_creation_tokens: 0,

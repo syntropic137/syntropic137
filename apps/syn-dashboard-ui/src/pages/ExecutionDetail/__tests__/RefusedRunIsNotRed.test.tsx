@@ -77,6 +77,7 @@ function failedExecution(
     phases: [failedPhase(failure_classification)],
     total_phases: 1,
     completed_phases: 0,
+    phase_progress: { completed: 0, skipped: 0, possible: 0, remaining_possible: 0, percent: 100, display: '0 of 0' },
     total_input_tokens: 10,
     total_output_tokens: 20,
     total_cache_creation_tokens: 0,

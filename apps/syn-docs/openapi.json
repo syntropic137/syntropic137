@@ -10681,6 +10681,9 @@
             "title": "Completed Phases",
             "default": 0
           },
+          "phase_progress": {
+            "$ref": "#/components/schemas/PhaseProgressInfo"
+          },
           "total_input_tokens": {
             "type": "integer",
             "title": "Total Input Tokens"
@@ -10883,6 +10886,7 @@
           "workflow_id",
           "workflow_name",
           "status",
+          "phase_progress",
           "total_input_tokens",
           "total_output_tokens",
           "total_cache_creation_tokens",
@@ -11100,6 +11104,9 @@
             "title": "Total Phases",
             "default": 0
           },
+          "phase_progress": {
+            "$ref": "#/components/schemas/PhaseProgressInfo"
+          },
           "total_tokens": {
             "type": "integer",
             "title": "Total Tokens",
@@ -11142,7 +11149,8 @@
           "workflow_execution_id",
           "workflow_id",
           "workflow_name",
-          "status"
+          "status",
+          "phase_progress"
         ],
         "title": "ExecutionRunSummary"
       },
@@ -11308,6 +11316,9 @@
             "title": "Total Phases",
             "default": 0
           },
+          "phase_progress": {
+            "$ref": "#/components/schemas/PhaseProgressInfo"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -11346,7 +11357,8 @@
         "required": [
           "execution_id",
           "workflow_id",
-          "status"
+          "status",
+          "phase_progress"
         ],
         "title": "ExecutionStatusResponse",
         "description": "Response for execution status check."
@@ -11400,6 +11412,9 @@
             "type": "integer",
             "title": "Total Phases",
             "default": 0
+          },
+          "phase_progress": {
+            "$ref": "#/components/schemas/PhaseProgressInfo"
           },
           "total_tokens": {
             "type": "integer",
@@ -11520,6 +11535,7 @@
           "workflow_id",
           "workflow_name",
           "status",
+          "phase_progress",
           "total_tokens",
           "total_input_tokens",
           "total_output_tokens",
@@ -15333,6 +15349,46 @@
           "operation_type"
         ],
         "title": "PhaseOperationInfo"
+      },
+      "PhaseProgressInfo": {
+        "properties": {
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "possible": {
+            "type": "integer",
+            "title": "Possible"
+          },
+          "remaining_possible": {
+            "type": "integer",
+            "title": "Remaining Possible"
+          },
+          "percent": {
+            "type": "integer",
+            "title": "Percent"
+          },
+          "display": {
+            "type": "string",
+            "title": "Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "completed",
+          "skipped",
+          "possible",
+          "remaining_possible",
+          "percent",
+          "display"
+        ],
+        "title": "PhaseProgressInfo",
+        "description": "How far through its phases an execution is, skipped phases accounted for.\n\n``total_phases`` is what the workflow defines, and a review that certifies\nskips the repair rounds after it (PC-63), so ``completed/total`` read\n\"6/10\" for a run that finished. Clients render ``display`` and draw\n``percent``; they never divide the raw counts themselves."
       },
       "PhaseRefResponse": {
         "properties": {
