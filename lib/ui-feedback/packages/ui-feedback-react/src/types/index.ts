@@ -58,6 +58,8 @@ export interface LocationContext {
   cssSelector?: string;
   xpath?: string;
   componentName?: string;
+  /** Display-only label of the pinned element (see describeElement); not submitted. */
+  elementLabel?: string;
 }
 
 // =====================================================
