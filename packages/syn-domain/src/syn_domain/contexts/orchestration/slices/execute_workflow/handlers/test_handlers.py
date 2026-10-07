@@ -7,6 +7,7 @@ correct commands back to the aggregate.
 from __future__ import annotations
 
 import subprocess
+from typing import TYPE_CHECKING
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -42,6 +43,11 @@ from syn_shared.agents import AgentProvider
 # =========================================================================
 # AgentExecutionHandler
 # =========================================================================
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
 
 
 @pytest.mark.unit
@@ -854,7 +860,7 @@ async def _provisioned_context(
     *,
     repos: list[str] | None = None,
     execute_error: Exception | None = None,
-    read_results: dict[str, object] | None = None,
+    read_results: dict[str, ExecutionResult] | None = None,
 ) -> str:
     """Run the real WorkspaceProvisionHandler.handle() and return the context it injected.
 
@@ -880,9 +886,7 @@ async def _provisioned_context(
             raise execute_error
         path = command[-1]
         if read_results is not None and path in read_results:
-            result = read_results[path]
-            assert isinstance(result, ExecutionResult)
-            return result
+            return read_results[path]
         if path in files:
             return ExecutionResult(exit_code=0, success=True, duration_ms=1.0, stdout=files[path])
         if command[:2] == ["sh", "-c"] and path.endswith(".md"):
