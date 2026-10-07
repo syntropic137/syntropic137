@@ -111,6 +111,39 @@ A Resume carries the skips before its Resume Phase forward as
 `inherited_skipped_phase_ids`: a Skipped Phase is not a gap in the completed
 prefix, so a Resume neither runs it nor counts it as work still to do (#1681).
 
+## Scorecard
+
+The platform's own return on investment over a window of UTC days, read from
+its records: outcomes, tokens per Phase Type, cost, and throughput, each shown
+against a target. Built by `ScorecardProjection` (replay-safe, no side effects)
+and computed by `compute_scorecard`; served at `GET /insights/scorecard`.
+
+Every Scorecard count is over **Resume Chains**, never raw Executions. Every
+number states its scope (which window, which runs) beside it.
+
+## Resume Chain
+
+An Execution together with every Resume of it, oldest first. Its outcome is
+its final run's outcome; it is in a window when that final run ended in it. Its
+cost is the cost of every run in it, failed and superseded runs included, so a
+cost per outcome never reads low by dropping the attempts that preceded it.
+
+## Phase Type
+
+The kind of work a Phase does: premise, implement, verify, fix, reverify,
+finalize, or other. **Not recorded on any event**: it is read from the
+`phase_id` by `phase_type_of`, which strips a round suffix (`fix_2` is a fix).
+A `phase_id` it does not name is `other`, never folded into a neighbour.
+
+## Merged-PR Attribution
+
+Linking a merged pull request to every Resume Chain that produced it.
+
+**Unclear:** no event records the PR a run produced, and only a failed run
+records its branches (`observed_branches`), so the Scorecard reports merged PRs
+and cost per merged PR as not recorded. When it is built, the GitHub lookup
+belongs in a ProcessManager, never in `ScorecardProjection`.
+
 ## Unresolved Findings
 
 How a `completed` Execution ended when its last Review Verdict was `blocked`:
