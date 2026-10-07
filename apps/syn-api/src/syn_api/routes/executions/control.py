@@ -321,7 +321,23 @@ async def inject_context_endpoint(
 @router.get("/executions/{execution_id}/state", response_model=StateResponse)
 async def get_execution_state_endpoint(execution_id: str) -> StateResponse:
     """Get current execution state."""
-    execution_id = await _resolve_execution_id(execution_id)
+    try:
+        execution_id = await _resolve_execution_id(execution_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Resolution asks the event store first (#1555), so an outage now
+        # surfaces here rather than in get_state() below. It is the same
+        # failure to answer, and keeps the same 503.
+        logger.warning("could not resolve execution %s", execution_id, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Could not resolve execution {execution_id}: the event store could not "
+                f"be read ({type(exc).__name__}). This is not a statement that the "
+                "execution is absent."
+            ),
+        ) from exc
     result = await get_state(execution_id)
 
     if isinstance(result, Err):

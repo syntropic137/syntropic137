@@ -294,3 +294,45 @@ class TestAnUnknownFullIdIsStillNotFound:
         response = await client.post("/executions/exec-000000000000/resume", json={})
 
         assert response.status_code == 404, response.text
+
+
+class TestStateDuringAStoreOutage:
+    async def test_is_503_not_500(
+        self, signals: InMemorySignalQueueAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The store probe now runs first; its outage keeps the 503 get_state() gave."""
+        from event_sourcing import EventStoreError
+
+        from syn_adapters.projections.sync import sync_published_events_to_projections
+        from syn_adapters.storage.event_store_client import get_event_store_client
+        from syn_api.main import create_app
+
+        del signals
+        await wiring.ensure_connected()
+        await wiring.get_workflow_execution_repository().save(_started())
+        await sync_published_events_to_projections()
+        assert await wiring.get_projection_mgr().store.get(READ_MODEL, EXECUTION) is not None
+
+        async def _outage(*args: object, **kwargs: object) -> bool:
+            del args, kwargs
+            raise EventStoreError("simulated event store outage")
+
+        event_store = get_event_store_client()
+        monkeypatch.setattr(event_store, "stream_exists", _outage)
+        monkeypatch.setattr(event_store, "read_events", _outage)
+        transport = ASGITransport(app=create_app(), raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://t") as http:
+            response = await http.get(f"/executions/{EXECUTION}/state")
+
+        assert response.status_code == 503, response.text
+        assert "event store could not be read" in response.json()["detail"]
+
+    async def test_a_full_id_still_answers_during_the_rebuild(
+        self, client: AsyncClient, rebuilding: None
+    ) -> None:
+        await _stored_with_read_model_cleared(_started())
+
+        response = await client.get(f"/executions/{EXECUTION}/state")
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"execution_id": EXECUTION, "state": "running"}
