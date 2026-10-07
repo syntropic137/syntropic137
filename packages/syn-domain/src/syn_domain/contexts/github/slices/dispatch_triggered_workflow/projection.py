@@ -13,7 +13,6 @@ PROCESSOR SIDE (process_pending): reads pending records and dispatches.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -345,23 +344,30 @@ class WorkflowDispatchProjection(ProcessManager):
         # `None` means this dispatcher was built without a gate, which only
         # happens in fixtures; the timestamp falls back to now.
         store = self._store
-        # Set once the `dispatched` write below has landed (or will not happen).
-        # The hand-back runs on the dispatcher's task, so without this its
-        # `paused` could land first and be overwritten by a `dispatched` save
-        # still in flight, leaving a start that never ran and is never
-        # re-offered (#1617).
-        recorded = asyncio.Event()
+        # #1617: the hand-back runs on the dispatcher's task, so its `paused`
+        # could land first and be overwritten by the `dispatched` save below
+        # while that is still in flight, leaving a start that never ran and is
+        # never re-offered. So a hand-back that arrives before the `dispatched`
+        # write has landed is parked here and written after it. Each check and
+        # update below has no await between them, so on the one event loop
+        # they cannot interleave.
+        recorded = False
+        held: dict[str, str | int | float | bool | None] | None = None
 
         async def hold_again(exc: Exception) -> None:
             # #1617: queued for a slot when a pause closed the gate, so it did
             # not start. `paused` again, so the re-open re-offers it. A copy,
             # so the record this method saves as `dispatched` is not mutated
             # under it.
+            nonlocal held
             reason = exc.hold_reason if isinstance(exc, AdmissionRefusedError) else str(exc)
-            if execution_id:
-                await recorded.wait()
-                held = {**record, "status": _PAUSED, "status_reason": reason}
-                await store.save(self.PROJECTION_NAME, execution_id, held)
+            if not execution_id:
+                return
+            paused = {**record, "status": _PAUSED, "status_reason": reason}
+            if recorded:
+                await store.save(self.PROJECTION_NAME, execution_id, paused)
+            else:
+                held = paused
 
         try:
             ticket = await self._execution_service.run_workflow(
@@ -379,7 +385,9 @@ class WorkflowDispatchProjection(ProcessManager):
             if execution_id:
                 await self._store.save(self.PROJECTION_NAME, execution_id, record)
         finally:
-            recorded.set()
+            recorded = True
+            if held is not None and execution_id:
+                await store.save(self.PROJECTION_NAME, execution_id, held)
 
         self._record_dispatch_timestamp()
 
