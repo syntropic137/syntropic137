@@ -118,6 +118,14 @@ def inherited_phase_count(resumed_from: JsonValue) -> int:
     includes the prefix, restates this figure rather than adding to it.
     Zero for a fresh run.
     """
+    return len(inherited_phase_ids(resumed_from))
+
+
+def inherited_phase_ids(resumed_from: JsonValue) -> list[str]:
+    """The phases a resumed run took over from its parent, in phase order.
+
+    Empty for a fresh run. Same input as `inherited_phase_count`.
+    """
     if resumed_from is None:
-        return 0
-    return len(ResumeOrigin.model_validate(resumed_from).inherited_phases)
+        return []
+    return [p.phase_id for p in ResumeOrigin.model_validate(resumed_from).inherited_phases]

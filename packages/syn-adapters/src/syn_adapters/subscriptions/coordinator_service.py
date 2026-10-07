@@ -14,10 +14,11 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, Protocol, cast
 
 from agentic_logging import get_logger
 from event_sourcing import (
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
     import asyncpg
     from event_sourcing import DomainEvent, EventEnvelope, EventStoreClient
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
+    from event_sourcing.core.envelope import EventTypeFilter
 
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.realtime import RealTimeProjection
@@ -62,6 +64,14 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
+
+#: How often a coordinator halted at an undecodable stored event (ESP ADR-026)
+#: checks whether an operator has repaired it. It stays halted inside start(),
+#: visible as ``halted_at`` on /health, and resumes by itself once the event
+#: decodes or the checkpoints have moved. Without it start() raises and the
+#: generic reconnect loop in ``coordinator_helpers`` would replay to the same
+#: event on every attempt, logging each as a transient error.
+UNDECODABLE_RECHECK_INTERVAL_S: Final = 60.0
 
 #: How long :meth:`CoordinatorSubscriptionService.start` waits for the
 #: coordinator to open its subscription before giving up and FAILING. Only
@@ -96,6 +106,14 @@ class SubscriptionNotLiveError(RuntimeError):
     """
 
 
+class _TypeFilteringSubscribe(Protocol):
+    """``subscribe`` of a store that filters before decoding (ESP ADR-027)."""
+
+    def __call__(
+        self, *, from_global_nonce: int, event_types: EventTypeFilter
+    ) -> AsyncIterator[EventEnvelope[DomainEvent]]: ...
+
+
 class _SignalsWhenSubscribed:
     """The store the coordinator reads, plus the one moment it does not report.
 
@@ -118,9 +136,22 @@ class _SignalsWhenSubscribed:
     def __init__(self, inner: EventStoreClient, subscribed: asyncio.Event) -> None:
         self._inner = inner
         self._subscribed = subscribed
+        #: Whether the wrapped store can leave unwanted types undecoded (ESP
+        #: ADR-027, v0.17.0). The coordinator decides to filter by reading THIS
+        #: wrapper's signature, so the wrapper must declare ``event_types`` and
+        #: pass it on, or every track silently decodes every event and one
+        #: un-upcast type no projection handles halts all of them.
+        self._inner_filters = "event_types" in inspect.signature(inner.subscribe).parameters
 
-    def subscribe(self, from_global_nonce: int = 0) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+    def subscribe(
+        self, from_global_nonce: int = 0, event_types: EventTypeFilter | None = None
+    ) -> AsyncIterator[EventEnvelope[DomainEvent]]:
         self._subscribed.set()
+        if event_types is not None and self._inner_filters:
+            # The protocol predates the parameter; the signature check above is
+            # the guarantee that the concrete store accepts it.
+            subscribe = cast("_TypeFilteringSubscribe", self._inner.subscribe)
+            return subscribe(from_global_nonce=from_global_nonce, event_types=event_types)
         return self._inner.subscribe(from_global_nonce=from_global_nonce)
 
     async def read_all(
@@ -150,6 +181,27 @@ class SubscriptionServiceStatus:
     running: bool
     projection_count: int
     realtime_enabled: bool
+    #: Projections the coordinator holds below an event they failed to apply
+    #: (ESP #391, v0.17.0), by name. Empty when none is held.
+    held_projections: tuple[HeldProjection, ...] = ()
+    #: Global nonce of the undecodable stored event the subscription is halted
+    #: at (ESP ADR-026), or None when it is not halted.
+    halted_at: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HeldProjection:
+    """One projection the coordinator will not move past an event it failed on.
+
+    Since ESP v0.17.0 (#391) a projection whose handler returns FAILURE or
+    raises is held at that event and fed it again with backoff, instead of
+    being checkpointed past it and losing it silently. The other projections
+    keep consuming, so nothing else on /health would show it.
+    """
+
+    projection_name: str
+    event_type: str
+    global_nonce: int
 
 
 class CoordinatorSubscriptionService:
@@ -207,10 +259,22 @@ class CoordinatorSubscriptionService:
 
     def get_status(self) -> SubscriptionServiceStatus:
         """Get service status for health checks."""
+        coordinator = self._coordinator
+        held = coordinator.held_projections if coordinator is not None else {}
+        halt = coordinator.halted if coordinator is not None else None
         return SubscriptionServiceStatus(
             running=self._running,
             projection_count=len(self._projections),
             realtime_enabled=self._realtime_projection is not None,
+            held_projections=tuple(
+                HeldProjection(
+                    projection_name=name,
+                    event_type=failure.event_type,
+                    global_nonce=failure.global_nonce,
+                )
+                for name, failure in sorted(held.items())
+            ),
+            halted_at=halt.global_nonce if halt is not None else None,
         )
 
     async def describe_read_model_lag(self) -> ReadModelLag | None:
@@ -375,6 +439,7 @@ class CoordinatorSubscriptionService:
             event_store=_SignalsWhenSubscribed(self._event_store, self._subscribed),
             checkpoint_store=self._checkpoint_store,
             projections=all_projections,
+            undecodable_recheck_interval=UNDECODABLE_RECHECK_INTERVAL_S,
         )
         self._unapplied_starts = UnappliedStartWatch(
             UnappliedStartDetector(

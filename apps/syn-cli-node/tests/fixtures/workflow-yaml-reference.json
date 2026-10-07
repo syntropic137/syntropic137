@@ -109,6 +109,17 @@
       ],
       "document_sha256": "e415b6b2ef430f4d63e526324fff380183ca16e73bd44179c227144132e7024b"
     },
+    "workflows/evals/verify-pinned-sonnet/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "43628b9712172ecc5e36afda5c25d0def2aba3be9ab9d1a4fafefe5e5a0d12fd"
+    },
     "workflows/examples/claude-delegates-to-codex.yaml": {
       "phases": [
         {

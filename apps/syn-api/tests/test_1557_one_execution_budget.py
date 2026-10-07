@@ -163,49 +163,15 @@ class _Log:
         )
 
 
-class _ServerKeyedClient(MemoryEventStoreClient):
-    """The in-memory event store, keyed the way the ESP server keys a stream.
-
-    The server's `events` table is keyed `(tenant_id, aggregate_id,
-    aggregate_nonce)`, and the gRPC client sends only the id half of
-    `Type-id` (`GrpcEventStoreClient.read_events` splits the type off). So two
-    aggregate types given ONE id share ONE stream. `MemoryEventStoreClient`
-    keys by the whole name instead, which is how #1574 gave the request stream
-    the execution's own id and every test here still passed, while on the
-    server the request took version 1 of `WorkflowExecution-<id>` and every
-    direct start was refused as a duplicate (v0.33.2-beta.8 and beta.9).
-    """
-
-    @staticmethod
-    def _key(stream_name: str) -> str:
-        _, _, aggregate_id = stream_name.partition("-")
-        return aggregate_id
-
-    async def read_events(
-        self, stream_name: str, from_version: int | None = None
-    ) -> list[EventEnvelope[DomainEvent]]:
-        return await super().read_events(self._key(stream_name), from_version)
-
-    async def append_events(
-        self,
-        stream_name: str,
-        events: list[EventEnvelope[DomainEvent]],
-        expected_version: int | None = None,
-    ) -> None:
-        await super().append_events(self._key(stream_name), events, expected_version)
-
-    async def stream_exists(self, stream_name: str) -> bool:
-        return await super().stream_exists(self._key(stream_name))
-
-
 class _Executions:
     """Execution streams, keyed by id; a second NoStream write is refused.
 
     Refused too when ANY aggregate already opened a stream at that id, because
-    the server has one keyspace for every aggregate type (`_ServerKeyedClient`).
+    the server has one keyspace for every aggregate type, and so does
+    `MemoryEventStoreClient` since ESP v0.17.0 (event-sourcing-platform#345).
     """
 
-    def __init__(self, log: _Log, keyspace: _ServerKeyedClient) -> None:
+    def __init__(self, log: _Log, keyspace: MemoryEventStoreClient) -> None:
         self.streams: dict[str, WorkflowExecutionAggregate] = {}
         self._log = log
         self._keyspace = keyspace
@@ -236,7 +202,7 @@ class _Requests:
     as JSON, not handed back as the object the route built.
     """
 
-    def __init__(self, log: _Log, client: _ServerKeyedClient) -> None:
+    def __init__(self, log: _Log, client: MemoryEventStoreClient) -> None:
         self.client = client
         self._repo = RepositoryAdapter(
             EventStoreRepository(
@@ -415,8 +381,8 @@ class _World:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._monkeypatch = monkeypatch
         self.log = _Log()
-        # ONE event store under both, keyed as the server keys it.
-        self.event_store = _ServerKeyedClient()
+        # ONE event store under both; it keys by aggregate id alone, as the server does.
+        self.event_store = MemoryEventStoreClient()
         self.executions = _Executions(self.log, self.event_store)
         self.requests = _Requests(self.log, self.event_store)
         self.projections = _ProjectionManager()
@@ -1000,7 +966,8 @@ class TestTheRequestDoesNotTakeTheExecutionsStream:
     by id alone, so `ExecutionRequested` became version 1 of
     `WorkflowExecution-<id>`, the start's NoStream write conflicted, and the
     handler dropped it as a duplicate dispatch. Both stores here share one
-    `_ServerKeyedClient`, so this is the server's keying, not a mock of it.
+    `MemoryEventStoreClient`, which keys a stream by aggregate id alone as the
+    server does (event-sourcing-platform#345), so this is the server's keying.
     """
 
     async def test_a_direct_start_runs(self, world: _World) -> None:

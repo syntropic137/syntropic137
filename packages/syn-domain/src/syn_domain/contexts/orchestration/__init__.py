@@ -95,6 +95,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     ResumeExecutionCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    replays_generic,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
     refuse_resume_start,
 )
@@ -175,6 +178,7 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
+from syn_domain.contexts.orchestration.domain.read_models.phase_plan import PlannedPhase
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
@@ -412,6 +416,7 @@ __all__ = [
     "PhaseTypeStats",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "PlannedPhase",
     "PullRequestCommenter",
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",
@@ -489,6 +494,7 @@ __all__ = [
     "refuse_resume_start",
     "remove_reclaimed_dir",
     "render_workspace_prompt",
+    "replays_generic",
     "require_supported_execution_type",
     "retired_field_notices",
     "salvage_stranded_phase",

@@ -177,6 +177,7 @@ async def not_yet_started(
         phases=[],
         total_phases=0,
         completed_phases=0,
+        phase_plan=[],
         phase_progress=PhaseProgressInfo.of(
             PhaseProgress(status=_status(position, record), completed=0, skipped=0, defined=0)
         ),

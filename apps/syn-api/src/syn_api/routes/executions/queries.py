@@ -25,6 +25,7 @@ from syn_api.types import (
     Ok,
     PhaseExecution,
     PhaseProgressInfo,
+    PlannedPhaseInfo,
     Result,
 )
 from syn_domain.contexts.orchestration import (
@@ -548,6 +549,7 @@ async def get_detail(
             total_phases=detail.total_phases,
             completed_phases=detail.completed_phases,
             phase_progress=PhaseProgressInfo.of(detail.phase_progress),
+            phase_plan=[PlannedPhaseInfo.of(p) for p in detail.phase_plan],
             total_tokens=enriched.total_tokens,
             total_cost_usd=enriched.total_cost_usd,
             unpriced_observation_count=enriched.unpriced_observation_count,
@@ -790,6 +792,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         total_phases=detail.total_phases,
         completed_phases=detail.completed_phases,
         phase_progress=detail.phase_progress,
+        phase_plan=detail.phase_plan,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
         total_cache_creation_tokens=total_cache_creation,
