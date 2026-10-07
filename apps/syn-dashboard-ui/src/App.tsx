@@ -9,6 +9,7 @@ import {
   ExecutionList,
   Insights,
   RepoList,
+  Scorecard,
   SessionDetail,
   SessionList,
   TriggerDetail,
@@ -36,6 +37,7 @@ export function App() {
           <Route path="triggers" element={<TriggerList />} />
           <Route path="triggers/:triggerId" element={<TriggerDetail />} />
           <Route path="repos" element={<RepoList />} />
+          <Route path="scorecard" element={<Scorecard />} />
           <Route path="insights" element={<Insights />} />
           <Route path="insights/*" element={<Insights />} />
         </Route>

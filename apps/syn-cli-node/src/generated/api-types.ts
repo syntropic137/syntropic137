@@ -2146,6 +2146,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/insights/scorecard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scorecard Endpoint
+         * @description The platform scorecard: outcomes, phase tokens, cost and throughput vs targets.
+         */
+        get: operations["get_scorecard_endpoint_insights_scorecard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/maintenance": {
         parameters: {
             query?: never;
@@ -6685,6 +6705,175 @@ export interface components {
             active_executions?: number | null;
             /** Active Connections */
             active_connections?: number | null;
+        };
+        /** ScorecardDailyPointResponse */
+        ScorecardDailyPointResponse: {
+            /** Day */
+            day: string;
+            counts: components["schemas"]["ScorecardOutcomeCountsResponse"];
+            /** Cost Usd */
+            cost_usd: string;
+            /** Cost Display */
+            cost_display: string;
+            /** Median Verify Tokens */
+            median_verify_tokens: number | null;
+            /** Median Verify Tokens Display */
+            median_verify_tokens_display: string;
+            /** Peak Concurrency */
+            peak_concurrency: number;
+        };
+        /**
+         * ScorecardDeliveryResponse
+         * @description Merged PRs and cost per merged PR. ``None`` until a run's PR is recorded.
+         */
+        ScorecardDeliveryResponse: {
+            /** Merged Prs */
+            merged_prs: number | null;
+            /** Cost Per Merged Pr Usd */
+            cost_per_merged_pr_usd: string | null;
+            /** Cost Per Merged Pr Display */
+            cost_per_merged_pr_display: string;
+            /** Scope */
+            scope: string;
+        };
+        /**
+         * ScorecardOutcomeCountsResponse
+         * @description Finished resume chains by final outcome. A resumed run is counted once, as its chain.
+         */
+        ScorecardOutcomeCountsResponse: {
+            /** Total */
+            total: number;
+            /** Completed */
+            completed: number;
+            /** Failed Platform */
+            failed_platform: number;
+            /** Failed Task */
+            failed_task: number;
+            /** Failed Correct Refusal */
+            failed_correct_refusal: number;
+            /** Failed Unclassified */
+            failed_unclassified: number;
+            /** Cancelled */
+            cancelled: number;
+            /** Completed Platform Failure Free */
+            completed_platform_failure_free: number;
+            /** Platform Failure Free Rate */
+            platform_failure_free_rate: number | null;
+            /** Platform Failure Free Rate Display */
+            platform_failure_free_rate_display: string;
+        };
+        /** ScorecardOutcomeRowResponse */
+        ScorecardOutcomeRowResponse: {
+            /** Key */
+            key: string;
+            counts: components["schemas"]["ScorecardOutcomeCountsResponse"];
+        };
+        /** ScorecardPhaseTypeResponse */
+        ScorecardPhaseTypeResponse: {
+            /** Phase Type */
+            phase_type: string;
+            /** Phase Count */
+            phase_count: number;
+            /** Median Tokens */
+            median_tokens: number | null;
+            /** Median Tokens Display */
+            median_tokens_display: string;
+            /** P90 Tokens */
+            p90_tokens: number | null;
+            /** P90 Tokens Display */
+            p90_tokens_display: string;
+            /** Cache Read Share */
+            cache_read_share: number | null;
+            /** Cache Read Share Display */
+            cache_read_share_display: string;
+            /** Median Tool Calls */
+            median_tool_calls: number | null;
+            /** Median Tool Calls Display */
+            median_tool_calls_display: string;
+            /** Tokens Per Tool Call */
+            tokens_per_tool_call: number | null;
+            /** Tokens Per Tool Call Display */
+            tokens_per_tool_call_display: string;
+            /** Phases With Tool Counts */
+            phases_with_tool_counts: number;
+        };
+        /**
+         * ScorecardResponse
+         * @description The platform's return on investment over a window of UTC days.
+         */
+        ScorecardResponse: {
+            /** Window */
+            window: string;
+            /** Window Start */
+            window_start: string;
+            /** Window End */
+            window_end: string;
+            /** Scope */
+            scope: string;
+            counts: components["schemas"]["ScorecardOutcomeCountsResponse"];
+            /** By Workflow */
+            by_workflow: components["schemas"]["ScorecardOutcomeRowResponse"][];
+            /** By Model */
+            by_model: components["schemas"]["ScorecardOutcomeRowResponse"][];
+            /** Phases */
+            phases: components["schemas"]["ScorecardPhaseTypeResponse"][];
+            /** Phases Scope */
+            phases_scope: string;
+            /** Daily */
+            daily: components["schemas"]["ScorecardDailyPointResponse"][];
+            throughput: components["schemas"]["ScorecardThroughputResponse"];
+            /** Total Cost Usd */
+            total_cost_usd: string;
+            /** Total Cost Display */
+            total_cost_display: string;
+            /** Cost Scope */
+            cost_scope: string;
+            delivery: components["schemas"]["ScorecardDeliveryResponse"];
+            /** Targets */
+            targets: components["schemas"]["ScorecardTargetResponse"][];
+            /** Eval Quality Scope */
+            eval_quality_scope: string;
+        };
+        /** ScorecardTargetResponse */
+        ScorecardTargetResponse: {
+            /** Name */
+            name: string;
+            /** Actual */
+            actual: number | null;
+            /** Actual Display */
+            actual_display: string;
+            /** Target */
+            target: number;
+            /** Target Display */
+            target_display: string;
+            /** Higher Is Better */
+            higher_is_better: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "on_track" | "off_track" | "no_data";
+        };
+        /** ScorecardThroughputResponse */
+        ScorecardThroughputResponse: {
+            /** Average Concurrency */
+            average_concurrency: number;
+            /** Average Concurrency Display */
+            average_concurrency_display: string;
+            /** Peak Concurrency */
+            peak_concurrency: number;
+            /** Median Queue Wait Seconds */
+            median_queue_wait_seconds: number | null;
+            /** Median Queue Wait Display */
+            median_queue_wait_display: string;
+            /** P90 Queue Wait Seconds */
+            p90_queue_wait_seconds: number | null;
+            /** P90 Queue Wait Display */
+            p90_queue_wait_display: string;
+            /** Queue Waits Measured */
+            queue_waits_measured: number;
+            /** Scope */
+            scope: string;
         };
         /**
          * SessionCostResponse
@@ -12923,6 +13112,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContributionHeatmapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scorecard_endpoint_insights_scorecard_get: {
+        parameters: {
+            query?: {
+                /** @description Window of UTC days ending now: 1d..30d */
+                window?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScorecardResponse"];
                 };
             };
             /** @description Validation Error */

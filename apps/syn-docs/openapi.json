@@ -6856,6 +6856,52 @@
         }
       }
     },
+    "/insights/scorecard": {
+      "get": {
+        "tags": [
+          "insights"
+        ],
+        "summary": "Get Scorecard Endpoint",
+        "description": "The platform scorecard: outcomes, phase tokens, cost and throughput vs targets.",
+        "operationId": "get_scorecard_endpoint_insights_scorecard_get",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Window of UTC days ending now: 1d..30d",
+              "default": "7d",
+              "title": "Window"
+            },
+            "description": "Window of UTC days ending now: 1d..30d"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorecardResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/maintenance": {
       "get": {
         "tags": [
@@ -16736,6 +16782,525 @@
         ],
         "title": "SSEHealthResponse",
         "description": "Health status of the SSE subsystem."
+      },
+      "ScorecardDailyPointResponse": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "title": "Day"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ScorecardOutcomeCountsResponse"
+          },
+          "cost_usd": {
+            "type": "string",
+            "title": "Cost Usd"
+          },
+          "cost_display": {
+            "type": "string",
+            "title": "Cost Display"
+          },
+          "median_verify_tokens": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Verify Tokens"
+          },
+          "median_verify_tokens_display": {
+            "type": "string",
+            "title": "Median Verify Tokens Display"
+          },
+          "peak_concurrency": {
+            "type": "integer",
+            "title": "Peak Concurrency"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "counts",
+          "cost_usd",
+          "cost_display",
+          "median_verify_tokens",
+          "median_verify_tokens_display",
+          "peak_concurrency"
+        ],
+        "title": "ScorecardDailyPointResponse"
+      },
+      "ScorecardDeliveryResponse": {
+        "properties": {
+          "merged_prs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged Prs"
+          },
+          "cost_per_merged_pr_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Merged Pr Usd"
+          },
+          "cost_per_merged_pr_display": {
+            "type": "string",
+            "title": "Cost Per Merged Pr Display"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "merged_prs",
+          "cost_per_merged_pr_usd",
+          "cost_per_merged_pr_display",
+          "scope"
+        ],
+        "title": "ScorecardDeliveryResponse",
+        "description": "Merged PRs and cost per merged PR. ``None`` until a run's PR is recorded."
+      },
+      "ScorecardOutcomeCountsResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
+          },
+          "failed_platform": {
+            "type": "integer",
+            "title": "Failed Platform"
+          },
+          "failed_task": {
+            "type": "integer",
+            "title": "Failed Task"
+          },
+          "failed_correct_refusal": {
+            "type": "integer",
+            "title": "Failed Correct Refusal"
+          },
+          "failed_unclassified": {
+            "type": "integer",
+            "title": "Failed Unclassified"
+          },
+          "cancelled": {
+            "type": "integer",
+            "title": "Cancelled"
+          },
+          "completed_platform_failure_free": {
+            "type": "integer",
+            "title": "Completed Platform Failure Free"
+          },
+          "platform_failure_free_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Failure Free Rate"
+          },
+          "platform_failure_free_rate_display": {
+            "type": "string",
+            "title": "Platform Failure Free Rate Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "completed",
+          "failed_platform",
+          "failed_task",
+          "failed_correct_refusal",
+          "failed_unclassified",
+          "cancelled",
+          "completed_platform_failure_free",
+          "platform_failure_free_rate",
+          "platform_failure_free_rate_display"
+        ],
+        "title": "ScorecardOutcomeCountsResponse",
+        "description": "Finished resume chains by final outcome. A resumed run is counted once, as its chain."
+      },
+      "ScorecardOutcomeRowResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ScorecardOutcomeCountsResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "counts"
+        ],
+        "title": "ScorecardOutcomeRowResponse"
+      },
+      "ScorecardPhaseTypeResponse": {
+        "properties": {
+          "phase_type": {
+            "type": "string",
+            "title": "Phase Type"
+          },
+          "phase_count": {
+            "type": "integer",
+            "title": "Phase Count"
+          },
+          "median_tokens": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Tokens"
+          },
+          "median_tokens_display": {
+            "type": "string",
+            "title": "Median Tokens Display"
+          },
+          "p90_tokens": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90 Tokens"
+          },
+          "p90_tokens_display": {
+            "type": "string",
+            "title": "P90 Tokens Display"
+          },
+          "cache_read_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Share"
+          },
+          "cache_read_share_display": {
+            "type": "string",
+            "title": "Cache Read Share Display"
+          },
+          "median_tool_calls": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Tool Calls"
+          },
+          "median_tool_calls_display": {
+            "type": "string",
+            "title": "Median Tool Calls Display"
+          },
+          "tokens_per_tool_call": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens Per Tool Call"
+          },
+          "tokens_per_tool_call_display": {
+            "type": "string",
+            "title": "Tokens Per Tool Call Display"
+          },
+          "phases_with_tool_counts": {
+            "type": "integer",
+            "title": "Phases With Tool Counts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_type",
+          "phase_count",
+          "median_tokens",
+          "median_tokens_display",
+          "p90_tokens",
+          "p90_tokens_display",
+          "cache_read_share",
+          "cache_read_share_display",
+          "median_tool_calls",
+          "median_tool_calls_display",
+          "tokens_per_tool_call",
+          "tokens_per_tool_call_display",
+          "phases_with_tool_counts"
+        ],
+        "title": "ScorecardPhaseTypeResponse"
+      },
+      "ScorecardResponse": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "title": "Window"
+          },
+          "window_start": {
+            "type": "string",
+            "title": "Window Start"
+          },
+          "window_end": {
+            "type": "string",
+            "title": "Window End"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ScorecardOutcomeCountsResponse"
+          },
+          "by_workflow": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardOutcomeRowResponse"
+            },
+            "type": "array",
+            "title": "By Workflow"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardOutcomeRowResponse"
+            },
+            "type": "array",
+            "title": "By Model"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardPhaseTypeResponse"
+            },
+            "type": "array",
+            "title": "Phases"
+          },
+          "phases_scope": {
+            "type": "string",
+            "title": "Phases Scope"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardDailyPointResponse"
+            },
+            "type": "array",
+            "title": "Daily"
+          },
+          "throughput": {
+            "$ref": "#/components/schemas/ScorecardThroughputResponse"
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "title": "Total Cost Usd"
+          },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display"
+          },
+          "cost_scope": {
+            "type": "string",
+            "title": "Cost Scope"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/ScorecardDeliveryResponse"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ScorecardTargetResponse"
+            },
+            "type": "array",
+            "title": "Targets"
+          },
+          "eval_quality_scope": {
+            "type": "string",
+            "title": "Eval Quality Scope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window",
+          "window_start",
+          "window_end",
+          "scope",
+          "counts",
+          "by_workflow",
+          "by_model",
+          "phases",
+          "phases_scope",
+          "daily",
+          "throughput",
+          "total_cost_usd",
+          "total_cost_display",
+          "cost_scope",
+          "delivery",
+          "targets",
+          "eval_quality_scope"
+        ],
+        "title": "ScorecardResponse",
+        "description": "The platform's return on investment over a window of UTC days."
+      },
+      "ScorecardTargetResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "actual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual"
+          },
+          "actual_display": {
+            "type": "string",
+            "title": "Actual Display"
+          },
+          "target": {
+            "type": "number",
+            "title": "Target"
+          },
+          "target_display": {
+            "type": "string",
+            "title": "Target Display"
+          },
+          "higher_is_better": {
+            "type": "boolean",
+            "title": "Higher Is Better"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "on_track",
+              "off_track",
+              "no_data"
+            ],
+            "title": "Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "actual",
+          "actual_display",
+          "target",
+          "target_display",
+          "higher_is_better",
+          "status"
+        ],
+        "title": "ScorecardTargetResponse"
+      },
+      "ScorecardThroughputResponse": {
+        "properties": {
+          "average_concurrency": {
+            "type": "number",
+            "title": "Average Concurrency"
+          },
+          "average_concurrency_display": {
+            "type": "string",
+            "title": "Average Concurrency Display"
+          },
+          "peak_concurrency": {
+            "type": "integer",
+            "title": "Peak Concurrency"
+          },
+          "median_queue_wait_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Queue Wait Seconds"
+          },
+          "median_queue_wait_display": {
+            "type": "string",
+            "title": "Median Queue Wait Display"
+          },
+          "p90_queue_wait_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90 Queue Wait Seconds"
+          },
+          "p90_queue_wait_display": {
+            "type": "string",
+            "title": "P90 Queue Wait Display"
+          },
+          "queue_waits_measured": {
+            "type": "integer",
+            "title": "Queue Waits Measured"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "average_concurrency",
+          "average_concurrency_display",
+          "peak_concurrency",
+          "median_queue_wait_seconds",
+          "median_queue_wait_display",
+          "p90_queue_wait_seconds",
+          "p90_queue_wait_display",
+          "queue_waits_measured",
+          "scope"
+        ],
+        "title": "ScorecardThroughputResponse"
       },
       "SessionCostResponse": {
         "properties": {
