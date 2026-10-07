@@ -81,6 +81,30 @@ from syn_api.inventory_types import TranscriptDeletionResponse as TranscriptDele
 from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdentityRequest
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
+from syn_api.scorecard_types import (  # re-exported: types.py is the API contract's single source
+    ScorecardDailyPointResponse as ScorecardDailyPointResponse,
+)
+from syn_api.scorecard_types import (
+    ScorecardDeliveryResponse as ScorecardDeliveryResponse,
+)
+from syn_api.scorecard_types import (
+    ScorecardOutcomeCountsResponse as ScorecardOutcomeCountsResponse,
+)
+from syn_api.scorecard_types import (
+    ScorecardOutcomeRowResponse as ScorecardOutcomeRowResponse,
+)
+from syn_api.scorecard_types import (
+    ScorecardPhaseTypeResponse as ScorecardPhaseTypeResponse,
+)
+from syn_api.scorecard_types import (
+    ScorecardResponse as ScorecardResponse,
+)
+from syn_api.scorecard_types import (
+    ScorecardTargetResponse as ScorecardTargetResponse,
+)
+from syn_api.scorecard_types import (
+    ScorecardThroughputResponse as ScorecardThroughputResponse,
+)
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (

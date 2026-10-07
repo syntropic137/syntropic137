@@ -592,6 +592,7 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.register_skill.projection import (
         SkillLockProjection,
     )
+    from syn_domain.contexts.orchestration.slices.scorecard import ScorecardProjection
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
     )
@@ -607,7 +608,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
     from syn_domain.tool_call_counts import ToolCallCountsProjection
 
-    # Create all checkpointed projections (27 total - bumped for #1557)
+    # Create all checkpointed projections (28 total - scorecard)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -619,6 +620,7 @@ def create_coordinator_service(
             EvalListProjection(projection_store),
             DashboardMetricsProjection(projection_store),
             WorkflowPhaseMetricsProjection(projection_store),
+            ScorecardProjection(projection_store),
             ExecutionTodoProjection(store=projection_store),
             WorkflowDispatchProjection(
                 execution_service=cast("_ExecutionService | None", execution_service),

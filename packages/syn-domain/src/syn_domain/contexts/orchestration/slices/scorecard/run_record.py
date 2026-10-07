@@ -8,19 +8,16 @@ from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from enum import StrEnum
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (  # noqa: TC001 - needed at runtime for Pydantic
+    FailureClassification,
+)
 from syn_domain.contexts.orchestration.slices.scorecard.phase_type import (
     PhaseType,
     phase_type_of,
 )
-
-if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        FailureClassification,
-    )
 
 
 class RunOutcome(StrEnum):

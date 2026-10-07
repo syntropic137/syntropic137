@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import logging
 from datetime import date  # noqa: TC003 — needed at runtime for FastAPI Query params
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Query
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+from fastapi import APIRouter, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from syn_api._wiring import ensure_connected
@@ -19,6 +22,7 @@ from syn_api.types import (
     GlobalCostResponse,
     GlobalOverviewResponse,
     HeatmapDayBucketResponse,
+    ScorecardResponse,
     SystemOverviewEntryResponse,
 )
 
@@ -276,3 +280,39 @@ async def get_contribution_heatmap_endpoint(
         )
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@router.get("/scorecard", response_model=ScorecardResponse)
+async def get_scorecard_endpoint(
+    window: str = Query("7d", description="Window of UTC days ending now: 1d..30d"),
+) -> ScorecardResponse:
+    """The platform scorecard: outcomes, phase tokens, cost and throughput vs targets."""
+    from decimal import Decimal
+
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_api._wiring import get_event_store_instance, get_execution_cost_query
+    from syn_api.services.scorecard import WindowError, build_scorecard
+    from syn_domain import tool_call_counts
+
+    await ensure_connected()
+
+    async def read_costs(execution_ids: Iterable[str]) -> dict[str, Decimal]:
+        costs = await get_execution_cost_query().list_for_ids(execution_ids)
+        return {c.execution_id: Decimal(c.total_cost_usd) for c in costs}
+
+    async def read_tool_calls(session_ids: Iterable[str]) -> dict[str, int]:
+        pool = get_event_store_instance().pool
+        if pool is None:
+            return {}
+        async with pool.acquire() as conn:
+            return await tool_call_counts.by_session(conn, list(session_ids))  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+
+    try:
+        return await build_scorecard(
+            store=get_projection_store(),
+            read_costs=read_costs,
+            read_tool_calls=read_tool_calls,
+            window=window,
+        )
+    except WindowError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
