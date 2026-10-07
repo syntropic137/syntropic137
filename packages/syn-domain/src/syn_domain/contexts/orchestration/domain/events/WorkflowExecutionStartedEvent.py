@@ -111,8 +111,8 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: The installed version of the workflow this run launched from (Evals v2):
     #: the template's package version, or its source digest when it has no
     #: version. A launch snapshot - a later install changes future runs only.
-    #: None for a template with neither, on a resume, and before the field
-    #: existed. Written only when set.
+    #: A resume carries its parent's, from the parent's start pins. None for a
+    #: template with neither and before the field existed. Written only when set.
     workflow_version: str | None = None
 
     #: Set only on a resume: the parent, what it inherited and where it resumes

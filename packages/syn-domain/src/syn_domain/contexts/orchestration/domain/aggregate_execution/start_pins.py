@@ -92,6 +92,9 @@ class StartPins(BaseModel):
     abandoned_branches: list[AbandonedBranch] = Field(default_factory=list)
     #: Set on a resume only: phases its parent's certified review skipped (#1681).
     inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
+    #: The installed workflow version it launched from (Evals v2); a resume
+    #: carries its parent's, never the template's current one.
+    workflow_version: str | None = None
 
     def inherited_owners(self) -> dict[str, str]:
         """Who holds the artifacts of each phase a resume inherited, by phase id."""
@@ -240,6 +243,7 @@ def read_start_pins(event: DomainEvent) -> StartPins:
         continued_branches=read_continued_branches(evt(event, "continued_branches")),
         abandoned_branches=read_abandoned_branches(evt(event, "abandoned_branches")),
         inherited_skipped_phase_ids=read_phase_ids(evt(event, "inherited_skipped_phase_ids")),
+        workflow_version=evt(event, "workflow_version"),
     )
 
 
