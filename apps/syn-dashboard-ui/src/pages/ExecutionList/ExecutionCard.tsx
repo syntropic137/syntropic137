@@ -48,9 +48,7 @@ export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
           title={formatTimestampLocale(exec.started_at) ?? undefined}
         >
           {formatRelativeTime(exec.started_at)}
-          {exec.total_phases > 0 && (
-            <> &middot; {exec.completed_phases}/{exec.total_phases} phases</>
-          )}
+          {exec.total_phases > 0 && <> &middot; {exec.phase_progress.display} phases</>}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3">

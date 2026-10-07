@@ -296,6 +296,13 @@ export interface ExecutionHistoryResponse {
 // WORKFLOW EXECUTION TYPES (NEW)
 // =============================================================================
 
+/**
+ * Phase progress with skipped repair rounds accounted for, computed by the
+ * API (PC-63). Render `display` and draw `percent`; never divide
+ * `completed_phases` by `total_phases`, which counts skipped rounds.
+ */
+export type PhaseProgressInfo = components['schemas']['PhaseProgressInfo']
+
 export interface WorkflowExecutionSummary {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
@@ -305,6 +312,7 @@ export interface WorkflowExecutionSummary {
   completed_at: string | null
   completed_phases: number
   total_phases: number
+  phase_progress: PhaseProgressInfo
   total_tokens: number
   total_cost_usd: number
   /**
@@ -355,6 +363,7 @@ export interface ExecutionListItem {
   completed_at: string | null
   completed_phases: number
   total_phases: number
+  phase_progress: PhaseProgressInfo
   total_tokens: number
   total_tokens_display: string
   total_cost_usd: number
@@ -471,6 +480,7 @@ export interface ExecutionDetailResponse {
    */
   total_phases: number
   completed_phases: number
+  phase_progress: PhaseProgressInfo
   total_input_tokens: number
   total_output_tokens: number
   total_cache_creation_tokens: number

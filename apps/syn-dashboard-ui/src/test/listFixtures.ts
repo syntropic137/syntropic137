@@ -1,3 +1,5 @@
+import type { PhaseProgressInfo } from '../types'
+
 /**
  * Collections that do not fit on one page.
  *
@@ -76,6 +78,7 @@ export interface FakeExecution {
   completed_at: string | null
   completed_phases: number
   total_phases: number
+  phase_progress: PhaseProgressInfo
   total_tokens: number
   total_tokens_display: string
   total_input_tokens: number
@@ -102,6 +105,7 @@ function makeExecution(index: number): FakeExecution {
     started_at: isoAgo(hoursAgo(index) * HOUR_MS),
     completed_at: null,
     completed_phases: 1,
+    phase_progress: { completed: 1, skipped: 0, possible: 1, remaining_possible: 0, percent: 100, display: '1 of 1' },
     total_phases: 1,
     total_tokens: 10,
     total_tokens_display: '10',
