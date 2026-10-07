@@ -51,7 +51,11 @@ _DROPPED: dict[str, object] = {
         "lag": 0,
         "unapplied_starts": [
             {"projection": "workflow_executions", "execution_id": _DROPPED_A, "global_nonce": 7},
-            {"projection": "workflow_execution_list", "execution_id": _DROPPED_A, "global_nonce": 7},
+            {
+                "projection": "workflow_execution_list",
+                "execution_id": _DROPPED_A,
+                "global_nonce": 7,
+            },
             {"projection": "workflow_executions", "execution_id": _DROPPED_B, "global_nonce": 9},
         ],
     },
