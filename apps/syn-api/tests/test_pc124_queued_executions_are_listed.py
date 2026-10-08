@@ -33,6 +33,8 @@ from syn_domain.contexts.orchestration.slices.list_executions.projection import 
 if TYPE_CHECKING:
     from syn_api.routes.executions.models import ExecutionListResponse
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch) -> _World:
