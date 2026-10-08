@@ -114,6 +114,10 @@ _WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
     "XDG_CACHE_HOME": "/workspace/.cache",
     "UV_CACHE_DIR": "/workspace/.cache/uv",
     "npm_config_cache": "/workspace/.cache/npm",
+    # pnpm's content-addressable store, where a dependency seed (#1714) is
+    # copied. Unset, pnpm puts it beside the project or under $HOME, where a
+    # seed would never be found.
+    "npm_config_store_dir": "/workspace/.cache/pnpm",
 }
 
 

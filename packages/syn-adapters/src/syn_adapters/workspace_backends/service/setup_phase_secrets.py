@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import shlex
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
@@ -696,6 +697,18 @@ class SetupPhaseSecrets:
             git_author_name=git_author_name,
             git_author_email=git_author_email,
         )
+
+    def clones_under(self, workspace_dir: Path) -> list[tuple[str, Path]]:
+        """``(owner/name, its checkout)`` for every repository, seen from the host.
+
+        ``workspace_dir`` is the host side of ``/workspace``. Uses the same
+        destinations the setup script clones into, so a seed is looked up in
+        exactly the checkout that was made (#1714).
+        """
+        return [
+            (_repo_full_name(url), workspace_dir / Path(dest).relative_to("/workspace"))
+            for url, dest in _clone_destinations(self.repositories)
+        ]
 
     def build_setup_script(self) -> str:
         """Build the complete bash setup script for this execution.

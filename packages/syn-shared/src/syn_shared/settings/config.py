@@ -28,6 +28,7 @@ from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
     from syn_shared.settings.dev_tooling import DevToolingSettings
+    from syn_shared.settings.dependency_seed import DependencySeedSettings
     from syn_shared.settings.disk import DiskSettings
     from syn_shared.settings.execution import ExecutionSettings
     from syn_shared.settings.github import GitHubAppSettings
@@ -866,6 +867,13 @@ class Settings(BaseSettings):
         from syn_shared.settings.disk import DiskSettings
 
         return DiskSettings()
+
+    @property
+    def dependency_seed(self) -> DependencySeedSettings:
+        """Where platform-warmed uv/pnpm seeds live and how much disk they get (#1714)."""
+        from syn_shared.settings.dependency_seed import DependencySeedSettings
+
+        return DependencySeedSettings()
 
 
 @lru_cache
