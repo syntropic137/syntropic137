@@ -13,6 +13,21 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Added
 
+- Workspace and sidecar containers now carry `syn.host_id` and `syn.host_generation` labels, and sidecars also carry `syn.execution_id`. Operators can now tell which API host and build created a container. (#1736)
+- Restarting or upgrading the API no longer orphans running executions. Each running execution saves its unpushed commits to a quarantine ref and is recorded `interrupted`, so it can be resumed. (#1730)
+- New opt-in setting `SYN_PLATFORM_ACCESS_ENABLED` (default `false`). When it is on, each workspace phase receives `SYN_API_URL` and a read-only `SYN_API_TOKEN`. With them the agent can GET executions, sessions, artifacts, evals, insights and health, and nothing else. The API refuses every other workspace request. Tokens expire with the phase (capped by `SYN_PLATFORM_ACCESS_TOKEN_TTL_SECONDS`, default 4h) and are revoked when the phase ends. (#1741)
+- `just pit-stop <version> --service gateway` deploys a new gateway image without pausing admission, draining, or touching the API. Running executions keep going. (#1731)
+- **Redesigned eval detail page.** It now opens with a summary: pass rate (ERROR and unscored excluded), runs scored with a PASS/FAIL/ERROR/unscored breakdown, median duration, median cost per run and cost per PASS. (#1772)
+- The architecture diagram (`docs/architecture/vsa-overview.svg`) and the README aggregate table now show all 18 aggregates, including Eval. (#1733)
+- The execution detail API now has `phases[].skill_use` for each phase. It lists the skills the phase declared, the skills the agent invoked (with counts) and `declared_not_invoked`. Codex phases report `not_observable` instead of zero, because codex has no Skill tool. (#1674)
+- Eval suite `verifier-seed-v1` is now **v6**, with four new clean controls from #839, #974, #1104 and #1210. A verifier's false-block rate is now measured over 6 known-good changes instead of 2. (#1775)
+- `sdlc-implement-v3` and `sdlc-reverify-pr-v1` now make **at most two** fix/re-verify rounds (previously three). A run still blocked after round 2 leaves its PR a draft, with a comment naming the open blocker and what would close it. Resuming such a run re-runs round 2. (#1770)
+- New eval workflows run the verifier-seed-v1 suite with the codex verifier pinned to `gpt-6-luna`, `gpt-5.6-luna` or `gpt-5.6-terra`, to compare against `gpt-6.1-sol`. (#1740)
+- Eval suite `verifier-seed-v1` is now **v5**: 33 cases, 31 defects and 2 clean controls. The redis retry-on-timeout bug (#1756) is now a defect case. The two mislabelled clean controls and four controls younger than 30 days are retired. Retired cases are never launched again and still score in v3/v4. (#1767)
+- The dashboard shows a non-blocking banner while a read model rebuilds after a deploy, with exact progress, and an error banner when a projection is held or event processing is halted. The Executions, Evals and execution pages say when their own list is incomplete because of a rebuild. (#1753)
+- `sdlc-implement-v3` and `sdlc-reverify-pr-v1` now run the **target repository's own** verification gates, so they can certify changes to repositories other than syntropic137. (#1746)
+- The verifier seed eval suite is now **v4 with 36 cases**: 30 defect cases (24 mined from real fix PRs in this repository) and 6 clean controls that measure false blocks. (#1752)
+- New per-phase workflow key `requires_verdict` (default `false`). When a phase declares it and reports no valid `review_verdict`, the phase fails as a resumable `platform` failure: "verify produced no verdict". Phases that do not declare it behave as before. (#1761)
 - The Executions list now marks eval runs with an **Eval** badge. The badge shows the eval's name, linked to the eval, and the run's verdict (PASS / FAIL / ERROR, or Unscored). (#1754)
 - New eval kind for implementing agents: suite `evals/implementer-seed-v1` (five cases from real merged fixes), workflow `eval-implement-pinned-v1`, and `scripts/eval_implementer.py` (`check` / `admit` / `score`), which scores PASS only when every hidden test from the original fix runs and passes on the agent's patch. (#1747)
 - Queued executions now appear in the Executions list in the dashboard and in `syn execution list`. Each row shows its place in the queue and why it is waiting: slots full or admission paused. `syn execution list --status queued` works, and the list's status counts include `queued`. (#1751)
@@ -61,6 +76,10 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Changed
 
+- ci: run the dashboard test suite in CI (#1672)
+- docs(research): remote workspace executor (E2B first), research and build plan (#1796)
+- `docs/north-star.md` now has a capacity model for 20, 100 and 1,000 concurrent executions: (#1724)
+- docs: rename syntropic137-npx references to syntropic137-setup (#1766)
 - Docs only, no behaviour change: ADR-072 plans a separate executor role that claims runs from a durable Postgres run queue under a lease, so the platform can be upgraded without draining running executions. (#1745)
 - New doc: **Skills versioning: pin, record, upgrade** (`docs/skills-versioning.md`). (#1742)
 - Docs: new **Concepts for Agents** glossary, covering execution, phase, repair round, certify/skipped, resume, refusal vs failure, and eval/variant/score. (#1739)
@@ -98,8 +117,24 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - ci(security): OSV scan was scanning nothing; bump to v2.3.8 + scan nested lockfile (#1535)
 - Security: click raised to 8.3.3 in the ui-feedback API (PYSEC-2026-2132). (#1531)
 
+### Removed
+
+- refactor(capture): delete the unused stderr verdict parser (#1779) (#1784)
+
 ### Fixed
 
+- fix(#1515): pin event-store from the ESP gitlink version, never latest (#1573)
+- **Changed defaults:** `API_MEMORY_LIMIT` `512m` → `2g` and `EVENT_STORE_MEMORY_LIMIT` `512m` → `2g`. At 512m, the API was being OOM-killed under concurrent executions (#1552), and the event store during projection rebuilds (#1553). (#1777)
+- Workspace directories left behind by crashed, OOM-killed or failed-teardown executions are now reclaimed every 30 min (`SYN_DISK_RECLAIM_INTERVAL_MINUTES`). A directory qualifies after 6 h (`SYN_DISK_RECLAIM_GRACE_HOURS`) with no running container, no running owning execution and no changes. (#1755)
+- `syn workflow run -R <repo>` no longer warns that `-R` repos "will not be cloned" when a workflow has `requires_repos: false`. Since #1776 the server honours repos passed explicitly for those workflows, so the warning was wrong. (A phase that sets `clone_repos: false` still gets credentials for those repos but no checkout.) (#1789)
+- Eval verify workflows now require a review verdict. A verify run that ends without one fails instead of completing as an unjudged run. The workflows install as revision `6.1.0`, so servers holding `6.0.0` upgrade without a suite version bump. (#1783)
+- The workflow list is sorted newest-first by creation time again. Templates now show the time they were created, in ISO 8601 UTC. Both workflow projections rebuild on the first start after upgrading. (#1778)
+- fix(evals): drop two controls that are not clean from verifier-seed v6 (#1774) (#1781)
+- `-R <repo>` (and `repos` on the execute API) is no longer silently ignored for workflows that declare `requires_repos: false`. The named repositories are checked out and recorded on the execution like any other run, and a repository the GitHub App cannot reach is refused up front with a 422. (#1776)
+- fix: main green - tool vocabulary record for claude 2.1.293 (+ _fail_execution complexity) (#1773)
+- A run interrupted mid-fix (for example by a deploy) after its fix phase pushed commits now resumes **at those commits** and verifies them, instead of refusing because "the branch moved". A commit pushed by anyone else still makes the resumed fix phase stop. (#1749)
+- GitHub triggers that were waiting for an execution slot when the API restarted, crashed or was redeployed are no longer lost. The next API process starts them, and a trigger whose run had already begun is not run a second time. (#1759)
+- Execution list and detail read models now refuse a `WorkflowExecutionStarted` event with an empty `execution_id`. Instead of silently skipping it, they hold the projection on that event, and it shows as held in `/health`. (#1701)
 - Fixed: a Redis timeout or dropped connection during event deduplication could silently drop a first-seen GitHub event as a "duplicate". It is now processed. (#1757)
 - New settings: `SKILL_INSTALL_TIMEOUT_SECONDS` (90), `CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS` (120), `CREDENTIAL_GUARD_EXEC_TIMEOUT_SECONDS` (15), `CHECKOUT_VERIFICATION_TIMEOUT_SECONDS` (60), `GITHUB_API_REQUEST_TIMEOUT_SECONDS` (30). `SETUP_PHASE_TIMEOUT_SECONDS` default raised from 120 to 240. (#1748)
 - `syn execution cancel`, `resume` and `inject`, and `GET /executions/{id}/state`, now work with a full execution id while the API is rebuilding its read models after an upgrade. Previously they failed with "Execution not found". (#1732)
