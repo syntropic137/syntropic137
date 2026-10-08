@@ -58,11 +58,18 @@ class _Streams:
 
 class _Handler:
     """Opens the execution's stream - NoStream, so a second open is refused -
-    then runs until told to finish, the way a real execution holds its slot."""
+    reports the write the way the processor does, then runs until told to
+    finish, the way a real execution holds its slot.
 
-    def __init__(self, streams: _Streams, *, fails: bool = False) -> None:
+    ``reports=False`` is a process that dies between the write and the report:
+    the stream exists and nobody was told. The real processor's report is
+    proven in test_1707_a_trigger_is_dispatched_at_its_durable_write.
+    """
+
+    def __init__(self, streams: _Streams, *, fails: bool = False, reports: bool = True) -> None:
         self._streams = streams
         self._fails = fails
+        self._reports = reports
         self.may_finish = asyncio.Event()
 
     async def validate_stored_declarations(self, _workflow_id: str) -> None:
@@ -78,8 +85,8 @@ class _Handler:
         if execution_id in self._streams.opened:
             raise DuplicateExecutionError(execution_id)
         self._streams.opened.append(execution_id)
-        if admitted is not None:
-            admitted.mark_visible()
+        if admitted is not None and self._reports:
+            await admitted.mark_durable()
         await self.may_finish.wait()
         return WorkflowExecutionResult(
             workflow_id="wf",
@@ -172,15 +179,28 @@ class TestATriggerQueuedWhenTheProcessStops:
 
 
 class TestATriggerWhoseExecutionBecameDurableBeforeTheCrash:
+    async def test_is_dispatched_while_it_runs(self) -> None:
+        store, streams = InMemoryProjectionStore(), _Streams()
+        process = _Process(store, streams)
+        await process.a_trigger_fires()
+        await process.projection.process_pending()
+        await process.settle()
+        assert streams.opened == [_TRIGGERED]
+
+        assert await process.status() == ("dispatched", None), (
+            "the execution is durable and running, and the record still says it may not exist"
+        )
+        await process.finish()
+
     async def test_is_settled_and_not_run_twice(self) -> None:
         store, streams = InMemoryProjectionStore(), _Streams()
-        before = _Process(store, streams)
+        before = _Process(store, streams, reports=False)
         await before.a_trigger_fires()
         await before.projection.process_pending()
         await before.settle()
         assert streams.opened == [_TRIGGERED]
 
-        await before.dispatcher.shutdown()  # mid-run, before it could confirm
+        await before.dispatcher.shutdown()  # between the write and its report
         assert (await before.status())[0] == "queued"
 
         after = _Process(store, streams)

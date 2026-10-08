@@ -88,6 +88,11 @@ record that said `dispatched` at that point was a trigger nothing would ever
 run. A re-offer of a `queued` start that did become durable is refused by the
 execution stream's NoStream write, and that refusal counts as started.
 
+**Confirmed at the write, not at the end of the run.** The dispatcher says
+`dispatched` when the execution's start event is durable. Anything that fails
+after that - the local projection, the run itself - is the execution's failure,
+recorded on the execution; the record stays `dispatched`, never `failed`.
+
 `paused` here is a dispatch record status, not the Trigger Rule's `PAUSED`
 above: a paused record is one Fire held back, not a rule that stopped firing.
 

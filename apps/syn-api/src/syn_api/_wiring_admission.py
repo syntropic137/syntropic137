@@ -62,14 +62,31 @@ logger = logging.getLogger(__name__)
 StartConfirmer = Callable[[], Awaitable[None]]
 
 
-async def _confirm_started(execution_id: str, on_started: StartConfirmer | None) -> None:
-    """Durable once `handle` returns or finds its stream (#1707); unrecorded, it is re-offered."""
-    if on_started is None:
-        return
-    try:
-        await on_started()
-    except Exception:
-        logger.exception("Could not record the start", extra={"start": execution_id})
+class _StartConfirmation:
+    """Tells ``on_started`` once that a start is durable, and remembers it did (#1707).
+
+    Called by the ticket at the durable write, and by the worker when `handle`
+    finds the stream already there or returns without a ticket. Once called,
+    an exception from the run is not a failure to start. A confirmation that
+    could not be recorded leaves the record `queued`, so it is re-offered and
+    settled as a duplicate.
+    """
+
+    def __init__(self, execution_id: str, on_started: StartConfirmer | None) -> None:
+        self._execution_id = execution_id
+        self._on_started = on_started
+        self.confirmed = False
+
+    async def __call__(self) -> None:
+        if self.confirmed:
+            return
+        self.confirmed = True
+        if self._on_started is None:
+            return
+        try:
+            await self._on_started()
+        except Exception:
+            logger.exception("Could not record the start", extra={"start": self._execution_id})
 
 
 _maintenance_singleton: MaintenancePort | None = None
@@ -791,6 +808,9 @@ class BackgroundWorkflowDispatcher:
             ExecuteWorkflowCommand,
         )
 
+        started = _StartConfirmation(execution_id, on_started)
+        if admitted is not None:
+            admitted.on_durable(started)
         try:
             cmd = ExecuteWorkflowCommand(
                 aggregate_id=workflow_id,
@@ -812,10 +832,12 @@ class BackgroundWorkflowDispatcher:
                 "Background workflow execution raised exception",
                 extra={"workflow_id": workflow_id, "execution_id": execution_id},
             )
-            if on_held is not None:
+            # #1707: past the durable write the execution exists, so this is
+            # its run failing - the execution records that - not its start.
+            if on_held is not None and not started.confirmed:
                 await self._report_start_failure(execution_id, on_held, exc)
             return
-        await _confirm_started(execution_id, on_started)
+        await started()
         if result is not None and result.unrecorded_work_error is not None:
             # #1547: a trigger has no caller to hand an error to, so this log is
             # the report. It is also the only place outside process memory that
