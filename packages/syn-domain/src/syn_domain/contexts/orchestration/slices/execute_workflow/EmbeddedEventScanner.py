@@ -69,7 +69,7 @@ class EmbeddedEventScanner:
                 phase_id=self._phase_id,
             )
             await self._collector.record_embedded_event(et, enriched)
-            await observe_push(embedded, self._on_push)
+            await observe_push(embedded, tool_content, self._on_push)
             logger.info(
                 "Git hook event from tool output: %s (tool=%s)",
                 et,

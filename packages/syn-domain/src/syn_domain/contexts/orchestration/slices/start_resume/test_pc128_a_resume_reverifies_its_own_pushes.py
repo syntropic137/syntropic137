@@ -7,7 +7,8 @@ resumed fix saw a head past its verified SHA and refused. Each cost a fresh
 reverify-pr run (exec-26837be532a8, exec-5aa538f2f450, exec-051e420018d5).
 
 These drive the parent's push in through the production path - the workspace
-hook's `git_push` line in a tool result, read by the real `EmbeddedEventScanner`
+hook's `git_push` line in a tool result, beside the status line git prints for
+the ref it updated, read by the real `EmbeddedEventScanner`
 and recorded by `push_recorder` through the real `ExecutionJournal` - then fail
 it the way `reconciliation._reconcile_one` does, with no observed branches,
 store everything through JSON, and start the resume through the real
@@ -96,6 +97,8 @@ FIRST_PUSH = "b128b128b128b128b128b128b128b128b128b128"
 LAST_PUSH = "c128c128c128c128c128c128c128c128c128c128"
 #: A commit somebody else pushed to the branch after the run died.
 FOREIGN = "f128f128f128f128f128f128f128f128f128f128"
+#: A ref the phase pushed that is not the branch under review.
+UNRELATED = "unrelated"
 
 
 class _Store:
@@ -192,8 +195,21 @@ def _hook_line(sha: str) -> str:
     )
 
 
-async def _orphaned_mid_fix(store: _Store, *, pushes: tuple[str, ...]) -> None:
-    """A parent that verified, pushed ``pushes`` in fix, and was orphaned by a deploy."""
+def _pushed(old: str, new: str) -> str:
+    """The tool result of a `git push` that origin accepted, moving BRANCH ``old`` -> ``new``."""
+    return (
+        f"{_hook_line(new)}\nTo github.com:acme/widgets.git\n"
+        f"   {old[:7]}..{new[:7]}  {BRANCH} -> {BRANCH}\n"
+    )
+
+
+def _own_pushes(*shas: str) -> tuple[str, ...]:
+    olds = (VERIFIED, *shas)
+    return tuple(_pushed(old, new) for old, new in zip(olds, shas, strict=False))
+
+
+async def _orphaned_mid_fix(store: _Store, *, outputs: tuple[str, ...]) -> None:
+    """A parent that verified, ran ``outputs`` in fix, and was orphaned by a deploy."""
     parent = WorkflowExecutionAggregate()
     phases = _phases()
     parent.start_execution(
@@ -249,8 +265,8 @@ async def _orphaned_mid_fix(store: _Store, *, pushes: tuple[str, ...]) -> None:
         phase_id="fix",
         on_push=push_recorder(parent, journal, "fix"),
     )
-    for sha in pushes:
-        await scanner.scan_and_record(f"To github.com:acme/widgets\n{_hook_line(sha)}\n", "Bash")
+    for output in outputs:
+        await scanner.scan_and_record(output, "Bash")
     # What `reconciliation._reconcile_one` records: no observed branches.
     parent.fail_execution(
         FailExecutionCommand(
@@ -292,7 +308,7 @@ def _told(pins: StartPins) -> str:
 class TestOwnPushesAreReverified:
     async def test_a_head_at_the_runs_last_push_is_continued_and_reverified(self) -> None:
         store = _Store()
-        await _orphaned_mid_fix(store, pushes=(FIRST_PUSH, LAST_PUSH))
+        await _orphaned_mid_fix(store, outputs=_own_pushes(FIRST_PUSH, LAST_PUSH))
 
         pins = await _resume(store, forge_head=LAST_PUSH)
 
@@ -309,7 +325,7 @@ class TestOwnPushesAreReverified:
     async def test_a_head_at_an_earlier_own_push_is_still_the_runs_own(self) -> None:
         """The last push may not have landed; the one before it did."""
         store = _Store()
-        await _orphaned_mid_fix(store, pushes=(FIRST_PUSH, LAST_PUSH))
+        await _orphaned_mid_fix(store, outputs=_own_pushes(FIRST_PUSH, LAST_PUSH))
 
         pins = await _resume(store, forge_head=FIRST_PUSH)
 
@@ -320,7 +336,7 @@ class TestOwnPushesAreReverified:
 class TestAForeignHeadIsStillRefused:
     async def test_a_commit_this_run_did_not_push_abandons_the_branch(self) -> None:
         store = _Store()
-        await _orphaned_mid_fix(store, pushes=(FIRST_PUSH, LAST_PUSH))
+        await _orphaned_mid_fix(store, outputs=_own_pushes(FIRST_PUSH, LAST_PUSH))
 
         pins = await _resume(store, forge_head=FOREIGN)
 
@@ -333,10 +349,77 @@ class TestAForeignHeadIsStillRefused:
         assert OWN_UNVERIFIED_PUSH not in _told(pins)
 
 
+class TestOnlyAPushGitAcceptedToTheBranchIsTheRuns:
+    """The hook runs before git pushes and reads HEAD, not the ref pushed.
+
+    The phase fetched a foreign head of the branch and is checked out on it,
+    so every hook line below names BRANCH at FOREIGN. Only git's status line
+    says which ref, if any, origin updated.
+    """
+
+    async def _resumed_after(self, output: str) -> StartPins:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=(output,))
+        return await _resume(store, forge_head=FOREIGN)
+
+    def _refused(self, pins: StartPins) -> None:
+        """No push recorded: the resume is the no-push one, and the fix gate refuses FOREIGN."""
+        checkout = pins.checkout_for("fix")
+        assert pins.continued_branches == []
+        assert pins.abandoned_branches == []
+        assert REPO not in checkout.branches
+        assert checkout.commits[REPO] == VERIFIED
+        assert _told(pins) == ""
+
+    async def test_a_rejected_push_establishes_nothing(self) -> None:
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" ! [remote rejected] {UNRELATED} -> {UNRELATED} (pre-receive hook declined)\n"
+            "error: failed to push some refs to 'github.com:acme/widgets.git'\n"
+        )
+
+        self._refused(pins)
+
+    async def test_pushing_another_ref_does_not_claim_the_checked_out_branch(self) -> None:
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" * [new branch]      {UNRELATED} -> {UNRELATED}\n"
+        )
+
+        self._refused(pins)
+
+    async def test_an_up_to_date_push_moved_nothing(self) -> None:
+        pins = await self._resumed_after(f"{_hook_line(FOREIGN)}\nEverything up-to-date\n")
+
+        self._refused(pins)
+
+    async def test_an_update_of_the_branch_to_a_different_commit_is_not_the_hooks_sha(
+        self,
+    ) -> None:
+        """`git push origin HEAD~1:BRANCH`: the branch moved, but not to HEAD."""
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f"   {VERIFIED[:7]}..{FIRST_PUSH[:7]}  HEAD~1 -> {BRANCH}\n"
+        )
+
+        self._refused(pins)
+
+    async def test_creating_the_branch_from_head_is_the_runs_push(self) -> None:
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" * [new branch]      HEAD -> {BRANCH}\n"
+        )
+
+        assert pins.checkout_for("fix").commits[REPO] == FOREIGN
+        assert pins.checkout_for("fix").branches[REPO] == BRANCH
+        assert pins.abandoned_branches == []
+        assert OWN_UNVERIFIED_PUSH in _told(pins)
+
+
 class TestNoPushIsUnchanged:
     async def test_a_fix_that_pushed_nothing_continues_nothing(self) -> None:
         store = _Store()
-        await _orphaned_mid_fix(store, pushes=())
+        await _orphaned_mid_fix(store, outputs=())
 
         pins = await _resume(store, forge_head=FOREIGN)
 

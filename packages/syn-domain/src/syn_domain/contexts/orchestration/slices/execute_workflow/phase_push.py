@@ -2,10 +2,18 @@
 
 The workspace's pre-push hook reports each push into the agent's tool output
 as a `git_push` event, which `EmbeddedEventScanner` already finds for Lane 2.
-This module is the one crossing from that report into Lane 1: it reads the
-pushed branch and SHA out of the hook's payload and records them on the
-execution as `PhaseCommitPushed`, while the phase is still alive - the run a
-deploy orphans never reaches anything later.
+This module is the one crossing from that report into Lane 1: it records a
+push on the execution as `PhaseCommitPushed`, while the phase is still alive -
+the run a deploy orphans never reaches anything later.
+
+The hook alone is not evidence of a push. It runs BEFORE git pushes, and it
+reports the checked-out branch and HEAD, not the ref being pushed: a rejected
+push, or `git push origin other:other` from a branch someone else moved,
+reports that branch at a commit this run never pushed. So a push is recorded
+only when git's own status line in the same tool output - printed after the
+remote accepted the update - names the hook's branch as the destination and
+updates it to the hook's SHA. A rejected, up-to-date, quiet or other-ref push
+has no such line and records nothing.
 
 Recording is best effort and never raises into the stream: a push the run
 fails to record leaves a resume exactly where it was before PC-128, refusing
@@ -15,6 +23,7 @@ a moved branch, which is the safe direction.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -104,10 +113,45 @@ class _HookLine(BaseModel):
     context: _PushContext | None = None
 
 
-async def observe_push(embedded: object, on_push: PushObserver | None) -> None:
-    """Tell ``on_push`` of the push ``embedded`` reports, if it is one to origin.
+#: git's per-ref status line for an accepted update (git-push(1), OUTPUT):
+#: ` <old>..<new> <from> -> <to>`, `+ <old>...<new> <from> -> <to>` or
+#: `* [new branch] <from> -> <to>`. Rejections (`!`), deletions (`-`) and
+#: `[up to date]` (`=`) are deliberately not matched.
+_ACCEPTED_UPDATE = re.compile(
+    r"^(?:[+*]\s+)?"
+    r"(?:[0-9a-f]{4,40}\.\.\.?(?P<new>[0-9a-f]{4,40})|(?P<created>\[new branch\]))"
+    r"\s+(?P<source>\S+)\s+->\s+(?P<destination>\S+)(?:\s+\(.*\))?$"
+)
+_HEADS = "refs/heads/"
 
-    ``embedded`` is a hook event as parsed from the agent's tool output.
+
+def _branch_name(ref: str) -> str:
+    return ref.removeprefix(_HEADS)
+
+
+def git_accepted(tool_content: str, branch: str, sha: str) -> bool:
+    """Whether git's output in ``tool_content`` shows origin's ``branch`` updated to ``sha``.
+
+    An update line names the new commit abbreviated, which must be a prefix of
+    ``sha``. A created branch names none, so its source must be the branch the
+    hook read ``sha`` from - the checked-out branch, or HEAD itself.
+    """
+    for line in tool_content.splitlines():
+        update = _ACCEPTED_UPDATE.match(line.strip())
+        if update is None or _branch_name(update["destination"]) != branch:
+            continue
+        if update["new"] is not None and sha.startswith(update["new"]):
+            return True
+        if update["created"] is not None and _branch_name(update["source"]) in (branch, "HEAD"):
+            return True
+    return False
+
+
+async def observe_push(embedded: object, tool_content: str, on_push: PushObserver | None) -> None:
+    """Tell ``on_push`` of the push ``embedded`` reports, if git confirms it to origin.
+
+    ``embedded`` is a hook event as parsed from the agent's tool output, and
+    ``tool_content`` is that whole output, where git reports what it pushed.
     """
     if on_push is None:
         return
@@ -120,6 +164,6 @@ async def observe_push(embedded: object, on_push: PushObserver | None) -> None:
     push = event.context.git
     if push.remote != _ORIGIN or not (push.repo and push.branch and push.sha):
         return
-    if push.branch == "HEAD":
+    if push.branch == "HEAD" or not git_accepted(tool_content, push.branch, push.sha):
         return
     await on_push(push.repo, push.branch, push.sha)
