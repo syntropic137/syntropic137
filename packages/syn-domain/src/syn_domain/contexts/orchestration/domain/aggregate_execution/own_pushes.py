@@ -12,9 +12,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
     PushedCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    ExecutionStatus,
-)
 from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
     PhaseCommitPushedEvent,
 )
@@ -27,23 +24,13 @@ if TYPE_CHECKING:
     )
 
 
-def push_event(
-    command: RecordPhasePushCommand,
-    *,
-    status: ExecutionStatus | None,
-    running_phase_id: str | None,
-    workflow_id: str | None,
-) -> PhaseCommitPushedEvent:
-    """The event recording ``command``'s push, or ValueError.
+def push_event(command: RecordPhasePushCommand, workflow_id: str) -> PhaseCommitPushedEvent:
+    """The `PhaseCommitPushed` recording ``command``'s push.
 
-    Refused for any phase but the running one: a push is only this run's when
-    the workspace that made it was running this run's phase.
+    Payload only: whether the push is this run's to record is the handler's guard.
     """
-    if status != ExecutionStatus.RUNNING or running_phase_id != command.phase_id:
-        msg = f"Cannot record a push for {command.phase_id}: it is not the running phase"
-        raise ValueError(msg)
     return PhaseCommitPushedEvent(
-        workflow_id=workflow_id or "",
+        workflow_id=workflow_id,
         execution_id=command.aggregate_id,
         phase_id=command.phase_id,
         repository=command.repository,
