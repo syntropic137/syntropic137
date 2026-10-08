@@ -254,26 +254,33 @@ async def queued_starts(store: ProjectionStoreProtocol) -> list[QueuedStart]:
             workflow_id=claim.workflow_id,
             queue=_info(position, record),
         )
-    for status in OWED_STATUSES:
-        rows = await store.query(
-            ExecutionRequestStartProcessManager.PROJECTION_NAME, filters={"status": status}
-        )
-        for row in rows:
-            record = read_start_record(ExecutionRequestStartRecord, row)
-            if record is None or record.execution_id in found:
-                continue
-            if budget.position(record.execution_id) is not None:
-                continue  # holds a slot here: starting, not queued
-            # The record lags the execution's stream: a start that opened its
-            # execution has a read model, and is listed from that instead.
-            if await store.get("workflow_execution_details", record.execution_id) is not None:
-                continue
+    for record in await _owed_and_unheld(store):
+        if record.execution_id not in found:
             found[record.execution_id] = QueuedStart(
                 execution_id=record.execution_id,
                 workflow_id=record.workflow_id,
                 queue=_info(None, record),
             )
     return sorted(found.values(), key=lambda q: q.queue.queued_at)
+
+
+async def _owed_and_unheld(store: ProjectionStoreProtocol) -> list[ExecutionRequestStartRecord]:
+    """Direct requests still owed a start that no process here holds, and not yet started."""
+    budget = get_execution_budget()
+    owed: list[ExecutionRequestStartRecord] = []
+    for status in OWED_STATUSES:
+        rows = await store.query(
+            ExecutionRequestStartProcessManager.PROJECTION_NAME, filters={"status": status}
+        )
+        records = [read_start_record(ExecutionRequestStartRecord, row) for row in rows]
+        for record in records:
+            if record is None or budget.position(record.execution_id) is not None:
+                continue  # unreadable, or held here (queued above, or starting)
+            # The record lags the execution's stream: a start that opened its
+            # execution has a read model, and is listed from that instead.
+            if await store.get("workflow_execution_details", record.execution_id) is None:
+                owed.append(record)
+    return owed
 
 
 def _info(
