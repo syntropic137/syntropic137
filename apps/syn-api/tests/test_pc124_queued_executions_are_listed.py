@@ -56,7 +56,10 @@ def world(monkeypatch: pytest.MonkeyPatch) -> _World:
 
 
 async def _listed(
-    status: str | None = None, q: str | None = None, started_after: datetime | None = None
+    status: str | None = None,
+    q: str | None = None,
+    started_after: datetime | None = None,
+    in_eval: bool | None = None,
 ) -> ExecutionListResponse:
     """`GET /executions`, as `syn execution list` and the dashboard call it."""
     return await queries.list_executions_endpoint(
@@ -67,7 +70,7 @@ async def _listed(
         q=q,
         tag=None,
         eval_id=None,
-        in_eval=None,
+        in_eval=in_eval,
         page=1,
         page_size=50,
     )
@@ -112,6 +115,20 @@ class TestAQueuedStartIsListed:
 
         assert (await _listed(q=queued[-6:])).total == 1
         assert (await _listed(q="nothing-like-it")).total == 0
+
+        await _release_everything(world)
+
+    async def test_it_is_in_no_eval(self, world: _World) -> None:
+        """Evals only leaves it out; Hide evals keeps it (#1754)."""
+        _, queued = await _two_running_one_queued(world)
+
+        only = await _listed(in_eval=True)
+        hidden = await _listed(in_eval=False)
+
+        assert queued not in {e.workflow_execution_id for e in only.executions}
+        assert "queued" not in only.status_counts
+        assert queued in {e.workflow_execution_id for e in hidden.executions}
+        assert hidden.status_counts["queued"] == 1
 
         await _release_everything(world)
 
