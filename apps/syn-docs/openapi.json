@@ -9315,6 +9315,15 @@
         "title": "CostOutlierResponse",
         "description": "An execution with unusually high cost."
       },
+      "CostSplitBasis": {
+        "type": "string",
+        "enum": [
+          "rate_table",
+          "allocated"
+        ],
+        "title": "CostSplitBasis",
+        "description": "How a cost-by-token-type breakdown was arrived at.\n\nThe two are not equally strong claims, so a client must be able to tell\nthem apart and label the second one."
+      },
       "CoverageState": {
         "type": "string",
         "enum": [
@@ -18711,6 +18720,16 @@
             "type": "object",
             "title": "Cost By Model"
           },
+          "cost_by_token_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenTypeCostResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cache_read_rate_display": {
             "anyOf": [
               {
@@ -20048,6 +20067,43 @@
         ],
         "title": "TimelineEntryResponse",
         "description": "Timeline entry for visualization."
+      },
+      "TokenTypeCostResponse": {
+        "properties": {
+          "input_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Input Usd"
+          },
+          "output_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Output Usd"
+          },
+          "cache_creation_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cache Creation Usd"
+          },
+          "cache_read_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cache Read Usd"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/CostSplitBasis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "input_usd",
+          "output_usd",
+          "cache_creation_usd",
+          "cache_read_usd",
+          "basis"
+        ],
+        "title": "TokenTypeCostResponse",
+        "description": "A session's priced cost split by the kind of token it was spent on.\n\nThe parts sum to ``total_cost_usd`` (to within the canonical quantum per\npart when ``basis`` is ``allocated``). Unpriced work is in neither, exactly\nas with ``cost_by_model``."
       },
       "ToolSummary": {
         "properties": {

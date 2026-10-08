@@ -3104,6 +3104,15 @@ export interface components {
             executed_at: string;
         };
         /**
+         * CostSplitBasis
+         * @description How a cost-by-token-type breakdown was arrived at.
+         *
+         *     The two are not equally strong claims, so a client must be able to tell
+         *     them apart and label the second one.
+         * @enum {string}
+         */
+        CostSplitBasis: "rate_table" | "allocated";
+        /**
          * CoverageState
          * @enum {string}
          */
@@ -7488,6 +7497,7 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            cost_by_token_type?: components["schemas"]["TokenTypeCostResponse"] | null;
             /** Cache Read Rate Display */
             cache_read_rate_display?: string | null;
             /** Cache Write Rate Display */
@@ -8289,6 +8299,25 @@ export interface components {
             duration_ms?: number | null;
             /** Success */
             success?: boolean | null;
+        };
+        /**
+         * TokenTypeCostResponse
+         * @description A session's priced cost split by the kind of token it was spent on.
+         *
+         *     The parts sum to ``total_cost_usd`` (to within the canonical quantum per
+         *     part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
+         *     as with ``cost_by_model``.
+         */
+        TokenTypeCostResponse: {
+            /** Input Usd */
+            input_usd: string;
+            /** Output Usd */
+            output_usd: string;
+            /** Cache Creation Usd */
+            cache_creation_usd: string;
+            /** Cache Read Usd */
+            cache_read_usd: string;
+            basis: components["schemas"]["CostSplitBasis"];
         };
         /**
          * ToolSummary

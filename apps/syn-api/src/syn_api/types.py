@@ -105,6 +105,10 @@ from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
 from syn_shared.display.formatters import EM_DASH
 from syn_shared.observed_model import format_observed_model
+from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
+    CostSplitBasis,
+    TokenTypeCost,
+)
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -1981,6 +1985,35 @@ class ControlResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class TokenTypeCostResponse(BaseModel):
+    """A session's priced cost split by the kind of token it was spent on.
+
+    The parts sum to ``total_cost_usd`` (to within the canonical quantum per
+    part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
+    as with ``cost_by_model``.
+    """
+
+    input_usd: Decimal
+    output_usd: Decimal
+    cache_creation_usd: Decimal
+    """Cache WRITES."""
+    cache_read_usd: Decimal
+    basis: CostSplitBasis
+    """``rate_table``: each part is tokens x that type's rate. ``allocated``: a
+    harness-reported total, which states no split, apportioned in the rate
+    table's proportions. Label the second as an estimate."""
+
+    @classmethod
+    def from_split(cls, split: TokenTypeCost, basis: CostSplitBasis) -> TokenTypeCostResponse:
+        return cls(
+            input_usd=split.input_usd,
+            output_usd=split.output_usd,
+            cache_creation_usd=split.cache_creation_usd,
+            cache_read_usd=split.cache_read_usd,
+            basis=basis,
+        )
+
+
 class SessionDetail(BaseModel):
     """Detailed session with tool operations and cost data."""
 
@@ -2016,6 +2049,8 @@ class SessionDetail(BaseModel):
     requested_model: str | None = None
     """The model the session REQUESTED (often an alias), or None (ADR-067 D9)."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    cost_by_token_type: TokenTypeCostResponse | None = None
+    """Cost split by token type; None when it could not be split, never zeroes."""
     operations: list[ToolOperation] = Field(default_factory=list)
     started_at: datetime | None = None
     completed_at: datetime | None = None

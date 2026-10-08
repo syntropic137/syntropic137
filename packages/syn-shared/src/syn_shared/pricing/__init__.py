@@ -159,6 +159,71 @@ _GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("0.40")
 _GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION = Decimal("5.00")
 
 
+class CostSplitBasis(StrEnum):
+    """How a cost-by-token-type breakdown was arrived at.
+
+    The two are not equally strong claims, so a client must be able to tell
+    them apart and label the second one.
+    """
+
+    RATE_TABLE = "rate_table"
+    """Every priced amount came from this module's rates: each part is
+    tokens x that type's rate, and the parts are the total."""
+
+    ALLOCATED = "allocated"
+    """At least one amount was a harness-reported total with no breakdown of
+    its own. That total is apportioned across the token types in the
+    proportions the rate table gives, so the parts still sum to the reported
+    total, but no source ever stated them."""
+
+
+@dataclass(frozen=True)
+class TokenTypeCost:
+    """A cost in USD split by the kind of token it was spent on."""
+
+    input_usd: Decimal = Decimal("0")
+    output_usd: Decimal = Decimal("0")
+    cache_creation_usd: Decimal = Decimal("0")
+    cache_read_usd: Decimal = Decimal("0")
+
+    @property
+    def total(self) -> Decimal:
+        return self.input_usd + self.output_usd + self.cache_creation_usd + self.cache_read_usd
+
+    def __add__(self, other: TokenTypeCost) -> TokenTypeCost:
+        return TokenTypeCost(
+            input_usd=self.input_usd + other.input_usd,
+            output_usd=self.output_usd + other.output_usd,
+            cache_creation_usd=self.cache_creation_usd + other.cache_creation_usd,
+            cache_read_usd=self.cache_read_usd + other.cache_read_usd,
+        )
+
+    def allocated_to(self, total: Decimal) -> TokenTypeCost | None:
+        """These proportions applied to ``total``, or None when they cannot be.
+
+        None when this split is zero but ``total`` is not: there are no
+        proportions to apportion by, and inventing some would be a guess.
+        """
+        own = self.total
+        if own.is_zero():
+            return TokenTypeCost() if total.is_zero() else None
+        return TokenTypeCost(
+            input_usd=total * self.input_usd / own,
+            output_usd=total * self.output_usd / own,
+            cache_creation_usd=total * self.cache_creation_usd / own,
+            cache_read_usd=total * self.cache_read_usd / own,
+        )
+
+    def canonical(self) -> TokenTypeCost:
+        """Every part in canonical form (see ``canonical_cost_usd``)."""
+        return TokenTypeCost(
+            input_usd=canonical_cost_usd(self.input_usd),
+            output_usd=canonical_cost_usd(self.output_usd),
+            cache_creation_usd=canonical_cost_usd(self.cache_creation_usd),
+            cache_read_usd=canonical_cost_usd(self.cache_read_usd),
+        )
+
+
 @dataclass(frozen=True)
 class ModelPricing:
     """Pricing for an LLM model, in USD per million tokens."""
@@ -181,11 +246,27 @@ class ModelPricing:
         Returns:
             Total cost in USD.
         """
-        return (
-            Decimal(input_tokens) * self.input_per_million / _MILLION
-            + Decimal(output_tokens) * self.output_per_million / _MILLION
-            + Decimal(cache_creation) * self.cache_creation_per_million / _MILLION
-            + Decimal(cache_read) * self.cache_read_per_million / _MILLION
+        return self.cost_by_token_type(
+            input_tokens, output_tokens, cache_creation, cache_read
+        ).total
+
+    def cost_by_token_type(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation: int = 0,
+        cache_read: int = 0,
+    ) -> TokenTypeCost:
+        """The same cost as ``calculate_cost``, split by token type.
+
+        ``calculate_cost`` is defined as this split's total, so the two cannot
+        disagree.
+        """
+        return TokenTypeCost(
+            input_usd=Decimal(input_tokens) * self.input_per_million / _MILLION,
+            output_usd=Decimal(output_tokens) * self.output_per_million / _MILLION,
+            cache_creation_usd=Decimal(cache_creation) * self.cache_creation_per_million / _MILLION,
+            cache_read_usd=Decimal(cache_read) * self.cache_read_per_million / _MILLION,
         )
 
 
@@ -749,9 +830,11 @@ __all__ = [
     "PLACEHOLDER_PRICED_MODELS",
     "VENDOR_COST_QUANTUM",
     "CacheRateMultipliers",
+    "CostSplitBasis",
     "ModelPricing",
     "PricedAmount",
     "PricingStatus",
+    "TokenTypeCost",
     "UnknownModelPricingError",
     "cache_rate_multipliers",
     "calculate_cost",
