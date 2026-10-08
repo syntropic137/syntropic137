@@ -40,10 +40,16 @@ parallel record of the same fact.
 `syntropic137/syntropic137-skills` (and any skills repo that wants the same
 upgrade discipline) promises:
 
-1. **A release is an immutable git tag `vX.Y.Z`.** Tags are never moved.
-   Per-skill tags like `<skill>@1.2.0` are not created: `skill-ref.ts` rejects a
-   ref containing `@`, and the `skills` CLI pins one ref per repository
-   (`owner/repo#ref`).
+1. **A release is an immutable, repository-wide git tag `vX.Y.Z`.** Tags are
+   never moved. Per-skill tags like `<skill>@1.2.0` are not created, by
+   convention rather than because anything forbids them: each skill entry
+   carries its own ref, so skills from one repository can be pinned to
+   different refs, and the verbose mapping form (separate `source` and
+   `version` keys, `parseVerbose` in `skill-ref.ts`) accepts a version
+   containing `@`. What does not work is such a ref in the compact string
+   forms: `skill-ref.ts` refuses an ambiguous `@` in `<url>@<version>`, and the
+   `skills` CLI reads `owner/repo#name@1.2.0` as ref `name` with skill filter
+   `1.2.0`. One tag per release keeps every pin a short string.
 2. **Each skill states its own semver** as a quoted string in its frontmatter,
    `metadata.version` (the Agent Skills spec has no top-level `version`, and
    `metadata` values are strings). It is part of the skill tree, so it is
@@ -52,11 +58,36 @@ upgrade discipline) promises:
    so the upgrade from one tag to another can be read before it is made.
 
 What Syntropic137 relies on is only (1): the ref. Neither the `skills` CLI nor
-Syntropic137 reads `metadata.version` to decide anything. The CLI's lock file
-records the `ref` and a content hash, `skills update` reinstalls when the
-content at the same ref changes, and nothing compares semver. A workflow that
-pins `@main` therefore gets whatever `main` is when it is registered, and the
-version field does not protect it.
+Syntropic137 reads `metadata.version` to decide anything. Checked against
+`skills` CLI 1.7.0, the version the agentic-workspace images install
+(`SKILLS_CLI_VERSION`), on 2026-10-08:
+
+- The CLI's `skills-lock.json` records the source, the `ref` as given (branch,
+  tag or sha; it does not resolve it to a commit) and a content hash of the
+  skill folder
+  ([src/local-lock.ts](https://github.com/vercel-labs/skills/blob/v1.7.0/src/local-lock.ts)).
+  Of `metadata` it reads only `metadata.internal`
+  ([src/skills.ts](https://github.com/vercel-labs/skills/blob/v1.7.0/src/skills.ts)).
+- `skills update` depends on scope
+  ([src/update.ts](https://github.com/vercel-labs/skills/blob/v1.7.0/src/update.ts)):
+  for global skills it reinstalls when the folder hash at the recorded ref
+  differs; for project skills it re-fetches every updatable skill at its
+  recorded ref without comparing hashes. Neither compares semver.
+- `experimental_install` reinstalls from `source#ref` and does not check the
+  result against the recorded hash
+  ([src/install.ts](https://github.com/vercel-labs/skills/blob/v1.7.0/src/install.ts)).
+- A full 40-character commit sha works as a ref in 1.7.0; 1.5.14 cloned with
+  `--branch` and could not use one
+  ([1.7.0 src/git.ts](https://github.com/vercel-labs/skills/blob/v1.7.0/src/git.ts)).
+  Workspaces do not depend on this: layer 2 installs from a local path.
+
+On the Syntropic137 side, registration is idempotent on
+`(source_url, version, skill_name)`: `RegisterSkillHandler` returns the
+existing registration for that triple without fetching again. So a workflow
+that pins `@main` gets whatever `main` was at the **first** successful
+registration of that triple, and keeps getting those bytes on every later
+registration, however far `main` has moved. The version field does not protect
+it either way. Only a new ref (a new tag) brings new content.
 
 ## Using a skill from syntropic137-skills
 
@@ -71,7 +102,8 @@ phases:
 
 The three-segment form resolves the skill to `skills/<skill>/` inside the
 clone (`skillDirInClone` in `skill-tree.ts`). Registration identity is
-`(source_url, version, skill_name)`, so `@v1.1.0` registers once and is reused.
+`(source_url, version, skill_name)`, so `@v1.1.0` registers once and is reused,
+which is correct for a tag that never moves.
 
 ## Upgrade path: bump pin -> eval -> deploy
 
