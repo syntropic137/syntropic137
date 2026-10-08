@@ -17,6 +17,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ExecutionEvalRun } from '../../../api/evals'
+import { LIST_PAGE_SIZE } from '../../../hooks/useServerList'
 import { serveListEndpoint } from '../../../test/fakeListServer'
 import { EXECUTIONS, matchesExecutionSearch } from '../../../test/listFixtures'
 import { ExecutionCard } from '../ExecutionCard'
@@ -61,9 +62,18 @@ const ORDINARY = {
   eval: null,
 }
 
+// Enough ordinary runs behind the three above to give the list a real page 2,
+// so the filter's return to page 1 is a transition and not the starting state.
+const FILLER = Array.from({ length: LIST_PAGE_SIZE }, (_, i) => ({
+  ...ORDINARY,
+  workflow_execution_id: `exec-filler-${i}`,
+  workflow_name: `Filler run ${i}`,
+}))
+const LAST_FILLER = `Filler run ${LIST_PAGE_SIZE - 1}`
+
 const server = serveListEndpoint({
   path: '/api/v1/executions',
-  collection: [SCORED, UNSCORED, ORDINARY],
+  collection: [SCORED, UNSCORED, ORDINARY, ...FILLER],
   matchesSearch: matchesExecutionSearch,
 })
 
@@ -168,8 +178,11 @@ describe('Evals only / Hide evals', () => {
     ['Hide evals', 'false'],
   ])('"%s" sends in_eval=%s and returns to page 1', async (label, wire) => {
     const user = userEvent.setup()
-    renderPage('/executions?page=2')
+    renderPage()
     await screen.findByText('Scored eval run')
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText(LAST_FILLER)
+    expect(server.lastRequest.params.get('page')).toBe('2')
 
     await user.click(screen.getByRole('button', { name: label }))
 
