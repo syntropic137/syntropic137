@@ -524,16 +524,27 @@ scripts/rehearse_upgrade.sh --dump <events-YYYYMMDDTHHMMSSZ.dump> \
   --to-event-store ghcr.io/syntropic137/event-store@sha256:<candidate digest>
 ```
 
-The backup is a `pg_dump -Fc` of the `events` table. The script starts the
-`--from` release's digest-pinned compose under its own project name, restores
+The backup is a `pg_dump -Fc` of the `events` table. The script is safe by
+construction and exits 3 before touching anything unless: the Docker daemon is
+local (`DOCKER_CONTEXT` unset, `DOCKER_HOST` unset or `unix://`, the selected
+context a unix socket), no `syn137rehearse-*` container, volume or network
+exists, `--workdir` (if given) does not exist yet, and the created API and
+collector containers carry no credential (checked by name, before restore and
+again once running). The project name is generated, compose runs with an empty
+host environment, and no docker socket is reachable from inside. It starts the
+`--from` release's digest-pinned compose under that project, restores
 the dump, waits for every projection to reach the head, snapshots counts, then
 swaps in the candidate compose and images (built from `--to-ref` unless
 `--to-api-image`/`--to-collector-image` are given) and measures the rebuild.
-It fails on: fewer events, an execution missing or changed with no new events
+It fails on: fewer rows in any table (event store and every projection,
+printed as a before/after table), a table that disappeared, an execution missing or changed with no new events
 on its stream, fewer sessions, `/evals` unavailable, a held or halted
 projection, a spot-checked execution detail that differs, or a catch-up
-timeout. It never touches the host Docker daemon or a VPS, and it tears the
-stack down unless `--keep` is passed. Quote its catch-up time in the release
+timeout. Its exit trap removes the build worktree and, unless `--keep` is
+passed, the compose project and only the volumes and networks carrying its
+generated prefix. The stubbed checks live in
+`scripts/tests/test_1769_rehearse_upgrade_refuses_unsafe.py`; a real run needs a
+local Docker daemon. Quote its catch-up time in the release
 PR's **Upgrade Notes**: that is the read-path window step 2 of the rollout
 constraints above warns about.
 
