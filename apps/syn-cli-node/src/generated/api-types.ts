@@ -5919,6 +5919,11 @@ export interface components {
              */
             delivers_repo_changes: boolean;
             /**
+             * Requires Verdict
+             * @default false
+             */
+            requires_verdict: boolean;
+            /**
              * Sandbox
              * @default full-access
              */

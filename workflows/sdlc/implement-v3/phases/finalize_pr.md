@@ -5,7 +5,8 @@ $ARGUMENTS
 The final verification report is **the last round's that ran**. A round
 whose predecessor certified never runs: the engine skips straight here, so a
 run certified in round 1 has no `reverify_2` or `reverify_3` input at all, and
-its round-1 report is the final one. A round RAN if anything of it was handed
+its round-1 report is the final one. A run whose first `verify` certified ran
+no round at all, and that first report is the final one (round 0). A round RAN if anything of it was handed
 to you under `artifacts/input/` - its directory `reverify_N/` or its flat
 alias `reverify_N.md` (kept for one release - issue #988). Take the
 newest round that ran, then read its report, the first of its two files that
@@ -17,12 +18,15 @@ exists:
 4. `artifacts/input/reverify_2.md`
 5. `artifacts/input/reverify/reverify.md`
 6. `artifacts/input/reverify.md`
+7. `artifacts/input/verify/verify.md` - only when no round ran
+8. `artifacts/input/verify.md` - only when no round ran
 
 Never take the verdict from an older round when a newer one ran, even when the
 newer round's report is missing or unreadable: that round handed the open
 findings to a fix and its verdict is the one that says whether the fix closed
 them, so an older verdict is history. Below, `reverify.md` means the report of
-the round you read, and N is that round's number (1 for `reverify`).
+the round you read, and N is that round's number (1 for `reverify`, 0 for the
+first `verify`).
 
 **The report is usable only if its first line is exactly `CERTIFIED` or
 `BLOCKED` and its second line is exactly `Round: N of 3`.** Anything else -
@@ -36,7 +40,7 @@ The implement phase opened a **draft** PR on its first push and recorded its
 number and URL in its artifact. This phase decides what that draft becomes. It
 is the only phase allowed to mark it ready (#1197).
 
-Read `reverify.md`, not `verify.md`. The first pass's findings may describe defects the `fix` phase has
+Read `reverify.md`, not `verify.md`, whenever a round ran. The first pass's findings may describe defects the `fix` phase has
 since closed; treating them as current is how a good branch gets abandoned.
 
 This workspace has no checkout at all. Work from the remote branch and the PR.

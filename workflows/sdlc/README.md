@@ -167,6 +167,28 @@ recorded as ~one run in three. Removing the clone did not necessarily fix
 them, because the clone was never inside the budget that expired. If that
 phase still times out, look at the agent's own work.
 
+## `requires_verdict`: a review must say what it found
+
+A phase's `review_verdict` (`certified` or `blocked`) is what moves the repair
+rounds forward: `certified` goes straight to the final phase, and anything else
+advances by `order`. When a phase reports no verdict, that also advances by
+order, which is right for a phase that judges nothing. For a review it is
+wrong, because a verify phase that forgot to report its verdict then looks
+exactly like one that blocked the change (PC-116).
+
+    requires_verdict: true   # this phase is a review; no verdict fails it
+
+If a phase declares this and its TASK_RESULT names no verdict, or a word other
+than `certified` or `blocked`, the phase fails with "verify produced no
+verdict". That is a `platform` failure and the run can be resumed. A phase
+that reports `success: false` keeps its own failure. Declare it on every
+`verify` and `reverify*` phase. Do not declare it anywhere else; it defaults
+to `false`.
+
+Because the first `verify` now reports a verdict too, a run whose first pass
+certifies skips every repair round. In that case `finalize_pr` reads the
+first `verify` report as round 0 (`Round: 0 of 3`).
+
 ## `delivers_repo_changes`: which phases own a branch
 
 Every phase ends with the unpushed-work gate asking whether its workspace is
