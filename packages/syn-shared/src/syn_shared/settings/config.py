@@ -458,6 +458,18 @@ class Settings(BaseSettings):
         ),
     )
 
+    credential_guard_exec_timeout_seconds: int = Field(
+        default=15,
+        ge=1,
+        le=600,
+        description=(
+            "Timeout in seconds for each exec of the staged-credential cleanup guard "
+            "(a `[ -e ]` probe or an `rm -f`) after the setup phase. Each is retried; "
+            "exhausting every attempt on timeouts alone fails the run as transient. "
+            "Increase on a loaded host."
+        ),
+    )
+
     checkout_verification_timeout_seconds: int = Field(
         default=60,
         ge=5,
