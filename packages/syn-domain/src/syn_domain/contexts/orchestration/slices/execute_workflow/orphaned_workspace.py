@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
@@ -45,6 +46,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import SavedWork
     from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
         GitWorkspace,
@@ -199,7 +202,8 @@ async def guard_stale_workspace_dir(
     A commit not on any remote keeps it: there is no credential left to push
     with, so the directory is that commit's only copy. Uncommitted changes, and
     every file outside a repository's history, are archived first, and a failed
-    archive keeps it. Never raises.
+    archive keeps it, as does work with no known owner to archive it under.
+    Never raises.
     """
     try:
         repos = await git.repositories(stale.host_dir)
@@ -207,18 +211,10 @@ async def guard_stale_workspace_dir(
             unpushed = await git.unpushed_commits(repo)
             if unpushed:
                 return _keep(stale, f"{unpushed} unpushed commit(s) in {repo}")
-        saved: list[str] = []
-        for repo in repos:
-            patch = await git.uncommitted_patch(repo)
-            if patch:
-                if stale.execution_id is None:
-                    return _keep(stale, "its authored work has no known execution owner")
-                saved.append(await archive.save(stale, repo, patch))
-        files = await git.unversioned_files(stale.host_dir, repos)
-        if files:
-            if stale.execution_id is None:
-                return _keep(stale, "its unversioned files have no known execution owner")
-            saved.append(await archive.save_files(stale, files))
+        pending = await _pending_archives(stale, repos, git, archive)
+        if pending and stale.execution_id is None:
+            return _keep(stale, "its authored work has no known execution owner")
+        saved = [await save() for save in pending]
     except Exception as exc:
         return _keep(stale, f"its work could not be shown safe ({type(exc).__name__}: {exc})")
     for uri in saved:
@@ -232,6 +228,25 @@ async def guard_stale_workspace_dir(
     return ReclaimableDir(
         host_dir=stale.host_dir, workspace_id=stale.workspace_id, size_bytes=stale.size_bytes
     )
+
+
+async def _pending_archives(
+    stale: StaleWorkspaceDir, repos: list[str], git: HostWorkspaceGit, archive: PatchArchive
+) -> list[Callable[[], Awaitable[str]]]:
+    """Every save deletion would need, read in full before any is attempted.
+
+    Nothing is uploaded here: the guard first decides, once for all of them,
+    whether the work has an owner to attribute it to.
+    """
+    pending: list[Callable[[], Awaitable[str]]] = []
+    for repo in repos:
+        patch = await git.uncommitted_patch(repo)
+        if patch:
+            pending.append(partial(archive.save, stale, repo, patch))
+    files = await git.unversioned_files(stale.host_dir, repos)
+    if files:
+        pending.append(partial(archive.save_files, stale, files))
+    return pending
 
 
 def _keep(stale: StaleWorkspaceDir, why: str) -> None:
