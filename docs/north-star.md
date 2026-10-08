@@ -31,6 +31,7 @@ From [the 2026-10-04 retrospective](retrospectives/2026-10-04-dogfood-orchestrat
 
 - **Peak:** 9 concurrent executions on flywheel pushed load to 21 on 16 cores. One `/sessions` read took 55 s (2026-10-05).
 - **Today's baseline** (operator report, 2026-10-07; not re-measured by the capacity-model phase): 5 workspaces, load 17 on 16 cores, 10 of 62 GB RAM in use, `SYN_WORKSPACE_CPU_LIMIT=2` and an 8 GB memory override. The code default for memory is 4096 MB (`packages/syn-shared/src/syn_shared/settings/workspace.py:39`).
+- **2026-10-08 observation** (operator report, not re-measured here): on the VPS (16 cores, 62 GB) with `SYN_EXECUTION_MAX_CONCURRENT=10`, each running execution adds about 2.7 to the host load average. The host is CPU-bound while memory sits near 15% in use. Load average counts runnable tasks, not CPU-seconds, so it is an upper-side proxy for CPU demand, not a measurement of it. The event store runs v0.17.0, the same as the ESP pin on `main`.
 - **Fixed since the 2026-10-05 snapshot:**
   - the control plane is no longer capped at 0.5 CPU: API and Postgres default to 2 CPU with a 4x CPU weight ([#1602](https://github.com/syntropic137/syntropic137/issues/1602); `packages/syn-shared/src/syn_shared/settings/infra.py:183-221`);
   - one admission budget covers starts, resumes and triggers, and a queued start is visible ([#1557](https://github.com/syntropic137/syntropic137/issues/1557), [#1574](https://github.com/syntropic137/syntropic137/issues/1574));
@@ -43,7 +44,7 @@ From [the 2026-10-04 retrospective](retrospectives/2026-10-04-dogfood-orchestrat
   - a graceful shutdown skips work preservation ([#1381](https://github.com/syntropic137/syntropic137/issues/1381));
   - transient errors fail whole runs ([#1593](https://github.com/syntropic137/syntropic137/issues/1593));
   - the API is OOM-killed at its 512 MB default ([#1552](https://github.com/syntropic137/syntropic137/issues/1552));
-  - a deployed event store can lag the ESP pin ([#1708](https://github.com/syntropic137/syntropic137/issues/1708)).
+  - a deployed event store can lag the ESP pin ([#1708](https://github.com/syntropic137/syntropic137/issues/1708)); nothing yet prevents it, although on 2026-10-08 the VPS ran v0.17.0, matching the pin (operator report).
 
 ## Capacity model
 
@@ -68,7 +69,7 @@ This is how to fill the unmeasured rows. It is tracked in [#1716](https://github
 |---|---|---|
 | Phase deadlines summed | 14,400 s with one repair round (premise 1200, implement 3600, verify 3600, fix 3600, reverify 1800, finalize 600); 25,200 s with all three rounds (`fix_2`/`reverify_2`/`fix_3`/`reverify_3` reuse the round deadlines) | `workflows/sdlc/implement-v3/workflow.yaml:72-268`. A **maximum**, not an observed duration |
 | Active-run duration *D* | assumed 1-4 h | **assumption**, not measured. Starts/h needed to hold N concurrent = N / *D* (Little's law), so N / 4 to N / 1 |
-| CPU demand of an active run | about 1.2 CPU: 1.5-2.2 CPU while gating x about 0.65 gate duty | **estimate** ([#1600](https://github.com/syntropic137/syntropic137/issues/1600), [#1585](https://github.com/syntropic137/syntropic137/issues/1585)) |
+| CPU demand of an active run | about 1.2 CPU: 1.5-2.2 CPU while gating x about 0.65 gate duty | **estimate** ([#1600](https://github.com/syntropic137/syntropic137/issues/1600), [#1585](https://github.com/syntropic137/syntropic137/issues/1585)). The operator's 2026-10-08 observation of about 2.7 load per run (see above) is a load-average proxy, not CPU-seconds, but it suggests the estimate is low |
 | Workspace CPU cap | 2.0 per workspace | code default, `packages/syn-shared/src/syn_shared/settings/workspace.py:42` |
 | Workspace RAM | 0.5-1 GB used | used: **estimate**. Cap: 4096 MB code default (`workspace.py:39`); 8 GB on the VPS by **operator report** |
 | Workspace disk | 1-3 GB per phase (clone, deps, caches; five of six phases start cold) | **estimate** |
@@ -121,7 +122,7 @@ The limit is per installation, and **5,000 req/h is GitHub's documented minimum*
 
 | Limit | Value | Source |
 |---|---|---|
-| Execution budget | 4 by default, a constant | `packages/syn-shared/src/syn_shared/settings/execution.py:23` |
+| Execution budget | 4 by code default, a hand-set constant not derived from the host ([#1715](https://github.com/syntropic137/syntropic137/issues/1715)); overridable with `SYN_EXECUTION_MAX_CONCURRENT`. The VPS runs 10 (operator report, 2026-10-08) | `packages/syn-shared/src/syn_shared/settings/execution.py:23,46-49` |
 | API process | one uvicorn process, stdlib event loop, no `--workers` | `infra/docker/images/syn-api/Dockerfile:135,182` |
 | API container | 2 CPU, 512 MB code default (a 2 GB override is reported live on [#1552](https://github.com/syntropic137/syntropic137/issues/1552)) | `packages/syn-shared/src/syn_shared/settings/infra.py:183-184` |
 | Postgres (event store tables, projections, observations) | 2 CPU, 1 GB, one instance | `infra.py:201-209` |
@@ -138,8 +139,8 @@ Starts/h to hold 20 at *D* = 1-4 h: 5-20.
 
 | Resource | Need at 20 | Limit | Binds? |
 |---|---|---|---|
-| Host CPU | 20 x 1.2 = 24 CPU, plus about 4 for the control plane | 16 cores | **hypothesis: yes**, about 1.75x, *if* the 1.2 CPU estimate holds. The operator baseline (load 17 at 5 workspaces) points the same way but does not measure per-run demand ([#1714](https://github.com/syntropic137/syntropic137/issues/1714)) |
-| Admission | 20 slots | budget 4, a constant | yes, by configuration. Sizing it needs the CPU figure ([#1715](https://github.com/syntropic137/syntropic137/issues/1715)) |
+| Host CPU | 20 x 1.2 = 24 CPU, plus about 4 for the control plane | 16 cores | **hypothesis: yes**, about 1.75x, *if* the 1.2 CPU estimate holds. The operator observations (load 17 at 5 workspaces on 2026-10-07; about 2.7 load per run, CPU-bound, on 2026-10-08) point the same way, and at 2.7 per run 16 cores would saturate near 6 runs, but load average does not measure per-run CPU demand ([#1714](https://github.com/syntropic137/syntropic137/issues/1714)) |
+| Admission | 20 slots | 4 by code default, 10 on the VPS (operator report) | yes, by configuration. Sizing it needs the CPU figure ([#1715](https://github.com/syntropic137/syntropic137/issues/1715)) |
 | API memory | **unmeasured.** Linear extrapolation of the one 443 MB / 8 sample gives about 1.1 GB, an **unvalidated scenario** and not a minimum | 512 MB code default (2 GB reported live) | **possible**; measure the slope ([#1552](https://github.com/syntropic137/syntropic137/issues/1552)) |
 | Host RAM | 10-20 GB in use (estimate) plus the platform | 62 GB; caps overcommit (20 x 4 GiB = 80 GiB at the default) | not on the estimate. Caps can overcommit |
 | Disk | 20-60 GB (estimate) | 63 GB free on 2026-10-05 ([#1310](https://github.com/syntropic137/syntropic137/issues/1310) plan); not re-measured | possible at the upper end |
