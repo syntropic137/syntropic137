@@ -35,6 +35,14 @@ the service with **no store**. A service with no store issues nothing, so no
 workspace gets `SYN_API_TOKEN`, and it refuses every workspace-ingress request
 with 403. "Off" cannot be half-wired.
 
+The same variable also reaches `envoy-proxy`. Its `entrypoint.sh` writes the
+Envoy runtime key `syn_platform.access_enabled` only when the value is true,
+and both `/syn-platform` routes match only when that key is on (default 0%).
+So with access OFF there is **no route**: a workspace request ends at Envoy's
+local 404 and nothing is forwarded to the API. The API's 403 stays as defense
+in depth. `ci/fitness/infrastructure/test_platform_route_is_switched.py` keeps
+every route to `syn_platform_api` gated.
+
 ### 2. The route: a path on the Envoy sidecar, not a network join
 
 Workspace containers do not set `HTTP_PROXY`; they reach Envoy by name, as
@@ -56,8 +64,10 @@ On these routes:
   API unchanged.
 
 Neither `api` nor `gateway` joins `agent-net`. Envoy already shares a network
-with `api` (`syn-internal` in selfhost, `default` in dev), so no compose file
-changes. The ADR-059 boundary still holds for every path except this one, and
+with `api` (`syn-internal` in selfhost, `default` in dev); the only compose
+change is forwarding the setting to `envoy-proxy` (section 1). This is the
+boundary for reaching the API, not for all egress: `agent-net` is not
+`internal`, and harness credentials still follow ADR-024. The ADR-059 boundary still holds for every path except this one, and
 this path is authenticated.
 
 ### 3. The API enforces scope server-side
@@ -69,9 +79,18 @@ must present a token whose scope allows the method and path, or it gets a 401
 Requests without the header come from the internal network and are not touched
 (ADR-059 is unchanged for them).
 
+The path judged is the **router-relative** path, stripped of the ASGI
+`root_path` by Starlette's own rule (`get_route_path`), because selfhost runs
+Uvicorn with `--root-path /api/v1` and hands the app `/api/v1/health`. And
+since the API never sees the `/syn-platform/api/v1` prefix Envoy stripped, a
+same-host `Location` header (a framework redirect such as `/health/` to
+`/health`) is re-rooted onto that prefix on workspace-ingress responses, so a
+client following it stays on the authenticated route.
+
 The allowlist lives in one place, `syn_adapters.platform_access`. It fails
 closed: a route added later is denied until someone adds its first path
-segment.
+segment. The policy is per resource, not per route: a GET added later under
+an allowed first segment (`/executions/...`) is readable at once.
 
 | Scope | Methods | First path segment |
 |---|---|---|
@@ -90,14 +109,20 @@ rather than hidden:
 - `synpt_` + 32 random bytes, shown once. The store keeps only its SHA-256.
 - One token per workspace, minted in `WorkspaceService.create_workspace`
   (the token's lifetime is the workspace's) and handed to the agent as
-  `SYN_API_URL` / `SYN_API_TOKEN` through the provider-independent part of
-  `WorkspaceProvisionHandler._launch_for`, so codex phases get it as well.
+  `SYN_API_URL` / `SYN_API_TOKEN` by `ManagedWorkspace.stream`, the one
+  launch path every provider uses, so codex phases get it as well.
+- Bounded by the phase deadline. The first launch carrying
+  `SYN_PHASE_DEADLINE` lowers the grant's expiry (store TTL and `expires_at`)
+  to `min(issued + max TTL, deadline)`. It never raises it, so a retry sharing
+  the phase's deadline changes nothing.
 - Revoked in `create_workspace`'s `finally`, beside the GitHub token
   revocation (#725). If revocation fails, the token still expires at
   `SYN_PLATFORM_ACCESS_TOKEN_TTL_SECONDS` (store TTL **and** an explicit
   `expires_at` check, so a store that ignores TTL cannot extend it).
 - Never logged. Log lines name the execution id, and `WorkspacePlatformGrant`
-  hides the token from `repr`.
+  hides the token from `repr`. The token rides the `docker exec -e` argv, so
+  `capture_signal_death` replaces every `-e`/`--env` value with `<redacted>`
+  before a `SignalDeath` (logged at ERROR) retains the command.
 - Store: Redis (`syn:platform-token:<sha256>`) in production, because a grant
   must survive an API restart or every running phase loses access.
   `InMemoryPlatformTokenStore` inherits `InMemoryAdapter` (ADR-060).
