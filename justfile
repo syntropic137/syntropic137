@@ -1698,6 +1698,46 @@ selfhost-seed:
       python /app/scripts/seed_triggers.py
     echo "✅ Seeding complete"
 
+# Back up the whole syn database into $BACKUP_DIR, verified before it reports ok
+selfhost-backup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Same command the scheduled db-backup service runs: docker/db-backup/.
+    source infra/scripts/selfhost-env.sh
+    {{compose_selfhost}} run --rm --no-TTY db-backup backup /backups \
+        | sed "s|/backups/|${BACKUP_DIR:-/var/backups/syn}/|"
+
+# Replace the syn database with a backup (refuses a populated DB without --force)
+selfhost-restore file *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Stops the writers first - api, collector, event-store, gateway - the same
+    # set docs/deployment/timescaledb-2.29-upgrade.md stops before its backup,
+    # because they reconnect and write the moment Postgres is reachable. Starts
+    # them again afterwards, unless the restore itself failed. --force is also
+    # passed to the in-flight execution check: a restore discards running
+    # executions too.
+    source infra/scripts/selfhost-env.sh
+    file="$(realpath -e "{{file}}")"
+    uv run python infra/scripts/predeploy_check.py {{args}}
+    force=""
+    for a in {{args}}; do [ "$a" = --force ] && force=--force; done
+    writers="api collector event-store gateway"
+    echo "Stopping writers: $writers"
+    {{compose_selfhost}} stop $writers
+    rc=0
+    {{compose_selfhost}} run --rm --no-TTY \
+        -v "$(dirname "$file"):/restore:ro" \
+        db-backup restore "/restore/$(basename "$file")" $force || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+        echo "❌ Restore failed (exit $rc). Writers left STOPPED: inspect the database, then"
+        echo "   {{compose_selfhost}} start $writers"
+        exit "$rc"
+    fi
+    echo "Starting writers: $writers"
+    {{compose_selfhost}} start $writers
+    exit "$rc"
+
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
 selfhost-update *args:
     #!/usr/bin/env bash

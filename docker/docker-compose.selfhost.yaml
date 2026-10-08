@@ -423,6 +423,51 @@ services:
     networks:
       - syn-internal
 
+  # ===========================================================================
+  # DB BACKUP - scheduled pg_dump of the whole syn database
+  # ===========================================================================
+  # Same image as timescaledb (pinned equal by a unit test) so pg_dump and
+  # pg_restore always match the server. Also what `just selfhost-backup` and
+  # `just selfhost-restore` run, via `compose run`: docker/db-backup/.
+  db-backup:
+    container_name: syn137-db-backup
+    image: timescale/timescaledb:2.29.2-pg16
+    entrypoint: ["sh", "/usr/local/bin/syn-db-backup"]
+    command: ["schedule", "/backups", "${BACKUP_SCHEDULE:-0 3 * * *}", "${BACKUP_RETENTION_DAYS:-7}"]
+    environment:
+      PGHOST: timescaledb
+      PGUSER: ${POSTGRES_USER:-syn}
+      PGDATABASE: ${POSTGRES_DB:-syn}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - ./db-backup/syn-db-backup.sh:/usr/local/bin/syn-db-backup:ro
+      - ${BACKUP_DIR:-/var/backups/syn}:/backups
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - syn-internal
+
 # =============================================================================
 # SECRETS (file-based)
 # =============================================================================
