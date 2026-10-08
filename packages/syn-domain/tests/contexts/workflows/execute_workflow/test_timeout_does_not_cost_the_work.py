@@ -51,6 +51,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import 
     WorkflowFailedEvent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow import workspace_git
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown import (
+    record_cancel_and_release,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnpushedWorkQuarantinedError,
 )
@@ -638,13 +641,16 @@ async def test_cancelling_an_execution_does_not_destroy_its_commits(clone: _Clon
         CancelExecutionCommand(execution_id=_EXECUTION_ID, phase_id=_PHASE_ID, reason="stop")
     )
 
-    result = await processor._cancel_execution(  # pyright: ignore[reportPrivateUsage]
-        aggregate,
-        _EXECUTION_ID,
-        _WORKFLOW_ID,
-        [],
-        [],
-        datetime.now(UTC),
+    result = await record_cancel_and_release(
+        aggregate=aggregate,
+        runtime=processor._runtimes.of(_EXECUTION_ID),
+        workspaces=processor._workspaces_for(_EXECUTION_ID, {}),
+        ledger=processor._cancelled_work,
+        execution_id=_EXECUTION_ID,
+        workflow_id=_WORKFLOW_ID,
+        phase_results=[],
+        all_artifact_ids=[],
+        started_at=datetime.now(UTC),
         cancel_reason="Cancelled by user",
         phase_id=_PHASE_ID,
     )

@@ -313,6 +313,8 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         owed_cancelled_work=get_projection_store(),  # #1547: refused landed refs, until appended
         # #894: a declared delegation completes only on a delegate its child journal shows succeeded.
         delegation_evidence=ChildJournalDelegations(),
+        # #1381: how long shutdown waits to record each running run INTERRUPTED.
+        interrupt_budget_seconds=_settings.execution.interrupt_budget_s,
     )
 
 
