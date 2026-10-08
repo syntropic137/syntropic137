@@ -3,8 +3,9 @@
 On 2026-10-05 four runs (#1589, #1596, #1597, #1603) ended with `reverify`
 BLOCKED on findings one more edit would have closed, and each needed a second
 fix round built by hand. The engine advances strictly by `order` and reads no
-verdict, so the repeat is written into the workflow definition: three
-fix/reverify rounds under distinct phase ids, then `finalize_pr`. A round
+verdict, so the repeat is written into the workflow definition: two
+fix/reverify rounds under distinct phase ids, then `finalize_pr` (three until
+the owner capped it at two on 2026-10-07). A round
 whose predecessor certified never runs: the aggregate skips to `finalize_pr`.
 
 Two halves have to agree, and each is tested where it lives:
@@ -65,9 +66,13 @@ _ROUND_WORKFLOWS = {
 }
 _FINALIZE = _WORKFLOW.parent / "phases" / "finalize_pr.md"
 
-# The bound the task set: one round plus at most two extra. Raising it is a
-# decision about cost, so it is pinned here rather than inferred from the YAML.
-_ROUNDS = 3
+# The bound the owner set on 2026-10-07: one round plus at most one extra.
+# Raising it is a decision about cost, so it is pinned here rather than
+# inferred from the YAML.
+_ROUNDS = 2
+_FIXES = ["fix", *(f"fix_{n}" for n in range(2, _ROUNDS + 1))]
+_REVERIFIES = ["reverify", *(f"reverify_{n}" for n in range(2, _ROUNDS + 1))]
+_LAST_FIX, _LAST_REVERIFY = _FIXES[-1], _REVERIFIES[-1]
 
 
 @pytest.fixture(scope="module", params=list(_ROUND_WORKFLOWS))
@@ -205,12 +210,12 @@ def _round_report(verdict: str, n: int) -> str:
 
 
 class TestABlockedReverifyIsRepaired:
-    @pytest.mark.parametrize("certified_in", [1, 2, 3])
+    @pytest.mark.parametrize("certified_in", range(1, _ROUNDS + 1))
     def test_a_certification_in_any_round_marks_the_pr_ready(
         self, installed: tuple[list[PhaseDefinition], dict[str, str]], certified_in: int
     ) -> None:
         phases, _ = installed
-        rounds = ["reverify", "reverify_2", "reverify_3"]
+        rounds = _REVERIFIES
         reports = {
             phase: _round_report("CERTIFIED" if n == certified_in else "BLOCKED", n)
             for n, phase in enumerate(rounds[:certified_in], start=1)
@@ -233,8 +238,6 @@ class TestABlockedReverifyIsRepaired:
         # ran; listing it first is how a stale certification gets acted on.
         _, prompts = installed
         assert _reports_finalize_reads(prompts["finalize_pr"]) == [
-            "artifacts/input/reverify_3/reverify.md",
-            "artifacts/input/reverify_3.md",
             "artifacts/input/reverify_2/reverify.md",
             "artifacts/input/reverify_2.md",
             "artifacts/input/reverify/reverify.md",
@@ -251,12 +254,12 @@ class TestABlockedReverifyIsRepaired:
         assert verdict == "FINAL_REPORT_UNUSABLE"
         assert "ready" not in actions
 
-    async def test_a_recovered_round_three_never_falls_back_to_round_two(self) -> None:
-        """Round 2 CERTIFIED, round 3 wrote no file and was salvaged BLOCKED.
+    async def test_a_recovered_round_two_never_falls_back_to_round_one(self) -> None:
+        """Round 1 CERTIFIED, round 2 wrote no file and was salvaged BLOCKED.
 
         Driven through the real collector and handoff, which file a salvaged
         phase under `recovered-from-transcript.md` and an alias whose first
-        line is the recovery notice - so no `reverify_3/reverify.md` exists.
+        line is the recovery notice - so no `reverify_2/reverify.md` exists.
         """
 
         class _Workspace:
@@ -291,17 +294,17 @@ class TestABlockedReverifyIsRepaired:
             )
             return list(got.files)
 
-        round_2 = _round_report("CERTIFIED", 2)
+        round_1 = _round_report("CERTIFIED", 1)
         files = {
-            "reverify_2": await _collect(
-                "reverify_2",
-                _Workspace([("artifacts/output/reverify.md", round_2.encode())]),
+            "reverify": await _collect(
+                "reverify",
+                _Workspace([("artifacts/output/reverify.md", round_1.encode())]),
                 None,
             ),
-            "reverify_3": await _collect(
-                "reverify_3",
+            "reverify_2": await _collect(
+                "reverify_2",
                 _Workspace([]),
-                "BLOCKED\nRound: 3 of 3\nRepair bound reached: 3 of 3 rounds used, findings "
+                "BLOCKED\nRound: 2 of 2\nRepair bound reached: 2 of 2 rounds used, findings "
                 "still open. The fix to the collector reintroduced the dropped alias for "
                 "recovered phases, and the regression test asserts nothing about it.",
             ),
@@ -315,17 +318,19 @@ class TestABlockedReverifyIsRepaired:
             phase_files=files,
         )
         injected = finalize_ws.injected
-        assert "artifacts/input/reverify_2/reverify.md" in injected
-        assert "artifacts/input/reverify_3/reverify.md" not in injected
+        assert "artifacts/input/reverify/reverify.md" in injected
+        assert "artifacts/input/reverify_2/reverify.md" not in injected
 
         verdict, actions = _finalize(injected)
         assert verdict == "FINAL_REPORT_UNUSABLE"
-        assert "ready" not in actions, "round 2's certification must not mark the PR ready"
+        assert "ready" not in actions, "round 1's certification must not mark the PR ready"
         assert "comment" in actions
 
     def test_an_unreadable_or_mislabelled_final_report_keeps_the_pr_draft(self) -> None:
-        for report in ("", "CERTIFIED\nRound: 2 of 3\n", "Looks good to me\n"):
-            verdict, actions = _finalize(_injected({"reverify_3": report}))
+        # "Round: 2 of 3" is the line a report written under the old bound
+        # carries; it is not this run's round line, so it is unusable.
+        for report in ("", "CERTIFIED\nRound: 1 of 2\n", "CERTIFIED\nRound: 2 of 3\n", "Looks good\n"):
+            verdict, actions = _finalize(_injected({_LAST_REVERIFY: report}))
             assert verdict == "FINAL_REPORT_UNUSABLE", report
             assert "ready" not in actions, report
 
@@ -337,13 +342,13 @@ class TestTheRepairIsBounded:
         phases, _ = installed
         reports = {
             phase: _round_report("BLOCKED", n)
-            for n, phase in enumerate(["reverify", "reverify_2", "reverify_3"], start=1)
+            for n, phase in enumerate(_REVERIFIES, start=1)
         }
         ran = _run(phases, reports)
 
         fixes = [p for p in ran if p == "fix" or p.startswith("fix_")]
         assert len(fixes) == _ROUNDS
-        assert ran[-2:] == ["reverify_3", "finalize_pr"], "nothing may run after the bound"
+        assert ran[-2:] == [_LAST_REVERIFY, "finalize_pr"], "nothing may run after the bound"
         verdict, actions = _finalize(_injected(reports))
         assert verdict == "BLOCKED"
         assert "comment" in actions, "a blocked run must say why on the PR"
@@ -353,8 +358,18 @@ class TestTheRepairIsBounded:
         self, installed: tuple[list[PhaseDefinition], dict[str, str]]
     ) -> None:
         _, prompts = installed
-        assert "Repair bound reached: 3 of 3 rounds used" in prompts["reverify_3"]
-        assert "Repair rounds: N of 3" in prompts["finalize_pr"]
+        assert "Repair bound reached: 2 of 2 rounds used" in prompts[_LAST_REVERIFY]
+        assert "Repair rounds: N of 2" in prompts["finalize_pr"]
+
+    def test_no_third_round_is_defined(
+        self, installed: tuple[list[PhaseDefinition], dict[str, str]]
+    ) -> None:
+        phases, _ = installed
+        ids = {p.phase_id for p in phases}
+        assert not ids & {"fix_3", "reverify_3"}, "the owner capped repair at two rounds"
+        assert not any("of 3" in prompt for prompt in installed[1].values()), (
+            "a prompt still counts rounds out of three"
+        )
 
 
 class TestEveryRoundIsVisibleAndWired:
@@ -372,8 +387,6 @@ class TestEveryRoundIsVisibleAndWired:
             "reverify",
             "fix_2",
             "reverify_2",
-            "fix_3",
-            "reverify_3",
             "finalize_pr",
         ]
 
@@ -384,13 +397,12 @@ class TestEveryRoundIsVisibleAndWired:
         acts_on = {
             "fix": "verify/verify.md",
             "fix_2": "reverify/reverify.md",
-            "fix_3": "reverify_2/reverify.md",
         }
         for fix, verdict in acts_on.items():
             assert f"artifacts/input/{verdict}" in prompts[fix], fix
             assert f"Round: {fix[-1] if fix != 'fix' else 1} of {_ROUNDS}" in prompts[fix], fix
         for n, (fix, reverify) in enumerate(
-            [("fix", "reverify"), ("fix_2", "reverify_2"), ("fix_3", "reverify_3")], start=1
+            zip(_FIXES, _REVERIFIES, strict=True), start=1
         ):
             assert f"artifacts/input/{fix}/fix.md" in prompts[reverify], reverify
             assert f"Round {n} of {_ROUNDS}" in prompts[reverify], reverify
@@ -441,40 +453,42 @@ def _fix_checkout(
 
 
 class TestAResumedFixBuildsOnThePushedHead:
-    """A resume re-runs `fix_3` after round 3 pushed head B and was BLOCKED.
+    """A resume re-runs `fix_2` after round 2 pushed head B and was BLOCKED.
 
-    `reverify_2.md` is still injected and names A, the head before round 3's
+    `reverify.md` is still injected and names A, the head before round 2's
     push. Taking A as verified makes the remote check fail on B and the resumed
-    round stops before repairing anything; checking out A would drop round 3's
+    round stops before repairing anything; checking out A would drop round 2's
     commits.
     """
 
     A, B = "a" * 40, "b" * 40
 
     def test_the_resumed_round_checks_out_the_head_the_blocked_comment_names(self) -> None:
-        got = _fix_checkout("fix_3", reported=self.A, remote=self.B, resume_comment=self.B)
+        got = _fix_checkout(_LAST_FIX, reported=self.A, remote=self.B, resume_comment=self.B)
         assert got == self.B
 
     def test_without_a_resume_a_moved_branch_still_stops_the_round(self) -> None:
-        assert _fix_checkout("fix_3", reported=self.A, remote=self.B) is None
-        assert _fix_checkout("fix_3", reported=self.A, remote=self.A) == self.A
+        assert _fix_checkout(_LAST_FIX, reported=self.A, remote=self.B) is None
+        assert _fix_checkout(_LAST_FIX, reported=self.A, remote=self.A) == self.A
 
     def test_the_resume_signal_is_what_finalize_pr_writes(self) -> None:
-        # fix_3 recognises a resume by the BLOCKED comment; if finalize_pr
+        # The last fix round recognises a resume by the BLOCKED comment; if finalize_pr
         # stopped writing its round count or head SHA, nothing would match.
         rounds = re.sub(
             r"\s+",
             " ",
-            _section((_WORKFLOW.parent / "phases" / "fix_3.md").read_text(), "Which round this is"),
+            _section(
+                (_WORKFLOW.parent / "phases" / f"{_LAST_FIX}.md").read_text(), "Which round this is"
+            ),
         )
         blocked = re.sub(r"\s+", " ", _section(_FINALIZE.read_text(), "If BLOCKED"))
-        assert "saying `3 of 3` repair rounds ran" in rounds
-        assert "`3 of 3`" in blocked
+        assert "saying `2 of 2` repair rounds ran" in rounds
+        assert "`2 of 2`" in blocked
         assert "gives the head SHA it applies to" in blocked
 
 
 @pytest.mark.parametrize(
-    ("base", "rounds"), [("fix", ("fix_2", "fix_3")), ("reverify", ("reverify_2", "reverify_3"))]
+    ("base", "rounds"), [("fix", tuple(_FIXES[1:])), ("reverify", tuple(_REVERIFIES[1:]))]
 )
 def test_round_prompts_differ_only_in_their_round_section(
     base: str, rounds: tuple[str, ...]

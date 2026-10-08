@@ -4,7 +4,7 @@ $ARGUMENTS
 
 ## Which round this is
 
-**Round 2 of 2.** This prompt re-verifies after each of up to two fix
+**Round 2 of 2.** **This is the final round**: there is no third. This prompt re-verifies after each of up to two fix
 rounds. This round's fix report is **`artifacts/input/fix_2/fix.md`** (flat
 alias `artifacts/input/fix_2.md`); the verdict that fix round acted on is
 `artifacts/input/reverify/reverify.md`. Read the fix report first. It says what the previous phase did about
