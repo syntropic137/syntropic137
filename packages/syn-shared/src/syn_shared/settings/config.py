@@ -458,6 +458,17 @@ class Settings(BaseSettings):
         ),
     )
 
+    checkout_verification_timeout_seconds: int = Field(
+        default=60,
+        ge=5,
+        le=3600,
+        description=(
+            "Timeout in seconds for each read-only git read that verifies a cloned "
+            "repository's HEAD while provisioning. A timed-out verification is "
+            "retried once. Increase on a loaded host."
+        ),
+    )
+
     github_api_request_timeout_seconds: float = Field(
         default=30.0,
         gt=0,

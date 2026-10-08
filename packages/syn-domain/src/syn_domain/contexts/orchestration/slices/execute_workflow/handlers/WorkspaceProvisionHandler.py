@@ -26,7 +26,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     ProvisionWorkspaceCompletedCommand,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.checkout_verification import (
-    verify_checkout,
+    verify_provisioned_checkout,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
@@ -456,7 +456,7 @@ class WorkspaceProvisionHandler:
             # Read back BEFORE anything else is staged and long before the agent
             # is launched: a workspace not at its pins is refused here (#967).
             checked_out = (
-                await verify_checkout(
+                await verify_provisioned_checkout(
                     workspace,
                     _cloned_pins(effective_repos, pinned_commits),
                     continued_branches=continued_branches or {},

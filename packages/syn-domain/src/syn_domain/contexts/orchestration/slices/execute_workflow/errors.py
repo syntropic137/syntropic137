@@ -137,6 +137,9 @@ class ProvisionStep(StrEnum):
     CODEX_SANDBOX_PROBE = "codex_sandbox_probe"
     """The live `codex sandbox` probe run before a sandboxed codex phase (#1434)."""
 
+    CHECKOUT_VERIFICATION = "checkout_verification"
+    """The read-only `git rev-parse` reads of each cloned repository's HEAD (#967)."""
+
 
 class ProvisionStepTimeoutError(UpstreamFailureError):
     """A provisioning step ran out of time, every attempt it was allowed (PC-126).
