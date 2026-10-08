@@ -11,7 +11,10 @@ Run from the repo root.
 | What | Command |
 |---|---|
 | Install | `pnpm install` |
-| Type-check everything (tsc, svelte-check, CSS token gate, theme parity) | `just skyline-check`, or `pnpm --filter syn-ui --filter './packages/syn-ui/*' --workspace-concurrency=1 run check` |
+| Type-check everything (tsc, svelte-check, CSS token gate, theme parity, token usage, the published contracts gate) | `just skyline-check` |
+| Plain type check (what `build` runs first) | `pnpm --filter syn-ui --filter './packages/syn-ui/*' run typecheck` |
+| Published `@syntropic137/design-contracts` gate | `just skyline-verify-contracts` |
+| Prove the gates catch drift (applies each mutation, expects failure, restores) | `just skyline-mutations` |
 | Unit tests | `just skyline-test`, or `pnpm --filter syn-ui --filter './packages/syn-ui/*' run test` |
 | Production build with the size budget | `just skyline-build`, or `pnpm --filter syn-ui run build` |
 | All of the above | `just skyline-qa` |
@@ -87,7 +90,7 @@ These rules are enforced by `packages/syn-ui/scripts/check-css.mjs`, which runs 
 | Control heights | `--sky-size-control-sm`, `-md`, `-lg` (32, 36, 44px) |
 | Layout | `--sky-page-max` (1400px), `--sky-gutter` (16px phone, 40px from 48rem), `--sky-side-column` (340px) |
 
-If you need a colour that has no token yet, add it to **both** theme files, since `check-themes.mjs` fails when they differ. Say so in your result, because the themes are owned by the foundation.
+If you need a colour that has no token yet, add it to **both** theme files, since `check-themes.mjs` fails when they differ, and `check-token-usage.mjs` fails (with file:line) on any `var(--sky-*)` or `var(--ds-*)` that a theme, `tokens.css` or upstream design-tokens does not define. Say so in your result, because the themes are owned by the foundation.
 
 ## skyline-core
 
@@ -110,7 +113,12 @@ Every new function gets a Vitest test in Node (`src/**/*.test.ts`).
 5. Logic such as geometry, formatting or state goes in skyline-core with tests. The component only renders.
 6. Component tests are welcome. They need `jsdom` and `@testing-library/svelte`, which are not installed yet, so whoever adds the first component test adds them as devDependencies of skyline-svelte-v5 and lists them in their result.
 
-Once Button, Badge and Toggle exist, add the conformance entry to `src/index.ts`. The template is in that file.
+7. Every contract union the component renders (size, variant, tone, orientation) goes through an exhaustive lookup in `Name/variants.ts`, keyed by the Props type: `export const NAME_SIZE = { sm: 'sm', md: 'md', lg: 'lg' } as const satisfies Record<NonNullable<NameProps['size']>, string>`, used as `data-size={NAME_SIZE[size]}`. A member added upstream is then a missing-key compile error, not an unstyled value. Add an `Expect<Equal<...>>` line for each such prop to `src/contract-unions.ts`.
+
+Required-contract conformance lives in `src/contract-adapter.ts` (the file name the published gate looks for), re-exported from `src/index.ts`.
+
+Contract-only callers: Svelte's HTML attribute types carry a symbol index signature (attachments), so a plain `ButtonContract` value is not assignable to `ButtonProps`.
+Spread it, `<Button {...props} />` or `consume({ ...props })`; that is expected, not a contract break.
 
 ## The data client (syn-ui-data)
 

@@ -24,6 +24,12 @@ skyline-verify-contracts:
       --tokens packages/syn-ui/themes/node_modules/@syntropic137/design-tokens/generated/design-tokens.css \
       --typecheck "pnpm --filter @syn137/skyline-svelte-v5 run typecheck"
 
+# Apply each verifier mutation (upstream widening, invalid props at build,
+# dropped contract prop, token deleted from both themes), assert the gate
+# fails, restore. Slow; run after touching a gate.
+skyline-mutations *cases:
+    node packages/syn-ui/scripts/tests/contract-mutations.mjs {{cases}}
+
 # Run Skyline unit tests (skyline-core, syn-ui-data, app router)
 skyline-test:
     {{_skyline}} run test
