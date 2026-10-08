@@ -220,6 +220,22 @@ async def test_an_expired_lease_is_never_claimed_and_is_fenced_to_interrupted(
         )
 
 
+async def test_fence_leaves_a_live_lease_alone(pools: list[asyncpg.Pool]) -> None:
+    """D5: only an expired lease is fenced. Fencing a live one would kill a healthy run."""
+    queue = PostgresExecutionRunQueue(pools[0])
+    reconciler = PostgresExecutionRunQueue(pools[1])
+    await _online(queue, "h1", capacity=1)
+    await _online(reconciler, "rec", capacity=1)
+    await _admit(queue, "live")
+    run = await queue.claim("h1")
+    assert run is not None
+
+    assert await reconciler.fence_expired("rec") == []
+    assert (await queue.in_use()).claimed == 1
+    await queue.renew(run)
+    await queue.close(run)
+
+
 async def test_claim_refuses_stale_heartbeat_draining_host_newer_epoch_and_retry_at(
     pools: list[asyncpg.Pool],
 ) -> None:

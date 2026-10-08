@@ -73,6 +73,18 @@ async def test_stale_token_is_refused_after_defer_and_reclaim() -> None:
     await queue.renew(second)
 
 
+async def test_fence_leaves_a_live_lease_alone() -> None:
+    clock = _Clock()
+    queue = await _queue_with(clock, 1, "a")
+    await queue.register(_host("h2"), 1)
+    held = await queue.claim("h1")
+    assert held is not None
+    clock.now += timedelta(seconds=89)
+    assert await queue.fence_expired("h2") == []
+    await queue.renew(held)
+    await queue.close(held)
+
+
 async def test_expired_lease_is_fenced_never_reclaimed() -> None:
     clock = _Clock()
     queue = await _queue_with(clock, 1, "a")
