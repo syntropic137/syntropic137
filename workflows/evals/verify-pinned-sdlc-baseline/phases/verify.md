@@ -104,6 +104,25 @@ failed `codegen-check`, a real PR-gating job, while every direct test passed.
 Run `git status --porcelain` before and after. Verification commands in this
 repository have mutated tracked files; if the tree changed, report it.
 
+## The one gate this workspace cannot run
+
+This workspace has no network, and that is deliberate: the pinned checkout's
+dependencies were installed during setup, while it still had network, so every
+gate above runs offline except one.
+`ci/fitness/infrastructure/test_submodule_pointer_reachability.py` asks each
+submodule's remote on GitHub whether the pinned pointer is reachable, and it is
+network-dependent by design. Here it fails with `Could not resolve host:
+github.com` and `This gate is network-dependent by design and does not pass
+offline`. CI runs it with network.
+
+That failure is not a finding about the change. Do not stop on it, do not try
+to reach GitHub some other way, and do not certify it as passed. List it under
+`## NON-BLOCKING` as `NOT RUN offline: submodule pointer reachability`, then
+carry on reviewing. Every OTHER failing gate is still a finding, including
+one that failed installing or resolving anything: setup was meant to install
+everything those gates need, so a gate that still reaches for the network is
+something to report, not to work around.
+
 ## Attack the tests
 
 For each test the change added, **break the code it guards and confirm that test

@@ -1094,6 +1094,32 @@ def test_an_environment_blocker_never_hides_a_caught_seed() -> None:
 
 
 @pytest.mark.unit
+def test_blocking_on_the_offline_submodule_reachability_gate_is_error_not_fail() -> None:
+    # What test_submodule_pointer_reachability prints inside the offline eval
+    # sandbox, which the sdlc eval prompts tell the verifier to list NOT RUN.
+    report = _report(
+        (
+            "ci/fitness/infrastructure/test_submodule_pointer_reachability.py:241",
+            "lib/agentic-workspace: cannot reach its remote. This gate is network-dependent "
+            "by design and does not pass offline. fatal: unable to access "
+            "'https://github.com/syntropic137/agentic-workspace.git/': "
+            "Could not resolve host: github.com",
+        )
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.environment_findings == 1 and not score.passed and score.errored
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("which", ["lean", "baseline"])
+def test_the_sdlc_eval_prompts_say_the_reachability_gate_is_not_run_offline(which: str) -> None:
+    section = _sections(_sdlc_eval(which))["## The one gate this workspace cannot run"]
+    assert "test_submodule_pointer_reachability.py" in section
+    assert "NOT RUN offline: submodule pointer reachability" in section
+    assert "do not certify it as passed" in section
+
+
+@pytest.mark.unit
 def test_a_code_defect_that_discusses_dns_and_network_is_a_fail_not_an_error() -> None:
     report = _report(
         (

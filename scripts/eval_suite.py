@@ -514,9 +514,13 @@ def blocking_findings(report: str) -> list[str]:
 #: What a gate prints when it cannot reach a package index, and the indexes
 #: themselves. A finding is about the environment only when it says one of
 #: these: a code defect that merely discusses DNS, networking or a proxy names
-#: none of them, so it stays a finding about the code (#1726).
+#: none of them, so it stays a finding about the code (#1726). The submodule
+#: reachability gate is the one gate an offline eval cannot run however well
+#: setup prewarmed; the prompt says to list it NOT RUN, and a verifier that
+#: blocks on it anyway is blocked on the environment, not on the change.
 _ENVIRONMENT_SIGNATURE = re.compile(
     r"files\.pythonhosted\.org|\bpypi\.org\b|registry\.npmjs\.org|registry\.yarnpkg\.com"
+    r"|could not resolve host: github\.com|network-dependent by design and does not pass offline"
     r"|temporary failure in name resolution|failed to lookup address information"
     r"|could not (?:install|download|resolve) (?:its |the )?(?:dependencies|packages|deps)",
     re.IGNORECASE,
