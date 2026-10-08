@@ -124,7 +124,7 @@ class TestAQueuedStartIsListed:
 
         assert queued in {e.workflow_execution_id for e in recent.executions}
         assert recent.status_counts["queued"] == 1
-        assert later.status_counts["queued"] == 0
+        assert "queued" not in later.status_counts
 
         await _release_everything(world)
 
@@ -136,7 +136,7 @@ class TestAQueuedStartIsListed:
         listed = await _listed()
 
         assert [e for e in listed.executions if e.status == "queued"] == []
-        assert listed.status_counts["queued"] == 0
+        assert listed.status_counts.get("queued", 0) == 0
 
 
 class TestTheListIsDurable:
@@ -166,7 +166,7 @@ class TestACancelledQueuedStartLeavesTheList:
         listed = await _listed()
 
         assert queued not in {e.workflow_execution_id for e in listed.executions}
-        assert listed.status_counts["queued"] == 0
+        assert listed.status_counts.get("queued", 0) == 0
 
         await _release_everything(world)
 

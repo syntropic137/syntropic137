@@ -715,7 +715,8 @@ async def list_executions_endpoint(
         page=page,
         page_size=page_size,
         excluded_undated=execution_page.excluded_undated,
-        status_counts={**execution_page.status_counts, QUEUED: len(queued)},
+        # Like every other status, present only when something has it.
+        status_counts={**execution_page.status_counts, **({QUEUED: len(queued)} if queued else {})},
         budget=await _budget_info(len(all_queued)),
     )
 
