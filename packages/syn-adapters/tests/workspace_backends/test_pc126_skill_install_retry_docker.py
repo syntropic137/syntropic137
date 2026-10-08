@@ -21,10 +21,8 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
-from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,7 +30,6 @@ from agentic_isolation import SecurityConfig
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
-from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationConfig,
     IsolationHandle,
@@ -47,6 +44,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_in
 )
 from syn_shared.settings import reset_settings
 from syn_shared.upstream_failure import UpstreamFailureKind
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator
+    from pathlib import Path
+
+    from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
 
 #: Small, ubiquitous, and has /bin/sh, which is all the fake installer needs.
 _IMAGE = "alpine:3"
