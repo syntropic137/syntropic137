@@ -86,8 +86,10 @@ async def test_production_reclaimer_reads_the_registered_ownership_store(
     from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
     from syn_api.services.workspace_dir_reclaim import default_reclaimer
     from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
-        WorkspaceOwner,
         WorkspaceOwnershipProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.workspace_ownership.value_objects import (
+        WorkspaceOwner,
     )
 
     ws = _workspace(base, "ws-production-wiring", tmp_path)

@@ -10,23 +10,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from event_sourcing import AutoDispatchProjection
-from pydantic import BaseModel, ConfigDict
 
 from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
     WorkspaceProvisionedForPhaseEvent,
 )
+from syn_domain.contexts.orchestration.slices.workspace_ownership.value_objects import (
+    WorkspaceOwner,
+)
 
 if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
-
-
-class WorkspaceOwner(BaseModel):
-    """The executions recorded for a workspace; ambiguity must protect it."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    workspace_id: str
-    execution_ids: tuple[str, ...]
 
 
 class WorkspaceOwnershipProjection(AutoDispatchProjection):
