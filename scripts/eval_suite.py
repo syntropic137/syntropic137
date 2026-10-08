@@ -75,6 +75,7 @@ Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import math
 import os
@@ -210,6 +211,10 @@ class _CaseBase(_Frozen):
     task: str = Field(min_length=1)
     split: Split
     """`train` cases may tune a verifier; `holdout` cases only measure it. Never moved."""
+    retired: str | None = Field(default=None, min_length=1)
+    """Why the case left the suite, and in which version. A retired case is not part
+    of the current version: it is kept so the history versions that held it still
+    score their runs against it, as it was. Never re-polarise a case in place."""
 
     @property
     def tag(self) -> str:
@@ -232,6 +237,10 @@ class DefectCase(_CaseBase):
     so the bug is present and nothing of the fix is.
     """
     expected: Expected
+    reclassified_from: str | None = Field(default=None, min_length=1)
+    """The retired clean control this defect was found in, when the case is that
+    control reclassified. Its pin is then the control's own commit, kept so the
+    reviewed tree does not change: an ancestor of the fix, not its first parent."""
 
     @property
     def fix_start(self) -> str:
@@ -334,16 +343,33 @@ def load_suite(
         raise DefinitionError(str(exc)) from exc
 
     problems: list[str] = []
+    retired = {c.id for c in cases if c.retired}
+    if stray := sorted(retired - {i for h in suite.history for i in h.cases}):
+        problems.append(f"retired case(s) {stray} are in no history version: delete them")
+    every_case, cases = cases, tuple(c for c in cases if not c.retired)
     if not cases:
         problems.append(f"{directory}/cases holds no case")
-    for path, case in zip(case_files, cases, strict=True):
+    for path, case in zip(case_files, every_case, strict=True):
         if path.stem != case.id:
             problems.append(f"{path.name}: file name must be the case id {case.id!r}")
         if f"#{case.source_pr}" in case.task:
             problems.append(
                 f"{case.id}: task names #{case.source_pr}; the agent could fetch the fix"
             )
-    ids = [c.id for c in cases]
+    for case in every_case:
+        if isinstance(case, DefectCase) and case.reclassified_from:
+            source = next((c for c in every_case if c.id == case.reclassified_from), None)
+            if not (isinstance(source, CleanCase) and source.retired):
+                problems.append(
+                    f"{case.id}: reclassified_from {case.reclassified_from!r} "
+                    "is not a retired clean case"
+                )
+            elif source.commit != case.commit:
+                problems.append(
+                    f"{case.id}: pins {case.commit[:12]}, but {source.id} pins "
+                    f"{source.commit[:12]}; a reclassified control keeps its pin"
+                )
+    ids = [c.id for c in every_case]
     if len(set(ids)) != len(ids):
         problems.append(f"duplicate case ids: {sorted(ids)}")
     holdout = sum(c.split == "holdout" for c in cases)
@@ -376,6 +402,7 @@ def load_suite(
         raise DefinitionError("\n".join(problems))
     if split is not None:
         cases = tuple(c for c in cases if c.split == split)
+        every_case = tuple(c for c in every_case if c.split == split)
     if past is None:
         return LoadedSuite(
             suite=suite,
@@ -386,7 +413,7 @@ def load_suite(
         )
     return LoadedSuite(
         suite=suite,
-        cases=tuple(c for c in cases if c.id in past.cases),
+        cases=tuple(c for c in every_case if c.id in past.cases),
         workflow=selected,
         version=past.version,
         tag=past.tag,
@@ -468,15 +495,24 @@ def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
 
 def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
     """Every SHA is a commit here, the pin is the first parent of the fix's first
-    commit (the tree just before the fix, not merely some ancestor of it), that
-    commit leads to the fix, every expected file exists at the pin, and the fix
+    commit (the tree just before the fix, not merely some ancestor of it) - or,
+    for a reclassified control, a strict ancestor of it - that commit leads to
+    the fix, every expected file exists at the pin, and the fix
     changes at least one of them - so the files are where the bug lived, not a guess.
     """
     if missing := _missing_commits(repo, case.commit, case.fix_start, case.fix_commit):
         return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
     problems: list[str] = []
     parent = _git_out(repo, "rev-parse", f"{case.fix_start}^1").strip()
-    if parent != case.commit:
+    if case.reclassified_from:
+        if case.commit == case.fix_start or not _git_ok(
+            repo, "merge-base", "--is-ancestor", case.commit, case.fix_start
+        ):
+            problems.append(
+                f"{case.id}: pins {case.commit[:12]}, which is not before the fix "
+                f"{case.fix_start[:12]}; a reclassified control's pin must precede it"
+            )
+    elif parent != case.commit:
         problems.append(
             f"{case.id}: pins {case.commit[:12]}, but the fix {case.fix_start[:12]}'s "
             f"first parent is {parent[:12] or '(none)'}; pin the tree just before the fix"
@@ -501,11 +537,85 @@ def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
 _FIX_SUBJECT = re.compile(r"^(fix|revert)\b", re.IGNORECASE)
 
 
+QUIET_DAYS = 30
+"""How long after a clean control merged no mainline commit may touch what it changed."""
+
+
+def _functions(repo: Path, commit: str, path: str) -> dict[str, tuple[str, ...]]:
+    """Qualified name (``Class.method``) -> the source of each Python function so named in `path`.
+
+    Every definition is found, wherever it sits (under an ``if``, a ``try``, a
+    ``with``); only classes and functions qualify a name. Same-named definitions,
+    such as a property's getter and setter, are all kept, in order.
+    """
+    text = _git_out(repo, "show", f"{commit}:{path}")
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {}
+    lines = text.splitlines()
+    found: dict[str, list[str]] = {}
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                name = f"{prefix}{child.name}"
+                if not isinstance(child, ast.ClassDef):
+                    first = min([child.lineno, *(d.lineno for d in child.decorator_list)])
+                    last = child.end_lineno or child.lineno
+                    found.setdefault(name, []).append("\n".join(lines[first - 1 : last]))
+                visit(child, f"{name}.")
+            else:
+                visit(child, prefix)
+
+    visit(tree, "")
+    return {name: tuple(sources) for name, sources in found.items()}
+
+
+def _changed_functions(repo: Path, commit: str) -> dict[str, set[str]]:
+    """Python path -> each function whose source `commit` changes against its first parent.
+
+    A function is changed when its source differs, appears or disappears, so a
+    line inserted next to a function is not a change to it and one inserted
+    inside it is.
+    """
+    paths = _git_out(repo, "diff", "--name-only", "--no-renames", f"{commit}^1", commit).split()
+    changed: dict[str, set[str]] = {}
+    for path in (p for p in paths if p.endswith(".py")):
+        before, after = _functions(repo, f"{commit}^1", path), _functions(repo, commit, path)
+        if names := {n for n in before.keys() | after.keys() if before.get(n) != after.get(n)}:
+            changed[path] = names
+    return changed
+
+
+def _touched(repo: Path, merge: str, until: str) -> list[str]:
+    """Each mainline commit after `merge`, up to `until`, that touches what `merge` changed.
+
+    "What it changed" is every Python function whose source the PR changed,
+    found again by qualified name in each later commit, so a function that
+    moves within its file is still followed. Only Python functions can be found
+    again here: a non-Python change is the selector's to read by hand. One line
+    per hit.
+    """
+    functions = _changed_functions(repo, merge)
+    hits: list[str] = []
+    later = _git_out(repo, "rev-list", "--reverse", "--first-parent", f"{merge}..{until}")
+    for commit in later.split():
+        for path, names in _changed_functions(repo, commit).items():
+            hits.extend(
+                f"{commit[:12]} changes {path}:{name}"
+                for name in sorted(names & functions.get(path, set()))
+            )
+    return hits
+
+
 def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
     """Every SHA is a commit here, the pin is the merge's second parent (the PR
     head exactly as main took it), the merge is on `clean_through`'s first-parent
-    chain (a mainline merge, not one inside a branch), and no commit between the
-    merge and `clean_through` is a fix or revert naming the PR.
+    chain (a mainline merge, not one inside a branch), no commit between the
+    merge and `clean_through` is a fix or revert naming the PR, `clean_through`
+    is at least `QUIET_DAYS` after the merge, and no mainline commit in those
+    days touches a Python function the PR changed.
     """
     if missing := _missing_commits(repo, case.commit, case.merge_commit, case.clean_through):
         return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
@@ -535,6 +645,21 @@ def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
                 f"{case.id}: {sha[:12]} fixes or reverts #{case.source_pr} after it merged; "
                 "a clean control must have no known defect"
             )
+    merged_at = int(_git_out(repo, "show", "-s", "--format=%ct", case.merge_commit))
+    quiet_until = merged_at + QUIET_DAYS * 86400
+    if int(_git_out(repo, "show", "-s", "--format=%ct", case.clean_through)) < quiet_until:
+        problems.append(
+            f"{case.id}: clean_through {case.clean_through[:12]} is under {QUIET_DAYS} days "
+            "after the merge; a clean control needs that long untouched"
+        )
+    window_end = _git_out(
+        repo, "rev-list", "-1", "--first-parent", f"--before={quiet_until}", case.clean_through
+    ).strip()
+    problems.extend(
+        f"{case.id}: {hit} within {QUIET_DAYS} days of the merge; "
+        "a clean control's code must stay untouched that long"
+        for hit in _touched(repo, case.merge_commit, window_end)
+    )
     return problems
 
 

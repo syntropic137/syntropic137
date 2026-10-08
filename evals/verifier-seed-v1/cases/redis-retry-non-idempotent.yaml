@@ -1,0 +1,31 @@
+id: redis-retry-non-idempotent
+polarity: defect
+source_pr: 1757
+# Was the v3 clean control clean-redis-signal-queue-fail-open (PR #1083), which
+# both strong verifiers blocked for this defect; it is retired, not re-polarised.
+# Pinned at that control's own commit, so the reviewed tree is unchanged
+# (`reclassified_from`): an ancestor of the first fix commit, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `resilient_redis_client` sets `retry_on_timeout=True` and
+# `Retry(ExponentialBackoff(), retries=3)` (redis_client.py:32-33), and the
+# clients it builds run `getdel` (redis_adapter.py:76) and
+# `set(..., nx=True)` (redis_dedup.py:31). A timeout after Redis applied the
+# command retries it: GETDEL returns nothing and the signal is lost, SET NX
+# returns false and a first delivery is reported as a duplicate.
+reclassified_from: clean-redis-signal-queue-fail-open
+commit: 2af77227449663381d0ed128d1f5989e8593c03d
+fix_commit: 59fe93661367074960bc39c33871d6571720b181
+first_fix_commit: a950bb15de0f3819aa0fe43d1189210a82c0432f
+task: >
+  Review how the platform's Redis-backed adapters behave when a Redis command
+  times out: the shared client factory's retry policy, the execution
+  controller's signal queue, and GitHub event deduplication.
+expected:
+  files:
+    - packages/syn-adapters/src/syn_adapters/redis_client.py
+    - packages/syn-adapters/src/syn_adapters/control/adapters/redis_adapter.py
+    - packages/syn-adapters/src/syn_adapters/dedup/redis_dedup.py
+  keywords:
+    - ["retry", "retries", "retried", "retry_on_timeout", "re-sent", "resent", "re-issued", "reissued", "twice"]
+    - ["idempotent", "getdel", "nx", "set nx", "duplicate", "lost", "dropped", "already applied", "applied twice"]
+split: train

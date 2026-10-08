@@ -304,6 +304,24 @@ from it. The Resume Phase is checked out at its head; every other Phase still
 reads the pinned commit. Recorded on the resumed Execution's start. (#1513,
 ADR-058.)
 
+A branch the failing attempt made an Own Push to is also continued when origin's
+head is not where the attempt was last seen but is any SHA it pushed there: the
+Execution's own unverified commits, which the Resume Phase re-verifies at that
+head before changing anything. (PC-128.)
+
+## Own Push
+
+A commit the running Phase's own workspace pushed to origin, recorded as
+`PhaseCommitPushed` while the Phase runs, from the workspace's push hook. It
+attributes the push to this Execution and nothing else: it does not say the push
+landed, and it is not a Branch Observation, which records that a ref moved and
+deliberately not who moved it. A Resume reads it to tell the Execution's own
+commits from someone else's; a head that is not an Own Push is still
+Abandoned. Recorded mid-Phase because the run it exists for, one orphaned by a
+restart, never reaches the end of its Phase. Only a push git reports as an update of
+an existing branch to the hook's commit is one: creating a branch names no
+commit in git's output, so a creation is never an Own Push. (PC-128.)
+
 ## Abandoned Branch
 
 A branch a Resume Phase could have continued and deliberately did not, because

@@ -18,6 +18,7 @@ from syn_api.types import (
     PhaseProgressInfo,
     PhaseStartConfig,
     PlannedPhaseInfo,
+    ReadModelStatus,
     StartPinsStatus,
 )
 from syn_domain.contexts.orchestration import (
@@ -436,6 +437,9 @@ class ExecutionDetailResponse(BaseModel):
     """Set, with ``status`` ``queued`` or ``starting``, for an execution that has
     been accepted but not yet opened, because it is waiting for a slot in the
     execution budget (#1557). ``None`` for every execution that exists."""
+    read_model_status: ReadModelStatus | None = None
+    """Whether the execution detail read model is rebuilding, so a page missing
+    recent phases can say why instead of looking broken."""
 
 
 class ExecutionSummaryResponse(BaseModel):
@@ -561,3 +565,6 @@ class ExecutionListResponse(BaseModel):
     rows cannot answer that: it only ever knows about the status already
     selected, and only about one page of it.
     """
+    read_model_status: ReadModelStatus | None = None
+    """Whether the execution list read model is rebuilding. While it is, this
+    page is a partial view of history and the newest runs may be missing."""
