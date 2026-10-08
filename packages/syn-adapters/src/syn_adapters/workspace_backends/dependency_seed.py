@@ -13,8 +13,10 @@ it always did.
 THE SEED IS NEVER SHARED WRITABLY. #1310 rejected a shared writable cache: one
 agent could plant a poisoned wheel that every later run installs. So:
 
-- a seed is produced only through `publish`, which the platform calls with a
-  cache it built itself. Nothing reads a workspace back into the store;
+- a seed is produced only by the platform's own download-only command
+  (`WARM_COMMANDS`), run in a fresh checkout BEFORE any agent has run in that
+  workspace, and published from the cache that command alone wrote. A
+  workspace's cache is never read back into the store once an agent has run;
 - a workspace never sees the store. `seed` COPIES a seed into the workspace's
   own writable cache from the host side, through the workspace directory the
   host bind-mounts at `/workspace`, so the agent can corrupt its own copy and
@@ -40,12 +42,16 @@ import shutil
 import stat
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +59,41 @@ logger = logging.getLogger(__name__)
 #: seeds is `/workspace/.cache/<tool>`, which is where
 #: `agentic.adapter._WORKSPACE_CACHE_ENV` points that tool.
 SEEDED_TOOLS: Final[dict[str, str]] = {"uv": "uv.lock", "pnpm": "pnpm-lock.yaml"}
+
+#: How the platform builds each tool's seed from a fresh checkout.
+#:
+#: THE CHECKOUT IS NOT TRUSTED. A verify phase checks out what an implement
+#: phase's agent pushed, so every file in it but the lockfile's hashes may be
+#: an agent's. Any command that runs repository code - a workspace member's
+#: build hook, an npm lifecycle script - could write into the cache it is
+#: building, and that cache would be served to every later run with the same
+#: lockfile, including runs on main. So each command downloads only what the
+#: lockfile pins, verified against the lockfile's hashes, and runs nothing:
+#:
+#: - `uv sync --no-install-workspace --no-install-local` builds no project of
+#:   the repository's own, and `--no-build` builds no sdist at all, so no build
+#:   backend runs. A lockfile that needs an sdist fails to warm and the run
+#:   goes on cold;
+#: - `pnpm fetch` reads only the lockfile and runs no lifecycle scripts.
+#:
+#: A malicious lockfile is not a way in: its seed is keyed by its own hash, so
+#: it reaches only runs that would install that lockfile anyway.
+WARM_COMMANDS: Final[dict[str, tuple[str, ...]]] = {
+    "uv": (
+        "uv",
+        "sync",
+        "--frozen",
+        "--no-install-workspace",
+        "--no-install-local",
+        "--no-build",
+    ),
+    # No `--frozen-lockfile`: `fetch` only ever reads the lockfile, and pnpm 12
+    # rejects the flag there.
+    "pnpm": ("pnpm", "fetch"),
+}
+
+#: A warm that has not finished by then is abandoned and the run goes on cold.
+_WARM_TIMEOUT_SECONDS: Final = 900
 
 #: A seed copied less than this long ago is never pruned, so a prune cannot
 #: delete a seed out from under a copy that is reading it.
@@ -97,6 +138,15 @@ def seed_keys(repository: str, clone_dir: Path) -> list[SeedKey]:
     return keys
 
 
+@dataclass
+class SeedOutcome:
+    """What `DependencySeedStore.seed` did for one workspace."""
+
+    copied: list[SeedKey] = field(default_factory=list)
+    #: Seeds the store lacks, with the checkout whose lockfile names each.
+    missing: list[tuple[SeedKey, Path]] = field(default_factory=list)
+
+
 class DependencySeedStore:
     """Platform-owned seeds on the host, copied into workspaces and pruned LRU."""
 
@@ -104,25 +154,26 @@ class DependencySeedStore:
         self._root = root
         self._max_bytes = max_bytes
 
-    def seed(self, workspace_dir: Path, clones: Iterable[tuple[str, Path]]) -> list[SeedKey]:
+    def seed(self, workspace_dir: Path, clones: Iterable[tuple[str, Path]]) -> SeedOutcome:
         """Copy every ready seed for ``clones`` into ``workspace_dir``'s caches.
 
         ``workspace_dir`` is the host side of `/workspace`; each clone is
-        ``(repository, host path of its checkout)``. Returns the seeds copied.
-        A missing seed is not an error: that workspace installs from cold.
+        ``(repository, host path of its checkout)``. A seed the store does not
+        have is reported missing, not raised: that workspace installs cold.
         """
-        copied: list[SeedKey] = []
+        outcome = SeedOutcome()
         for repository, clone_dir in clones:
             for key in seed_keys(repository, clone_dir):
                 source = self._root / key.relative_path
                 if not source.is_dir():
+                    outcome.missing.append((key, clone_dir))
                     continue
                 # Touched BEFORE the copy: it is both the LRU clock and the
                 # grace `prune` honours for a seed being read right now.
                 os.utime(source)
                 _copy_writable(source, workspace_dir / ".cache" / key.tool)
-                copied.append(key)
-        return copied
+                outcome.copied.append(key)
+        return outcome
 
     def publish(self, key: SeedKey, built_cache: Path) -> None:
         """Install a cache THE PLATFORM built as the seed for ``key``, then prune.
@@ -213,26 +264,78 @@ def _size(root: Path) -> int:
     )
 
 
-async def seed_dependency_caches(workspace_dir: Path, clones: list[tuple[str, Path]]) -> None:
-    """Seed a freshly cloned workspace's caches, if seeding is configured.
+class SeedableWorkspace(Protocol):
+    """What seeding needs of a workspace: its host directory, and a way to run in it."""
 
-    Never raises: a seed only saves work, so a seed that cannot be copied
-    leaves the workspace exactly as it was before #1714, installing from cold.
-    The copy is a thread, not the event loop: a seed is gigabytes.
+    @property
+    def path(self) -> Path: ...
+
+    async def execute(
+        self,
+        command: list[str],
+        *,
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> ExecutionResult: ...
+
+
+async def seed_dependency_caches(
+    workspace: SeedableWorkspace, clones: list[tuple[str, Path]]
+) -> None:
+    """Give a freshly cloned workspace warm caches, warming any seed it lacks.
+
+    MUST run after the clone and before any agent: a missing seed is built
+    here, in this workspace, by the platform's own command, and published
+    from a cache nothing but that command has written. Once an agent has run,
+    the workspace's cache is the agent's and can never become a seed.
+
+    Never raises: a seed only saves work, so one that cannot be copied or
+    built leaves the workspace as it was before #1714, installing from cold.
+    The file copies run in a thread, not the event loop: a seed is gigabytes.
     """
     store = configured_store()
     if store is None:
         return
     try:
-        copied = await asyncio.to_thread(store.seed, workspace_dir, clones)
+        outcome = await asyncio.to_thread(store.seed, workspace.path, clones)
+        for key, clone_dir in outcome.missing:
+            await _warm(store, workspace, key, clone_dir)
     except Exception:
-        logger.exception("Dependency seeding failed; installing from cold (%s)", workspace_dir)
+        logger.exception("Dependency seeding failed; installing from cold (%s)", workspace.path)
         return
     logger.info(
-        "Dependency seeds copied (workspace=%s, seeds=%s)",
-        workspace_dir,
-        [f"{key.tool}:{key.repository}@{key.lockfile_sha256[:12]}" for key in copied],
+        "Dependency seeds (workspace=%s, copied=%s, warmed=%s)",
+        workspace.path,
+        [_label(key) for key in outcome.copied],
+        [_label(key) for key, _ in outcome.missing],
     )
+
+
+async def _warm(
+    store: DependencySeedStore, workspace: SeedableWorkspace, key: SeedKey, clone_dir: Path
+) -> None:
+    in_container = Path("/workspace") / clone_dir.relative_to(workspace.path)
+    result = await workspace.execute(
+        list(WARM_COMMANDS[key.tool]),
+        timeout_seconds=_WARM_TIMEOUT_SECONDS,
+        working_directory=str(in_container),
+    )
+    if result.exit_code != 0:
+        # Not published: a half-built cache is not a seed. The workspace
+        # keeps what it built, so this run is no colder than before.
+        logger.warning(
+            "Could not warm dependency seed %s (exit %s): %s",
+            _label(key),
+            result.exit_code,
+            (result.stderr or "")[-300:],
+        )
+        return
+    await asyncio.to_thread(store.publish, key, workspace.path / ".cache" / key.tool)
+
+
+def _label(key: SeedKey) -> str:
+    return f"{key.tool}:{key.repository}@{key.lockfile_sha256[:12]}"
 
 
 def configured_store() -> DependencySeedStore | None:

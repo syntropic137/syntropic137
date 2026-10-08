@@ -20,6 +20,7 @@ from syn_adapters.workspace_backends.agentic.adapter import _with_executable_tmp
 from syn_adapters.workspace_backends.dependency_seed import (
     DependencySeedStore,
     SeedKey,
+    SeedOutcome,
 )
 from syn_adapters.workspace_backends.service import managed_workspace
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -115,7 +116,7 @@ async def test_a_changed_lockfile_never_reuses_the_old_seed(
         tmp_path, monkeypatch, {"uv.lock": _UV_LOCK + b"# one more line\n"}
     )
 
-    assert not (workspace_dir / ".cache" / "uv").exists()
+    assert not (workspace_dir / ".cache" / "uv" / "archive" / "pkg.py").exists()
 
 
 async def test_the_workspace_writes_its_copy_and_never_the_seed(
@@ -148,7 +149,9 @@ async def test_a_symlinked_lockfile_is_not_read(
     (workspace_dir / "repos" / "app").mkdir(parents=True)
     (workspace_dir / "repos" / "app" / "uv.lock").symlink_to(secret)
 
-    assert store.seed(workspace_dir, [("org/app", workspace_dir / "repos" / "app")]) == []
+    outcome = store.seed(workspace_dir, [("org/app", workspace_dir / "repos" / "app")])
+
+    assert outcome == SeedOutcome()
 
 
 async def test_no_store_configured_leaves_the_workspace_cold(
@@ -196,3 +199,78 @@ def test_pnpm_is_pointed_at_the_cache_a_seed_is_copied_into() -> None:
     environment = _with_executable_tmpdir({})
     for tool in dependency_seed.SEEDED_TOOLS:
         assert f"/workspace/.cache/{tool}" in environment.values()
+
+
+class _FreshCheckout:
+    """A workspace nobody has run in, whose tool writes ``built`` into its cache."""
+
+    def __init__(self, root: Path, *, exit_code: int = 0, built: str = "fetched") -> None:
+        self.path = root
+        self.commands: list[tuple[list[str], str | None]] = []
+        self._exit_code = exit_code
+        self._built = built
+
+    async def execute(
+        self,
+        command: list[str],
+        *,
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> ExecutionResult:
+        self.commands.append((command, working_directory))
+        cache = self.path / ".cache" / command[0]
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "pkg").write_text(self._built)
+        return ExecutionResult(
+            exit_code=self._exit_code, success=self._exit_code == 0, duration_ms=1.0
+        )
+
+
+def _cloned(root: Path, files: dict[str, bytes]) -> Path:
+    clone = root / "repos" / "app"
+    clone.mkdir(parents=True)
+    for name, data in files.items():
+        (clone / name).write_bytes(data)
+    return clone
+
+
+async def test_a_missing_seed_is_warmed_by_a_download_only_command_and_served_next_time(
+    tmp_path: Path, store: DependencySeedStore
+) -> None:
+    pnpm_lock = b"lockfileVersion: '9.0'\n"
+    first = _FreshCheckout(tmp_path / "first")
+    clone = _cloned(first.path, {"uv.lock": _UV_LOCK, "pnpm-lock.yaml": pnpm_lock})
+
+    await dependency_seed.seed_dependency_caches(first, [("org/app", clone)])
+
+    assert [command for command, _ in first.commands] == [
+        list(dependency_seed.WARM_COMMANDS["uv"]),
+        list(dependency_seed.WARM_COMMANDS["pnpm"]),
+    ]
+    assert {cwd for _, cwd in first.commands} == {"/workspace/repos/app"}
+    # Nothing the repository ships may run while a seed is built.
+    assert {"--no-build", "--no-install-workspace", "--no-install-local"} <= set(
+        dependency_seed.WARM_COMMANDS["uv"]
+    )
+
+    second = _FreshCheckout(tmp_path / "second")
+    clone = _cloned(second.path, {"uv.lock": _UV_LOCK, "pnpm-lock.yaml": pnpm_lock})
+    await dependency_seed.seed_dependency_caches(second, [("org/app", clone)])
+
+    assert second.commands == []
+    assert (second.path / ".cache" / "uv" / "pkg").read_text() == "fetched"
+    assert (second.path / ".cache" / "pnpm" / "pkg").read_text() == "fetched"
+
+
+async def test_a_warm_that_fails_publishes_nothing(
+    tmp_path: Path, store: DependencySeedStore
+) -> None:
+    ws = _FreshCheckout(tmp_path / "ws", exit_code=1, built="half")
+    clone = _cloned(ws.path, {"uv.lock": _UV_LOCK})
+
+    await dependency_seed.seed_dependency_caches(ws, [("org/app", clone)])
+
+    assert not (
+        tmp_path / "seeds" / SeedKey("uv", "org/app", _sha(_UV_LOCK)).relative_path
+    ).exists()

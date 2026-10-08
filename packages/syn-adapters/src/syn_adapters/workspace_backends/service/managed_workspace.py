@@ -282,7 +282,7 @@ class ManagedWorkspace:
             self._ledger.installed(secrets.issued)
             # After the clone, before the agent: the lockfiles that key the
             # seeds exist only now, and nothing has run in the workspace yet.
-            await seed_dependency_caches(self.path, secrets.clones_under(self.path))
+            await seed_dependency_caches(self, secrets.clones_under(self.path))
         return result
 
     @property
