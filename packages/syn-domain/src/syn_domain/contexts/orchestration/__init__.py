@@ -322,8 +322,8 @@ __all__ = [
     "OWED_STATUSES",
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
-    "SKILL_TOOL_NAME",
     "RETIRED_PHASE_FIELDS",
+    "SKILL_TOOL_NAME",
     "TASK_PLACEHOLDER",
     # Tag edits after creation (#967)
     "AddExecutionTagsCommand",
