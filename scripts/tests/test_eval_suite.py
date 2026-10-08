@@ -30,17 +30,22 @@ import yaml
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
-    Case,
+    CleanCase,
+    DefectCase,
     DefinitionError,
     Expected,
     Launch,
     LoadedSuite,
+    Score,
+    ScoredRun,
     check_commits,
     install_provenance,
     launch_suite,
     load_suite,
+    rates,
     read_launches,
     render,
+    score_case,
     score_report,
     score_suite,
     versions_run,
@@ -82,10 +87,17 @@ _SONNET_WF = "eval-verify-pinned-sonnet-v1"
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v2:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v3:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
-    assert {c.source_pr for c in loaded.cases} == {1574, 1649, 1652, 1654, 1679, 1680}
+    by_polarity = {
+        polarity: {c.source_pr for c in loaded.cases if c.polarity == polarity}
+        for polarity in ("defect", "clean")
+    }
+    assert by_polarity == {
+        "defect": {1574, 1649, 1652, 1654, 1679, 1680},
+        "clean": {1083, 1130, 1238, 1486, 1643, 1691},
+    }
 
 
 @pytest.mark.unit
@@ -95,7 +107,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v2:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v3:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -107,7 +119,7 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v2:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v3:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
 
 
@@ -272,6 +284,7 @@ def _one_case_suite(
         p.unlink()
     case: dict[str, object] = {
         "id": "seed",
+        "polarity": "defect",
         "source_pr": 1,
         "commit": commit,
         "fix_commit": fix,
@@ -326,8 +339,12 @@ def test_check_passes_a_pin_before_the_first_commit_of_a_fix_series(
 
 @pytest.mark.skipif(_is_shallow(), reason="a shallow clone does not hold the pinned commits")
 @pytest.mark.unit
-@pytest.mark.parametrize("case", load_suite(DEFAULT_SUITE).cases, ids=lambda c: c.id)
-def test_every_committed_case_pins_its_fixs_first_parent(case: Case) -> None:
+@pytest.mark.parametrize(
+    "case",
+    [c for c in load_suite(DEFAULT_SUITE).cases if isinstance(c, DefectCase)],
+    ids=lambda c: c.id,
+)
+def test_every_committed_defect_pins_its_fixs_first_parent(case: DefectCase) -> None:
     assert _git(ROOT, "rev-parse", f"{case.fix_start}^1") == case.commit
 
 
@@ -513,8 +530,10 @@ def test_a_longer_file_name_ending_in_the_seed_file_does_not_name_it() -> None:
     assert score_report(_EXPECTED, "blocked", report).named_file is None
 
 
-def _case(case_id: str) -> Case:
-    return next(c for c in load_suite(DEFAULT_SUITE).cases if c.id == case_id)
+def _case(case_id: str) -> DefectCase:
+    return next(
+        c for c in load_suite(DEFAULT_SUITE).cases if isinstance(c, DefectCase) and c.id == case_id
+    )
 
 
 # Natural, correct descriptions of each seed's defect, worded independently of
@@ -655,7 +674,8 @@ def test_a_natural_correct_finding_passes(case_id: str, file: str, defect: str) 
 
 @pytest.mark.unit
 def test_every_seed_has_at_least_three_paraphrases() -> None:
-    assert {c.id for c in load_suite(DEFAULT_SUITE).cases} == set(_PARAPHRASES)
+    defects = {c.id for c in load_suite(DEFAULT_SUITE).cases if c.polarity == "defect"}
+    assert defects == set(_PARAPHRASES)
     assert all(len(found) >= 3 for found in _PARAPHRASES.values())
 
 
@@ -749,7 +769,11 @@ class _Server:
         self.installed: str | None = None
         self.phases = served_phases if served_phases is not None else _phases_of(loaded)
         self.attached = attached
+        self.case = _CASE
+        """The case `eval-1` is tagged with; `eval_pin` must be its commit."""
         self.eval_pin = _PIN
+        self.verdict = "blocked"
+        """The review verdict `exec-1` reports."""
         self.run_workflow = loaded.workflow.id
         self.tag = loaded.suite.suite_tag
         self.existing = False
@@ -767,7 +791,7 @@ class _Server:
                 "workflow_id": self.run_workflow,
                 "workflow_name": "w",
                 "status": "completed",
-                "review_verdict": "blocked",
+                "review_verdict": self.verdict,
                 "total_cost_usd": "3.75",
                 "total_duration_seconds": 640.2,
                 "unknown_duration_phase_count": 0,
@@ -796,7 +820,7 @@ class _Server:
             "name": "n",
             "goal": "g",
             "starting_workflow_id": None,
-            "tags": [self.tag, f"case:{_CASE}"],
+            "tags": [self.tag, f"case:{self.case}"],
             "frozen": True,
             "archived": False,
             "created_at": None,
@@ -896,7 +920,7 @@ class _Server:
             # `eval-1` is what `score` finds. A launch installs first and, on
             # this fresh server, finds no case eval unless `existing` is set.
             scoring = self.installed is None
-            evals = [self._eval()] if scoring and tags == {self.tag, f"case:{_CASE}"} else []
+            evals = [self._eval()] if scoring and tags == {self.tag, f"case:{self.case}"} else []
             if self.existing and self.tag in tags:
                 evals = [self._stable(t.removeprefix("case:")) for t in tags if t != self.tag]
             return httpx.Response(
@@ -976,7 +1000,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/6 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/12 passed" in table
 
 
 @pytest.mark.unit
@@ -1043,7 +1067,7 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
         c.commit for c in loaded.cases
     ]
     assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
-    assert all(s["tags"] == ["suite-version:2", f"verifier:{_WF}"] for s in starts)
+    assert all(s["tags"] == ["suite-version:3", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1125,13 +1149,13 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     # The case evals are shared by every verifier; the run says which one it was.
     assert all("starting_workflow_id" not in c for c in creates)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:2", f"verifier:{_CODEX_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:3", f"verifier:{_CODEX_WF}")}
     assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v2:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v3:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -1324,20 +1348,20 @@ def test_the_committed_v1_ledger_scores_four_of_four_against_the_v1_cases(
 
 
 @pytest.mark.unit
-def test_v1_runs_never_count_toward_v2(tmp_path: Path) -> None:
+def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     launches = _v1_ledger(tmp_path)
-    v2 = load_suite(DEFAULT_SUITE)
-    rows, unrecorded = score_suite(v2, _LedgerServer(launches).client(), launches)
+    current = load_suite(DEFAULT_SUITE)
+    rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 6 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 12 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 2]
-    assert versions_run(suite, _CODEX_WF) == [2]
+    assert versions_run(suite, _WF) == [1, 3]
+    assert versions_run(suite, _CODEX_WF) == [2, 3]
 
 
 @pytest.mark.unit
@@ -1468,8 +1492,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 2.0.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 3.0.0")
 
 
 @pytest.mark.unit
@@ -1516,7 +1540,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -1567,7 +1591,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -1582,7 +1606,7 @@ def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
     assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:2", f"verifier:{_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:3", f"verifier:{_WF}")}
 
 
 @pytest.mark.unit
@@ -1596,5 +1620,280 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "2")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "3")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
+
+
+# ---------------------------------------------------------------------------
+# Clean controls: a merged change with no known defect passes only certified
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def merged(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """A repo whose main merged a one-commit PR with --no-ff: (repo, base, PR head, merge)."""
+    repo = tmp_path / "merged"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "a.py").write_text("one\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-qb", "feature")
+    (repo / "a.py").write_text("two\n")
+    _git(repo, "commit", "-qam", "feat: two")
+    head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "Merge pull request #7 from feature", "feature")
+    return repo, base, head, _git(repo, "rev-parse", "HEAD")
+
+
+def _later(repo: Path, message: str) -> str:
+    """Commit `message` on main after the merge, touching a file of its own."""
+    (repo / "later.txt").write_text(message)
+    _git(repo, "add", "later.txt")
+    _git(repo, "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _clean_suite(tmp_path: Path, commit: str, merge: str, through: str) -> Path:
+    suite_dir = _copy_suite(tmp_path)
+    suite_file = suite_dir / "suite.yaml"
+    suite = yaml.safe_load(suite_file.read_text())
+    suite.pop("history", None)
+    suite_file.write_text(yaml.safe_dump(suite))
+    for p in (suite_dir / "cases").glob("*.yaml"):
+        p.unlink()
+    case = {
+        "id": "control",
+        "polarity": "clean",
+        "source_pr": 7,
+        "commit": commit,
+        "merge_commit": merge,
+        "clean_through": through,
+        "task": "Review it.",
+    }
+    (suite_dir / "cases" / "control.yaml").write_text(json.dumps(case))
+    return suite_dir
+
+
+@pytest.mark.unit
+def test_check_passes_a_clean_pin_at_the_merged_pr_head(
+    tmp_path: Path, merged: tuple[Path, str, str, str]
+) -> None:
+    repo, _, head, merge = merged
+    through = _later(repo, "chore: changelog for #7")  # a mention that fixes nothing
+    loaded = load_suite(_clean_suite(tmp_path, head, merge, through))
+    assert [c.polarity for c in loaded.cases] == ["clean"]
+    assert check_commits(loaded, repo) == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_clean_pin_that_is_not_the_merges_second_parent(
+    tmp_path: Path, merged: tuple[Path, str, str, str]
+) -> None:
+    repo, base, _, merge = merged
+    problems = check_commits(load_suite(_clean_suite(tmp_path, base, merge, merge)), repo)
+    assert problems == [
+        f"control: pins {base[:12]}, but the merge {merge[:12]}'s second parent is "
+        f"{_git(repo, 'rev-parse', merge + '^2')[:12]}; pin the PR head the merge took"
+    ]
+
+
+@pytest.mark.unit
+def test_check_refuses_a_merge_off_the_first_parent_chain(
+    tmp_path: Path, merged: tuple[Path, str, str, str]
+) -> None:
+    # A merge made inside a branch and brought in by a later merge is not one
+    # main took: its first parent is the branch, not main.
+    repo, _, _, _ = merged
+    _git(repo, "checkout", "-qb", "outer")
+    _git(repo, "checkout", "-qb", "inner")
+    (repo / "b.py").write_text("b\n")
+    _git(repo, "add", "b.py")
+    _git(repo, "commit", "-qm", "feat: b")
+    inner_head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "outer")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "Merge inner", "inner")
+    inner_merge = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "main")
+    (repo / "c.py").write_text("c\n")
+    _git(repo, "add", "c.py")
+    _git(repo, "commit", "-qm", "main moves on")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "Merge outer", "outer")
+    tip = _git(repo, "rev-parse", "HEAD")
+
+    problems = check_commits(load_suite(_clean_suite(tmp_path, inner_head, inner_merge, tip)), repo)
+    assert problems == [
+        f"control: the merge {inner_merge[:12]} is not on the first-parent chain of {tip[:12]}"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "message", ["fix: the PR #7 retry never stops", "Fix(#7): restore the lost key"]
+)
+def test_check_refuses_a_clean_control_a_later_commit_fixes(
+    tmp_path: Path, merged: tuple[Path, str, str, str], message: str
+) -> None:
+    repo, _, head, merge = merged
+    fix = _later(repo, message)
+    through = _later(repo, "chore: unrelated")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+    assert problems == [
+        f"control: {fix[:12]} fixes or reverts #7 after it merged; "
+        "a clean control must have no known defect"
+    ]
+
+
+@pytest.mark.unit
+def test_check_refuses_a_clean_control_git_revert_undid(
+    tmp_path: Path, merged: tuple[Path, str, str, str]
+) -> None:
+    # `git revert` names the merge by SHA, never by PR number.
+    repo, _, head, merge = merged
+    _git(repo, "revert", "--no-edit", "-m", "1", merge)
+    revert = _git(repo, "rev-parse", "HEAD")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, revert)), repo)
+    assert problems == [
+        f"control: {revert[:12]} fixes or reverts #7 after it merged; "
+        "a clean control must have no known defect"
+    ]
+
+
+@pytest.mark.unit
+def test_a_clean_case_with_a_fix_or_expected_findings_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "clean-api-stdlib-event-loop.yaml"
+    case.write_text(case.read_text() + "fix_commit: " + "a" * 40 + "\n")
+
+    with pytest.raises(DefinitionError, match="fix_commit"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_a_case_without_a_polarity_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "codex-cost-limit.yaml"
+    case.write_text(case.read_text().replace("polarity: defect\n", ""))
+
+    with pytest.raises(DefinitionError, match="polarity"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_the_suite_holds_a_clean_control_per_defect_case() -> None:
+    cases = load_suite(DEFAULT_SUITE).cases
+    clean = [c for c in cases if isinstance(c, CleanCase)]
+    assert len(clean) >= len(cases) - len(clean)
+
+
+def _clean_case() -> CleanCase:
+    return next(c for c in load_suite(DEFAULT_SUITE).cases if isinstance(c, CleanCase))
+
+
+@pytest.mark.unit
+def test_a_certified_clean_control_passes() -> None:
+    score = score_case(_clean_case(), "certified", "## BLOCKING\n\nNone.\n")
+    assert score.passed and not score.false_block
+
+
+@pytest.mark.unit
+def test_a_blocked_clean_control_fails_as_a_false_block_whatever_it_names() -> None:
+    # The finding names a defect seed's file and every keyword: on a clean
+    # control that is still a false block, never a catch.
+    score = score_case(_clean_case(), "blocked", _FINDING)
+    assert score.findings == 1
+    assert not score.passed and score.false_block
+
+
+@pytest.mark.unit
+def test_a_clean_control_with_no_verdict_fails_and_is_not_a_false_block() -> None:
+    score = score_case(_clean_case(), None, "")
+    assert not score.passed and not score.false_block
+
+
+@pytest.mark.unit
+def test_score_case_still_needs_a_defect_blocked_and_named() -> None:
+    defect = _case(_CASE)
+    assert score_case(defect, "blocked", _FINDING).passed
+    assert not score_case(defect, "certified", _FINDING).passed
+    assert not score_case(defect, "blocked", "## BLOCKING\n\nNone.\n").passed
+    assert not score_case(defect, "blocked", _FINDING).false_block
+
+
+def _clean_server(loaded: LoadedSuite, verdict: str) -> tuple[_Server, Launch]:
+    clean = _clean_case()
+    server = _Server(loaded)
+    server.case, server.eval_pin, server.verdict = clean.id, clean.commit, verdict
+    launch = Launch(
+        suite=loaded.tag,
+        case=clean.id,
+        eval_id="eval-1",
+        run_id="exec-1",
+        commit=clean.commit,
+        workflow_id=loaded.workflow.id,
+    )
+    return server, launch
+
+
+@pytest.mark.unit
+def test_score_records_a_certified_clean_control_as_a_pass() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server, launch = _clean_server(loaded, "certified")
+    rows, _ = score_suite(loaded, server.client(), [launch])
+
+    [(_, body)] = server.scores
+    assert (body["verdict"], body["score"]) == ("PASS", 1.0)
+    assert f"{_clean_case().id} (clean)" in str(body["evidence"])
+    table = render(loaded, rows)
+    assert "1/12 passed" in table
+    assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
+    assert "catch rate (defect cases blocked and named): -" in table
+
+
+@pytest.mark.unit
+def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server, launch = _clean_server(loaded, "blocked")
+    rows, _ = score_suite(loaded, server.client(), [launch])
+
+    [(_, body)] = server.scores
+    assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
+    table = render(loaded, rows)
+    assert "0/12 passed" in table
+    assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
+
+
+@pytest.mark.unit
+def test_rates_separate_catches_from_false_blocks_per_table() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    clean = _clean_case()
+    defect = _case(_CASE)
+
+    def row(case_id: str, score: Score) -> ScoredRun:
+        return ScoredRun(
+            case=case_id,
+            eval_id="e",
+            run_id="r",
+            status="completed",
+            score=score,
+            cost_usd=None,
+            duration="-",
+            models="-",
+        )
+
+    rows = [
+        row(defect.id, score_case(defect, "blocked", _FINDING)),
+        row(defect.id, score_case(defect, "certified", "")),
+        row(clean.id, score_case(clean, "blocked", _FINDING)),
+        row(clean.id, score_case(clean, "certified", "")),
+        row(clean.id, score_case(clean, "certified", "")),
+    ]
+    assert rates(rows) == (
+        "catch rate (defect cases blocked and named): 1/2 (50%)\n"
+        "false-block rate (clean controls blocked): 1/3 (33%)"
+    )
+    assert "3/5 passed" in render(loaded, rows)

@@ -11,6 +11,7 @@
 import { StatusBadge } from '../../components'
 import type { ExecutionListItem } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
+import { queueLabel } from './queueLabel'
 
 const EM_DASH = '—'
 
@@ -47,7 +48,7 @@ export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
           className="text-xs text-[var(--color-text-muted)]"
           title={formatTimestampLocale(exec.started_at) ?? undefined}
         >
-          {formatRelativeTime(exec.started_at)}
+          {exec.start_queue ? queueLabel(exec.start_queue) : formatRelativeTime(exec.started_at)}
           {exec.total_phases > 0 && <> &middot; {exec.phase_progress.display}</>}
         </div>
       </div>

@@ -3821,6 +3821,29 @@ export interface components {
             message: string;
         };
         /**
+         * ExecutionBudgetInfo
+         * @description How full the execution budget is right now, for the app bar (PC-124).
+         *
+         *     ``running`` and ``limit`` are this API process's budget. ``queued`` is
+         *     every start the list reports as ``queued``: waiting here for a slot, or
+         *     recorded durably and not yet picked up by any process.
+         */
+        ExecutionBudgetInfo: {
+            /** Running */
+            running: number;
+            /** Queued */
+            queued: number;
+            /** Limit */
+            limit: number;
+            /** Admission Paused */
+            admission_paused: boolean | null;
+            /**
+             * Display
+             * @description e.g. '2 running / 3 queued / cap 4'.
+             */
+            readonly display: string;
+        };
+        /**
          * ExecutionCostResponse
          * @description Aggregated cost for a workflow execution.
          */
@@ -4087,6 +4110,7 @@ export interface components {
              * @default 0
              */
             excluded_undated: number;
+            budget?: components["schemas"]["ExecutionBudgetInfo"] | null;
             /** Status Counts */
             status_counts?: {
                 [key: string]: number;
@@ -4182,6 +4206,11 @@ export interface components {
              * @description Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.
              */
             readonly position_display: string;
+            /**
+             * Reason Display
+             * @description Why it has not started: 'slots full 4/4', 'admission paused', 'starting' or 'awaiting pickup (<status>)' (PC-124).
+             */
+            readonly reason_display: string;
         };
         /**
          * ExecutionStatusCounts
@@ -4343,6 +4372,7 @@ export interface components {
             tags?: string[];
             /** Repos Display */
             repos_display?: string | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /**
          * ExecutionTagsResponse
