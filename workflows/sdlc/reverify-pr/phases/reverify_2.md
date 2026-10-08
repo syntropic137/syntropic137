@@ -238,9 +238,10 @@ Your `TASK_RESULT` block MUST carry `"review_verdict"`, exactly `"certified"`
 or `"blocked"`, matching your first line. The engine reads that key, and only
 that key, to decide what runs next: `certified` skips every remaining repair
 round and goes straight to `finalize_pr`; `blocked` runs the next round, or
-ends the run with **unresolved findings** once the rounds are spent. A missing
-or misspelled verdict is read as no verdict, which never skips a round and
-never counts as certified.
+ends the run with **unresolved findings** once the rounds are spent. This phase
+declares `requires_verdict`, so a missing or misspelled verdict FAILS the phase
+("verify produced no verdict") and the review you did is not acted on; it is
+never read as certified.
 
 `review_verdict` is not `success`. A BLOCKED review you completed is a
 successful phase: write `"success": true, "review_verdict": "blocked"`.

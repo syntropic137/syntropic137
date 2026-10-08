@@ -821,6 +821,7 @@ class WorkflowExecutionProcessor:
                 evidence=self._delegation_evidence,
                 workspace=runtime.workspace_for(todo.phase_id),
                 required_delegate=phase.agent_config.required_delegate,
+                requires_verdict=phase.requires_verdict,
             )
             if failure is not None:
                 logger.error(str(failure))
