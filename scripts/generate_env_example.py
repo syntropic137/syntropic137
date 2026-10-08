@@ -30,8 +30,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 
 from syn_shared.settings.config import Settings  # noqa: E402
-from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.dependency_seed import DependencySeedSettings  # noqa: E402
+from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.disk import DiskSettings  # noqa: E402
 from syn_shared.settings.execution import ExecutionSettings  # noqa: E402
 from syn_shared.settings.git_identity import OperatorSettings  # noqa: E402

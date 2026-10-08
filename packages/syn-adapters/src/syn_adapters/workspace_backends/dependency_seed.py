@@ -180,13 +180,13 @@ def _copy_writable(source: Path, destination: Path) -> None:
     """
     shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
     for directory, _dirs, files in os.walk(destination):
-        os.chmod(directory, 0o777)
+        Path(directory).chmod(0o777)
         for name in files:
             path = Path(directory, name)
             if path.is_symlink():
                 continue
             mode = path.stat().st_mode
-            os.chmod(path, 0o777 if mode & 0o111 else 0o666)
+            path.chmod(0o777 if mode & 0o111 else 0o666)
 
 
 def _make_read_only(root: Path) -> None:
@@ -194,14 +194,14 @@ def _make_read_only(root: Path) -> None:
         for name in files:
             path = Path(directory, name)
             if not path.is_symlink():
-                os.chmod(path, path.stat().st_mode & 0o555)
-        os.chmod(directory, 0o555)
+                path.chmod(path.stat().st_mode & 0o555)
+        Path(directory).chmod(0o555)
 
 
 def _remove(root: Path) -> None:
     # A read-only seed's directories must be writable again to be emptied.
     for directory, _dirs, _files in os.walk(root):
-        os.chmod(directory, 0o755)
+        Path(directory).chmod(0o755)
     shutil.rmtree(root)
 
 

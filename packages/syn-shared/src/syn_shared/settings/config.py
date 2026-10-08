@@ -27,8 +27,8 @@ from syn_shared.agents import (
 from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
-    from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.dependency_seed import DependencySeedSettings
+    from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.disk import DiskSettings
     from syn_shared.settings.execution import ExecutionSettings
     from syn_shared.settings.github import GitHubAppSettings

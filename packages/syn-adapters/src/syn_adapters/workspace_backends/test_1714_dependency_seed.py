@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
@@ -30,6 +29,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
 
 pytestmark = pytest.mark.unit
