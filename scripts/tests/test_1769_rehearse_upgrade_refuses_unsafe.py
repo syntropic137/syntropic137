@@ -19,10 +19,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+
+from syn_shared.settings.config import AppEnvironment
 
 pytestmark = pytest.mark.unit
 
@@ -286,7 +289,9 @@ def _inventory_failure(kind: str):
         rig.put(f"fail_{kind}", "")
         res = rig.run()
         assert_refused_before_acting(res, "namespace is unproven")
-        assert not (rig.root / "work").exists(), "workdir created before the inventory proved anything"
+        assert not (rig.root / "work").exists(), (
+            "workdir created before the inventory proved anything"
+        )
 
     scenario.__name__ = f"scenario_{kind}_listing_fails"
     return scenario
@@ -465,3 +470,203 @@ def test_verify_fails_on_any_table_losing_rows(
     assert res.rc == 1, res.output
     assert _row(res.output, table).endswith(verdict), res.output
     assert "rows lost or tables gone" in res.output
+
+
+@pytest.mark.parametrize("kind", ["containers", "volumes", "networks"])
+def test_inventory_failing_open_again_fails_its_test(rig: Rig, kind: str) -> None:
+    # The regression verification found: a failed listing swallowed by `|| true`.
+    source = rig.script.read_text()
+    guard = f'|| refuse "could not list docker {kind};'
+    assert source.count(guard) == 1
+    rig.script.write_text(source.replace(guard, '|| true # "', 1))
+    with pytest.raises(AssertionError):
+        _inventory_failure({"containers": "ps"}.get(kind, kind.rstrip("s")))(rig)
+
+
+# --- 1Password: an authenticated `op` and no token still resolves nothing ----
+
+FAKE_AUTHENTICATED_OP = """#!/bin/sh
+echo "$*" >> "{log}"
+case "$1" in
+    whoami) exit 0 ;;
+    item) echo '{{"fields":[{{"label":"SYN_GIT_TOKEN","value":"ghp_from_vault"}}]}}' ;;
+esac
+"""
+
+RESOLVE = (
+    "import os\n"
+    "from syn_shared.settings.op_resolver import resolve_op_secrets\n"
+    "resolve_op_secrets('/nonexistent.env')\n"
+    "print('injected' if os.environ.get('SYN_GIT_TOKEN') else 'clean')\n"
+)
+
+
+def _container_env(rig: Rig, var: str) -> str:
+    """`var` as the override sets it for the api service."""
+    override = (rig.root / "work" / "override.yaml").read_text()
+    api = override.split("\n  api:\n", 1)[1].split("\n  collector:\n", 1)[0]
+    for line in api.splitlines():
+        if line.strip().startswith(f"{var}:"):
+            return line.split(":", 1)[1].split("#", 1)[0].strip().strip('"')
+    return ""
+
+
+def _resolve_in_rehearsal_env(rig: Rig, *, shadow: bool = True) -> tuple[str, Path]:
+    """Run the real resolver with the api's PATH and APP_ENVIRONMENT from the
+    override, an authenticated `op` where the image installs it, and no token."""
+    real_op = rig.root / "image-bin"
+    real_op.mkdir(exist_ok=True)
+    log = rig.root / "op-calls.log"
+    (real_op / "op").write_text(FAKE_AUTHENTICATED_OP.format(log=log))
+    (real_op / "op").chmod(0o755)
+    container_path = _container_env(rig, "PATH").split(":") if shadow else []
+    host_path = [
+        str(rig.root / "work" / "rehearsal-bin") for p in container_path if p == "/rehearsal-bin"
+    ]
+    # The image's own op (/usr/local/bin) comes after the rehearsal stub.
+    path = ":".join([*host_path, str(real_op), "/usr/bin", "/bin"])
+    env = {
+        "PATH": path,
+        "HOME": str(rig.root),
+        "APP_ENVIRONMENT": _container_env(rig, "APP_ENVIRONMENT"),
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", RESOLVE],
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=rig.root,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.strip(), log
+
+
+def test_authenticated_op_without_a_token_resolves_nothing_in_the_rehearsal(rig: Rig) -> None:
+    res = rig.run()
+    assert res.rc == 0, res.output
+    app_env = _container_env(rig, "APP_ENVIRONMENT")
+    # Durable stores: test/offline select in-memory stores (Settings.uses_in_memory_stores).
+    assert app_env == "selfhost"
+    assert AppEnvironment(app_env) not in (AppEnvironment.TEST, AppEnvironment.OFFLINE)
+    said, log = _resolve_in_rehearsal_env(rig)
+    assert said == "clean", "a credential was injected from 1Password"
+    assert not log.exists(), f"the authenticated op was called: {log.read_text()}"
+    # The probe ran for both services before anything started.
+    probes = [i for i, line in enumerate(res.trace) if " run --rm --no-deps" in line]
+    up = next(i for i, line in enumerate(res.trace) if " up " in line)
+    assert len(probes) >= 2 and probes[1] < up
+
+
+def test_the_fake_op_does_resolve_without_the_shadow(rig: Rig) -> None:
+    # Control: the same authenticated op, without the rehearsal's PATH, injects.
+    assert rig.run().rc == 0
+    said, log = _resolve_in_rehearsal_env(rig, shadow=False)
+    assert said == "injected" and "item get syntropic137-config" in log.read_text()
+
+
+def test_removing_the_op_shadow_fails_the_resolver_test(rig: Rig) -> None:
+    source = rig.script.read_text().splitlines(keepends=True)
+    kept = [line for line in source if "# guard:op-shadow" not in line]
+    assert len(kept) == len(source) - 1
+    rig.script.write_text("".join(kept))
+    with pytest.raises(AssertionError):
+        test_authenticated_op_without_a_token_resolves_nothing_in_the_rehearsal(rig)
+
+
+# --- failure transitions: worktree and project are always cleaned up ----------
+
+SUBMODULES = (
+    "lib/event-sourcing-platform",
+    "lib/agent-paradise-standards-system",
+    "lib/agentic-workspace",
+)
+FILE_PROTOCOL = {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "protocol.file.allow",
+    "GIT_CONFIG_VALUE_0": "always",
+}
+
+
+def _with_submodules(rig: Rig) -> None:
+    """Give origin/main the three submodules the build step updates."""
+    sub = rig.root / "sub"
+    sub.mkdir()
+    (sub / "f").write_text("x\n")
+    _git(sub, "init", "-q", "-b", "main")
+    _git(sub, "-c", "user.name=t", "-c", "user.email=t@t", "add", ".")
+    _git(sub, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "s")
+    for path in SUBMODULES:
+        _git(rig.repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), path)
+    _git(rig.repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "subs")
+    _git(rig.repo, "push", "-q", "origin", "main")
+
+
+def _worktree_gone(rig: Rig) -> None:
+    src = rig.root / "work" / "src"
+    assert not src.exists(), "worktree directory left behind"
+    listed = subprocess.run(
+        ["git", "-C", str(rig.repo), "worktree", "list"], capture_output=True, text=True, check=True
+    )
+    assert str(src) not in listed.stdout, "worktree registration left behind"
+
+
+def test_failed_docker_build_removes_the_worktree_and_its_registration(rig: Rig) -> None:
+    _with_submodules(rig)
+    rig.put("build_fail", "")
+    res = rig.run("--to-api-image", "", "--to-collector-image", "", env=FILE_PROTOCOL)
+    assert res.rc != 0, res.output
+    builds = [line for line in res.trace if line.startswith("docker build")]
+    assert builds and "syn-api/Dockerfile" in builds[-1], "the failing docker build was not reached"
+    assert (rig.root / "work" / ".env").exists(), "failed before the build step"
+    _worktree_gone(rig)
+    assert not any(" up " in line or " create" in line for line in res.trace)
+
+
+def test_failed_compose_up_tears_down_only_this_project(rig: Rig) -> None:
+    rig.put("existing_volumes", "syn137_db_data\nsomeone_else_db\n")
+    rig.put("existing_networks", "syn137_internal\n")
+    rig.put("up_fail", "")
+    res = rig.run()
+    assert res.rc != 0, res.output
+    project = next(line for line in res.trace if " create " in line).split(" -p ")[1].split()[0]
+    up = next(i for i, line in enumerate(res.trace) if " up " in line)
+    assert "timescaledb" in res.trace[up], "the failing compose up was not reached"
+    assert not any("pg_restore" in line for line in res.trace)
+    after = res.trace[up + 1 :]
+    assert any(f"-p {project}" in line and " down -v" in line for line in after), "not torn down"
+    removed = [
+        line.split()[3]
+        for line in after
+        if line.split()[1:3] in (["volume", "rm"], ["network", "rm"])
+    ]
+    assert sorted(removed) == sorted([f"{project}_db_data", f"{project}_internal"]), removed
+
+
+CLEANUP_MUTATIONS = {
+    "worktree": (
+        'git -C "$REPO" worktree remove --force "$SRC" >/dev/null 2>&1 || rm -rf "$SRC"',
+        ":",
+        test_failed_docker_build_removes_the_worktree_and_its_registration,
+    ),
+    "compose-down": (
+        "dc down -v >/dev/null 2>&1 || true",
+        ":",
+        test_failed_compose_up_tears_down_only_this_project,
+    ),
+    "volume-scope": (
+        "for v in $(dk volume ls --format '{{.Name}}' | grep \"^${PROJECT}\" || true)",
+        "for v in $(dk volume ls --format '{{.Name}}' || true)",
+        test_failed_compose_up_tears_down_only_this_project,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(CLEANUP_MUTATIONS))
+def test_breaking_cleanup_fails_its_test(rig: Rig, name: str) -> None:
+    old, new, test = CLEANUP_MUTATIONS[name]
+    source = rig.script.read_text()
+    assert source.count(old) == 1, old
+    rig.script.write_text(source.replace(old, new))
+    with pytest.raises(AssertionError):
+        test(rig)
