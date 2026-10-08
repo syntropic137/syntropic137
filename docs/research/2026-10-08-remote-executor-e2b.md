@@ -510,7 +510,7 @@ can be filed as is.
   builds only the sandbox argv and calls `SupportsStreamingExec`; signal-death
   and lost-status diagnosis become provider calls; the `_workspaces` cache is
   filled by `attach`; `isolation_type` comes from the kit.
-- **Acceptance:** a test through the **production** `AgenticStreamAdapter.stream`
+- **Acceptance:** a test through the **production** `AgenticEventStreamAdapter.stream` (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:69`, `:106`)
   and the engine, with a provider fake, asserts that the provider received the
   sandbox argv with no `docker` prefix, that `last_exit_code` reflects the
   fake's outcome, and that cancellation calls `cancel()`.
