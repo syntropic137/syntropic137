@@ -109,7 +109,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${EVENT_STORE_MEMORY_LIMIT:-512m}
+          memory: ${EVENT_STORE_MEMORY_LIMIT:-2g}
     logging:
       driver: json-file
       options:
@@ -439,7 +439,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${API_MEMORY_LIMIT:-512m}
+          memory: ${API_MEMORY_LIMIT:-2g}
           cpus: ${API_CPU_LIMIT:-2.0}
     logging:
       driver: json-file
