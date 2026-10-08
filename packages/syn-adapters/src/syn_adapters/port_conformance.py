@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
     from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
+    from syn_adapters.github.pull_request_merge_reader import GitHubPullRequestMergeReader
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.github.revision_resolver import GitHubRevisionResolver
     from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
@@ -206,6 +207,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import (
         PendingSHAStore,
     )
+    from syn_domain.contexts.orchestration import PullRequestMergePort
     from syn_domain.contexts.orchestration._shared.ports import (
         ArtifactCollectionPort,
         EventStreamPort,
@@ -369,6 +371,7 @@ if TYPE_CHECKING:
         source_commits: GitHubSourceCommitResolver,
         remote_branches: GitHubRemoteBranchReader,
         revisions: GitHubRevisionResolver,
+        pull_request_merges: GitHubPullRequestMergeReader,
     ) -> None:
         """GitHub ingestion and execution control.
 
@@ -380,6 +383,7 @@ if TYPE_CHECKING:
         _checks: GitHubChecksAPIPort = checks_client
         _source_commits: SourceCommitResolverPort = source_commits
         _remote_branches: RemoteBranchPort = remote_branches
+        _pull_request_merges: PullRequestMergePort = pull_request_merges
         _revisions: RevisionResolverPort = revisions
         _redis_dedup: DedupPort = redis_dedup
         _postgres_dedup: DedupPort = postgres_dedup

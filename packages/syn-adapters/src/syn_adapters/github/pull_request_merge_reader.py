@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests import (
+from syn_domain.contexts.orchestration import (
     PullRequestMergePort,
     PullRequestMergeState,
 )

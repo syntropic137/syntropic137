@@ -625,13 +625,11 @@ def create_coordinator_service(
         ExecutionJournal,
         ExecutionRequestStarter,
         ExecutionRequestStartProcessManager,
+        MergedPullRequestAttributionProcessManager,
         QuarantineNoticeProcessManager,
+        RecordPullRequestMergeHandler,
         ResumeStarter,
         ResumeStartProcessManager,
-    )
-    from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests import (
-        MergedPullRequestAttributionProcessManager,
-        RecordPullRequestMergeHandler,
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,

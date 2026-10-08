@@ -189,6 +189,13 @@ from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveW
 from syn_domain.contexts.orchestration.slices.attach_execution_to_eval import (
     AttachExecutionToEvalHandler,
 )
+from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests import (
+    MergedPullRequestAttributionProcessManager,
+    MergeRecorder,
+    PullRequestMergePort,
+    PullRequestMergeState,
+    RecordPullRequestMergeHandler,
+)
 from syn_domain.contexts.orchestration.slices.create_eval.CreateEvalHandler import (
     CreateEvalHandler,
 )
@@ -407,6 +414,8 @@ __all__ = [
     "InvalidTagsError",
     "IsolationConfig",
     "LaunchEval",
+    "MergeRecorder",
+    "MergedPullRequestAttributionProcessManager",
     "OrphanedWorkspace",
     "OutcomeCounts",
     "OutcomeRow",
@@ -418,9 +427,12 @@ __all__ = [
     "PhaseUsage",
     "PlannedPhase",
     "PullRequestCommenter",
+    "PullRequestMergePort",
+    "PullRequestMergeState",
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",
     "ReclaimableDir",
+    "RecordPullRequestMergeHandler",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
