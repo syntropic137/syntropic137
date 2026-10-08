@@ -88,51 +88,32 @@ def _is_proven_cache(path: Path) -> bool:
     """
     if path.is_symlink() or not path.is_dir():
         return False
-    try:
-        with (path / "CACHEDIR.TAG").open("rb") as tag:
-            if tag.read(len(_CACHEDIR_TAG_SIGNATURE)) == _CACHEDIR_TAG_SIGNATURE:
-                return True
-    except OSError:
-        pass
+    if _has_cachedir_tag(path):
+        return True
     if path.name == "node_modules":
         return (path.parent / "package.json").is_file()
     if path.name in (".venv", "venv"):
         return (path / "pyvenv.cfg").is_file()
     if path.name == "__pycache__":
-        try:
-            return all(
-                e.is_file() and not e.is_symlink() and e.suffix == ".pyc" for e in path.iterdir()
-            )
-        except OSError:
-            return False
+        return _holds_only_bytecode(path)
     return False
 
 
-_GIT_TIMEOUT_SECONDS = 120
+def _has_cachedir_tag(path: Path) -> bool:
+    try:
+        with (path / "CACHEDIR.TAG").open("rb") as tag:
+            return tag.read(len(_CACHEDIR_TAG_SIGNATURE)) == _CACHEDIR_TAG_SIGNATURE
+    except OSError:
+        return False
 
 
-class HostGitError(RuntimeError):
-    """Git could not give a definite answer about a repository."""
-
-
-@dataclass(frozen=True)
-class WorkspaceDirListing:
-    """One directory under the workspace base, measured in a single walk."""
-
-    workspace_id: str
-    host_dir: str
-    size_bytes: int
-    #: Newest mtime of anything inside, epoch seconds: the grace clock.
-    last_modified: float
-
-
-@dataclass(frozen=True)
-class WorkspaceContainer:
-    """A workspace container in any state, by the directory it mounts."""
-
-    workspace_id: str
-    execution_id: str | None
-    running: bool
+def _holds_only_bytecode(path: Path) -> bool:
+    try:
+        return all(
+            e.is_file() and not e.is_symlink() and e.suffix == ".pyc" for e in path.iterdir()
+        )
+    except OSError:
+        return False
 
 
 #: A directory claimed for deletion is renamed to this prefix plus its
