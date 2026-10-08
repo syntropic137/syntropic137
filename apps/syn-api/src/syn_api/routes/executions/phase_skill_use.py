@@ -20,9 +20,7 @@ from typing import TYPE_CHECKING
 
 from syn_adapters.projections.session_tools import call_identity
 from syn_api.types import InvokedSkillInfo, PhaseSkillUseInfo
-from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-    SKILL_TOOL_NAME,
-)
+from syn_domain.contexts.orchestration import SKILL_TOOL_NAME
 from syn_shared.agents import AgentProvider
 from syn_shared.events import TOOL_EXECUTION_STARTED
 

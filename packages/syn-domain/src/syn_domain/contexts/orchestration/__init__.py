@@ -227,6 +227,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     WorkflowNotFoundError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    SKILL_TOOL_NAME,
     StreamResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
@@ -321,6 +322,7 @@ __all__ = [
     "OWED_STATUSES",
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
+    "SKILL_TOOL_NAME",
     "RETIRED_PHASE_FIELDS",
     "TASK_PLACEHOLDER",
     # Tag edits after creation (#967)
