@@ -1078,6 +1078,26 @@ class EvalArchivedResponse(BaseModel):
     archived: bool
 
 
+class EvalRunStatsResponse(BaseModel):
+    """How long a set of an eval's runs took and what it cost, over EVERY run in the set.
+
+    Medians, not means: one runaway run should not make a variant look slow.
+    """
+
+    median_duration_seconds: float | None
+    """Median over the runs whose duration is known. Null when none is."""
+    median_duration_display: str
+    median_cost_usd: Decimal | None
+    """Median over the runs whose cost is known. Null when none is."""
+    median_cost_display: str
+    cost_per_pass_usd: Decimal | None
+    """Known spend of every run (FAIL, ERROR and unscored too) over the PASS runs.
+
+    Null when nothing passed or no cost is known."""
+    cost_per_pass_display: str
+    """Says it is a lower bound when some run's cost could not be read."""
+
+
 class EvalVariantResponse(BaseModel):
     """Every run of an eval with the same workflow, workflow version and OBSERVED models.
 
@@ -1099,6 +1119,9 @@ class EvalVariantResponse(BaseModel):
     """Mean over the runs whose cost is known. Null when none is."""
     avg_cost_display: str
     last_run_at: str | None
+    last_verdict: Verdict | None
+    """The verdict of this variant's newest run that has one."""
+    stats: EvalRunStatsResponse
 
 
 class EvalResponse(BaseModel):
@@ -1130,6 +1153,8 @@ class EvalResponse(BaseModel):
     """The verdict of the newest run that has one."""
     variants: list[EvalVariantResponse] = Field(default_factory=list)
     """The eval's runs grouped by workflow and the models its phases actually ran."""
+    stats: EvalRunStatsResponse
+    """Duration and cost over every current run, all variants together."""
 
 
 class EvalRunModelResponse(BaseModel):

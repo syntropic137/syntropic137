@@ -27,6 +27,7 @@ from syn_api.types import (
     EvalRunListResponse,
     EvalRunModelResponse,
     EvalRunResponse,
+    EvalRunStatsResponse,
     EvalVariantResponse,
     ExecutionEvalRunResponse,
     Ok,
@@ -35,6 +36,7 @@ from syn_domain.contexts.orchestration import ExecutionListReads
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import (
     EvalRunFacts,
     EvalRunsSummary,
+    EvalRunStats,
     PhaseModel,
     summarize,
 )
@@ -134,6 +136,17 @@ def pass_rate_display(rate: float | None) -> str:
     return EM_DASH if rate is None else f"{rate:.0%}"
 
 
+def stats_response(stats: EvalRunStats) -> EvalRunStatsResponse:
+    return EvalRunStatsResponse(
+        median_duration_seconds=stats.median_duration_seconds,
+        median_duration_display=format_duration_seconds(stats.median_duration_seconds),
+        median_cost_usd=stats.median_cost_usd,
+        median_cost_display=format_cost(stats.median_cost_usd),
+        cost_per_pass_usd=stats.cost_per_pass_usd,
+        cost_per_pass_display=format_cost(stats.cost_per_pass_usd, stats.unknown_cost_count),
+    )
+
+
 def variant_responses(summary: EvalRunsSummary) -> list[EvalVariantResponse]:
     return [
         EvalVariantResponse(
@@ -147,6 +160,8 @@ def variant_responses(summary: EvalRunsSummary) -> list[EvalVariantResponse]:
             avg_cost_usd=v.avg_cost_usd,
             avg_cost_display=format_cost(v.avg_cost_usd),
             last_run_at=v.last_run_at,
+            last_verdict=v.last_verdict,
+            stats=stats_response(v.stats),
         )
         for v in summary.variants
     ]

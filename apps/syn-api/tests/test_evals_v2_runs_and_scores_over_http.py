@@ -407,6 +407,26 @@ class TestSummary:
             # ERROR-only: nothing was judged, so no rate rather than 0%.
             assert variants["wf-b", "1.0.0", (OPUS,)]["pass_count"] == 0
             assert variants["wf-b", "1.0.0", (OPUS,)]["pass_rate"] is None
+            assert variants["wf-b", "1.0.0", (OPUS,)]["last_verdict"] == "ERROR"
+            assert v1_opus["stats"]["median_cost_display"] == "$1.00"
+            assert v1_opus["stats"]["cost_per_pass_display"] == "$1.00"
+            assert v2_opus["stats"]["cost_per_pass_display"] == "—"
+
+    async def test_eval_figures_cover_every_run_not_one_page_of_runs(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        """The detail's aggregates are the eval's, whatever page of runs the page shows."""
+        eval_id = await _two_by_two(client, lane2)
+
+        page = (await client.get(f"/evals/{eval_id}/runs", params={"page_size": 1})).json()
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+
+        assert (len(page["items"]), page["total"]) == (1, 5)
+        assert sum(v["run_count"] for v in shown["variants"]) == 5
+        # Costs 1.00, 3.00, 0.50, 2.00, 0.25: median 1.00. Spend 6.75 over two PASS runs.
+        assert shown["stats"]["median_cost_display"] == "$1.00"
+        assert Decimal(shown["stats"]["cost_per_pass_usd"]) == Decimal("3.375")
+        assert shown["stats"]["cost_per_pass_display"] == "$3.38"
 
 
 class TestScore:

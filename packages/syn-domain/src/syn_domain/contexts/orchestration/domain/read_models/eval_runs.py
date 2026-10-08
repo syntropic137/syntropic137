@@ -6,14 +6,16 @@ SCORE, from ``EvalRunScored``. The rest of a run's row - the models its phases
 actually ran and what it cost - is Lane 2 telemetry, joined at read time by
 the caller, so ``EvalRunFacts`` is what that caller hands back.
 
-``summarize`` is the one place pass rate and variants are decided, so the
-eval list, the eval detail and the runs view cannot count differently.
+``summarize`` is the one place pass rate, variants and their duration and
+cost figures are decided, so the eval list, the eval detail and the runs view
+cannot count differently.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from statistics import median
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
@@ -75,6 +77,27 @@ class EvalRunFacts:
 
 
 @dataclass(frozen=True)
+class EvalRunStats:
+    """How long a set of runs took and what it cost, over EVERY run in the set.
+
+    Medians, not means: one runaway run should not make a variant look slow.
+    """
+
+    median_duration_seconds: float | None
+    """Over the runs whose duration is known; ``None`` when none is."""
+    median_cost_usd: Decimal | None
+    """Over the runs whose cost is known; ``None`` when none is."""
+    cost_per_pass_usd: Decimal | None
+    """Known spend of every run (FAIL, ERROR and unscored included) over PASS runs.
+
+    What one passing run costs once the runs that did not pass are paid for.
+    ``None`` when nothing passed or no cost is known: not infinite, not zero.
+    """
+    unknown_cost_count: int
+    """Runs whose cost could not be read, so ``cost_per_pass_usd`` is a lower bound."""
+
+
+@dataclass(frozen=True)
 class EvalVariant:
     """Every run of the eval with the same workflow, workflow version and observed models."""
 
@@ -89,6 +112,9 @@ class EvalVariant:
     avg_cost_usd: Decimal | None
     """Mean over the runs whose cost is known; ``None`` when none is."""
     last_run_at: str | None
+    last_verdict: Verdict | None
+    """The verdict of this variant's newest run that has one."""
+    stats: EvalRunStats
 
 
 @dataclass(frozen=True)
@@ -102,6 +128,7 @@ class EvalRunsSummary:
     last_verdict: Verdict | None
     """The verdict of the newest run that has one."""
     variants: tuple[EvalVariant, ...]
+    stats: EvalRunStats
 
 
 def _pass_rate(runs: Sequence[EvalRunFacts]) -> tuple[int, int, float | None]:
@@ -116,14 +143,30 @@ def _pass_rate(runs: Sequence[EvalRunFacts]) -> tuple[int, int, float | None]:
     return len(scored), passed, (passed / judged) if judged else None
 
 
+def _stats(runs: Sequence[EvalRunFacts], passed: int) -> EvalRunStats:
+    durations = [r.duration_seconds for r in runs if r.duration_seconds is not None]
+    costs = [r.total_cost_usd for r in runs if r.total_cost_usd is not None]
+    return EvalRunStats(
+        median_duration_seconds=median(durations) if durations else None,
+        median_cost_usd=median(costs) if costs else None,
+        cost_per_pass_usd=sum(costs, Decimal(0)) / passed if costs and passed else None,
+        unknown_cost_count=len(runs) - len(costs),
+    )
+
+
+def _last_verdict(ordered: Iterable[EvalRunFacts]) -> Verdict | None:
+    """The verdict of the first run that has one; ``ordered`` is newest first."""
+    return next((r.score.verdict for r in ordered if r.score is not None), None)
+
+
 def _newest_first(runs: Iterable[EvalRunFacts]) -> list[EvalRunFacts]:
     return sorted(runs, key=lambda r: (r.started_at or "", r.execution_id), reverse=True)
 
 
 def summarize(runs: Iterable[EvalRunFacts]) -> EvalRunsSummary:
-    """Run count, pass rate, newest verdict and the variants of one eval's runs."""
+    """Run count, pass rate, newest verdict, duration and cost of one eval's runs and its variants."""
     ordered = _newest_first(runs)
-    scored_count, _, pass_rate = _pass_rate(ordered)
+    scored_count, total_passed, pass_rate = _pass_rate(ordered)
     # The version is part of the key: a workflow edited between two runs is a
     # different treatment, and pooling them would hide the change being measured.
     # An unrecorded version sorts as "" and groups with the other unrecorded runs.
@@ -145,14 +188,16 @@ def summarize(runs: Iterable[EvalRunFacts]) -> EvalRunsSummary:
                 pass_rate=rate,
                 avg_cost_usd=sum(costs, Decimal(0)) / len(costs) if costs else None,
                 last_run_at=members[0].started_at,
+                last_verdict=_last_verdict(members),
+                stats=_stats(members, passed),
             )
         )
-    last_verdict = next((r.score.verdict for r in ordered if r.score is not None), None)
     return EvalRunsSummary(
         run_count=len(ordered),
         scored_count=scored_count,
         pass_rate=pass_rate,
         last_run_at=ordered[0].started_at if ordered else None,
-        last_verdict=last_verdict,
+        last_verdict=_last_verdict(ordered),
         variants=tuple(variants),
+        stats=_stats(ordered, total_passed),
     )

@@ -26,6 +26,7 @@ from syn_domain.contexts.orchestration.domain.commands.RecordEvalRunScoreCommand
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import (
     EvalRunFacts,
     EvalRunScore,
+    EvalRunStats,
     PhaseModel,
     summarize,
 )
@@ -149,6 +150,7 @@ def _run(
     cost: str | None,
     started_at: str,
     version: str | None = None,
+    duration: float | None = None,
 ) -> EvalRunFacts:
     return EvalRunFacts(
         execution_id=execution_id,
@@ -159,7 +161,7 @@ def _run(
         completed_at=None,
         models=tuple(PhaseModel(f"p{i}", m) for i, m in enumerate(models)),
         total_cost_usd=None if cost is None else Decimal(cost),
-        duration_seconds=None,
+        duration_seconds=duration,
         score=None
         if verdict is None
         else EvalRunScore(
@@ -237,6 +239,50 @@ class TestSummarize:
 
         assert (summary.run_count, summary.pass_rate, summary.last_verdict) == (0, None, None)
         assert summary.variants == ()
+        assert summary.stats == EvalRunStats(None, None, None, 0)
+
+    def test_duration_and_cost_are_medians_and_cost_per_pass_pays_for_every_run(self) -> None:
+        opus = "claude-opus-5-5"
+        runs = [
+            _run("1", "wf-a", [opus], Verdict.PASS, "1.00", "2026-10-01T00:00:00+00:00", None, 60),
+            _run("2", "wf-a", [opus], Verdict.FAIL, "3.00", "2026-10-02T00:00:00+00:00", None, 600),
+            _run(
+                "3", "wf-a", [opus], Verdict.ERROR, "2.00", "2026-10-03T00:00:00+00:00", None, 120
+            ),
+            _run("4", "wf-a", [opus], None, "6.00", "2026-10-04T00:00:00+00:00", None, 3000),
+            _run("5", "wf-a", [opus], Verdict.PASS, None, "2026-10-05T00:00:00+00:00", None, None),
+        ]
+
+        [variant] = summarize(runs).variants
+
+        # Even count of known durations (60, 120, 600, 3000): the mean of the middle two.
+        assert variant.stats.median_duration_seconds == pytest.approx(360)
+        assert variant.stats.median_cost_usd == Decimal("2.50")
+        # 12.00 known spend - the FAIL, the ERROR and the unscored run included -
+        # over 2 PASS runs. Run 5's cost is unknown, so this is a lower bound.
+        assert variant.stats.cost_per_pass_usd == Decimal("6.00")
+        assert variant.stats.unknown_cost_count == 1
+        assert variant.last_verdict is Verdict.PASS
+
+    def test_nothing_passed_has_no_cost_per_pass_and_each_variant_its_own_last_verdict(
+        self,
+    ) -> None:
+        opus, sonnet = "claude-opus-5-5", "claude-sonnet-5"
+        runs = [
+            _run("1", "wf-a", [opus], Verdict.FAIL, "1.00", "2026-10-01T00:00:00+00:00"),
+            _run("2", "wf-a", [opus], Verdict.ERROR, "1.00", "2026-10-02T00:00:00+00:00"),
+            _run("3", "wf-a", [sonnet], Verdict.PASS, "4.00", "2026-10-03T00:00:00+00:00"),
+        ]
+
+        summary = summarize(runs)
+
+        by_models = {v.models: v for v in summary.variants}
+        assert by_models[opus,].stats.cost_per_pass_usd is None
+        assert by_models[opus,].last_verdict is Verdict.ERROR
+        assert by_models[sonnet,].last_verdict is Verdict.PASS
+        # Across the eval: 6.00 over one PASS.
+        assert summary.stats.cost_per_pass_usd == Decimal("6.00")
+        assert summary.stats.median_duration_seconds is None
 
 
 class TestBatchReadsForAPageOfRuns:
