@@ -40,6 +40,11 @@ on:
       - 'just/skyline-serve.just'
       - '.github/workflows/syn-ui.yml'
   workflow_dispatch:
+    inputs:
+      update_screenshots:
+        description: 'Rewrite every screenshot baseline and upload them (commit the artifact)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -159,6 +164,66 @@ jobs:
             apps/syn-ui/e2e/.report
             apps/syn-ui/e2e/.results
           retention-days: 7
+          if-no-files-found: ignore
+
+  #############################################################################
+  # SCREENSHOTS - /dev/components and /dev/patterns at 1440px and 390px against
+  # the Linux Chromium baselines in apps/syn-ui/e2e/baselines
+  # (just skyline-screenshots). Refreshing them: design/README.md.
+  #############################################################################
+
+  screenshots:
+    name: Skyline screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter 'syn-ui...'
+
+      - name: Install Chromium
+        working-directory: apps/syn-ui
+        run: node node_modules/@playwright/test/cli.js install --with-deps chromium
+
+      # Compare against the committed baselines. With none committed yet (first
+      # run) or on a dispatch with update_screenshots, write them instead and
+      # pass; the next step uploads them for a human to review and commit.
+      - name: Screenshot tests
+        env:
+          UPDATE: ${{ inputs.update_screenshots && 'true' || 'false' }}
+        run: |
+          count=$(find apps/syn-ui/e2e/baselines -name '*-linux.png' 2>/dev/null | wc -l)
+          if [ "$UPDATE" = true ] || [ "$count" -eq 0 ]; then
+            echo "::warning::Writing screenshot baselines ($count committed). Download the skyline-screenshot-baselines artifact and commit it to apps/syn-ui/e2e/baselines."
+            just skyline-screenshots --update-snapshots=all
+          else
+            just skyline-screenshots
+          fi
+
+      - name: Upload baselines and diffs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: skyline-screenshot-baselines
+          path: |
+            apps/syn-ui/e2e/baselines/*-linux.png
+            apps/syn-ui/e2e/.results
+          retention-days: 14
           if-no-files-found: ignore
 
   #############################################################################

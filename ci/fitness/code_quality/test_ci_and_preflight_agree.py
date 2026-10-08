@@ -37,6 +37,7 @@ _ALLOWED_OUTSIDE: dict[str, str] = {
     # records the same split.
     "skyline-ci": "path-filtered Skyline QA (install, test, build, size budget); run by hand",
     "skyline-e2e": "needs a Playwright browser, which a pre-push hook cannot assume",
+    "skyline-screenshots": "Linux Chromium baselines only; macOS fonts differ, so only CI compares",
     "skyline-gateway-smoke": "builds the gateway image, too heavy for a pre-push hook",
 }
 
