@@ -26,4 +26,4 @@ expected:
   keywords:
     - ["retry", "retries", "retried", "retry_on_timeout", "re-sent", "resent", "re-issued", "reissued", "twice"]
     - ["idempotent", "getdel", "nx", "set nx", "duplicate", "lost", "dropped", "already applied", "applied twice"]
-split: train
+split: holdout

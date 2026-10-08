@@ -1,0 +1,18 @@
+id: clean-delegation-edge-events
+polarity: clean
+# A control, not a defect: PR #917, merged 2026-08-28. Chosen by the v5 rule
+# (README.md): no later fix or revert names the PR, no issue or fix PR refers
+# to it (searched on GitHub), and no mainline commit has touched any file it
+# changed since it merged, through clean_through.
+source_pr: 917
+commit: 3ee02e5dffce03d2d1549861ac7d11653c7a9f49
+merge_commit: 34905b4552314ba3cf829b05b81eb888e70be9af
+added_in: 5
+clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
+task: >
+  The change under review records a delegation between agent sessions as
+  three domain events: the delegation started, the child session bound to
+  it, and the delegation finished. Review whether the events carry what a
+  reader needs to rebuild the edge between parent and child, and nothing a
+  replay could get wrong.
+split: train

@@ -1773,9 +1773,9 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 3, 4]
-    assert versions_run(suite, _CODEX_WF) == [2, 3, 4]
-    assert versions_run(suite, _SONNET_WF) == [3, 4]
+    assert versions_run(suite, _WF) == [1, 3, 4, 5]
+    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5]
+    assert versions_run(suite, _SONNET_WF) == [3, 4, 5]
 
 
 # The twelve cases of #1750's v3: the six v2 defects and the six clean controls.
@@ -1798,6 +1798,37 @@ def test_v3_under_each_verifier_holds_its_twelve_cases_and_its_own_tag(workflow:
     assert v3.workflow.id == workflow
     assert {c.id for c in v3.cases if c.polarity == "defect"} == _V2_CASES
     assert {c.id for c in v3.cases if c.polarity == "clean"} == _V3_CLEAN
+
+
+# Both were blocked by two strong verifiers for a real defect: retired in v5.
+_RETIRED = {"clean-github-token-installation-routing", "clean-redis-signal-queue-fail-open"}
+
+
+@pytest.mark.unit
+def test_a_retired_control_scores_in_the_versions_that_held_it_and_never_launches_again(
+    tmp_path: Path,
+) -> None:
+    v4 = load_suite(DEFAULT_SUITE, version=4)
+    held = {c.id: c for c in v4.cases if c.id in _RETIRED}
+    assert set(held) == _RETIRED and len(v4.cases) == 36
+    # As it ran: still a clean control there, so v4's runs score as they did.
+    assert all(isinstance(c, CleanCase) for c in held.values())
+
+    current = load_suite(DEFAULT_SUITE)
+    assert not {c.id for c in current.cases} & _RETIRED
+    ledger = tmp_path / "launches.jsonl"
+    launch_suite(current, _Server(current).client(), ledger)
+    assert not {x.case for x in read_launches(ledger)} & _RETIRED
+
+
+@pytest.mark.unit
+def test_a_retired_case_no_history_version_holds_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "redis-retry-non-idempotent.yaml"
+    case.write_text(case.read_text() + "retired: v5 - never ran\n")
+
+    with pytest.raises(DefinitionError, match=r"retired case\(s\) \['redis-retry-non-idempotent'\]"):
+        load_suite(suite_dir)
 
 
 @pytest.mark.unit
@@ -2190,7 +2221,9 @@ def _later(repo: Path, message: str) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _clean_suite(tmp_path: Path, commit: str, merge: str, through: str) -> Path:
+def _clean_suite(
+    tmp_path: Path, commit: str, merge: str, through: str, added_in: int = 3
+) -> Path:
     suite_dir = _copy_suite(tmp_path)
     suite_file = suite_dir / "suite.yaml"
     suite = yaml.safe_load(suite_file.read_text())
@@ -2204,6 +2237,7 @@ def _clean_suite(tmp_path: Path, commit: str, merge: str, through: str) -> Path:
         "source_pr": 7,
         "commit": commit,
         "merge_commit": merge,
+        "added_in": added_in,
         "clean_through": through,
         "task": "Review it.",
         "split": "train",
@@ -2294,6 +2328,93 @@ def test_check_refuses_a_clean_control_git_revert_undid(
         f"control: {revert[:12]} fixes or reverts #7 after it merged; "
         "a clean control must have no known defect"
     ]
+
+
+_DAY = 86400
+_PR_FILE = "def kept():\n    return 1\n\n\nclass Box:\n    def changed(self):\n        return 2\n"
+
+
+def _commit_at(repo: Path, when: int, message: str, text: str | None = None) -> str:
+    """Commit on the current branch at epoch `when`, writing `text` to m.py if given."""
+    if text is not None:
+        (repo / "m.py").write_text(text)
+    else:
+        (repo / "other.txt").write_text(message)
+    _git(repo, "add", ".")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{when}", "GIT_COMMITTER_DATE": f"@{when}"}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", message], env=env, check=True)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def quiet(tmp_path: Path) -> tuple[Path, str, str, int]:
+    """A repo whose main merged a PR that changed `Box.changed` in m.py at day 0:
+    (repo, PR head, merge, the merge's epoch)."""
+    repo = tmp_path / "quiet"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    day0 = 1_780_000_000
+    _commit_at(repo, day0 - _DAY, "base", _PR_FILE.replace("return 2", "return 0"))
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit_at(repo, day0 - 60, "feat: box", _PR_FILE)
+    _git(repo, "checkout", "-q", "main")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{day0}", "GIT_COMMITTER_DATE": f"@{day0}"}
+    subprocess.run(
+        ["git", "-C", str(repo), "merge", "-q", "--no-ff", "-m", "Merge pull request #7", "feature"],
+        env=env,
+        check=True,
+    )
+    return repo, head, _git(repo, "rev-parse", "HEAD"), day0
+
+
+@pytest.mark.unit
+def test_check_refuses_a_control_whose_function_a_later_commit_changes_within_30_days(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    # Moved below a new function first, so only its qualified name finds it.
+    repo, head, merge, day0 = quiet
+    moved = "def added():\n    return 9\n\n\n" + _PR_FILE
+    _commit_at(repo, day0 + _DAY, "feat: added", moved)
+    touch = _commit_at(repo, day0 + 2 * _DAY, "refactor: tidy", moved.replace("return 2", "return 3"))
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+    assert problems == [
+        f"control: {touch[:12]} changes m.py:Box.changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_passes_a_control_whose_other_functions_or_later_days_see_the_change(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    repo, head, merge, day0 = quiet
+    other = _PR_FILE.replace("return 1", "return 5")
+    _commit_at(repo, day0 + _DAY, "feat: kept", other)  # not a function the PR changed
+    _commit_at(repo, day0 + 31 * _DAY, "feat: box", other.replace("return 2", "return 3"))
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+
+    loaded = load_suite(_clean_suite(tmp_path, head, merge, through, added_in=5))
+    assert check_commits(loaded, repo) == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_v5_control_younger_than_30_days_and_spares_an_older_one(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    repo, head, merge, day0 = quiet
+    through = _commit_at(repo, day0 + 10 * _DAY, "chore: later")
+
+    young = load_suite(_clean_suite(tmp_path / "v5", head, merge, through, added_in=5))
+    assert check_commits(young, repo) == [
+        f"control: clean_through {through[:12]} is under 30 days after the merge; "
+        "a clean control needs that long untouched"
+    ]
+    legacy = load_suite(_clean_suite(tmp_path / "v3", head, merge, through, added_in=4))
+    assert check_commits(legacy, repo) == []
 
 
 @pytest.mark.unit
