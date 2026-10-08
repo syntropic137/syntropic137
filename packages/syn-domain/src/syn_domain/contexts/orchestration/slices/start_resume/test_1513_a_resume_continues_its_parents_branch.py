@@ -29,14 +29,18 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
+from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from pydantic import BaseModel, ConfigDict
 
 from syn_adapters.github.client import GitHubAppError
 from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_adapters.workspace_backends.memory.memory_adapter import MemoryIsolationAdapter
 from syn_adapters.workspace_backends.service.pinned_checkout import pinned_heads
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
@@ -55,8 +59,15 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     ExecutionResult,
     IsolationHandle,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+    PhaseCompletedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
+)
+from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests import (
+    MergedPullRequestAttributionProcessManager,
+    PullRequestMergeState,
 )
 from syn_domain.contexts.orchestration.slices.start_resume import StartResumeHandler
 from syn_domain.contexts.orchestration.slices.start_resume.test_1458_a_resume_is_provisioned_at_its_parents_commits import (
@@ -627,3 +638,94 @@ class TestASuccessfulRunRecordsThePrItOpened:
             BRANCH,
             PR,
         )
+
+    async def test_a_pr_review_opens_from_implements_branch_links_the_run(
+        self, world: _World
+    ) -> None:
+        """#1728: implement pushes B with no PR; review opens PR N and pushes nothing.
+
+        Neither PhaseCompleted carries N, so the stored events alone link nobody.
+        RED before the fix: the attribution manager recorded no merge for the run
+        that built and opened N. Its live pass now asks the forge for the PRs
+        from B, the branch implement pushed.
+        """
+        executions = _Executions()
+
+        async def push_then_open(phase_id: str, _prompt: str, _w: ManagedWorkspace) -> None:
+            if phase_id == "implement":
+                world.push_and_open_pr()
+                world.pulls.clear()  # pushed, no PR yet
+            elif phase_id == "review":
+                world.pulls[BRANCH] = [(PR, "open")]  # no commit, no push
+
+        agent = _Acts(FakeAgentExecutionHandler.success(produces=A_DELIVERABLE), act=push_then_open)
+        result = await _wired(executions, agent, world).run(
+            workflow_id=WORKFLOW,
+            workflow_name="Open a PR later",
+            phases=[_phase(p, i + 1) for i, p in enumerate(PHASE_IDS)],
+            inputs={"task": "open one"},
+            execution_id=PARENT,
+            repos=[RepositoryRef.from_slug(REPO)],
+            source_commits=[SourceCommit(repository=REPO, sha=PINNED)],
+        )
+        assert result.status == "completed", result
+
+        stored: list[DomainEvent] = []
+        for metadata, payload in executions.written[PARENT]:
+            if metadata.event_type == "WorkflowExecutionStarted":
+                stored.append(WorkflowExecutionStartedEvent.model_validate_json(payload))
+            elif metadata.event_type == "PhaseCompleted":
+                stored.append(PhaseCompletedEvent.model_validate_json(payload))
+        observed = {
+            e.phase_id: [(b.branch, b.pull_request) for b in e.observed_branches or []]
+            for e in stored
+            if isinstance(e, PhaseCompletedEvent)
+        }
+        assert observed == {"research": [], "implement": [(BRANCH, None)], "review": []}
+
+        forge = _MergedForge(world)
+        recorded: list[tuple[str, str, int]] = []
+        manager = MergedPullRequestAttributionProcessManager(
+            store=InMemoryProjectionStore(), merges=forge, recorder=_Recorded(recorded)
+        )
+        for nonce, event in enumerate(stored, start=1):
+            envelope = EventEnvelope(
+                event=event,
+                metadata=EventMetadata(
+                    aggregate_id=PARENT,
+                    aggregate_type="WorkflowExecution",
+                    aggregate_nonce=nonce,
+                    event_type=event.event_type,
+                    global_nonce=nonce,
+                ),
+            )
+            await manager.handle_event(envelope, MemoryCheckpointStore())
+
+        assert await manager.process_pending() == 1
+        assert forge.asked == [(REPO, BRANCH)]
+        assert recorded == [(PARENT, REPO, PR)]
+
+
+@dataclass
+class _MergedForge:
+    """GitHub as the attribution manager asks it: the PRs from a branch, all merged."""
+
+    world: _World
+    asked: list[tuple[str, str]] = field(default_factory=list)
+
+    async def pull_requests_from(self, repository: str, branch: str) -> tuple[int, ...] | None:
+        self.asked.append((repository, branch))
+        return tuple(n for n, _state in self.world.pulls.get(branch, []))
+
+    async def read_merge(self, repository: str, pull_request: int) -> PullRequestMergeState:
+        return PullRequestMergeState(readable=True, merged_at=datetime.now(UTC))
+
+
+@dataclass
+class _Recorded:
+    merges: list[tuple[str, str, int]]
+
+    async def record_merge(
+        self, execution_id: str, repository: str, pull_request: int, merged_at: datetime
+    ) -> None:
+        self.merges.append((execution_id, repository, pull_request))
