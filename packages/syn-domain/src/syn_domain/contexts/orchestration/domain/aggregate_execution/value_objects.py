@@ -19,6 +19,9 @@ from pydantic import (
 
 # Runtime import: a pydantic field type of DelegationAttempt.
 from syn_domain.contexts.agent_sessions import DelegationOutcome  # noqa: TC001
+from syn_domain.contexts.orchestration._shared.phase_isolation import (
+    PhaseIsolation,
+)
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
@@ -1093,6 +1096,11 @@ class ExecutablePhase:
     # `cargo check` made while inspecting the toolchain, so the phase says
     # which of the two its working tree can possibly hold.
     delivers_repo_changes: bool = True
+
+    # Whether the workspace is sealed at the run's pins - no later commit, no
+    # remote, no GitHub credential - for an evaluation (#1725, ADR-073).
+    # Read by WorkspaceProvisionHandler, which hands it to the setup script.
+    isolation: PhaseIsolation = PhaseIsolation.STANDARD
 
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and

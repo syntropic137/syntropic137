@@ -71,6 +71,10 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # something - and dropping it is not inert, it silently restores the
     # failure the field exists to stop.
     "delivers_repo_changes": ("ExecutablePhase", "delivers_repo_changes"),
+    # Read by WorkspaceProvisionHandler, which seals the workspace at the
+    # run's pins and drops its GitHub credential (#1725, ADR-073). Applied,
+    # and refused in the one combination a seal cannot honour.
+    "isolation": ("ExecutablePhase", "isolation"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),

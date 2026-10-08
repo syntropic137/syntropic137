@@ -570,6 +570,8 @@ class PhaseDefinitionResponse(BaseModel):
     fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
+    # `pinned`: the workspace is sealed at the run's pins (#1725, ADR-073).
+    isolation: str = "standard"
     sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)

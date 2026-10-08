@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
+from syn_domain.contexts.orchestration._shared.phase_isolation import (
+    PhaseIsolation,
+    require_satisfiable_isolation,
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
@@ -193,6 +197,23 @@ class PhaseDefinition(BaseModel):
     deliverable that was never saved, or a build tool's side effect. See
     ``PhaseYamlDefinition.delivers_repo_changes`` for why the gate cannot work
     this out for itself."""
+
+    isolation: PhaseIsolation = PhaseIsolation.STANDARD
+    """Whether this phase's workspace is sealed at the run's pins (#1725, ADR-073).
+
+    Sourced from the workflow YAML ``isolation`` field; see `PhaseIsolation`."""
+
+    @model_validator(mode="after")
+    def _refuse_unsatisfiable_isolation(self) -> PhaseDefinition:
+        # Here as well as on the YAML model: the API creates phases without
+        # one, and a pinned phase that must push is refused on either path.
+        require_satisfiable_isolation(
+            self.isolation,
+            delivers_repo_changes=self.delivers_repo_changes,
+            clone_repos=self.clone_repos,
+            phase_id=self.phase_id,
+        )
+        return self
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None

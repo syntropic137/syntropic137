@@ -30,6 +30,10 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
 )
+from syn_domain.contexts.orchestration._shared.phase_isolation import (
+    PhaseIsolation,
+    require_satisfiable_isolation,
+)
 from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
     without_retired_fields,
 )
@@ -410,6 +414,15 @@ class PhaseYamlDefinition(BaseModel):
     #1129 token routing: dropping it would fall back to the first
     installation, which in a multi-org deployment is the wrong one."""
 
+    isolation: PhaseIsolation = PhaseIsolation.STANDARD
+    """``pinned`` seals the workspace at the run's pins: no later commit, no GitHub (#1725).
+
+    For eval workflows, where the commit after the pin is the answer. See
+    `PhaseIsolation` and ADR-073. Declared per phase, beside ``clone_repos``,
+    because it decides what the workspace contains; a pinned phase cannot
+    push, so it is refused unless it also declares
+    ``delivers_repo_changes: false``."""
+
     delivers_repo_changes: bool = True
     """Whether a change to the repositories is part of what this phase delivers (#1308).
 
@@ -571,6 +584,17 @@ class PhaseYamlDefinition(BaseModel):
             require_enforceable_cost_limit(provider, self.max_cost_usd, phase_id=self.id)
         return self
 
+    @model_validator(mode="after")
+    def validate_pinned_isolation_is_satisfiable(self) -> PhaseYamlDefinition:
+        """Refuse a pinned phase that needs what the seal takes away (#1725)."""
+        require_satisfiable_isolation(
+            self.isolation,
+            delivers_repo_changes=self.delivers_repo_changes,
+            clone_repos=self.clone_repos,
+            phase_id=self.id,
+        )
+        return self
+
     def _declared_providers(self) -> tuple[str | None, ...]:
         """Every provider this phase may run on: its own, and its fallback's (PC-83).
 
@@ -669,6 +693,7 @@ class PhaseYamlDefinition(BaseModel):
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
             delivers_repo_changes=self.delivers_repo_changes,
+            isolation=self.isolation,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,

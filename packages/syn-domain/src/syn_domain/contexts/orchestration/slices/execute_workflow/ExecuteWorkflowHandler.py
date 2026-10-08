@@ -688,6 +688,10 @@ class ExecuteWorkflowHandler:
                     # that is judged strictly rather than one that is not
                     # judged at all.
                     delivers_repo_changes=phase.delivers_repo_changes,
+                    # Dropping this provisions an eval phase with the full
+                    # history and a GitHub credential: the answer one
+                    # `git log --all` away (#1725).
+                    isolation=phase.isolation,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

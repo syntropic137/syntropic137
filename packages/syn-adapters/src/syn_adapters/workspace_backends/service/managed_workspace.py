@@ -273,7 +273,15 @@ class ManagedWorkspace:
         # caller: this object is what `renew_git_credential` re-mints from, and
         # a copy of the answers taken anywhere else could disagree with the
         # credential actually installed here (#1393).
-        self._credential_source = CredentialSource(repositories=tuple(secrets.repositories))
+        #
+        # None for a workspace sealed at its pins (#1725): its credential is
+        # deleted once the clone is done, and a renewal would put one back
+        # for the agent to fetch the commits the seal removed.
+        self._credential_source = (
+            None
+            if secrets.sealed_at_pin
+            else CredentialSource(repositories=tuple(secrets.repositories))
+        )
         # `secrets.issued` is already in the ledger: `SetupPhaseSecrets.create`
         # recorded each token as it was minted (#725).
         result = await _run_setup_phase(self, secrets, setup_script)
