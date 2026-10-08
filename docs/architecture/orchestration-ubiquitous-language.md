@@ -68,6 +68,17 @@ refused at install. Not a separate budget from the
 [Execution Budget](#execution-budget), which counts concurrent Executions, not
 money.
 
+## Platform Access
+
+What a Phase's workspace may do against the Syntropic137 API, declared per
+Phase as `platform_access` (ADR-072, #1744). It is carried as the scope of the
+platform token minted for that Phase's workspace, and it dies with the Phase.
+`read` is the default and reads executions, sessions, artifacts, evals and
+insights. `eval` adds exactly two writes: launching a workflow into an eval the
+request names, and scoring a run of an eval. A Phase that declares nothing is
+`read`. The declaration is per Phase, not per Workflow, so the one Phase that
+scores does not lend that power to the others.
+
 ## Quota Exhaustion
 
 An upstream failure of kind `quota` (PC-83): the provider's usage allowance for

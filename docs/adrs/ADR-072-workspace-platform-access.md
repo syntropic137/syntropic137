@@ -1,8 +1,8 @@
 # ADR-072: Workspace Access to the Syntropic137 API
 
-- **Status**: Accepted (read scope only; the eval scope is split out to #1744, see "Not granted")
-- **Date**: 2026-10-07
-- **Issue**: PC-127; unblocks #1724, #1726, #1727
+- **Status**: Accepted. Read scope (PC-127); eval scope added 2026-10-08 (#1744, section 5)
+- **Date**: 2026-10-07, amended 2026-10-08
+- **Issue**: PC-127, #1744; unblocks #1724, #1726, #1727
 - **Related**: ADR-024 (setup-phase secrets), ADR-059 (gateway two-port auth model), ADR-060 (in-memory adapter guard), ADR-021 (isolated workspaces)
 
 ## Context
@@ -95,15 +95,18 @@ client following it stays on the authenticated route.
 
 The allowlist lives in one place, `syn_adapters.platform_access`. It fails
 closed: a route added later is denied until someone adds its first path
-segment. The policy is per resource, not per route: a GET added later under
-an allowed first segment (`/executions/...`) is readable at once.
+segment. The read policy is per resource, not per route: a GET added later
+under an allowed first segment (`/executions/...`) is readable at once. The
+eval writes are the opposite, per route and exact (section 5).
 
-| Scope | Methods | First path segment |
-|---|---|---|
-| `read` | GET, HEAD | `executions`, `sessions`, `artifacts`, `evals`, `insights`, `health` |
+| Scope | Reaches |
+|---|---|
+| `read` | GET, HEAD on first path segment `executions`, `sessions`, `artifacts`, `evals`, `insights`, `health` |
+| `eval` | everything `read` reaches, plus exactly `POST /workflows/{id}/execute` whose body names an `eval_id`, and `POST /evals/{id}/runs/{execution}/score` |
 
 `workflows`, `triggers`, `github`, `organizations`, `costs`, `conversations`,
-`events`, `maintenance` and every write method are refused.
+`events`, `maintenance` and every other write method are refused, for both
+scopes.
 
 ### 4. The token (extends ADR-024)
 
@@ -133,23 +136,88 @@ rather than hidden:
   must survive an API restart or every running phase loses access.
   `InMemoryPlatformTokenStore` inherits `InMemoryAdapter` (ADR-060).
 
+### 5. The eval scope (#1744)
+
+An eval-optimizer phase has to launch candidate runs into an eval and score
+them. That is two writes, and this section is the whole of what a second scope
+adds. The scope enum (`syn_shared.platform_access.PlatformScope`) has two
+members; a third is a change to this ADR, not a line in a table.
+
+**Declared per phase, default read.** A phase opts in with
+`platform_access: eval` in workflow YAML. Any other value is refused at
+install. The declaration travels `PhaseYamlDefinition` -> `PhaseDefinition`
+(and so the stored `WorkflowTemplateCreated` event) -> `ExecutablePhase` ->
+`WorkspaceServicePort.create_workspace(platform_access=...)` ->
+`PlatformTokenService.grant_workspace`. Every hop defaults to `read`, so a
+dropped field gives a phase LESS access than it declared, never more. Templates
+stored before #1744 replay as `read`. It is per phase, not per workflow,
+because the token is minted per phase. A workflow whose scoring phase needs
+`eval` does not hand it to its implement phase.
+
+**Exactly two writes, judged before routing:**
+
+- `POST /evals/{id}/runs/{execution}/score`: matched as exactly those five
+  segments. The route itself refuses (409) an execution that is not a run of
+  that eval.
+- `POST /workflows/{id}/execute`, and only when the JSON body names an
+  `eval_id` explicitly: a non-blank string, and `no_eval` not true. "Not opted
+  out" is not enough. With no `eval_id` the route falls back to the workflow's
+  `default_eval_id`, and a workflow with none starts an ordinary execution,
+  which is what this boundary exists to prevent. The fields are parsed the way
+  the route parses them (`json.loads`, so the last duplicate key wins, and
+  Pydantic lax mode, so `"no_eval": "true"` counts as an opt-out here as it
+  does there). The enforcer and the route therefore cannot read two different
+  requests. Eval admission still applies after the enforcer: a missing eval
+  is a 404 and an archived one a 409.
+
+**Body-aware enforcement.** The read scope is decided from method and path
+only. The eval execute rule needs the body. `PlatformTokenService.authorize`
+takes a body *reader*, and only the enforcer decides whether to call it. The
+middleware therefore knows nothing about which routes need a body. When the
+reader is called, the middleware buffers the ASGI `http.request` messages, up
+to one byte past `MAX_EVAL_BODY_BYTES` (64 KiB), and then replays them to the
+app unchanged. A larger body is refused without being read further. Every
+other request streams through untouched.
+
+**Bound to the phase.** An eval token is the same kind of credential as a read
+token (section 4): one per workspace, its expiry lowered to the phase deadline
+at first launch, revoked at teardown, and never logged. It cannot outlive the
+phase that declared it.
+
+**What "bound" does NOT mean here, deliberately:**
+
+- *Not pinned to one eval.* The token can launch into, and score runs of, any
+  non-archived eval on the instance. An eval's comparison runs span workflows
+  (an A/B is two workflows in one eval), and `starting_workflow_id` is
+  optional. So "the eval's workflow" is not a single value the enforcer could
+  check. A phase whose job is to optimise one eval has no field naming that
+  eval yet. Pinning would need one (for example `platform_access: {eval: <id>}`)
+  and a lookup at authorize time.
+- *No per-token launch budget.* Every launch from an eval token goes through
+  the execute route, so it claims a slot from the same Execution Budget as any
+  other start (`SYN_EXECUTION_MAX_CONCURRENT`, per Executor) and passes eval
+  admission. Nothing caps how many runs ONE phase may start over its lifetime,
+  or what they cost. An eval phase looping on launches is bounded by its
+  deadline, the global concurrency budget, and the per-phase `max_cost_usd` of
+  the phases it launches. Those are not a budget for the launching phase.
+- *Scorer not pinned.* `EvalRunScoreRequest.scorer` is caller-supplied, so an
+  eval token can record a score under any scorer name.
+
+Each of these leaves the eval scope strictly larger than its name suggests.
+Each was judged acceptable for a single-tenant instance whose operator wrote
+the workflows that declare it, under the same reasoning as the read scope's
+"reads everything" consequence. Each must be closed before a multi-tenant
+deployment, and any of them can be tightened later without changing the
+declaration.
+
 ## Not granted, and why
 
-**The eval scope (launch into an eval, record a score) is not built here.** It
-is tracked in #1744. This ADR ships the read scope only.
-
-- `POST /evals/{id}/runs/{exec}/score` now exists on `main`, but a platform
-  token cannot reach it: the read scope allows GET and HEAD only, and the API
-  refuses every other method from a workspace. Granting it needs a second
-  scope bound to one eval and one execution, which is #1744's design.
-- `POST /workflows/{id}/execute` with `eval_id` starts an execution. A
-  credential that can start executions is exactly what this boundary exists to
-  prevent. Granting it safely needs body-aware enforcement (eval_id required,
-  workflow pinned to the eval's), a `platform_access: eval` declaration on the
-  phase definition, and a budget story. Each of those is its own design.
-
-The scope enum has one member on purpose. Adding a second is a change to this
-ADR, not a line in a table.
+- Any write other than the two in section 5. That includes cancelling,
+  resuming or editing an execution, editing an eval, and creating or changing
+  a workflow.
+- `POST /workflows/{id}/execute` without an explicit `eval_id`, even for an
+  eval token. A credential that can start ordinary executions is exactly what
+  this boundary exists to prevent.
 
 ## Image contract (agentic-workspace)
 
@@ -175,6 +243,10 @@ agent can use
   through the gateway at all.
 - The owner's deployment turns this on with `SYN_PLATFORM_ACCESS_ENABLED=true`.
   Nothing else changes for anyone else.
+- A phase that declares `platform_access: eval` can start executions. Each
+  one joins a named eval and is visible in it, and the Execution Budget bounds
+  them, but nothing bounds them per phase (section 5). Review a workflow that
+  declares it with that in mind.
 - An agent holding a read token can read every execution, session and
   artifact on the instance, not only its own. That is the point for the
   measurement workflows. On a multi-tenant instance it is not acceptable, and
