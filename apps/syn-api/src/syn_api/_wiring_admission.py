@@ -62,6 +62,16 @@ logger = logging.getLogger(__name__)
 StartConfirmer = Callable[[], Awaitable[None]]
 
 
+async def _confirm_started(execution_id: str, on_started: StartConfirmer | None) -> None:
+    """Durable once `handle` returns or finds its stream (#1707); unrecorded, it is re-offered."""
+    if on_started is None:
+        return
+    try:
+        await on_started()
+    except Exception:
+        logger.exception("Could not record the start", extra={"start": execution_id})
+
+
 _maintenance_singleton: MaintenancePort | None = None
 
 
@@ -472,11 +482,7 @@ class BackgroundWorkflowDispatcher:
     async def _report_start_failure(
         start_key: str, on_failure: StartFailureReporter, exc: Exception
     ) -> None:
-        """Hand the failure over; a failure to record it is only logged.
-
-        Nothing awaits this task, so a raise here would vanish into the event
-        loop's handler instead.
-        """
+        """Hand the failure over; nothing awaits this task, so a failure to record it is logged."""
         try:
             await on_failure(exc)
         except Exception:
@@ -780,8 +786,6 @@ class BackgroundWorkflowDispatcher:
         on_held: StartFailureReporter | None = None,
         on_started: StartConfirmer | None = None,
     ) -> None:
-        """Started (#1707) once ``handle`` returns or finds its stream exists; other
-        raises go to ``on_held``. Cancelled reports nothing: a later process re-offers it."""
         from syn_domain.contexts.orchestration import (
             DuplicateExecutionError,
             ExecuteWorkflowCommand,
@@ -811,11 +815,7 @@ class BackgroundWorkflowDispatcher:
             if on_held is not None:
                 await self._report_start_failure(execution_id, on_held, exc)
             return
-        if on_started is not None:
-            try:
-                await on_started()
-            except Exception:  # nothing awaits this task; a later process settles it
-                logger.exception("Could not record the start", extra={"start": execution_id})
+        await _confirm_started(execution_id, on_started)
         if result is not None and result.unrecorded_work_error is not None:
             # #1547: a trigger has no caller to hand an error to, so this log is
             # the report. It is also the only place outside process memory that
