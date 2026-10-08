@@ -17,9 +17,10 @@
 # report a result and never choose one. The six earlier defects are train:
 # verifiers were already shaped against them. The holdout is, within each
 # batch of added cases, the ~30% whose sha256(id) sorts lowest (7 of the first
-# 18 mined, 2 of the next 6, 2 of the 6 clean controls), fixed once,
-# recorded in each file, and never moved to train. That was 11 of 36 in v4;
-# after v5's retirements and additions it is 10 of 33.
+# 18 mined, 2 of the next 6, 2 of the 6 clean controls, 2 of v6's 6
+# controls), fixed once, recorded in each file, and never moved to train. That
+# was 11 of 36 in v4; after v5's retirements and additions it is 10 of 33, and
+# 12 of 39 in v6.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
 # find the defect, and certify the change that has none? `score` prints both
@@ -48,6 +49,11 @@
 #     GitHub token one has no fix to cut a case from. Two replacement controls
 #     chosen by the quiet-window rule (README.md); four more v3/v4 controls
 #     retired because they are under its 30 days. 31 defects, 2 controls.
+# v6: six clean controls added by the same rule (#1774), each quiet through
+#     main 23edd9c0b by `git log -L` on every hunk it changed: two with CLI
+#     TypeScript, the rest Python across the API, syn-shared, syn-adapters and
+#     the fitness scripts. No dashboard change met the rule. 31 defects, 8
+#     controls, 39 in all.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
@@ -58,7 +64,7 @@ id: verifier-seed-v1
 # version and verifier runs into those same evals; the run carries
 # `suite-version:<n>` and `verifier:<workflow id>`.
 eval_suite: verifier-seed
-version: 5
+version: 6
 goal: >
   Does the verifier block a change that carries a known escaped bug, naming
   the defect and the file it lives in, and certify a merged change that has
@@ -263,6 +269,118 @@ history:
       - pit-stop-password-on-argv
       - prompt-claims-checkout-without-clone
       - prompt-deliverable-only-if-acted
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  # v5 is the thirty-three live cases of #1767 under every listed verifier.
+  - version: 5
+    tag: verifier-seed-v1:v5:eval-verify-pinned-v1
+    workflow: eval-verify-pinned-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 5
+    tag: verifier-seed-v1:v5:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 5
+    tag: verifier-seed-v1:v5:eval-verify-pinned-sonnet-v1
+    workflow: eval-verify-pinned-sonnet-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
       - redis-url-password-logged
       - repo-name-collision-skipped-clone
       - repo-privacy-ignores-app

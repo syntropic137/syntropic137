@@ -1,0 +1,18 @@
+id: clean-workflow-detail-artifact-declarations
+polarity: clean
+# A control, not a defect: PR #1178, merged 2026-09-04. Chosen by the v5 rule
+# (README.md): no later fix or revert names the PR, no issue or fix PR refers
+# to it (searched on GitHub), and `git log -L` finds no mainline commit touching
+# a line it changed in workflows/queries.py or the CLI's workflow/run.ts,
+# through clean_through.
+source_pr: 1178
+commit: 8e31fd959526563deba9b255df38a9ce04736b92
+merge_commit: c9fd5bd6e3c67f57363f7d4f3c8891d188f1cdf0
+clean_through: 23edd9c0b65e6c6841b2248bb1614144b9d3c160
+task: >
+  The change under review makes the workflow detail endpoint return each
+  phase as the API already built it, instead of copying it field by field
+  into a second response model, and points the CLI at the new schema name.
+  Review whether any phase field a caller relies on is still lost or
+  changed between the read model and the JSON.
+split: train
