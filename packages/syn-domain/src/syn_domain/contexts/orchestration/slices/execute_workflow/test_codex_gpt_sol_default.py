@@ -1,12 +1,12 @@
 """A codex phase on the `gpt-sol` default: priced, and honestly identified (R2).
 
 `gpt-sol` is a platform alias. It is what the phase STORES and REQUESTS; the
-command builder sends codex the concrete slug `gpt-6-sol` (pinned in
+command builder sends codex the concrete slug `gpt-6.1-sol` (pinned in
 ``apps/syn-api/tests/test_codex_model_alias_argv.py``). Two separate claims
 follow, and each gets its own evidence:
 
 - COST comes from the requested model, because codex does not report its
-  model on the wire. The alias must therefore resolve to gpt-6-sol's rate.
+  model on the wire. The alias must therefore resolve to gpt-6.1-sol's rate.
 - IDENTITY (``announced_model``) comes only from the rollout. With a readable
   rollout it is what codex wrote there; without one it stays ``None`` - never
   the requested alias, and never a slug synthesized from it.
@@ -58,7 +58,7 @@ def _rollout_naming(model: str) -> _RolloutOnDisk:
 
 
 class TestTheDefaultIsPriced:
-    async def test_a_gpt_sol_phase_is_priced_at_gpt_6_sol_rates(self) -> None:
+    async def test_a_gpt_sol_phase_is_priced_at_gpt_6_1_sol_rates(self) -> None:
         collector = _RecordingCollector()
         processor, _ = _make_processor(collector, agent_model=DEFAULT_CODEX_MODEL)
 
@@ -67,7 +67,7 @@ class TestTheDefaultIsPriced:
         )
 
         assert result.reported_usage is not None
-        expected = require_model_pricing(ModelId.GPT_6_SOL).calculate_cost(
+        expected = require_model_pricing(ModelId.GPT_6_1_SOL).calculate_cost(
             result.reported_usage.input_tokens,
             result.reported_usage.output_tokens,
             cache_read=result.reported_usage.cache_read,
@@ -78,7 +78,7 @@ class TestTheDefaultIsPriced:
 
     async def test_the_default_is_the_alias_not_an_unpriced_string(self) -> None:
         assert DEFAULT_CODEX_MODEL == CodexModelAlias.GPT_SOL
-        assert require_model_pricing(DEFAULT_CODEX_MODEL).model_id is ModelId.GPT_6_SOL
+        assert require_model_pricing(DEFAULT_CODEX_MODEL).model_id is ModelId.GPT_6_1_SOL
 
 
 class TestTheIdentityComesOnlyFromTheRollout:
@@ -96,7 +96,7 @@ class TestTheIdentityComesOnlyFromTheRollout:
         assert result.announced_model == ModelId.GPT_6_SOL
 
     async def test_an_unreadable_rollout_leaves_the_model_unknown(self) -> None:
-        """No fallback to the request: not `gpt-sol`, and not a `gpt-6-sol`
+        """No fallback to the request: not `gpt-sol`, and not a `gpt-6.1-sol`
         synthesized from it. What ran is unknown, so it is recorded as such."""
         rollout = _RolloutOnDisk(None)
         processor, _ = _make_processor(

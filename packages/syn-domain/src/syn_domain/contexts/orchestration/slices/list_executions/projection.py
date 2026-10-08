@@ -68,7 +68,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
     """
 
     PROJECTION_NAME = WORKFLOW_EXECUTIONS
-    VERSION = 9  # v9: skipped_phase_ids, so phase progress drops skipped rounds
+    VERSION = 10  # v10: workflow_version, the installed version a run launched from
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -133,6 +133,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             inherited_tags=launched_with,
             eval_id=eval_id,
             association_kind=AssociationKind.LAUNCHED.value if eval_id else None,
+            workflow_version=event_data.get("workflow_version"),
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 
@@ -369,20 +370,6 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         return {
             key for key, document in documents.items() if document.get("started_at") is not None
         }
-
-    async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
-        """Get a specific execution by ID.
-
-        Args:
-            execution_id: The execution ID.
-
-        Returns:
-            Execution summary or None if not found.
-        """
-        data = await self._store.get(self.PROJECTION_NAME, execution_id)
-        if data:
-            return WorkflowExecutionSummary.from_dict(data)
-        return None
 
     async def get_all(
         self,

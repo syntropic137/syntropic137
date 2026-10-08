@@ -51,3 +51,12 @@ class DuplicateBaselineRepositoryError(EvalRuleError):
         super().__init__(
             "each repository may appear once in an eval baseline; repeated: " + ", ".join(slugs)
         )
+
+
+class EvalRunNotMemberError(EvalRuleError):
+    """Only a run currently in the eval can be scored against it."""
+
+    def __init__(self, eval_id: str, execution_id: str) -> None:
+        self.eval_id = eval_id
+        self.execution_id = execution_id
+        super().__init__(f"Execution {execution_id} is not a run of eval {eval_id}")

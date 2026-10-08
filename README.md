@@ -170,7 +170,7 @@ phases:
   - id: review
     agent:
       provider: codex           # a different model reviews the work
-      model: gpt-sol            # platform alias for gpt-6-sol, see note below
+      model: gpt-sol            # platform alias for gpt-6.1-sol, see note below
 ```
 
 Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, a phase
@@ -178,7 +178,7 @@ with `agent.provider: codex` fails to provision.
 
 A phase that names no model gets the platform default: `opus` on claude
 phases, `gpt-sol` on codex phases. `gpt-sol` is a platform alias that runs
-and prices as `gpt-6-sol`; codex has no aliases of its own, so the platform
+and prices as `gpt-6.1-sol`; codex has no aliases of its own, so the platform
 translates it before calling codex. Override the defaults with
 `SYN_DEFAULT_CLAUDE_MODEL` and `SYN_DEFAULT_CODEX_MODEL` in your `.env`. A
 default is recorded in the workflow when you install it, so changing the

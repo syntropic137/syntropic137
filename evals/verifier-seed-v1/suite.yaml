@@ -15,13 +15,18 @@
 # table; changing a listed workflow's model or prompt bumps the version.
 #
 # v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
-# v2: two cases added (#1679, #1680) and the codex verifier.
+# v2: two cases added (#1679, #1680) and the codex verifier. The Sonnet
+#     verifier was added later under v2: a new workflow, no existing table.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
 # workflow it ran and the cases it held. `score` scores each version's runs
 # against its own cases only. Never edit a history entry or a ledger line.
 id: verifier-seed-v1
+# The stable name the case evals carry, `suite:verifier-seed` + `case:<id>`. Every
+# version and verifier runs into those same evals; the run carries
+# `suite-version:<n>` and `verifier:<workflow id>`.
+eval_suite: verifier-seed
 version: 2
 goal: >
   Does the verifier block a change that carries a known escaped bug, and name
@@ -39,6 +44,12 @@ workflows:
     path: workflows/evals/verify-pinned-codex/workflow.yaml
     models:
       verify: gpt-sol
+  # Sonnet 5.5 against Opus 5.5 at half the price. `sonnet` is the alias the
+  # pinned CLI resolves; a run is Sonnet 5.5 only if its reported model says so.
+  - id: eval-verify-pinned-sonnet-v1
+    path: workflows/evals/verify-pinned-sonnet/workflow.yaml
+    models:
+      verify: sonnet
 history:
   # v1 predates the workflow suffix in the tag.
   - version: 1

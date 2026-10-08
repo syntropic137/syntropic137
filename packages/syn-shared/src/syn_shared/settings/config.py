@@ -362,7 +362,7 @@ class Settings(BaseSettings):
         description=(
             "Model a codex phase gets when its workflow declares no `model:`. "
             "Same persistence rule as SYN_DEFAULT_CLAUDE_MODEL. A platform "
-            "codex alias (gpt-sol -> gpt-6-sol) or a concrete codex model slug. "
+            "codex alias (gpt-sol -> gpt-6.1-sol) or a concrete codex model slug. "
             "Claude aliases are rejected: codex cannot run them."
         ),
     )

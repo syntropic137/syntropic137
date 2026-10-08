@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
+
 logger = logging.getLogger(__name__)
 
 
@@ -161,11 +163,20 @@ class ExecutionBudget:
         return claim
 
     @asynccontextmanager
-    async def held(self, claim: StartClaim) -> AsyncIterator[None]:
+    async def held(
+        self, claim: StartClaim, admitted: AdmissionTicket | None = None
+    ) -> AsyncIterator[None]:
         """Wait for ``claim``'s slot, hold it for the block, and give it back.
 
         Releases however the block ends, including cancellation while still
         queued, so an abandoned start never keeps its place.
+
+        The slot grant is where an admitted start stops being queued, so it is
+        where ``admitted`` re-checks the gate and starts its lease (#1617). A
+        pause that completed while this start was queued raises
+        :class:`~syn_domain.contexts._shared.MaintenancePausedError` here,
+        with the slot released and the block never entered: the start stays
+        queued in its durable record and is re-offered after the re-open.
         """
         try:
             entry = self._running.get(claim.execution_id) or self._waiting.get(claim.execution_id)
@@ -173,6 +184,8 @@ class ExecutionBudget:
                 msg = f"{claim.execution_id} holds no claim in this budget"
                 raise RuntimeError(msg)
             await entry.granted
+            if admitted is not None:
+                await admitted.enter_slot()
             yield
         finally:
             self.release(claim)
