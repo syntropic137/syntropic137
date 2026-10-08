@@ -501,6 +501,33 @@ git commit -m "chore: bump version to v0.20.0"
 git push origin main
 ```
 
+### 2a. Rehearse the upgrade on production data
+
+Production data must never be lost, and the [Release Validation
+Runbook](testing/release-validation.md) runs against an empty event store, so it
+cannot see a projection rebuild. Before the release PR, replay a fresh
+production event-store backup through the current release and upgrade it in
+place to the candidate, on a local machine:
+
+```bash
+scripts/rehearse_upgrade.sh --dump <events-YYYYMMDDTHHMMSSZ.dump> \
+  --from v0.33.1 --to-ref origin/main \
+  --to-event-store ghcr.io/syntropic137/event-store@sha256:<candidate digest>
+```
+
+The backup is a `pg_dump -Fc` of the `events` table. The script starts the
+`--from` release's digest-pinned compose under its own project name, restores
+the dump, waits for every projection to reach the head, snapshots counts, then
+swaps in the candidate compose and images (built from `--to-ref` unless
+`--to-api-image`/`--to-collector-image` are given) and measures the rebuild.
+It fails on: fewer events, an execution missing or changed with no new events
+on its stream, fewer sessions, `/evals` unavailable, a held or halted
+projection, a spot-checked execution detail that differs, or a catch-up
+timeout. It never touches the host Docker daemon or a VPS, and it tears the
+stack down unless `--keep` is passed. Quote its catch-up time in the release
+PR's **Upgrade Notes**: that is the read-path window step 2 of the rollout
+constraints above warns about.
+
 ### 3. Open Release PR
 
 Open a PR from `main` to `release`. **The PR body becomes the GitHub Release notes** - write meaningful release notes here. The release-gate check enforces a minimum of 20 characters. Use this format as a guide:
