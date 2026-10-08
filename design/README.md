@@ -81,5 +81,7 @@ Boards for these screens are frozen history. Change the code, not the board.
 | Artifacts | `Artifacts.dc.html`, `Artifact.dc.html`, `PhoneArtifacts.dc.html`, `PhoneArtifact.dc.html` | `/artifacts`, `/artifacts/:artifactId` | #1764 | 2026-10-08 |
 | Triggers | `Triggers.dc.html`, `PhoneTriggers.dc.html` | `/triggers` | #1764 | 2026-10-08 |
 | Repos | `Repos.dc.html`, `PhoneRepos.dc.html` | `/repos` | #1764 | 2026-10-08 |
+| Eval Trend panel | `Eval.dc.html`, `PhoneEval.dc.html` (trend section) | `/evals/:evalId` | #1764 | 2026-10-08 |
+| Workflows list trend cards | `Workflows.dc.html`, `PhoneWorkflows.dc.html` (duration graph, Faster/Slower/Steady) | `/workflows` | #1764 | 2026-10-08 |
 
-Sessions is partial: finish it from its board. The new trend charts on `Eval.dc.html`, `PhoneEval.dc.html`, `Workflow.dc.html`, `PhoneWorkflow.dc.html` and the Workflows list cards are not shipped yet, so those parts of the boards are still live specs.
+Sessions is partial: finish it from its board. The Workflow detail Performance panel on `Workflow.dc.html` and `PhoneWorkflow.dc.html` is not shipped yet (#1788), so that board is still a live spec.

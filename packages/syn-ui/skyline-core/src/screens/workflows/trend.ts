@@ -87,3 +87,6 @@ export function durationTrend(rows: readonly WorkflowTrendRowLike[]): DurationTr
     spark: sparkPath(ds),
   }
 }
+
+/** What a card shows while its trend is loading. */
+export const DURATION_TREND_PENDING: DurationTrend = { kind: 'none', pct: 0, runs: 0, word: 'Loading', sub: '', label: 'Loading the duration trend', spark: sparkPath([]) }

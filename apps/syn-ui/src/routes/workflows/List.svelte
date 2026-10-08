@@ -3,6 +3,10 @@
   styles are the phone board; the hero turns into a row and the grid widens
   from 48rem. Filter, sort, search and page live in the URL.
 
+  Each card's duration graph and Faster / Slower / Steady label come from
+  GET /workflows/{id}/trend for the cards on screen, four at a time (API gap:
+  the list should carry each workflow's recent durations).
+
   The list endpoint has no skills, so the skill chips and "Has skills"
   come from each workflow's detail, fetched four at a time after the list
   renders (API gap: add declared skill names to WorkflowSummary).
@@ -10,20 +14,23 @@
 <script lang="ts">
   import {
     CATEGORY_ICON,
+    DURATION_TREND_PENDING,
+    TREND_WINDOW,
+    durationTrend,
     WORKFLOW_FILTERS,
     filterWorkflows,
     parseWorkflowFilter,
     parseWorkflowSort,
     phasesLabel,
-    runSharePercent,
     runsLabel,
     workflowCategory,
     workflowSkillNames,
     workflowsSummary,
   } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Input, Pagination, Select, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
-  import { ObjectIcon } from '@syn137/skyline-svelte-v5/patterns'
-  import { ApiError, getWorkflow, isAbortError, listWorkflows, mapLimit } from '@syn137/syn-ui-data'
+  import { ObjectIcon, TrendSpark } from '@syn137/skyline-svelte-v5/patterns'
+  import { ApiError, getWorkflow, getWorkflowTrend, isAbortError, listWorkflows, mapLimit, type WorkflowSummary, type WorkflowTrendRow } from '@syn137/syn-ui-data'
+  import { untrack } from 'svelte'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href, router } from '../../lib/router'
@@ -69,7 +76,29 @@
   const matched = $derived(filterWorkflows(all, { filter, sort, search: q, skillsOf: (id) => skills[id] }))
   const pageCount = $derived(Math.max(1, Math.ceil(matched.length / PAGE_SIZE)))
   const rows = $derived(matched.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE))
-  const most = $derived(Math.max(0, ...all.map((w) => w.runs_count)))
+
+  let trends = $state<Record<string, WorkflowTrendRow[]>>({})
+  // Keyed on the ids on screen, so a skills update that rebuilds `rows` does not abort these.
+  const trendIds = $derived(rows.filter((w) => w.runs_count > 0).map((w) => w.id).join(' '))
+  $effect(() => {
+    const need = trendIds.split(' ').filter((id) => id && untrack(() => !(id in trends)))
+    if (!need.length) return
+    const controller = new AbortController()
+    void mapLimit(need, 4, async (id) => {
+      try {
+        const res = await getWorkflowTrend(id, { page_size: TREND_WINDOW }, controller.signal)
+        trends = { ...trends, [id]: res.items }
+      } catch (e) {
+        if (!isAbortError(e)) trends = { ...trends, [id]: [] }
+      }
+    })
+    return () => controller.abort()
+  })
+  const trendOf = (w: WorkflowSummary) => {
+    if (w.runs_count === 0) return durationTrend([])
+    const t = trends[w.id]
+    return t ? durationTrend(t) : DURATION_TREND_PENDING
+  }
   const filtered = $derived(filter !== 'all' || q !== '')
   const skillsPending = $derived(filter === 'skills' && all.some((w) => !(w.id in skills)))
 
@@ -157,6 +186,7 @@
       {#each rows as w (w.id)}
         {@const cat = workflowCategory(w.workflow_type)}
         {@const names = skills[w.id] ?? []}
+        {@const trend = trendOf(w)}
         <li class="sky-wfs__card">
           <div class="sky-wfs__top">
             <span class="sky-wfs__type">
@@ -181,14 +211,15 @@
               {/each}
             </ul>
           {/if}
-          <div class="sky-wfs__phases">
-            <span class="sky-wfs__pips" aria-hidden="true">
-              {#each Array.from({ length: w.phase_count }, (_, i) => i) as i (i)}<span></span>{/each}
-            </span>
-            <span class="sky-wfs__phase-count">{phasesLabel(w.phase_count)}</span>
-          </div>
-          <div class="sky-wfs__foot">
-            <span class="sky-wfs__bar" aria-hidden="true"><span style:width="{runSharePercent(w.runs_count, most)}%"></span></span>
+          <div class="sky-wfs__bottom">
+            <div class="sky-wfs__phases">
+              <span class="sky-wfs__pips" aria-hidden="true">
+                {#each Array.from({ length: w.phase_count }, (_, i) => i) as i (i)}<span></span>{/each}
+              </span>
+              <span class="sky-wfs__phase-count">{phasesLabel(w.phase_count)}</span>
+            </div>
+            <span class="sky-wfs__rule" aria-hidden="true"></span>
+            <span class="sky-wfs__trend"><TrendSpark kind={trend.kind} word={trend.word} sub={trend.sub} label={trend.label} spark={trend.spark} /></span>
             <a class="sky-wfs__run" href={href(`/workflows/${w.id}`)} aria-label="Run {w.name}">
               <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.5 2.75v10.5L13 8z"></path></svg>
               <span>Run</span>
@@ -377,7 +408,27 @@
   .sky-wfs__skill svg {
     color: var(--ds-color-accent);
   }
+  .sky-wfs__bottom {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'trend trend' 'phases run';
+    align-items: center;
+    gap: var(--ds-space-3-5);
+  }
+  .sky-wfs__trend {
+    grid-area: trend;
+    display: flex;
+    min-width: 0;
+    padding: 2px 0;
+  }
+  .sky-wfs__rule {
+    display: none;
+    grid-area: rule;
+    border-top: var(--ds-border-width) solid var(--ds-color-border);
+  }
   .sky-wfs__phases {
+    grid-area: phases;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: var(--ds-space-3);
@@ -388,8 +439,7 @@
     gap: 4px;
   }
   .sky-wfs__pips > span {
-    flex: 1 1 0;
-    max-width: 46px;
+    flex: 0 0 22px;
     height: 8px;
     border-radius: 3px;
     background: var(--sky-face-front);
@@ -400,26 +450,8 @@
     font-size: var(--ds-text-xs);
     color: var(--ds-color-text-muted);
   }
-  .sky-wfs__foot {
-    display: flex;
-    align-items: center;
-    gap: var(--ds-space-3-5);
-    padding-top: var(--ds-space-3-5);
-    border-top: var(--ds-border-width) solid var(--ds-color-border);
-  }
-  .sky-wfs__bar {
-    flex-grow: 1;
-    height: 6px;
-    border-radius: 3px;
-    background: var(--sky-color-track);
-  }
-  .sky-wfs__bar > span {
-    display: block;
-    height: 6px;
-    border-radius: 3px;
-    background: var(--ds-color-text-muted);
-  }
   .sky-wfs__run {
+    grid-area: run;
     display: flex;
     align-items: center;
     gap: 7px;
@@ -470,6 +502,17 @@
     }
     .sky-wfs__search {
       flex: 0 1 260px;
+    }
+    .sky-wfs__bottom {
+      grid-template-areas: 'phases phases' 'rule rule' 'trend run';
+      row-gap: var(--ds-space-4);
+    }
+    .sky-wfs__rule {
+      display: block;
+    }
+    .sky-wfs__pips > span {
+      flex: 1 1 0;
+      max-width: 46px;
     }
   }
 </style>
