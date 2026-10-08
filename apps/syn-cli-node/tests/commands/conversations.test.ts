@@ -150,7 +150,7 @@ describe("conversations commands", () => {
       expect(out).toContain("Read");
     });
 
-    it("renders an unreported model as unknown with the request, never the alias as the model", async () => {
+    it("renders the backend's requested-labelled display while the observed model is unreported, never the alias as the model", async () => {
       mockFetch.mockResolvedValue(
         jsonResponse({
           session_id: "sess-legacy",
@@ -162,7 +162,8 @@ describe("conversations commands", () => {
 
       await handler({ positionals: ["sess-legacy"], values: {} });
       const out = stdout();
-      expect(out).toMatch(/Model:\s+unknown \(requested: opus\)/);
+      expect(out).toMatch(/Model:\s+opus \(requested\)/);
+      expect(out).not.toMatch(/unknown/);
       expect(out).not.toMatch(/Requested:/);
     });
 
