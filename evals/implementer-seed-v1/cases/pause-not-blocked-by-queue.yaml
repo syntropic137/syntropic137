@@ -31,6 +31,9 @@ task: |
   `async AdmissionTicket.enter_slot()`, which a queued holder awaits when its
   turn comes to start. Once a pause has returned, entering a slot raises
   `MaintenancePausedError`. A ticket that has entered its slot and is not yet
-  visible still holds a pause, as before.
+  visible still holds a pause, but only for a bound:
+  `AdmissionGate(port, drain_timeout=<seconds>)`, and a pause that runs out of
+  it raises a new `AdmissionDrainTimeoutError` (exported from the same module)
+  and does not write the flag.
 hidden_tests:
   - packages/syn-domain/src/syn_domain/contexts/_shared/test_1617_a_queued_ticket_does_not_hold_the_pause.py
