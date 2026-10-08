@@ -112,7 +112,9 @@ def test_every_case_is_pinned_at_its_fix_s_first_parent_with_its_hidden_tests() 
 def test_a_pin_that_is_not_the_first_parent_is_reported() -> None:
     loaded = load_suite(DEFAULT_SUITE)
     case = loaded.cases[0]
-    wrong = loaded.model_copy(update={"cases": (case.model_copy(update={"commit": case.fix_commit}),)})
+    wrong = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"commit": case.fix_commit}),)}
+    )
     assert any("first parent" in p for p in check_commits(wrong, ROOT))
 
 

@@ -43,17 +43,20 @@ import argparse
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import yaml
 from eval_suite import ROOT, DefinitionError, Suite, _read_yaml, _workflow_problems
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 DEFAULT_SUITE = ROOT / "evals" / "implementer-seed-v1"
-TEST_TIMEOUT_SECONDS = 900
+TEST_TIMEOUT_SECONDS = 300
+SYNC_TIMEOUT_SECONDS = 900
 
 Outcome = Literal["PASS", "FAIL", "ERROR"]
 
@@ -118,7 +121,9 @@ def load_suite(directory: Path, root: Path = ROOT) -> ImplementerSuite:
         if path.stem != case.id:
             problems.append(f"{path.name}: file name must be the case id {case.id!r}")
         if f"#{case.source_pr}" in case.task:
-            problems.append(f"{case.id}: task names #{case.source_pr}; the agent could fetch the fix")
+            problems.append(
+                f"{case.id}: task names #{case.source_pr}; the agent could fetch the fix"
+            )
     ids = [c.id for c in cases]
     if len(set(ids)) != len(ids):
         problems.append(f"duplicate case ids: {sorted(ids)}")
@@ -140,7 +145,8 @@ def check_commits(loaded: ImplementerSuite, repo: Path) -> list[str]:
     problems: list[str] = []
     for case in loaded.cases:
         missing = [
-            sha for sha in (case.commit, case.fix_commit)
+            sha
+            for sha in (case.commit, case.fix_commit)
             if _git(repo, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0
         ]
         if missing:
@@ -187,7 +193,9 @@ def _check_out_submodules(repo: Path, tree: Path) -> None:
         key, path = line.split(maxsplit=1)
         name = key.removeprefix("submodule.").removesuffix(".path")
         _git(tree, "config", f"submodule.{name}.url", str((repo / path).resolve()))
-    updated = _git(tree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--quiet")
+    updated = _git(
+        tree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--quiet"
+    )
     if updated.returncode != 0:
         raise _EnvironmentFailure(f"submodules at the pin: {updated.stderr.strip()}")
 
@@ -206,26 +214,43 @@ def score_patch(case: ImplementerCase, patch: str, repo: Path) -> TestRun:
             if patch.strip():
                 applied = _git(tree, "apply", "--whitespace=nowarn", "-", stdin=patch)
                 if applied.returncode != 0:
-                    return TestRun(outcome="FAIL", detail=f"patch does not apply: {applied.stderr.strip()}")
+                    return TestRun(
+                        outcome="FAIL", detail=f"patch does not apply: {applied.stderr.strip()}"
+                    )
             for path in case.hidden_tests:
                 shown = subprocess.run(
-                    ["git", "-C", str(repo), "show", f"{case.fix_commit}:{path}"], capture_output=True
+                    ["git", "-C", str(repo), "show", f"{case.fix_commit}:{path}"],
+                    capture_output=True,
                 )
                 if shown.returncode != 0:
-                    raise _EnvironmentFailure(f"hidden test {path}: {shown.stderr.decode().strip()}")
+                    raise _EnvironmentFailure(
+                        f"hidden test {path}: {shown.stderr.decode().strip()}"
+                    )
                 target = tree / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(shown.stdout)
-            ran = _run(
-                tree,
-                ["uv", "run", "--frozen", "--no-sync", "pytest", "-q", "-p", "no:cacheprovider",
-                 "-n", "0", *case.hidden_tests],
-                None,
-            )
+            return _run_hidden_tests(tree, case.hidden_tests)
     except _EnvironmentFailure as exc:
         return TestRun(outcome="ERROR", detail=str(exc))
+
+
+def _run_hidden_tests(tree: Path, tests: tuple[str, ...]) -> TestRun:
+    command = ["uv", "run", "--frozen", "--no-sync", "pytest", "-q", "-p", "no:cacheprovider"]
+    command += ["-n", "0", *tests]
+    try:
+        ran = subprocess.run(
+            command, cwd=tree, capture_output=True, text=True, timeout=TEST_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        # The environment is already built, so a hang is in the code under
+        # test: the pin's (the case is not admitted) or the change's.
+        return TestRun(outcome="FAIL", detail=f"hidden tests ran past {TEST_TIMEOUT_SECONDS}s")
+    except OSError as exc:
+        return TestRun(outcome="ERROR", detail=f"{' '.join(command)}: {exc}")
     tail = "\n".join((ran.stderr + ran.stdout).strip().splitlines()[-15:])
-    return TestRun(outcome=_outcome_of(ran.returncode), detail=f"pytest exit {ran.returncode}\n{tail}")
+    return TestRun(
+        outcome=_outcome_of(ran.returncode), detail=f"pytest exit {ran.returncode}\n{tail}"
+    )
 
 
 def _outcome_of(pytest_exit: int) -> Outcome:
@@ -244,17 +269,16 @@ def _outcome_of(pytest_exit: int) -> Outcome:
     return "ERROR"
 
 
-def _run(tree: Path, command: list[str], step: str | None) -> subprocess.CompletedProcess[str]:
-    """Run `command` in `tree`. A timeout is always ERROR; so is a failure of a named `step`."""
+def _run(tree: Path, command: list[str], step: str) -> None:
+    """Run a setup `step` in `tree`. Any failure, timeout included, is the environment's."""
     try:
         ran = subprocess.run(
-            command, cwd=tree, capture_output=True, text=True, timeout=TEST_TIMEOUT_SECONDS
+            command, cwd=tree, capture_output=True, text=True, timeout=SYNC_TIMEOUT_SECONDS
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise _EnvironmentFailure(f"{' '.join(command)}: {exc}") from exc
-    if step is not None and ran.returncode != 0:
+        raise _EnvironmentFailure(f"{step}: {exc}") from exc
+    if ran.returncode != 0:
         raise _EnvironmentFailure(f"{step} exited {ran.returncode}: {ran.stderr.strip()[-2000:]}")
-    return ran
 
 
 def admit(case: ImplementerCase, repo: Path) -> list[str]:
@@ -262,10 +286,14 @@ def admit(case: ImplementerCase, repo: Path) -> list[str]:
     problems: list[str] = []
     at_pin = score_patch(case, "", repo)
     if at_pin.outcome != "FAIL":
-        problems.append(f"{case.id}: hidden tests at the pin must FAIL, got {at_pin.outcome}\n{at_pin.detail}")
+        problems.append(
+            f"{case.id}: hidden tests at the pin must FAIL, got {at_pin.outcome}\n{at_pin.detail}"
+        )
     with_fix = score_patch(case, fix_patch(case, repo), repo)
     if with_fix.outcome != "PASS":
-        problems.append(f"{case.id}: hidden tests with the fix must PASS, got {with_fix.outcome}\n{with_fix.detail}")
+        problems.append(
+            f"{case.id}: hidden tests with the fix must PASS, got {with_fix.outcome}\n{with_fix.detail}"
+        )
     return problems
 
 
