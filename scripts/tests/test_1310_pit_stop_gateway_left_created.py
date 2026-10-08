@@ -113,8 +113,15 @@ class Run:
 
 
 def _pit_stop(
-    tmp: Path, service: str, *, compose_fails: int = 0, start: str = "ok", up: str = "created"
+    tmp: Path,
+    service: str,
+    *,
+    compose_fails: int = 0,
+    start: str = "ok",
+    up: str = "created",
+    digest: str = "",
 ) -> Run:
+    """`digest`, when given, qualifies the gateway pin: `...:<tag>@<digest>`."""
     host, bin_dir = tmp / "host", tmp / "bin"
     host.mkdir()
     bin_dir.mkdir()
@@ -122,7 +129,7 @@ def _pit_stop(
     (tmp / "compose_fails").write_text(str(compose_fails))
     (host / "docker-compose.syntropic137.yaml").write_text(
         f"services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:v{_VERSION}\n"
-        f"  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v{_VERSION}\n"
+        f"  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v{_VERSION}{digest}\n"
     )
     for name, body in (("docker", _DOCKER), ("ssh", _SSH), ("curl", _CURL)):
         stub = bin_dir / name
@@ -233,3 +240,18 @@ def test_a_gateway_that_will_not_start_aborts_with_the_recovery(
         # Never resumed over a gateway that is down.
         assert [c for c in run.calls if '"active": true' in c]
         assert not [c for c in run.calls if '"active": false' in c]
+
+
+@pytest.mark.parametrize("service", ["gateway", "all"])
+def test_a_target_tag_qualified_by_an_old_digest_is_refused_before_any_swap(
+    tmp_path: Path, service: str
+) -> None:
+    """Docker runs `<tag>@<digest>` by its digest: the target tag in front of
+    an old digest, with the target image loaded, would recreate the gateway
+    from the OLD bytes. The precheck must stop it before compose runs."""
+    run = _pit_stop(tmp_path, service, up="running", digest="@sha256:" + "0" * 64)
+    assert run.proc.returncode == 1
+    pins = {"gateway": "0/1", "all": "1/2"}[service]
+    assert f"pins {pins} services to v{_VERSION}; stage it first" in run.proc.stderr
+    assert not [c for c in run.calls if c.startswith("docker compose")]
+    assert not [c for c in run.calls if '"active": true' in c]

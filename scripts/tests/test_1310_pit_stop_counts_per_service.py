@@ -164,10 +164,24 @@ class TestTheValueIsComparedWhole:
         assert proc.returncode == 1
         assert "0/1 images" in proc.stderr
 
-    def test_a_quoted_digest_qualified_pin_with_a_comment_passes(self, tmp_path: Path) -> None:
+    def test_a_quoted_digest_qualified_pin_with_a_comment_is_refused(self, tmp_path: Path) -> None:
+        """Docker resolves `<tag>@<digest>` by the digest, which nothing proves
+        is the unpushed image `ship` loaded; the right tag in front of it says
+        nothing about the bytes compose would run."""
         compose = (
             f"services:\n  api:\n    image: {_REPO}/syn-api:{_OLD}\n  gateway:\n"
             f'    image: "{_REPO}/syn-gateway:{_NEW}@sha256:{"a" * 64}"  # staged\n'
+        )
+        proc = _precheck(
+            tmp_path, "gateway", api=_OLD, gateway=_NEW, images=_images("gateway"), compose=compose
+        )
+        assert proc.returncode == 1
+        assert "pins 0/1 services" in proc.stderr
+
+    def test_a_quoted_bare_pin_with_a_comment_passes(self, tmp_path: Path) -> None:
+        compose = (
+            f"services:\n  api:\n    image: {_REPO}/syn-api:{_OLD}\n  gateway:\n"
+            f'    image: "{_REPO}/syn-gateway:{_NEW}"  # staged\n'
         )
         proc = _precheck(
             tmp_path, "gateway", api=_OLD, gateway=_NEW, images=_images("gateway"), compose=compose

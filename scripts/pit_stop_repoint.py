@@ -114,12 +114,14 @@ def repoint(compose: str, tag: str, services: tuple[str, ...] = SERVICES) -> Rep
 
 def on_tag(compose: str, tag: str, service: str) -> bool:
     """Whether `service`'s one image line names `REGISTRY/<service>:<tag>`
-    exactly, optionally digest-qualified. Compared whole, never as a pattern."""
+    exactly. Compared whole, never as a pattern.
+
+    A digest-qualified `...:<tag>@sha256:...` is NOT on the tag: Docker
+    resolves a tag-plus-digest reference by the digest alone, and the image
+    `ship` loaded is unpushed, so no digest in a compose file is proven to be
+    it. The repoint writes the bare ref, so a staged file never has one."""
     found = [m["ref"] for m in _IMAGE_LINE.finditer(compose) if _image_name(m["ref"]) == service]
-    if len(found) != 1:
-        return False
-    ref, _, digest = found[0].partition("@")
-    return ref == f"{REGISTRY}/{service}:{tag}" and (not digest or bool(_DIGEST.fullmatch(digest)))
+    return found == [f"{REGISTRY}/{service}:{tag}"]
 
 
 def main(argv: list[str]) -> int:
