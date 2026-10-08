@@ -13,6 +13,7 @@ test_phase_progress.py, which keeps its own three-round definition.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -28,15 +29,17 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseDefinition,
     ReviewVerdict,
 )
-from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
-    PhaseProgress,
-)
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
 from syn_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
 )
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
+        PhaseProgress,
+    )
 
 pytestmark = pytest.mark.unit
 

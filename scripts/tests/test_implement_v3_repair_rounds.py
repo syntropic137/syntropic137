@@ -336,7 +336,12 @@ class TestABlockedReverifyIsRepaired:
     def test_an_unreadable_or_mislabelled_final_report_keeps_the_pr_draft(self) -> None:
         # "Round: 2 of 3" is the line a report written under the old bound
         # carries; it is not this run's round line, so it is unusable.
-        for report in ("", "CERTIFIED\nRound: 1 of 2\n", "CERTIFIED\nRound: 2 of 3\n", "Looks good\n"):
+        for report in (
+            "",
+            "CERTIFIED\nRound: 1 of 2\n",
+            "CERTIFIED\nRound: 2 of 3\n",
+            "Looks good\n",
+        ):
             verdict, actions = _finalize(_injected({_LAST_REVERIFY: report}))
             assert verdict == "FINAL_REPORT_UNUSABLE", report
             assert "ready" not in actions, report
@@ -348,8 +353,7 @@ class TestTheRepairIsBounded:
     ) -> None:
         phases, _ = installed
         reports = {
-            phase: _round_report("BLOCKED", n)
-            for n, phase in enumerate(_REVERIFIES, start=1)
+            phase: _round_report("BLOCKED", n) for n, phase in enumerate(_REVERIFIES, start=1)
         }
         ran = _run(phases, reports)
 
@@ -422,9 +426,7 @@ class TestEveryRoundIsVisibleAndWired:
         for fix, verdict in acts_on.items():
             assert f"artifacts/input/{verdict}" in prompts[fix], fix
             assert f"Round: {fix[-1] if fix != 'fix' else 1} of {_ROUNDS}" in prompts[fix], fix
-        for n, (fix, reverify) in enumerate(
-            zip(_FIXES, _REVERIFIES, strict=True), start=1
-        ):
+        for n, (fix, reverify) in enumerate(zip(_FIXES, _REVERIFIES, strict=True), start=1):
             assert f"artifacts/input/{fix}/fix.md" in prompts[reverify], reverify
             assert f"Round {n} of {_ROUNDS}" in prompts[reverify], reverify
 
