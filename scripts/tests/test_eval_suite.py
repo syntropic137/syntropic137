@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,7 @@ from eval_suite import (
     Expected,
     Launch,
     LoadedSuite,
+    blocking_findings,
     check_commits,
     install_provenance,
     launch_suite,
@@ -82,7 +84,7 @@ _SONNET_WF = "eval-verify-pinned-sonnet-v1"
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v2:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v3:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
     assert {c.source_pr for c in loaded.cases} == {1574, 1649, 1652, 1654, 1679, 1680}
@@ -95,7 +97,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v2:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v3:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -107,7 +109,7 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v2:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v3:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
 
 
@@ -136,7 +138,15 @@ def test_each_verify_variant_differs_from_opus_only_in_the_agent(
 ) -> None:
     """Same cases, different verifier: a score difference must be the verifier alone."""
     refs = {r.id: r for r in load_suite(DEFAULT_SUITE).suite.workflows}
-    assert set(refs) == {"eval-verify-pinned-v1", _CODEX_WF, _SONNET_WF}
+    # The sdlc prompt pair (#1726) differs from opus in the prompt too; its own
+    # tests below hold it to the codex workflow instead.
+    assert set(refs) == {
+        "eval-verify-pinned-v1",
+        _CODEX_WF,
+        _SONNET_WF,
+        "eval-verify-pinned-sdlc-baseline-v1",
+        "eval-verify-pinned-sdlc-lean-v1",
+    }
     opus_path, variant_path = refs["eval-verify-pinned-v1"].path, refs[variant].path
 
     # The prompt files, byte for byte, and the prompt each definition resolves.
@@ -163,6 +173,65 @@ def test_each_verify_variant_differs_from_opus_only_in_the_agent(
     agent = variant_def.phases[0].agent
     assert agent is not None
     assert (agent.provider, agent.model, agent.sandbox) == agent_fields
+
+
+_SDLC_VERIFY = ROOT / "workflows/sdlc/implement-v3/phases/verify.md"
+_BUDGET = "## Spend context like it costs money, because it does"
+_GATES = "## Run the gates"
+
+
+def _sections(prompt: Path) -> dict[str, str]:
+    """A prompt's `## ` sections by heading, each byte for byte with its body."""
+    parts = re.split(r"(?m)^(?=## )", prompt.read_text(encoding="utf-8"))
+    return {p.split("\n", 1)[0]: p for p in parts[1:]}
+
+
+def _sdlc_eval(which: str) -> Path:
+    return ROOT / f"workflows/evals/verify-pinned-sdlc-{which}/phases/verify.md"
+
+
+@pytest.mark.unit
+def test_the_lean_eval_prompt_quotes_the_sdlc_verify_prompt_byte_for_byte() -> None:
+    """The eval measures the prompt the workflow runs, not a paraphrase that drifts from it."""
+    sdlc, lean = _sections(_SDLC_VERIFY), _sections(_sdlc_eval("lean"))
+    quoted = [h for h in lean if h in sdlc]
+    assert {_BUDGET, _GATES, "## Attack the tests", "## Attack the change"} <= set(quoted)
+    for heading in quoted:
+        assert lean[heading] == sdlc[heading], f"{heading!r} drifted from {_SDLC_VERIFY}"
+
+
+@pytest.mark.unit
+def test_the_lean_and_baseline_eval_prompts_differ_only_in_the_budget_and_gates() -> None:
+    """A token difference between the pair must be the prompt change, not the adaptation."""
+    lean_text = _sdlc_eval("lean").read_text(encoding="utf-8")
+    base_text = _sdlc_eval("baseline").read_text(encoding="utf-8")
+    lean, base = _sections(_sdlc_eval("lean")), _sections(_sdlc_eval("baseline"))
+    assert lean_text.split("\n## ", 1)[0] == base_text.split("\n## ", 1)[0]
+    assert _BUDGET in lean and _BUDGET not in base
+    assert list(base) == [h for h in lean if h != _BUDGET]
+    for heading in base:
+        if heading != _GATES:
+            assert lean[heading] == base[heading], heading
+    assert lean[_GATES] != base[_GATES]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("which", ["lean", "baseline"])
+def test_the_sdlc_eval_workflows_are_the_codex_workflow_but_for_identity(which: str) -> None:
+    def comparable(doc: dict[str, object]) -> dict[str, object]:
+        return {k: v for k, v in doc.items() if k not in ("id", "name", "description")}
+
+    ours = _workflow_yaml(f"workflows/evals/verify-pinned-sdlc-{which}/workflow.yaml")
+    codex = _workflow_yaml("workflows/evals/verify-pinned-codex/workflow.yaml")
+    # The one intended difference (#1726): the sdlc prompts run the repo's
+    # gates, which need the dependencies installed while setup has network.
+    # The codex workflow keeps the default, so it is the same eval it was.
+    phases = ours["phases"]
+    assert isinstance(phases, list) and [p["prewarm"] for p in phases] == [True]
+    assert all("prewarm" not in p for p in codex["phases"])  # type: ignore[union-attr]
+    unwarmed = {**ours, "phases": [{k: v for k, v in p.items() if k != "prewarm"} for p in phases]}
+    assert comparable(unwarmed) == comparable(codex)
+    assert ours["id"] == f"eval-verify-pinned-sdlc-{which}-v1"
 
 
 def _is_shallow() -> bool:
@@ -744,8 +813,10 @@ class _Server:
         *,
         attached: bool = False,
         served_phases: list[_ServedPhase] | None = None,
+        report: str = _FINDING,
     ) -> None:
         self.requests: list[httpx.Request] = []
+        self.report = report
         self.installed: str | None = None
         self.phases = served_phases if served_phases is not None else _phases_of(loaded)
         self.attached = attached
@@ -775,7 +846,7 @@ class _Server:
                 "total_output_tokens": 1,
                 "total_cache_creation_tokens": 0,
                 "total_cache_read_tokens": 0,
-                "total_tokens": 2,
+                "total_tokens": 1_234_567,
                 "artifact_ids": ["art-1"],
                 "phases": [
                     {
@@ -937,7 +1008,7 @@ class _Server:
                 200,
                 json={
                     "artifact_id": "art-1",
-                    "content": _FINDING,
+                    "content": self.report,
                     "content_type": "text/markdown",
                     "size_bytes": 10,
                 },
@@ -977,6 +1048,72 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
 
     table = render(loaded, rows)
     assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/6 passed" in table
+    # Tokens are the measure a prompt-cost change is judged by (#1726): each
+    # run's total, and the median over the runs that reported one.
+    assert row.tokens == 1_234_567
+    assert "1,234,567" in table and "median tokens 1,234,567 over 1 run(s)" in table
+
+
+#: A report that blocks only on the workspace: its gates could not install
+#: their dependencies (#1726, modelled on exec-e1709cef93c6; see the fixture).
+_ENVIRONMENT_REPORT = (
+    Path(__file__).parent / "fixtures" / "eval_environment_blocked_report.md"
+).read_text()
+
+
+@pytest.mark.unit
+def test_a_run_blocked_only_on_the_environment_scores_error_not_fail() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded, report=_ENVIRONMENT_REPORT)
+    rows, _ = score_suite(loaded, server.client(), [_LAUNCHED])
+
+    row = next(r for r in rows if r.case == _CASE)
+    assert row.score is not None and not row.score.passed and row.score.errored
+    line = next(line for line in render(loaded, rows).splitlines() if "exec-1" in line)
+    assert " ERROR " in line and " FAIL " not in line
+    assert "0/6 passed (1 ERROR: blocked on the environment" in render(loaded, rows)
+
+
+@pytest.mark.unit
+def test_an_environment_blocker_beside_a_code_blocker_that_misses_is_still_error() -> None:
+    env = blocking_findings(_ENVIRONMENT_REPORT)[0]
+    report = _FINDING.replace("## NON-BLOCKING", env + "\n\n## NON-BLOCKING").replace(
+        "download() builds the id-only key; upload keys by execution, so reads 404.",
+        "logs at the wrong level.",
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.findings == 2 and not score.passed and score.errored
+
+
+@pytest.mark.unit
+def test_an_environment_blocker_never_hides_a_caught_seed() -> None:
+    env = blocking_findings(_ENVIRONMENT_REPORT)[0]
+    report = _FINDING.replace("## NON-BLOCKING", env + "\n\n## NON-BLOCKING")
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.passed and not score.errored
+
+
+@pytest.mark.unit
+def test_a_code_defect_that_discusses_dns_and_network_is_a_fail_not_an_error() -> None:
+    report = _report(
+        (
+            "docker/sidecar-proxy/envoy.yaml:88",
+            "the api.github.com route resolves DNS through the wrong cluster, so network "
+            "egress to GitHub is denied with Operation not permitted and the proxy 503s.",
+        )
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert not score.passed and not score.errored
+
+
+@pytest.mark.unit
+def test_gate_output_outside_blocking_is_not_an_environment_blocker() -> None:
+    report = _report(
+        ("other.py", "drops the key"),
+        non_blocking="uv first failed: dns error reaching files.pythonhosted.org; retried fine.",
+    )
+    score = score_report(_EXPECTED, "blocked", report)
+    assert score.environment_findings == 0 and not score.errored
 
 
 @pytest.mark.unit
@@ -1043,7 +1180,7 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
         c.commit for c in loaded.cases
     ]
     assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
-    assert all(s["tags"] == ["suite-version:2", f"verifier:{_WF}"] for s in starts)
+    assert all(s["tags"] == ["suite-version:3", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1125,13 +1262,13 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     # The case evals are shared by every verifier; the run says which one it was.
     assert all("starting_workflow_id" not in c for c in creates)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:2", f"verifier:{_CODEX_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:3", f"verifier:{_CODEX_WF}")}
     assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v2:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v3:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -1336,8 +1473,8 @@ def test_v1_runs_never_count_toward_v2(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 2]
-    assert versions_run(suite, _CODEX_WF) == [2]
+    assert versions_run(suite, _WF) == [1, 3]
+    assert versions_run(suite, _CODEX_WF) == [2, 3]
 
 
 @pytest.mark.unit
@@ -1468,8 +1605,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 2.0.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 3.0.0")
 
 
 @pytest.mark.unit
@@ -1498,7 +1635,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     `syn workflow install workflows/evals/verify-pinned-codex` records version
     0.0.0 (no manifest), no digest and package name; `syn workflow delete -f`
     archives it. An install declaring no version is refused (provenance guard).
-    `launch` declares 2.0.0 + digest: a different version on an archived
+    `launch` declares 3.0.0 + digest: a different version on an archived
     template, so the update is accepted, the template is active again and the
     recorded provenance is the suite's. No `force` is needed.
     """
@@ -1516,7 +1653,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -1567,7 +1704,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -1582,7 +1719,7 @@ def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
     assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:2", f"verifier:{_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:3", f"verifier:{_WF}")}
 
 
 @pytest.mark.unit
@@ -1596,5 +1733,5 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "2")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "3")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]

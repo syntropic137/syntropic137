@@ -222,6 +222,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         ),
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
+        prewarm=p.prewarm,
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
         skills=[_ref_response(r) for r in p.skills],
@@ -627,6 +628,8 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
         lines.append("    clone_repos: false")
     if not phase.delivers_repo_changes:
         lines.append("    delivers_repo_changes: false")
+    if phase.prewarm:
+        lines.append("    prewarm: true")
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))

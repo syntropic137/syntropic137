@@ -449,6 +449,7 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 phase_name=phase.name,
                 clone_repos=phase.clone_repos,
+                prewarm=phase.prewarm,
                 pinned_commits=pinned_commits,
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
@@ -496,6 +497,7 @@ class WorkspaceProvisionHandler:
         *,
         phase_name: str,
         clone_repos: bool,
+        prewarm: bool = False,
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
         include_codex_auth: bool,
@@ -523,6 +525,7 @@ class WorkspaceProvisionHandler:
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             clone_repos=clone_repos,
+            prewarm=prewarm,
             pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
             continued_branches=continued_branches,
             require_github=bool(effective_repos),

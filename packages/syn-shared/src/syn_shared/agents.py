@@ -52,8 +52,12 @@ class PhaseSandbox(StrEnum):
     """Read, write and run commands inside ``/workspace``, including
     ``artifacts/output/`` and git commits; writes outside it are denied. The
     least authority a phase can finish with, so prefer it for any phase that
-    does not need to reach outside the workspace. Network egress is available
-    at every level."""
+    does not need to reach outside the workspace. NO NETWORK: codex's
+    workspace-write sandbox denies egress unless
+    ``sandbox_workspace_write.network_access`` is set, which this platform does
+    not set, so a gate that installs packages fails on DNS here (#1726: every
+    sdlc verify eval run blocked on files.pythonhosted.org). Only
+    ``FULL_ACCESS`` has the network."""
 
     FULL_ACCESS = "full-access"
     """No codex sandbox: unrestricted filesystem access inside the workspace

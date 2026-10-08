@@ -168,6 +168,9 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 delivers_repo_changes=_as_bool(
                     p.get("delivers_repo_changes", True), "delivers_repo_changes"
                 ),
+                # Dropping this sends an offline agent to gates whose
+                # dependencies were never installed (#1726).
+                prewarm=_as_bool(p.get("prewarm", False), "prewarm"),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as

@@ -189,7 +189,9 @@ async def _run_setup_script(
         result = await ws.execute(
             ["bash", "/workspace/.setup/setup.sh"],
             environment=setup_env,
-            timeout_seconds=get_settings().setup_phase_timeout_seconds,
+            timeout_seconds=secrets.setup_timeout_seconds(
+                get_settings().setup_phase_timeout_seconds
+            ),
         )
         if not is_status_lost(result) or attempt == _SETUP_ATTEMPTS:
             return result

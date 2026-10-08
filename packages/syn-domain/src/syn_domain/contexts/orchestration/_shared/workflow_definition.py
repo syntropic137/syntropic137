@@ -433,6 +433,26 @@ class PhaseYamlDefinition(BaseModel):
     or verify phase - one whose deliverable is a report - and leave it alone
     anywhere a branch is the point."""
 
+    prewarm: bool = False
+    """Install the cloned repos' locked dependencies during setup, while it has network (#1726).
+
+    The agent may run with no network at all: codex's ``workspace-write``
+    sandbox is all-or-nothing, so a phase that must run the repo's gates
+    cannot download what those gates import, and every gate fails installing
+    instead of checking. Setup is the one step that still has network, and it
+    runs before the agent starts, so the installs happen there: ``uv sync
+    --frozen`` where a ``uv.lock`` is committed, ``pnpm install
+    --frozen-lockfile`` where a ``pnpm-lock.yaml`` is, and ``cargo fetch
+    --locked`` for each ``Cargo.lock`` (installing the stable toolchain first
+    when the image has rustup but no cargo). Frozen, so the pinned checkout's
+    lockfiles are what is installed and none is rewritten.
+
+    It grants the AGENT nothing: its sandbox, and so its network, is
+    unchanged. A failed or timed-out install fails setup, so the phase never
+    starts against half a dependency tree. Off by default, because it costs
+    every phase that declares it the install time, and requires
+    ``clone_repos`` - there is nothing to install into without a checkout."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -626,6 +646,14 @@ class PhaseYamlDefinition(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _prewarm_needs_a_checkout(self) -> PhaseYamlDefinition:
+        """`prewarm` installs into the checkout, so it is refused without one (#1726)."""
+        if self.prewarm and not self.clone_repos:
+            msg = f"Phase '{self.id}': prewarm installs into the checkout; it needs clone_repos"
+            raise ValueError(msg)
+        return self
+
     def _fallback_agent_domain(self) -> FallbackAgent | None:
         """The declared fallback_agent as a domain value, or None when absent."""
         return self.fallback_agent.to_domain() if self.fallback_agent else None
@@ -669,6 +697,7 @@ class PhaseYamlDefinition(BaseModel):
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
             delivers_repo_changes=self.delivers_repo_changes,
+            prewarm=self.prewarm,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,

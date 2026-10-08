@@ -17,6 +17,9 @@
 # v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
 # v2: two cases added (#1679, #1680) and the codex verifier. The Sonnet
 #     verifier was added later under v2: a new workflow, no existing table.
+# v3: the sdlc baseline and lean verifiers declare `prewarm: true` (#1726), so
+#     their gates run against installed dependencies; a changed workflow is a
+#     new experiment. No case or other verifier changed.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
@@ -27,7 +30,7 @@ id: verifier-seed-v1
 # version and verifier runs into those same evals; the run carries
 # `suite-version:<n>` and `verifier:<workflow id>`.
 eval_suite: verifier-seed
-version: 2
+version: 3
 goal: >
   Does the verifier block a change that carries a known escaped bug, and name
   the defect and the file it lives in?
@@ -42,6 +45,17 @@ workflows:
       verify: opus
   - id: eval-verify-pinned-codex-v1
     path: workflows/evals/verify-pinned-codex/workflow.yaml
+    models:
+      verify: gpt-sol
+  # The sdlc-implement-v3 verify prompt before and after its context budget
+  # (#1726). Same cases, same model, same adaptation: the pair measures what
+  # the prompt change does to tokens and to detection.
+  - id: eval-verify-pinned-sdlc-baseline-v1
+    path: workflows/evals/verify-pinned-sdlc-baseline/workflow.yaml
+    models:
+      verify: gpt-sol
+  - id: eval-verify-pinned-sdlc-lean-v1
+    path: workflows/evals/verify-pinned-sdlc-lean/workflow.yaml
     models:
       verify: gpt-sol
   # Sonnet 5.5 against Opus 5.5 at half the price. `sonnet` is the alias the
@@ -59,4 +73,14 @@ history:
       - binary-artifact-minio-key
       - codex-cost-limit
       - execution-id-as-eval-id
+      - shared-esp-stream
+  - version: 2
+    tag: verifier-seed-v1:v2:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - binary-artifact-minio-key
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - live-commits-unvalidated-sha
+      - repo-privacy-ignores-app
       - shared-esp-stream

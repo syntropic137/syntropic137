@@ -137,9 +137,14 @@ Before pushing, run:
 ```
 mkdir -p /workspace/.tmp /workspace/.cache
 export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv
-just preflight-agent
-uv run pytest -m unit -q
+just preflight-agent > /workspace/.tmp/preflight.log 2>&1; echo "exit=$?"
+tail -n 40 /workspace/.tmp/preflight.log
+uv run pytest -m unit -q > /workspace/.tmp/unit.log 2>&1; echo "exit=$?"
+tail -n 40 /workspace/.tmp/unit.log
 ```
+
+Each log stays on disk, so `grep` it for a failure rather than reading it
+whole: everything a command prints is re-read on every later turn.
 
 `preflight-agent`, not `preflight`: this workspace ships `just`, `uv` and
 `node` and nothing else, so the full target's `vsa`, Cargo, pnpm and Docker
@@ -148,7 +153,7 @@ either - `/tmp` is mounted `noexec` and `just` materialises every shebang
 recipe into a temp directory, so without them the gate dies on its first recipe
 before it reaches your change (#1100).
 
-Record the final output of both commands in `fix.md`, and commit any tracked
+Record the exit code and final output of both commands in `fix.md`, and commit any tracked
 auto-fixes before pushing: lint the commit, not the worktree, or local green
 becomes remote red.
 

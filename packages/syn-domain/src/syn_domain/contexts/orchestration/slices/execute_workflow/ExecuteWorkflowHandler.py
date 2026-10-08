@@ -688,6 +688,9 @@ class ExecuteWorkflowHandler:
                     # that is judged strictly rather than one that is not
                     # judged at all.
                     delivers_repo_changes=phase.delivers_repo_changes,
+                    # Dropping this sends an offline agent to gates whose
+                    # dependencies were never installed (#1726).
+                    prewarm=phase.prewarm,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

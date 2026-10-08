@@ -570,6 +570,8 @@ class PhaseDefinitionResponse(BaseModel):
     fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
+    # #1726: setup installs the clones' locked dependencies before the agent.
+    prewarm: bool = False
     sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)

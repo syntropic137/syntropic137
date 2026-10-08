@@ -17,6 +17,44 @@ This phase exists because a phase that makes a change and then checks it will
 shortchange the checking: the change feels like the deliverable, and the check
 feels like paperwork. You did not write this code. Treat it as suspect.
 
+## Spend context like it costs money, because it does
+
+Every byte a command prints stays in your context and is re-read on EVERY later
+turn. A 30k-token test log read at turn 20 of 200 is paid for 180 more times.
+Measured on this workflow (2026-10-07, 14 runs): verify used a median 8.8M
+tokens over ~200 tool calls at ~57k tokens per call, 99% of it cached re-reads
+and only 10-41k of it output. The cost is not thinking; it is re-reading what
+earlier commands printed. None of the rules below removes a check. They change
+how much of each check's output reaches your context.
+
+- **Read the diff first, and only what it touches.** Start from
+  `git diff --stat origin/main...HEAD`, then read the diff itself per file
+  (`git diff origin/main...HEAD -- <file>`). Open other files only to trace a
+  value the diff adds or changes to its producer or consumer, and read the
+  lines you need (`sed -n '<a>,<b>p'`, `grep -n`), not whole files. Never dump
+  a lockfile, a generated file or a recording; `grep` it.
+- **Send long output to a file, read the end and the failures.** Any command
+  that can print more than a screen (the gate, test suites, `gh run view
+  --log`, builds) runs as
+  `<cmd> > /workspace/.tmp/<name>.log 2>&1; echo "exit=$?"`, then
+  `tail -n 40` of the log, plus `grep -nE '<what you need>' | head -n 40` for
+  anything specific. The log stays on disk, so you can grep it again later
+  instead of re-running the command. The exit code is what decides pass or
+  fail, never the absence of red text in a tail.
+- **Run the full gate and the full unit suite once each**, as the gate section
+  below says. Everything after that is targeted: a mutation is judged by
+  running the one test file it targets (`uv run pytest -q <file>`), not the
+  suite again.
+- **Write the report early and keep it current.** Write
+  `artifacts/output/verify.md` with the head SHA and a provisional verdict
+  before the first long-running command, and update it as each section
+  finishes. A phase killed mid-gate then still delivers what it established.
+- **Soft budget: about 80 tool calls.** That is the order of what an
+  independent review of one change needs. If you pass it, stop opening new
+  lines of inquiry, finish the ones that bear on a blocker, and write the
+  report. Never skip a required section to stay under it: say which sections
+  you completed and which you could not.
+
 ## First: check out the code you are verifying
 
 **You are in a fresh workspace with a fresh clone of the default branch.** The
@@ -40,12 +78,17 @@ Run the gate as:
 ```
 mkdir -p /workspace/.tmp /workspace/.cache
 export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv
-just preflight-agent
-uv run pytest -m unit -q
+just preflight-agent > /workspace/.tmp/preflight.log 2>&1; echo "exit=$?"
+tail -n 40 /workspace/.tmp/preflight.log
+grep -nE 'NOT RUN|FAIL|error:' /workspace/.tmp/preflight.log | head -n 40
+uv run pytest -m unit -q > /workspace/.tmp/unit.log 2>&1; echo "exit=$?"
+tail -n 40 /workspace/.tmp/unit.log
 ```
 
-Paste the final lines of each. If either is not green, that is the finding and
-you should stop and report it rather than working around it.
+Paste the exit code and the final lines of each. If either is not green (a
+non-zero exit), that is the finding and you should stop and report it rather
+than working around it. On a failure, `grep` the log for the failing recipe or
+test rather than reading the whole log.
 
 **The `TMPDIR=` prefix is a temporary workaround, not decoration.** This
 workspace mounts `/tmp` `noexec` (deliberate hardening), and `just` materialises

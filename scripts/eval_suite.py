@@ -65,6 +65,7 @@ import argparse
 import hashlib
 import os
 import re
+import statistics
 import subprocess
 import sys
 import time
@@ -432,6 +433,10 @@ class Score(_Frozen):
     """The expected file the best-matching blocking finding names, by file name."""
     missing_keywords: tuple[tuple[str, ...], ...]
     """Keyword groups no word of which that same finding contains."""
+    environment_findings: int = 0
+    """How many blocking findings are about the workspace, not the code: a gate
+    that could not install its dependencies because the package index was out
+    of reach (#1726)."""
 
     @property
     def matched(self) -> bool:
@@ -440,6 +445,13 @@ class Score(_Frozen):
     @property
     def passed(self) -> bool:
         return self.verdict == "blocked" and self.matched
+
+    @property
+    def errored(self) -> bool:
+        """The run measured the workspace, not the verifier: it missed the seed
+        while blocking on the environment. Never a FAIL - a verifier that could
+        not run its gates has not been shown to miss anything (#1726)."""
+        return not self.passed and self.environment_findings > 0
 
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
@@ -497,6 +509,23 @@ def blocking_findings(report: str) -> list[str]:
         if finding is not None and skip is None:
             findings[-1].append(line)
     return ["\n".join(lines) for lines in findings]
+
+
+#: What a gate prints when it cannot reach a package index, and the indexes
+#: themselves. A finding is about the environment only when it says one of
+#: these: a code defect that merely discusses DNS, networking or a proxy names
+#: none of them, so it stays a finding about the code (#1726).
+_ENVIRONMENT_SIGNATURE = re.compile(
+    r"files\.pythonhosted\.org|\bpypi\.org\b|registry\.npmjs\.org|registry\.yarnpkg\.com"
+    r"|temporary failure in name resolution|failed to lookup address information"
+    r"|could not (?:install|download|resolve) (?:its |the )?(?:dependencies|packages|deps)",
+    re.IGNORECASE,
+)
+
+
+def is_environment_finding(finding: str) -> bool:
+    """The blocking finding is the workspace failing, not the change under review."""
+    return _ENVIRONMENT_SIGNATURE.search(finding) is not None
 
 
 def finding_fields(finding: str) -> dict[str, str]:
@@ -562,7 +591,11 @@ def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Sc
         if (named is None, len(missing)) < (best[0] is None, len(best[1])):
             best = (named, missing)
     return Score(
-        verdict=verdict, findings=len(findings), named_file=best[0], missing_keywords=best[1]
+        verdict=verdict,
+        findings=len(findings),
+        named_file=best[0],
+        missing_keywords=best[1],
+        environment_findings=sum(1 for text in findings if is_environment_finding(text)),
     )
 
 
@@ -613,6 +646,8 @@ class _Execution(_Read):
     status: str
     review_verdict: Verdict | None = None
     total_cost_usd: Decimal = Decimal(0)
+    total_tokens: int = 0
+    """Input, output, cache creation and cache reads: what a turn re-reads is counted."""
     total_duration_seconds: float | None = None
     unknown_duration_phase_count: int = 0
     phases: list[_Phase] = Field(default_factory=list)
@@ -686,6 +721,7 @@ class ScoredRun(_Frozen):
     status: str
     score: Score | None
     cost_usd: Decimal | None
+    tokens: int | None
     duration: str
     models: str
 
@@ -725,6 +761,7 @@ def _row(case: str, eval_id: str, run_id: str | None, status: str) -> ScoredRun:
         status=status,
         score=None,
         cost_usd=None,
+        tokens=None,
         duration="-",
         models="-",
     )
@@ -786,6 +823,7 @@ def score_suite(
                     status=run.status,
                     score=score,
                     cost_usd=run.total_cost_usd,
+                    tokens=run.total_tokens,
                     duration=_duration_of(run),
                     models=_models_of(run),
                 )
@@ -904,6 +942,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
         "matched",
         "pass",
         "cost",
+        "tokens",
         "duration",
         "models",
     )
@@ -925,8 +964,9 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
                 )
                 if s
                 else "-",
-                ("PASS" if s.passed else "FAIL") if s else "-",
+                ("PASS" if s.passed else "ERROR" if s.errored else "FAIL") if s else "-",
                 f"${r.cost_usd:.2f}" if r.cost_usd is not None else "-",
+                f"{r.tokens:,}" if r.tokens is not None else "-",
                 r.duration,
                 r.models,
             )
@@ -936,9 +976,19 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
         "  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in lines
     )
     passed = sum(1 for r in rows if r.score and r.score.passed)
+    errored = sum(1 for r in rows if r.score and r.score.errored)
+    errors = (
+        f" ({errored} ERROR: blocked on the environment, not scored as a miss)" if errored else ""
+    )
+    tokens = [r.tokens for r in rows if r.tokens is not None]
+    median = (
+        f"  median tokens {statistics.median(tokens):,.0f} over {len(tokens)} run(s)"
+        if tokens
+        else ""
+    )
     return (
         f"suite {loaded.tag}  version {loaded.version}  workflow {loaded.workflow.id}  "
-        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed"
+        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed{errors}{median}"
         + "".join(f"\nignored: {line}" for line in unrecorded)
     )
 

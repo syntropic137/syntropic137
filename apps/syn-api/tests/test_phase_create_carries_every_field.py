@@ -75,6 +75,8 @@ _EVERY_FIELD: Mapping[str, object] = {
     # turns the unpushed-work gate's reading of an uncommitted change from
     # "unsaved deliverable" into "build-tool side effect" (#1308).
     "delivers_repo_changes": False,
+    # NOT the default (False): a dropped mapping falls back and fails (#1726).
+    "prewarm": True,
     "argument_hint": "[task]",
     "model": "claude-opus-5-5",
     # NOT the default (None). Claude, not codex: a codex phase cannot carry

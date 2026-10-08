@@ -5831,6 +5831,11 @@ export interface components {
              */
             delivers_repo_changes: boolean;
             /**
+             * Prewarm
+             * @default false
+             */
+            prewarm: boolean;
+            /**
              * Sandbox
              * @default full-access
              */

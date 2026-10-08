@@ -71,6 +71,9 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # something - and dropping it is not inert, it silently restores the
     # failure the field exists to stop.
     "delivers_repo_changes": ("ExecutablePhase", "delivers_repo_changes"),
+    # Read by provisioning to install the clones' dependencies during setup
+    # (#1726). Dropping it sends an offline agent to gates with none installed.
+    "prewarm": ("ExecutablePhase", "prewarm"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),
