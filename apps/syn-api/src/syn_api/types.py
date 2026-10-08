@@ -1101,11 +1101,18 @@ class EvalRunStatsResponse(BaseModel):
     incomplete_cost_count: int
     """Runs left out of the median cost: unknown, or only a lower bound."""
     cost_per_pass_usd: Decimal | None
-    """Known spend of every run (FAIL, ERROR and unscored too) over the PASS runs.
+    """Known spend of the SCORED runs (PASS, FAIL and ERROR) over the PASS runs.
 
-    Null when nothing passed or no cost is known."""
+    Unscored runs are left out: they have no verdict yet. Null when nothing
+    passed or no cost is known."""
     cost_per_pass_display: str
-    """Says it is a lower bound when some run's cost is unknown or incomplete."""
+    """Says it is a lower bound when some scored run's cost is unknown or incomplete."""
+    pass_count: int
+    fail_count: int
+    error_count: int
+    """Scored, but the scorer could not judge: out of the pass rate, in cost per PASS."""
+    unscored_count: int
+    """No verdict yet: out of the pass rate and out of cost per PASS."""
 
 
 class EvalVariantResponse(BaseModel):

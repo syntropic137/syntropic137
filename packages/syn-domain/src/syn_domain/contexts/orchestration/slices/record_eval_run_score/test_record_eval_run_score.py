@@ -240,9 +240,11 @@ class TestSummarize:
 
         assert (summary.run_count, summary.pass_rate, summary.last_verdict) == (0, None, None)
         assert summary.variants == ()
-        assert summary.stats == EvalRunStats(None, 0, None, 0, None)
+        assert summary.stats == EvalRunStats(None, 0, None, 0, None, 0, 0, 0, 0, 0)
 
-    def test_duration_and_cost_are_medians_and_cost_per_pass_pays_for_every_run(self) -> None:
+    def test_duration_and_cost_are_medians_and_cost_per_pass_pays_for_every_scored_run(
+        self,
+    ) -> None:
         opus = "claude-opus-5-5"
         runs = [
             _run("1", "wf-a", [opus], Verdict.PASS, "1.00", "2026-10-01T00:00:00+00:00", None, 60),
@@ -259,10 +261,15 @@ class TestSummarize:
         # Even count of known durations (60, 120, 600, 3000): the mean of the middle two.
         assert variant.stats.median_duration_seconds == pytest.approx(360)
         assert variant.stats.median_cost_usd == Decimal("2.50")
-        # 12.00 known spend - the FAIL, the ERROR and the unscored run included -
-        # over 2 PASS runs. Run 5's cost is unknown, so this is a lower bound.
-        assert variant.stats.cost_per_pass_usd == Decimal("6.00")
+        # 6.00 known spend of the scored runs - the FAIL and the ERROR included,
+        # the unscored run's 6.00 not - over 2 PASS runs. Run 5 is scored and its
+        # cost is unknown, so this is a lower bound.
+        assert variant.stats.cost_per_pass_usd == Decimal("3.00")
         assert variant.stats.incomplete_cost_count == 1
+        assert variant.stats.incomplete_spend_count == 1
+        s = variant.stats
+        assert (s.pass_count, s.fail_count, s.error_count, s.unscored_count) == (2, 1, 1, 1)
+        assert variant.stats.judged_count == 3
         assert variant.stats.incomplete_duration_count == 1
         assert variant.last_verdict is Verdict.PASS
 
@@ -305,7 +312,29 @@ class TestSummarize:
         assert (stats.median_cost_usd, stats.incomplete_cost_count) == (Decimal("4.00"), 1)
         assert (stats.median_duration_seconds, stats.incomplete_duration_count) == (300.0, 1)
         assert stats.cost_per_pass_usd == Decimal("2.50")
+        assert stats.incomplete_spend_count == 1
         assert variant.avg_cost_usd == Decimal("4.00")
+
+    def test_cost_per_pass_ignores_unscored_spend_and_keeps_error_spend(self) -> None:
+        """An unscored run has no verdict, so its spend is not the price of a PASS.
+        An ERROR run was scored, and what it cost is."""
+        opus = "claude-opus-5-5"
+        passed = _run("1", "wf-a", [opus], Verdict.PASS, "0.33", "2026-10-01T00:00:00+00:00")
+        errored = _run("2", "wf-a", [opus], Verdict.ERROR, "0.22", "2026-10-02T00:00:00+00:00")
+        baseline = summarize([passed, errored]).stats
+        assert baseline.cost_per_pass_usd == Decimal("0.55")
+
+        for cost in ("0.38", "1.03", "1000.00", None):
+            unscored = _run("3", "wf-a", [opus], None, cost, "2026-10-03T00:00:00+00:00")
+            partial = replace(unscored, unpriced_observation_count=1)
+            for extra in (unscored, partial):
+                stats = summarize([passed, errored, extra]).stats
+                assert stats.cost_per_pass_usd == baseline.cost_per_pass_usd, (cost, extra)
+                assert stats.incomplete_spend_count == 0
+                assert stats.unscored_count == 1
+
+        dearer_error = replace(errored, total_cost_usd=Decimal("1.22"))
+        assert summarize([passed, dearer_error]).stats.cost_per_pass_usd == Decimal("1.55")
 
 
 class TestBatchReadsForAPageOfRuns:

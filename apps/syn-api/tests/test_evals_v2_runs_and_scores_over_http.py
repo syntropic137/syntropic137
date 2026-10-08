@@ -465,10 +465,14 @@ class TestSummary:
 
         assert (len(page["items"]), page["total"]) == (1, 5)
         assert sum(v["run_count"] for v in shown["variants"]) == 5
-        # Costs 1.00, 3.00, 0.50, 2.00, 0.25: median 1.00. Spend 6.75 over two PASS runs.
+        # Costs 1.00, 3.00, 0.50, 2.00, 0.25: median 1.00 over every run. Cost per
+        # PASS is the SCORED spend 6.50 (ERROR's 2.00 in, unscored r5's 0.25 out)
+        # over two PASS runs.
         assert shown["stats"]["median_cost_display"] == "$1.00"
-        assert Decimal(shown["stats"]["cost_per_pass_usd"]) == Decimal("3.375")
-        assert shown["stats"]["cost_per_pass_display"] == "$3.38"
+        assert Decimal(shown["stats"]["cost_per_pass_usd"]) == Decimal("3.25")
+        assert shown["stats"]["cost_per_pass_display"] == "$3.25"
+        counts = ("pass_count", "fail_count", "error_count", "unscored_count")
+        assert [shown["stats"][k] for k in counts] == [2, 1, 1, 1]
 
     async def test_a_lower_bound_is_never_shown_as_a_whole_cost_or_duration(
         self, client: AsyncClient, lane2: _Lane2
@@ -494,7 +498,7 @@ class TestSummary:
         assert shown["stats"]["incomplete_duration_count"] == 1
         # The other four are still running, so their live durations are the median.
         assert shown["stats"]["median_duration_display"].endswith(" (excl. 1 incomplete)")
-        assert shown["stats"]["cost_per_pass_display"] == ">=$3.38 (partial)"
+        assert shown["stats"]["cost_per_pass_display"] == ">=$3.25 (partial)"
         [v1_opus] = [
             v
             for v in shown["variants"]

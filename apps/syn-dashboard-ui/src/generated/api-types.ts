@@ -3738,6 +3738,14 @@ export interface components {
             cost_per_pass_usd: string | null;
             /** Cost Per Pass Display */
             cost_per_pass_display: string;
+            /** Pass Count */
+            pass_count: number;
+            /** Fail Count */
+            fail_count: number;
+            /** Error Count */
+            error_count: number;
+            /** Unscored Count */
+            unscored_count: number;
         };
         /**
          * EvalVariantResponse

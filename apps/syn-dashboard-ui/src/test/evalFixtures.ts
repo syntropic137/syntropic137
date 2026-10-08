@@ -20,6 +20,10 @@ export function stats(overrides: Partial<EvalRunStats> = {}): EvalRunStats {
     incomplete_cost_count: 1,
     cost_per_pass_usd: '0.6185',
     cost_per_pass_display: '>=$0.62 (partial)',
+    pass_count: 2,
+    fail_count: 1,
+    error_count: 0,
+    unscored_count: 0,
     ...overrides,
   }
 }
