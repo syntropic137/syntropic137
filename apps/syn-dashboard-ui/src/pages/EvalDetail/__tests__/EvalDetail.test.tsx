@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { EvalRun } from '../../../api/evals'
-import { LONG_MODEL, evalRun, evalSummary, json, runPage, variant } from '../../../test/evalFixtures'
+import { LONG_MODEL, evalRun, evalSummary, json, runPage, variant, withoutStats } from '../../../test/evalFixtures'
 import { EvalDetail } from '../EvalDetail'
 
 function serve(summary = evalSummary(), runs = runPage([evalRun()])) {
@@ -111,18 +111,40 @@ describe('EvalDetail', () => {
     // One run on this page; the eval has 120. Every figure in the strip is
     // the eval-level display string, which the page could not have derived
     // from the runs it holds.
-    serve(evalSummary({ run_count: 120, scored_count: 97, pass_rate_display: '41% judged' }), runPage([evalRun()], 120))
+    const counts = { pass_count: 37, fail_count: 53, error_count: 7, unscored_count: 23 }
+    const whole = evalSummary({ run_count: 120, scored_count: 97, pass_rate_display: '41% judged' })
+    serve({ ...whole, stats: { ...whole.stats!, ...counts } }, runPage([evalRun()], 120))
     renderDetail()
     const strip = await screen.findByRole('region', { name: 'Summary' })
 
     expect(within(strip).getByText('41% judged')).toBeInTheDocument()
     expect(within(strip).getByText(/ERROR and unscored excluded/)).toBeInTheDocument()
     expect(within(strip).getByText('97 / 120')).toBeInTheDocument()
-    expect(within(strip).getByText('over all 120 runs')).toBeInTheDocument()
+    expect(within(strip).getByText('37 PASS · 53 FAIL · 7 ERROR · 23 unscored')).toBeInTheDocument()
     expect(within(strip).getByText('18m all')).toBeInTheDocument()
     expect(within(strip).getByText('$0.39 all')).toBeInTheDocument()
     expect(within(strip).getByText('$0.58 all')).toBeInTheDocument()
     expect(screen.getByText('Workflow × version × models, over all 120 runs')).toBeInTheDocument()
+  })
+
+  it('renders an API response with no stats (an API older than #1772) instead of crashing', async () => {
+    const legacy = withoutStats(
+      evalSummary({
+        variants: [withoutStats(variant()), withoutStats(variant({ workflow_id: 'wf-fast', pass_rate: 0.1 }))],
+      }),
+    )
+    expect('stats' in legacy || legacy.variants!.some((v) => 'stats' in v)).toBe(false)
+    serve(legacy)
+    renderDetail()
+    const strip = await screen.findByRole('region', { name: 'Summary' })
+
+    expect(within(strip).getByText(/Stats unavailable/)).toBeInTheDocument()
+    expect(within(strip).getByText('3 / 3')).toBeInTheDocument()
+    expect(screen.getByText('wf-fast')).toBeInTheDocument()
+    expect(screen.getAllByText('stats unavailable').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-best]')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /Median cost/ }))
+    await waitFor(() => expect(document.querySelector('a[href="/executions/exec-1"]')).not.toBeNull())
   })
 
   it('keeps every run on the timeline, older than the first page included, while the table pages', async () => {

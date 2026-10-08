@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { evalRun } from '../../../test/evalFixtures'
 import { VERDICT_COLOURS, UNSCORED_COLOUR } from '../../../utils/evalVerdict'
@@ -20,6 +20,27 @@ describe('EvalRunsChart', () => {
     const { container } = render(<EvalRunsChart runs={[evalRun()]} />)
     const [only] = markers(container)
     expect(only.getAttribute('cx')).toBe('300')
+  })
+
+  it('sizes its viewBox to the rendered width, so 11-unit labels stay 11px on a 411px phone', () => {
+    let report: ResizeObserverCallback = () => {}
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: ResizeObserverCallback) {
+          report = cb
+        }
+        observe() {}
+        disconnect() {}
+        unobserve() {}
+      },
+    )
+    const { container } = render(<EvalRunsChart runs={[evalRun()]} />)
+    act(() => report([{ contentRect: { width: 411 } } as ResizeObserverEntry], {} as ResizeObserver))
+    const svg = container.querySelector('svg') as SVGSVGElement
+    expect(svg.getAttribute('viewBox')).toMatch(/^0 0 411 /)
+    expect(svg.querySelector('text')?.getAttribute('font-size')).toBe('11')
+    vi.unstubAllGlobals()
   })
 
   it('colours each marker by its verdict, with unscored runs apart from all three', () => {

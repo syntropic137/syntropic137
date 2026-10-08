@@ -2,15 +2,19 @@ import { clsx } from 'clsx'
 import { useState } from 'react'
 
 import type { EvalVariant } from '../../api/evals'
+import { useIsMobile } from '../../hooks/useMediaQuery'
 import { formatRelativeTime } from '../../utils/dateFormatters'
 import {
   bestVariantKey,
+  judgedLabel,
   sortVariants,
+  STATS_UNAVAILABLE,
   variantKey,
   type VariantSortDir,
   type VariantSortKey,
 } from '../../utils/evalVariants'
-import { VerdictPill } from './VerdictPill'
+import { EvalVariantCards } from './EvalVariantCards'
+import { EvalVariantLabel } from './EvalVariantLabel'
 
 const COLUMNS: { key: VariantSortKey; label: string; firstDir: VariantSortDir }[] = [
   { key: 'runs', label: 'Runs', firstDir: 'desc' },
@@ -47,28 +51,24 @@ function SortHeader({ column, sort, onSort }: { column: (typeof COLUMNS)[number]
 
 function VariantRow({ v, best }: { v: EvalVariant; best: boolean }) {
   const cell = 'px-3 py-2 text-right tabular-nums text-[var(--color-text-secondary)]'
+  const s = v.stats
   return (
     <tr
       data-best={best || undefined}
       className={clsx('border-b border-[var(--color-border)] last:border-0', best && 'bg-emerald-500/5 shadow-[inset_3px_0_0_#10b981]')}
     >
       <td className="break-all px-3 py-2">
-        <div className="text-[var(--color-text-primary)]">
-          {v.workflow_id}
-          {v.workflow_version && <span className="text-[var(--color-text-muted)]"> @ {v.workflow_version}</span>}
-          {best && <span className="ml-2 whitespace-nowrap rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">Best</span>}
-        </div>
-        <div className="text-xs text-[var(--color-text-muted)]">{v.models.length ? v.models.join(', ') : 'no model reported'}</div>
-        <div className="mt-1">
-          <VerdictPill verdict={v.last_verdict} />
-        </div>
+        <EvalVariantLabel v={v} best={best} />
       </td>
       <td className={cell}>{v.run_count}</td>
-      <td className={clsx(cell, 'text-[var(--color-text-primary)]')}>{v.pass_rate_display}</td>
-      <td className={cell}>{v.stats.median_duration_display}</td>
-      <td className={cell} title={`Cost per PASS ${v.stats.cost_per_pass_display}`}>
-        {v.stats.median_cost_display}
-        <div className="text-[11px] text-[var(--color-text-muted)]">{v.stats.cost_per_pass_display} / PASS</div>
+      <td className={clsx(cell, 'text-[var(--color-text-primary)]')}>
+        {v.pass_rate_display}
+        <div className="text-[11px] text-[var(--color-text-muted)]">{judgedLabel(v) ?? STATS_UNAVAILABLE}</div>
+      </td>
+      <td className={cell}>{s?.median_duration_display ?? STATS_UNAVAILABLE}</td>
+      <td className={cell}>
+        {s?.median_cost_display ?? STATS_UNAVAILABLE}
+        {s && <div className="text-[11px] text-[var(--color-text-muted)]">{s.cost_per_pass_display} / PASS</div>}
       </td>
       <td className={cell} title={v.last_run_at ?? undefined}>
         {formatRelativeTime(v.last_run_at)}
@@ -77,18 +77,8 @@ function VariantRow({ v, best }: { v: EvalVariant; best: boolean }) {
   )
 }
 
-/**
- * The Compare table: one row per (workflow, workflow version, observed models)
- * variant, sortable, with the best one marked. Every figure is the server's,
- * over all of the eval's runs. On a narrow screen the table scrolls inside its
- * own container, never the page.
- */
-export function EvalVariantsTable({ variants }: { variants: readonly EvalVariant[] }) {
+function VariantsTable({ variants, best }: { variants: readonly EvalVariant[]; best: string | null }) {
   const [sort, setSort] = useState<Sort>({ key: 'pass_rate', dir: 'desc' })
-  if (variants.length === 0) {
-    return <p className="p-4 text-sm text-[var(--color-text-muted)]">No runs yet, so nothing to compare.</p>
-  }
-  const best = bestVariantKey(variants)
   return (
     <div className="overflow-x-auto" data-testid="variants-scroll">
       <table className="w-full min-w-[40rem] table-fixed text-sm">
@@ -108,6 +98,22 @@ export function EvalVariantsTable({ variants }: { variants: readonly EvalVariant
       </table>
     </div>
   )
+}
+
+/**
+ * The Compare view: one entry per (workflow, workflow version, observed
+ * models) variant, with the best one marked. Every figure is the server's,
+ * over all of the eval's runs. A sortable table on a wide screen; on a phone,
+ * one card per variant (by pass rate), so no figure hides behind a swipe.
+ */
+export function EvalVariantsTable({ variants }: { variants: readonly EvalVariant[] }) {
+  const isMobile = useIsMobile()
+  if (variants.length === 0) {
+    return <p className="p-4 text-sm text-[var(--color-text-muted)]">No runs yet, so nothing to compare.</p>
+  }
+  const best = bestVariantKey(variants)
+  if (isMobile) return <EvalVariantCards variants={sortVariants(variants, 'pass_rate', 'desc')} best={best} />
+  return <VariantsTable variants={variants} best={best} />
 }
 
 /** The same comparison squeezed into one line per variant, for the eval list. */

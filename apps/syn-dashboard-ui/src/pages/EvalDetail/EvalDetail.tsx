@@ -11,17 +11,12 @@ import { Breadcrumbs, Card, CardHeader, EmptyState, ListPagination, Loader, Page
 import { EvalHeader, EvalRunsChart, EvalRunsTable, EvalSummaryStrip, EvalVariantsTable } from '../../components/evals'
 import { useEvalDetail } from '../../hooks/useEvalDetail'
 import { useEvalTimeline, type EvalTimelineState } from '../../hooks/useEvalTimeline'
+import { runsSubtitle } from '../../utils/evalSummary'
 
 function timelineSubtitle(timeline: EvalTimelineState): string {
   if (timeline.kind !== 'ready') return 'Every run, by variant'
   if (timeline.runs.length < timeline.total) return `Latest ${timeline.runs.length} of ${timeline.total} runs, by variant`
   return `All ${timeline.total} runs, by variant`
-}
-
-function runsSubtitle({ page, pageSize, total }: { page: number; pageSize: number; total: number }): string {
-  if (total <= pageSize) return `All ${total} runs, newest first`
-  const first = (page - 1) * pageSize + 1
-  return `Runs ${first}–${Math.min(page * pageSize, total)} of ${total}, newest first`
 }
 
 function TimelineCard({ timeline }: { timeline: EvalTimelineState }) {

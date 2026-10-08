@@ -6,9 +6,7 @@
  * test passes only if the page prints the server's string verbatim.
  */
 
-import type { EvalRun, EvalRunListResponse, EvalSummary, EvalVariant } from '../api/evals'
-
-type EvalRunStats = EvalVariant['stats']
+import type { EvalRun, EvalRunListResponse, EvalRunStats, EvalSummary, EvalVariant } from '../api/evals'
 
 export function stats(overrides: Partial<EvalRunStats> = {}): EvalRunStats {
   return {
@@ -28,6 +26,15 @@ export function stats(overrides: Partial<EvalRunStats> = {}): EvalRunStats {
   }
 }
 
+/**
+ * The JSON an API deployed before #1772 sends: no `stats` property at all,
+ * not `stats: undefined`, so `'stats' in x` is false as it is over the wire.
+ */
+export function withoutStats<T extends { stats?: EvalRunStats }>(x: T): T {
+  const copy = { ...x }
+  delete copy.stats
+  return copy
+}
 
 export const LONG_MODEL = 'claude-opus-5-5-20261001-with-a-very-long-observed-model-identifier'
 
