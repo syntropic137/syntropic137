@@ -44,6 +44,12 @@ skyline-e2e *args:
     for _ in $(seq 1 60); do curl -sf --noproxy '*' -o /dev/null "$base" && break; sleep 0.5; done
     E2E_BASE_URL="$base" E2E_DATA=fixtures node "$pw" test {{args}}
 
+# Mirror of syn-ui.yml `screenshots`: /dev/components and /dev/patterns at 1440px and 390px.
+# Baselines are Linux Chromium (CI); on macOS this writes git-ignored *-darwin.png files.
+# Pass --update-snapshots=all to (re)write the baselines for this OS.
+skyline-screenshots *args:
+    SYN_UI_SCREENSHOTS=1 just skyline-e2e --project=screenshots-1440 --project=screenshots-390 {{args}}
+
 # The suite's own server at / (fixtures preview build; E2E_DEV=1 for the dev server)
 skyline-e2e-root *args:
     cd apps/syn-ui && node node_modules/@playwright/test/cli.js test {{args}}

@@ -7,6 +7,10 @@
  *   /next:   E2E_BASE_URL=http://host/next/ playwright test
  *
  * See e2e/support/env.ts for every variable.
+ *
+ * Screenshots: SYN_UI_SCREENSHOTS=1 adds the two `screenshots-*` projects
+ * (e2e/screenshots.spec.ts). Baselines are Linux Chromium only, made in CI;
+ * see design/README.md for how to refresh them.
  */
 import { existsSync } from 'node:fs'
 import { defineConfig, devices } from '@playwright/test'
@@ -17,6 +21,17 @@ const CHROMIUM = process.env.PW_CHROMIUM_PATH ?? (existsSync('/opt/pw-browsers/c
 
 const desktop = { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } }
 const phone = { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }
+
+// Visual baselines of /dev/components and /dev/patterns. Opt-in: fonts and
+// rasterising differ per OS, so only CI (Linux Chromium) compares them.
+const SCREENSHOTS = process.env.SYN_UI_SCREENSHOTS === '1'
+const shots = { testMatch: '**/screenshots.spec.ts', snapshotPathTemplate: '{testDir}/baselines/{arg}-{projectName}-{platform}{ext}' }
+const screenshotProjects = SCREENSHOTS
+  ? [
+      { name: 'screenshots-1440', use: { ...desktop, viewport: { width: 1440, height: 900 } }, ...shots },
+      { name: 'screenshots-390', use: { ...phone, deviceScaleFactor: 1 }, ...shots },
+    ]
+  : []
 
 export default defineConfig({
   testDir: './e2e',
@@ -37,8 +52,9 @@ export default defineConfig({
     launchOptions: { ...(CHROMIUM ? { executablePath: CHROMIUM } : {}), args: ['--proxy-bypass-list=127.0.0.1;localhost;[::1]'] },
   },
   projects: [
-    { name: 'desktop', use: desktop, testIgnore: '**/phone.spec.ts' },
+    { name: 'desktop', use: desktop, testIgnore: ['**/phone.spec.ts', '**/screenshots.spec.ts'] },
     { name: 'phone', use: phone, testMatch: '**/phone.spec.ts' },
+    ...screenshotProjects,
   ],
   webServer: startsOwnServer
     ? {

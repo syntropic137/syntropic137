@@ -1,5 +1,5 @@
 /**
- * Fixture data for tests, Storybook-style previews and fixtures mode.
+ * Fixture data for tests, the dev pages (/dev/components, /dev/patterns) and fixtures mode.
  * Import from '@syn137/syn-ui-data/fixtures'. The client loads the router on
  * its own in fixtures mode; app code never needs to import this.
  */

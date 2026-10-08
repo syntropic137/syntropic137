@@ -1,3 +1,5 @@
 .results/
 .report/
 .dist/
+baselines/*
+!baselines/*-linux.png

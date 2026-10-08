@@ -609,7 +609,7 @@ The phone screens on the canvas are the visual reference for the base column of 
 ## Build order and acceptance
 Six waves. Each lands its logic in `skyline-core` and its components in `skyline-svelte-v5` before the next starts; screens move into `apps/syn-ui` as their components arrive (see Migration plan).
 
-- Foundation. Create `skyline-core`, `skyline-svelte-v5`, the themes package and `syn-ui-data`, both theme files and the `--sky-*` tokens. Wire Storybook, the upstream gate and the size budget into the monorepo's checks.
+- Foundation. Create `skyline-core`, `skyline-svelte-v5`, the themes package and `syn-ui-data`, both theme files and the `--sky-*` tokens. Wire the dev pages (`/dev/components`, `/dev/patterns`) plus Playwright screenshot tests, the upstream gate and the size budget into the monorepo's checks.
 
 - Required surface. Button, Badge, Toggle, plus Card, Tag, Stat and Input. Both adapters export and pass the conformance type.
 
@@ -636,7 +636,7 @@ A component is done when all of these hold:
 
 - Vitest and Testing Library tests cover every contract prop
 
-- A Storybook story shows every variant in both themes and at phone width
+- The dev pages (`/dev/components`, `/dev/patterns`) plus Playwright screenshot tests show every variant in both themes and at phone width
 
 - Geometry, formatting and state logic live in `skyline-core` with unit tests; the component only renders them
 
