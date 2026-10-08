@@ -222,6 +222,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         ),
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
+        prewarm=p.prewarm,
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
         skills=[_ref_response(r) for r in p.skills],

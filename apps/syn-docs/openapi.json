@@ -15518,6 +15518,11 @@
             "title": "Delivers Repo Changes",
             "default": true
           },
+          "prewarm": {
+            "type": "boolean",
+            "title": "Prewarm",
+            "default": false
+          },
           "sandbox": {
             "type": "string",
             "title": "Sandbox",
