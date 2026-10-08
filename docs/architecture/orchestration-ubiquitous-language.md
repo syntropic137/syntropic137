@@ -351,7 +351,7 @@ transaction that locks the claiming Executor's own row, and only if
 capacity is the sum of the rows, a figure for reporting, not one anything
 claims against. During a generation overlap or a restart the successor starts
 at capacity 0 and receives the predecessor's capacity slot by slot as its runs
-finish, so one machine's capacity is never counted twice.
+release their slots, so one machine's capacity is never counted twice.
 `SYN_EXECUTION_MAX_CONCURRENT` seeds an Executor's capacity and is not a
 second setting. Its value is measured from memory per running
 Execution against the Executor's memory limit. A slot is in use while a run
@@ -438,7 +438,8 @@ read leaves it `opening`). `abandoned` is provisional: a late successful open,
 or a later sweep that finds the stream, promotes it to `admitted`. An expired
 Lease goes `claimed` -> `fencing` -> `reaped` -> `interrupted` (see Fencing). A
 resume whose inherited artifacts cannot yet be read is deferred back to
-`admitted` with a `retry_at`. `RunCounts` is the number of rows in each state.
+`admitted` with a `retry_at`, releasing its slot (see Claim). `RunCounts` is the
+number of rows in each state.
 
 A run row is not an Execution and its states are not Execution statuses.
 
@@ -453,10 +454,14 @@ its Heartbeat is fresh, takes the oldest claimable row with `SKIP LOCKED`,
 records its own `executor_id` on it, bumps the Lease token and increments
 `in_use`. Each Executor's capacity is measured from memory per running
 Execution on that host, never a constant; global capacity is the sum. The slot
-stays charged to the claiming Executor through `fencing` and `reaped` and is
-released only when the run row is closed, by a decrement fenced on the run's
-current `lease_token`, so it is freed exactly once. A claimed run is never
-redelivered.
+stays charged to the claiming Executor while the run is `claimed`, `fencing`
+or `reaped`, and is released when the run leaves those states: by `defer`
+(a resume returned to `admitted`), `close` or `close_interrupted`. Each release
+decrements `in_use` on the charged Executor's row and clears the run's
+`executor_id` in one transaction, guarded on the run's state and current
+`lease_token`, so a slot is freed exactly once and a stale or repeated release
+changes nothing. Closing a row that was never claimed, or was deferred, holds
+no charge and changes no `in_use`. A claimed run is never redelivered.
 
 An Executor claims only rows whose Event Epoch it can read, and never claims an
 expired Lease to run it.

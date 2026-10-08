@@ -104,7 +104,7 @@ without Postgres (ADR-060); the test double inherits `InMemoryAdapter`.
 ```
 opening ──▶ admitted ──claim──▶ claimed ──terminal──▶ done
    │            ▲ ▲                │
-   │            │ └── retry_at ────┤ (resume claim deferred, see D7)
+   │            │ └── retry_at ────┤ (resume deferred, slot released, D3/D7)
    ▼            │                  ▼ lease expired
 abandoned ──────┘               fencing ──▶ reaped ──▶ interrupted
 (start not recorded;            (slot held until the row is closed)
@@ -178,17 +178,40 @@ The capacity predicate is per executor, so no host ever holds more runs than
 its own row allows, and two executors never contend on one budget lock. A count
 taken outside the claim transaction is racy and is not acceptable.
 
-**Release is the reverse, fenced.** `in_use` counts the runs charged to that
-executor in `claimed`, `fencing` or `reaped`, so a slot is held until the run
-row is closed (`done`, or `interrupted` by D5 step 2), never at lease expiry.
-`close` and `close_interrupted` each decrement `in_use` on the row named by the
-run's `executor_id`, in the same transaction as the state change and guarded on
-the run's current `lease_token`, as `renew` is guarded today. A release
-carrying a superseded token raises `RunLeaseLost` and changes nothing, so a
-slot is freed exactly once, and the `CHECK` turns any accounting bug into a
-failed write rather than a leaked or double-freed slot. Fencing and takeover
-(D5) move the reconciler, not the charge: the slot stays on the claimer's row
-until the run is closed. Nothing is ever redelivered (D5).
+**Release is the reverse, fenced.** A run row carries a **charge** exactly
+while it is `claimed`, `fencing` or `reaped`, and the charge is held by the
+budget row its `executor_id` names. `in_use` is the number of runs charged to
+that executor. A charged run stays charged until it leaves those three states,
+never at lease expiry. Three transitions leave them, and each is a
+**release**:
+
+| Release | Transition | Guard |
+|---|---|---|
+| `defer` | `claimed -> admitted`, with `retry_at` (D7) | `state = 'claimed'` and the caller's token is the current `lease_token` |
+| `close` | `claimed -> done` | `state = 'claimed'` and the current `lease_token` |
+| `close_interrupted` | `reaped -> interrupted` (D5 step 2) | `state = 'reaped'` and the reconciler's current `lease_token` |
+
+A release, in one transaction: the guarded state change, `in_use = in_use - 1`
+on the row named by `executor_id`, and `executor_id = NULL` on the run. The
+guard is a compare-and-set, as `renew` is guarded today, so a release whose
+token was superseded, or a second release of the same claim, matches no row,
+raises `RunLeaseLost` and changes nothing. The slot is freed exactly once, and
+the `CHECK` turns any remaining accounting bug into a failed write rather than
+a leaked or double-freed slot. A deferred row is unowned: its next claim
+charges whichever executor takes it, from step 3 above.
+
+**Closing a row that holds no charge changes no counter.** A row that is
+`opening`, `abandoned` or `admitted` has `executor_id = NULL`, whether it has
+never been claimed or was deferred. Cancelling it (D12) closes it with a
+transition guarded on that unclaimed state and `executor_id IS NULL`, and
+touches no `execution_budget` row: there is no charge to release, and no
+retained owner to debit wrongly. If a claim locks the row first, the guard
+matches nothing and the cancel reaches the claimed run as an ordinary cancel
+of a running Execution.
+
+Fencing and takeover (D5) move the reconciler, not the charge: the slot stays
+on the claimer's row until `close_interrupted`. Nothing is ever redelivered
+(D5); a deferred resume is not a redelivery, because it never ran.
 
 **Capacity across generations and restarts.** Each executor's row carries its
 own capacity, so two generations can never enforce different numbers for one
@@ -198,8 +221,10 @@ N+1 in D10 Phase 2, or a process restarting in the same container, D5)
 registers its row with `capacity = 0` and is that row's **successor**. One
 transaction, at drain or at restart, sets the predecessor's `capacity` to its
 current `in_use` and adds the difference to the successor. After that, every
-release on the predecessor's row also moves that unit of capacity to the
-successor, in the same transaction. The machine's total stays exactly what it
+release on the predecessor's row, `defer` included, also moves that unit of
+capacity to the successor, in the same transaction: the predecessor's
+`capacity` and `in_use` each fall by one and the successor's `capacity` rises
+by one. The machine's total stays exactly what it
 was throughout the overlap; the old generation's slots drain into the new one
 as its runs finish. A predecessor row is deleted when both its `capacity` and
 `in_use` are zero and its `executor_hosts` row is gone. A dead host retired
@@ -277,8 +302,9 @@ atomic one:
    already holds that change, but this ADR's PR is docs only and does not
    carry it.
 2. **Then close the row** with `close_interrupted`, guarded on the row's
-   current `lease_token`. Only this releases the slot: it decrements `in_use`
-   on the claimer's `execution_budget` row in the same transaction (D3).
+   current `lease_token`. For a fenced run only this releases the slot: it
+   decrements `in_use` on the claimer's `execution_budget` row in the same
+   transaction (D3).
 
 **Reconciliation turns are exclusive.** Every turn on a `fencing` or `reaped`
 row is taken by the row's `reconciler` and no other host, so two turns on one
@@ -383,7 +409,7 @@ claim was traced:
 | Call | Shared read model | Treatment |
 |---|---|---|
 | `get_pending(execution_id)` in the processor's drain loop | `execution_todo` | **Replaced** by a run-scoped fold (D8). An empty list is read as "done", so this one is critical. |
-| `inherited_outputs(...)` at the start of a resume | `artifact_list` | **Resumes only.** If it fails at claim, the row returns to `admitted` with `retry_at` backoff; after K attempts it fails with a reason naming the read model. Fresh starts do not call it. |
+| `inherited_outputs(...)` at the start of a resume | `artifact_list` | **Resumes only.** If it fails at claim, `defer` returns the row to `admitted` with `retry_at` backoff and releases its slot (D3); after K attempts it fails with a reason naming the read model. Fresh starts do not call it. |
 | `ArtifactCollector` fallback for completed phases missing from the run's cache | `artifact_list` | **Conditional, and not reached by today's fresh producer.** `_resolve_phase_outputs` queries the projection only for a completed phase absent from the run's file cache (`ArtifactCollector.py:352-359`), and `PhaseOutputCache.record` leaves a phase absent only when its result is empty (`processor_types.py:60-67`). The fresh producer never records an empty result: `_deliverables` returns at least one deliverable or raises (`ArtifactCollector.py:668-714`), each becomes one `PhaseOutputFile` (`:604-635`), and `collect` records them (`phase_workspace.py:412-416`) before `COMPLETE_PHASE` adds the phase to `completed_phase_ids` (`WorkflowExecutionProcessor.py:511-522,899-913`). Not replaced. See the claim below. |
 | Cancel and inject signals | none (Redis signal queue) | unchanged |
 
@@ -578,7 +604,7 @@ Item 1.2 **builds on its rule and replaces its mechanism**:
 | `queued` / `starting` as a value of `status`, for a start with no stream | **Replaced** by D11. Once admission opens the stream synchronously (1.3), there is no admitted start without a stream, so `status` carries only execution statuses and `queued` is a boolean. A `start_queue`-style position may stay as detail on the read path, computed from `execution_runs`. Changing the API field is a CLI type change through `just codegen`. |
 | `ExecutionRequest` stream as the durable start record | **Not a discovery source.** Executors discover work only from `execution_runs`. Whether `ExecutionRequested` survives as the domain record of what a caller asked for, or is folded into start-only admission, is decided in 1.3; either way the `opening` sweep (D2), not a ProcessManager re-offer, is what guarantees an admitted start is never lost. |
 | `holds_start` in-process duplicate-start checks | **Replaced** by `reserve` refusing a second row for one execution id, plus the stream's NoStream open. |
-| Withdraw (#1650, PR #1651): `cancel` on a Queued Start withdraws its `ExecutionRequest`, and each start path re-reads the request after it holds a slot | **Becomes an ordinary cancel.** Once admission opens the stream (1.3), an admitted run already has an Execution, so `cancel` is the Execution's own. A run that is `admitted` and not yet `claimed` is cancelled by the aggregate and its row closed without being claimed. The rule that a cancel landing after the start still cancels a running Execution is unchanged. If `ExecutionRequest` survives 1.3, the "re-read after taking a slot" check moves into the claim. |
+| Withdraw (#1650, PR #1651): `cancel` on a Queued Start withdraws its `ExecutionRequest`, and each start path re-reads the request after it holds a slot | **Becomes an ordinary cancel.** Once admission opens the stream (1.3), an admitted run already has an Execution, so `cancel` is the Execution's own. A run that is `admitted` and not yet `claimed` is cancelled by the aggregate and its row closed without being claimed; it holds no charge, so closing it changes no `in_use` (D3). The rule that a cancel landing after the start still cancels a running Execution is unchanged. If `ExecutionRequest` survives 1.3, the "re-read after taking a slot" check moves into the claim. |
 
 #1574 merged first, so 1.2 migrates its budget and status as described above.
 
