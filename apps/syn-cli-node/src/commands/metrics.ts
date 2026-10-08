@@ -122,6 +122,29 @@ const profilesCommand: CommandDef = {
       );
     }
     if (d.resources.length > 0) resources.print();
+
+    // Which phases each resource percentile stands on. Scope: every phase of
+    // this type with telemetry in the window. "missing" counts usage rows that
+    // exist but lack the field; a CPU rate also needs the workspace lifetime.
+    const coverage = new Table({ title: "Resource coverage per phase (n used / missing in a usage row)" });
+    for (const col of ["Phase", "Phases", "No usage row", "CPU s / wall s", "Lifetime missing", "Throttled", "Memory peak", "Disk at teardown"]) {
+      coverage.addColumn(col, col === "Phase" ? {} : { align: "right" });
+    }
+    for (const r of d.resources) {
+      const c = r.coverage;
+      const used = (n: number, missing: number) => `${n} / ${missing}`;
+      coverage.addRow(
+        r.phase_id,
+        String(c.phases),
+        String(c.phases_without_usage_row),
+        used(r.cpu_seconds_per_wall_second.n, c.cpu_usage_seconds_missing),
+        String(c.wall_seconds_missing),
+        used(r.cpu_throttled_seconds.n, c.cpu_throttled_seconds_missing),
+        used(r.memory_peak_bytes.n, c.memory_peak_bytes_missing),
+        used(r.disk_bytes_at_teardown.n, c.disk_bytes_at_teardown_missing),
+      );
+    }
+    if (d.resources.length > 0) coverage.print();
     printDim("Percentiles over every phase in the window; fewer than 10 phases reads 'insufficient'.");
   },
 };
