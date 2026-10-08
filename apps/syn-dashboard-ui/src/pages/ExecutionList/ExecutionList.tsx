@@ -13,6 +13,7 @@ import { Activity } from 'lucide-react'
 import { useMemo } from 'react'
 import {
   Card,
+  DEFAULT_STATUSES,
   EmptyState,
   ListPageHeader,
   ListPagination,
@@ -26,8 +27,12 @@ import { useIsMobile } from '../../hooks/useMediaQuery'
 import { useRebuildingReadModel } from '../../hooks/useReadPathHealth'
 import { useRowSelection } from '../../hooks/useRowSelection'
 import { formatExecutionIds, formatExecutionsForAgent } from '../../utils/executionExport'
+import { EvalFilterChips } from './EvalFilterChips'
 import { ExecutionCardList } from './ExecutionCardList'
 import { ExecutionTable } from './ExecutionTable'
+
+/** An accepted start waiting for a slot is a status only executions have (PC-124). */
+const EXECUTION_STATUSES = [{ value: 'queued', label: 'Queued' }, ...DEFAULT_STATUSES]
 
 function ExecutionEmptyState({ searchQuery }: { searchQuery: string }) {
   return (
@@ -60,6 +65,8 @@ export function ExecutionList() {
     setTimeWindow,
     resetView,
     isDefaultView,
+    evalFilter,
+    setEvalFilter,
     statusCounts,
     sort,
     toggleSort,
@@ -116,7 +123,10 @@ export function ExecutionList() {
         setTimeWindow={setTimeWindow}
         reset={resetView}
         isDefault={isDefaultView}
+        statuses={EXECUTION_STATUSES}
       />
+
+      <EvalFilterChips value={evalFilter} onChange={setEvalFilter} />
 
       <StaleResults stale={stale} failed={failed} onRetry={retry}>
         {isMobile ? (

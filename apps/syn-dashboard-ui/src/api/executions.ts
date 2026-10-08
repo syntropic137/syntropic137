@@ -1,4 +1,5 @@
 import type {
+  ExecutionBudgetInfo,
   ExecutionDetailResponse,
   ExecutionListResponse,
   WorkflowExecutionSummary,
@@ -32,11 +33,31 @@ export async function getExecution(
   return fetchJSON<ExecutionDetailResponse>(`${API_BASE}/executions/${executionId}`, { signal })
 }
 
+/**
+ * Which executions the list shows by eval membership: every run, only runs of
+ * some eval, or only runs of none. `all` sends nothing, so the server's
+ * default and this one cannot differ.
+ */
+export type EvalFilter = 'all' | 'only' | 'hide'
+
+const IN_EVAL: Record<Exclude<EvalFilter, 'all'>, string> = { only: 'true', hide: 'false' }
+
 export async function listAllExecutions(
   query: ListQuery,
+  evals: EvalFilter = 'all',
   signal?: AbortSignal
 ): Promise<ExecutionListResponse> {
-  return fetchJSON(`${API_BASE}/executions?${listQueryParams(query)}`, { signal })
+  const params = listQueryParams(query)
+  if (evals !== 'all') params.set('in_eval', IN_EVAL[evals])
+  return fetchJSON(`${API_BASE}/executions?${params}`, { signal })
+}
+
+/** The execution budget's occupancy, which the list reports beside every page (PC-124). */
+export async function getExecutionBudget(signal?: AbortSignal): Promise<ExecutionBudgetInfo | null> {
+  const response = await fetchJSON<ExecutionListResponse>(`${API_BASE}/executions?page_size=1`, {
+    signal,
+  })
+  return response.budget ?? null
 }
 
 export async function cancelExecution(

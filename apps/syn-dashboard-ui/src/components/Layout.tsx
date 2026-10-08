@@ -27,8 +27,10 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
+import { useExecutionBudget } from '../hooks/useExecutionBudget'
 import { ReadPathHealthContext, useReadPathHealth } from '../hooks/useReadPathHealth'
 import { useServerBuild, type ServerBuild } from '../hooks/useServerBuild'
+import { ExecutionBudgetIndicator } from './ExecutionBudgetIndicator'
 import { ReadPathBanner } from './ReadPathBanner'
 import { ServerVersion } from './ServerVersion'
 
@@ -170,6 +172,7 @@ export function Layout() {
   const hamburgerRef = useRef<HTMLButtonElement>(null)
   const serverBuild = useServerBuild()
   const readPath = useReadPathHealth()
+  const budget = useExecutionBudget()
 
   useEffect(() => {
     if (!drawerOpen) return
@@ -209,6 +212,7 @@ export function Layout() {
             Syntropic137
           </span>
         </div>
+        <ExecutionBudgetIndicator budget={budget} className="ml-auto" />
       </div>
 
       {/* Backdrop — only when drawer open */}
@@ -246,6 +250,10 @@ export function Layout() {
 
       {/* Main content */}
       <main className="min-w-0 flex-1 pt-12 md:ml-56 md:pt-0">
+        {/* Desktop app bar: the budget, right-aligned (mobile shows it in the top bar). */}
+        <div className="hidden h-9 items-center justify-end border-b border-[var(--color-border)] px-6 md:flex">
+          <ExecutionBudgetIndicator budget={budget} />
+        </div>
         <div className="p-4 md:p-6">
           <ReadPathHealthContext.Provider value={readPath}>
             <ReadPathBanner health={readPath} />
