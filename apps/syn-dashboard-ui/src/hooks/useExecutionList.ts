@@ -59,6 +59,7 @@ function toExecutionListItem(
     duration_seconds: row.duration_seconds ?? null,
     repos: row.repos ?? [],
     repos_display: row.repos_display ?? null,
+    start_queue: row.start_queue ?? null,
   }
 }
 

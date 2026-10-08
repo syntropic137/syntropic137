@@ -1,4 +1,5 @@
 id: shared-esp-stream
+polarity: defect
 source_pr: 1574
 # main just before #1641 merged (b1a162ab9^1), and #1641's branch base.
 commit: 6646da278d17a16e16549cf77b0749b25d8e8040

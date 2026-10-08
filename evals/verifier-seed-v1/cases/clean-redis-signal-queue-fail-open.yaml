@@ -1,0 +1,17 @@
+id: clean-redis-signal-queue-fail-open
+polarity: clean
+# A control, not a defect: PR #1083, merged 2026-09-06. A verifier passes it only by
+# certifying. clean_through is main when the history after the merge was read
+# (`check` re-reads it): no later fix or revert names the PR, and no later
+# commit to its files fixes what it changed.
+source_pr: 1083
+commit: 2af77227449663381d0ed128d1f5989e8593c03d
+merge_commit: 1e4d7c79774f00edd134427b18d34089565ff7d4
+clean_through: 6cb76a7f9aa881aff20ecaa8fefeeb690ce92673
+task: >
+  The change under review adds a retry policy to the platform's Redis clients
+  and makes signal queue reads fail open when Redis is unavailable, moving
+  the resilient client factory out of the API wiring into syn-adapters.
+  Review whether a Redis outage is now survived where it should be, and
+  refused where it must be.
+split: train

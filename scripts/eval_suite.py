@@ -2,8 +2,13 @@
 """Check, launch and score a versioned eval suite (#967 step 8).
 
 A suite lives in ``evals/<suite-id>/``: ``suite.yaml`` names the workflow and
-the models it declares, and ``cases/*.yaml`` holds one case each - a commit
-that carries a known bug and what a report must say to have found it.
+the models it declares, and ``cases/*.yaml`` holds one case each, of one of
+two polarities. A ``defect`` case is a commit that carries a known bug and
+what a report must say to have found it: it passes blocked and named. A
+``clean`` case is a control, a merged PR head with no known defect: it passes
+only certified. ``score`` prints the catch rate over defects and the
+false-block rate over controls for each table, because a catch rate alone
+cannot tell a careful verifier from one that blocks everything.
 
 ONE STABLE EVAL PER CASE. A run's commit comes from its eval's Baseline, which
 holds one SHA per repository and is fixed at create. The cases are one
@@ -79,11 +84,19 @@ import sys
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_shared.settings.dev_tooling import get_dev_api_url
@@ -172,36 +185,53 @@ class Expected(_Frozen):
         return groups
 
 
-class Case(_Frozen):
+Polarity = Literal["defect", "clean"]
+"""What a case holds: a known escaped bug the verifier must block, or a clean
+control it must certify. Clean controls are what make blocking cost something:
+without them a verifier that blocks everything is never wrong."""
+
+
+def _full_sha(value: str) -> str:
+    if not _SHA.fullmatch(value):
+        raise ValueError(f"{value!r} is not a full 40-character lowercase SHA")
+    return value
+
+
+FullSha = Annotated[str, AfterValidator(_full_sha)]
+
+
+class _CaseBase(_Frozen):
     id: str = Field(pattern=r"^[a-z0-9-]+$")
     source_pr: int = Field(ge=1)
-    """The PR the case comes from: the one that shipped the bug, or, for a case mined
-    from a fix, the one that fixed it. Never put it in `task`: the agent could fetch the fix."""
-    commit: str
-    """Full SHA the run is pinned to. The bug is present here."""
-    fix_commit: str
+    """The PR the case is cut from: the one that shipped the bug, or, for a case mined
+    from a fix, the one that fixed it. Never put it in `task`: the agent could fetch its history."""
+    commit: FullSha
+    """The SHA the run is pinned to."""
+    task: str = Field(min_length=1)
+    split: Split
+    """`train` cases may tune a verifier; `holdout` cases only measure it. Never moved."""
+
+    @property
+    def tag(self) -> str:
+        return f"case:{self.id}"
+
+
+class DefectCase(_CaseBase):
+    """A commit carrying a known bug. Passes when the verifier blocks and names it.
+
+    `source_pr` shipped the bug; `commit` is the tree just before its fix.
+    """
+
+    polarity: Literal["defect"]
+    fix_commit: FullSha
     """Full SHA of the commit that fixed it (the last, when the fix is a series)."""
-    first_fix_commit: str | None = None
+    first_fix_commit: FullSha | None = None
     """When the fix is a series of commits, the first of them; default `fix_commit`.
 
     `commit` must be this commit's first parent: the tree just before the fix,
     so the bug is present and nothing of the fix is.
     """
-    task: str = Field(min_length=1)
     expected: Expected
-    split: Split
-    """`train` cases may tune a verifier; `holdout` cases only measure it. Never moved."""
-
-    @field_validator("commit", "fix_commit", "first_fix_commit")
-    @classmethod
-    def _full_sha(cls, value: str | None) -> str | None:
-        if value is not None and not _SHA.fullmatch(value):
-            raise ValueError(f"{value!r} is not a full 40-character lowercase SHA")
-        return value
-
-    @property
-    def tag(self) -> str:
-        return f"case:{self.id}"
 
     @property
     def fix_start(self) -> str:
@@ -209,9 +239,31 @@ class Case(_Frozen):
         return self.first_fix_commit or self.fix_commit
 
 
+class CleanCase(_CaseBase):
+    """A merged change with no known defect. Passes only when the verifier certifies it.
+
+    `source_pr` is the merged PR; `commit` is its head as merged, the second
+    parent of `merge_commit` on main's first-parent chain.
+    """
+
+    polarity: Literal["clean"]
+    merge_commit: FullSha
+    """The mainline merge that took the PR: its second parent must be `commit`."""
+    clean_through: FullSha
+    """The mainline commit through which later history was read and held no fix of the PR.
+
+    `merge_commit` must be on its first-parent chain, and no commit between
+    them may be a fix or revert that names `#<source_pr>`.
+    """
+
+
+Case = Annotated[DefectCase | CleanCase, Field(discriminator="polarity")]
+_CASE: TypeAdapter[DefectCase | CleanCase] = TypeAdapter(Case)
+
+
 class LoadedSuite(_Frozen):
     suite: Suite
-    cases: tuple[Case, ...]
+    cases: tuple[DefectCase | CleanCase, ...]
     """The cases of the selected version: every case for the current one."""
     workflow: WorkflowRef
     """The one of `suite.workflows` this run of the script launches or scores."""
@@ -277,7 +329,7 @@ def load_suite(
     try:
         suite = Suite.model_validate(_read_yaml(directory / "suite.yaml"))
         case_files = sorted((directory / "cases").glob("*.yaml"))
-        cases = tuple(Case.model_validate(_read_yaml(p)) for p in case_files)
+        cases = tuple(_CASE.validate_python(_read_yaml(p)) for p in case_files)
     except (OSError, ValidationError, yaml.YAMLError) as exc:
         raise DefinitionError(str(exc)) from exc
 
@@ -305,16 +357,16 @@ def load_suite(
         problems.extend(_workflow_problems(ref, root))
     problems.extend(_history_problems(suite, set(ids)))
 
-    past = next((h for h in suite.history if h.version == version), None)
-    if version is not None and version != suite.version and past is None:
-        known = sorted([h.version for h in suite.history] + [suite.version])
+    # A past version may have run several workflows, one entry each; with no
+    # `workflow` given, the first entry listed for it is the default.
+    ran = [h for h in suite.history if h.version == version]
+    past = next((h for h in ran if workflow is None or h.workflow == workflow), None)
+    if version is not None and version != suite.version and not ran:
+        known = sorted({h.version for h in suite.history} | {suite.version})
         problems.append(f"version {version} is not one of the suite's {known}")
-    if past is None:
-        chosen = suite.workflows[0].id if workflow is None else workflow
-    else:
-        chosen = past.workflow if workflow is None else workflow
-        if chosen != past.workflow:
-            problems.append(f"version {past.version} ran only {past.workflow!r}, not {chosen!r}")
+    if ran and past is None:
+        problems.append(f"version {version} ran only {[h.workflow for h in ran]}, not {workflow!r}")
+    chosen = past.workflow if past is not None else workflow or suite.workflows[0].id
     selected = next((ref for ref in suite.workflows if ref.id == chosen), None)
     if selected is None:
         problems.append(
@@ -344,9 +396,12 @@ def load_suite(
 def _history_problems(suite: Suite, case_ids: set[str]) -> list[str]:
     """Where `history` contradicts itself, the current version or the case files."""
     problems: list[str] = []
-    versions = [h.version for h in suite.history]
-    if len(set(versions)) != len(versions):
-        problems.append(f"duplicate history versions: {sorted(versions)}")
+    runs = [(h.version, h.workflow) for h in suite.history]
+    if len(set(runs)) != len(runs):
+        problems.append(f"duplicate history version and workflow: {sorted(runs)}")
+    tags = [h.tag for h in suite.history]
+    if len(set(tags)) != len(tags):
+        problems.append(f"duplicate history tags: {sorted(tags)}")
     workflow_ids = {r.id for r in suite.workflows}
     for h in suite.history:
         if h.version >= suite.version:
@@ -388,54 +443,98 @@ def _git_ok(repo: Path, *args: str) -> bool:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True).returncode == 0
 
 
-def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
-    """Problems with each case's pinned history in `repo`; empty when every case holds.
+def _git_out(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
+    ).stdout
 
-    For each case: every SHA is a commit here, the pin is the first parent of
-    the fix's first commit (the tree just before the fix, not merely some
-    ancestor of it), that commit leads to the fix, every expected file exists
-    at the pin, and the fix changes at least one of them - so the files are
-    where the bug lived, not a guess.
-    """
+
+def _missing_commits(repo: Path, *shas: str) -> list[str]:
+    return [
+        s for s in dict.fromkeys(shas) if not _git_ok(repo, "cat-file", "-e", f"{s}^{{commit}}")
+    ]
+
+
+def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
+    """Problems with each case's pinned history in `repo`; empty when every case holds."""
     problems: list[str] = []
     for case in loaded.cases:
-        missing = [
-            s
-            for s in dict.fromkeys((case.commit, case.fix_start, case.fix_commit))
-            if not _git_ok(repo, "cat-file", "-e", f"{s}^{{commit}}")
-        ]
-        if missing:
+        if isinstance(case, DefectCase):
+            problems.extend(_defect_problems(case, repo))
+        else:
+            problems.extend(_clean_problems(case, repo))
+    return problems
+
+
+def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
+    """Every SHA is a commit here, the pin is the first parent of the fix's first
+    commit (the tree just before the fix, not merely some ancestor of it), that
+    commit leads to the fix, every expected file exists at the pin, and the fix
+    changes at least one of them - so the files are where the bug lived, not a guess.
+    """
+    if missing := _missing_commits(repo, case.commit, case.fix_start, case.fix_commit):
+        return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
+    problems: list[str] = []
+    parent = _git_out(repo, "rev-parse", f"{case.fix_start}^1").strip()
+    if parent != case.commit:
+        problems.append(
+            f"{case.id}: pins {case.commit[:12]}, but the fix {case.fix_start[:12]}'s "
+            f"first parent is {parent[:12] or '(none)'}; pin the tree just before the fix"
+        )
+    if not _git_ok(repo, "merge-base", "--is-ancestor", case.fix_start, case.fix_commit):
+        problems.append(
+            f"{case.id}: the fix's first commit {case.fix_start[:12]} is not an ancestor "
+            f"of {case.fix_commit[:12]}"
+        )
+    for path in case.expected.files:
+        if not _git_ok(repo, "cat-file", "-e", f"{case.commit}:{path}"):
+            problems.append(f"{case.id}: {path} does not exist at {case.commit[:12]}")
+    changed = _git_out(repo, "diff", "--name-only", case.commit, case.fix_commit).split()
+    if not set(case.expected.files) & set(changed):
+        problems.append(f"{case.id}: the fix changes none of {list(case.expected.files)}")
+    return problems
+
+
+#: A later commit that undoes or repairs a clean control: its subject says fix
+#: or revert, and its message names the control's PR or one of its SHAs (what
+#: `git revert` writes).
+_FIX_SUBJECT = re.compile(r"^(fix|revert)\b", re.IGNORECASE)
+
+
+def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
+    """Every SHA is a commit here, the pin is the merge's second parent (the PR
+    head exactly as main took it), the merge is on `clean_through`'s first-parent
+    chain (a mainline merge, not one inside a branch), and no commit between the
+    merge and `clean_through` is a fix or revert naming the PR.
+    """
+    if missing := _missing_commits(repo, case.commit, case.merge_commit, case.clean_through):
+        return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
+    problems: list[str] = []
+    head = _git_out(repo, "rev-parse", "--verify", "-q", f"{case.merge_commit}^2").strip()
+    if head != case.commit:
+        problems.append(
+            f"{case.id}: pins {case.commit[:12]}, but the merge {case.merge_commit[:12]}'s "
+            f"second parent is {head[:12] or '(none)'}; pin the PR head the merge took"
+        )
+    mainline = _git_out(repo, "rev-list", "--first-parent", case.clean_through).split()
+    if case.merge_commit not in mainline:
+        problems.append(
+            f"{case.id}: the merge {case.merge_commit[:12]} is not on the first-parent "
+            f"chain of {case.clean_through[:12]}"
+        )
+        return problems
+    reference = re.compile(rf"#{case.source_pr}\b")
+    log = _git_out(
+        repo, "log", "--format=%H%x00%B%x01", f"{case.merge_commit}..{case.clean_through}"
+    )
+    for entry in log.split("\x01"):
+        sha, _, message = entry.strip().partition("\x00")
+        names = reference.search(message) or case.merge_commit in message or case.commit in message
+        if sha and _FIX_SUBJECT.match(message) and names:
             problems.append(
-                f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"
+                f"{case.id}: {sha[:12]} fixes or reverts #{case.source_pr} after it merged; "
+                "a clean control must have no known defect"
             )
-            continue
-        parent = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", f"{case.fix_start}^1"],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-        if parent != case.commit:
-            problems.append(
-                f"{case.id}: pins {case.commit[:12]}, but the fix {case.fix_start[:12]}'s "
-                f"first parent is {parent[:12] or '(none)'}; pin the tree just before the fix"
-            )
-        if not _git_ok(repo, "merge-base", "--is-ancestor", case.fix_start, case.fix_commit):
-            problems.append(
-                f"{case.id}: the fix's first commit {case.fix_start[:12]} is not an ancestor "
-                f"of {case.fix_commit[:12]}"
-            )
-        for path in case.expected.files:
-            if not _git_ok(repo, "cat-file", "-e", f"{case.commit}:{path}"):
-                problems.append(f"{case.id}: {path} does not exist at {case.commit[:12]}")
-        changed = subprocess.run(
-            ["git", "-C", str(repo), "diff", "--name-only", case.commit, case.fix_commit],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.split()
-        if not set(case.expected.files) & set(changed):
-            problems.append(f"{case.id}: the fix changes none of {list(case.expected.files)}")
     return problems
 
 
@@ -450,6 +549,7 @@ SCORER = "eval_suite.py"
 
 
 class Score(_Frozen):
+    polarity: Polarity
     verdict: Verdict | None
     findings: int
     """How many structured blocking findings the report holds."""
@@ -464,7 +564,14 @@ class Score(_Frozen):
 
     @property
     def passed(self) -> bool:
+        """A defect passes blocked and named; a clean control passes only certified."""
+        if self.polarity == "clean":
+            return self.verdict == "certified"
         return self.verdict == "blocked" and self.matched
+
+    @property
+    def false_block(self) -> bool:
+        return self.polarity == "clean" and self.verdict == "blocked"
 
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
@@ -587,7 +694,27 @@ def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Sc
         if (named is None, len(missing)) < (best[0] is None, len(best[1])):
             best = (named, missing)
     return Score(
-        verdict=verdict, findings=len(findings), named_file=best[0], missing_keywords=best[1]
+        polarity="defect",
+        verdict=verdict,
+        findings=len(findings),
+        named_file=best[0],
+        missing_keywords=best[1],
+    )
+
+
+def score_case(case: Case, verdict: Verdict | None, report: str) -> Score:
+    """Score one run of `case`: a defect by `score_report`, a clean control by its verdict alone.
+
+    A clean control has no defect to name, so its findings are counted but never matched.
+    """
+    if isinstance(case, DefectCase):
+        return score_report(case.expected, verdict, report)
+    return Score(
+        polarity="clean",
+        verdict=verdict,
+        findings=len(blocking_findings(report)),
+        named_file=None,
+        missing_keywords=(),
     )
 
 
@@ -801,7 +928,7 @@ def score_suite(
             if problem:
                 rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
                 continue
-            score = score_report(case.expected, run.review_verdict, _report_of(client, run))
+            score = score_case(case, run.review_verdict, _report_of(client, run))
             _record_score(client, loaded, case, ev.eval_id, run, score)
             rows.append(
                 ScoredRun(
@@ -879,18 +1006,28 @@ def run_verdict(run: _Execution, score: Score) -> RunVerdict:
 
 def evidence_of(case: Case, run: _Execution, score: Score) -> str:
     """Why the verdict, as markdown: what the scorer looked for and what it found."""
+    head = [f"## {case.id} ({case.polarity})", "", f"- run status: `{run.status}`"]
+    tail = [f"- models: {_models_of(run) or '-'}"]
+    if isinstance(case, CleanCase):
+        return "\n".join(
+            [
+                *head,
+                f"- review verdict: `{score.verdict or 'none'}` "
+                "(a clean control passes only `certified`)",
+                f"- blocking findings: {score.findings}",
+                *tail,
+            ]
+        )
     missing = "; ".join("/".join(g) for g in score.missing_keywords) or "none"
     return "\n".join(
         [
-            f"## {case.id}",
-            "",
-            f"- run status: `{run.status}`",
+            *head,
             f"- review verdict: `{score.verdict or 'none'}` (a pass needs `blocked`)",
             f"- blocking findings: {score.findings}",
             f"- expected file named: {f'`{score.named_file}`' if score.named_file else 'no'}"
             f" (one of {', '.join(f'`{f}`' for f in case.expected.files)})",
             f"- keyword groups missing: {missing}",
-            f"- models: {_models_of(run) or '-'}",
+            *tail,
         ]
     )
 
@@ -920,9 +1057,33 @@ def _record_score(
         )
 
 
+def _ratio(part: int, whole: int) -> str:
+    return f"{part}/{whole} ({part / whole:.0%})" if whole else "-"
+
+
+def rates(rows: list[ScoredRun]) -> str:
+    """The catch rate over defect cases and the false-block rate over clean controls.
+
+    Over scored runs only; a run with no verdict is in the denominator and is
+    neither a catch nor a false block. A table with no clean controls says so:
+    its catch rate alone cannot tell a careful verifier from one that blocks all.
+    """
+    scores = [r.score for r in rows if r.score]
+    defects = [s for s in scores if s.polarity == "defect"]
+    clean = [s for s in scores if s.polarity == "clean"]
+    caught = sum(1 for s in defects if s.passed)
+    blocked = sum(1 for s in clean if s.false_block)
+    return f"catch rate (defect cases blocked and named): {_ratio(caught, len(defects))}\n" + (
+        f"false-block rate (clean controls blocked): {_ratio(blocked, len(clean))}"
+        if clean
+        else "false-block rate: not measured, no clean control in this version"
+    )
+
+
 def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ...] = ()) -> str:
     header = (
         "case",
+        "polarity",
         "run id",
         "status",
         "verdict",
@@ -938,11 +1099,14 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
         lines.append(
             (
                 r.case,
+                s.polarity if s else "-",
                 r.run_id or "-",
                 r.status,
                 (s.verdict or "none") if s else "-",
                 (
-                    "yes"
+                    "-"
+                    if s.polarity == "clean"
+                    else "yes"
                     if s.matched
                     else f"no{'' if s.findings else ' (no blocking findings)'}"
                     f"{'' if s.named_file or not s.findings else ' (file)'}"
@@ -963,7 +1127,8 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
     passed = sum(1 for r in rows if r.score and r.score.passed)
     return (
         f"suite {loaded.tag}  version {loaded.version}  workflow {loaded.workflow.id}  "
-        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed"
+        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed\n"
+        + rates(rows)
         + "".join(f"\nignored: {line}" for line in unrecorded)
     )
 

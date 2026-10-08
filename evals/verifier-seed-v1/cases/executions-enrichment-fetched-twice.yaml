@@ -1,4 +1,5 @@
 id: executions-enrichment-fetched-twice
+polarity: defect
 source_pr: 1087
 # Mined from the fix: the first fix commit's first parent, so the bug is
 # present and nothing of the fix is. Evidence at the pin:

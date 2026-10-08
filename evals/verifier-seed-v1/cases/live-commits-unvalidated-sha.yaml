@@ -1,4 +1,5 @@
 id: live-commits-unvalidated-sha
+polarity: defect
 source_pr: 1679
 # The fix's first parent: main just before the fix, with the bug and none of
 # the fix. Its useEventFeed.ts is byte-identical to the head #1668's verify

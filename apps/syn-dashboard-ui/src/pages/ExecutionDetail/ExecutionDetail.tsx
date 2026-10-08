@@ -174,7 +174,7 @@ function ExecutionErrorCard({
   )
 }
 
-const CONTROLLABLE_STATUSES = new Set(['running'])
+const CONTROLLABLE_STATUSES = new Set(['running', 'queued'])
 
 function ExecutionHeader({ execution, executionId, isConnected, refreshError, now, refreshExecution }: {
   execution: ExecutionDetailResponse
@@ -217,7 +217,7 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
         {showControl && (
           <ExecutionControl
             executionId={executionId}
-            initialState={execution.status as 'running'}
+            initialState={execution.status as 'running' | 'queued'}
             onSuccess={refreshExecution}
           />
         )}
