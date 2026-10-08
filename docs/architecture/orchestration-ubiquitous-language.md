@@ -342,6 +342,16 @@ start of a resumed Execution all claim a slot from it. Sized against memory,
 not isolation: each running Execution costs the API memory, and an API killed
 for exceeding its limit takes every Execution it hosts with it. (#1557.)
 
+ADR-072 keeps the rule and moves the budget. Today it is a semaphore in each
+API process. Under ADR-072 it becomes one row (`execution_budget`) that every
+Executor on every host reads. A Claim takes its slot inside the same
+transaction that locks that row, so two hosts or two generations can never
+enforce different numbers. `SYN_EXECUTION_MAX_CONCURRENT` seeds that row and
+is not a second setting. Its value is measured from memory per running
+Execution against the Executor's memory limit. A slot is in use while a run
+row is `claimed`, `fencing` or `reaped`, so a crash can hold a slot but never
+free one early. (ADR-072 D3, D12.)
+
 ## Queued Start
 
 An admitted start waiting for an Execution Budget slot. It has an id and no
@@ -429,7 +439,9 @@ A run row is not an Execution and its states are not Execution statuses.
 ## Claim
 
 An Executor taking one admitted Execution from the Run Queue to run, and the
-`ClaimedRun` that results. Capacity and claim are one transaction: it locks the
+`ClaimedRun` that results. It is the ADR-072 form of "claim a slot" under
+Execution Budget: one claim is one slot, and taking the slot and taking the
+run are the same act. Capacity and claim are one transaction: it locks the
 execution budget row (`execution_budget`), counts the slots in use (`claimed`,
 `fencing`, `reaped`) and, if one is free, takes the oldest claimable row. One
 budget, held in that row, bounds every start path on every host, so two
@@ -451,6 +463,16 @@ a fenced holder's `renew` and `close` fail, but its event appends still succeed
 until another writer advances the Execution's stream, whose expected-version
 check is what then refuses them. The Lease is what says which Executor is alive
 and holds the slot.
+
+## Heartbeat
+
+An Executor's periodic write of `heartbeat_at` to its own `executor_hosts` row,
+on the Lease's 30 s interval and whether or not it holds a Claim. It is
+evidence that the host was recently alive, used by the reap-window alert and
+before reaping an unlabelled container. It decides nothing else. An expired
+Lease, not a stale heartbeat, is what starts Fencing, and a stopped heartbeat
+is not leaving (see Fencing). A Lease belongs to one Claim. A heartbeat belongs
+to the host. (ADR-072 D4.)
 
 ## Fencing
 
@@ -499,7 +521,9 @@ without bumping the epoch fails a fitness test.
 
 ## Queued
 
-An admitted Execution that no Executor has Claimed yet. Its status is
+Under ADR-072, an admitted Execution that no Executor has Claimed yet. It is not
+the same thing as a Queued Start. A Queued Start, today, has no stream at all.
+A Queued Execution has one. Its status is
 `running`: the aggregate is running from its start event, and waiting for a
 slot is infrastructure state, not a domain decision. The read path shows it as
 `queued: true`, derived from the Run Queue. `queued` is a flag, never one of an

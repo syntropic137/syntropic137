@@ -4,7 +4,7 @@
 - **Date**: 2026-10-05
 - **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511
 - **Related**: ADR-014 (section 7, resume; section 9, who runs an execution), ADR-025, ADR-055, ADR-057, ADR-060 (section 8, dispatch concurrency), ADR-070 (D4/D5, drain-aware rotation)
-- **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Fencing, Drain (of an executor), Event Epoch, Queued)
+- **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget; reserved: Adopt / Reattach)
 
 No earlier ADR covers how the platform itself is deployed. ADR-052 is the docs
 site's Vercel deployment and ADR-057 is service registration inside one
@@ -167,6 +167,15 @@ executor's reconciliation loop are working, a host that stops renewing is seen
 as expired within the TTL. It does not bound the expiry-to-reap window in D5,
 which ends only when a reap succeeds.
 
+**Heartbeat** is separate from the lease. Every executor writes
+`heartbeat_at` on its own `executor_hosts` row at the same 30 s interval, even
+while it holds no claim. A lease says that one run's claim is still held. A
+heartbeat says only that the host was recently alive, and it has two uses: the
+reap-window alert (D5), and deciding whether an unlabelled container may be
+reaped (D6). It never authorises anything. Fencing is decided by an expired
+lease. Takeover is decided by the reconciler having left (D5), and a stopped
+heartbeat is not leaving.
+
 ### D5. At most one run per execution, and the limits of that guarantee
 
 **An expired lease is never claimed to run.** The only way out of an expired
@@ -200,6 +209,12 @@ atomic one:
    It leaves the row `reaped`, and the next reconciliation turn reloads the
    stream before deciding anything. A stream that is already terminal gets no
    second interruption, only the row closure in step 2.
+   The `EventsNotRecordedError` docstring on `main` still says a wrapped
+   failure means the events are "NOT durable". That is true only for a
+   `ConcurrencyConflictError` cause. Item 1.2 corrects the docstring and pins
+   it with a test before any reconciler relies on it. The parked #1597 branch
+   already holds that change, but this ADR's PR is docs only and does not
+   carry it.
 2. **Then close the row** with `close_interrupted`, guarded on the row's
    current `lease_token`. Only this releases the slot.
 
@@ -478,8 +493,9 @@ decided 2026-10-05.)
 
 ### D12. Relationship to PR #1574 (#1557)
 
-PR #1574, open at the time of writing, ships one execution concurrency budget
-and a durable start intent inside the current single-process topology:
+PR #1574 (merged 2026-10-05, after this ADR was first drafted) shipped one
+execution concurrency budget and a durable start intent inside the current
+single-process topology:
 
 - an in-process FIFO `ExecutionBudget` sized by `SYN_EXECUTION_MAX_CONCURRENT`
   (retiring `SYN_POLLING_MAX_CONCURRENT_DISPATCHES`) that bounds all three start
@@ -499,9 +515,9 @@ Item 1.2 **builds on its rule and replaces its mechanism**:
 | `queued` / `starting` as a value of `status`, for a start with no stream | **Replaced** by D11. Once admission opens the stream synchronously (1.3), there is no admitted start without a stream, so `status` carries only execution statuses and `queued` is a boolean. A `start_queue`-style position may stay as detail on the read path, computed from `execution_runs`. Changing the API field is a CLI type change through `just codegen`. |
 | `ExecutionRequest` stream as the durable start record | **Not a discovery source.** Executors discover work only from `execution_runs`. Whether `ExecutionRequested` survives as the domain record of what a caller asked for, or is folded into start-only admission, is decided in 1.3; either way the `opening` sweep (D2), not a ProcessManager re-offer, is what guarantees an admitted start is never lost. |
 | `holds_start` in-process duplicate-start checks | **Replaced** by `reserve` refusing a second row for one execution id, plus the stream's NoStream open. |
+| Withdraw (#1650, PR #1651): `cancel` on a Queued Start withdraws its `ExecutionRequest`, and each start path re-reads the request after it holds a slot | **Becomes an ordinary cancel.** Once admission opens the stream (1.3), an admitted run already has an Execution, so `cancel` is the Execution's own. A run that is `admitted` and not yet `claimed` is cancelled by the aggregate and its row closed without being claimed. The rule that a cancel landing after the start still cancels a running Execution is unchanged. If `ExecutionRequest` survives 1.3, the "re-read after taking a slot" check moves into the claim. |
 
-If #1574 merges first, 1.2 migrates its budget and status as above. If it does
-not, 1.2 carries the one-budget rule itself and #1557 closes with 2.3.
+#1574 merged first, so 1.2 migrates its budget and status as described above.
 
 ## Consequences
 
