@@ -284,16 +284,17 @@ def _run(tree: Path, command: list[str], step: str) -> None:
 def admit(case: ImplementerCase, repo: Path) -> list[str]:
     """Why the case does not discriminate: empty if its hidden tests FAIL at the pin and PASS at the fix."""
     problems: list[str] = []
-    at_pin = score_patch(case, "", repo)
-    if at_pin.outcome != "FAIL":
-        problems.append(
-            f"{case.id}: hidden tests at the pin must FAIL, got {at_pin.outcome}\n{at_pin.detail}"
-        )
-    with_fix = score_patch(case, fix_patch(case, repo), repo)
-    if with_fix.outcome != "PASS":
-        problems.append(
-            f"{case.id}: hidden tests with the fix must PASS, got {with_fix.outcome}\n{with_fix.detail}"
-        )
+    for label, patch, required in (
+        ("the pin", "", "FAIL"),
+        ("the fix", fix_patch(case, repo), "PASS"),
+    ):
+        run = score_patch(case, patch, repo)
+        last = run.detail.strip().splitlines()[-1] if run.detail.strip() else ""
+        print(f"{case.id}: {run.outcome} at {label}: {last}")
+        if run.outcome != required:
+            problems.append(
+                f"{case.id}: hidden tests at {label} must {required}, got {run.outcome}\n{run.detail}"
+            )
     return problems
 
 
