@@ -70,6 +70,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from syn_api.routes.sessions import SessionResponse, SessionSummaryResponse
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
     from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
         SessionSummary,
@@ -135,7 +136,7 @@ async def _paused_after_turn_started(release: asyncio.Event) -> AsyncIterator[st
             await release.wait()
 
 
-async def _get(path: str) -> dict[str, object]:
+async def _get(path: str) -> bytes:
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
 
@@ -146,17 +147,21 @@ async def _get(path: str) -> dict[str, object]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(path)
     assert response.status_code == 200, response.text
-    body = response.json()
-    assert isinstance(body, dict)
-    return body
+    return response.content
 
 
-async def _list_row() -> dict[str, object]:
-    body = await _get("/sessions?time_window=all")
-    sessions = body["sessions"]
-    assert isinstance(sessions, list)
-    (row,) = [s for s in sessions if isinstance(s, dict) and s.get("id") == SESSION_ID]
+async def _list_row() -> SessionSummaryResponse:
+    from syn_api.routes.sessions import SessionListResponse
+
+    body = SessionListResponse.model_validate_json(await _get("/sessions?time_window=all"))
+    (row,) = [s for s in body.sessions if s.id == SESSION_ID]
     return row
+
+
+async def _detail() -> SessionResponse:
+    from syn_api.routes.sessions import SessionResponse
+
+    return SessionResponse.model_validate_json(await _get(f"/sessions/{SESSION_ID}"))
 
 
 async def test_a_running_codex_session_shows_its_request_then_what_ran(
@@ -218,15 +223,15 @@ async def test_a_running_codex_session_shows_its_request_then_what_ran(
 
         # Running, no usage yet: the shape every "unknown" on the VPS had.
         running_row = await _list_row()
-        running_detail = await _get(f"/sessions/{SESSION_ID}")
+        running_detail = await _detail()
         requested_display = f"{REQUESTED_BY_A_CODEX_PHASE} (requested)"
         for served in (running_row, running_detail):
-            assert served["status"] == "running"
-            assert served["total_tokens"] == 0
+            assert served.status == "running"
+            assert served.total_tokens == 0
             # The request is said, and said to be one. It is never what ran.
-            assert served["agent_model"] is None
-            assert served["requested_model"] == REQUESTED_BY_A_CODEX_PHASE
-            assert served["agent_model_display"] == requested_display
+            assert served.agent_model is None
+            assert served.requested_model == REQUESTED_BY_A_CODEX_PHASE
+            assert served.agent_model_display == requested_display
     finally:
         release.set()
         await run
@@ -234,8 +239,8 @@ async def test_a_running_codex_session_shows_its_request_then_what_ran(
     # The stream ended and codex's rollout named the model: that replaces the
     # request on both surfaces.
     done_row = await _list_row()
-    done_detail = await _get(f"/sessions/{SESSION_ID}")
+    done_detail = await _detail()
     for served in (done_row, done_detail):
-        assert served["agent_model"] == CODEX_ANNOUNCED
-        assert served["requested_model"] == REQUESTED_BY_A_CODEX_PHASE
-        assert served["agent_model_display"] == CODEX_ANNOUNCED
+        assert served.agent_model == CODEX_ANNOUNCED
+        assert served.requested_model == REQUESTED_BY_A_CODEX_PHASE
+        assert served.agent_model_display == CODEX_ANNOUNCED
