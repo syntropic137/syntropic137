@@ -320,7 +320,9 @@ def _tar_unversioned(host_dir: str, repos: list[str], ignored: list[str]) -> byt
         for member in sorted(set(members)):
             total += member.lstat().st_size
             if total > MAX_PATCH_BYTES:
-                raise HostGitError(f"unversioned files in {host_dir} exceed {MAX_PATCH_BYTES} bytes")
+                raise HostGitError(
+                    f"unversioned files in {host_dir} exceed {MAX_PATCH_BYTES} bytes"
+                )
             tar.add(member, arcname=str(member.relative_to(root)), recursive=False)
     return buffer.getvalue()
 

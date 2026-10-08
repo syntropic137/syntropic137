@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_adapters.workspace_backends.orphaned import ShutilWorkspaceDirRemover, parse_inspect
 from syn_adapters.workspace_backends import stale_dirs
+from syn_adapters.workspace_backends.orphaned import ShutilWorkspaceDirRemover, parse_inspect
 from syn_adapters.workspace_backends.stale_dirs import (
     SubprocessHostWorkspaceGit,
     WorkspaceContainer,
@@ -408,9 +408,7 @@ async def test_unknown_owner_waits_while_any_execution_is_running(
     assert ws.exists()
 
 
-async def test_container_starting_during_archival_keeps_the_dir(
-    base: Path, tmp_path: Path
-) -> None:
+async def test_container_starting_during_archival_keeps_the_dir(base: Path, tmp_path: Path) -> None:
     """B6: authorization is read again after the archive, not only before it."""
     ws = _workspace(base, "ws-race", tmp_path)
     (ws / "repos" / "app" / "README.md").write_text("dirty\n")
@@ -428,9 +426,7 @@ async def test_container_starting_during_archival_keeps_the_dir(
     assert ws.exists()
 
 
-async def test_catch_up_beginning_during_archival_keeps_the_dir(
-    base: Path, tmp_path: Path
-) -> None:
+async def test_catch_up_beginning_during_archival_keeps_the_dir(base: Path, tmp_path: Path) -> None:
     ws = _workspace(base, "ws-replay-race", tmp_path)
     (ws / "repos" / "app" / "README.md").write_text("dirty\n")
     live = [True]
@@ -451,5 +447,7 @@ def test_archive_keys_never_collide_across_repository_paths() -> None:
     """B7: ``repos/a_b`` and ``repos/a/b`` once shared one object key."""
     from syn_domain.contexts.orchestration import StaleWorkspaceDir
 
-    stale = StaleWorkspaceDir(host_dir="/w/ws-1", workspace_id="ws-1", execution_id=None, size_bytes=0)
+    stale = StaleWorkspaceDir(
+        host_dir="/w/ws-1", workspace_id="ws-1", execution_id=None, size_bytes=0
+    )
     assert archive_key(stale, "/w/ws-1/repos/a_b") != archive_key(stale, "/w/ws-1/repos/a/b")
