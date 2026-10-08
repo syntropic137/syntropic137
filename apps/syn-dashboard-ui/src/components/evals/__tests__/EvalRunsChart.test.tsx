@@ -60,3 +60,15 @@ describe('EvalRunsChart', () => {
     expect(byId['other-model'].getAttribute('cy')).not.toBe(byId.late.getAttribute('cy'))
   })
 })
+
+describe('EvalRunsChart lanes by version', () => {
+  it('puts two versions of one workflow in two lanes, as the server groups them', () => {
+    const runs = [
+      evalRun({ execution_id: 'v1', workflow_version: '1', started_at: '2026-10-01T00:00:00Z' }),
+      evalRun({ execution_id: 'v2', workflow_version: '2', started_at: '2026-10-02T00:00:00Z' }),
+    ]
+    const { container } = render(<EvalRunsChart runs={runs} />)
+    const lanes = [...container.querySelectorAll('[data-lane]')].map((l) => l.getAttribute('data-lane'))
+    expect(lanes).toEqual(['wf-verifier @ 1 · claude-sonnet-5', 'wf-verifier @ 2 · claude-sonnet-5'])
+  })
+})

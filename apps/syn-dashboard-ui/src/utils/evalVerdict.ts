@@ -21,15 +21,23 @@ export function verdictColour(verdict: EvalVerdict | null): string {
   return verdict ? VERDICT_COLOURS[verdict] : UNSCORED_COLOUR
 }
 
-/** The key that groups runs into the variants the API compares. */
-export function variantKey(workflowId: string, models: readonly string[]): string {
-  return `${workflowId} · ${models.length ? models.join(', ') : 'no model reported'}`
+/**
+ * The key that groups runs into the variants the API compares: workflow, the
+ * version it launched from (when recorded), and the observed models.
+ */
+export function variantKey(
+  workflowId: string,
+  workflowVersion: string | null | undefined,
+  models: readonly string[],
+): string {
+  const workflow = workflowVersion ? `${workflowId} @ ${workflowVersion}` : workflowId
+  return `${workflow} · ${models.length ? models.join(', ') : 'no model reported'}`
 }
 
-/** The variant a run belongs to: its workflow plus the sorted unique models its phases reported. */
+/** The variant a run belongs to: its workflow and version plus the sorted unique models its phases reported. */
 export function runVariantKey(run: EvalRun): string {
   const models = [...new Set(run.models.map((m) => m.model))].sort()
-  return variantKey(run.workflow_id, models)
+  return variantKey(run.workflow_id, run.workflow_version, models)
 }
 
 /** A 0..1 score, which has no `*_display` field in the contract. */

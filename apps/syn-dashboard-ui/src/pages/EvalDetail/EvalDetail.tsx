@@ -95,7 +95,7 @@ export function EvalDetail() {
       <EvalHeader e={e} />
       <Card>
         <CardHeader title="Compare" subtitle={`${e.run_count} runs · ${e.scored_count} scored · pass rate ${e.pass_rate_display}`} />
-        <EvalVariantsTable variants={e.variants} />
+        <EvalVariantsTable variants={e.variants ?? []} />
       </Card>
       <TimelineCard timeline={timeline} />
       <Card>

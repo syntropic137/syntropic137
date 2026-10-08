@@ -26,6 +26,25 @@ describe('EvalVariantsTable (Compare)', () => {
     expect(screen.getByText('0% (0/1)')).toBeInTheDocument()
   })
 
+  it('shows two versions of one workflow as two rows, each naming its version', () => {
+    render(
+      <EvalVariantsTable
+        variants={[
+          variant({ workflow_version: '1.4.0', pass_rate_display: '100% (1/1)' }),
+          variant({ workflow_version: '2.0.0', pass_rate_display: '0% (0/1)' }),
+        ]}
+      />,
+    )
+    expect(screen.getAllByRole('row')).toHaveLength(3)
+    expect(screen.getByText('@ 1.4.0', { exact: false })).toBeInTheDocument()
+    expect(screen.getByText('@ 2.0.0', { exact: false })).toBeInTheDocument()
+  })
+
+  it('omits the version when the server recorded none', () => {
+    render(<EvalVariantsTable variants={[variant({ workflow_version: null })]} />)
+    expect(screen.queryByText('@', { exact: false })).toBeNull()
+  })
+
   it('says there is nothing to compare when no variant has run', () => {
     render(<EvalVariantsTable variants={[]} />)
     expect(screen.getByText(/nothing to compare/)).toBeInTheDocument()
@@ -41,6 +60,6 @@ describe('EvalVariantsTable (Compare)', () => {
 describe('EvalVariantsStrip', () => {
   it('reads workflow and models to pass rate on one chip', () => {
     render(<EvalVariantsStrip variants={[variant()]} />)
-    expect(screen.getByRole('listitem')).toHaveTextContent('wf-verifier · claude-sonnet-5 → 66.7% (2/3)')
+    expect(screen.getByRole('listitem')).toHaveTextContent('wf-verifier @ 1.4.0 · claude-sonnet-5 → 66.7% (2/3)')
   })
 })

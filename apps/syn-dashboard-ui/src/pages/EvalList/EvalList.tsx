@@ -57,7 +57,7 @@ function EvalRow({ row, onTag }: { row: EvalListRow; onTag: (tag: string) => voi
           ))}
         </div>
       )}
-      <EvalVariantsStrip variants={e.variants} />
+      <EvalVariantsStrip variants={e.variants ?? []} />
     </li>
   )
 }

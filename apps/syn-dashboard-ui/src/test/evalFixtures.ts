@@ -1,6 +1,5 @@
 /**
- * Eval fixtures written from the Evals v2 contract (TODO(#1710): replace with
- * recorded responses once the backend route exists).
+ * Eval fixtures typed by the generated Evals v2 response schemas (#1710).
  *
  * Display strings are deliberately ones the client could not compute from the
  * numbers beside them (`66.7% (2/3)` for 0.6667, `$0.41 est.` for 0.4123), so a
@@ -14,12 +13,13 @@ export const LONG_MODEL = 'claude-opus-5-5-20261001-with-a-very-long-observed-mo
 export function variant(overrides: Partial<EvalVariant> = {}): EvalVariant {
   return {
     workflow_id: 'wf-verifier',
+    workflow_version: '1.4.0',
     models: ['claude-sonnet-5'],
     run_count: 3,
     pass_count: 2,
     pass_rate: 0.6667,
     pass_rate_display: '66.7% (2/3)',
-    avg_cost_usd: 0.4123,
+    avg_cost_usd: '0.4123',
     avg_cost_display: '$0.41 est.',
     last_run_at: '2026-10-06T12:00:00Z',
     ...overrides,
@@ -41,6 +41,7 @@ export function evalSummary(overrides: Partial<EvalSummary> = {}): EvalSummary {
     created_at: '2026-10-01T00:00:00Z',
     updated_at: '2026-10-01T00:00:00Z',
     run_count: 3,
+    run_status_counts: { completed: 3 },
     scored_count: 3,
     pass_rate: 0.6667,
     pass_rate_display: '66.7% (2/3)',
@@ -60,7 +61,7 @@ export function evalRun(overrides: Partial<EvalRun> = {}): EvalRun {
     workflow_id: 'wf-verifier',
     workflow_version: '1.4.0',
     models: [{ phase_id: 'implement', model: 'claude-sonnet-5' }],
-    total_cost_usd: 0.4123,
+    total_cost_usd: '0.4123',
     total_cost_display: '$0.41 est.',
     duration_seconds: 1200,
     duration_display: '20m 0s',
@@ -68,6 +69,7 @@ export function evalRun(overrides: Partial<EvalRun> = {}): EvalRun {
     score: 0.9,
     evidence_excerpt: 'All 14 checkout tests passed on 5 consecutive runs.',
     scorer: 'eval_suite',
+    scorer_version: '2',
     scored_at: '2026-10-06T12:30:00Z',
     ...overrides,
   }

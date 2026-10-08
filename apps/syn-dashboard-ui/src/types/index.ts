@@ -549,6 +549,11 @@ export interface ExecutionDetailResponse {
    * dispatched with no task; absent from a server that predates the field.
    */
   task?: string | null
+  /**
+   * The eval this execution is a current run of, with its current verdict
+   * (Evals v2). Null in no eval; absent from a server that predates the field.
+   */
+  eval?: components['schemas']['ExecutionEvalRunResponse'] | null
 }
 
 // =============================================================================
