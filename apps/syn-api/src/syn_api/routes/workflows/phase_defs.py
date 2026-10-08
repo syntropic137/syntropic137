@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.orchestration._shared.phase_isolation import PhaseIsolation
 from syn_shared.agents import (
     DEFAULT_PHASE_SANDBOX,
     require_enforceable_cost_limit,
@@ -168,6 +169,10 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 delivers_repo_changes=_as_bool(
                     p.get("delivers_repo_changes", True), "delivers_repo_changes"
                 ),
+                # Dropping this provisions an eval phase installed through the
+                # API with the full history and a GitHub credential (#1725).
+                # An unknown value raises, like a non-bool above.
+                isolation=PhaseIsolation(p.get("isolation", PhaseIsolation.STANDARD)),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as

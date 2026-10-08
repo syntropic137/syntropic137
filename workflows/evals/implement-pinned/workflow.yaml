@@ -36,6 +36,9 @@ phases:
       - patch
     timeout_seconds: 3600
     delivers_repo_changes: false
+    # Sealed at the pin: no commit after it, no remote, no GitHub credential,
+    # so the fix cannot be read from the workspace (#1725, ADR-073).
+    isolation: pinned
     allowed_tools:
       - Read
       - Grep

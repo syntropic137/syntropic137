@@ -87,6 +87,20 @@ for this to be automatic:
 
 ## Leakage: NOT prevented today
 
+> **Partly closed (ADR-073, PR #1760).** `workflows/evals/implement-pinned`
+> now declares `isolation: pinned` on its implement phase. Provisioning then
+> seals every repository at its pin - no later commit, ref, tag, reflog or
+> remote - deletes the GitHub credential after the clone, never gives `gh` a
+> token, and never renews one. That closes the **Local object store** and
+> **Remote fetch** rows below for that workflow.
+>
+> The **Network** row is still open, and wider than it reads: `agent-net` is
+> not an internal network (`docker/docker-compose.yaml`), so a workspace has
+> direct egress and the Envoy allowlist only governs traffic routed through
+> it. An agent can still `curl https://api.github.com/repos/<o>/<r>/pulls`
+> anonymously for a public repository. No Docker probe test exists yet either.
+> Until both land, read the tool trace before trusting a surprising PASS.
+
 The task requires that the workspace cannot fetch commits after the pin or
 read the fix PR. **The platform cannot guarantee that today.** The suite
 relies on the phase prompt's rules, which an agent can break:

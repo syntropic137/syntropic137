@@ -184,6 +184,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # so patching one is patching half.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                isolation=str(p.get("isolation", "standard")),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),
                 skills=_refs(p.get("skills")),

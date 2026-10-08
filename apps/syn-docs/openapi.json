@@ -15616,6 +15616,11 @@
             "title": "Delivers Repo Changes",
             "default": true
           },
+          "isolation": {
+            "type": "string",
+            "title": "Isolation",
+            "default": "standard"
+          },
           "sandbox": {
             "type": "string",
             "title": "Sandbox",

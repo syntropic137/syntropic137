@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
+from syn_domain.contexts.orchestration._shared.phase_isolation import PhaseIsolation
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -451,6 +452,7 @@ class WorkspaceProvisionHandler:
                 clone_repos=phase.clone_repos,
                 pinned_commits=pinned_commits,
                 continued_branches=continued_branches,
+                sealed_at_pin=phase.isolation is PhaseIsolation.PINNED,
                 include_codex_auth=include_codex_auth,
             )
             # Read back BEFORE anything else is staged and long before the agent
@@ -498,6 +500,7 @@ class WorkspaceProvisionHandler:
         clone_repos: bool,
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
+        sealed_at_pin: bool = False,
         include_codex_auth: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -525,6 +528,7 @@ class WorkspaceProvisionHandler:
             clone_repos=clone_repos,
             pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
             continued_branches=continued_branches,
+            sealed_at_pin=sealed_at_pin,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
             ledger=workspace.issuance_ledger,

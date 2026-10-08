@@ -40,6 +40,7 @@
 | [ADR-049](ADR-049-sse-over-websocket-for-execution-streams.md) | Server-Sent Events (SSE) for Real-Time Execution Streams | Accepted |
 | [ADR-069](ADR-069-harness-neutral-phase-definition.md) | Harness-neutral Phase Definition | Accepted (partially proposed) |
 | [ADR-072](ADR-072-execution-hosting-and-upgrade-without-drain.md) | Execution Hosting, Executors, the Run Queue and Upgrade Without Drain | Accepted |
+| [ADR-073](ADR-073-sealed-pinned-workspaces-for-evals.md) | Sealed Pinned Workspaces for Evals | Proposed |
 
 ### Infrastructure & Storage
 

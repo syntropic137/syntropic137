@@ -20,7 +20,10 @@ from __future__ import annotations
 
 import re
 import shlex
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 #: The setup script's exit status when a repository cannot be checked out at
 #: the commit it was pinned to (#1458). sysexits' EX_DATAERR - the input named
@@ -150,3 +153,85 @@ def _append_branch_checkout(
     )
     lines.append(f"git -C {repo} checkout --quiet -B {name} {remote}")
     lines.append(f"git -C {repo} branch --quiet --set-upstream-to=origin/{branch} {name}")
+
+
+def require_sealable(
+    cloned: list[str], *, pinned: Mapping[str, str], continued: Mapping[str, str]
+) -> None:
+    """Refuse a workspace that cannot be sealed at its pins (#1725).
+
+    Every cloned repository (``owner/name``) must be pinned, and none may
+    continue a branch: a repository on a default branch's or a branch's head
+    would be sealed at whatever happened to be newest, which seals nothing.
+    A workspace that clones nothing has nothing to seal and passes.
+
+    Raises:
+        ValueError: a cloned repository is unpinned, or a branch is continued.
+    """
+    unpinned = [repo for repo in cloned if repo not in pinned]
+    if unpinned or continued:
+        msg = (
+            "A workspace sealed at its pins needs every cloned repository pinned,"
+            f" and none continuing a branch (unpinned: {unpinned},"
+            f" continued: {sorted(continued)})"
+        )
+        raise ValueError(msg)
+
+
+def append_seal(lines: list[str], pins: Mapping[str, str]) -> None:
+    """Seal each clone directory in ``pins`` at its commit, then delete the GitHub credential.
+
+    The credential is deleted even when ``pins`` is empty: a sealed workspace
+    that cloned nothing is still one the agent must not reach GitHub from.
+    """
+    lines.append("")
+    lines.append("# Seal each repository at its pin: no later commit, no remote (#1725, ADR-073)")
+    for dest, sha in pins.items():
+        append_seal_at_pin(lines, dest=dest, sha=sha)
+    lines.append("rm -f ~/.git-credentials ~/.config/gh/hosts.yml")
+    lines.append("git config --global --unset-all credential.helper || true")
+
+
+def append_seal_at_pin(lines: list[str], *, dest: str, sha: str) -> None:
+    """Leave ``dest`` - and every submodule under it - knowing no commit after ``sha``.
+
+    For an evaluation workspace, where any later commit may be the answer
+    (#1725, ADR-073). Runs AFTER `append_pinned_checkout` and the submodule
+    step, so the pin has already been verified by the full clone's
+    reachability rule (#1458) and the submodules are at its gitlinks. Sealing
+    then removes, in each repository:
+
+    - every remote, so `git fetch` has nowhere to go and no URL is left to
+      read back out of `.git/config`;
+    - every ref, tag and branch, so `git log --all` starts from HEAD alone;
+    - every reflog, and FETCH_HEAD and ORIG_HEAD, so the history the clone
+      walked through is not one `git reflog` or `cat` away;
+    - every object those no longer reach, so `git show <later sha>` fails
+      even for an agent that already knows the id.
+
+    One ref is put back, `_PIN_REMOTE_REF/<sha>`: under `refs/remotes`, it
+    keeps the pin out of what the unpushed-work guard and branch observation
+    read as this phase's own work, exactly as for a tag-only pin above. It
+    names nothing the agent could not already see.
+
+    The seal does not block the network. A sealed repository has no remote,
+    but nothing stops an agent typing a URL; that is the egress policy's job
+    and the setup script's credential removal (`SetupPhaseSecrets`).
+    """
+    if not _COMMIT_ID_RE.fullmatch(sha):
+        msg = f"The commit to seal {dest} at is not a full commit id: {sha!r}"
+        raise ValueError(msg)
+    repo = shlex.quote(dest)
+    # One command, run in the top-level repository and then in each submodule
+    # by `foreach`, which exports $sha1 as that submodule's gitlink. Single-
+    # quoted for `foreach`, so its variables expand there and not here.
+    seal = (
+        "git remote | xargs -r -n1 git remote remove"
+        " && git for-each-ref --format='delete %(refname)' | git update-ref --stdin"
+        " && git reflog expire --expire=now --expire-unreachable=now --all"
+        ' && rm -f "$(git rev-parse --git-dir)/FETCH_HEAD" "$(git rev-parse --git-dir)/ORIG_HEAD"'
+        " && git gc --quiet --prune=now"
+    )
+    lines.append(f"git -C {repo} submodule foreach --quiet --recursive {shlex.quote(seal)}")
+    lines.append(f"(cd {repo} && {seal})")
+    lines.append(f"git -C {repo} update-ref {_PIN_REMOTE_REF}/{sha} {sha}")
