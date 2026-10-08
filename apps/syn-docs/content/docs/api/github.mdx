@@ -17,16 +17,26 @@ _openapi:
           List repositories accessible to the GitHub App.
 
 
-          Queries all active installations and aggregates results when no
+          With no installation_id, aggregates every installation. The last
+          complete
 
-          installation_id is provided. The installation list is cached locally
-          with
+          listing is cached and served as ``complete`` while under a minute old;
 
-          a 1-hour TTL: if empty or stale, it bootstraps automatically from the
+          otherwise GitHub is asked live, and an older listing is served as
 
-          GitHub API without requiring a webhook URL. Stale data is kept as a
+          ``partial`` only if GitHub cannot be asked. The GitHub App's
 
-          fallback if the GitHub API is unreachable during refresh.
+          ``installation`` and ``installation_repositories`` webhooks invalidate
+          the
+
+          cache at once. A single installation_id is always asked live.
+
+
+          ``lookup`` says whether a repo missing from ``repos`` is known to be
+          out of
+
+          the App's reach (``complete``) or merely went unseen because GitHub
+          failed.
         heading: list-accessible-repos-endpoint
 ---
 

@@ -17,6 +17,8 @@ from syn_domain.contexts.artifacts import (
     compute_content_hash,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestComputeContentHash:

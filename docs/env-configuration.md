@@ -20,6 +20,34 @@ just gen-env
 This ensures the example file always matches the actual settings defined in code.
 Never edit `.env.example` manually - update `packages/syn-shared/src/syn_shared/settings/config.py` instead.
 
+## Container Passthrough (generated)
+
+A setting only reaches the API container if compose forwards it. That
+forwarding is **generated**, not hand-written:
+
+- `scripts/settings_forwarding.py` reads `.env.example` (itself generated from
+  the Settings classes) and writes `docker/generated/api.env.yaml`: one entry
+  per documented setting, bare (`KEY:`) so an unset key keeps its Pydantic
+  default.
+- The base `api` service in `docker/docker-compose.yaml` pulls that file in with
+  `extends`. Its own keys win over generated ones, and every overlay wins over
+  both. `scripts/generate_published_compose.py` inlines it into the standalone
+  published compose.
+- `just codegen` (or `just gen-env && just gen-compose`) regenerates both.
+
+**Adding a setting never touches a compose file.** Add the field to its Settings
+class, run `just codegen`, commit the class, `.env.example` and
+`docker/generated/api.env.yaml`. Compose files hold only what carries privilege
+(images, mounts, ports, sockets, pins, credential wiring) and stay
+owner-reviewed; the generated file is derived and is not.
+
+The exceptions are tables in `scripts/settings_forwarding.py`, each entry with
+its reason: `NOT_FORWARDED` (pinned by the deployment, printed in
+`.env.example`), `COMPOSE_OWNED` (forwarded by hand on purpose) and
+`FORWARD_WITH_DEFAULT` (forwarded as `${KEY:-default}`).
+`ci/fitness/infrastructure/test_compose_env_forwarding.py` fails if the generated
+file is stale or a compose file hand-lists a setting the generator owns.
+
 ## Startup Modes
 
 The dashboard supports two startup modes:
@@ -50,8 +78,6 @@ All env vars are routed through Pydantic Settings — **never use `os.environ.ge
 |----------|----------|---------|-------------|
 | `ESP_EVENT_STORE_DB_URL` | Production | None | Event Sourcing Platform DB URL (domain events) |
 | `SYN_OBSERVABILITY_DB_URL` | Production | None | Observability DB URL (agent events, projections) |
-| `DATABASE_POOL_SIZE` | No | `5` | Connection pool size |
-| `DATABASE_POOL_OVERFLOW` | No | `10` | Max overflow connections |
 
 > **Note:** After ADR-030, both URLs point to the same TimescaleDB instance but are named explicitly for each concern.
 

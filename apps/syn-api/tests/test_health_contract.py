@@ -34,7 +34,18 @@ from syn_api.types import HealthResponse, SubscriptionHealth
 #: Field names on ``SubscriptionHealth`` that come from the service's own status
 #: rather than from a lag measurement. Everything else on it must be a
 #: ``ReadModelLag`` field — see ``test_the_flat_lag_fields_match_read_model_lag``.
-_SERVICE_STATUS_FIELDS = frozenset({"status", "running", "projection_count", "realtime_enabled"})
+_SERVICE_STATUS_FIELDS = frozenset(
+    {
+        "status",
+        "running",
+        "projection_count",
+        "realtime_enabled",
+        "held_projections",
+        "halted_at",
+        "unapplied_starts",
+        "rebuilding_read_models",
+    }
+)
 
 
 def _schema(name: str) -> dict:

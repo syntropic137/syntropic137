@@ -25,14 +25,17 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
     run_phase_agent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
-    phase_failure,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     UnfinishedPhase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     UpstreamRetryPolicy,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown import (
+    record_cancel_and_release,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+    CancelledWorkLedger,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
@@ -50,12 +53,18 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+    raise_if_stopped_on_cost,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation import (
+    completion_failure,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
-    cancelled_execution,
     completed_execution,
     completed_phase,
     failed_phase_outcome,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import push_recorder
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_retry import (
     retry_lost_terminal_attempt,
 )
@@ -88,6 +97,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
 )
 
 if TYPE_CHECKING:
+    from event_sourcing import ProjectionStore
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
     from syn_adapters.workspace_backends.agentic.session_capture_service import (
@@ -104,11 +115,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports import (
         ArtifactContentStoragePort,
     )
+    from syn_domain.contexts.orchestration._shared.eval_choice import LaunchEval
     from syn_domain.contexts.orchestration._shared.tags import TagSet
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
         SourceCommit,
     )
+    from syn_domain.contexts.orchestration.ports import DelegationEvidencePort
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -191,8 +204,13 @@ class WorkflowExecutionProcessor:
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
+        owed_cancelled_work: ProjectionStore | None = None,
+        delegation_evidence: DelegationEvidencePort | None = None,
     ) -> None:
         self._session_repo = session_repository
+        #: Read as a phase that declared delegation completes, to show its
+        #: delegate actually ran (#894). See `phase_delegation`.
+        self._delegation_evidence = delegation_evidence
         # How a phase answers a provider that is simply busy (#1303). Injected
         # only so a test can collapse the backoff to zero; production takes the
         # policy's own numbers and no caller chooses them.
@@ -212,6 +230,8 @@ class WorkflowExecutionProcessor:
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
         self._journal = ExecutionJournal(execution_repository, todo_projection)
+        #: Records what a cancel landed, owing it when refused; every run settles first (#1547).
+        self._cancelled_work = CancelledWorkLedger(self._journal, owed_cancelled_work)
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # WHY (issue #726, PR2): the materializer is the optional collaborator
         # that turns ResolvedClaudePlugin entries on the phase into workspace
@@ -290,6 +310,8 @@ class WorkflowExecutionProcessor:
         admitted: AdmissionTicket | None = None,
         source_commits: list[SourceCommit] | None = None,
         tags: TagSet | None = None,
+        launch_eval: LaunchEval | None = None,
+        workflow_version: str | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern.
 
@@ -317,6 +339,8 @@ class WorkflowExecutionProcessor:
             pinned_phases=phases,
             source_commits=source_commits,
             tags=tags,
+            launch_eval=launch_eval,
+            workflow_version=workflow_version,
         )
         aggregate.start_execution(start_cmd)
         return await self._run_started(aggregate, workflow_id, phases, inputs, repos, admitted)
@@ -357,6 +381,7 @@ class WorkflowExecutionProcessor:
         origin: ResumeOrigin | None = None,
     ) -> WorkflowExecutionResult:
         """Record the start, then drain the to-do list until the run ends."""
+        await self._cancelled_work.settle()
         started_at = datetime.now(UTC)
         execution_id = aggregate.id or ""
         phase_map = {p.phase_id: p for p in phases}
@@ -364,16 +389,18 @@ class WorkflowExecutionProcessor:
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
         record_continuation(phase_outputs, aggregate.start_pins)
-        await self._journal.open(aggregate)
-
-        # #1387: durable, therefore visible. From here the drain counts this
-        # execution and a maintenance transition may proceed over it; before
-        # here it existed only as a queued task, and `set_mode(active=True)`
-        # was waiting on this line. If `open()` raised - a duplicate stream,
-        # a store that is down - the lease is ended by the worker instead,
-        # which is the other honest answer: nothing started.
-        if admitted is not None:
-            admitted.mark_visible()
+        # #1387: durable, therefore visible. From the write the drain counts
+        # this execution and a maintenance transition may proceed over it;
+        # before it, it existed only as a queued task, and `set_mode(active=True)`
+        # was waiting on this line. #1707: the write is also where whoever
+        # queued it learns it started - not later, where an exception would
+        # read as a start that never happened. If `open()` raised before the
+        # write - a duplicate stream, a store that is down - the lease is
+        # ended by the worker instead, which is the other honest answer:
+        # nothing started.
+        await self._journal.open(
+            aggregate, written=admitted.mark_durable if admitted is not None else None
+        )
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
@@ -399,6 +426,7 @@ class WorkflowExecutionProcessor:
                     i for i in dispatch_ctx.kept_artifact_ids if i not in all_artifact_ids
                 )
                 return await self._cancel_execution(
+                    aggregate,
                     execution_id,
                     workflow_id,
                     phase_results,
@@ -523,6 +551,7 @@ class WorkflowExecutionProcessor:
 
     async def _cancel_execution(
         self,
+        aggregate: WorkflowExecutionAggregate,
         execution_id: str,
         workflow_id: str,
         phase_results: list[PhaseResult],
@@ -534,44 +563,26 @@ class WorkflowExecutionProcessor:
         """Close open sessions as cancelled and return cancelled result.
 
         Called when the to-do list empties due to ExecutionCancelledEvent.
-        The aggregate is already in CANCELLED status - no new command needed.
+        The aggregate is already CANCELLED; what the save landed is recorded for the PR (#1547).
 
         ``phase_id`` is the phase that was mid-flight when the cancel landed,
         from the run's own _DispatchContext for the reason ``failed_phase_id``
         is: with concurrent runs sharing this processor, anything else could
         name another execution's phase.
         """
-        runtime = self._runtimes.of(execution_id)
-        session_ids = runtime.timings().session_ids
-        # BEFORE the teardown below. `abandon_all` destroys the cancelled
-        # phase's container and commits that exist only in it go with it. The
-        # user asked for the run to stop, not for the work to be deleted
-        # (#1231).
-        try:
-            saved = await runtime.save_unpushed_work(phase_id, execution_id=execution_id)
-            # The workflow changes the rescue could not push, stored while
-            # this is still the run that knows them (#1437). No inputs: they
-            # are read only to provision, and storing an artifact is not that.
-            dropped = await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
-                saved.quarantined,
-                workflow_id=workflow_id,
-                phase_id=phase_id,
-                execution_id=execution_id,
-                session_id=session_ids.get(phase_id or "", ""),
-            )
-            all_artifact_ids.extend(i for i in dropped if i not in all_artifact_ids)
-            cancellation = cancelled_execution(
-                cancel_reason, phase_results, all_artifact_ids, saved=saved
-            )
-            try:
-                await runtime.report_cancelled(cancellation.reason)
-            except Exception:
-                logger.exception(
-                    "Could not close the sessions of execution %s as cancelled", execution_id
-                )
-            return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
-        finally:
-            await runtime.abandon_all("cancel")
+        return await record_cancel_and_release(
+            aggregate=aggregate,
+            runtime=self._runtimes.of(execution_id),
+            workspaces=self._workspaces_for(execution_id, {}),
+            ledger=self._cancelled_work,
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            cancel_reason=cancel_reason,
+            phase_results=phase_results,
+            all_artifact_ids=all_artifact_ids,
+            started_at=started_at,
+        )
 
     async def _complete_execution(
         self,
@@ -668,8 +679,9 @@ class WorkflowExecutionProcessor:
         # Whichever of the two saved it, the workflow changes a rescue had to
         # leave out are stored now, while the run still knows them, and
         # pointed at from the failed phase like everything else it kept (#1437).
+        records = quarantined_records(error, saved)
         for artifact_id in await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
-            quarantined_records(error, saved),
+            records,
             workflow_id=workflow_id,
             phase_id=failed_phase_id,
             execution_id=execution_id,
@@ -688,6 +700,8 @@ class WorkflowExecutionProcessor:
             kept_artifact_ids=kept,
             usage=usage,
             saved=saved,
+            quarantined=records,
+            repositories=[c.repository for c in aggregate.start_pins.source_commits],
         )
         if failure.result is not None:
             phase_results.append(failure.result)
@@ -760,6 +774,7 @@ class WorkflowExecutionProcessor:
                 session_id=session_id,
                 observability=self._observability_writer,
                 retry_policy=self._retry_policy,
+                on_push=push_recorder(aggregate, self._journal, todo.phase_id),
             )
             said = result.stream_result.last_agent_message
 
@@ -777,6 +792,12 @@ class WorkflowExecutionProcessor:
                 started_at=launch.started_at,
             )
             runtime.record_agent_run(todo.phase_id, execution_id=todo.execution_id, result=result)
+
+            # BEFORE the cancel branch: a cost stop is also an interrupt, but
+            # nobody cancelled anything. Raised, so it reaches the aggregate as
+            # a failed phase - resumable, like one killed at its timeout -
+            # through the same path that keeps what the phase wrote (#1376).
+            raise_if_stopped_on_cost(todo.phase_id, result.stream_result.cost_limit_reason)
 
             if result.stream_result.interrupt_requested:
                 kept = True
@@ -798,7 +819,14 @@ class WorkflowExecutionProcessor:
             # and checked before the aggregate is told the run completed
             # (#1256). WHICH channel ended the run, and what the failure is
             # counted as, are `agent_run_outcome`'s to decide (#1367).
-            failure = phase_failure(result, phase_id=todo.phase_id)
+            failure = await completion_failure(
+                result,
+                phase_id=todo.phase_id,
+                evidence=self._delegation_evidence,
+                workspace=runtime.workspace_for(todo.phase_id),
+                required_delegate=phase.agent_config.required_delegate,
+                requires_verdict=phase.requires_verdict,
+            )
             if failure is not None:
                 logger.error(str(failure))
                 # A retried attempt keeps nothing: the phase is not over, and

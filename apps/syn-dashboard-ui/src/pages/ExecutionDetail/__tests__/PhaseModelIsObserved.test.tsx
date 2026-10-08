@@ -15,12 +15,13 @@ import { describe, expect, it } from 'vitest'
 import { UNATTRIBUTED_MODEL_KEY, UNATTRIBUTED_MODEL_LABEL } from '../../../constants/models'
 import type { ExecutionDetailResponse } from '../../../types'
 import { PhaseTimeline } from '../PhaseTimeline'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
 function phase(overrides: Partial<Phase>): Phase {
   return {
-    workflow_phase_id: 'p1',
+    phase_id: 'p1',
     name: 'Phase',
     status: 'completed',
     session_id: null,
@@ -46,6 +47,7 @@ function phase(overrides: Partial<Phase>): Phase {
 function renderPhases(phases: Phase[]) {
   const execution = {
     workflow_execution_id: 'exec-1',
+    phase_progress: { completed: 0, skipped: 0, possible: 1, remaining_possible: 1, percent: 0, display: 'phase 1 of up to 1' },
     workflow_id: 'wf-1',
     workflow_name: 'Run',
     status: 'completed',
@@ -62,7 +64,7 @@ function renderPhases(phases: Phase[]) {
   } as unknown as ExecutionDetailResponse
   return render(
     <MemoryRouter>
-      <PhaseTimeline execution={execution} now={Date.now()} />
+      <PhaseTimeline execution={withPlanOfPhases(execution)} now={Date.now()} />
     </MemoryRouter>,
   )
 }
@@ -126,7 +128,7 @@ describe('Phase Pipeline model label', () => {
     renderPhases(
       aliases.map((alias, i) =>
         phase({
-          workflow_phase_id: `p${i}`,
+          phase_id: `p${i}`,
           model: null,
           requested_model: alias,
           model_display: `unknown (requested: ${alias})`,

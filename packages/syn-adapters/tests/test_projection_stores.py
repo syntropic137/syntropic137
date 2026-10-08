@@ -19,6 +19,8 @@ from syn_adapters.projection_stores import (
     reset_projection_store,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def reset_store():
@@ -310,6 +312,8 @@ class TestNullOrderingIsLast:
         from syn_adapters.projection_stores.postgres_query_builder import _build_order_clause
 
         assert _build_order_clause("-created_at") == (
-            " ORDER BY data->>'created_at' DESC NULLS LAST"
+            " ORDER BY data->>'created_at' DESC NULLS LAST, id"
         )
-        assert _build_order_clause("created_at") == (" ORDER BY data->>'created_at' ASC NULLS LAST")
+        assert _build_order_clause("created_at") == (
+            " ORDER BY data->>'created_at' ASC NULLS LAST, id"
+        )

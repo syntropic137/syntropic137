@@ -31,6 +31,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScan
 from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser import (
     HookEventParser,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+    limit_exceeded,
+    spend,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
     VerdictReader,
@@ -52,6 +56,12 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
         SubagentTracker,
@@ -122,6 +132,15 @@ def api_error_label(error_type: str, http_code: str = "") -> str:
     return f"{label} (HTTP {http_code})" if http_code else label
 
 
+def api_error_with_message(error_type: str, message: str) -> str:
+    """The label for ``error_type`` followed by the provider's own message.
+
+    Shared with the upstream failure reader, which recognises this shape by
+    the prefix it writes with an empty ``message``.
+    """
+    return f"{api_error_label(error_type)}: {message}"
+
+
 def _http_code_from_prefix(prefix: str) -> str:
     """Return the first 3-digit token from a prefix like 'API Error: 529 '."""
     return next((w for w in prefix.split() if w.isdigit() and len(w) == 3), "")
@@ -136,7 +155,7 @@ def _format_anthropic_error(error_obj: dict[str, object], prefix: str) -> str:
     if http_code:
         return api_error_label(error_type, http_code)
     if message and message.lower() != label.lower():
-        return f"{label}: {message}"
+        return api_error_with_message(error_type, message)
     return label
 
 
@@ -333,6 +352,11 @@ class StreamResult:
     #: than guessed (#788) - and it is also what a stream cut off before its
     #: first announcement leaves behind.
     announced_model: str | None = None
+    #: Why the platform stopped this run for spending past the phase's
+    #: `max_cost_usd`, or None if it did not (#1376). Set together with
+    #: `interrupt_requested`, which is what makes the attempt settled and the
+    #: missing exit status expected; this is what tells it apart from a cancel.
+    cost_limit_reason: str | None = None
 
 
 def _model_under_message(message: object) -> object:
@@ -341,6 +365,13 @@ def _model_under_message(message: object) -> object:
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
+
+#: The claude tool that invokes a skill, and the input field naming the skill
+#: (#1269). Recorded as its own field, never read back out of the preview: the
+#: preview is cut at 500 characters and a long ``args`` before ``skill`` would
+#: cut the name off.
+SKILL_TOOL_NAME = "Skill"
+_SKILL_INPUT_FIELD = "skill"
 
 # This processor drives a CLAUDE primary, so its declared delegate is codex.
 DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CLAUDE]
@@ -383,8 +414,12 @@ class EventStreamProcessor:
         workspace_id: str | None,
         agent_model: str | None,
         collector: ObservabilityCollector | None = None,
+        cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> None:
         self._tokens = tokens
+        self._cost_limit = cost_limit
+        self._cost_limit_reason: str | None = None
         self._subagents = subagents
         self._execution_id = execution_id
         self._phase_id = phase_id
@@ -450,6 +485,7 @@ class EventStreamProcessor:
             collector=self._collector,
             execution_id=execution_id,
             phase_id=phase_id,
+            on_push=on_push,
         )
         self._cancel_poller = CancelSignalPoller(
             controller=controller,
@@ -519,6 +555,7 @@ class EventStreamProcessor:
             leader_native_session_id=self._leader_native_session_id,
             last_agent_message=self._last_agent_message,
             announced_model=self._announced_model,
+            cost_limit_reason=self._cost_limit_reason,
         )
 
     async def _process_line(
@@ -546,7 +583,19 @@ class EventStreamProcessor:
             return _LineOutcome(action=_LineAction.CONTINUE)
 
         await self._process_cli_event(line)
-        return _LineOutcome(action=_LineAction.CONTINUE)
+        return await self._stop_if_over_cost_limit(workspace)
+
+    async def _stop_if_over_cost_limit(self, workspace: InterruptibleWorkspace) -> _LineOutcome:
+        """Interrupt the agent once the phase has spent past its limit (#1376)."""
+        reason = limit_exceeded(self._cost_limit)
+        if reason is None:
+            return _LineOutcome(action=_LineAction.CONTINUE)
+        logger.warning("Phase %s %s - interrupting the agent", self._phase_id, reason)
+        self._cost_limit_reason = reason
+        await workspace.interrupt()
+        return _LineOutcome(
+            action=_LineAction.BREAK, interrupt_requested=True, interrupt_reason=reason
+        )
 
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
         """Process a single hook event: validate, enrich, record, track subagents."""
@@ -770,12 +819,21 @@ class EventStreamProcessor:
             self._tokens.record(input_tokens, output_tokens, cache_creation, cache_read)
             # The model THIS message names, not the session's: a subagent turn
             # on another model is priced as that model, not as the leader.
+            turn_model = announced_model_from(message.get("model"))
             await self._collector.record_token_usage(
                 input_tokens,
                 output_tokens,
                 cache_creation,
                 cache_read,
-                model=announced_model_from(message.get("model")),
+                model=turn_model,
+            )
+            spend(
+                self._cost_limit,
+                turn_model,
+                input_tokens,
+                output_tokens,
+                cache_creation,
+                cache_read,
             )
             logger.info(
                 "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
@@ -804,10 +862,12 @@ class EventStreamProcessor:
 
         self._note_delegation_attempt(tool_use_id, tool_input.get("command"))
 
+        skill = tool_input.get(_SKILL_INPUT_FIELD) if tool_name == SKILL_TOOL_NAME else None
         await self._collector.record_tool_started(
             tool_name=tool_name,
             tool_use_id=tool_use_id,
             input_preview=json.dumps(tool_input)[:500],
+            skill_name=skill if isinstance(skill, str) and skill else None,
         )
         logger.debug("Tool started: %s", tool_name)
 

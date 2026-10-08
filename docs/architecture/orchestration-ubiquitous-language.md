@@ -28,7 +28,8 @@ stream. An Execution is never rewritten: its history is the record of what
 happened, including how it ended.
 
 Statuses: `not_started`, `running`, `completed`, `failed`, `cancelled`,
-`interrupted`. The last four are terminal. There is no paused Execution - see
+`interrupted`. The last four are terminal. `queued` is not one of them: it
+describes a start that has no Execution yet (see Queued Start). There is no paused Execution - see
 "Words we do not use".
 
 ## Phase
@@ -41,6 +42,148 @@ A Phase is completed only when the Execution recorded it so. A Phase that
 started and did not complete has no partial credit: there is no mid-phase
 resume.
 
+## Phase Deadline
+
+When a Phase's agent is killed on its timeout (#1546). The clock starts when
+the Phase's workspace is ready (`WorkspaceProvisionedForPhase`), not at
+`PhaseStarted`, so the deadline is `provisioned_at` plus the effective timeout,
+NOT the Phase's start plus it. The agent is told the same deadline as
+`SYN_PHASE_DEADLINE`. Upstream-busy retries inside one run share it; a retried
+Phase is provisioned again and gets a new one. It is derived, never recorded as
+its own event: the facts it is made of are already events.
+
+## Phase Cost Limit
+
+The most a Phase may spend, in USD, before its agent is stopped (`max_cost_usd`,
+#1376). The cost-axis twin of the timeout: a Phase fanning out to parallel
+subagents turns a time bound into an unbounded cost. Spend is the per-turn
+usage on the agent's own stream, priced by `price_tokens` (the same pricing the
+execution's cost is built from), and one limit covers every attempt of the
+Phase. Crossing it fails the Phase with `cost limit USD X exceeded at USD Y`: a
+failure, not a cancel, so the Execution is resumable like one whose Phase hit
+its deadline. Checked per turn, not reserved before each call, so turns already
+in flight can land above it. Claude only: `codex exec` reports usage once, when
+its run has ended, so a limit on a codex Phase could never stop it and is
+refused at install. Not a separate budget from the
+[Execution Budget](#execution-budget), which counts concurrent Executions, not
+money.
+
+## Quota Exhaustion
+
+An upstream failure of kind `quota` (PC-83): the provider's usage allowance for
+our account is spent until a reset it names ("try again at Oct 9th, 2026 9:10
+PM"). Distinct from capacity, which returns in seconds: a quota returns on a
+calendar date, so it is never retried, and the Phase fails with
+`<provider> quota exhausted until <time>`. Recognised from codex's own fault
+line only. **Unclear:** no real claude quota message exists in this repo or its
+submodules, so claude quota text is not yet recognised and reads as `unknown`.
+
+## Provision Step Timeout
+
+A provisioning step that ran inside the workspace and did not finish before its
+deadline (`ProvisionStepTimeoutError`, PC-126). The steps are named by
+`ProvisionStep`: `secret_injection` (the ADR-024 setup script, including the
+repository clones), `skill_install` (one `skills add`), `codex_sandbox_probe`
+and `checkout_verification` (the read-only git reads of each cloned
+repository's HEAD). A timeout says the host was too loaded to answer, not that
+the step is broken. So it is recorded as an upstream failure of kind
+`unavailable`: transient, and the Execution is resumable. A skill install, a
+sandbox probe or a checkout verification is retried once in place. A skill
+install's retry comes only after the timed-out installer is killed inside the
+container: the deadline ends the `docker exec` client, not the installer, and
+the installer deletes its destination before copying, so two of them must
+never run at once. The setup script is not retried, because a clone killed
+mid-transfer would be skipped by the re-run. Resuming provisions a fresh
+workspace instead. Each deadline is a Setting.
+
+## Fallback Agent
+
+The agent (provider and model) a Phase declares under `fallback_agent`, to be
+re-run on once when its own agent's upstream could not serve it: capacity that
+outlived every retry, or a Quota Exhaustion (PC-83). The Phase's tools, budget
+and sandbox bind the fallback too, so the provider rules that refuse an `agent`
+refuse a `fallback_agent` at install. Acted on at execution (#1663): one
+attempt, only when the primary's failed attempt got nowhere, drawn from the
+same phase deadline as every attempt before it.
+
+## Review Verdict
+
+What a reviewing Phase concluded about the change in front of it: `certified`
+(nothing blocks it) or `blocked` (something must be fixed first). The Phase
+REPORTS it, as `review_verdict` in its TASK_RESULT block; the Execution
+DECIDES on it. `certified` ends the repair loop: every Phase before the
+Workflow's final Phase becomes a Skipped Phase. `blocked`, or no verdict, runs
+the next Phase by `order`. A word other than exactly `certified` or `blocked`
+is no verdict - it never skips anything.
+
+Not `success`. A Phase that finished a review that blocks the change
+succeeded; its verdict is `blocked`.
+
+A Phase that declares `requires_verdict` MUST report one (PC-116): with no
+verdict it fails ("verify produced no verdict") instead of advancing by
+`order`, because for a review, silence and `blocked` would otherwise look the
+same. A Phase without the declaration keeps the rule above.
+
+## Skipped Phase
+
+A Phase the Execution decided will never run, because a Review Verdict made it
+unnecessary. Recorded on the `NextPhaseReady` decision as `skipped_phase_ids`.
+Never started, never completed, never billed.
+
+A Resume carries the skips before its Resume Phase forward as
+`inherited_skipped_phase_ids`: a Skipped Phase is not a gap in the completed
+prefix, so a Resume neither runs it nor counts it as work still to do (#1681).
+
+## Unresolved Findings
+
+How a `completed` Execution ended when its last Review Verdict was `blocked`:
+every repair round the Workflow allows ran, and the last review still refused
+the change. Recorded as `review_verdict: blocked` on `WorkflowCompleted`, and
+visible on the execution detail API. A `completed` Execution with
+`review_verdict: certified` is a certified one; with none, nothing reviewed it.
+
+A status, deliberately not: the run did not fail - every Phase did its job -
+and the bound was the Workflow's own decision.
+
+Continuable by a Resume. A `completed` Execution is resumable only when it
+ended with Unresolved Findings, and then not at its first unfinished Phase
+(there is none) but at its Repair Point: the Phase before the Review that
+blocked it - the last round's fix. The Resume inherits every Phase before the
+Repair Point and re-runs that round against the findings still open, then its
+review and everything after. That fix already ran and may have pushed, so the
+Resume must acknowledge external effects. A `completed` Execution that
+certified, or that nothing reviewed, still has nothing to resume.
+
+## Repair Point
+
+Where a Resume of an Execution with Unresolved Findings starts: the Phase
+immediately before the Phase whose `blocked` verdict the run ended on. Decided
+by the aggregate from its replayed Review Verdicts (`ReviewRecord.repair_point`),
+never by the caller.
+
+## Delegation
+
+A phase's agent handing part of its work to the **other** harness: a claude
+phase to codex, a codex phase to claude. The delegate is a cross-harness child
+that reports itself through the platform's `syn-delegate` shim; a harness's
+own native subagents are not delegation. The provider alone decides where a
+delegate goes, so a phase never names its delegate's harness
+(`DELEGATION_TARGET_BY_PRIMARY`).
+
+- **Delegation permission** (`agent.allow_delegation`): the agent MAY
+  delegate. Both harnesses' auth is staged. Never gated: a permitted phase
+  whose agent did the work itself completed.
+- **Required delegation** (`agent.require_delegation`, `AgentConfiguration.require_delegation`):
+  the phase MUST delegate. It completes only when a delegate to its
+  **required delegate** - the other harness (`AgentConfiguration.required_delegate`) -
+  reported success. A delegate to any other harness does not count. Implies
+  the permission.
+- **Delegation failure** (`DelegationFailure`): the typed account of a
+  required delegation that did not happen - `not_attempted` (no delegate to
+  the required harness), `failed` (every one failed or never finished),
+  `unverifiable` (the record could not be read). Platform-observed, never the
+  agent's word (#894).
+
 ## Workflow
 
 The definition a run is made from - its Phases and their configuration.
@@ -51,7 +194,8 @@ needs rather than reading the Workflow later.
 
 Continuing an Execution that DID NOT FINISH, by starting a new Execution that
 inherits the Phases already completed and restarts at the first one that did
-not.
+not. Or one that finished with Unresolved Findings, restarting at
+its Repair Point.
 
 Applies to `failed` and `interrupted` on request, and to `cancelled` only with
 an explicit override - a cancel was a decision, and resuming past it needs a
@@ -95,10 +239,29 @@ completed it. Carries the artifact ids that Phase produced, and the id of the
 Execution that actually produced them - which may be an ancestor further up a
 chain of Resumes, not the immediate predecessor.
 
+## Declared Phase
+
+A Phase an Execution set out to do, as its `WorkflowExecutionStarted` stated
+it in `phase_definitions`. The same list `total_phases` counts. An Execution
+started before those definitions were recorded (ISS-196) has none.
+
+## Phase Plan
+
+Every Declared Phase of an Execution, in order, each with where it stands:
+the status it ran to here, `inherited`, `skipped`, or `pending`. Served on the
+execution detail API as `phase_plan` (feedback cee46909). Not `phases`, which
+holds only the Phases that started in this Execution.
+
+## Pending Phase
+
+A Declared Phase that has not started, is not an Inherited Phase and is not a
+Skipped Phase: work still to come. Only ever a Phase Plan status; a Phase that
+starts reports its own.
+
 ## Resume Phase
 
 The Phase a resumed Execution starts at: the first Phase, in order, that the
-original did not complete. Restarted from its beginning.
+original neither completed nor skipped. Restarted from its beginning.
 
 A Resume Phase that had already STARTED in the original may have pushed or
 published something, and re-running it repeats that, so resuming such an
@@ -120,6 +283,36 @@ code the original ran on. A pinned commit no branch or tag of origin still
 reaches refuses the Phase; it is never swapped for the branch's head.
 (#1458, ADR-058.)
 
+## Declared Skill / Invoked Skill
+
+A **Declared Skill** is one a Phase names in its `skills:`. The platform
+installs it into the Phase's workspace and, for a claude Phase that scopes its
+tools, grants the `Skill` tool so it can be invoked (#1269). The declared set
+read back is the Phase's Pin, never the Workflow as it stands now.
+
+An **Invoked Skill** is a declared or installed skill the agent actually called,
+counted per call. Declaring is not using: a Phase can be given a skill and never
+reach for it, and `phases[].skill_use.declared_not_invoked` names those.
+
+The two harnesses differ and the difference is reported, not hidden. Claude
+invokes a skill through its `Skill` tool, so the call is on the timeline and
+skill use is **observed**. Codex has no `Skill` tool: its skills arrive as
+context and their use leaves no signal, so a codex Phase reports skill use
+**not observable**, never zero invocations. **Unavailable** means the Pin or the
+timeline could not be read, so nothing is known either way.
+
+## Starting Checkout
+
+The commit each pinned repository was actually found at once a Phase's
+workspace was provisioned, read back from the workspace rather than taken from
+the request, and verified against its pin before the agent is given the
+workspace. A repository not at its pin is a Checkout Mismatch and refuses the
+Phase. A Continued Branch is held to its branch instead of its pin, since its
+head may legitimately be past the pin: it must be at origin's fetched head of
+that branch, and that head must contain the pin, or it too is a Checkout
+Mismatch. Recorded on every Phase's provisioning; the Execution's Starting
+Checkout is the first provisioning's, even when that one recorded none. (#967.)
+
 ## Continued Branch
 
 A branch a Resume Phase picks up rather than starting over: one the original's
@@ -129,12 +322,67 @@ from it. The Resume Phase is checked out at its head; every other Phase still
 reads the pinned commit. Recorded on the resumed Execution's start. (#1513,
 ADR-058.)
 
+A branch the failing attempt made an Own Push to is also continued when origin's
+head is not where the attempt was last seen but is any SHA it pushed there: the
+Execution's own unverified commits, which the Resume Phase re-verifies at that
+head before changing anything. (PC-128.)
+
+## Own Push
+
+A commit the running Phase's own workspace pushed to origin, recorded as
+`PhaseCommitPushed` while the Phase runs, from the workspace's push hook. It
+attributes the push to this Execution and nothing else: it does not say the push
+landed, and it is not a Branch Observation, which records that a ref moved and
+deliberately not who moved it. A Resume reads it to tell the Execution's own
+commits from someone else's; a head that is not an Own Push is still
+Abandoned. Recorded mid-Phase because the run it exists for, one orphaned by a
+restart, never reaches the end of its Phase. Only a push git reports as an update of
+an existing branch to the hook's commit is one: creating a branch names no
+commit in git's output, so a creation is never an Own Push. (PC-128.)
+
 ## Abandoned Branch
 
 A branch a Resume Phase could have continued and deliberately did not, because
 it was deleted, force-pushed or moved, its PR was closed, or the forge could not
 be asked. Recorded with that reason on the resumed Execution's start; the Phase
 starts fresh and is told so. Never a silent omission. (#1513.)
+
+## Quarantine Ref
+
+Where a Phase's unpushed work is saved when the Phase ends without pushing it:
+`refs/syn/lost/<execution>/<phase>`, outside every branch, fetched only on
+purpose. A Quarantine Ref that LANDED is a fact on the Execution's stream: on
+`WorkflowFailed` for a failure, and on `CancelledWorkQuarantined` for a
+cancellation, which is recorded after the cancelled Phase's save has run
+because `ExecutionCancelled` is written before it. Each carries a diffstat of
+what the ref holds. The PR open from the Phase's branch is told once, by a
+Quarantine Notice. (#1547.)
+
+## Quarantine Notice
+
+The one comment a PR gets naming the Quarantine Ref its run left behind, edited
+rather than repeated when the Phase quarantines again. Owed until a PR exists
+to receive it; with none yet, it is asked again on every live pass, and the
+platform's clock tick guarantees a pass comes. (#1547.)
+
+## Owed Cancelled Work
+
+A cancelled Execution's landed Quarantine Refs that the event store refused to
+take as `CancelledWorkQuarantined`, even after retries. They are kept in a
+durable store, keyed by Execution and Phase, and the processor appends them at
+the start of its next run. The row is removed after the event is on the
+stream. A delete that fails leaves the row to be settled again. The aggregate
+records a cancel's work once, so settling it twice still gives one fact.
+(#1547.)
+
+## Unrecorded Work
+
+A cancel's landed Quarantine Refs that neither the event store nor the owed
+store took. The cancelled result names them in `unrecorded_work`, so the cancel
+is not reported as handled: the API turns that result into an execution failure
+naming each ref and commit, never a cancelled summary. The processor holds them
+in memory and its next run tries both stores again. A restart before then loses
+that copy. The refs then survive only in that failure and the error log. (#1547.)
 
 ## Admission
 
@@ -144,6 +392,240 @@ Execution is then created and started by a background processor.
 
 An admitted Resume is not a started one. The two are separate facts, and a
 successful API response reports the first.
+
+## Execution Budget
+
+How many Executions one API process runs at once (`SYN_EXECUTION_MAX_CONCURRENT`).
+ONE budget bounds every start path: a direct start, a trigger dispatch and the
+start of a resumed Execution all claim a slot from it. Sized against memory,
+not isolation: each running Execution costs the API memory, and an API killed
+for exceeding its limit takes every Execution it hosts with it. (#1557.)
+
+ADR-072 keeps the rule and moves the budget. Today it is a semaphore in each
+API process. Under ADR-072 (D3, adopting epic #1612 Step 2) it becomes one
+`execution_budget` row **per Executor**, holding that Executor's `capacity`,
+`in_use` and `heartbeat_at`. A Claim takes its slot inside the same
+transaction that locks the claiming Executor's own row, and only if
+`in_use < capacity` there, so no host runs more than its own capacity. Global
+capacity is the sum of the rows, a figure for reporting, not one anything
+claims against. During a generation overlap or a restart the successor starts
+at capacity 0 and receives the predecessor's capacity slot by slot as its runs
+release their slots, so one machine's capacity is never counted twice.
+`SYN_EXECUTION_MAX_CONCURRENT` seeds an Executor's capacity and is not a
+second setting. Its value is measured from memory per running
+Execution against the Executor's memory limit. A slot is in use while a run
+row is `claimed`, `fencing` or `reaped`, so a crash can hold a slot but never
+free one early. (ADR-072 D3, D12.)
+
+## Queued Start
+
+An admitted start waiting for an Execution Budget slot. It has an id and no
+event stream yet, so `queued` is not one of an Execution's statuses: the API
+reports `queued` (and `starting`, once it holds a slot and before its stream
+opens) from the budget and the start's to-do record, with its position, in
+place of a 404. First come, first served. A start already queued in a process
+is never queued twice there; across processes, the Execution's first write is
+what refuses a second start.
+
+The execution list reports Queued Starts too, as rows with status `queued`,
+counted in `status_counts.queued` and selected by `status=queued` (PC-124).
+A start waiting in this process is listed with its position; a direct start
+whose Execution Request is still owed a start but held by no process is
+listed from that record, with no position. A resume's record is keyed by its
+parent, so an unheld resume is reported on the parent (`resume_start`), not
+as a row. Withdrawing a queued resume is not yet possible (#1677).
+
+## Execution Request
+
+The durable record that a direct start (`POST /workflows/{id}/execute`) was
+admitted: `ExecutionRequested`, on its own `ExecutionRequest` stream, written
+BEFORE the caller is told 200 and carrying everything the start needs. The
+Execution it names does not exist yet. `ExecutionRequestStartProcessManager`
+starts it from this record whenever no process already holds it - after a
+restart, or when the route's own task never ran - so an accepted start is
+never lost while it queues. Resume starts work the same way, from the
+parent's `ExecutionResumed`; both use one start to-do list (#1557).
+
+Its stream id is `request-<execution id>` (`execution_request_id`), never the
+execution id itself. The event store keys a stream by aggregate id alone, not
+by type and id, so a request at the execution's id would BE the execution's
+stream, and the start's NoStream write would refuse the run as a duplicate.
+That shipped once and stopped every direct start (v0.33.2-beta.8, beta.9).
+
+## Withdraw
+
+What cancelling a Queued Start does to its Execution Request (#1650):
+`WithdrawExecutionRequest` -> `ExecutionRequestWithdrawn`, on the request's own
+stream. A Queued Start has no Execution to cancel, so `cancel` on one withdraws
+its request instead; on an Execution that exists, `cancel` is the Execution's
+own and unchanged. Withdrawing twice records one withdrawal.
+
+Withdraw decides about the request only. It does not know whether the
+Execution started, and does not need to: both direct start paths read the
+request again once they hold an Execution Budget slot, immediately before the
+start, and a withdrawn one gives the slot straight back. A start already past
+that read when the withdrawal lands still starts, and its own
+`WorkflowExecutionStarted` outranks the withdrawal on the to-do list; that run
+is cancelled as any other.
+
+## Withdrawn
+
+A request start to-do record's terminal status after `ExecutionRequestWithdrawn`.
+Never offered again, and no later write walks it back to owed: it yields only
+to `started`, as `failed` does. Rebuilt from the events alone on a restart, so a
+withdrawn request is never started by a new process. The API reports a Queued
+Start whose request is withdrawn as `cancelled`. Not an Execution status, for
+the same reason `queued` is not: there is no Execution.
+
+## Executor
+
+The process role that runs Executions (`SYN_PROCESS_ROLE=executor`; `all`
+runs it beside the API in one process). It Claims admitted Executions from the
+Run Queue and runs each to a terminal status. The API process admits
+Executions and never runs one. Implemented by `ExecutionHost`. One host has a
+`host_id` and a generation (its image tag), recorded in `executor_hosts` and
+on every container it creates (`syn.host_id`, `syn.host_generation`).
+Specified in ADR-072.
+
+An Executor is a host, not an Execution: nothing about an Execution's stream
+says which Executor ran it.
+
+## Run Queue
+
+Where admitted Executions wait for an Executor: the `execution_runs` table,
+behind the `ExecutionRunQueue` port. It is infrastructure state, written at
+Admission, and never a projection, so a projection replay cannot hide admitted
+work from Executors.
+
+A run row moves `opening` -> `admitted` -> `claimed` -> `done`. Admission
+writes `opening` before the Execution's stream exists and `admitted` after, so
+a row stranded at `opening` is swept to `admitted` (stream present) or
+`abandoned`, with reason `start not recorded` (stream confirmed absent; a failed
+read leaves it `opening`). `abandoned` is provisional: a late successful open,
+or a later sweep that finds the stream, promotes it to `admitted`. An expired
+Lease goes `claimed` -> `fencing` -> `reaped` -> `interrupted` (see Fencing). A
+resume whose inherited artifacts cannot yet be read is deferred back to
+`admitted` with a `retry_at`, releasing its slot (see Claim). `RunCounts` is the
+number of rows in each state.
+
+A run row is not an Execution and its states are not Execution statuses.
+
+## Claim
+
+An Executor taking one admitted Execution from the Run Queue to run, and the
+`ClaimedRun` that results. It is the ADR-072 form of "claim a slot" under
+Execution Budget: one claim is one slot, and taking the slot and taking the
+run are the same act. Capacity and claim are one transaction: it locks the
+claiming Executor's own `execution_budget` row where `in_use < capacity` and
+its Heartbeat is fresh, takes the oldest claimable row with `SKIP LOCKED`,
+records its own `executor_id` on it, bumps the Lease token and increments
+`in_use`. Each Executor's capacity is measured from memory per running
+Execution on that host, never a constant; global capacity is the sum. The slot
+stays charged to the claiming Executor while the run is `claimed`, `fencing`
+or `reaped`, and is released when the run leaves those states: by `defer`
+(a resume returned to `admitted`), `close` or `close_interrupted`. Each release
+decrements `in_use` on the charged Executor's row and clears the run's
+`executor_id` in one transaction, guarded on the run's state and current
+`lease_token`, so a slot is freed exactly once and a stale or repeated release
+changes nothing. Closing a row that was never claimed, or was deferred, holds
+no charge and changes no `in_use`. A claimed run is never redelivered.
+
+An Executor claims only rows whose Event Epoch it can read, and never claims an
+expired Lease to run it.
+
+## Lease
+
+How long a Claim stays valid without renewal: `leased_until`, plus a
+`lease_token` bumped on every Claim and every Fencing. The holder renews every
+TTL/3 (90 s TTL, 30 s renewal). A renewal whose token was superseded raises
+`RunLeaseLost`, and the holder then cancels its own run.
+
+A Lease is not a lock on the Execution. The token fences the Run Queue only:
+a fenced holder's `renew` and `close` fail, but its event appends still succeed
+until another writer advances the Execution's stream, whose expected-version
+check is what then refuses them. The Lease is what says which Executor is alive
+and holds the slot.
+
+## Heartbeat
+
+An Executor's write of `heartbeat_at` to its own `execution_budget` row, made
+by the claim loop itself as the first step of every turn, on the Lease's 30 s
+cadence and including while idle with no Claim. Never a side task or separate
+timer: a wedged claim loop stops writing it, so it stops looking alive. It is
+evidence that the Executor's claim loop turned recently, used by the claim
+(a stale Executor does not claim), the global capacity report, the reap-window
+alert and before reaping an unlabelled container. It decides nothing else, and
+it is not Lease renewal, which is per run. An expired
+Lease, not a stale heartbeat, is what starts Fencing, and a stopped heartbeat
+is not leaving (see Fencing). A Lease belongs to one Claim. A heartbeat belongs
+to the host. (ADR-072 D4.)
+
+## Fencing
+
+What happens to a Claim whose Lease expired: another Executor bumps the token
+(`fencing`), removes the dead host's containers for that Execution (`reaped`),
+then appends `WorkflowInterruptedEvent` and, as a separate later step, closes
+the row and frees the slot (`interrupted`). A failed reap stays `fencing` and
+is retried, so Fencing has no time bound once a Lease expires.
+`fence_expired` returns each one as a `FencedRun`: the Execution and the host
+that held it.
+
+Fencing gives the row one **reconciler**, and only that host takes turns on it.
+Another Executor replaces it (**takeover**) only once the reconciler has
+**left**: its `executor_hosts` row is gone, by clean exit after a Drain, by a
+restart in the same container, or by an operator **retiring** it after stopping
+it. A stopped heartbeat is not leaving. A `host_id` is never reused.
+
+An expired Lease is never claimed again to run. So an Execution runs at most
+once: never a second workspace, never an automatic re-run, and no automatic
+Resume after a host dies. An agent on a stalled host can still act until its
+container is removed. That effect belongs to the one run (ADR-072 D5).
+
+## Drain (of an executor)
+
+An Executor stops claiming, finishes the Executions it holds, then exits.
+Requested by setting `executor_hosts.draining`, which the host reads between
+Claims. It is a property of the host: no Execution is signalled, paused or
+moved, and admission stays open while it happens. Draining one generation
+while the next is already claiming is how Executors upgrade without waiting.
+
+**Not** the pit-stop drain, which closes admission and waits for the whole
+platform to have no running Execution (see "Admission pause" under Pause).
+"Drain" alone, in this context, means the Executor's.
+
+## Event Epoch
+
+The version of the orchestration events' shapes,
+`ORCHESTRATION_EVENT_EPOCH`. Admission records the epoch it wrote with as a run
+row's `writer_epoch`, and an Executor claims only rows whose `writer_epoch` is
+no higher than its own. So an older Executor never loads events it cannot read:
+newer work waits for a newer Executor. Every later append is held to the row's
+`reader_epoch`, the least epoch of any host that may still load the stream (the
+claimer and the reconciler); it rises only once the host holding it down has
+left (ADR-072 D9). Changing an orchestration event's schema
+without bumping the epoch fails a fitness test.
+
+## Queued
+
+Under ADR-072, an admitted Execution that no Executor has Claimed yet. It is not
+the same thing as a Queued Start. A Queued Start, today, has no stream at all.
+A Queued Execution has one. Its status is
+`running`: the aggregate is running from its start event, and waiting for a
+slot is infrastructure state, not a domain decision. The read path shows it as
+`queued: true`, derived from the Run Queue. `queued` is a flag, never one of an
+Execution's statuses. (#1310 plan section 8, decision 2: Option A, decided
+2026-10-05.)
+
+Until ADR-072's admission ships, a start waiting on the in-process budget has
+no stream at all, and #1574 reports it as a status of `queued` or `starting`.
+That window disappears once Admission opens the stream itself (ADR-072 D12).
+
+## Run-scoped to-do fold
+
+The to-do list one Executor uses for the one Execution it is running: a fresh
+`ExecutionTodoProjection` over a `RunTodoStore`, seeded from that Execution's
+own events at Claim and discarded with the run. The shared `execution_todo`
+projection feeds dashboards only. Nothing an Executor decides reads it.
 
 ## Eval
 
@@ -156,6 +638,67 @@ it measures, and Freezing fixes them.
 An Eval does not list its runs. An Execution records which Eval it belongs to,
 so attaching a run is one write to the Execution and the Eval's stream does not
 grow with every run. (Evals plan, #967.)
+
+An Eval is long-lived: the same experiment is run again and again, under
+different workflows and models, and every run adds a data point to the same
+Eval. Its summary (run count, scored count, Pass Rate, last run and last
+Verdict, Variants) is derived at read time and never stored on it.
+
+## Run
+
+An Execution that is a member of an Eval, seen from the Eval: one data point.
+Membership is the Execution's (`eval_membership`), never the Eval's. A Run
+carries what the dashboard compares: its Workflow, the models its phases
+OBSERVED (the model that ran, as recorded on the session, never the alias a
+phase declared - `opus` is not a model), its cost and duration, and its Score
+if it has one. A Run's workflow version is the one it LAUNCHED from: the
+template's installed package version, or its source digest when it has none,
+written on the Execution's start event. Never the template's current version,
+which is wrong for every Run that started before an update. A Run started
+before this was recorded, or a resume, reports none rather than guess.
+
+## Score
+
+A judgement of one Run, recorded on the Eval: a Verdict, an optional number
+from 0 to 1, Evidence (markdown: why), the scorer that produced it and its
+version, and when. `RecordEvalRunScore` -> `EvalRunScored`. Only a member Run
+can be scored (409 otherwise). Scoring is allowed on a Frozen or Archived Eval:
+judging a run is not editing what the Eval measures. Re-scoring REPLACES the
+Run's current Score; the earlier Scores stay in the Eval's events. Unlike
+membership, Scores do grow the Eval's stream, one event per judgement.
+
+## Verdict
+
+`PASS`, `FAIL` or `ERROR` (`Verdict`, a StrEnum). `ERROR` means the Run could
+not be judged (it did not finish, or produced nothing to judge): it counts as
+scored, and is left out of the Pass Rate entirely: an unjudged Run is
+neither a pass nor a fail. Not the same word as a Review Verdict, which is a
+phase's own `certified` / `blocked` about a change; a scorer reads the Review
+Verdict and records a Verdict about the Run.
+
+## Pass Rate
+
+`PASS` Runs divided by `PASS` + `FAIL` Runs. `ERROR` Runs are excluded, so a
+provision failure never counts as a `FAIL`. None (shown as an em dash) when no
+Run is judged `PASS` or `FAIL`: no data is not 0%.
+
+## Variant
+
+The Runs of one Eval that share a Workflow, the workflow version they launched
+from, and the same sorted, unique set of observed models. Each Variant has its
+own run count, pass count, Pass Rate, average cost (over Runs whose cost is
+known) and last run. Two workflows under two models make four Variants of one
+Eval; editing a workflow between Runs makes a fifth, because a different
+version is a different treatment and pooling them would hide its effect. Runs
+with no recorded version group together. Derived at read time from each Run's
+execution detail (the observed models and cost are Lane 2 facts), never stored.
+
+## Suite
+
+A tag on Evals, not a record: `suite:<name>` plus `case:<case id>` names one
+case's Eval, and that Eval is reused by every version of the suite and every
+verifier (`scripts/eval_suite.py`). What differs between Runs goes on the Run
+as tags: `suite-version:<n>` and `verifier:<workflow id>`.
 
 ## Goal
 
@@ -179,6 +722,13 @@ state of it. Each repository appears at most once in an Eval's Baseline.
 A Baseline is not a Pin. A Pin is what one Execution records about itself as it
 starts; a Baseline is what an Eval requires of every Execution it admits.
 
+The two meet at admission. An Execution launched into an Eval records the
+Eval's Frozen Baseline as `eval_baseline` on its `WorkflowExecutionStarted`,
+one `EvalBaselinePin` per repository: the Pin of the Baseline it was admitted
+against, read from the Eval aggregate once it is Frozen (after a lost freeze
+race, the winner's), never from a request or a read model. Empty for an Eval
+with no repositories; absent for a run in no Eval.
+
 ## Freeze
 
 Fix an Eval's Goal and Baseline, permanently. Admission freezes an Eval before
@@ -194,7 +744,121 @@ and Evals alike. An archived Eval refuses every edit and refuses to be Frozen.
 It stays readable, and its history and runs stay intact. Archiving an archived Eval
 succeeds and records nothing.
 
+A Workflow template is never archived while it has an active Execution. That is
+decided from the template's own stream, not from a read model: every launch is
+recorded there first (see Launch), so an archive and a launch racing each other
+cannot both succeed (#1588).
+
+## Launch
+
+Starting an Execution of a Workflow template. Recorded on the TEMPLATE's stream
+as `WorkflowTemplateExecutionLaunched`, before the Execution's own stream exists,
+and refused if the template is Archived. A launch whose Execution stream never
+appears stops counting as active after a grace period (`LAUNCH_GRACE`), so a
+dispatch that died before starting cannot block an archive forever.
+
+## Default Eval
+
+The Eval a Workflow's runs join when the launch names none: `default_eval_id`
+in workflow YAML, or `PUT /workflows/{id}/default-eval`. Setting one requires
+the Eval to exist and not be Archived; clearing one consults no Eval. A
+reinstall replaces it with the package's, like every other template field.
+Changing it never moves a run that has already started.
+
+## Eval Selection
+
+How a launch chose its Eval, recorded on `WorkflowExecutionStarted` as
+`eval_selection` beside `eval_id`: `explicit` (the launch named one),
+`workflow_default`, `ordinary` (see Ordinary Run), or `none` (no Eval named and
+no Default Eval). Admission loads the Eval aggregate, never a read model, and
+refuses a launch into an Eval that is missing or Archived before the
+Execution starts.
+
+## Ordinary Run
+
+A launch that asks for no Eval (`--no-eval`, `no_eval: true`), even though its
+Workflow has a Default Eval. It cannot also name an Eval.
+
+## Attach
+
+Put an Execution into an Eval after it was launched, in any status, including
+terminal ones. It records `ExecutionAttachedToEval` on the Execution's stream,
+never on the Eval's, and copies nothing from the Eval: the run keeps the state
+it actually started from, and attaching does not Freeze the Eval. An Execution
+belongs to at most one Eval. Attaching it to the Eval it already belongs to
+succeeds and records nothing; attaching it to a different one is refused until
+it is Detached.
+
+Membership is decided before the Eval is consulted. A run already in the Eval
+is a no-op success even after the Eval is Archived, so a repeated attach never
+turns into a refusal. Only an attach that would record an event asks the Eval
+aggregate whether it can take the run.
+
+**Admission point.** An attach reads the Eval aggregate, then writes the
+Execution's stream. The two are separate streams with no shared transaction,
+and Attach deliberately does not write the Eval's (see Eval). So Archive closes
+admission as of the Eval version the attach read: an `EvalArchived` that
+commits after that read and before the Execution write does not refuse the
+attach. The attach is ordered before the archive: it was decided and admitted
+against the open Eval, and the run stays a member of the Archived Eval like any
+run admitted earlier. Nothing marks it, and `attached_at` against `archived_at`
+is not evidence either way, since the two clocks are stamped at decision time,
+not commit time. Detach remedies it, and works on an Archived Eval. Every attach
+that reads the Eval after the archive committed is refused. A launch is admitted
+the same way.
+
+## Detach
+
+Take an Execution out of the Eval it belongs to. The command names that Eval,
+so a stale caller cannot detach a run from an Eval it has since moved to.
+Detaching consults no Eval, so it works on an Archived one. It never erases the
+launch: `launched_eval_id` still records the Eval the run was launched into.
+
+## Association Kind
+
+How an Execution joined the Eval it belongs to now. `launched`: the launch
+chose it. `attached`: it was Attached afterwards. A run Detached and then
+Attached again, even to the same Eval, is `attached`, because the current
+association was made after the fact.
+
+## Workspace Resource Usage
+
+What one Phase's workspace consumed, measured once as it is torn down: CPU
+time, CPU throttling, memory peak, OOM kills, the workspace's disk size, network
+bytes, and the paths its delete could not remove (`WorkspaceUsage`). The
+workspace provider measures it; the Phase that held the workspace records it,
+as one `workspace_resource_usage` observation under that Phase's session.
+
+It is telemetry (Lane 2), never domain state: no event, no aggregate, and a
+failed measurement or write never fails a Phase. Each field is independently
+unknown rather than zero when its read failed. A Phase retried after a failed
+attempt held one workspace per attempt, so it has one usage per attempt. It
+exists to size the platform against `docs/north-star.md`.
+
+## Scripted Agent
+
+What runs in a Phase's workspace in place of the agent CLI during a load test
+(#1310): it replays a recorded session and performs the Phase's real side
+effect without spending a token. It is production code with its own contract,
+not a test double, which is why it is not called a stub, fake or mock. The
+contract lives in `syn_perf.loadtest.scripted_agent_profile`:
+
+- **Scripted Agent Profile** (`ScriptedAgentProfile`) - one load-test run's
+  instructions, keyed by Phase id, sent to every workspace as the single
+  `SYN_SCRIPTED_AGENT_PROFILE` environment variable. Read-only once validated.
+- **Scripted Phase** (`ScriptedPhase`) - what the Scripted Agent does in one
+  Phase: the stream it replays, the workload it burns, the side effect it
+  performs and the artifact it writes.
+- **Scripted Stream** (`ScriptedStream`) - the recorded session a Scripted
+  Phase replays, its harness and CLI version, and the pacing.
+
+The workspace image that carries a Scripted Agent is still called the stub
+image in agentic-workspace; that names the image, not these models.
+
 ## Words we do not use
+
+- **Suite** (as a record or an aggregate). A suite is a tag on Evals. There is
+  no Suite stream, and a second aggregate for it was rejected (evals v2).
 
 - **Lock** (an Eval). The word is Freeze. "Lock" already means the skill and
   plugin lock files here, and an Eval is not locked against reading or
@@ -228,6 +892,11 @@ succeeds and records nothing.
   unchanged, permanently. The retired keys are listed in
   `_shared/retired_phase_fields.py`; rejecting them at authoring time is
   #1502. There is no replacement: every Phase may open and comment on a PR.
+- **Adopt / Reattach.** Reserved for #1310 Phase 3, no meaning assigned: a new
+  process taking over a phase that is still running after the process that
+  started it died. Not built, and deferred until an experiment shows it can be
+  (ADR-072). Until then, an Executor that loses an Execution mid-phase Fences
+  and interrupts it, and continuing it is a Resume.
 - **Branch.** Reserved, no meaning assigned. If a chat-style "branch from here"
   operation is ever wanted, this is where it gets defined.
 - **Retry.** A Phase attempt within one Execution (`PhaseRetryScheduled`), never

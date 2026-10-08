@@ -13,7 +13,7 @@ from syn_domain.contexts.artifacts._shared.value_objects import (  # noqa: TC001
 )
 
 
-@event("ArtifactCreated", "v6")
+@event("ArtifactCreated", "v7")
 class ArtifactCreatedEvent(DomainEvent):
     """Event emitted when an artifact is created.
 
@@ -34,6 +34,22 @@ class ArtifactCreatedEvent(DomainEvent):
     work, and without these the record cannot show that it did; every review
     produced before v6 opened by saying it could not determine the models that
     ran its own phases. Same safety as v5: optional, defaulted, no upcaster.
+    v7: Binary content (issue #990). ``content_type`` may now be a binary
+    member (``image/png``, ``application/pdf``, ...), and when it is,
+    ``content`` is ``""``: the bytes are at ``storage_uri`` and nowhere else,
+    because Lane 1 records facts and MinIO holds bytes (ADR-012).
+    ``content_hash`` and ``size_bytes`` are of the stored BYTES - for text that
+    is its UTF-8 encoding, exactly what v1-v6 hashed, so no historical hash
+    changes meaning. No field was added, renamed or retyped, and every v6
+    payload is a valid v7 payload with the meaning it always had (text, inline
+    content), so the upcast from v6 is the identity and none is written: a
+    function that returned its argument would be ceremony, and would claim a
+    shape change that did not happen.
+    ``apps/syn-api/tests/test_990_binary_artifacts_round_trip.py`` holds that:
+    it replays a v6-shaped payload, and payloads recorded from a real store,
+    through the ESP client's deserializer, the aggregate and the projection. Binary files collected BEFORE v7 were decoded with
+    ``errors="replace"`` and stored as text; those bytes are gone, the stored
+    hash matches the mangled text, and no upcaster can restore them.
     NOTE the version string here is
     decorator metadata only - it does not set ``DomainEvent.schema_version``,
     and the gRPC serializer writes ``event_version=1`` regardless. Deserialization
@@ -87,7 +103,8 @@ class ArtifactCreatedEvent(DomainEvent):
     artifact_type: ArtifactType
     content_type: ContentType
 
-    # Content
+    # Content. Inline for text; "" for a binary content_type (v7, #990),
+    # whose bytes are at storage_uri only.
     content: str
     content_hash: str
     size_bytes: int

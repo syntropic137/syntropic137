@@ -28,7 +28,7 @@ function rowFor(e: ExecutionListItem): string {
     e.workflow_execution_id,
     dash(e.workflow_name || e.workflow_id),
     e.status,
-    `${e.completed_phases}/${e.total_phases}`,
+    e.phase_progress.display,
     e.total_tokens_display ?? String(e.total_tokens ?? 0),
     e.total_cost_display ?? '-',
     e.duration_display ?? '-',

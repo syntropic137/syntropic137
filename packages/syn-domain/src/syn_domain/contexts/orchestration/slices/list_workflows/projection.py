@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
-from event_sourcing import AutoDispatchProjection
-
+from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
     WorkflowTagsAddedEvent,
@@ -25,20 +24,21 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent im
     WorkflowTagsRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models import WorkflowSummary
+from syn_domain.pagination import matches_search
 
 
-class WorkflowListProjection(AutoDispatchProjection):
+class WorkflowListProjection(RecordedTimeProjection):
     """Builds workflow TEMPLATE list read model from events.
 
     This projection handles workflow template events only.
     Execution events are handled by WorkflowExecutionListProjection.
 
-    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    Uses AutoDispatchProjection (via RecordedTimeProjection): define on_<snake_case_event> methods to
     subscribe and handle events — no separate subscription set needed.
     """
 
     PROJECTION_NAME = "workflow_summaries"
-    VERSION = 5  # v5: tags (#967)
+    VERSION = 6  # v6: created_at from the envelope's recorded time (#959)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -70,7 +70,7 @@ class WorkflowListProjection(AutoDispatchProjection):
             classification=event_data.get("classification", ""),
             phase_count=len(event_data.get("phases", [])),
             description=event_data.get("description"),
-            created_at=event_data.get("created_at"),
+            created_at=self.recorded_at,
             runs_count=0,
             is_archived=False,
             requires_repos=event_data.get("requires_repos", True),
@@ -101,7 +101,8 @@ class WorkflowListProjection(AutoDispatchProjection):
             classification=event_data.get("classification", ""),
             phase_count=len(event_data.get("phases", [])),
             description=event_data.get("description"),
-            created_at=(existing or {}).get("created_at") or event_data.get("created_at"),
+            # An update that finds no row dates the template itself.
+            created_at=(existing or {}).get("created_at") or self.recorded_at,
             runs_count=(existing or {}).get("runs_count", 0),
             is_archived=False,
             requires_repos=event_data.get("requires_repos", True),
@@ -176,6 +177,7 @@ class WorkflowListProjection(AutoDispatchProjection):
         offset: int = 0,
         order_by: str = "-created_at",
         include_archived: bool = False,
+        search: str | None = None,
     ) -> list[WorkflowSummary]:
         """Query workflow template summaries with optional filtering.
 
@@ -185,57 +187,56 @@ class WorkflowListProjection(AutoDispatchProjection):
             offset: Pagination offset
             order_by: Sort field (prefix with - for descending)
             include_archived: If True, include archived templates. Defaults to False.
+            search: Case-insensitive substring matched against name and id.
 
         Returns:
             List of matching WorkflowSummary objects
         """
-        filters = self._filters(workflow_type_filter, include_archived)
+        matching = await self._matching(workflow_type_filter, include_archived, search, order_by)
+        return matching[offset : offset + limit]
 
-        data = await self._store.query(
-            self.PROJECTION_NAME,
-            filters=filters if filters else None,
-            order_by=order_by,
-            limit=limit,
-            offset=offset,
-        )
-        return [WorkflowSummary.from_dict(d) for d in data]
+    async def count(
+        self,
+        workflow_type_filter: str | None = None,
+        include_archived: bool = False,
+        search: str | None = None,
+    ) -> int:
+        """Count all matching templates, ignoring pagination."""
+        return len(await self._matching(workflow_type_filter, include_archived, search))
 
-    @staticmethod
-    def _filters(workflow_type_filter: str | None, include_archived: bool) -> dict[str, str | bool]:
-        """Build the filter map shared by ``query`` and ``count``.
+    async def _matching(
+        self,
+        workflow_type_filter: str | None,
+        include_archived: bool,
+        search: str | None,
+        order_by: str | None = None,
+    ) -> list[WorkflowSummary]:
+        """Every template matching the filters, before pagination.
 
-        Shared so the two cannot drift: a total computed under different filters
-        than the page it describes is worse than no total at all.
+        Shared by ``query`` and ``count`` so the two cannot drift: a total
+        computed under different filters than the page it describes is worse
+        than no total at all. That is also why pagination happens here in
+        Python rather than in the store: ``search`` is a substring match the
+        store's equality filters cannot express, and it has to run before the
+        page is cut or it only ever searches the page (#1159 left this list
+        doing exactly that in the browser).
+
+        COST: this fetches every matching row, O(n) per request. Fine at the
+        current scale (tens of templates). The store protocol has neither a
+        ``count`` nor a substring filter; adding them touches both adapters
+        and the test doubles, so it is not bundled in here.
         """
         filters: dict[str, str | bool] = {}
         if workflow_type_filter:
             filters["workflow_type"] = workflow_type_filter
         if not include_archived:
             filters["is_archived"] = False
-        return filters
-
-    async def count(
-        self,
-        workflow_type_filter: str | None = None,
-        include_archived: bool = False,
-    ) -> int:
-        """Count all matching templates, ignoring pagination.
-
-        ``limit=None`` means unlimited in both the postgres and memory stores,
-        so this counts the whole filtered collection rather than one page.
-
-        COST: this fetches every matching row and takes ``len``, which is O(n)
-        in database work, transfer, and deserialization per request. That is
-        acceptable at the current scale (tens of workflow templates) but it is
-        not the right primitive. The store protocol has no ``count``; adding
-        ``SELECT COUNT(*)`` there touches both adapters and six test doubles,
-        so it is tracked separately rather than bundled into a pagination fix.
-        """
-        filters = self._filters(workflow_type_filter, include_archived)
-        data = await self._store.query(
+        rows = await self._store.query(
             self.PROJECTION_NAME,
-            filters=filters if filters else None,
+            filters=filters or None,
+            order_by=order_by,
             limit=None,
             offset=0,
         )
-        return len(data)
+        summaries = [WorkflowSummary.from_dict(r) for r in rows]
+        return [s for s in summaries if matches_search(search, s.name, s.id)]

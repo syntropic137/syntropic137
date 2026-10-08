@@ -446,7 +446,7 @@ jobs:
       # -----------------------------------------------------------------------
       # Notify downstream repos
       # -----------------------------------------------------------------------
-      - name: Notify syntropic137-npx to sync templates
+      - name: Notify syntropic137-setup to sync templates
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.NPX_DISPATCH_TOKEN }}
@@ -456,7 +456,7 @@ jobs:
             exit 0
           fi
           gh workflow run template-sync.yml \
-            --repo syntropic137/syntropic137-npx \
+            --repo syntropic137/syntropic137-setup \
             --field ref="${{ steps.version.outputs.version }}" \
           && echo "✓ Template sync triggered for ${{ steps.version.outputs.version }}" \
           || echo "::warning::Failed to trigger template sync — release assets are published, sync manually"

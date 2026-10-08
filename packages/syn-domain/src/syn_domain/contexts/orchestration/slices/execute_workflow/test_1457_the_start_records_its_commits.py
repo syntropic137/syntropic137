@@ -65,6 +65,7 @@ class _Resolver:
 class _Processor:
     def __init__(self) -> None:
         self.source_commits: list[SourceCommit] | None = None
+        self.workflow_version: str | None = None
 
     async def run(
         self,
@@ -78,9 +79,12 @@ class _Processor:
         admitted: object = None,
         source_commits: list[SourceCommit] | None = None,
         tags: object = None,
+        launch_eval: object = None,
+        workflow_version: str | None = None,
     ) -> WorkflowExecutionResult:
         del workflow_name, phases, inputs, repos, admitted
         self.source_commits = source_commits
+        self.workflow_version = workflow_version
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,

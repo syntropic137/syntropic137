@@ -18,10 +18,11 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { PhaseTimeline } from '../PhaseTimeline'
 import type { ExecutionDetailResponse } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
-function phase(overrides: Partial<Phase> & { workflow_phase_id: string }): Phase {
+function phase(overrides: Partial<Phase> & { phase_id: string }): Phase {
   return {
     name: 'Phase',
     status: 'completed',
@@ -56,6 +57,7 @@ function execution(
 ): ExecutionDetailResponse {
   return {
     workflow_execution_id: 'exec-1',
+    phase_progress: { completed: 0, skipped: 0, possible: 1, remaining_possible: 1, percent: 0, display: 'phase 1 of up to 1' },
     workflow_id: 'wf-1',
     workflow_name: 'Run',
     status: 'running',
@@ -80,14 +82,14 @@ function execution(
 function renderTimeline(phases: Phase[], overrides: Partial<ExecutionDetailResponse> = {}) {
   return render(
     <MemoryRouter>
-      <PhaseTimeline execution={execution(phases, overrides)} now={Date.now()} />
+      <PhaseTimeline execution={withPlanOfPhases(execution(phases, overrides))} now={Date.now()} />
     </MemoryRouter>,
   )
 }
 
 /** The header roll-up lives in the metrics strip above the phase cards. */
 function headerStrip(): string {
-  const strip = document.querySelector('.flex.items-center.gap-4')
+  const strip = document.querySelector('.phase-pipeline-stats')
   return strip?.textContent ?? ''
 }
 
@@ -98,7 +100,7 @@ describe('PhaseTimeline cost roll-up', () => {
   // roll-up summed from the cards prints "$0.000000" under a $0.42 headline.
   it('reports the execution total, not the sum of the phase cards', () => {
     // The exact shape from the report: one phase, seeded 0, live total $0.42.
-    renderTimeline([phase({ workflow_phase_id: 'implement', cost_usd: 0 })], {
+    renderTimeline([phase({ phase_id: 'implement', cost_usd: 0 })], {
       total_cost_usd: 0.42,
     })
     expect(headerStrip()).toContain('$0.42')
@@ -110,8 +112,8 @@ describe('PhaseTimeline cost roll-up', () => {
     // figure the Total Cost card shows, and the header must agree with it.
     renderTimeline(
       [
-        phase({ workflow_phase_id: 'plan', cost_usd: 1.5 }),
-        phase({ workflow_phase_id: 'build', cost_usd: 2.5 }),
+        phase({ phase_id: 'plan', cost_usd: 1.5 }),
+        phase({ phase_id: 'build', cost_usd: 2.5 }),
       ],
       { total_cost_usd: 6.25 },
     )
@@ -124,7 +126,7 @@ describe('PhaseTimeline cost roll-up', () => {
     // The #890 coverage signal lives at execution level too: unpriced_by_phase
     // is empty on the live path, so a count summed from the phases reads 0 and
     // the zero cost renders as a confident figure.
-    renderTimeline([phase({ workflow_phase_id: 'plan', unpriced_observation_count: 0 })], {
+    renderTimeline([phase({ phase_id: 'plan', unpriced_observation_count: 0 })], {
       total_cost_usd: 0,
       unpriced_observation_count: 11,
     })
@@ -133,7 +135,7 @@ describe('PhaseTimeline cost roll-up', () => {
   })
 
   it('marks a mixed total as a lower bound rather than a complete figure', () => {
-    renderTimeline([phase({ workflow_phase_id: 'plan', unpriced_observation_count: 0 })], {
+    renderTimeline([phase({ phase_id: 'plan', unpriced_observation_count: 0 })], {
       total_cost_usd: 3,
       unpriced_observation_count: 9,
     })
@@ -143,7 +145,7 @@ describe('PhaseTimeline cost roll-up', () => {
   })
 
   it('treats a genuinely free priced execution as $0, not unpriced', () => {
-    renderTimeline([phase({ workflow_phase_id: 'plan' })], {
+    renderTimeline([phase({ phase_id: 'plan' })], {
       total_cost_usd: 0,
       unpriced_observation_count: 0,
     })
@@ -158,14 +160,14 @@ describe('PhaseTimeline with an unknown phase duration', () => {
   // taking the whole page down with it.
   it('renders a phase whose duration is unknown without crashing', () => {
     const { container } = renderTimeline([
-      phase({ workflow_phase_id: 'plan', duration_seconds: null }),
+      phase({ phase_id: 'plan', duration_seconds: null }),
     ])
     expect(container.textContent).toContain('Phase')
   })
 
   it('shows an unknown duration as unknown, not as a measured 0.0', () => {
     const { container } = renderTimeline([
-      phase({ workflow_phase_id: 'plan', duration_seconds: null }),
+      phase({ phase_id: 'plan', duration_seconds: null }),
     ])
     // The backend deliberately distinguishes "no reading" from "took no time",
     // so the card must not launder the first into the second.
@@ -175,8 +177,8 @@ describe('PhaseTimeline with an unknown phase duration', () => {
 
   it('keeps unknown phases out of the header total instead of counting them as 0', () => {
     renderTimeline([
-      phase({ workflow_phase_id: 'plan', duration_seconds: 60 }),
-      phase({ workflow_phase_id: 'build', duration_seconds: null }),
+      phase({ phase_id: 'plan', duration_seconds: 60 }),
+      phase({ phase_id: 'build', duration_seconds: null }),
     ])
     // 60.0s is a real reading of one phase, not of the execution: say how many
     // phases it does not cover rather than implying it covers them all.
@@ -186,8 +188,8 @@ describe('PhaseTimeline with an unknown phase duration', () => {
 
   it('reports the whole header duration as unknown when no phase has one', () => {
     renderTimeline([
-      phase({ workflow_phase_id: 'plan', duration_seconds: null }),
-      phase({ workflow_phase_id: 'build', duration_seconds: null }),
+      phase({ phase_id: 'plan', duration_seconds: null }),
+      phase({ phase_id: 'build', duration_seconds: null }),
     ])
     expect(headerStrip()).not.toContain('0.0s')
   })
@@ -200,7 +202,7 @@ describe('PhaseTimeline token roll-up while a phase is running', () => {
     renderTimeline(
       [
         phase({
-          workflow_phase_id: 'implement',
+          phase_id: 'implement',
           status: 'running',
           input_tokens: 0,
           output_tokens: 0,
@@ -218,9 +220,9 @@ describe('PhaseTimeline token roll-up while a phase is running', () => {
     // must follow the execution, not the 300 it can see beneath it.
     renderTimeline(
       [
-        phase({ workflow_phase_id: 'plan' }),
+        phase({ phase_id: 'plan' }),
         phase({
-          workflow_phase_id: 'implement',
+          phase_id: 'implement',
           status: 'running',
           input_tokens: 0,
           output_tokens: 0,
@@ -239,7 +241,7 @@ describe('PhaseTimeline per-phase token figures', () => {
     const { container } = renderTimeline(
       [
         phase({
-          workflow_phase_id: 'implement',
+          phase_id: 'implement',
           status: 'running',
           input_tokens: 0,
           output_tokens: 0,
@@ -254,7 +256,7 @@ describe('PhaseTimeline per-phase token figures', () => {
   it('leaves a settled phase’s count unqualified', () => {
     // 'so far' on every card would be as uninformative as never showing it:
     // this pins the label to the phase's status, not to the component.
-    const { container } = renderTimeline([phase({ workflow_phase_id: 'plan' })])
+    const { container } = renderTimeline([phase({ phase_id: 'plan' })])
 
     expect(container.textContent).toContain('300')
     expect(container.textContent).not.toContain('so far')
@@ -262,18 +264,50 @@ describe('PhaseTimeline per-phase token figures', () => {
 
   it('qualifies only the running phase when phases are mixed', () => {
     const { container } = renderTimeline([
-      phase({ workflow_phase_id: 'plan' }),
+      phase({ phase_id: 'plan' }),
       phase({
-        workflow_phase_id: 'implement',
+        phase_id: 'implement',
         status: 'running',
         input_tokens: 0,
         output_tokens: 0,
       }),
-      phase({ workflow_phase_id: 'review', status: 'pending', input_tokens: 0, output_tokens: 0 }),
+      phase({ phase_id: 'review', status: 'pending', input_tokens: 0, output_tokens: 0 }),
     ])
 
     // A pending phase really has used no tokens, so its 0 is a reading and
     // stays unqualified; only the running one is still being counted.
     expect(container.textContent?.match(/so far/g)).toHaveLength(1)
+  })
+})
+
+describe('a failed phase card says why that phase failed (#1592)', () => {
+  it('shows the phase’s own classification and error text, not the run’s', () => {
+    const { getByTestId } = renderTimeline(
+      [
+        phase({
+          phase_id: 'verify',
+          status: 'failed',
+          error_message: 'Agent failed: codex reported: Selected model is at capacity.',
+          failure_classification: 'platform',
+          reported_failure_reason: 'platform',
+        }),
+      ],
+      // The run says something different on purpose: a card that borrowed the
+      // execution's classification or text would render these instead.
+      { status: 'failed', failure_classification: 'correct_refusal', error_message: 'run text' },
+    )
+
+    const failure = getByTestId('phase-failure')
+    expect(failure.textContent).toContain('platform')
+    expect(failure.textContent).toContain('Selected model is at capacity.')
+    expect(failure.textContent).toContain('The agent reported: platform')
+    expect(failure.textContent).not.toContain('correct_refusal')
+    expect(failure.textContent).not.toContain('run text')
+    expect(failure.closest('[class*="red-"]')).not.toBeNull()
+  })
+
+  it('says nothing about failure on a phase that did not fail', () => {
+    const { queryByTestId } = renderTimeline([phase({ phase_id: 'plan' })])
+    expect(queryByTestId('phase-failure')).toBeNull()
   })
 })

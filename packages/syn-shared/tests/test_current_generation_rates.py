@@ -1,4 +1,7 @@
-"""Pin the Opus 5.5 and GPT-6-Sol rates field by field (read 2026-09-24).
+"""Pin the Opus 5.5, Sonnet 5.5, GPT-6-Sol, GPT-6.1-Sol and GPT-6-Luna rates field by field.
+
+Opus 5.5 and GPT-6-Sol were read 2026-09-24, GPT-6.1-Sol on 2026-10-06,
+Sonnet 5.5 and GPT-6-Luna on 2026-10-07.
 
 Same discipline as ``test_openai_published_rates``: the numbers are
 transcribed from the vendor pages and asserted literally, so a diff here is
@@ -32,10 +35,26 @@ from syn_shared.pricing import price_tokens, resolve_model_pricing
 #: (input, 5-min cache write, cache read, output) in USD per million tokens.
 OPUS_5_5_PUBLISHED = ("4.00", "5.00", "0.20", "20.00")
 
+#: Same shape. Cache read is $0.10 per the what's-new page, anthropic.com and
+#: the pricing page's prose; that page's table says $0.20 (see the row comment).
+SONNET_5_5_PUBLISHED = ("2.00", "2.50", "0.10", "10.00")
+
 #: (input, cached input, output) in USD per million tokens, short context,
 #: Standard tier. Cache write is not published.
 GPT_6_SOL_PUBLISHED = ("2.00", "0.20", "10.00")
 GPT_6_SOL_CACHE_WRITE_BY_CONVENTION = "2.50"
+
+#: (input, cached input, cache write, output) in USD per million tokens, short
+#: context (<=272K input), Standard tier. Read 2026-10-06 from
+#: https://developers.openai.com/api/docs/pricing and
+#: https://developers.openai.com/api/docs/models/gpt-6.1-sol ; unlike
+#: gpt-6-sol, the cache-write rate IS published.
+GPT_6_1_SOL_PUBLISHED = ("2.00", "0.10", "2.50", "10.00")
+
+#: Same shape and tier. Read 2026-10-07 from
+#: https://developers.openai.com/api/docs/pricing and
+#: https://developers.openai.com/api/docs/models/gpt-6-luna .
+GPT_6_LUNA_PUBLISHED = ("0.10", "0.01", "0.125", "0.50")
 
 
 @pytest.mark.unit
@@ -68,6 +87,43 @@ class TestOpus55:
 
 
 @pytest.mark.unit
+class TestSonnet55:
+    def test_every_field_matches_the_vendor_page(self) -> None:
+        pricing = resolve_model_pricing(ModelId.CLAUDE_SONNET_5_5)
+        assert pricing is not None
+        expected_input, expected_write, expected_read, expected_output = SONNET_5_5_PUBLISHED
+        assert pricing.input_per_million == Decimal(expected_input)
+        assert pricing.cache_creation_per_million == Decimal(expected_write)
+        assert pricing.cache_read_per_million == Decimal(expected_read)
+        assert pricing.output_per_million == Decimal(expected_output)
+
+    def test_a_known_token_mix_against_opus_5_5(self) -> None:
+        """2M in / 500k out / 1M cache write / 10M cache read, priced by the
+        id the CLI reports. Sonnet: 4.00 + 5.00 + 2.50 + 1.00; Opus: 8.00 +
+        10.00 + 5.00 + 2.00. Cache reads dominate an agent session, so a
+        cache-read price copied from Sonnet 5 ($0.20) shows up here as 13.50."""
+        mix = (2_000_000, 500_000, 1_000_000, 10_000_000)
+        sonnet = price_tokens("claude-sonnet-5-5", *mix)
+        opus = price_tokens("claude-opus-5-5", *mix)
+        assert sonnet.model == ModelId.CLAUDE_SONNET_5_5
+        assert sonnet.cost == Decimal("12.50")
+        assert opus.cost == Decimal("25.00")
+
+    def test_sonnet_alias_prices_as_sonnet_5_5(self) -> None:
+        pricing = resolve_model_pricing(ModelAlias.SONNET)
+        assert pricing is not None
+        assert pricing.model_id is ModelId.CLAUDE_SONNET_5_5
+
+    def test_sonnet_5_is_still_priced_as_itself(self) -> None:
+        """Runs observed on Sonnet 5 (every run on the 2.1.281 CLI) keep their
+        own $0.20 cache read; retargeting the alias must not reprice them."""
+        pricing = resolve_model_pricing(ModelId.CLAUDE_SONNET_5)
+        assert pricing is not None
+        assert pricing.model_id is ModelId.CLAUDE_SONNET_5
+        assert pricing.cache_read_per_million == Decimal("0.20")
+
+
+@pytest.mark.unit
 class TestGpt6Sol:
     def test_every_published_field_matches(self) -> None:
         pricing = resolve_model_pricing(ModelId.GPT_6_SOL)
@@ -83,12 +139,59 @@ class TestGpt6Sol:
         assert pricing.cache_creation_per_million == Decimal(GPT_6_SOL_CACHE_WRITE_BY_CONVENTION)
         assert pricing.cache_creation_per_million == pricing.input_per_million * Decimal("1.25")
 
-    def test_gpt_sol_alias_prices_as_gpt_6_sol(self) -> None:
+    def test_gpt_6_sol_stays_priced_for_historical_runs(self) -> None:
+        """Runs recorded before the alias moved to gpt-6.1-sol name gpt-6-sol."""
+        priced = price_tokens("gpt-6-sol", 1_000_000, 1_000_000, 0, 1_000_000)
+        assert priced.model == ModelId.GPT_6_SOL
+        assert priced.cost == Decimal("2.00") + Decimal("10.00") + Decimal("0.20")
+
+
+@pytest.mark.unit
+class TestGpt61Sol:
+    def test_every_published_field_matches(self) -> None:
+        pricing = resolve_model_pricing(ModelId.GPT_6_1_SOL)
+        assert pricing is not None
+        expected_input, expected_cached, expected_write, expected_output = GPT_6_1_SOL_PUBLISHED
+        assert pricing.input_per_million == Decimal(expected_input)
+        assert pricing.cache_read_per_million == Decimal(expected_cached)
+        assert pricing.cache_creation_per_million == Decimal(expected_write)
+        assert pricing.output_per_million == Decimal(expected_output)
+
+    def test_gpt_sol_alias_prices_as_gpt_6_1_sol(self) -> None:
         """The requested-model path sees the stored alias, not the slug."""
         alias = resolve_model_pricing(CodexModelAlias.GPT_SOL)
-        concrete = resolve_model_pricing(ModelId.GPT_6_SOL)
+        concrete = resolve_model_pricing(ModelId.GPT_6_1_SOL)
         assert alias is not None
         assert alias is concrete
+
+
+@pytest.mark.unit
+class TestGpt6Luna:
+    def test_every_published_field_matches(self) -> None:
+        pricing = resolve_model_pricing(ModelId.GPT_6_LUNA)
+        assert pricing is not None
+        expected_input, expected_cached, expected_write, expected_output = GPT_6_LUNA_PUBLISHED
+        assert pricing.input_per_million == Decimal(expected_input)
+        assert pricing.cache_read_per_million == Decimal(expected_cached)
+        assert pricing.cache_creation_per_million == Decimal(expected_write)
+        assert pricing.output_per_million == Decimal(expected_output)
+
+    def test_the_slug_codex_runs_prices_directly(self) -> None:
+        """The eval variant passes ``--model gpt-6-luna`` verbatim, so the
+        observed and the requested model are both this string. 1M of each:
+        0.10 + 0.50 + 0.125 + 0.01."""
+        priced = price_tokens("gpt-6-luna", 1_000_000, 1_000_000, 1_000_000, 1_000_000)
+        assert priced.model == ModelId.GPT_6_LUNA
+        assert priced.cost == Decimal("0.735")
+
+    def test_it_is_a_codex_model_and_no_alias_targets_it(self) -> None:
+        """Added for an eval variant only: no default may move to it."""
+        from syn_shared.agents import CODEX_MODEL_IDS, AgentProvider, model_is_for_provider
+
+        assert ModelId.GPT_6_LUNA in CODEX_MODEL_IDS
+        assert model_is_for_provider(ModelId.GPT_6_LUNA, AgentProvider.CODEX) is True
+        assert model_is_for_provider(ModelId.GPT_6_LUNA, AgentProvider.CLAUDE) is False
+        assert ModelId.GPT_6_LUNA not in CODEX_MODEL_ALIAS_TARGETS.values()
 
 
 @pytest.mark.unit
@@ -100,8 +203,8 @@ class TestCodexAliasTranslation:
         for alias, target in CODEX_MODEL_ALIAS_TARGETS.items():
             assert resolve_model_pricing(target) is not None, alias
 
-    def test_gpt_sol_translates_to_gpt_6_sol(self) -> None:
-        assert resolve_codex_model_alias(CodexModelAlias.GPT_SOL) == ModelId.GPT_6_SOL
+    def test_gpt_sol_translates_to_gpt_6_1_sol(self) -> None:
+        assert resolve_codex_model_alias(CodexModelAlias.GPT_SOL) == ModelId.GPT_6_1_SOL
 
     def test_a_concrete_slug_passes_through(self) -> None:
         assert resolve_codex_model_alias(ModelId.GPT_5_6_SOL) == ModelId.GPT_5_6_SOL

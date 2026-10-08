@@ -1,14 +1,23 @@
 id: sdlc-implement-v3
 name: "SDLC: Premise, implement + draft PR, verify, fix, re-verify, mark ready (v3)"
 description: >
-  Take a well-specified issue to a reviewed pull request. Six phases: check the
-  premise, make the change, verify it independently, fix what verification
-  found, confirm the fix, open the PR. Verification is separate from
-  implementation on purpose, and a defect it finds is repaired rather than
+  Take a well-specified issue to a reviewed pull request: check the premise,
+  make the change, verify it independently, fix what verification found and
+  confirm the fix (up to two rounds), open the PR. Verification is separate
+  from implementation on purpose, and a defect it finds is repaired rather than
   ending the run.
 type: implementation
 classification: standard
 requires_repos: true
+
+# The task IS the brief: every phase reads it as $ARGUMENTS, and without one the
+# run implements nothing at full cost (PC-66, exec-2dced6933763). Declaring it
+# required is what makes admission refuse a missing, empty or whitespace-only
+# task, at the API and in `syn workflow run`.
+inputs:
+  - name: task
+    description: "The well-specified issue or change to implement"
+    required: true
 
 # WHY THIS EXISTS.
 #
@@ -74,7 +83,7 @@ phases:
       - Write
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     skills:
       - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
@@ -121,13 +130,15 @@ phases:
     # which production does not do yet (#1308, #1342), so this declaration is
     # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of advancing by order (PC-116).
+    requires_verdict: true
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
     agent:
       provider: codex
       # `gpt-sol` is the platform's codex alias: stored as written, sent to
-      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # codex as `--model gpt-6.1-sol`, and priced as gpt-6.1-sol (#892 no longer
       # applies - the alias resolves to a rate). Timeouts and any timing or
       # cost figures in this file were measured under gpt-5.6-sol
       # (pre-2026-09-24); re-measure before tuning them against this model.
@@ -139,7 +150,8 @@ phases:
       - syntropic137/software-leverage-points/software-complexity@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/verify.md
 
-  - id: fix
+  - &fix_round
+    id: fix
     name: Address what verification found
     order: 4
     execution_type: sequential
@@ -165,7 +177,8 @@ phases:
       - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/fix.md
 
-  - id: reverify
+  - &reverify_round
+    id: reverify
     name: Confirm the fix closed what verification found
     order: 5
     execution_type: sequential
@@ -181,13 +194,15 @@ phases:
     # which production does not do yet (#1308, #1342), so this declaration is
     # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of advancing by order (PC-116).
+    requires_verdict: true
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
     agent:
       provider: codex
       # `gpt-sol` is the platform's codex alias: stored as written, sent to
-      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # codex as `--model gpt-6.1-sol`, and priced as gpt-6.1-sol (#892 no longer
       # applies - the alias resolves to a rate). Timeouts and any timing or
       # cost figures in this file were measured under gpt-5.6-sol
       # (pre-2026-09-24); re-measure before tuning them against this model.
@@ -199,9 +214,52 @@ phases:
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/reverify.md
 
+  # BOUNDED REPAIR ROUNDS (PC-63). On 2026-10-05 four runs (#1589, #1596,
+  # #1597, #1603) ended with `reverify` BLOCKED on findings one more edit would
+  # have closed, and each needed a second round built by hand. The engine
+  # advances strictly by `order` and has no loop construct, so the repeat is
+  # written out here instead: one extra fix/reverify pair, the same prompts
+  # under new ids. That makes the bound part of the definition - two rounds
+  # in total, never more - and every round a phase on the execution, so the
+  # round count is visible there. Each round has its own prompt file because a
+  # prompt may name only phases that have already run; the files differ only in
+  # their "Which round this is" section, and the test below keeps them so.
+  #
+  # A round whose predecessor CERTIFIED never runs. Each reverify reports a
+  # `review_verdict` (certified | blocked) in its TASK_RESULT, and the execution
+  # aggregate - not the prompts - picks the next phase from it: `certified`
+  # skips every phase before the final one (recorded as `skipped_phase_ids`
+  # on NextPhaseReady), `blocked` advances by order. A run that is still
+  # blocked after round 2 completes with `review_verdict: blocked`, i.e. with
+  # unresolved findings, on the execution, and a resume of it re-runs `fix_2`
+  # onward. See review_rounds.py. `finalize_pr` must therefore stay the LAST
+  # phase. `finalize_pr` reads the newest round that ran, of `reverify_2/`,
+  # `reverify/`.
+  #
+  # TWO ROUNDS, NOT THREE (owner decision 2026-10-07). A third round
+  # (`fix_3`/`reverify_3`) was removed to bound token spend: a blocker two
+  # rounds cannot close goes to a person, not to a third agent pass. A server
+  # keeps running three rounds until this definition is reinstalled on it, so
+  # the cutover is the reinstall, not a date. Executions started under the
+  # three-round definition carry those phase ids in their start event and replay unchanged; nothing reads ids from this
+  # file to render history. Adding a round
+  # means a pair here, two prompt files, and a line in phases/finalize_pr.md;
+  # scripts/tests/test_implement_v3_repair_rounds.py fails if they disagree.
+  - <<: *fix_round
+    id: fix_2
+    name: Address what verification found (round 2)
+    order: 6
+    prompt_file: phases/fix_2.md
+
+  - <<: *reverify_round
+    id: reverify_2
+    name: Confirm the fix closed what verification found (round 2)
+    order: 7
+    prompt_file: phases/reverify_2.md
+
   - id: finalize_pr
     name: Open the pull request
-    order: 6
+    order: 8
     execution_type: sequential
     input_artifacts:
       - markdown
@@ -254,7 +312,7 @@ phases:
       - Write
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     skills:
       - syntropic137/software-leverage-points/documentation@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454

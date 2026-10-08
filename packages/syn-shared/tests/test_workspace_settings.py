@@ -51,6 +51,7 @@ class TestIsolationBackend:
         assert len(IsolationBackend) == 5
 
 
+@pytest.mark.unit
 class TestCloudProvider:
     """Test CloudProvider enum."""
 
@@ -60,6 +61,7 @@ class TestCloudProvider:
         assert CloudProvider.MODAL == "modal"
 
 
+@pytest.mark.unit
 class TestWorkspaceSecuritySettings:
     """Test WorkspaceSecuritySettings class."""
 
@@ -78,8 +80,6 @@ class TestWorkspaceSecuritySettings:
             assert security.max_workspace_size == "1Gi"
 
             # Resource limits set
-            assert security.max_memory == "512Mi"
-            assert security.max_cpu == 0.5
             assert security.max_pids == 100
             assert security.max_execution_time == 3600
 
@@ -87,16 +87,12 @@ class TestWorkspaceSecuritySettings:
         """Environment variables should override defaults."""
         env = {
             "SYN_SECURITY_ALLOW_NETWORK": "true",
-            "SYN_SECURITY_MAX_MEMORY": "2Gi",
-            "SYN_SECURITY_MAX_CPU": "2.0",
             "SYN_SECURITY_MAX_PIDS": "500",
         }
         with patch.dict(os.environ, env, clear=True):
             security = WorkspaceSecuritySettings(_env_file=None)
 
             assert security.allow_network is True
-            assert security.max_memory == "2Gi"
-            assert security.max_cpu == 2.0
             assert security.max_pids == 500
 
     def test_allowed_hosts_comma_format(self) -> None:
@@ -122,6 +118,7 @@ class TestWorkspaceSecuritySettings:
             assert security.get_allowed_hosts_list() == []
 
 
+@pytest.mark.unit
 class TestWorkspaceSettings:
     """Test WorkspaceSettings class."""
 
@@ -130,12 +127,11 @@ class TestWorkspaceSettings:
         with patch.dict(os.environ, {}, clear=True):
             settings = WorkspaceSettings(_env_file=None)
 
-            # Capacity defaults
-            assert settings.pool_size == 100
-            assert settings.max_concurrent == 1000
+            # Per-container limits: behaviour-neutral against the 4G / 2 CPU
+            # the agentic_isolation provider applied before these were wired.
+            assert settings.memory_limit_mb == 4096
+            assert settings.cpu_limit == 2.0
 
-            # Cloud overflow enabled by default
-            assert settings.enable_cloud_overflow is True
             assert settings.cloud_provider == CloudProvider.E2B
             assert settings.cloud_api_key is None
 
@@ -169,19 +165,20 @@ class TestWorkspaceSettings:
             assert settings.cloud_api_key.get_secret_value() == "secret-key"
             assert settings.cloud_template == "custom-template"
 
-    def test_capacity_limits(self) -> None:
-        """Capacity settings should accept reasonable values."""
+    def test_container_limits_override(self) -> None:
+        """Per-container limits are read from SYN_WORKSPACE_* env vars."""
         env = {
-            "SYN_WORKSPACE_POOL_SIZE": "500",
-            "SYN_WORKSPACE_MAX_CONCURRENT": "5000",
+            "SYN_WORKSPACE_MEMORY_LIMIT_MB": "1536",
+            "SYN_WORKSPACE_CPU_LIMIT": "1.5",
         }
         with patch.dict(os.environ, env, clear=True):
             settings = WorkspaceSettings(_env_file=None)
 
-            assert settings.pool_size == 500
-            assert settings.max_concurrent == 5000
+            assert settings.memory_limit_mb == 1536
+            assert settings.cpu_limit == 1.5
 
 
+@pytest.mark.unit
 class TestGetDefaultIsolationBackend:
     """Test get_default_isolation_backend function."""
 
@@ -308,6 +305,7 @@ class TestWorkspaceImages:
             assert settings.docker_image == "my-registry/custom-image:v1"
 
 
+@pytest.mark.unit
 class TestSettingsWorkspaceIntegration:
     """Test workspace settings integration with main Settings class.
 
@@ -330,15 +328,15 @@ class TestSettingsWorkspaceIntegration:
     def test_workspace_respects_env_vars(self) -> None:
         """Workspace settings should respect env vars."""
         env = {
-            "SYN_WORKSPACE_POOL_SIZE": "200",
-            "SYN_SECURITY_MAX_MEMORY": "1Gi",
+            "SYN_WORKSPACE_MEMORY_LIMIT_MB": "2000",
+            "SYN_SECURITY_MAX_PIDS": "200",
         }
         with patch.dict(os.environ, env, clear=True):
             workspace = WorkspaceSettings(_env_file=None)
             security = WorkspaceSecuritySettings(_env_file=None)
 
-            assert workspace.pool_size == 200
-            assert security.max_memory == "1Gi"
+            assert workspace.memory_limit_mb == 2000
+            assert security.max_pids == 200
 
 
 # =============================================================================
@@ -346,6 +344,7 @@ class TestSettingsWorkspaceIntegration:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestGitIdentitySettings:
     """Test GitIdentitySettings class."""
 
@@ -446,6 +445,7 @@ class TestGitIdentitySettings:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestContainerLoggingSettings:
     """Test ContainerLoggingSettings class."""
 
@@ -531,6 +531,7 @@ class TestContainerLoggingSettings:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestGitIdentityResolver:
     """Test GitIdentityResolver class."""
 

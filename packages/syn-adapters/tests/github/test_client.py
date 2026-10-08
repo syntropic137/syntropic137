@@ -21,6 +21,8 @@ from syn_adapters.github.client import (
 )
 from syn_adapters.github.client_jwt import _PEM_HEADER
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from pathlib import Path
 

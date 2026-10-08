@@ -199,8 +199,8 @@ class ModelPricing:
 # rows that FOLLOW the multipliers (not every row does - read each row):
 #   - Cache creation (5-min TTL): 1.25x
 #   - Cache read:                 0.10x
-# Opus 5.5 breaks both: its cache read is $0.20 (0.05x) and its 5-min write
-# is $5.00 (1.25x), set explicitly from the vendor page rather than derived.
+# Opus 5.5 and Sonnet 5.5 break the cache-read one: both read at 0.05x of input
+# ($0.20 / $0.10), set explicitly from the vendor page rather than derived.
 # The table carries one cache-write rate, the 5-min one; a 1-hour cache write
 # (Opus 5.5: $8.00) is not modelled and would be under-priced.
 # ---------------------------------------------------------------------------
@@ -217,6 +217,40 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         cache_creation_per_million=Decimal("5.00"),
         cache_read_per_million=Decimal("0.20"),
     ),
+    # Sonnet 5.5: $2 in / $2.50 5-min cache write / $0.10 cache read / $10 out
+    # per MTok - exactly half Opus 5.5 on every modelled rate. Read 2026-10-07:
+    #   https://docs.claude.com/en/docs/about-claude/pricing
+    #   https://docs.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5
+    #   https://www.anthropic.com/pricing
+    # The vendor sources DISAGREE on cache read. The pricing page's table (and
+    # the prompt-caching page's table) say $0.20; the same pricing page's prose
+    # ("a cache hit costs 5% ... $0.10 USD on Claude Sonnet 5.5"), the
+    # what's-new page ("cache reads ... cost $0.10 ... half the Claude Sonnet 5
+    # rate") and anthropic.com/pricing say $0.10. $0.10 is taken because it is
+    # the stated 0.05x of $2 input and the $0.20 row is identical to Sonnet 5's.
+    # 1-hour cache write ($4.00) is not modelled, as for Opus 5.5.
+    ModelId.CLAUDE_SONNET_5_5: ModelPricing(
+        model_id=ModelId.CLAUDE_SONNET_5_5,
+        input_per_million=Decimal("2.00"),
+        output_per_million=Decimal("10.00"),
+        cache_creation_per_million=Decimal("2.50"),
+        cache_read_per_million=Decimal("0.10"),
+    ),
+    # GPT-6.1-Sol (codex slug `gpt-6.1-sol`, the `gpt-sol` target since
+    # 2026-10-06): $2 in / $0.10 cached / $2.50 cache write / $10 out per
+    # MTok, SHORT-CONTEXT (<=272K input) Standard tier. Source, retrieved
+    # 2026-10-06: https://developers.openai.com/api/docs/pricing and
+    # https://developers.openai.com/api/docs/models/gpt-6.1-sol . Above 272K
+    # input OpenAI bills 2x input/cache and 1.5x output for the whole request;
+    # that tier is not modelled, so a long-context run is under-priced. Only
+    # the cached-input rate differs from gpt-6-sol (half).
+    ModelId.GPT_6_1_SOL: ModelPricing(
+        model_id=ModelId.GPT_6_1_SOL,
+        input_per_million=Decimal("2.00"),
+        output_per_million=Decimal("10.00"),
+        cache_creation_per_million=Decimal("2.50"),
+        cache_read_per_million=Decimal("0.10"),
+    ),
     # GPT-6-Sol (codex slug `gpt-6-sol`): $2 in / $0.20 cached / $10 out per
     # MTok, SHORT-CONTEXT Standard tier; the long-context rate was not
     # captured, so a long-context run is under-priced (same caveat as the
@@ -228,6 +262,20 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("10.00"),
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.20"),
+    ),
+    # GPT-6-Luna (codex slug `gpt-6-luna`): $0.10 in / $0.01 cached / $0.125
+    # cache write / $0.50 out per MTok, SHORT-CONTEXT (<=272K input) Standard
+    # tier. Source, retrieved 2026-10-07:
+    # https://developers.openai.com/api/docs/pricing and
+    # https://developers.openai.com/api/docs/models/gpt-6-luna . All four
+    # rates are published. Above 272K input OpenAI bills 2x input/cache and
+    # 1.5x output for the whole request; not modelled, as for gpt-6.1-sol.
+    ModelId.GPT_6_LUNA: ModelPricing(
+        model_id=ModelId.GPT_6_LUNA,
+        input_per_million=Decimal("0.10"),
+        output_per_million=Decimal("0.50"),
+        cache_creation_per_million=Decimal("0.125"),
+        cache_read_per_million=Decimal("0.01"),
     ),
     # --- ADR-067 phase 0 generation ---
     # ANTHROPIC ROWS ONLY: verified 2026-08-16 against the vendor pricing pages

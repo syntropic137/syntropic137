@@ -27,6 +27,8 @@ from syn_shared.display.formatters import (
     format_phase_model_definition,
     format_repos,
     format_tokens,
+    format_utc_timestamp,
+    resolve_deadline,
     resolve_duration_seconds,
 )
 
@@ -44,5 +46,7 @@ __all__ = [
     "format_phase_model_definition",
     "format_repos",
     "format_tokens",
+    "format_utc_timestamp",
+    "resolve_deadline",
     "resolve_duration_seconds",
 ]

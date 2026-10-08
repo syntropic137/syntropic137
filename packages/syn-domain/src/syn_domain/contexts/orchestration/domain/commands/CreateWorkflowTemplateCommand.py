@@ -15,6 +15,9 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (  # noqa: TC001
     SkillRef,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import (  # noqa: TC001
+    EvalId,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -80,6 +83,10 @@ class CreateWorkflowTemplateCommand(BaseModel):
     # the YAML one, applies the shared rules.
     tags: TagSet = Field(default_factory=TagSet)
 
+    # The eval a launch that names none joins (#967). Part of the definition,
+    # so an install replaces it like every other field.
+    default_eval_id: EvalId | None = None
+
     # Provenance (issue #822). Recorded at install time so an execution can be
     # traced back to the package version and source commit that produced it.
     version: str | None = None
@@ -87,6 +94,9 @@ class CreateWorkflowTemplateCommand(BaseModel):
 
     source_digest: str | None = None
     """Resolved source commit SHA the definition was built from."""
+
+    package_name: str | None = None
+    """Package that installed this definition (#1588). Read back by prune."""
 
     force: bool = False
     """Explicit intent to overwrite an already-installed matching version."""

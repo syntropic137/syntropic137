@@ -8,6 +8,10 @@ For execution details, see WorkflowExecutionDetail.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    FallbackAgent,
+    stored_fallback_agent,
+)
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
@@ -124,6 +128,9 @@ class PhaseDefinitionDetail:
     timeout_seconds: int = PhaseDefaults.TIMEOUT_SECONDS
     """Timeout for phase execution in seconds."""
 
+    max_cost_usd: float | None = None
+    """The most this phase may spend, in USD, before it is stopped (#1376)."""
+
     allowed_tools: tuple[str, ...] = ()
     """Tools allowed during this phase execution."""
 
@@ -142,11 +149,21 @@ class PhaseDefinitionDetail:
     Security-relevant: it stages BOTH agent auths in the workspace, so a
     reader has to be able to see it. It was stored and unreadable."""
 
+    require_delegation: bool = False
+    """Whether the phase completes only once its delegate succeeded (#894).
+    Distinct from ``allow_delegation``, the permission."""
+
+    fallback_agent: FallbackAgent | None = None
+    """The agent the phase is re-run on when its provider cannot serve it (PC-83)."""
+
     clone_repos: bool = True
     """Whether the workflow's repos are checked out for this phase (#1187)."""
 
     delivers_repo_changes: bool = True
     """Whether repository changes are part of this phase's deliverable (#1308)."""
+
+    requires_verdict: bool = False
+    """Whether this phase fails when it reports no ``review_verdict`` (PC-116)."""
 
     sandbox: str = DEFAULT_PHASE_SANDBOX
     """The agent sandbox level this phase declares (``agent.sandbox``).
@@ -241,6 +258,13 @@ class WorkflowDetail:
     tags: tuple[str, ...] = ()
     """The template's tags, normalised and sorted (#967). Exported as ``tags:``."""
 
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Exported as ``default_eval_id:``."""
+
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None if not installed
+    from a package, or recorded before provenance existed."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
@@ -254,6 +278,7 @@ class WorkflowDetail:
                 order=p.get(PhaseFields.ORDER, i),
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE),
                 timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
+                max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
@@ -264,11 +289,15 @@ class WorkflowDetail:
                 # CLI -- goes through here, so the previous version fixed
                 # exactly half the path while five tests passed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                require_delegation=bool(p.get("require_delegation", False)),
+                # PC-83, and the same seam: written below, so read here.
+                fallback_agent=stored_fallback_agent(p.get("fallback_agent")),
                 # #1429. Read at BOTH construction sites on purpose: the
                 # comment above this one records that fixing only one left
                 # half the path broken while the tests passed.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                requires_verdict=bool(p.get("requires_verdict", False)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_stored_refs(p.get("claude_plugins")),
                 skills=_stored_refs(p.get("skills")),
@@ -305,6 +334,8 @@ class WorkflowDetail:
             repos=tuple(data.get("repos", [])),
             requires_repos=data.get("requires_repos", True),
             tags=tuple(data.get("tags") or ()),
+            default_eval_id=data.get("default_eval_id"),
+            package_name=data.get("package_name"),
         )
 
     @staticmethod
@@ -331,6 +362,7 @@ class WorkflowDetail:
                 PhaseFields.ORDER: p.order,
                 PhaseFields.PROMPT_TEMPLATE: p.prompt_template,
                 PhaseFields.TIMEOUT_SECONDS: p.timeout_seconds,
+                "max_cost_usd": p.max_cost_usd,
                 PhaseFields.ALLOWED_TOOLS: list(p.allowed_tools),
                 "argument_hint": p.argument_hint,
                 "model": p.model,
@@ -340,6 +372,10 @@ class WorkflowDetail:
                 # and served -- drops it. Adding the field above without this
                 # line changes nothing a caller can see.
                 "allow_delegation": p.allow_delegation,
+                "require_delegation": p.require_delegation,
+                "fallback_agent": (
+                    p.fallback_agent.model_dump() if p.fallback_agent is not None else None
+                ),
                 # #1429, and the SAME seam this comment describes. The first
                 # attempt added these to the dataclass and to both constructor
                 # sites and stopped there, so the projection built a phase
@@ -349,6 +385,7 @@ class WorkflowDetail:
                 # LESS restricted than the phase actually runs.
                 "clone_repos": p.clone_repos,
                 "delivers_repo_changes": p.delivers_repo_changes,
+                "requires_verdict": p.requires_verdict,
                 "sandbox": p.sandbox,
                 "claude_plugins": [r.to_dict() for r in p.claude_plugins],
                 "skills": [r.to_dict() for r in p.skills],
@@ -382,4 +419,6 @@ class WorkflowDetail:
             "repos": list(self.repos),
             "requires_repos": self.requires_repos,
             "tags": list(self.tags),
+            "default_eval_id": self.default_eval_id,
+            "package_name": self.package_name,
         }

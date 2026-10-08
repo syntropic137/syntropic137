@@ -10,26 +10,46 @@ Uses AutoDispatchProjection (ADR-014) for reliable position tracking.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
     from event_sourcing import ProjectionStore
+    from pydantic import JsonValue
 
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration._shared.unapplied_start import UnappliableStartError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationFailure,
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
+)
+from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
+    AgentExecutionCompletedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
     ExecutionTagsAddedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
     ExecutionTagsRemovedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+    NextPhaseReadyEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+    WorkspaceProvisionedForPhaseEvent,
+)
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
+    inherited_phase_count,
+    inherited_phase_ids,
+    record_skips,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
@@ -40,6 +60,7 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.failed_phase_
 from syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail import (
     PhaseDetail,
 )
+from syn_domain.projection_scan import read_by_keys
 from syn_shared.display import compute_duration_seconds
 
 #: Totals a completion event MAY restate. Accumulated from PhaseCompleted
@@ -76,6 +97,53 @@ _ZERO_IS_SUSPECT = "total_duration_seconds"
 _IN_FLIGHT_PHASE_STATUSES = frozenset({"running", "pending"})
 
 
+@dataclass(frozen=True)
+class _PhaseDefinitions:
+    """What the detail view keeps from a start event's ``phase_definitions``."""
+
+    budgets: dict[str, int]
+    """Each phase's wall-clock budget, keyed by phase id (#1262)."""
+    declared: list[dict[str, str | int]]
+    """Every phase the run declared, in order, as stored (feedback cee46909)."""
+
+
+def _parse_phase_definitions(definitions: JsonValue) -> _PhaseDefinitions:
+    """Budgets and declared phases from ``WorkflowExecutionStarted.phase_definitions``.
+
+    Every value is checked because none of them are validated: the field is a
+    list of `dict[str, Any]`, so a definition can carry anything at all. A
+    phase with no stated budget is absent rather than 0, which is what keeps an
+    unknown budget reading as None downstream instead of as a number nobody
+    set.
+
+    The same loop keeps every phase the run declared, in order, so the detail
+    view can show the phases still to come and not only the ones that started
+    (feedback cee46909). Off the event `total_phases` is read from, so the list
+    and the progress denominator agree.
+    """
+    budgets: dict[str, int] = {}
+    declared: list[dict[str, str | int]] = []
+    for definition in definitions if isinstance(definitions, list) else []:
+        if not isinstance(definition, dict):
+            continue
+        phase_id = definition.get("phase_id")
+        if not isinstance(phase_id, str) or not phase_id:
+            continue
+        timeout = definition.get("timeout_seconds")
+        if isinstance(timeout, int):
+            budgets[phase_id] = timeout
+        name = definition.get("name")
+        order = definition.get("order")
+        declared.append(
+            {
+                "phase_id": phase_id,
+                "name": name if isinstance(name, str) and name else phase_id,
+                "order": order if isinstance(order, int) else len(declared),
+            }
+        )
+    return _PhaseDefinitions(budgets=budgets, declared=declared)
+
+
 class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """Builds workflow execution detail read model from events.
 
@@ -93,7 +161,25 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # both bumped 10 -> 11 independently, on separate branches. Taking either
     # literal 11 would leave a deployment that had already rebuilt at the other
     # one's 11 seeing no change here, and so never rebuilding for this field.
-    VERSION = 13  # v13: tags and inherited_tags (#967)
+    # v14: rebuild so stored PhaseFailed events populate the phase failure
+    # fields #1592 added (failure_classification, reported_failure_reason);
+    # a row built before them reads `unclassified`. Also picks up
+    # review_verdict (PC-63), which only new completions carry.
+    # v15, not 14: #1590 added delegation_failure (#894) to this read model on
+    # main without bumping from 13, while PC-63 bumped 13 -> 14. A deployment
+    # that had already rebuilt at this branch's 14 would never rebuild for
+    # delegation_failure, so the merge takes the higher and bumps once more.
+    # v16: skipped_phase_ids from NextPhaseReady, so a run certified early
+    # stops reading as finished short of its total. Rebuilt so every run
+    # since PC-63 gets its skips, not only new ones.
+    # v16 (main, PC-83): rebuild so stored AgentExecutionCompleted events
+    # populate agent_provider / agent_model, the agent that actually ran.
+    # v17: both branches bumped 15 -> 16 independently; a deployment already
+    # at either 16 would miss the other's rebuild, so the merge bumps once more.
+    # v18: declared_phases and inherited_phase_ids from WorkflowExecutionStarted
+    # (feedback cee46909), so every run, not only new ones, shows the phases
+    # it has still to do.
+    VERSION = 18
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -184,7 +270,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         """
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
-            return
+            raise UnappliableStartError(self.PROJECTION_NAME)
 
         # What the run was dispatched with. Kept whole (#1307): this is the only
         # record of what the run was ASKED to do, and a reader retrying a run
@@ -203,33 +289,16 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # this projection's memory; a map on the instance would not survive a
         # restart mid-run.
         #
-        # DELIBERATELY NOT A HELPER, and please do not extract it. A function a
-        # handler hands its payload to must declare a typed payload
-        # (test_typed_projection_handlers.py, #1268), and there is no narrower
-        # type to give this one: `event_data` is a `model_dump()` of an event
-        # whose `phase_definitions` is itself `list[dict[str, Any]]`. Extracting
-        # it adds a new untyped site to a table that only ever shrinks, so the
-        # tidier-looking version is the one that fails the gate. It moves out of
-        # here when the dispatch hands handlers the event itself.
-        #
-        # Every value is checked because none of them are validated: the field
-        # is a list of `dict[str, Any]`, so a definition can carry anything at
-        # all. A phase with no stated budget is absent rather than 0, which is
-        # what keeps an unknown budget reading as None downstream instead of as
-        # a number nobody set.
-        definitions = event_data.get("phase_definitions")
-        phase_budgets: dict[str, int] = {}
-        for definition in definitions if isinstance(definitions, list) else []:
-            if not isinstance(definition, dict):
-                continue
-            phase_id = definition.get("phase_id")
-            timeout = definition.get("timeout_seconds")
-            if isinstance(phase_id, str) and phase_id and isinstance(timeout, int):
-                phase_budgets[phase_id] = timeout
+        # Parsed in `_parse_phase_definitions` below, which keeps the handler
+        # inside its complexity budget and takes the value as `JsonValue`, the
+        # same typed payload `inherited_phase_ids` takes, so extracting it
+        # opens no new untyped site (#1268).
+        definitions = _parse_phase_definitions(event_data.get("phase_definitions"))
+        phase_budgets = definitions.budgets
+        declared_phases = definitions.declared
 
-        # Create initial phases from workflow definition (all pending)
-        # Note: In a full implementation, we'd get phase names from workflow
-        # For now, phases are populated as they start/complete
+        # `phases` holds only the phases that started; `declared_phases` is
+        # every phase, and the read model derives where each one stands.
         detail = {
             "execution_id": execution_id,
             "workflow_id": event_data.get("workflow_id", ""),
@@ -238,6 +307,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "started_at": event_data.get("started_at"),
             "completed_at": None,
             "phases": [],  # Populated as phases start/complete
+            "declared_phases": declared_phases,
+            "inherited_phase_ids": inherited_phase_ids(event_data.get("resumed_from")),
             "total_input_tokens": 0,
             "total_output_tokens": 0,
             "total_cache_creation_tokens": 0,
@@ -257,7 +328,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # (#1147). total_phases is required on the event, so there is no
             # default worth defending here; 0 would be a run with no phases.
             "total_phases": event_data.get("total_phases", 0),
-            "completed_phases": 0,
+            "completed_phases": inherited_phase_count(event_data.get("resumed_from")),
+            # Skips a certified review made in the parent (#1681), so a resume
+            # does not count rounds it will never run as work still to do.
+            "skipped_phase_ids": list(event_data.get("inherited_skipped_phase_ids") or []),
             # Held here, not served from here: `on_phase_started` moves each
             # budget onto the phase that it belongs to, which is where a
             # reader needs it next to that phase's elapsed time (#1262).
@@ -322,6 +396,51 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         status = SideEffectStatus.from_stored(event_data.get("reported_side_effects"))
         phase["reported_side_effects"] = None if status is None else status.value
 
+    async def on_agent_execution_completed(self, event_data: AgentExecutionCompletedEvent) -> None:
+        """Record which agent PRODUCED the phase's result (PC-83).
+
+        A phase whose provider was at capacity or out of quota re-runs once on
+        its fallback_agent, so the declared agent is not always the one that
+        ran. Events written before PC-83 carry neither field and leave the
+        phase's values as they were (None), never a guess at the declared one.
+        """
+        event = AgentExecutionCompletedEvent.model_validate(event_data)
+        if event.agent_provider is None and event.agent_model is None:
+            return
+        existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
+        if not existing:
+            return
+        agent = {"agent_provider": event.agent_provider, "agent_model": event.agent_model}
+        found = self._find_phase(existing.get("phases", []), event.phase_id)
+        if found is None:
+            # No row yet: its PhaseStarted was never projected. Held, like
+            # `phase_budgets`, until `on_phase_completed` creates the row, so
+            # the salvage path names its agent the way the common path does.
+            existing.setdefault("phase_agents", {})[event.phase_id] = agent
+        else:
+            found[1].update(agent)
+        await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
+
+    async def on_workspace_provisioned_for_phase(
+        self, event_data: WorkspaceProvisionedForPhaseEvent
+    ) -> None:
+        """Handle WorkspaceProvisionedForPhase: the phase's clock starts here (#1546).
+
+        Overwrites, because a retried phase is provisioned again and runs on a
+        fresh clock.
+        """
+        event = WorkspaceProvisionedForPhaseEvent.model_validate(event_data)
+        existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
+        if not existing:
+            return
+        phases = existing.get("phases", [])
+        found = self._find_phase(phases, event.phase_id)
+        if found is None:
+            return
+        _, phase = found
+        phase["provisioned_at"] = event.provisioned_at.isoformat()
+        await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
+
     @staticmethod
     def _track_artifact(existing: dict[str, Any], artifact_id: str | None) -> None:
         """Add an artifact ID to the execution detail if not already tracked."""
@@ -345,22 +464,26 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not existing:
             return
 
-        phase_id = event_data.get("phase_id")
+        phase_id: str = event_data.get("phase_id") or ""
         phases = existing.get("phases", [])
 
-        found = self._find_phase(phases, phase_id or "")
+        found = self._find_phase(phases, phase_id)
         if found:
             _, phase = found
             self._update_phase_metrics(phase, event_data)
         else:
             budgets = existing.get("phase_budgets") or {}
             new_phase = PhaseDetail.completed(
-                phase_id or "",
-                phase_id or "",
+                phase_id,
+                phase_id,
                 event_data,
-                timeout_seconds=budgets.get(phase_id or ""),
+                timeout_seconds=budgets.get(phase_id),
             )
-            phases.append(new_phase.to_dict())
+            row = new_phase.to_dict()
+            # The agent held by `on_agent_execution_completed` for a phase
+            # that had no row yet (PC-83).
+            row.update(existing.get("phase_agents", {}).get(phase_id, {}))
+            phases.append(row)
 
         # Aggregate totals
         input_tokens = event_data.get("input_tokens", 0)
@@ -383,6 +506,26 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         existing["phases"] = phases
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
+    async def on_next_phase_ready(self, event_data: NextPhaseReadyEvent) -> None:
+        """Handle NextPhaseReady: record the phases a review verdict skipped (PC-63).
+
+        Without this a run certified at its first review reads as finished
+        short of its total, because the rounds it never needed stay in the
+        denominator.
+        """
+        event = NextPhaseReadyEvent.model_validate(event_data)
+        execution_id = event.execution_id
+        skipped = event.skipped_phase_ids
+        if not execution_id or not skipped:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["skipped_phase_ids"] = record_skips(
+                existing.get("skipped_phase_ids") or [], skipped
+            )
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
     async def on_workflow_completed(self, event_data: dict) -> None:
         """Handle WorkflowCompleted event.
 
@@ -398,6 +541,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["status"] = "completed"
         existing["completed_at"] = event_data.get("completed_at")
+        verdict = ReviewVerdict.from_stored(event_data.get("review_verdict"))
+        existing["review_verdict"] = None if verdict is None else verdict.value
         existing["completed_phases"] = self._completed_phases_after(
             event_data, existing.get("completed_phases", 0)
         )
@@ -450,6 +595,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # word be summed as a measurement (#1392).
         reported = ReportedFailureReason.from_stored(event_data.get("reported_failure_reason"))
         reported_value = None if reported is None else reported.value
+        # Which required delegate did not happen (#894). Validated through its
+        # value object here so the row holds the one shape the read model reads.
+        delegation = DelegationFailure.from_stored(event_data.get("delegation_failure"))
+        delegation_value = None if delegation is None else delegation.model_dump(mode="json")
 
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not existing:
@@ -469,6 +618,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 "error_message": event_data.get("error_message"),
                 "failure_classification": classification.value,
                 "reported_failure_reason": reported_value,
+                "quarantined_refs": event_data.get("quarantined_refs") or [],
+                "delegation_failure": delegation_value,
                 "completed_phases": event_data.get("completed_phases", 0),
                 "total_phases": event_data.get("total_phases", 0),
             }
@@ -483,6 +634,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # and stranding the whole read model.
             existing["failure_classification"] = classification.value
             existing["reported_failure_reason"] = reported_value
+            # Where the failed phase's unpushed work landed (#1547). New events
+            # only carry it, so no replay is needed: older rows read as none.
+            existing["quarantined_refs"] = event_data.get("quarantined_refs") or []
+            existing["delegation_failure"] = delegation_value
             existing["completed_phases"] = self._completed_phases_after(
                 event_data, existing.get("completed_phases", 0)
             )
@@ -635,6 +790,20 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if existing:
             existing["tags"] = replay_tag_edit(existing.get("tags") or [], tags, added=added)
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def applied_starts(self, execution_ids: Sequence[str]) -> set[str]:
+        """Which of ``execution_ids`` this read model applied the start of, in one query.
+
+        A row alone does not prove it: the #598 fallback in `on_workflow_failed`
+        creates a row for a failure whose start was never seen, with no
+        `started_at`. That is the shape a dropped start leaves behind (#1545),
+        so a start counts as applied only when `started_at` is set. The document
+        key is the execution id, so this is a primary-key read, not a JSON filter.
+        """
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, execution_ids)
+        return {
+            key for key, document in documents.items() if document.get("started_at") is not None
+        }
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:
         """Get execution detail by ID.

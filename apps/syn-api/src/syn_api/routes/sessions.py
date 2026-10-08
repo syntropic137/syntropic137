@@ -5,7 +5,6 @@ Provides listing, starting, completing, and retrieving agent sessions.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import (
@@ -52,6 +51,7 @@ from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
 from syn_domain.pagination import Page
+from syn_domain.projection_scan import read_by_keys
 from syn_shared.display import (
     EM_DASH,
     compute_duration_seconds,
@@ -302,22 +302,6 @@ class SessionResponse(BaseModel):
 # =============================================================================
 
 
-async def _fetch_one_workflow_name(
-    manager: ProjectionManager, wf_id: str
-) -> tuple[str, str] | None:
-    """Fetch a single workflow name; returns (id, name) or None on failure."""
-    try:
-        wf_data = await manager.store.get(WorkflowListProjection.PROJECTION_NAME, wf_id)
-        if isinstance(wf_data, dict) and wf_data.get("name"):
-            return wf_id, wf_data["name"]
-    except Exception:
-        logger.debug("Could not load workflow name for %s", wf_id, exc_info=True)
-    return None
-
-
-_WF_NAME_CONCURRENCY = 20
-
-
 @dataclass
 class _SummaryEnrichment:
     """Per-session enrichment loaded from Lane 2 (cost projection).
@@ -384,19 +368,32 @@ async def _load_session_costs(session_ids: list[str]) -> dict[str, _SummaryEnric
     return {sid: _enrichment_from_cost(cost) for sid, cost in costs.items()}
 
 
-async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
-    """Build a {workflow_id: workflow_name} lookup for the given IDs via concurrent store lookups."""
+async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str] | None:
+    """``{workflow_id: name}`` for the given ids, in ONE store read; None if unreadable.
+
+    It was one ``get`` per workflow on the page - up to fifty round trips per
+    /sessions request, most of the endpoint's time once the page itself came
+    from one statement (E2). ``read_by_keys`` is one ``id = ANY(...)`` query
+    on Postgres. A failed read is None, not ``{}``: "no workflow has a name"
+    and "the names could not be read" are different answers (#1341). The
+    page still renders, without names, as it did when each lookup failed.
+    """
     if not workflow_ids:
         return {}
     manager = get_projection_mgr()
-    semaphore = asyncio.Semaphore(_WF_NAME_CONCURRENCY)
-
-    async def _fetch_bounded(wf_id: str) -> tuple[str, str] | None:
-        async with semaphore:
-            return await _fetch_one_workflow_name(manager, wf_id)
-
-    results = await asyncio.gather(*(_fetch_bounded(wf_id) for wf_id in workflow_ids))
-    return dict(entry for entry in results if entry is not None)
+    try:
+        documents = await read_by_keys(
+            manager.store, WorkflowListProjection.PROJECTION_NAME, sorted(workflow_ids)
+        )
+    except Exception:
+        logger.warning("Could not load workflow names for the session page", exc_info=True)
+        return None
+    names: dict[str, str] = {}
+    for wf_id, document in documents.items():
+        name = document.get("name")
+        if isinstance(name, str) and name:
+            names[wf_id] = name
+    return names
 
 
 def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
@@ -834,7 +831,7 @@ async def list_sessions_endpoint(
     responses = [
         _build_session_summary_response(
             s,
-            wf_names.get(s.workflow_id) if s.workflow_id else None,
+            wf_names.get(s.workflow_id) if wf_names is not None and s.workflow_id else None,
             enrichment.get(s.id, _SummaryEnrichment()),
         )
         for s in summaries

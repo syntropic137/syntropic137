@@ -59,6 +59,8 @@ _FILTERED_FIELDS: dict[str, tuple[str, ...]] = {
     # repo_correlation is read on every insights request, by repo
     # (executions_by_repo) and by execution (repo_health).
     "repo_correlation": ("repo_full_name", "execution_id"),
+    # get_by_workflow_id, twice per /metrics?workflow_id= request (#1558).
+    "workflow_executions": ("workflow_id",),
 }
 
 
@@ -134,7 +136,9 @@ async def fetch_get_all(
 ) -> list[dict[str, Any]]:
     """Fetch all records from a projection table ordered by updated_at."""
     async with pool.acquire() as conn:
-        rows = await conn.fetch(f"SELECT data FROM {table_name} ORDER BY updated_at DESC")
+        # `id` breaks ties so the order is total - the same order the field
+        # scan (postgres_scan) reads in, which E2's parity depends on.
+        rows = await conn.fetch(f"SELECT data FROM {table_name} ORDER BY updated_at DESC, id")
         return [deserialize_fn(row["data"]) for row in rows]
 
 

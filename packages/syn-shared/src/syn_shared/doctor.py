@@ -74,10 +74,11 @@ from pydantic import ValidationError
 
 from syn_shared.env_constants import (
     ENV_APP_ENVIRONMENT,
-    ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
+    ENV_SYN_EXECUTION_MAX_CONCURRENT,
 )
 from syn_shared.settings.config import AppEnvironment
 from syn_shared.settings.env_file import parse_env_file
+from syn_shared.settings.execution import DEFAULT_MAX_CONCURRENT_EXECUTIONS
 from syn_shared.settings.op_client import fetch_op_item, op_available
 from syn_shared.settings.op_resolver import _ENV_TO_VAULT, _OP_ITEM_TITLE
 from syn_shared.settings.session_store import (
@@ -260,7 +261,7 @@ class DoctorReport:
     rejected_names: tuple[str, ...]
     label_usable: bool
     label_declared: bool
-    dispatch_concurrency: VariableReport
+    execution_concurrency: VariableReport
     image_ref: str
     exporter_version: str | None
 
@@ -611,8 +612,10 @@ def build_report(sources: EnvSources) -> DoctorReport:
         rejected_names=rejected_names,
         label_usable=label_usable,
         label_declared=bool(store_label.value and store_label.value.strip()),
-        dispatch_concurrency=resolve_variable(
-            ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES, sources, default="1"
+        execution_concurrency=resolve_variable(
+            ENV_SYN_EXECUTION_MAX_CONCURRENT,
+            sources,
+            default=str(DEFAULT_MAX_CONCURRENT_EXECUTIONS),
         ),
         image_ref=image_ref,
         exporter_version=_exporter_version(provider),
@@ -792,7 +795,7 @@ def _legend(report: DoctorReport) -> list[str]:
         report.store_url,
         report.store_token,
         report.store_label,
-        report.dispatch_concurrency,
+        report.execution_concurrency,
     )
     lines: list[str] = []
     if any(variable.inferred for variable in variables):
@@ -818,8 +821,8 @@ def render(report: DoctorReport, *, show_values: bool) -> str:
         lines.extend(_wrap_finding(finding))
     lines.append("")
 
-    lines.append("Trigger dispatch")
-    lines.append(_variable_line(report.dispatch_concurrency, show_values=True))
+    lines.append("Execution concurrency (direct, trigger and resume starts)")
+    lines.append(_variable_line(report.execution_concurrency, show_values=True))
     lines.append("")
 
     lines.append("Workspace image (pinned)")

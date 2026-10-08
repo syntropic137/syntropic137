@@ -1,6 +1,6 @@
 """Alias -> concrete model id, the one table every surface reads.
 
-Definition surfaces show ``gpt-sol → gpt-6-sol``; the codex command builder
+Definition surfaces show ``gpt-sol → gpt-6.1-sol``; the codex command builder
 forces the same slug; pricing prices the same id. These tests pin that all
 three read ONE map, so a generation swap cannot move one and strand the rest.
 """
@@ -34,9 +34,9 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize(
     ("alias", "target", "basis"),
     [
-        ("gpt-sol", ModelId.GPT_6_SOL, AliasResolutionBasis.TRANSLATED),
+        ("gpt-sol", ModelId.GPT_6_1_SOL, AliasResolutionBasis.TRANSLATED),
         ("opus", ModelId.CLAUDE_OPUS_5_5, AliasResolutionBasis.EXPECTED),
-        ("sonnet", ModelId.CLAUDE_SONNET_5, AliasResolutionBasis.EXPECTED),
+        ("sonnet", ModelId.CLAUDE_SONNET_5_5, AliasResolutionBasis.EXPECTED),
         ("haiku", ModelId.CLAUDE_HAIKU_4_5, AliasResolutionBasis.EXPECTED),
         ("fable", ModelId.CLAUDE_FABLE_5, AliasResolutionBasis.EXPECTED),
     ],
@@ -88,9 +88,9 @@ class TestFormatModelDefinition:
     @pytest.mark.parametrize(
         ("model", "expected"),
         [
-            ("gpt-sol", "gpt-sol → gpt-6-sol"),
+            ("gpt-sol", "gpt-sol → gpt-6.1-sol"),
             ("opus", "opus → claude-opus-5-5"),
-            ("sonnet", "sonnet → claude-sonnet-5"),
+            ("sonnet", "sonnet → claude-sonnet-5-5"),
             ("haiku", "haiku → claude-haiku-4-5-20251001"),
             ("fable", "fable → claude-fable-5"),
         ],
@@ -118,12 +118,12 @@ class TestDefinitionModelFollowsExecution:
     @pytest.mark.parametrize(
         ("provider", "model", "display", "concrete"),
         [
-            ("codex", "gpt-sol", "gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),
+            ("codex", "gpt-sol", "gpt-sol \u2192 gpt-6.1-sol", "gpt-6.1-sol"),
             ("claude", "opus", "opus \u2192 claude-opus-5-5", "claude-opus-5-5"),
-            (None, "sonnet", "sonnet \u2192 claude-sonnet-5", "claude-sonnet-5"),
+            (None, "sonnet", "sonnet \u2192 claude-sonnet-5-5", "claude-sonnet-5-5"),
             ("codex", "gpt-6-sol", "gpt-6-sol", None),
             ("claude", "some-future-model", "some-future-model", None),
-            ("codex", "opus", "opus \u2192 gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),
+            ("codex", "opus", "opus \u2192 gpt-sol \u2192 gpt-6.1-sol", "gpt-6.1-sol"),
             ("claude", "gpt-sol", "gpt-sol \u2192 opus \u2192 claude-opus-5-5", "claude-opus-5-5"),
             (
                 "claude",
@@ -131,7 +131,7 @@ class TestDefinitionModelFollowsExecution:
                 "gpt-6-sol \u2192 opus \u2192 claude-opus-5-5",
                 "claude-opus-5-5",
             ),
-            ("codex", None, "default \u2192 gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),
+            ("codex", None, "default \u2192 gpt-sol \u2192 gpt-6.1-sol", "gpt-6.1-sol"),
             ("claude", "  ", "default \u2192 opus \u2192 claude-opus-5-5", "claude-opus-5-5"),
             (
                 "claude",

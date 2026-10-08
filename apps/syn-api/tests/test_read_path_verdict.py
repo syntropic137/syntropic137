@@ -27,13 +27,17 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from syn_adapters.subscriptions.coordinator_service import SubscriptionServiceStatus
+from syn_adapters.subscriptions.coordinator_service import (
+    HeldProjection,
+    SubscriptionServiceStatus,
+)
 from syn_adapters.subscriptions.read_model_lag import (
     STALLED_AFTER_SECONDS,
     CheckpointState,
     ReadModelLag,
     measure_read_model_lag,
 )
+from syn_adapters.subscriptions.unapplied_starts import UnappliedStart, UnappliedStartsReport
 from syn_api.services import lifecycle
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.read_path_health import _judge_read_path
@@ -42,7 +46,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
     #: Installs a subscription state and returns the parsed /health body.
-    HealthProbe = Callable[[bool, ReadModelLag | None], Awaitable[dict]]
+    HealthProbe = Callable[..., Awaitable[dict]]
 
 HEAD = 8726
 REBUILDING = "session_summaries"
@@ -62,17 +66,39 @@ class _SubscriptionServiceStub:
     from the checkpoint table, so the lag looks like an ordinary rebuild.
     """
 
-    def __init__(self, running: bool, lag: ReadModelLag | None) -> None:
+    def __init__(
+        self,
+        running: bool,
+        lag: ReadModelLag | None,
+        drops: UnappliedStartsReport | None = None,
+        held: tuple[HeldProjection, ...] = (),
+        halted_at: int | None = None,
+        probe_fails: bool = False,
+    ) -> None:
+        self._probe_fails = probe_fails
         self._running = running
         self._lag = lag
+        self._drops = drops
+        self._held = held
+        self._halted_at = halted_at
 
     def get_status(self) -> SubscriptionServiceStatus:
         return SubscriptionServiceStatus(
-            running=self._running, projection_count=25, realtime_enabled=True
+            running=self._running,
+            projection_count=25,
+            realtime_enabled=True,
+            held_projections=self._held,
+            halted_at=self._halted_at,
         )
 
     async def describe_read_model_lag(self) -> ReadModelLag | None:
+        if self._probe_fails:
+            # What a halt at an undecodable HEAD does: the probe reads the head too.
+            raise RuntimeError("Cannot decode event 'Boom' v1: payload is not JSON")
         return self._lag
+
+    async def describe_unapplied_starts(self) -> UnappliedStartsReport | None:
+        return self._drops
 
 
 def _lag_mid_rebuild() -> ReadModelLag:
@@ -111,8 +137,17 @@ async def health_payload() -> AsyncIterator[HealthProbe]:
     original = lifecycle._state.subscription_service
     app = create_app()
 
-    async def get(running: bool, lag: ReadModelLag | None) -> dict:
-        lifecycle._state.subscription_service = _SubscriptionServiceStub(running, lag)  # type: ignore[assignment]  # stub
+    async def get(
+        running: bool,
+        lag: ReadModelLag | None,
+        drops: UnappliedStartsReport | None = None,
+        held: tuple[HeldProjection, ...] = (),
+        halted_at: int | None = None,
+        probe_fails: bool = False,
+    ) -> dict:
+        lifecycle._state.subscription_service = _SubscriptionServiceStub(  # type: ignore[assignment]  # stub
+            running, lag, drops, held, halted_at, probe_fails
+        )
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/health")
@@ -212,3 +247,191 @@ def test_a_running_coordinator_with_nothing_behind_raises_no_signal() -> None:
 
     assert verdict.status == "healthy"
     assert verdict.degraded_reasons == ()
+
+
+def _lag_at_head() -> ReadModelLag:
+    """Every checkpoint at the head and moving: what lag said during #1545."""
+    return measure_read_model_lag(
+        head_position=HEAD,
+        checkpoints={
+            name: CheckpointState(position=HEAD, updated_at=MOVING) for name in (REBUILDING, PEER)
+        },
+        projection_names=[REBUILDING, PEER],
+        replaying=False,
+        now=NOW,
+    )
+
+
+DROPPED = UnappliedStart(
+    projection=PEER, execution_id="exec-db527ea0d361", global_nonce=HEAD - 1_000
+)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_dropped_start_is_visible_on_health_although_lag_is_zero(
+    health_payload: HealthProbe,
+) -> None:
+    """#1545 on the wire: at the head, healthy by lag, and wrong.
+
+    The lag fields alone say nothing is behind, which is exactly what /health
+    said for 2h22m while exec-db527ea0d361 returned 404. The dropped start has
+    to set the status, add a reason and name the execution.
+    """
+    body = await health_payload(
+        True, _lag_at_head(), UnappliedStartsReport(unapplied=(DROPPED,), scanned_through=HEAD)
+    )
+
+    subscription = body["subscription"]
+    assert subscription["lagging_projections"] == []
+    assert subscription["status"] == "dropped_events"
+    assert body["mode"] == "degraded"
+    assert body["degraded_reasons"] == ["projection_dropped_event"]
+    assert subscription["unapplied_starts"] == [
+        {"projection": PEER, "execution_id": "exec-db527ea0d361", "global_nonce": HEAD - 1_000}
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_clean_scan_publishes_an_empty_list_and_stays_healthy(
+    health_payload: HealthProbe,
+) -> None:
+    """Measured and clean is `[]`, distinct from unmeasured, which is absent."""
+    body = await health_payload(
+        True, _lag_at_head(), UnappliedStartsReport(unapplied=(), scanned_through=HEAD)
+    )
+
+    assert body["subscription"]["status"] == "healthy"
+    assert body["subscription"]["unapplied_starts"] == []
+
+
+@pytest.mark.unit
+def test_a_dropped_event_outranks_a_stall_but_not_a_dead_coordinator() -> None:
+    """Wrong beats late; nothing consuming at all beats both."""
+    live = _judge_read_path(running=True, lag=_lag_wedged(), dropped_events=True)
+    assert live.status == "dropped_events"
+    assert live.degraded_reasons == (
+        DegradedReason.PROJECTION_DROPPED_EVENT,
+        DegradedReason.PROJECTION_STALLED,
+    )
+
+    dead = _judge_read_path(running=False, lag=None, dropped_events=True)
+    assert dead.status == "degraded"
+    assert dead.degraded_reasons == (
+        DegradedReason.SUBSCRIPTION_COORDINATOR,
+        DegradedReason.PROJECTION_DROPPED_EVENT,
+    )
+
+
+HELD = HeldProjection(
+    projection_name="resume_start_todo", event_type="ExecutionResumed", global_nonce=HEAD - 5
+)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_held_projection_is_visible_on_health_although_lag_is_zero(
+    health_payload: HealthProbe,
+) -> None:
+    """ESP v0.17.0 (#391): a projection that fails an event is held, not skipped.
+
+    Every other projection keeps consuming, so lag alone can read healthy while
+    one read model, or one ProcessManager's side effects, has stopped. The hold
+    has to set the status, add a reason and name the event.
+    """
+    body = await health_payload(True, _lag_at_head(), held=(HELD,))
+
+    subscription = body["subscription"]
+    assert subscription["status"] == "held"
+    assert body["mode"] == "degraded"
+    assert body["degraded_reasons"] == ["projection_held"]
+    assert subscription["held_projections"] == [
+        {
+            "projection": "resume_start_todo",
+            "event_type": "ExecutionResumed",
+            "global_nonce": HEAD - 5,
+        }
+    ]
+    assert "halted_at" not in subscription
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_halted_subscription_is_visible_on_health_while_still_running(
+    health_payload: HealthProbe,
+) -> None:
+    """ADR-026: halted at an undecodable event, `running` still True."""
+    body = await health_payload(True, _lag_at_head(), halted_at=HEAD - 9)
+
+    subscription = body["subscription"]
+    assert subscription["status"] == "halted"
+    assert subscription["halted_at"] == HEAD - 9
+    assert subscription["held_projections"] == []
+    assert body["degraded_reasons"] == ["subscription_halted"]
+
+
+@pytest.mark.unit
+def test_halted_and_held_rank_by_what_they_stop() -> None:
+    """A halt stops every projection; a hold stops one, and outranks its own stall."""
+    everything = _judge_read_path(
+        running=True, lag=_lag_wedged(), dropped_events=True, held=True, halted=True
+    )
+    assert everything.status == "halted"
+    assert everything.degraded_reasons == (
+        DegradedReason.SUBSCRIPTION_HALTED,
+        DegradedReason.PROJECTION_DROPPED_EVENT,
+        DegradedReason.PROJECTION_HELD,
+        DegradedReason.PROJECTION_STALLED,
+    )
+
+    held = _judge_read_path(running=True, lag=_lag_wedged(), held=True)
+    assert held.status == "held"
+
+    dead = _judge_read_path(running=False, lag=None, halted=True)
+    assert dead.status == "degraded"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_halt_is_reported_when_the_lag_probe_fails_on_the_same_event(
+    health_payload: HealthProbe,
+) -> None:
+    """#1737 review: the halted head is the event the lag probe cannot read either.
+
+    A probe failure used to blank the whole block to "unknown" with no reason,
+    so /health said mode "full" while the coordinator knew it was stopped.
+    """
+    body = await health_payload(True, None, halted_at=HEAD, probe_fails=True)
+
+    subscription = body["subscription"]
+    assert subscription["status"] == "halted"
+    assert subscription["halted_at"] == HEAD
+    assert body["mode"] == "degraded"
+    assert body["degraded_reasons"] == ["subscription_halted"]
+    assert "lag" not in subscription
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_hold_is_reported_when_the_lag_probe_fails(
+    health_payload: HealthProbe,
+) -> None:
+    """A failing checkpoint store can both cause a hold and fail the probe."""
+    body = await health_payload(True, None, held=(HELD,), probe_fails=True)
+
+    assert body["subscription"]["status"] == "held"
+    assert body["subscription"]["held_projections"][0]["projection"] == "resume_start_todo"
+    assert body["degraded_reasons"] == ["projection_held"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_failed_probe_with_nothing_known_is_still_unknown(
+    health_payload: HealthProbe,
+) -> None:
+    """The control: a probe failure alone is not invented into a degradation."""
+    body = await health_payload(True, None, probe_fails=True)
+
+    assert body["subscription"]["status"] == "unknown"
+    assert body.get("degraded_reasons", []) == []

@@ -61,3 +61,20 @@ token usage, a cost figure, a stream chunk. See `agent_observation.py` and
 
 Observations are Lane 2. An Observation is never the reason state changed; if
 something must be replayed to decide state, it belongs in `orchestration`.
+
+## Inventory Reconciliation
+
+Rebuilding one run's session inventory snapshot from host evidence, one durable
+`InventoryReconciliation` job per evidence watermark. The job advances in steps
+(pending, publishing, then a terminal stage), and each step is an event.
+
+- **Stale step:** the job's projected row is behind its aggregate in the event
+  store, so the step handler runs nothing. A stale step is not progress and is
+  never counted as processed (#1528).
+- **Park:** after a step runs or turns out stale, its job is set aside until
+  the manager projects a newer event for it. A park has no timer.
+- **Re-arm:** projecting a newer open step makes a parked job claimable again.
+  A newer terminal step drops the job instead.
+- **Coalesce:** while a run has an open job, new evidence for that run waits.
+  The next job picks up the latest watermark, so one job is minted per
+  catch-up and not one per watermark.

@@ -49,6 +49,8 @@ validation:
 projection_allowed_prefixes:
   - "syn_domain.contexts"          # read models, _shared value objects, sibling events
   - "syn_domain.pagination"        # pure shared list filtering, ordering and paging
+  - "syn_domain.projection_scan"   # pagination's read-side helper: reads the projection's own store, writes nothing (E2)
+  - "syn_domain.projection_page"   # a list page the store answers in its own query: reads the projection's own store, writes nothing (#967)
   - "syn_shared"                   # pricing, typed constants, agent enums
   - "syn_adapters.projection_stores"
   - "event_sourcing"

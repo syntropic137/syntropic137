@@ -133,6 +133,10 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_list", "on_workflow_tags_removed"),
         ("workflow_detail", "on_workflow_tags_removed"),
     ],
+    # WHY (#967): same reason as the tag edits - the export reads the detail.
+    "WorkflowDefaultEvalSet": [
+        ("workflow_detail", "on_workflow_default_eval_set"),
+    ],
     "WorkflowExecutionStarted": [
         ("workflow_list", "on_workflow_execution_started"),
         ("workflow_detail", "on_workflow_execution_started"),
@@ -173,7 +177,10 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("realtime", "on_workflow_failed"),
         ("execution_todo", "on_workflow_failed"),
     ],
-    "WorkspaceProvisionedForPhase": [("execution_todo", "on_workspace_provisioned_for_phase")],
+    "WorkspaceProvisionedForPhase": [
+        ("execution_todo", "on_workspace_provisioned_for_phase"),
+        ("workflow_execution_detail", "on_workspace_provisioned_for_phase"),
+    ],
     "AgentExecutionCompleted": [("execution_todo", "on_agent_execution_completed")],
     "ArtifactsCollectedForPhase": [("execution_todo", "on_artifacts_collected_for_phase")],
     "NextPhaseReady": [("execution_todo", "on_next_phase_ready")],

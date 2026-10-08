@@ -1,0 +1,152 @@
+---
+title: syn eval
+description: "Create evals, read their runs, and put executions in them"
+---
+
+Create evals, read their runs, and put executions in them
+
+## `syn eval archive`
+
+Archive an eval: it stays readable with its runs and admits no new ones
+
+```bash
+syn eval archive <eval-id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `eval-id` | `text` | Yes | The eval |
+
+---
+
+## `syn eval attach`
+
+Attach an execution to an eval, in any status. Idempotent; never copies the baseline
+
+```bash
+syn eval attach <execution-id> <eval-id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | The execution (partial match supported) |
+| `eval-id` | `text` | Yes | The eval |
+
+**Examples:**
+
+```bash
+syn eval attach <execution-id> eval-planning   # association_kind: attached
+```
+
+---
+
+## `syn eval create`
+
+Create an eval, pinning each --repo ref to a commit SHA
+
+```bash
+syn eval create [options]
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `text` | --- | Eval name |
+| `--goal` | `text` | --- | What the eval sets out to measure |
+| `--workflow` | `text` | --- | Starting workflow id (used when a run names none) |
+| `--repo` | `text` | --- | Baseline repo as owner/name@ref (repeatable) |
+| `--tag` | `text` | --- | Tag (repeatable) |
+
+**Examples:**
+
+```bash
+syn eval create --name "Refactor" --goal "Does it keep tests green?" --repo acme/app@main
+```
+
+---
+
+## `syn eval detach`
+
+Detach an execution from its eval. launched_eval_id still records the launch
+
+```bash
+syn eval detach <execution-id> <eval-id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | The execution (partial match supported) |
+| `eval-id` | `text` | Yes | The eval |
+
+**Examples:**
+
+```bash
+syn eval detach <execution-id> eval-planning
+```
+
+---
+
+## `syn eval list`
+
+List evals, newest first, with their run counts
+
+```bash
+syn eval list [options]
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--status`, `-s` | `text` | --- | active or archived (both when omitted) |
+| `--tag` | `text` | --- | Only evals carrying this tag (repeatable; all must match) |
+| `--page` | `text` | `1` | Page number |
+| `--page-size` | `text` | `50` | Items per page |
+
+---
+
+## `syn eval runs`
+
+List the executions currently in an eval
+
+```bash
+syn eval runs <eval-id> [options]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `eval-id` | `text` | Yes | The eval |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--page` | `text` | `1` | Page number |
+| `--page-size` | `text` | `50` | Items per page |
+
+---
+
+## `syn eval show`
+
+Show an eval: goal, baseline and run tally
+
+```bash
+syn eval show <eval-id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `eval-id` | `text` | Yes | The eval |
+
+---

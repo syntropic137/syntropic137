@@ -2,7 +2,7 @@
  * Generic mobile card list — pairs with ResourceTable for narrow viewports.
  *
  * Pages provide a `renderCard(row)` that returns the card body; this primitive
- * owns the outer wrapper, selection checkbox, and tap-to-detail behaviour so
+ * owns the outer wrapper, selection checkbox, and link-to-detail behaviour so
  * Sessions and Executions don't reinvent that scaffolding.
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
@@ -12,6 +12,7 @@ import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { PageLoader, SelectionCheckbox } from '..'
 import type { SelectionProps } from './types'
+import { useRowLink } from './useRowLink'
 
 export interface ResourceCardListProps<Row> {
   rows: Row[]
@@ -19,7 +20,8 @@ export interface ResourceCardListProps<Row> {
   emptyState: ReactNode
   getRowId: (row: Row) => string
   renderCard: (row: Row) => ReactNode
-  onRowClick?: (row: Row) => void
+  /** Where a card links to, typically its detail page. See useRowLink. */
+  rowHref?: (row: Row) => string
   selection?: SelectionProps
 }
 
@@ -27,18 +29,8 @@ interface CardWrapperProps {
   rowId: string
   isSelected: boolean
   onToggleSelection?: (modifiers: { shift: boolean; meta: boolean }) => void
-  onClick?: () => void
+  href?: string
   children: ReactNode
-}
-
-function cardKeyHandler(onClick: (() => void) | undefined): (e: React.KeyboardEvent) => void {
-  return (e) => {
-    if (!onClick) return
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onClick()
-    }
-  }
 }
 
 interface CardSelectionProps {
@@ -59,16 +51,15 @@ function CardSelection({ rowId, isSelected, onToggle }: CardSelectionProps) {
   )
 }
 
-function CardWrapper({ rowId, isSelected, onToggleSelection, onClick, children }: CardWrapperProps) {
+function CardWrapper({ rowId, isSelected, onToggleSelection, href, children }: CardWrapperProps) {
+  const link = useRowLink(href)
   return (
     <div
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : -1}
-      onClick={onClick}
-      onKeyDown={cardKeyHandler(onClick)}
+      {...link}
+      tabIndex={link ? 0 : -1}
       className={clsx(
         'flex items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 transition-colors hover:bg-[var(--color-surface-elevated)] focus:bg-[var(--color-surface-elevated)] focus:outline-none',
-        onClick && 'cursor-pointer',
+        link && 'cursor-pointer',
         isSelected && 'border-[var(--color-accent)] bg-[var(--color-accent)]/10',
       )}
     >
@@ -86,7 +77,7 @@ export function ResourceCardList<Row>({
   emptyState,
   getRowId,
   renderCard,
-  onRowClick,
+  rowHref,
   selection,
 }: ResourceCardListProps<Row>) {
   if (loading) return <PageLoader />
@@ -104,7 +95,7 @@ export function ResourceCardList<Row>({
             onToggleSelection={
               selection ? (mods) => selection.onToggleRow(id, mods) : undefined
             }
-            onClick={onRowClick ? () => onRowClick(row) : undefined}
+            href={rowHref?.(row)}
           >
             {renderCard(row)}
           </CardWrapper>

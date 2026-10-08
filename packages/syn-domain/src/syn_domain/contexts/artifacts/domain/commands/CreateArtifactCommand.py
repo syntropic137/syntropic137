@@ -54,8 +54,13 @@ class CreateArtifactCommand(BaseModel):
     )
 
     # Content
-    content: str = Field(
-        ..., description="Artifact content", min_length=MIN_ARTIFACT_CONTENT_LENGTH
+    content: str | bytes = Field(
+        ...,
+        description="Artifact content: str for text, bytes for a binary file "
+        "(#990). Binary content must name a binary content_type and must "
+        "already be in object storage (storage_uri) - its bytes never enter "
+        "the event store.",
+        min_length=MIN_ARTIFACT_CONTENT_LENGTH,
     )
     title: str | None = Field(default=None, description="Human-readable title")
     source_path: str | None = Field(

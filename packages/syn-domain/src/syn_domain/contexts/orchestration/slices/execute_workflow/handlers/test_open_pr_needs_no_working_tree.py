@@ -55,7 +55,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 from syn_adapters.workspace_backends.service.setup_phase_secrets import _GitHubAuth
-from syn_api._wiring import _build_agent_command, _build_workspace_prompt
+from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -137,6 +137,8 @@ class _CapturingProcessor:
         admitted: AdmissionTicket | None = None,
         source_commits: list[SourceCommit] | None = None,
         tags: object = None,
+        launch_eval: object = None,
+        workflow_version: str | None = None,
     ) -> WorkflowExecutionResult:
         del workflow_name, inputs, repos, admitted
         self.phases = list(phases)
@@ -249,6 +251,8 @@ async def _provision(phase: ExecutablePhase, *, completed: dict[str, str]) -> _P
     workspace.workspace_id = "ws-1187"
     workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
     workspace.inject_files = AsyncMock()
+    # Every command succeeds, so a cloned repo's instruction files read as present.
+    workspace.execute = AsyncMock(return_value=MagicMock(exit_code=0, stdout="# Instructions\n"))
 
     workspace_cm = AsyncMock()
     workspace_cm.__aenter__ = AsyncMock(return_value=workspace)

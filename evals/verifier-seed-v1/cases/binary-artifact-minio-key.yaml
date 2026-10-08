@@ -1,0 +1,30 @@
+id: binary-artifact-minio-key
+polarity: defect
+source_pr: 1652
+# The parent of 721a8014c, the commit that fixed it on the PR branch.
+commit: b2f680f00b4e154b94fa4802a92ead30429e7b98
+fix_commit: 721a8014cee0d44f267e379b2edbccb76899d13a
+task: >
+  The change under review keeps binary artifacts byte-for-byte through
+  collection, phase handoff and the API: binary content goes to object storage
+  and is read back from there. Review the artifact content storage adapters and
+  the read path behind the artifact content endpoint, and judge them against
+  production MinIO.
+expected:
+  # Repo-relative. The report must name one of them; it is matched by file
+  # name, because a verifier writes `minio.py:212` as often as the full path.
+  files:
+    - packages/syn-adapters/src/syn_adapters/storage/artifact_storage/minio.py
+  # Matched within ONE blocking finding, case-insensitive, with `_`, `-` and
+  # space alike, as substrings: a stem (`collid`) covers its inflections.
+  # Every group must match; within a group, any one word. Each group is one
+  # concept of the defect, written as the ways a correct finding says it.
+  keywords:
+    # The object key the two sides compute.
+    - [key, object name, object path, path, prefix, object id, artifact id, name]
+    # They disagree, so the read misses.
+    - ["404", not found, nosuchkey, no such key, mismatch, not match, "n't match",
+       differ, disagree, inconsistent, wrong, another, never read, cannot read,
+       "can't read", never retriev, cannot retriev, "can't retriev", cannot be read,
+       cannot be retriev, fail, missing, discard, drop, lost, unreachable, orphan]
+split: train

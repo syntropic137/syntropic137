@@ -85,6 +85,24 @@
               "title": "Order By"
             },
             "description": "Sort field (- prefix = descending)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on name or id, applied before paging",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match on name or id, applied before paging"
           }
         ],
         "responses": {
@@ -198,7 +216,7 @@
           "workflows"
         ],
         "summary": "Archive (soft-delete) a workflow template",
-        "description": "Archive (soft-delete) a workflow template.\n\nArchived templates are excluded from listing by default but remain\naccessible via `GET /workflows/{id}` and with `?include_archived=true`.",
+        "description": "Archive (soft-delete) a workflow template.\n\nArchived templates are excluded from listing by default but remain\naccessible via `GET /workflows/{id}` and with `?include_archived=true`.\n\n``expected_package_name`` makes the archive conditional on the current\naggregate still attributing the workflow to that package (#1588). A prune\npicks candidates from `GET /workflows/{id}`, a read model that can lag;\nthis check is made against the aggregate at the moment of archive, so a\nworkflow reinstalled by another package is refused with 409 however stale\nthat read was.",
         "operationId": "delete_workflow_endpoint_workflows__workflow_id__delete",
         "parameters": [
           {
@@ -208,6 +226,22 @@
             "schema": {
               "type": "string",
               "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "expected_package_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected Package Name"
             }
           }
         ],
@@ -226,7 +260,7 @@
             "description": "Workflow template not found"
           },
           "409": {
-            "description": "Conflict; workflow has active executions or is already archived"
+            "description": "Conflict; workflow has active executions, is already archived, or is not attributed to expected_package_name"
           },
           "422": {
             "description": "Validation Error",
@@ -496,7 +530,7 @@
           "workflows"
         ],
         "summary": "Create Workflow From Yaml Endpoint",
-        "description": "Create a workflow template by uploading raw YAML.\n\nThe CLI (`syn workflow create --from <file>`) POSTs the file bytes\nhere. Every semantic field (name, classification, repository,\nphases, inputs, requires_repos) comes from the YAML itself.\n\nQuery-string ``name`` and ``workflow_id`` are optional overrides\nintended for scripted bulk installation (e.g. renaming a template\non install). They are *not* a second source of truth for fields\nthat live in the YAML.\n\n``version``, ``source_digest`` and ``force`` carry install provenance\nand policy (issue #822). ``syn workflow install`` supplies the package\nversion and the resolved commit SHA; reinstalling a matching version is\nrefused with 409 unless ``force`` is set, and a matching version that\nresolves to a different digest is refused regardless of how it looks,\nbecause that is the signature of a republished version.",
+        "description": "Create a workflow template by uploading raw YAML.\n\nThe CLI (`syn workflow create --from <file>`) POSTs the file bytes\nhere. Every semantic field (name, classification, repository,\nphases, inputs, requires_repos) comes from the YAML itself.\n\nQuery-string ``name`` and ``workflow_id`` are optional overrides\nintended for scripted bulk installation (e.g. renaming a template\non install). They are *not* a second source of truth for fields\nthat live in the YAML.\n\n``version``, ``source_digest`` and ``force`` carry install provenance\nand policy (issue #822). ``syn workflow install`` supplies the package\nversion and the resolved commit SHA; reinstalling a matching version is\nrefused with 409 unless ``force`` is set, and a matching version that\nresolves to a different digest is refused regardless of how it looks,\nbecause that is the signature of a republished version.\n\n``package_name`` records which package installed the definition (#1588).\nIt is read back on ``GET /workflows/{id}`` so ``syn workflow install\n--prune`` archives only what the server attributes to that package.",
         "operationId": "create_workflow_from_yaml_endpoint_workflows_from_yaml_post",
         "parameters": [
           {
@@ -561,6 +595,22 @@
                 }
               ],
               "title": "Source Digest"
+            }
+          },
+          {
+            "name": "package_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Package Name"
             }
           },
           {
@@ -719,6 +769,42 @@
               "title": "Tag"
             },
             "description": "Keep only executions carrying this tag. Repeat to require several (AND). Normalised like stored tags; an invalid tag is rejected with 422."
+          },
+          {
+            "name": "eval_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix.",
+              "title": "Eval Id"
+            },
+            "description": "Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix."
+          },
+          {
+            "name": "in_eval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both.",
+              "title": "In Eval"
+            },
+            "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both."
           },
           {
             "name": "page",
@@ -976,7 +1062,7 @@
           "control"
         ],
         "summary": "Cancel Execution Endpoint",
-        "description": "Cancel a running execution.",
+        "description": "Cancel an execution, or withdraw a start still queued for one (#1650).",
         "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -2076,6 +2162,531 @@
         }
       }
     },
+    "/executions/{execution_id}/eval": {
+      "post": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Attach Execution To Eval Endpoint",
+        "description": "Attach an execution to an eval, in any status. Never copies the eval's baseline.",
+        "operationId": "attach_execution_to_eval_endpoint_executions__execution_id__eval_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachEvalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Detach Execution From Eval Endpoint",
+        "description": "Detach an execution from its eval. The launch record (`launched_eval_id`) is kept.",
+        "operationId": "detach_execution_from_eval_endpoint_executions__execution_id__eval_delete",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "eval_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The eval to detach from. Must be the eval the run belongs to, or none.",
+              "title": "Eval Id"
+            },
+            "description": "The eval to detach from. Must be the eval the run belongs to, or none."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No execution has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/default-eval": {
+      "put": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Set Workflow Default Eval Endpoint",
+        "description": "Set or clear the eval a workflow's runs join when the launch names none.",
+        "operationId": "set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultEvalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDefaultEvalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workflow has this id, or no eval has the eval id"
+          },
+          "409": {
+            "description": "The eval is archived, or the id prefix matches more than one workflow"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/evals": {
+      "post": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Create Eval Endpoint",
+        "description": "Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.",
+        "operationId": "create_eval_endpoint_evals_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEvalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid, or a baseline ref could not be resolved"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "List Evals Endpoint",
+        "description": "List evals, newest first, each with its run count and status tally.",
+        "operationId": "list_evals_endpoint_evals_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "archived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only active or only archived evals. Both when omitted.",
+              "title": "Status"
+            },
+            "description": "Keep only active or only archived evals. Both when omitted."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive match on id, name and goal",
+              "title": "Q"
+            },
+            "description": "Case-insensitive match on id, name and goal"
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep evals carrying this tag; repeat for AND",
+              "title": "Tag"
+            },
+            "description": "Keep evals carrying this tag; repeat for AND"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/evals/{eval_id}": {
+      "get": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Get Eval Endpoint",
+        "description": "One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`.",
+        "operationId": "get_eval_endpoint_evals__eval_id__get",
+        "parameters": [
+          {
+            "name": "eval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Eval Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No eval has this id in the eval read model (it may still be catching up)"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/evals/{eval_id}/runs": {
+      "get": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "List Eval Runs Endpoint",
+        "description": "The executions currently in an eval, newest first, each with what it ran and its score.\n\nThe eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an id\nmatching no eval is a 404. An eval with no runs is an empty page.",
+        "operationId": "list_eval_runs_endpoint_evals__eval_id__runs_get",
+        "parameters": [
+          {
+            "name": "eval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Eval Id"
+            }
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated execution statuses (OR'd)",
+              "title": "Statuses"
+            },
+            "description": "Comma-separated execution statuses (OR'd)"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No eval has this id in the eval read model (it may still be catching up)"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/evals/{eval_id}/runs/{execution_id}/score": {
+      "post": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Score Eval Run Endpoint",
+        "description": "Record a verdict on one run. Re-scoring replaces the run's current score.\n\nAllowed on frozen and archived evals: judging a run is not editing the eval.",
+        "operationId": "score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post",
+        "parameters": [
+          {
+            "name": "eval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Eval Id"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalRunScoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunScoreResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No eval has this id"
+          },
+          "409": {
+            "description": "The execution is not currently a run of this eval"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/evals/{eval_id}/archive": {
+      "post": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Archive Eval Endpoint",
+        "description": "Archive an eval: it stays readable with its runs, and admits no new ones. Idempotent.",
+        "operationId": "archive_eval_endpoint_evals__eval_id__archive_post",
+        "parameters": [
+          {
+            "name": "eval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Eval Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalArchivedResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No eval has this id"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
     "/sessions": {
       "get": {
         "tags": [
@@ -2786,6 +3397,45 @@
                   "$ref": "#/components/schemas/ArtifactContentResponse"
                 }
               }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/artifacts/{artifact_id}/raw": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Artifact Raw Endpoint",
+        "description": "Get artifact content as stored, byte-for-byte, under its own content type.\n\nThe way to fetch a binary artifact - a screenshot, a PDF - which has no\ntext form for the JSON endpoints to carry (#990). Text artifacts are\nserved the same way, as their UTF-8 bytes.",
+        "operationId": "get_artifact_raw_endpoint_artifacts__artifact_id__raw_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/octet-stream": {}
             }
           },
           "422": {
@@ -4082,7 +4732,7 @@
           "github"
         ],
         "summary": "List Accessible Repos Endpoint",
-        "description": "List repositories accessible to the GitHub App.\n\nQueries all active installations and aggregates results when no\ninstallation_id is provided. The installation list is cached locally with\na 1-hour TTL: if empty or stale, it bootstraps automatically from the\nGitHub API without requiring a webhook URL. Stale data is kept as a\nfallback if the GitHub API is unreachable during refresh.",
+        "description": "List repositories accessible to the GitHub App.\n\nWith no installation_id, aggregates every installation. The last complete\nlisting is cached and served as ``complete`` while under a minute old;\notherwise GitHub is asked live, and an older listing is served as\n``partial`` only if GitHub cannot be asked. The GitHub App's\n``installation`` and ``installation_repositories`` webhooks invalidate the\ncache at once. A single installation_id is always asked live.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
         "operationId": "list_accessible_repos_endpoint_github_repos_get",
         "parameters": [
           {
@@ -6311,7 +6961,7 @@
           "maintenance"
         ],
         "summary": "Set Maintenance Mode",
-        "description": "Pause or resume execution admission.\n\nReturns only once the state is durably stored AND every admission already\npart-way through deciding has finished deciding. That ordering is the whole\npoint: a caller holding this response knows not only that the flag is set\nbut that nothing is still on its way through the old answer, so there is no\nwindow on the setting side either.\n\nSet through the gate rather than the port, because the port can only store\nthe flag - it cannot hold the door while it does so.\n\nClearing is only done when the work the deploy paused has been woken, so a\nfailed announcement answers 503 and not 200 (#1387). Admission IS open by\nthen - the 503 body says so - but the triggers parked during the deploy are\nstill asleep and nothing else will re-offer them, so reporting success here\nwould close the deploy over work that never runs. Repeating the clear\nre-announces, which is why this is a retryable status and not a 500.",
+        "description": "Pause or resume execution admission.\n\nReturns only once the state is durably stored AND every admission already\npart-way through deciding has finished deciding. That ordering is the whole\npoint: a caller holding this response knows not only that the flag is set\nbut that nothing is still on its way through the old answer, so there is no\nwindow on the setting side either.\n\nSet through the gate rather than the port, because the port can only store\nthe flag - it cannot hold the door while it does so.\n\nClearing is only done when the work the deploy paused has been woken, so a\nfailed announcement answers 503 and not 200 (#1387). Admission IS open by\nthen - the 503 body says so - but the triggers parked during the deploy are\nstill asleep and nothing else will re-offer them, so reporting success here\nwould close the deploy over work that never runs. Repeating the clear\nre-announces, which is why this is a retryable status and not a 500.\n\nPausing waits only for starts that already hold an execution slot and have\nnot written their start event, and only for a bound (#1617). Starts queued\nfor a slot stay queued and start after the clear. A pause that runs out of\nthat bound answers 503 with the flag NOT set: admission is still open.",
         "operationId": "set_maintenance_mode_maintenance_put",
         "requestBody": {
           "content": {
@@ -7122,7 +7772,7 @@
     "/health": {
       "get": {
         "summary": "Health",
-        "description": "Health check endpoint with detailed subscription status.",
+        "description": "Health check endpoint with detailed subscription status.\n\nThis is the container's LIVENESS check (#1575): while the gate withholds\nthe API it answers 200 with the gate's phase - \"starting\", or \"failed\"\nin the moment between a late startup failure and the process exiting -\nwithout probing anything startup has not built. \"healthy\" is what\nreadiness waits for, so it is only ever said once the gate is ready.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -7589,6 +8239,21 @@
         "title": "AssignRepoToSystemRequest",
         "description": "Request body for assigning a repo to a system."
       },
+      "AttachEvalRequest": {
+        "properties": {
+          "eval_id": {
+            "$ref": "#/components/schemas/EvalId",
+            "description": "The eval to attach to. It must exist and not be archived. Attaching to the eval the run already belongs to is a no-op; another eval needs a detach first."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eval_id"
+        ],
+        "title": "AttachEvalRequest",
+        "description": "The eval to attach an execution to (#967)."
+      },
       "BodyAvailability": {
         "type": "string",
         "enum": [
@@ -7730,6 +8395,12 @@
             "title": "Commit",
             "description": "Git commit the image was built from, stamped at image build time. Null when the build did not stamp one."
           },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At",
+            "description": "When this API process started (UTC, ISO 8601): the moment the running deployment went live. Captured once per process, so it changes only when the process is replaced, which is what a redeploy does."
+          },
           "version_status": {
             "type": "string",
             "enum": [
@@ -7739,16 +8410,24 @@
             "title": "Version Status",
             "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.",
             "readOnly": true
+          },
+          "started_at_display": {
+            "type": "string",
+            "title": "Started At Display",
+            "description": "started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. Relative and local-time renderings are the client's to make from started_at.",
+            "readOnly": true
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "version",
-          "version_status"
+          "started_at",
+          "version_status",
+          "started_at_display"
         ],
         "title": "BuildInfo",
-        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply and\nonly ``/health`` reports."
+        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply,\nand when this process went live, which only the process can."
       },
       "CancelRequest": {
         "properties": {
@@ -8623,6 +9302,62 @@
         ],
         "title": "CoverageState"
       },
+      "CpuThrottling": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "measured",
+              "unknown"
+            ],
+            "title": "Status",
+            "description": "'measured' when cgroup v2 cpu.stat reported throttling counters; 'unknown' on cgroup v1, outside a container, or with no CPU limit set. Unknown is not zero: the counters are null, not 0."
+          },
+          "nr_periods": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nr Periods",
+            "description": "Scheduling periods in which this cgroup was runnable."
+          },
+          "nr_throttled": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nr Throttled",
+            "description": "Periods in which the cgroup hit its CPU limit and was held back. nr_throttled / nr_periods is the share of time the control plane was starved."
+          },
+          "throttled_usec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Throttled Usec",
+            "description": "Total time spent throttled, in microseconds."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "CpuThrottling",
+        "description": "CPU throttling of the process answering /health, since its cgroup was created."
+      },
       "CreateArtifactRequest": {
         "properties": {
           "workflow_id": {
@@ -8706,6 +9441,57 @@
           "status"
         ],
         "title": "CreateArtifactResponse"
+      },
+      "CreateEvalRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "goal": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Goal",
+            "description": "What the eval sets out to measure."
+          },
+          "starting_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Workflow Id",
+            "description": "The workflow a run uses when it names none."
+          },
+          "baseline_repos": {
+            "items": {
+              "$ref": "#/components/schemas/EvalBaselineRepoRequest"
+            },
+            "type": "array",
+            "title": "Baseline Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "goal"
+        ],
+        "title": "CreateEvalRequest",
+        "description": "A new eval (#967). The server mints its id; see `EvalCreatedResponse`."
       },
       "CreateOrganizationRequest": {
         "properties": {
@@ -8958,6 +9744,46 @@
         ],
         "title": "CreateWorkflowResponse"
       },
+      "DbPoolHealth": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "What the pool serves, e.g. 'projections' or 'agent_events'."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Connections currently open."
+          },
+          "max_size": {
+            "type": "integer",
+            "title": "Max Size",
+            "description": "Most connections the pool will open."
+          },
+          "in_use": {
+            "type": "integer",
+            "title": "In Use",
+            "description": "Connections checked out right now."
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting",
+            "description": "Callers blocked waiting for a connection right now."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "max_size",
+          "in_use",
+          "waiting"
+        ],
+        "title": "DbPoolHealth",
+        "description": "One Postgres connection pool in this API process, at the moment of asking (#1583).\n\n``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means\nrequests are queueing for a connection rather than for the database itself."
+      },
       "DegradedReason": {
         "type": "string",
         "enum": [
@@ -8969,13 +9795,135 @@
           "subscription_coordinator",
           "projection_catchup",
           "projection_stalled",
+          "projection_dropped_event",
+          "projection_held",
+          "subscription_halted",
           "event_poller",
           "check_run_poller",
           "anthropic_api_key",
-          "github_app"
+          "github_app",
+          "disk_space"
         ],
         "title": "DegradedReason",
         "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
+      },
+      "DelegationAttempt": {
+        "properties": {
+          "delegate_id": {
+            "type": "string",
+            "title": "Delegate Id"
+          },
+          "target_harness": {
+            "type": "string",
+            "title": "Target Harness"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "delegate_id",
+          "target_harness",
+          "outcome"
+        ],
+        "title": "DelegationAttempt",
+        "description": "One delegate the phase's agent launched, as the platform observed it."
+      },
+      "DelegationFailure": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DelegationFailureReason"
+          },
+          "required_delegate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Delegate"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/DelegationAttempt"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "default": []
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "DelegationFailure",
+        "description": "The typed account of a failed required delegation."
+      },
+      "DelegationFailureReason": {
+        "type": "string",
+        "enum": [
+          "not_attempted",
+          "failed",
+          "unverifiable"
+        ],
+        "title": "DelegationFailureReason",
+        "description": "Why a required delegation is counted as not having happened."
+      },
+      "DelegationOutcome": {
+        "type": "string",
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "DelegationOutcome",
+        "description": "How a delegated run ended, in provider-neutral terms.\n\nWHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit\nstatus is shell-specific baggage. The native same-harness fan-out path\nreports a boolean success and has no process to exit; cancellation and\ntimeout have no natural integer either. Since these events are v1 and this\nrepo has no upcaster framework, encoding a shell assumption now would need\na v2 to undo."
       },
       "DeleteWorkflowResponse": {
         "properties": {
@@ -8994,6 +9942,1059 @@
           "status"
         ],
         "title": "DeleteWorkflowResponse"
+      },
+      "DiskSpaceHealth": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Directory whose filesystem was measured."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unmeasurable",
+              "low",
+              "critical"
+            ],
+            "title": "State",
+            "description": "'low' degrades /health; 'critical' also refuses new executions."
+          },
+          "free_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Percent",
+            "description": "Percent free; null when unmeasurable."
+          },
+          "free_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Bytes",
+            "description": "Bytes available; null when unmeasurable."
+          },
+          "degraded_below_percent": {
+            "type": "number",
+            "title": "Degraded Below Percent",
+            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT."
+          },
+          "refuse_admission_below_percent": {
+            "type": "number",
+            "title": "Refuse Admission Below Percent",
+            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "state",
+          "free_percent",
+          "free_bytes",
+          "degraded_below_percent",
+          "refuse_admission_below_percent"
+        ],
+        "title": "DiskSpaceHealth",
+        "description": "Free space on the workspace volume, as /health reports it (#1560)."
+      },
+      "EvalArchivedResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "archived"
+        ],
+        "title": "EvalArchivedResponse",
+        "description": "The receipt for an archive, read from the Eval aggregate (#967)."
+      },
+      "EvalBaselineRepoRequest": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository",
+            "description": "The repository, as an `owner/name` slug."
+          },
+          "requested_ref": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Requested Ref",
+            "description": "A branch, tag or commit. Resolved once, at create, to a full commit SHA; every run starts from that SHA even after the branch or tag moves."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repository",
+          "requested_ref"
+        ],
+        "title": "EvalBaselineRepoRequest",
+        "description": "One repository of a new eval's Baseline, before its ref is pinned (#967)."
+      },
+      "EvalBaselineRepoResponse": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "requested_ref": {
+            "type": "string",
+            "title": "Requested Ref"
+          },
+          "commit_sha": {
+            "type": "string",
+            "title": "Commit Sha"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repository",
+          "requested_ref",
+          "commit_sha"
+        ],
+        "title": "EvalBaselineRepoResponse",
+        "description": "One repository of an eval's Baseline: the ref asked for and the SHA it pinned to."
+      },
+      "EvalCreatedResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "starting_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Workflow Id"
+          },
+          "baseline_repos": {
+            "items": {
+              "$ref": "#/components/schemas/EvalBaselineRepoResponse"
+            },
+            "type": "array",
+            "title": "Baseline Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "name",
+          "goal",
+          "starting_workflow_id",
+          "baseline_repos",
+          "tags"
+        ],
+        "title": "EvalCreatedResponse",
+        "description": "The receipt for a create, read from the Eval aggregate, never a projection (#967).\n\nThe eval list and `GET /evals/{eval_id}` are read models and may not show\nthe eval for a moment after this returns. That is lag, not a failed create:\n`eval_id` is authoritative from here on."
+      },
+      "EvalDetailResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "starting_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Workflow Id"
+          },
+          "baseline_repos": {
+            "items": {
+              "$ref": "#/components/schemas/EvalBaselineRepoResponse"
+            },
+            "type": "array",
+            "title": "Baseline Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "frozen": {
+            "type": "boolean",
+            "title": "Frozen"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "run_count": {
+            "type": "integer",
+            "title": "Run Count"
+          },
+          "run_status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Run Status Counts"
+          },
+          "scored_count": {
+            "type": "integer",
+            "title": "Scored Count",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "pass_rate_display": {
+            "type": "string",
+            "title": "Pass Rate Display",
+            "default": "\u2014"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/EvalVariantResponse"
+            },
+            "type": "array",
+            "title": "Variants"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "name",
+          "goal",
+          "starting_workflow_id",
+          "baseline_repos",
+          "tags",
+          "frozen",
+          "archived",
+          "created_at",
+          "updated_at",
+          "run_count",
+          "run_status_counts",
+          "stats"
+        ],
+        "title": "EvalDetailResponse",
+        "description": "One eval, as `GET /evals/{eval_id}` returns it.\n\nThe row model plus whether the evals read model is rebuilding, so a\nmissing or stale eval can say why. Kept off `EvalResponse` so every list\nrow does not repeat the list's own status."
+      },
+      "EvalId": {
+        "type": "string",
+        "title": "EvalId",
+        "description": "The identity of one eval, and the id of its stream."
+      },
+      "EvalListResponse": {
+        "properties": {
+          "evals": {
+            "items": {
+              "$ref": "#/components/schemas/EvalResponse"
+            },
+            "type": "array",
+            "title": "Evals"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "evals",
+          "total",
+          "page",
+          "page_size",
+          "status_counts"
+        ],
+        "title": "EvalListResponse",
+        "description": "One page of evals, newest first (#967)."
+      },
+      "EvalResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "starting_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Workflow Id"
+          },
+          "baseline_repos": {
+            "items": {
+              "$ref": "#/components/schemas/EvalBaselineRepoResponse"
+            },
+            "type": "array",
+            "title": "Baseline Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "frozen": {
+            "type": "boolean",
+            "title": "Frozen"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "run_count": {
+            "type": "integer",
+            "title": "Run Count"
+          },
+          "run_status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Run Status Counts"
+          },
+          "scored_count": {
+            "type": "integer",
+            "title": "Scored Count",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "pass_rate_display": {
+            "type": "string",
+            "title": "Pass Rate Display",
+            "default": "\u2014"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/EvalVariantResponse"
+            },
+            "type": "array",
+            "title": "Variants"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "name",
+          "goal",
+          "starting_workflow_id",
+          "baseline_repos",
+          "tags",
+          "frozen",
+          "archived",
+          "created_at",
+          "updated_at",
+          "run_count",
+          "run_status_counts",
+          "stats"
+        ],
+        "title": "EvalResponse",
+        "description": "An eval as the eval read model holds it, with its run tally (#967)."
+      },
+      "EvalRunListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRunResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "EvalRunListResponse",
+        "description": "One page of an eval's current runs, newest first (Evals v2)."
+      },
+      "EvalRunModelResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phase_id",
+          "model"
+        ],
+        "title": "EvalRunModelResponse",
+        "description": "The model one phase of a run ACTUALLY ran, as its harness reported it."
+      },
+      "EvalRunResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Version"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRunModelResponse"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "total_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Cost Usd"
+          },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "duration_display": {
+            "type": "string",
+            "title": "Duration Display"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "evidence_excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Excerpt"
+          },
+          "scorer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scorer"
+          },
+          "scorer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scorer Version"
+          },
+          "scored_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scored At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "started_at",
+          "completed_at",
+          "status",
+          "workflow_id",
+          "models",
+          "total_cost_usd",
+          "total_cost_display",
+          "duration_seconds",
+          "duration_display",
+          "verdict",
+          "score",
+          "evidence_excerpt",
+          "scorer",
+          "scorer_version",
+          "scored_at"
+        ],
+        "title": "EvalRunResponse",
+        "description": "One run of an eval: one data point of how the eval changes over time (Evals v2)."
+      },
+      "EvalRunScoreRequest": {
+        "properties": {
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence",
+            "default": ""
+          },
+          "scorer": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Scorer"
+          },
+          "scorer_version": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Scorer Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "verdict",
+          "scorer",
+          "scorer_version"
+        ],
+        "title": "EvalRunScoreRequest",
+        "description": "A scorer's verdict on one run of an eval. Re-scoring replaces the current score."
+      },
+      "EvalRunScoreResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence"
+          },
+          "scorer": {
+            "type": "string",
+            "title": "Scorer"
+          },
+          "scorer_version": {
+            "type": "string",
+            "title": "Scorer Version"
+          },
+          "scored_at": {
+            "type": "string",
+            "title": "Scored At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "execution_id",
+          "verdict",
+          "score",
+          "evidence",
+          "scorer",
+          "scorer_version",
+          "scored_at"
+        ],
+        "title": "EvalRunScoreResponse",
+        "description": "The run's score as recorded (Evals v2)."
+      },
+      "EvalRunStatsResponse": {
+        "properties": {
+          "median_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Duration Seconds"
+          },
+          "median_duration_display": {
+            "type": "string",
+            "title": "Median Duration Display"
+          },
+          "incomplete_duration_count": {
+            "type": "integer",
+            "title": "Incomplete Duration Count"
+          },
+          "median_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Cost Usd"
+          },
+          "median_cost_display": {
+            "type": "string",
+            "title": "Median Cost Display"
+          },
+          "incomplete_cost_count": {
+            "type": "integer",
+            "title": "Incomplete Cost Count"
+          },
+          "cost_per_pass_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Pass Usd"
+          },
+          "cost_per_pass_display": {
+            "type": "string",
+            "title": "Cost Per Pass Display"
+          }
+        },
+        "type": "object",
+        "required": [
+          "median_duration_seconds",
+          "median_duration_display",
+          "incomplete_duration_count",
+          "median_cost_usd",
+          "median_cost_display",
+          "incomplete_cost_count",
+          "cost_per_pass_usd",
+          "cost_per_pass_display"
+        ],
+        "title": "EvalRunStatsResponse",
+        "description": "How long a set of an eval's runs took and what it cost, over EVERY run in the set.\n\nMedians, not means: one runaway run should not make a variant look slow."
+      },
+      "EvalVariantResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Version"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "run_count": {
+            "type": "integer",
+            "title": "Run Count"
+          },
+          "pass_count": {
+            "type": "integer",
+            "title": "Pass Count"
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "pass_rate_display": {
+            "type": "string",
+            "title": "Pass Rate Display"
+          },
+          "avg_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Cost Usd"
+          },
+          "avg_cost_display": {
+            "type": "string",
+            "title": "Avg Cost Display"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "models",
+          "run_count",
+          "pass_count",
+          "pass_rate",
+          "pass_rate_display",
+          "avg_cost_usd",
+          "avg_cost_display",
+          "last_run_at",
+          "last_verdict",
+          "stats"
+        ],
+        "title": "EvalVariantResponse",
+        "description": "Every run of an eval with the same workflow, workflow version and OBSERVED models.\n\n(Evals v2.) Two versions of one workflow are two variants: an edit between\nruns is a different treatment, and pooling them would hide its effect."
       },
       "EventListResponse": {
         "properties": {
@@ -9177,7 +11178,7 @@
               }
             ],
             "title": "Task",
-            "description": "Primary task description -- substituted for $ARGUMENTS in phase prompts."
+            "description": "Primary task description -- substituted for $ARGUMENTS in phase prompts. Omit it to run without a task; an empty or whitespace-only task is rejected with 422 (PC-66)."
           },
           "repos": {
             "items": {
@@ -9194,6 +11195,23 @@
             "type": "array",
             "title": "Tags",
             "description": "Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422."
+          },
+          "eval_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The eval this run joins, overriding the workflow's default eval (#967). 404 if it does not exist, 409 if it is archived."
+          },
+          "no_eval": {
+            "type": "boolean",
+            "title": "No Eval",
+            "description": "Launch an ordinary run: join no eval, even if the workflow has a default eval (#967). Cannot be combined with `eval_id` (422).",
+            "default": false
           },
           "provider": {
             "type": "string",
@@ -9249,6 +11267,49 @@
         ],
         "title": "ExecuteWorkflowResponse",
         "description": "Response after starting workflow execution."
+      },
+      "ExecutionBudgetInfo": {
+        "properties": {
+          "running": {
+            "type": "integer",
+            "title": "Running"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "admission_paused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admission Paused"
+          },
+          "display": {
+            "type": "string",
+            "title": "Display",
+            "description": "e.g. '2 running / 3 queued / cap 4'.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "queued",
+          "limit",
+          "admission_paused",
+          "display"
+        ],
+        "title": "ExecutionBudgetInfo",
+        "description": "How full the execution budget is right now, for the app bar (PC-124).\n\n``running`` and ``limit`` are this API process's budget. ``queued`` is\nevery start the list reports as ``queued``: waiting here for a slot, or\nrecorded durably and not yet picked up by any process."
       },
       "ExecutionCostResponse": {
         "properties": {
@@ -9469,6 +11530,16 @@
             "title": "Completed Phases",
             "default": 0
           },
+          "phase_progress": {
+            "$ref": "#/components/schemas/PhaseProgressInfo"
+          },
+          "phase_plan": {
+            "items": {
+              "$ref": "#/components/schemas/PlannedPhaseInfo"
+            },
+            "type": "array",
+            "title": "Phase Plan"
+          },
           "total_input_tokens": {
             "type": "integer",
             "title": "Total Input Tokens"
@@ -9560,6 +11631,16 @@
             "$ref": "#/components/schemas/FailureClassification",
             "default": "unclassified"
           },
+          "delegation_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DelegationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reported_failure_reason": {
             "anyOf": [
               {
@@ -9570,10 +11651,27 @@
               }
             ]
           },
+          "quarantined_refs": {
+            "items": {
+              "$ref": "#/components/schemas/QuarantinedRef"
+            },
+            "type": "array",
+            "title": "Quarantined Refs"
+          },
           "deliverable_produced": {
             "type": "boolean",
             "title": "Deliverable Produced",
             "default": false
+          },
+          "review_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reported_side_effects": {
             "anyOf": [
@@ -9617,10 +11715,40 @@
             "type": "object",
             "title": "Inputs"
           },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionEvalRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "resume_start": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ResumeStartInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
               },
               {
                 "type": "null"
@@ -9634,6 +11762,8 @@
           "workflow_id",
           "workflow_name",
           "status",
+          "phase_progress",
+          "phase_plan",
           "total_input_tokens",
           "total_output_tokens",
           "total_cache_creation_tokens",
@@ -9641,6 +11771,130 @@
           "total_tokens"
         ],
         "title": "ExecutionDetailResponse"
+      },
+      "ExecutionEvalResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Id"
+          },
+          "association_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "launched",
+                  "attached"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Association Kind"
+          },
+          "launched_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launched Eval Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "eval_id",
+          "association_kind",
+          "launched_eval_id"
+        ],
+        "title": "ExecutionEvalResponse",
+        "description": "An execution's eval membership after an edit, read from the aggregate (#967)."
+      },
+      "ExecutionEvalRunResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "eval_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Name"
+          },
+          "association_kind": {
+            "type": "string",
+            "enum": [
+              "launched",
+              "attached"
+            ],
+            "title": "Association Kind"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "scored_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scored At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "eval_name",
+          "association_kind",
+          "verdict",
+          "score",
+          "scored_at"
+        ],
+        "title": "ExecutionEvalRunResponse",
+        "description": "The eval an execution is a run of, and that run's current verdict (Evals v2).\n\nCarried on ``GET /executions/{id}`` so an execution page can link to its eval\nand show how the run was judged without a second request."
       },
       "ExecutionHistoryResponse": {
         "properties": {
@@ -9701,12 +11955,32 @@
             "title": "Excluded Undated",
             "default": 0
           },
+          "budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionBudgetInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status_counts": {
             "additionalProperties": {
               "type": "integer"
             },
             "type": "object",
             "title": "Status Counts"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -9797,6 +12071,9 @@
             "title": "Total Phases",
             "default": 0
           },
+          "phase_progress": {
+            "$ref": "#/components/schemas/PhaseProgressInfo"
+          },
           "total_tokens": {
             "type": "integer",
             "title": "Total Tokens",
@@ -9839,9 +12116,106 @@
           "workflow_execution_id",
           "workflow_id",
           "workflow_name",
-          "status"
+          "status",
+          "phase_progress"
         ],
         "title": "ExecutionRunSummary"
+      },
+      "ExecutionStartQueueInfo": {
+        "properties": {
+          "path": {
+            "$ref": "#/components/schemas/StartPath"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "held": {
+            "type": "boolean",
+            "title": "Held",
+            "default": true
+          },
+          "start_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "paused",
+                  "retryable",
+                  "dispatched",
+                  "started",
+                  "failed",
+                  "withdrawn"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Status"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running"
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          },
+          "position_display": {
+            "type": "string",
+            "title": "Position Display",
+            "description": "Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.",
+            "readOnly": true
+          },
+          "reason_display": {
+            "type": "string",
+            "title": "Reason Display",
+            "description": "Why it has not started: 'slots full 4/4', 'admission paused', 'starting' or 'awaiting pickup (<status>)' (PC-124).",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "position",
+          "running",
+          "waiting",
+          "limit",
+          "queued_at",
+          "position_display",
+          "reason_display"
+        ],
+        "title": "ExecutionStartQueueInfo",
+        "description": "Where a start stands in the execution budget, before its execution exists (#1557).\n\nEvery start path - direct, trigger and resume - claims one of\n``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits\nhere, first come first served, and has no execution record yet; this is\nwhat it shows instead of a 404."
       },
       "ExecutionStatusCounts": {
         "properties": {
@@ -9916,6 +12290,9 @@
             "title": "Total Phases",
             "default": 0
           },
+          "phase_progress": {
+            "$ref": "#/components/schemas/PhaseProgressInfo"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -9954,7 +12331,8 @@
         "required": [
           "execution_id",
           "workflow_id",
-          "status"
+          "status",
+          "phase_progress"
         ],
         "title": "ExecutionStatusResponse",
         "description": "Response for execution status check."
@@ -10008,6 +12386,9 @@
             "type": "integer",
             "title": "Total Phases",
             "default": 0
+          },
+          "phase_progress": {
+            "$ref": "#/components/schemas/PhaseProgressInfo"
           },
           "total_tokens": {
             "type": "integer",
@@ -10120,6 +12501,26 @@
               }
             ],
             "title": "Repos Display"
+          },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionEvalRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -10128,6 +12529,7 @@
           "workflow_id",
           "workflow_name",
           "status",
+          "phase_progress",
           "total_tokens",
           "total_input_tokens",
           "total_output_tokens",
@@ -10252,6 +12654,31 @@
         "type": "object",
         "title": "FailurePatternResponse",
         "description": "A recurring failure pattern within a system."
+      },
+      "FallbackAgentResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "title": "FallbackAgentResponse",
+        "description": "The agent a phase is re-run on when its own provider cannot serve it (PC-83)."
       },
       "FeatureDisabledDetail": {
         "properties": {
@@ -11496,11 +13923,27 @@
               }
             ],
             "title": "Installation Id"
+          },
+          "lookup": {
+            "$ref": "#/components/schemas/GitHubRepoLookup"
           }
         },
         "type": "object",
+        "required": [
+          "lookup"
+        ],
         "title": "GitHubRepoListResponse",
         "description": "List of repositories accessible to the GitHub App."
+      },
+      "GitHubRepoLookup": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "partial",
+          "unavailable"
+        ],
+        "title": "GitHubRepoLookup",
+        "description": "How much of the GitHub App's access a repo listing actually covers.\n\nOnly ``complete`` makes a repo's absence mean the App cannot reach it. A\n``partial`` listing still proves access for every repo it contains; an\n``unavailable`` one proves nothing."
       },
       "GitHubRepoResponse": {
         "properties": {
@@ -11743,7 +14186,7 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "'healthy' while the process is alive and accepting writes."
+            "description": "'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed."
           },
           "mode": {
             "type": "string",
@@ -11805,6 +14248,43 @@
             ],
             "title": "Warnings",
             "description": "Human-readable notes that need attention but do not degrade the instance. Omitted when there are none."
+          },
+          "disk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskSpaceHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free space on the workspace volume (#1560). Omitted only when the probe itself could not be built."
+          },
+          "db_pools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DbPoolHealth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Pools",
+            "description": "Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode."
+          },
+          "cpu_throttling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CpuThrottling"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API."
           }
         },
         "additionalProperties": false,
@@ -11842,6 +14322,34 @@
         ],
         "title": "HeatmapDayBucketResponse",
         "description": "Single day's aggregated activity."
+      },
+      "HeldProjectionHealth": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as in projection_checkpoints."
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "description": "Type of the event it failed to apply."
+          },
+          "global_nonce": {
+            "type": "integer",
+            "title": "Global Nonce",
+            "description": "Global nonce of the event it is held at."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "event_type",
+          "global_nonce"
+        ],
+        "title": "HeldProjectionHealth",
+        "description": "A projection held below an event it failed to apply (ESP #391).\n\nIt is retried there with backoff and never checkpointed past it, so it is\nbehind and stays behind until the handler is fixed or the projection is\nrebuilt. Every other projection keeps consuming."
       },
       "IdentityBinding": {
         "properties": {
@@ -12327,6 +14835,25 @@
           "counts"
         ],
         "title": "InventorySnapshot"
+      },
+      "InvokedSkillInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "InvokedSkillInfo",
+        "description": "One skill the agent invoked through the Skill tool, and how often (#1269)."
       },
       "LineageEdge": {
         "properties": {
@@ -13213,6 +15740,18 @@
               }
             ],
             "title": "Timeout Seconds"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
           }
         },
         "type": "object",
@@ -13265,6 +15804,17 @@
             "type": "integer",
             "title": "Timeout Seconds",
             "default": 300
+          },
+          "max_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Cost Usd"
           },
           "allowed_tools": {
             "items": {
@@ -13343,6 +15893,21 @@
             "title": "Allow Delegation",
             "default": false
           },
+          "require_delegation": {
+            "type": "boolean",
+            "title": "Require Delegation",
+            "default": false
+          },
+          "fallback_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackAgentResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "clone_repos": {
             "type": "boolean",
             "title": "Clone Repos",
@@ -13352,6 +15917,11 @@
             "type": "boolean",
             "title": "Delivers Repo Changes",
             "default": true
+          },
+          "requires_verdict": {
+            "type": "boolean",
+            "title": "Requires Verdict",
+            "default": false
           },
           "sandbox": {
             "type": "string",
@@ -13537,6 +16107,26 @@
               }
             ]
           },
+          "failure_classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureClassification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "model": {
             "anyOf": [
               {
@@ -13558,6 +16148,17 @@
               }
             ],
             "title": "Requested Model"
+          },
+          "agent_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Provider"
           },
           "cost_by_model": {
             "additionalProperties": {
@@ -13624,6 +16225,9 @@
             ],
             "title": "Start Pins Status",
             "default": "unavailable"
+          },
+          "skill_use": {
+            "$ref": "#/components/schemas/PhaseSkillUseInfo"
           },
           "operations": {
             "items": {
@@ -13795,6 +16399,46 @@
         ],
         "title": "PhaseOperationInfo"
       },
+      "PhaseProgressInfo": {
+        "properties": {
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "possible": {
+            "type": "integer",
+            "title": "Possible"
+          },
+          "remaining_possible": {
+            "type": "integer",
+            "title": "Remaining Possible"
+          },
+          "percent": {
+            "type": "integer",
+            "title": "Percent"
+          },
+          "display": {
+            "type": "string",
+            "title": "Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "completed",
+          "skipped",
+          "possible",
+          "remaining_possible",
+          "percent",
+          "display"
+        ],
+        "title": "PhaseProgressInfo",
+        "description": "How far through its phases an execution is, skipped phases accounted for.\n\n``total_phases`` is what the workflow defines, and a review that certifies\nskips the repair rounds after it (PC-63), so ``completed/total`` read\n\"6/10\" for a run that finished. Clients render ``display`` and draw\n``percent``; they never divide the raw counts themselves."
+      },
       "PhaseRefResponse": {
         "properties": {
           "source_url": {
@@ -13850,6 +16494,49 @@
         "type": "object",
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
+      },
+      "PhaseSkillUseInfo": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "not_observable",
+              "unavailable"
+            ],
+            "title": "Status",
+            "default": "unavailable"
+          },
+          "declared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared"
+          },
+          "invoked": {
+            "items": {
+              "$ref": "#/components/schemas/InvokedSkillInfo"
+            },
+            "type": "array",
+            "title": "Invoked"
+          },
+          "declared_not_invoked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared Not Invoked",
+            "description": "Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "declared_not_invoked"
+        ],
+        "title": "PhaseSkillUseInfo",
+        "description": "Which declared skills this phase actually used (#1269).\n\nDeclaring a skill installs it; only an invocation shows the agent reached\nfor it. This is the fact that tells the two apart, per phase."
       },
       "PhaseStartConfig": {
         "properties": {
@@ -13918,6 +16605,36 @@
         ],
         "title": "PinnedSkillInfo",
         "description": "One skill a phase was given at start, at the version it was resolved to (#1454)."
+      },
+      "PlannedPhaseInfo": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "status_display": {
+            "type": "string",
+            "title": "Status Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "name",
+          "status",
+          "status_display"
+        ],
+        "title": "PlannedPhaseInfo",
+        "description": "One phase the run declared, and where it stands (feedback cee46909).\n\n``ExecutionDetail.phase_plan`` lists every declared phase, so a client\nshows what is left as well as what ran. Clients render ``status_display``\nand style by ``status``; they never work the status out themselves."
       },
       "Priority": {
         "type": "string",
@@ -14002,6 +16719,152 @@
         ],
         "title": "ProjectionLag",
         "description": "One projection's distance from the head of the event store."
+      },
+      "QuarantinedRef": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "commit_count": {
+            "type": "integer",
+            "title": "Commit Count"
+          },
+          "pull_request": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request"
+          },
+          "diffstat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diffstat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repository",
+          "branch",
+          "ref",
+          "commit",
+          "commit_count"
+        ],
+        "title": "QuarantinedRef",
+        "description": "Where one repository's unpushed work was saved when its phase ended (#1547).\n\nThe structured half of what `describe_saved_work` writes as prose into\n`error_message`: only work that LANDED, because a ref that does not exist\nis nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the\nPR the run was working on can be told, by a ProcessManager rather than by\nwhoever happened to read the error."
+      },
+      "ReadModelStatus": {
+        "properties": {
+          "rebuilding": {
+            "type": "boolean",
+            "title": "Rebuilding",
+            "description": "True while this read model is replaying history: it is more than the live-lag threshold (500 events) behind the head. A few events of ordinary live lag is NOT rebuilding, even while another read model replays."
+          },
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as in projection_checkpoints."
+          },
+          "label_display": {
+            "type": "string",
+            "title": "Label Display",
+            "description": "What the read model holds, for a sentence, e.g. 'execution history'."
+          },
+          "progress_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Pct",
+            "description": "Checkpoint position as a whole percentage of the store head, 0-99 while rebuilding. Null when not rebuilding."
+          },
+          "progress_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Display",
+            "description": "progress_pct as '72%'."
+          },
+          "events_behind": {
+            "type": "integer",
+            "title": "Events Behind",
+            "description": "Events between the checkpoint and the store head.",
+            "default": 0
+          },
+          "events_behind_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events Behind Display",
+            "description": "events_behind as '29,476 events behind'."
+          },
+          "summary_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Display",
+            "description": "One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rebuilding",
+          "projection",
+          "label_display"
+        ],
+        "title": "ReadModelStatus",
+        "description": "Whether one read model is rebuilding, and how far it has got.\n\nCarried on the list and detail responses a read model serves, so a page can\nsay \"this list is incomplete because it is being rebuilt\" instead of\nlooking broken, and listed on ``/health`` for every read model that is\nrebuilding. Judged by ``services.read_model_status``; every number is\nexact (checkpoint position against store head), never estimated."
       },
       "RegisterClaudePluginRequest": {
         "properties": {
@@ -14898,7 +17761,8 @@
               "retryable",
               "dispatched",
               "started",
-              "failed"
+              "failed",
+              "withdrawn"
             ],
             "title": "Status"
           },
@@ -14938,6 +17802,16 @@
               }
             ],
             "title": "Dispatched At"
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -14948,6 +17822,15 @@
         ],
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
+      },
+      "ReviewVerdict": {
+        "type": "string",
+        "enum": [
+          "certified",
+          "blocked"
+        ],
+        "title": "ReviewVerdict",
+        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for the rounds after it.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
       },
       "RootResponse": {
         "properties": {
@@ -16542,6 +19425,28 @@
         "title": "SessionTokenMetrics",
         "description": "Token usage metrics for a session."
       },
+      "SetDefaultEvalRequest": {
+        "properties": {
+          "eval_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The default eval, which must exist and not be archived. Null clears it. Runs already started keep the eval they launched into."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eval_id"
+        ],
+        "title": "SetDefaultEvalRequest",
+        "description": "The eval a workflow's runs join when the launch names none (#967)."
+      },
       "SetMaintenanceModeRequest": {
         "properties": {
           "active": {
@@ -16789,6 +19694,16 @@
         "title": "SkillStorageStatsResponse",
         "description": "Size of the content-addressed skill store.\n\nSkill storage grows monotonically: registration is keyed by content hash\nand nothing removes old trees (skills-distribution spec D6, eviction is\ndeliberately not implemented). This endpoint exists so that decision stays\na measured one rather than an assumption."
       },
+      "StartPath": {
+        "type": "string",
+        "enum": [
+          "direct",
+          "trigger",
+          "resume"
+        ],
+        "title": "StartPath",
+        "description": "Which entrance an execution start came through."
+      },
       "StateResponse": {
         "properties": {
           "execution_id": {
@@ -16871,12 +19786,15 @@
             "enum": [
               "healthy",
               "degraded",
+              "halted",
+              "dropped_events",
+              "held",
               "stalled",
               "catching_up",
               "unknown"
             ],
             "title": "Status",
-            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed."
+            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed."
           },
           "running": {
             "anyOf": [
@@ -16913,6 +19831,33 @@
             ],
             "title": "Realtime Enabled",
             "description": "Whether a realtime (SSE) projection is attached."
+          },
+          "held_projections": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HeldProjectionHealth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Projections",
+            "description": "Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed."
+          },
+          "halted_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Halted At",
+            "description": "Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted."
           },
           "is_catching_up": {
             "anyOf": [
@@ -16989,6 +19934,36 @@
             ],
             "title": "Lagging Projections",
             "description": "Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable."
+          },
+          "rebuilding_read_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReadModelStatus"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebuilding Read Models",
+            "description": "Every read model that is rebuilding, furthest behind first, with display strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable."
+          },
+          "unapplied_starts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UnappliedStart"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unapplied Starts",
+            "description": "Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured."
           }
         },
         "additionalProperties": false,
@@ -16997,7 +19972,7 @@
           "status"
         ],
         "title": "SubscriptionHealth",
-        "description": "The read-path block of ``GET /health``: is the subscription up, and is it behind.\n\nFLAT, not nested, because that is the wire shape `syn health` and the deploy\nrunbook already read. The fields from ``running`` down are\n``CoordinatorSubscriptionService.get_status()``; the ones from\n``is_catching_up`` down are ``ReadModelLag``, spread into the same object by\n``lifecycle._describe_subscription_health``.\n\nEVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact\nrather than a default: ``lag is None`` means the coordinator is not up yet,\nso there is nothing whose progress could be measured \u2014 which is not the same\nas \"not behind\", and must not serialize as ``lag: 0``. When the probe itself\nfails, ``status`` is \"unknown\" and nothing else is known at all.\n\n``ReadModelLag``'s fields are restated here because the block is flat on the\nwire and a generated client has to be able to see them. That restatement is\nthe one place this model can drift from its producer, so\n``test_health_contract.py`` asserts the two field sets still match."
+        "description": "The read-path block of ``GET /health``: is the subscription up, and is it behind.\n\nFLAT, not nested, because that is the wire shape `syn health` and the deploy\nrunbook already read. The fields from ``running`` down are\n``CoordinatorSubscriptionService.get_status()``; the ones from\n``is_catching_up`` down are ``ReadModelLag``, spread into the same object by\n``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).\n\nEVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact\nrather than a default: ``lag is None`` means the coordinator is not up yet,\nso there is nothing whose progress could be measured \u2014 which is not the same\nas \"not behind\", and must not serialize as ``lag: 0``. When the lag or\ndropped-start probe fails, the lag fields are absent but what the\ncoordinator itself knows (``running``, ``held_projections``, ``halted_at``)\nis still published, and still sets ``status``: a halt at an undecodable\nhead event is exactly when the lag probe fails too. ``status`` is \"unknown\"\nonly when none of those fires.\n\n``ReadModelLag``'s fields are restated here because the block is flat on the\nwire and a generated client has to be able to see them. That restatement is\nthe one place this model can drift from its producer, so\n``test_health_contract.py`` asserts the two field sets still match."
       },
       "SystemActionResponse": {
         "properties": {
@@ -18366,6 +21341,34 @@
         "title": "TypeCount",
         "description": "Count of items by type."
       },
+      "UnappliedStart": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Read model that skipped the start."
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id",
+            "description": "Execution whose WorkflowExecutionStarted it skipped."
+          },
+          "global_nonce": {
+            "type": "integer",
+            "title": "Global Nonce",
+            "description": "Store position of that start event."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "execution_id",
+          "global_nonce"
+        ],
+        "title": "UnappliedStart",
+        "description": "One execution whose start a projection skipped past. Published on /health as is."
+      },
       "UpdateArtifactRequest": {
         "properties": {
           "title": {
@@ -18740,6 +21743,42 @@
         ],
         "title": "ValidationError"
       },
+      "Verdict": {
+        "type": "string",
+        "enum": [
+          "PASS",
+          "FAIL",
+          "ERROR"
+        ],
+        "title": "Verdict",
+        "description": "What a scorer concluded about one run of an eval.\n\n``ERROR`` is the scorer's own failure to reach a conclusion (the run left\nnothing to judge, or the scorer broke), never a judgement that the run\nfailed. It counts as scored, and not as passed."
+      },
+      "WorkflowDefaultEvalResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "default_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Eval Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "default_eval_id"
+        ],
+        "title": "WorkflowDefaultEvalResponse",
+        "description": "A workflow's default eval after an edit, read from the aggregate (#967)."
+      },
       "WorkflowListResponse": {
         "properties": {
           "workflows": {
@@ -18869,6 +21908,28 @@
             },
             "type": "array",
             "title": "Tags"
+          },
+          "default_eval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Eval Id"
+          },
+          "package_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Name"
           }
         },
         "type": "object",
@@ -19089,6 +22150,10 @@
     {
       "name": "costs",
       "description": "Track token costs per session and execution"
+    },
+    {
+      "name": "evals",
+      "description": ""
     },
     {
       "name": "events",

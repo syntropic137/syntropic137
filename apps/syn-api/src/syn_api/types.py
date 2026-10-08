@@ -34,6 +34,7 @@ from pydantic import (
 # rather than restated - the probe that produces a shape is the only place
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_adapters.subscriptions.unapplied_starts import UnappliedStart  # noqa: TC001
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -80,12 +81,20 @@ from syn_api.inventory_types import TranscriptDeletionResponse as TranscriptDele
 from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdentityRequest
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
+from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    DelegationFailure,
+    EvalId,
     FailureClassification,
+    PhaseProgress,
+    PlannedPhase,
+    QuarantinedRef,
     ReportedFailureReason,
+    ReviewVerdict,
     SideEffectStatus,
     TagSet,
+    Verdict,
 )
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
@@ -93,6 +102,8 @@ from syn_domain.contexts.orchestration import (
 # guard on AliasResolutionBasis both unused and misleading.
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
+from syn_shared.display import format_utc_timestamp
+from syn_shared.display.formatters import EM_DASH
 from syn_shared.observed_model import format_observed_model
 
 # ---------------------------------------------------------------------------
@@ -134,6 +145,7 @@ class WorkflowError(StrEnum):
     INVALID_INPUT = "invalid_input"
     EXECUTION_FAILED = "execution_failed"
     HAS_ACTIVE_EXECUTIONS = "has_active_executions"
+    PACKAGE_MISMATCH = "package_mismatch"
     NOT_IMPLEMENTED = "not_implemented"
 
 
@@ -218,12 +230,26 @@ class GitHubRepoResponse(BaseModel):
     installation_id: str
 
 
+class GitHubRepoLookup(StrEnum):
+    """How much of the GitHub App's access a repo listing actually covers.
+
+    Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+    ``partial`` listing still proves access for every repo it contains; an
+    ``unavailable`` one proves nothing.
+    """
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+
+
 class GitHubRepoListResponse(BaseModel):
     """List of repositories accessible to the GitHub App."""
 
     repos: list[GitHubRepoResponse] = Field(default_factory=list)
     total: int = 0
     installation_id: str | None = None
+    lookup: GitHubRepoLookup
 
 
 class ObservabilityError(StrEnum):
@@ -493,6 +519,13 @@ class PhaseRefResponse(BaseModel):
     """The shorthand spelling when the stored row held a bare string."""
 
 
+class FallbackAgentResponse(BaseModel):
+    """The agent a phase is re-run on when its own provider cannot serve it (PC-83)."""
+
+    provider: str
+    model: str | None = None
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -503,6 +536,8 @@ class PhaseDefinitionResponse(BaseModel):
     agent_type: str = ""
     prompt_template: str | None = None
     timeout_seconds: int = 300
+    max_cost_usd: float | None = None
+    """The most this phase may spend, in USD, before it is stopped. None is unbounded."""
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
@@ -518,8 +553,8 @@ class PhaseDefinitionResponse(BaseModel):
     target is what runs. ``expected``: the CLI resolves it (claude), so the
     target is what the pinned CLI is expected to pick. ``None`` with no alias."""
     model_display: str | None = None
-    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6-sol``, or
-    ``default → gpt-sol → gpt-6-sol`` when execution substitutes the
+    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6.1-sol``, or
+    ``default → gpt-sol → gpt-6.1-sol`` when execution substitutes the
     provider default; the bare model when there is nothing to resolve. Render
     verbatim."""
     provider: str | None = None
@@ -527,8 +562,16 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
+    # The obligation beside the permission (#894): a phase declaring it fails
+    # unless its delegate succeeded.
+    require_delegation: bool = False
+    # PC-83: re-run once on this agent after capacity outlived the retries, or
+    # a spent quota. None when the phase declared no fallback.
+    fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
+    # PC-116: the phase fails when it reports no review_verdict.
+    requires_verdict: bool = False
     sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)
@@ -557,7 +600,87 @@ class WorkflowDetail(BaseModel):
     requires_repos: bool = True
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
-    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+    default_eval_id: str | None = None
+    """The eval a launch naming none joins (#967). Future runs only."""
+    package_name: str | None = None
+    """Package that installed this definition (#1588); None when it was not
+    installed from a package or predates install provenance."""
+
+
+class PhaseProgressInfo(BaseModel):
+    """How far through its phases an execution is, skipped phases accounted for.
+
+    ``total_phases`` is what the workflow defines, and a review that certifies
+    skips the repair rounds after it (PC-63), so ``completed/total`` read
+    "6/10" for a run that finished. Clients render ``display`` and draw
+    ``percent``; they never divide the raw counts themselves.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    completed: int
+    """Phases that ran to completion."""
+    skipped: int
+    """Phases a review verdict made unnecessary; they will never run."""
+    possible: int
+    """The most phases this run can complete: defined, less the skipped."""
+    remaining_possible: int
+    """Phases that could still run. Zero once the run has ended."""
+    percent: int
+    """Completed as a share of ``possible``, 0-100. A completed run is 100."""
+    display: str
+    """E.g. ``6 of 6 (2 phases not needed)``, ``phase 3 of up to 8``."""
+
+    @classmethod
+    def of(cls, progress: PhaseProgress) -> PhaseProgressInfo:
+        """The response shape of the domain's answer."""
+        return cls(
+            completed=progress.completed,
+            skipped=progress.skipped,
+            possible=progress.possible,
+            remaining_possible=progress.remaining_possible,
+            percent=progress.percent,
+            display=progress.display,
+        )
+
+    @classmethod
+    def without_skips(cls, status: str, completed: int, defined: int) -> PhaseProgressInfo:
+        """Progress from a run result, which carries no skips.
+
+        The list and detail reads, built from NextPhaseReady, are where skips
+        are counted.
+        """
+        return cls.of(PhaseProgress(status=status, completed=completed, skipped=0, defined=defined))
+
+
+class PlannedPhaseInfo(BaseModel):
+    """One phase the run declared, and where it stands (feedback cee46909).
+
+    ``ExecutionDetail.phase_plan`` lists every declared phase, so a client
+    shows what is left as well as what ran. Clients render ``status_display``
+    and style by ``status``; they never work the status out themselves.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    name: str
+    status: str
+    """``pending``, ``skipped`` (a review made it unnecessary), ``inherited``
+    (completed by the run this one resumed), or the status of the phase as it
+    ran here: ``running``, ``completed``, ``failed``, ..."""
+    status_display: str
+    """E.g. ``Pending``, ``Skipped (not needed)``, ``Inherited (completed earlier)``."""
+
+    @classmethod
+    def of(cls, phase: PlannedPhase) -> PlannedPhaseInfo:
+        """The response shape of the domain's answer."""
+        return cls(
+            phase_id=phase.phase_id,
+            name=phase.name,
+            status=phase.status,
+            status_display=phase.status_display,
+        )
 
 
 class ExecutionSummary(BaseModel):
@@ -573,6 +696,7 @@ class ExecutionSummary(BaseModel):
     completed_at: datetime | str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -690,6 +814,13 @@ class ExecutionDetail(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -708,6 +839,12 @@ class ExecutionDetail(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
+    """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
 
@@ -717,6 +854,9 @@ class ExecutionDetail(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -829,6 +969,358 @@ class WorkflowTagsResponse(BaseModel):
     workflow_id: str
     tags: list[str]
     """The workflow's tags, normalised and sorted. Future runs inherit them."""
+
+
+class AttachEvalRequest(BaseModel):
+    """The eval to attach an execution to (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    eval_id: EvalId = Field(
+        description=(
+            "The eval to attach to. It must exist and not be archived. Attaching to the "
+            "eval the run already belongs to is a no-op; another eval needs a detach first."
+        ),
+    )
+
+
+class ExecutionEvalResponse(BaseModel):
+    """An execution's eval membership after an edit, read from the aggregate (#967)."""
+
+    execution_id: str
+    eval_id: str | None
+    """The eval the run belongs to now, or null if it belongs to none."""
+    association_kind: Literal["launched", "attached"] | None
+    """How it joined: chosen at launch, or attached afterwards. Null with no eval."""
+    launched_eval_id: str | None
+    """The eval the launch chose. A record of the launch: a detach never clears it."""
+
+
+class SetDefaultEvalRequest(BaseModel):
+    """The eval a workflow's runs join when the launch names none (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    eval_id: EvalId | None = Field(
+        description=(
+            "The default eval, which must exist and not be archived. Null clears it. "
+            "Runs already started keep the eval they launched into."
+        ),
+    )
+
+
+class WorkflowDefaultEvalResponse(BaseModel):
+    """A workflow's default eval after an edit, read from the aggregate (#967)."""
+
+    workflow_id: str
+    default_eval_id: str | None
+
+
+class EvalBaselineRepoRequest(BaseModel):
+    """One repository of a new eval's Baseline, before its ref is pinned (#967)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str = Field(description="The repository, as an `owner/name` slug.")
+    requested_ref: str = Field(
+        min_length=1,
+        description=(
+            "A branch, tag or commit. Resolved once, at create, to a full commit SHA; "
+            "every run starts from that SHA even after the branch or tag moves."
+        ),
+    )
+
+
+class CreateEvalRequest(BaseModel):
+    """A new eval (#967). The server mints its id; see `EvalCreatedResponse`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    goal: str = Field(min_length=1, description="What the eval sets out to measure.")
+    starting_workflow_id: str | None = Field(
+        default=None, min_length=1, description="The workflow a run uses when it names none."
+    )
+    baseline_repos: list[EvalBaselineRepoRequest] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class EvalBaselineRepoResponse(BaseModel):
+    """One repository of an eval's Baseline: the ref asked for and the SHA it pinned to."""
+
+    repository: str
+    """The repository, as an `owner/name` slug."""
+    requested_ref: str
+    commit_sha: str
+
+
+class EvalCreatedResponse(BaseModel):
+    """The receipt for a create, read from the Eval aggregate, never a projection (#967).
+
+    The eval list and `GET /evals/{eval_id}` are read models and may not show
+    the eval for a moment after this returns. That is lag, not a failed create:
+    `eval_id` is authoritative from here on.
+    """
+
+    eval_id: str
+    name: str
+    goal: str
+    starting_workflow_id: str | None
+    baseline_repos: list[EvalBaselineRepoResponse]
+    """Each ref the request named, with the commit SHA it resolved to."""
+    tags: list[str]
+
+
+class EvalArchivedResponse(BaseModel):
+    """The receipt for an archive, read from the Eval aggregate (#967)."""
+
+    eval_id: str
+    archived: bool
+
+
+class EvalRunStatsResponse(BaseModel):
+    """How long a set of an eval's runs took and what it cost, over EVERY run in the set.
+
+    Medians, not means: one runaway run should not make a variant look slow.
+    """
+
+    median_duration_seconds: float | None
+    """Median over the runs whose duration is known and complete. Null when none is.
+
+    A run with a phase of unknown duration has only a lower bound and is left out."""
+    median_duration_display: str
+    """Says how many runs it left out, e.g. ``"2m 14s (excl. 1 incomplete)"``."""
+    incomplete_duration_count: int
+    """Runs left out of the median duration: unknown, or only a lower bound."""
+    median_cost_usd: Decimal | None
+    """Median over the runs whose cost is known and complete. Null when none is.
+
+    A run with unpriced observations has only a lower bound and is left out."""
+    median_cost_display: str
+    """Says how many runs it left out, e.g. ``"$1.20 (excl. 1 incomplete)"``."""
+    incomplete_cost_count: int
+    """Runs left out of the median cost: unknown, or only a lower bound."""
+    cost_per_pass_usd: Decimal | None
+    """Known spend of the SCORED runs (PASS, FAIL and ERROR) over the PASS runs.
+
+    Unscored runs are left out: they have no verdict yet. Null when nothing
+    passed or no cost is known."""
+    cost_per_pass_display: str
+    """Says it is a lower bound when some scored run's cost is unknown or incomplete."""
+
+
+class EvalVariantResponse(BaseModel):
+    """Every run of an eval with the same workflow, workflow version and OBSERVED models.
+
+    (Evals v2.) Two versions of one workflow are two variants: an edit between
+    runs is a different treatment, and pooling them would hide its effect.
+    """
+
+    workflow_id: str
+    workflow_version: str | None = None
+    """The installed version (or source digest) the runs launched from. Null if unrecorded."""
+    models: list[ObservedModelId]
+    """Sorted, unique models the runs' phases reported running. Never an alias."""
+    run_count: int
+    pass_count: int
+    pass_rate: float | None
+    """PASS over this variant's PASS + FAIL runs, 0..1 (ERROR excluded). Null when none."""
+    pass_rate_display: str
+    avg_cost_usd: Decimal | None
+    """Mean over the runs whose cost is known and complete. Null when none is."""
+    avg_cost_display: str
+    last_run_at: str | None
+    last_verdict: Verdict | None
+    """The verdict of this variant's newest run that has one."""
+    stats: EvalRunStatsResponse
+
+
+class EvalResponse(BaseModel):
+    """An eval as the eval read model holds it, with its run tally (#967)."""
+
+    eval_id: str
+    name: str
+    goal: str
+    starting_workflow_id: str | None
+    baseline_repos: list[EvalBaselineRepoResponse]
+    tags: list[str]
+    frozen: bool
+    """True once a run was admitted: the goal and Baseline can no longer change."""
+    archived: bool
+    created_at: str | None
+    updated_at: str | None
+    run_count: int
+    """Executions currently in the eval. A detached run is not counted."""
+    run_status_counts: dict[str, int]
+    """Those executions tallied by execution status."""
+    scored_count: int = 0
+    """Runs with a score. ``ERROR`` counts as scored, and is left out of the pass rate."""
+    pass_rate: float | None = None
+    """PASS over PASS + FAIL runs, 0..1 (ERROR excluded). Null when there are none."""
+    pass_rate_display: str = EM_DASH
+    last_run_at: str | None = None
+    """When the newest run started, ISO 8601 UTC."""
+    last_verdict: Verdict | None = None
+    """The verdict of the newest run that has one."""
+    variants: list[EvalVariantResponse] = Field(default_factory=list)
+    """The eval's runs grouped by workflow and the models its phases actually ran."""
+    stats: EvalRunStatsResponse
+    """Duration and cost over every current run, all variants together."""
+
+
+class EvalRunModelResponse(BaseModel):
+    """The model one phase of a run ACTUALLY ran, as its harness reported it."""
+
+    phase_id: str
+    model: ObservedModelId
+
+
+class EvalRunResponse(BaseModel):
+    """One run of an eval: one data point of how the eval changes over time (Evals v2)."""
+
+    execution_id: str
+    started_at: str | None
+    completed_at: str | None
+    status: str
+    workflow_id: str
+    workflow_version: str | None = None
+    """The workflow's installed version (or source digest, when it has no version)
+    as the run launched it, recorded on the run's start event. Null for a run
+    started before that was recorded, a resume, or a template with neither."""
+    models: list[EvalRunModelResponse]
+    """Observed per phase; a phase with no reported model is omitted."""
+    total_cost_usd: Decimal | None
+    total_cost_display: str
+    duration_seconds: float | None
+    duration_display: str
+    verdict: Verdict | None
+    score: float | None
+    evidence_excerpt: str | None
+    """The start of the scorer's markdown evidence; the full text is on the score."""
+    scorer: str | None
+    scorer_version: str | None
+    scored_at: str | None
+
+
+class EvalRunListResponse(BaseModel):
+    """One page of an eval's current runs, newest first (Evals v2)."""
+
+    items: list[EvalRunResponse]
+    total: int
+    """Every current run of the eval, whatever the page size."""
+    page: int
+    page_size: int
+
+
+class EvalRunScoreRequest(BaseModel):
+    """A scorer's verdict on one run of an eval. Re-scoring replaces the current score."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Verdict
+    score: float | None = Field(default=None, ge=0.0, le=1.0)
+    evidence: str = ""
+    """Markdown."""
+    scorer: str = Field(min_length=1)
+    scorer_version: str = Field(min_length=1)
+
+
+class EvalRunScoreResponse(BaseModel):
+    """The run's score as recorded (Evals v2)."""
+
+    eval_id: str
+    execution_id: str
+    verdict: Verdict
+    score: float | None
+    evidence: str
+    scorer: str
+    scorer_version: str
+    scored_at: str
+
+
+class ExecutionEvalRunResponse(BaseModel):
+    """The eval an execution is a run of, and that run's current verdict (Evals v2).
+
+    Carried on ``GET /executions/{id}`` so an execution page can link to its eval
+    and show how the run was judged without a second request.
+    """
+
+    eval_id: str
+    eval_name: str | None
+    """The eval's name. Null only while the eval's own record has not been projected."""
+    association_kind: Literal["launched", "attached"]
+    """How the run joined: chosen at launch, or attached afterwards."""
+    verdict: Verdict | None
+    """The run's current verdict. Null until a scorer records one."""
+    score: float | None
+    scored_at: str | None
+    """When the current verdict was recorded, ISO 8601 UTC."""
+
+
+class ReadModelStatus(BaseModel):
+    """Whether one read model is rebuilding, and how far it has got.
+
+    Carried on the list and detail responses a read model serves, so a page can
+    say "this list is incomplete because it is being rebuilt" instead of
+    looking broken, and listed on ``/health`` for every read model that is
+    rebuilding. Judged by ``services.read_model_status``; every number is
+    exact (checkpoint position against store head), never estimated.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rebuilding: bool = Field(
+        description="True while this read model is replaying history: it is more than the "
+        "live-lag threshold (500 events) behind the head. A few events of ordinary live lag "
+        "is NOT rebuilding, even while another read model replays.",
+    )
+    projection: str = Field(description="Projection name, as in projection_checkpoints.")
+    label_display: str = Field(
+        description="What the read model holds, for a sentence, e.g. 'execution history'."
+    )
+    progress_pct: int | None = Field(
+        default=None,
+        description="Checkpoint position as a whole percentage of the store head, 0-99 while "
+        "rebuilding. Null when not rebuilding.",
+    )
+    progress_display: str | None = Field(default=None, description="progress_pct as '72%'.")
+    events_behind: int = Field(
+        default=0, description="Events between the checkpoint and the store head."
+    )
+    events_behind_display: str | None = Field(
+        default=None, description="events_behind as '29,476 events behind'."
+    )
+    summary_display: str | None = Field(
+        default=None,
+        description="One sentence for a banner, e.g. 'Rebuilding execution history - 72% "
+        "(29,476 events behind).' Null when not rebuilding.",
+    )
+
+
+class EvalDetailResponse(EvalResponse):
+    """One eval, as `GET /evals/{eval_id}` returns it.
+
+    The row model plus whether the evals read model is rebuilding, so a
+    missing or stale eval can say why. Kept off `EvalResponse` so every list
+    row does not repeat the list's own status.
+    """
+
+    read_model_status: ReadModelStatus | None = None
+    """Whether the evals read model is rebuilding."""
+
+
+class EvalListResponse(BaseModel):
+    """One page of evals, newest first (#967)."""
+
+    evals: list[EvalResponse]
+    total: int
+    """Evals matching every filter, before paging."""
+    page: int
+    page_size: int
+    status_counts: dict[str, int]
+    """Matching evals tallied as `active` / `archived`, ignoring the status filter."""
+    read_model_status: ReadModelStatus | None = None
+    """Whether the evals read model is rebuilding, so a short list can say why."""
 
 
 # ---------------------------------------------------------------------------
@@ -1039,6 +1531,12 @@ class ToolOperation(BaseModel):
     tool_use_id: str | None = None
     input_preview: str | None = None
     output_preview: str | None = None
+    skill_name: str | None = None
+    """The skill a `Skill` call invoked, recorded whole on its start (#1269).
+
+    Carried from `syn_adapters.projections.session_tools.ToolOperation` by
+    `model_validate(from_attributes=True)`; the names must stay identical.
+    """
     # Structured git data (v2 events - preferred).
     # AliasChoices: JSON clients send "git", from_attributes reads "git_data"
     # from the projection dataclass (which uses git_data to avoid shadowing).
@@ -1090,6 +1588,53 @@ class PhaseStartConfig(BaseModel):
     """Empty means the phase declared no restriction, so the harness ran with
     its own default tool set - not that the agent had no tools."""
     skills: list[PinnedSkillInfo] = Field(default_factory=list)
+
+
+SkillUseStatus = Literal["observed", "not_observable", "unavailable"]
+"""Whether a phase's skill USE could be read (#1269).
+
+``observed``: a claude phase whose timeline was read, so ``invoked`` is a
+measurement and an empty list means no skill was invoked. ``not_observable``:
+the harness has no Skill tool (codex), so skills land as context and their use
+leaves no signal - ``invoked`` is empty because nothing CAN be seen, never
+because nothing was used. ``unavailable``: the start pins or the timeline could
+not be read on this request, so nothing is known either way."""
+
+
+class InvokedSkillInfo(BaseModel):
+    """One skill the agent invoked through the Skill tool, and how often (#1269)."""
+
+    name: str
+    count: int
+    """Calls, not timeline rows: a call's start and completion fold to one."""
+
+
+class PhaseSkillUseInfo(BaseModel):
+    """Which declared skills this phase actually used (#1269).
+
+    Declaring a skill installs it; only an invocation shows the agent reached
+    for it. This is the fact that tells the two apart, per phase.
+    """
+
+    status: SkillUseStatus = "unavailable"
+    declared: list[str] = Field(default_factory=list)
+    """Skill names from `pinned_at_start.skills` - what the execution STARTED
+    with, never the template as it stands now."""
+    invoked: list[InvokedSkillInfo] = Field(default_factory=list)
+    """Meaningful only when `status` is ``observed``. May name a skill that was
+    not declared: one installed some other way is still a skill the agent used."""
+
+    @computed_field(
+        description="Declared skills with no observed invocation. Empty unless "
+        "status is 'observed': an unobservable use is not a non-use."
+    )
+    @property
+    def declared_not_invoked(self) -> list[str]:
+        """Derived, never passed in, so it cannot contradict the two lists."""
+        if self.status != "observed":
+            return []
+        used = {s.name for s in self.invoked}
+        return [name for name in self.declared if name not in used]
 
 
 class BranchObservationInfo(BaseModel):
@@ -1277,6 +1822,22 @@ class PhaseActivityInfo(BaseModel):
     budget - not that there was none, and not zero.
     """
 
+    deadline: datetime | None = None
+    """When this phase is killed on its budget (#1546), in UTC: the moment its
+    workspace was ready plus ``timeout_seconds``.
+
+    Not ``started_at`` plus ``timeout_seconds``. The phase starts before its
+    workspace is provisioned and its clock only after, so that sum is early by
+    the provisioning time - which is why phases appeared to run past their
+    limit. This is the deadline the agent is told as ``SYN_PHASE_DEADLINE``,
+    to within the moment between the workspace being recorded ready and the
+    agent being dispatched. Like that variable it is in whole seconds,
+    truncated, so it is never later than the agent's.
+
+    ``None`` until the workspace is ready, when the budget is unknown, or for
+    a phase provisioned before this was recorded.
+    """
+
 
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""
@@ -1305,6 +1866,13 @@ class PhaseExecution(BaseModel):
     """What this phase's agent said happened to its external writes, ``None``
     when it said nothing. A report, never a measurement, and it never decides
     whether the phase completed."""
+    failure_classification: FailureClassification | None = None
+    """Why this phase failed - ``platform``, ``task``, ``correct_refusal`` or
+    ``unclassified`` - and ``None`` exactly when it did not fail. The same fact
+    as the execution's ``failure_classification``, at the phase it failed in."""
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What this phase's agent SAID caused its failure, ``None`` when it said
+    nothing. A report beside the classification, never a replacement for it."""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -1325,6 +1893,11 @@ class PhaseExecution(BaseModel):
     """
     requested_model: str | None = None
     """The model the phase REQUESTED (often an alias such as ``opus``), or None."""
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result, or null
+    (PC-83). Differs from the declared provider when the phase fell back to its
+    ``fallback_agent`` on capacity or quota; ``requested_model`` is then the
+    fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
@@ -1369,6 +1942,8 @@ class PhaseExecution(BaseModel):
     start_pins_status: StartPinsStatus = "unavailable"
     """Why `pinned_at_start` is or is not set. Defaults to ``unavailable``: a
     constructor that never read the start event must not claim it was empty."""
+    skill_use: PhaseSkillUseInfo = Field(default_factory=PhaseSkillUseInfo)
+    """Skills declared against skills invoked, for this phase (#1269)."""
     operations: list[ToolOperation] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, summarised from `operations`
@@ -1404,6 +1979,10 @@ class ExecutionDetailFull(BaseModel):
     phase one carries one phase and a total of 3, and the gap is the phases
     that never started (#1147)."""
     completed_phases: int = 0
+    phase_progress: PhaseProgressInfo
+    phase_plan: list[PlannedPhaseInfo]
+    """Every phase the run declared, in order, with where each stands. Counts
+    the same phases ``total_phases`` does; ``phases`` is only the ones that ran."""
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
@@ -1453,6 +2032,13 @@ class ExecutionDetailFull(BaseModel):
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -1471,6 +2057,12 @@ class ExecutionDetailFull(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
+    """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
 
@@ -1480,6 +2072,9 @@ class ExecutionDetailFull(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -1924,8 +2519,8 @@ class BuildInfo(_NamesTheRunningRelease):
     twenty releases behind the installed package.
 
     The release and its status come from ``_NamesTheRunningRelease``. What this
-    model adds is the two build-time stamps, which only an image can supply and
-    only ``/health`` reports.
+    model adds is the two build-time stamps, which only an image can supply,
+    and when this process went live, which only the process can.
     """
 
     image_tag: str | None = Field(
@@ -1939,6 +2534,20 @@ class BuildInfo(_NamesTheRunningRelease):
         description="Git commit the image was built from, stamped at image build time. "
         "Null when the build did not stamp one.",
     )
+    started_at: datetime = Field(
+        description="When this API process started (UTC, ISO 8601): the moment the "
+        "running deployment went live. Captured once per process, so it changes only "
+        "when the process is replaced, which is what a redeploy does.",
+    )
+
+    @computed_field(
+        description="started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. "
+        "Relative and local-time renderings are the client's to make from started_at.",
+    )
+    @property
+    def started_at_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``started_at``."""
+        return format_utc_timestamp(self.started_at)
 
 
 class RootResponse(_NamesTheRunningRelease):
@@ -1998,7 +2607,31 @@ class _OmitsAbsentFields(BaseModel):
 #: is added here because only /health can produce it — it is what the probe
 #: reports when it failed and has no verdict to publish.
 #: ``test_health_contract.py`` fails if those four ever stop being a subset.
-SubscriptionHealthStatus = Literal["healthy", "degraded", "stalled", "catching_up", "unknown"]
+SubscriptionHealthStatus = Literal[
+    "healthy",
+    "degraded",
+    "halted",
+    "dropped_events",
+    "held",
+    "stalled",
+    "catching_up",
+    "unknown",
+]
+
+
+class HeldProjectionHealth(BaseModel):
+    """A projection held below an event it failed to apply (ESP #391).
+
+    It is retried there with backoff and never checkpointed past it, so it is
+    behind and stays behind until the handler is fixed or the projection is
+    rebuilt. Every other projection keeps consuming.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    projection: str = Field(description="Projection name, as in projection_checkpoints.")
+    event_type: str = Field(description="Type of the event it failed to apply.")
+    global_nonce: int = Field(description="Global nonce of the event it is held at.")
 
 
 class SubscriptionHealth(_OmitsAbsentFields):
@@ -2008,13 +2641,17 @@ class SubscriptionHealth(_OmitsAbsentFields):
     runbook already read. The fields from ``running`` down are
     ``CoordinatorSubscriptionService.get_status()``; the ones from
     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
-    ``lifecycle._describe_subscription_health``.
+    ``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).
 
     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
     rather than a default: ``lag is None`` means the coordinator is not up yet,
     so there is nothing whose progress could be measured — which is not the same
-    as "not behind", and must not serialize as ``lag: 0``. When the probe itself
-    fails, ``status`` is "unknown" and nothing else is known at all.
+    as "not behind", and must not serialize as ``lag: 0``. When the lag or
+    dropped-start probe fails, the lag fields are absent but what the
+    coordinator itself knows (``running``, ``held_projections``, ``halted_at``)
+    is still published, and still sets ``status``: a halt at an undecodable
+    head event is exactly when the lag probe fails too. ``status`` is "unknown"
+    only when none of those fires.
 
     ``ReadModelLag``'s fields are restated here because the block is flat on the
     wire and a generated client has to be able to see them. That restatement is
@@ -2027,7 +2664,10 @@ class SubscriptionHealth(_OmitsAbsentFields):
     status: SubscriptionHealthStatus = Field(
         description="Verdict on the read path: 'healthy', 'catching_up' during a replay "
         "that ends by itself, 'stalled' for a projection that does not, 'degraded' "
-        "for a coordinator that is not running, or 'unknown' when the probe failed.",
+        "for a coordinator that is not running, 'halted' when the subscription stopped "
+        "at a stored event it cannot decode, 'dropped_events' when a read model "
+        "passed an event without applying it, 'held' when a projection failed to apply "
+        "an event and is retried below it, or 'unknown' when the probe failed.",
     )
     running: bool | None = Field(
         default=None,
@@ -2039,6 +2679,18 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
     realtime_enabled: bool | None = Field(
         default=None, description="Whether a realtime (SSE) projection is attached."
+    )
+    held_projections: list[HeldProjectionHealth] | None = Field(
+        default=None,
+        description="Projections held below an event they failed to apply (ESP #391). "
+        "Non-empty sets status 'held'; the cause is in the API log as the handler's "
+        "exception. Null when the probe failed.",
+    )
+    halted_at: int | None = Field(
+        default=None,
+        description="Global nonce of the undecodable stored event the subscription is "
+        "halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; "
+        "repair per the ESP ADR-026 recovery steps in the API log. Null when not halted.",
     )
     is_catching_up: bool | None = Field(
         default=None,
@@ -2067,6 +2719,62 @@ class SubscriptionHealth(_OmitsAbsentFields):
         description="Every projection short of the head, furthest behind first. Empty when "
         "all are at the head; null when lag is unmeasurable.",
     )
+    rebuilding_read_models: list[ReadModelStatus] | None = Field(
+        default=None,
+        description="Every read model that is rebuilding, furthest behind first, with display "
+        "strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable.",
+    )
+    unapplied_starts: list[UnappliedStart] | None = Field(
+        default=None,
+        description="Executions whose WorkflowExecutionStarted an execution read model's "
+        "checkpoint passed without applying (#1545). Lag cannot show these: the read model "
+        "is at the head and wrong. Non-empty sets status 'dropped_events'; repair per "
+        "docs/runbooks/repair-dropped-execution-start.md. Null when not measured.",
+    )
+
+
+class DiskSpaceHealth(BaseModel):
+    """Free space on the workspace volume, as /health reports it (#1560)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(description="Directory whose filesystem was measured.")
+    state: Literal["ok", "unmeasurable", "low", "critical"] = Field(
+        description="'low' degrades /health; 'critical' also refuses new executions."
+    )
+    free_percent: float | None = Field(description="Percent free; null when unmeasurable.")
+    free_bytes: int | None = Field(description="Bytes available; null when unmeasurable.")
+    degraded_below_percent: float = Field(description="SYN_DISK_DEGRADED_BELOW_PERCENT.")
+    refuse_admission_below_percent: float = Field(
+        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+    )
+
+
+class DbPoolHealth(BaseModel):
+    """One Postgres connection pool in this API process, at the moment of asking (#1583).
+
+    ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+    requests are queueing for a connection rather than for the database itself.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="What the pool serves, e.g. 'projections' or 'agent_events'.")
+    size: int = Field(description="Connections currently open.")
+    max_size: int = Field(description="Most connections the pool will open.")
+    in_use: int = Field(description="Connections checked out right now.")
+    waiting: int = Field(description="Callers blocked waiting for a connection right now.")
+
+    @classmethod
+    def snapshot(cls) -> list[DbPoolHealth]:
+        """Every open pool, read from in-process counters only.
+
+        Costs nothing and cannot hang on the database it describes, so /health
+        can always report it.
+        """
+        from syn_adapters.postgres_pool import pool_stats
+
+        return [cls.model_validate(stats, from_attributes=True) for stats in pool_stats()]
 
 
 class HealthResponse(_OmitsAbsentFields):
@@ -2088,7 +2796,12 @@ class HealthResponse(_OmitsAbsentFields):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    status: str = Field(description="'healthy' while the process is alive and accepting writes.")
+    status: str = Field(
+        description="'healthy' while the process is alive and accepting writes; 'starting' "
+        "while it is alive but startup (a long migration, say) has not finished, when every "
+        "route but /health and /version answers 503; 'failed' when startup failed after serving "
+        "began and the process is exiting; 'unhealthy' when the probe failed.",
+    )
     mode: str = Field(description="'full', or 'degraded' when some subsystem is impaired.")
     build: BuildInfo = Field(description="Which build is answering (#1380).")
     degraded_reasons: list[DegradedReason] | None = Field(
@@ -2111,6 +2824,22 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="Human-readable notes that need attention but do not degrade the "
         "instance. Omitted when there are none.",
+    )
+    disk: DiskSpaceHealth | None = Field(
+        default=None,
+        description="Free space on the workspace volume (#1560). Omitted only when "
+        "the probe itself could not be built.",
+    )
+    db_pools: list[DbPoolHealth] | None = Field(
+        default=None,
+        description="Every open Postgres pool in this process, by name. Omitted when none "
+        "is open, e.g. in offline mode.",
+    )
+    cpu_throttling: CpuThrottling | None = Field(
+        default=None,
+        description="How often the API container hit its CPU limit (#1600). Always present "
+        "once the gate is ready, with status 'unknown' when the cgroup does not say; "
+        "omitted only while the gate is withholding the API.",
     )
 
 

@@ -6,11 +6,12 @@ import { Card, CardContent, CardHeader, ObservedModel, PhaseStartPins } from '..
 import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
-import { REFUSED, outcomeTone } from '../../utils/executionOutcome'
+import { REFUSED, outcomeTone, reportedFailureNote } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatTokens, liveDurationSeconds } from '../../utils/formatters'
 import { costByModelKeyLabel } from '../../utils/modelLabels'
 import { sessionInventoryHref } from '../../utils/sessionInventoryLinks'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
+import { PlannedPhaseCard } from './PlannedPhaseCard'
 import './SessionInventory.css'
 
 function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
@@ -52,16 +53,35 @@ const statusIconColors: Record<string, string> = {
 }
 
 /**
- * How this phase is drawn, given what the RUN was classified as.
+ * How this phase is drawn, from what THIS phase was classified as (#1592).
  *
- * The classification is a property of the execution, not of the phase - the
- * server records it once, from the verdict of the phase that refused - so the
- * timeline reads it from the execution and applies it to the failed phase,
- * which is that phase. Every other phase on a refused run completed, so
- * `outcomeTone` returns their status untouched and nothing else moves.
+ * Each failed phase carries its own classification, so the card never borrows
+ * the run's: a run can fail in one phase for a reason that says nothing about
+ * another. A phase that did not fail returns its status untouched.
  */
-function phaseTone(phase: Phase, execution: ExecutionDetailResponse): string {
-  return outcomeTone(phase.status, execution.failure_classification)
+function phaseTone(phase: Phase): string {
+  return outcomeTone(phase.status, phase.failure_classification ?? undefined)
+}
+
+/** Why this phase failed: the server's text and what the phase itself said. */
+function PhaseFailure({ phase }: { phase: Phase }) {
+  if (phase.status !== 'failed') return null
+  const said = reportedFailureNote(phase.reported_failure_reason)
+  return (
+    <div className="mt-2 space-y-1 text-xs" data-testid="phase-failure">
+      {phase.failure_classification && (
+        <div className="font-medium text-[var(--color-text-secondary)]">
+          {phase.failure_classification}
+        </div>
+      )}
+      {phase.error_message && (
+        <p className="whitespace-pre-wrap break-words text-[var(--color-text-muted)]">
+          {phase.error_message}
+        </p>
+      )}
+      {said && <p className="text-[var(--color-text-muted)]">{said}</p>}
+    </div>
+  )
 }
 
 function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: number }) {
@@ -121,6 +141,7 @@ function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: 
           output={tokens.outputTokens}
         />
       </div>
+      <PhaseFailure phase={phase} />
       {phase.agent_session_id && (
         <div className="mt-auto pt-2 text-xs text-[var(--color-text-muted)]">
           <span title="Claude CLI session ID for OTel correlation">
@@ -170,7 +191,13 @@ interface PhaseTimelineProps {
 }
 
 export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
+  // `phases` is what ran here and carries the metrics; `phase_plan` is every
+  // phase the run declared, in order, with where each stands (feedback
+  // cee46909). The timeline walks the plan so what is left is visible, and
+  // draws a phase that ran with its full card.
   const phases = execution.phases
+  const plan = execution.phase_plan
+  const ran = new Map(phases.map((p) => [p.phase_id, p]))
   // Read from the execution, not from the phases below. Lane 1 leaves a running
   // phase's counts at 0, so a roll-up summed from the cards reported "0 tokens"
   // for the whole of a live run - directly under a headline card already
@@ -207,10 +234,10 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
     <Card>
       <CardHeader title="Phase Pipeline" subtitle="Execution phases with per-phase metrics" />
       <CardContent>
-        <div className="flex items-center gap-4 mb-4 text-sm text-[var(--color-text-secondary)]">
+        <div className="phase-pipeline-stats flex flex-wrap items-center gap-x-4 gap-y-2 mb-4 text-sm text-[var(--color-text-secondary)]">
           <div className="flex items-center gap-1.5">
             <Layers className="h-4 w-4 text-[var(--color-text-muted)]" />
-            <span className="font-medium">{phases.length} phases</span>
+            <span className="font-medium">{plan.length} phases</span>
           </div>
           <span className="text-[var(--color-border)]">|</span>
           <div className="flex items-center gap-1.5">
@@ -233,25 +260,32 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
           </div>
         </div>
         <div className="flex items-stretch gap-2 overflow-x-auto pb-2">
-          {phases.map((phase, idx) => (
-            <div key={phase.workflow_phase_id} className="flex items-stretch">
-              <div className="phase-with-inventory">
-                <PhaseCard phase={phase} tone={phaseTone(phase, execution)} now={now} />
-                {/* Outside the card: the card is a link, and this expands in place. */}
-                <PhaseStartPins pins={phase.pinned_at_start} status={phase.start_pins_status} />
-                <Link
-                  className="phase-inventory-link"
-                  to={sessionInventoryHref(execution.workflow_execution_id, phase.workflow_phase_id)}
-                  aria-label={`Sessions for phase ${phase.name}`}
-                >
-                  Sessions
-                </Link>
+          {plan.map((planned, idx) => {
+            const phase = ran.get(planned.phase_id)
+            return (
+              <div key={planned.phase_id} className="flex items-stretch">
+                {phase ? (
+                  <div className="phase-with-inventory">
+                    <PhaseCard phase={phase} tone={phaseTone(phase)} now={now} />
+                    {/* Outside the card: the card is a link, and this expands in place. */}
+                    <PhaseStartPins pins={phase.pinned_at_start} status={phase.start_pins_status} />
+                    <Link
+                      className="phase-inventory-link"
+                      to={sessionInventoryHref(execution.workflow_execution_id, phase.phase_id)}
+                      aria-label={`Sessions for phase ${phase.name}`}
+                    >
+                      Sessions
+                    </Link>
+                  </div>
+                ) : (
+                  <PlannedPhaseCard phase={planned} />
+                )}
+                {idx < plan.length - 1 && (
+                  <div className="mx-2 h-px w-8 self-center bg-[var(--color-border)]" />
+                )}
               </div>
-              {idx < phases.length - 1 && (
-                <div className="mx-2 h-px w-8 self-center bg-[var(--color-border)]" />
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </CardContent>
     </Card>

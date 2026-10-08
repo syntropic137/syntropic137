@@ -246,8 +246,13 @@ class ObservabilityCollector:
         tool_name: str,
         tool_use_id: str,
         input_preview: str,
+        skill_name: str | None = None,
     ) -> None:
-        """Record tool execution started."""
+        """Record tool execution started.
+
+        ``skill_name`` is the skill a `Skill` call invoked, whole (#1269); the
+        key is written only when there is one, so other tools' rows are unchanged.
+        """
         # Recorded when the tool is ANNOUNCED, not when it returns, so this can
         # only run ahead of the side effect and never behind it. Running ahead
         # costs a retry that would have been safe; running behind would repeat
@@ -263,6 +268,7 @@ class ObservabilityCollector:
                 "tool_name": tool_name,
                 "tool_use_id": tool_use_id,
                 "input_preview": input_preview,
+                **({"skill_name": skill_name} if skill_name else {}),
             },
             execution_id=self._execution_id,
             phase_id=self._phase_id,

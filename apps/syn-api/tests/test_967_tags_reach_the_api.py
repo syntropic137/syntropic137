@@ -111,6 +111,8 @@ async def _listed(tag: list[str] | None) -> dict[str, list[str]]:
         started_before=None,
         q=None,
         tag=tag,
+        eval_id=None,
+        in_eval=None,
         page=1,
         page_size=50,
     )
@@ -207,8 +209,9 @@ class _CapturingExecute:
         repos: list[object],
         admitted: AdmissionTicket | None = None,
         tags: TagSet | None = None,
+        launch_eval: object = None,
     ) -> None:
-        del workflow_id, inputs, execution_id, task, repos
+        del workflow_id, inputs, execution_id, task, repos, launch_eval
         self.tags.append(tags)
         if admitted is not None:
             admitted.mark_visible()

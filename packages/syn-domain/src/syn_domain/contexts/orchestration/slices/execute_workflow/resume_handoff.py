@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.artifacts import primary_text
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -39,6 +40,9 @@ if TYPE_CHECKING:
 #: The output-cache key the continuation is handed over under. Not a phase id,
 #: so no phase's own output can ever overwrite it.
 CONTINUATION_OUTPUT_ID = "resume-continuation"
+#: The words a fix prompt's checkout gate keys on (PC-128): the branch head is
+#: this execution's own unverified push, so verify at it instead of refusing.
+OWN_UNVERIFIED_PUSH = "OWN UNVERIFIED COMMITS"
 
 
 class InheritanceUnavailableError(RuntimeError):
@@ -99,7 +103,7 @@ async def inherited_outputs(
     # resolved; #1460 tracks that. Refusing on a count here would be a false
     # invariant, not a safer one.
     for phase_id, phase_files in files.items():
-        cache.record(phase_id, phase_files[0].content if phase_files else None, phase_files)
+        cache.record(phase_id, primary_text(phase_files), phase_files)
     return cache
 
 
@@ -162,11 +166,20 @@ def _continued_line(branch: ContinuedBranch) -> str:
         if branch.pull_request is not None
         else "No PR is open from it yet: open the draft PR from this branch."
     )
-    return (
+    line = (
         f"- `{branch.repository}`: CONTINUE branch `{branch.branch}`. Your workspace is "
         f"already checked out on it, at its head ({branch.head_sha}). Do not start a new "
         f"branch. {pr}"
     )
+    if branch.is_own_unverified_push:
+        line += (
+            f" {OWN_UNVERIFIED_PUSH}: {branch.head_sha} was pushed by this execution's own "
+            "interrupted attempt at this phase and nothing has verified it. Treat it as the "
+            "head to verify, not as a moved branch: re-run verification at it before you "
+            "change anything. Any other head would be someone else's push, and the platform "
+            "would not have continued the branch."
+        )
+    return line
 
 
 def _abandoned_line(branch: AbandonedBranch) -> str:

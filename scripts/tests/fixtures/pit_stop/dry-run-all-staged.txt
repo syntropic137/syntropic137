@@ -1,0 +1,39 @@
+
+==> [T] precheck: the probe workflow telemetry-lag-probe-v1 is installed and active
+   probe workflow telemetry-lag-probe-v1: active
+
+==> [T] precheck: free space on the data volume
+   disk: not reported by this API (predates #1560)
+
+==> [T] prepare: worktree at origin/main, bump to 0.0.0-beta.1310
+   (dry-run) git -C <PARENT>/syntropic137 fetch -q origin
+   (dry-run) git -C <PARENT>/syntropic137 worktree add -b chore/bump-0.0.0-beta.1310 <PARENT>/syntropic137_worktrees/pit-stop-0.0.0-beta.1310 origin/main
+
+==> [T] build: syn-api + syn-gateway v0.0.0-beta.1310 for linux/amd64 (commit <the bump commit on origin/main>)
+   (dry-run) docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 --build-arg SYN_BUILD_IMAGE_TAG=v0.0.0-beta.1310 --build-arg SYN_BUILD_COMMIT=<the bump commit on origin/main> -t ghcr.io/syntropic137/syn-api:v0.0.0-beta.1310 --load -f <PARENT>/syntropic137_worktrees/pit-stop-0.0.0-beta.1310/infra/docker/images/syn-api/Dockerfile <PARENT>/syntropic137_worktrees/pit-stop-0.0.0-beta.1310
+   (dry-run) docker buildx build --platform linux/amd64 -t ghcr.io/syntropic137/syn-gateway:v0.0.0-beta.1310 --load -f <PARENT>/syntropic137_worktrees/pit-stop-0.0.0-beta.1310/infra/docker/images/gateway/Dockerfile <PARENT>/syntropic137_worktrees/pit-stop-0.0.0-beta.1310
+
+==> [T] ship: docker save | docker load on root@fake-host
+   (dry-run) docker save ... | ssh root@fake-host docker load
+
+==> [T] stage: back up the deployed compose and repoint both pins
+   both pins are already v0.0.0-beta.1310
+
+==> [T] gate: pausing execution admission for the rest of the pit stop
+   (dry-run) PUT /maintenance active=true
+   queued=0 running=0  status_counts: {'completed': 3}  (drained)
+
+==> [T] drain: waiting for every execution to be terminal (budget 2700s)
+   subscription: {'status': 'healthy', 'is_catching_up': False, 'lag': 0} degraded_reasons: []
+   queued=0 running=0  status_counts: {'completed': 3}  (drained)
+
+==> [T] swap: recreate api + gateway (no pull: the images are only in the host's daemon)
+   (dry-run) remote cd /root/.syntropic137 && docker compose -f docker-compose.syntropic137.yaml up -d api gateway
+
+==> [T] verify: images, docker CLI, projections, build identity
+
+==> [T] gate: resuming execution admission
+   (dry-run) PUT /maintenance active=false
+   (dry-run) POST /workflows/telemetry-lag-probe-v1/execute, then wait for a phase to reach running
+
+==> [T] DRY RUN DONE: nothing was built, shipped, staged or swapped. v0.0.0-beta.1310 is NOT live.

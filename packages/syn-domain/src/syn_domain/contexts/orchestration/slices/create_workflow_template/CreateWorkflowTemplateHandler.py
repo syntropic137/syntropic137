@@ -238,7 +238,9 @@ def _to_update_command(
         claude_plugins=command.claude_plugins,
         skills=command.skills,
         tags=command.tags,
+        default_eval_id=command.default_eval_id,
         version=command.version,
         source_digest=command.source_digest,
+        package_name=command.package_name,
         force=command.force,
     )

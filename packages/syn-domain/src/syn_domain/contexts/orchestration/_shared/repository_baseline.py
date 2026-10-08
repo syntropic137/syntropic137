@@ -14,14 +14,16 @@ abbreviated sha or a branch name mistaken for one never reaches an event.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef  # noqa: TC001
-from syn_domain.contexts.orchestration.ports.RevisionResolverPort import ResolvedRevision
+from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
+    FULL_COMMIT_SHA,
+    ResolvedRevision,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -30,10 +32,6 @@ if TYPE_CHECKING:
         RevisionResolverPort,
         UnresolvedRevision,
     )
-
-#: A full object id: 40 hex characters (SHA-1) or 64 (SHA-256 repositories).
-#: Lowercase only, so one commit has exactly one spelling.
-FULL_COMMIT_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 #: Long enough for any real branch or tag name; git itself caps refs near here.
 MAX_REQUESTED_REF_LENGTH = 255

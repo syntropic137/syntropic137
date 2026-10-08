@@ -206,6 +206,7 @@ class TestSchemaValidation:
         assert "jsonb" in str(exc_info.value)
 
 
+@pytest.mark.unit
 class TestExpectedColumnsConstant:
     """Tests for EXPECTED_COLUMNS constant."""
 

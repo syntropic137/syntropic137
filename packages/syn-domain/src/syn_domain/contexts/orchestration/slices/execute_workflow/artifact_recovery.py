@@ -46,11 +46,14 @@ reader has to be able to tell.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Final, Protocol
 
 from syn_domain.contexts.artifacts import MIN_ARTIFACT_CONTENT_LENGTH
+
+_logger = logging.getLogger(__name__)
 
 __all__ = [
     "RECOVERED_SOURCE_PATH",
@@ -60,6 +63,7 @@ __all__ = [
     "is_storable",
     "is_usable_conclusion",
     "recover_deliverable",
+    "where_the_work_is",
 ]
 
 
@@ -74,6 +78,24 @@ class DescribeWork(Protocol):
     """
 
     async def __call__(self) -> str | None: ...
+
+
+async def where_the_work_is(describe_work: DescribeWork | None) -> str | None:
+    """Ask where this phase's work stands, tolerating an inspection that fails.
+
+    A salvage runs on a phase that has already gone wrong once. An inspection
+    that raised here would turn a recoverable incident into an unrecoverable
+    one - the conclusion was in hand and would be discarded by the very code
+    trying to save it - so a failed reading becomes no reading, which is what
+    `None` already means to the caller.
+    """
+    if describe_work is None:
+        return None
+    try:
+        return await describe_work()
+    except Exception:
+        _logger.warning("Could not read where the phase's work stands", exc_info=True)
+        return None
 
 
 #: Stamped on the title of any artifact that reached the store by recovery.
@@ -110,6 +132,12 @@ _WROTE_NOTHING: Final[str] = (
     "owed. Its other work - commits, pushed "
     "branches - is unaffected by this and is described below if the agent "
     "described it."
+)
+_WROTE_ONLY_BINARY: Final[str] = (
+    "This phase wrote only binary files under `artifacts/output/` ({files}) and "
+    "no text report, so what follows is the last message its agent produced, "
+    "not the deliverable it owed. The binary files are stored beside this one "
+    "unchanged."
 )
 _CAVEAT: Final[str] = (
     " It may be a complete conclusion or it may be a sign-off line; read it as "
@@ -249,7 +277,7 @@ def is_usable_conclusion(message: str) -> bool:
     return _reporting_words(message) >= _MIN_CONCLUSION_WORDS
 
 
-def is_storable(content: str) -> bool:
+def is_storable(content: str | bytes) -> bool:
     """Whether the artifact store will accept `content` as it stands.
 
     Asks the store's own rule rather than restating it: the threshold is
@@ -282,6 +310,7 @@ def recover_deliverable(
     wrote: str | None,
     title: str,
     work: str | None = None,
+    alongside: tuple[str, ...] = (),
 ) -> RecoveredArtifact | None:
     """The artifact to store in place of a deliverable that is not on disk.
 
@@ -306,11 +335,21 @@ def recover_deliverable(
     A `work` report alone is NOT a conclusion and does not make one: a phase
     that pushed a branch and said nothing about it still reached no verdict,
     and that failure is reported where failures are reported.
+
+    `alongside` names the binary files the phase DID write when it wrote no
+    text (exec-8fb041217a15: two screenshots, no report). It changes only what
+    the reader is told; the salvage is filed where a no-file salvage is,
+    because in both cases there is no text deliverable on disk to stand in for.
     """
     said = (last_agent_message or "").strip()
     if not is_usable_conclusion(said):
         return None
-    reason = _WROTE_AN_EMPTY_FILE.format(wrote=wrote) if wrote is not None else _WROTE_NOTHING
+    if wrote is not None:
+        reason = _WROTE_AN_EMPTY_FILE.format(wrote=wrote)
+    elif alongside:
+        reason = _WROTE_ONLY_BINARY.format(files=", ".join(f"`{p}`" for p in alongside))
+    else:
+        reason = _WROTE_NOTHING
     where = _WHERE_THE_WORK_IS.format(work=work) if work else ""
     return RecoveredArtifact(
         content=_PREAMBLE + reason + _CAVEAT + said + where,

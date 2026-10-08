@@ -38,7 +38,8 @@ from pydantic import BaseModel, ConfigDict
 from syn_adapters.github.client import GitHubAppError
 from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
 from syn_adapters.workspace_backends.memory.memory_adapter import MemoryIsolationAdapter
-from syn_api._wiring import _build_agent_command, _build_workspace_prompt
+from syn_adapters.workspace_backends.service.pinned_checkout import pinned_heads
+from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     AbandonedBranch,
@@ -52,6 +53,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
+    IsolationHandle,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
@@ -84,6 +86,12 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import Runner
     from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
@@ -125,6 +133,8 @@ class _World:
         self.cache: dict[str, str] = {"origin/main": MAIN_SHA}
         self.local: dict[str, str] = {"main": MAIN_SHA}
         self.head = "main"
+        #: The commit HEAD is detached at, when it is not on a branch.
+        self.detached: str | None = None
         self.pulls: dict[str, list[tuple[int, str]]] = {}
         self.readable = True
         self.commands: list[list[str]] = []
@@ -135,6 +145,7 @@ class _World:
         """The parent's implement: create B, push it, open draft PR N."""
         self.local[BRANCH] = PUSHED
         self.head = BRANCH
+        self.detached = None
         self.origin[BRANCH] = PUSHED
         self.cache[f"origin/{BRANCH}"] = PUSHED
         self.pulls[BRANCH] = [(PR, "open")]
@@ -155,6 +166,15 @@ class _World:
 
     # -- the exec boundary --------------------------------------------------
 
+    def check_out(self, script: str) -> None:
+        """What the setup script leaves the clone at: on BRANCH if it continues it,
+        else detached at its pin (#967 reads HEAD back and holds the run to it)."""
+        if f"checkout --quiet -B {BRANCH}" in script:
+            self.head, self.detached = BRANCH, None
+            self.local[BRANCH] = self.origin[BRANCH]
+        else:
+            self.detached = pinned_heads(script).get(DEST, self.detached)
+
     def run(self, command: list[str]) -> ExecutionResult:
         self.commands.append(list(command))
         if "-C" not in command:
@@ -170,9 +190,13 @@ class _World:
             case ["for-each-ref", _, "refs/heads"]:
                 return "".join(f"{b}\n" for b in self.local)
             case ["rev-parse", "--abbrev-ref", "HEAD"]:
-                return self.head
+                return "HEAD" if self.detached else self.head
+            case ["rev-parse", "--symbolic-full-name", "HEAD"]:
+                return "HEAD" if self.detached else f"refs/heads/{self.head}"
+            case ["rev-parse", "--verify", ref] if ref.startswith("refs/remotes/"):
+                return self.cache[ref.removeprefix("refs/remotes/")]
             case ["rev-parse", *_]:
-                return self.local[self.head]
+                return self.detached or self.local[self.head]
             case ["remote"]:
                 return "origin\n"
             case ["commit", *_]:
@@ -229,8 +253,12 @@ def world() -> Iterator[_World]:
     the_world = _World()
 
     async def execute(
-        _self: MemoryIsolationAdapter, _handle: object, command: list[str], **_: object
+        self: MemoryIsolationAdapter, handle: IsolationHandle, command: list[str], **_: object
     ) -> ExecutionResult:
+        if command == ["bash", "/workspace/.setup/setup.sh"]:
+            the_world.check_out(
+                self._instances[handle.isolation_id].files[".setup/setup.sh"].decode()
+            )
         return the_world.run(command)
 
     with patch.object(MemoryIsolationAdapter, "execute", execute):
@@ -256,6 +284,8 @@ class _Acts(_ReadsItsSetup):
         collector: ObservabilityCollector | None = None,
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         # The prompt is one argv element of the production command.
         prompt = "\n".join(claude_cmd)

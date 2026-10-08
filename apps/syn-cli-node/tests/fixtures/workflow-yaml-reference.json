@@ -1,0 +1,908 @@
+{
+  "files": {
+    "workflows/custom/bake-haiku/workflow.yaml": {
+      "phases": [
+        {
+          "id": "premise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/premise.md"
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "verify",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "open_pr",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/open_pr.md"
+        }
+      ],
+      "document_sha256": "c7544bf585a5d21a99c96ea4656d2c6d19a66fac0deb280a5bac47a6668435c7"
+    },
+    "workflows/custom/bake-opus/workflow.yaml": {
+      "phases": [
+        {
+          "id": "premise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/premise.md"
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "verify",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "open_pr",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/open_pr.md"
+        }
+      ],
+      "document_sha256": "2db85739bc5a4088a8c4a178f154fa9631ec0e62669d1ddf50d84027f2133a33"
+    },
+    "workflows/custom/bake-sonnet/workflow.yaml": {
+      "phases": [
+        {
+          "id": "premise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/premise.md"
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "verify",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "open_pr",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/open_pr.md"
+        }
+      ],
+      "document_sha256": "99f32a9ed4d9809a13e0ae1fa48bb1369154e8a0eba3e83ef69635a98ae51059"
+    },
+    "workflows/evals/implement-pinned/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "6930cd72d4831a5d15bfd72b2a8a7e2a83d74468a400397a6c8af44ae218c625"
+    },
+    "workflows/evals/verify-pinned/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "50408de3a9642bdfc7a2a5857df5792c60831a0c6f3b275b4ff6866f7801fa00"
+    },
+    "workflows/evals/verify-pinned-codex/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "964e2089edf9c895a51a199eea79ac27fcf2cb2df4e9b047e361084a7de686b6"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-5-6-luna/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "fa52126f88e327c2457640d3d8cfc5d02d50110a7c6b5b15f802a541ddb0a761"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-5-6-terra/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "f65bd5f8331c9134d9083df8cde2dae95c6fbaf08614ec20f7cec2c759c8bca7"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "292932a20fc3c62cbd155e06c7b6e42771d01d19a74755c1060882ff3eb52ac1"
+    },
+    "workflows/evals/verify-pinned-sonnet/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "8aab00511fa58d2856437b01f2f47514a2d98ab84fc93b423f5e105172ea83ef"
+    },
+    "workflows/examples/claude-delegates-to-codex.yaml": {
+      "phases": [
+        {
+          "id": "plan-and-delegate",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "d4c01a0588aacf6b4a148c8af83315bdd84702b518739411ca1fe4542ff57cc4"
+    },
+    "workflows/examples/codex-delegates-to-claude.yaml": {
+      "phases": [
+        {
+          "id": "build-and-delegate",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "aa2d950fb51bf55bc7b78f78df57dd6a9dee6a66c4e0f7b4c620eefcd92e7949"
+    },
+    "workflows/examples/codex-demo.yaml": {
+      "phases": [
+        {
+          "id": "codex-implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "ca8f14f50133eb4264a83e7a44319af85304c796d8d552b58c98b34629cb8b3b"
+    },
+    "workflows/examples/github-pr.yaml": {
+      "phases": [
+        {
+          "id": "create-pr",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "verify-pr",
+          "order": 2,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "99627fb33bd4fa03cbe2d80a5114d3d4d8eec85a153839c6f352e4adea1d60c1"
+    },
+    "workflows/examples/implementation.yaml": {
+      "phases": [
+        {
+          "id": "research",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "innovate",
+          "order": 2,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "plan",
+          "order": 3,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "execute",
+          "order": 4,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "review",
+          "order": 5,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "71672b09c2d1123cb9affb2c2f7d27532d44e0c138fc3b64c73b194c0df69c78"
+    },
+    "workflows/examples/multi-agent-programmatic.yaml": {
+      "phases": [
+        {
+          "id": "plan",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "12a82fed228917a43672de83348e17c5331b4661e730263f5aed2559d7ce0b98"
+    },
+    "workflows/examples/research-package/workflow.yaml": {
+      "phases": [
+        {
+          "id": "discovery",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/discovery.md"
+        },
+        {
+          "id": "synthesis",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/synthesis.md"
+        }
+      ],
+      "document_sha256": "190c890aa80be99635baf6bc747ff3baa8b3ad1c95a08c3ee6367c5ce791c1ee"
+    },
+    "workflows/examples/research-with-prompts.yaml": {
+      "phases": [
+        {
+          "id": "discovery",
+          "order": 1,
+          "model": null,
+          "prompt_file": "prompts/discovery.md"
+        },
+        {
+          "id": "synthesis",
+          "order": 2,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "be788f9ade0b9e7d0defa9913a68e621aaa49bbeed66caa02cd31630b20dd4e7"
+    },
+    "workflows/examples/research.yaml": {
+      "phases": [
+        {
+          "id": "discovery",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "deep-dive",
+          "order": 2,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "synthesis",
+          "order": 3,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "c651568e647f263a9c90c5483d5b86fc3def1411ffcdc0894ff9b8d0eaa60b84"
+    },
+    "workflows/examples/starter-plugin/syntropic137.yaml": {
+      "phases": [],
+      "document_sha256": "a722dc81a374f97234b58ea2712ac1ccad801d1da11a80e42c09778bc67ca579"
+    },
+    "workflows/examples/starter-plugin/workflows/pr-review/workflow.yaml": {
+      "phases": [
+        {
+          "id": "review",
+          "order": 1,
+          "model": "haiku",
+          "prompt_file": "phases/review.md"
+        },
+        {
+          "id": "summarize",
+          "order": 2,
+          "model": "haiku",
+          "prompt_file": "shared://summarize"
+        }
+      ],
+      "document_sha256": "8875926314cbdef506bf9295fa1bf882c41b18947b2d59033f72fefb57b079d5"
+    },
+    "workflows/examples/starter-plugin/workflows/research/workflow.yaml": {
+      "phases": [
+        {
+          "id": "investigate",
+          "order": 1,
+          "model": "haiku",
+          "prompt_file": "phases/investigate.md"
+        },
+        {
+          "id": "summarize",
+          "order": 2,
+          "model": "haiku",
+          "prompt_file": "shared://summarize"
+        }
+      ],
+      "document_sha256": "d7415402af4e5d6f9098100fc38f9e8af9e9bef0a7bc392bc437e2043c8e9eda"
+    },
+    "workflows/examples/subagent-demo.yaml": {
+      "phases": [
+        {
+          "id": "coordinator",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "verify",
+          "order": 2,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "054a4dcd18f2338003ce73ad514bc8feb843228b3c8dc059fbe4b5b4beb64c0c"
+    },
+    "workflows/probes/telemetry-lag/workflow.yaml": {
+      "phases": [
+        {
+          "id": "heartbeat",
+          "order": 1,
+          "model": "sonnet",
+          "prompt_file": "phases/heartbeat.md"
+        }
+      ],
+      "document_sha256": "187f33f866c29cb8dd77b1a58d184ed2c2f3987496299d109f7badf9cbf5734b"
+    },
+    "workflows/research/resumability-slp/workflow.yaml": {
+      "phases": [
+        {
+          "id": "options",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "attack-options",
+          "order": 2,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "decide",
+          "order": 3,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "review-decision",
+          "order": 4,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "experiment",
+          "order": 5,
+          "model": null,
+          "prompt_file": null
+        },
+        {
+          "id": "final",
+          "order": 6,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "58caf7376b9e5fbfd23e0d31dc52af27a8591cb71cc66d277b1a1336a589ac10"
+    },
+    "workflows/sdlc/decision-record/workflow.yaml": {
+      "phases": [
+        {
+          "id": "options",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/options.md"
+        },
+        {
+          "id": "attack-options",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/attack-options.md"
+        },
+        {
+          "id": "decide",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/decide.md"
+        },
+        {
+          "id": "review-decision",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/review-decision.md"
+        },
+        {
+          "id": "experiment",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/experiment.md"
+        },
+        {
+          "id": "final",
+          "order": 6,
+          "model": null,
+          "prompt_file": "phases/final.md"
+        }
+      ],
+      "document_sha256": "cdaa1895c70f77c82bff2cdffab25e597b31cd29879ee7b47e48029f454947f9"
+    },
+    "workflows/sdlc/implement/workflow.yaml": {
+      "phases": [
+        {
+          "id": "premise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/premise.md"
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "verify",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "fix",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/fix.md"
+        },
+        {
+          "id": "reverify",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/reverify.md"
+        },
+        {
+          "id": "open_pr",
+          "order": 6,
+          "model": null,
+          "prompt_file": "phases/open_pr.md"
+        }
+      ],
+      "document_sha256": "8bbdbf8d7f0cb21254250612d47e83f4c106c8c9c6104051d706757ef590526e"
+    },
+    "workflows/sdlc/implement-v3/workflow.yaml": {
+      "phases": [
+        {
+          "id": "premise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/premise.md"
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "verify",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "fix",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/fix.md"
+        },
+        {
+          "id": "reverify",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/reverify.md"
+        },
+        {
+          "id": "fix_2",
+          "order": 6,
+          "model": null,
+          "prompt_file": "phases/fix_2.md"
+        },
+        {
+          "id": "reverify_2",
+          "order": 7,
+          "model": null,
+          "prompt_file": "phases/reverify_2.md"
+        },
+        {
+          "id": "finalize_pr",
+          "order": 8,
+          "model": null,
+          "prompt_file": "phases/finalize_pr.md"
+        }
+      ],
+      "document_sha256": "e57605a82bdef04a278703ec3aaff8c982e23d807ce238c334e92b43a9795d8b"
+    },
+    "workflows/sdlc/pr-review/workflow.yaml": {
+      "phases": [
+        {
+          "id": "investigate",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/investigate.md"
+        },
+        {
+          "id": "verify",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "report",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/report.md"
+        }
+      ],
+      "document_sha256": "4d53f92ad7942e07baa2f6e40211147572b1ff248274534ae606c46acf7f6355"
+    },
+    "workflows/sdlc/pr-review-slp/workflow.yaml": {
+      "phases": [
+        {
+          "id": "investigate",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/investigate.md"
+        },
+        {
+          "id": "verify",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "report",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/report.md"
+        }
+      ],
+      "document_sha256": "b2e4ceaf0ce752df272215a340dbadad80aface68bc24a83d601e0d8a7acabac"
+    },
+    "workflows/sdlc/quickfix/workflow.yaml": {
+      "phases": [
+        {
+          "id": "quickfix",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/quickfix.md"
+        }
+      ],
+      "document_sha256": "5630fead355496b4968c3d0e7d6abb1bfb59b37fb06bc50c0e87ac089cad7ff8"
+    },
+    "workflows/sdlc/refactor-plan/workflow.yaml": {
+      "phases": [
+        {
+          "id": "coverage-gate",
+          "order": 1,
+          "model": "opus",
+          "prompt_file": "phases/coverage-gate.md"
+        },
+        {
+          "id": "characterize",
+          "order": 2,
+          "model": "opus",
+          "prompt_file": "phases/characterize.md"
+        },
+        {
+          "id": "seams",
+          "order": 3,
+          "model": "opus",
+          "prompt_file": "phases/seams.md"
+        },
+        {
+          "id": "cross-model-review",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/cross-model-review.md"
+        },
+        {
+          "id": "revise",
+          "order": 5,
+          "model": "opus",
+          "prompt_file": "phases/revise.md"
+        }
+      ],
+      "document_sha256": "02e8c8fdab80fff0e9b6a060c66058213cfc06ae281dacf2f51b9a1cfcec675b"
+    },
+    "workflows/sdlc/research-experiment-plan/workflow.yaml": {
+      "phases": [
+        {
+          "id": "research",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/research.md"
+        },
+        {
+          "id": "review-spec",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/review-spec.md"
+        },
+        {
+          "id": "revise-spec",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/revise-spec.md"
+        },
+        {
+          "id": "experiment",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/experiment.md"
+        },
+        {
+          "id": "revise-after-experiment",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/revise-after-experiment.md"
+        },
+        {
+          "id": "plan",
+          "order": 6,
+          "model": null,
+          "prompt_file": "phases/plan.md"
+        },
+        {
+          "id": "review-plan",
+          "order": 7,
+          "model": null,
+          "prompt_file": "phases/review-plan.md"
+        },
+        {
+          "id": "final-plan",
+          "order": 8,
+          "model": null,
+          "prompt_file": "phases/final-plan.md"
+        }
+      ],
+      "document_sha256": "60a9a2de8bac7ec1909eddf3094a807456ac8f1c858f6b99f1937e52fff9028e"
+    },
+    "workflows/sdlc/research-plan/workflow.yaml": {
+      "phases": [
+        {
+          "id": "research",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/research.md"
+        },
+        {
+          "id": "plan",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/plan.md"
+        },
+        {
+          "id": "cross-model-review",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/cross-model-review.md"
+        },
+        {
+          "id": "revise",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/revise.md"
+        }
+      ],
+      "document_sha256": "e606d547163291dc6a42af42c55379fb4d9e5880dada9802dac0c340de927c62"
+    },
+    "workflows/sdlc/retrospective-v1/workflow.yaml": {
+      "phases": [
+        {
+          "id": "gather",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/gather.md"
+        },
+        {
+          "id": "classify",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/classify.md"
+        },
+        {
+          "id": "bisect",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/bisect.md"
+        },
+        {
+          "id": "autopsy",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/autopsy.md"
+        },
+        {
+          "id": "file",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/file.md"
+        }
+      ],
+      "document_sha256": "1796f9be153216abc60862f8eaf888e64f05608b159fe08268d540f92d60b0ee"
+    },
+    "workflows/sdlc/reverify-pr/workflow.yaml": {
+      "phases": [
+        {
+          "id": "prepare",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/prepare.md"
+        },
+        {
+          "id": "verify",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "fix",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/fix.md"
+        },
+        {
+          "id": "reverify",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/reverify.md"
+        },
+        {
+          "id": "fix_2",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/fix_2.md"
+        },
+        {
+          "id": "reverify_2",
+          "order": 6,
+          "model": null,
+          "prompt_file": "phases/reverify_2.md"
+        },
+        {
+          "id": "finalize_pr",
+          "order": 7,
+          "model": null,
+          "prompt_file": "phases/finalize_pr.md"
+        }
+      ],
+      "document_sha256": "d59d8a193403cb5ef56b2c049da38a79d1fd4ca623bae04cfd016b60d466309b"
+    },
+    "workflows/triggers/ci-fix.yaml": {
+      "phases": [
+        {
+          "id": "fix-ci",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "db4dc71f26dd21d26af06c928e3b399fb7167e7186837e2db09a1de1461c375b"
+    },
+    "workflows/triggers/fix-review.yaml": {
+      "phases": [
+        {
+          "id": "fix-review",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "c32430dc58b870c5586a3ff3632e5395000a0a9342fbf075adaab7adb52f1f92"
+    },
+    "workflows/triggers/self-heal-pr.yaml": {
+      "phases": [
+        {
+          "id": "self-heal",
+          "order": 1,
+          "model": null,
+          "prompt_file": null
+        }
+      ],
+      "document_sha256": "a536b915cdde5354248980ca95dda66cb18aabb3840de62988149b98a9beed63"
+    },
+    "workflows/validation/workflows/delegation/workflow.yaml": {
+      "phases": [
+        {
+          "id": "build-and-delegate",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/delegate.md"
+        }
+      ],
+      "document_sha256": "2a2c45fda4e869db71833981413f6580fbe9774bf1994ef5c08eea736e6128d5"
+    },
+    "workflows/validation/workflows/github-ops/workflow.yaml": {
+      "phases": [
+        {
+          "id": "exercise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/exercise.md"
+        }
+      ],
+      "document_sha256": "c938393ff5dca99a9f81bcaee50e9b921928d0ef59a1382503a770a8588b7764"
+    },
+    "workflows/validation/workflows/long-push/workflow.yaml": {
+      "phases": [
+        {
+          "id": "long_push",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/long_push.md"
+        }
+      ],
+      "document_sha256": "961478a8bc359b769d4a7c3073917e2d114a2ac3008b0ea8ca61e13910219310"
+    },
+    "workflows/validation/workflows/skills-injection/workflow.yaml": {
+      "phases": [
+        {
+          "id": "report",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/report.md"
+        },
+        {
+          "id": "confirm",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/confirm.md"
+        }
+      ],
+      "document_sha256": "70c11eba611330ea5826cab3cc7fa7ff642d97d4c551ecea6133ffe2cbe98c19"
+    }
+  }
+}

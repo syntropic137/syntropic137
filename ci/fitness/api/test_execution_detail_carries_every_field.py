@@ -48,6 +48,30 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
         ),
         (("syn_api.routes.costs", "SessionCostResponse"),),
     ),
+    (
+        "evals.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_summary",
+            "EvalRecord",
+        ),
+        (("syn_api.types", "EvalResponse"),),
+    ),
+    (
+        "eval_runs.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_runs",
+            "EvalRunFacts",
+        ),
+        (("syn_api.types", "EvalRunResponse"),),
+    ),
+    (
+        "eval_runs.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_runs",
+            "EvalVariant",
+        ),
+        (("syn_api.types", "EvalVariantResponse"),),
+    ),
 )
 
 #: Route modules that import a read model but carry no source-to-response pair

@@ -21,6 +21,8 @@ import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
+from syn_adapters.workspace_backends.exec_status_lost import is_status_lost
+from syn_domain.contexts.orchestration import ProvisionStep, ProvisionStepTimeoutError
 from syn_shared.display import format_exit_code
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
@@ -30,6 +32,7 @@ from syn_shared.env_constants import (
     ENV_GIT_COMMITTER_EMAIL,
     ENV_GIT_COMMITTER_NAME,
 )
+from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -112,29 +115,9 @@ async def run_setup_phase(
         base_path="/workspace",
     )
 
+    result: ExecutionResult | None = None
     try:
-        # Stage the codex auth file INSIDE the try so the finally-block cleanup
-        # always runs even if this injection raises. The docker copy path IGNORES
-        # base_path (it always writes under the /workspace mount), so we cannot
-        # inject straight to ~/.codex; we stage it under .setup/ and the setup
-        # script (SetupPhaseSecrets._append_codex_auth) relocates it to
-        # ~/.codex/auth.json (0600) and removes the staged copy. The secret
-        # contents never appear in the setup script text (only the file carries them).
-        if secrets.codex_auth_json:
-            await ws.inject_files(
-                [(".setup/codex-auth.json", secrets.codex_auth_json.encode())],
-                base_path="/workspace",
-            )
-
-        # Run setup script WITH secrets
-        logger.info("Running secret-injection setup script (workspace=%s)", ws.workspace_id)
-        from syn_shared.settings import get_settings
-
-        result = await ws.execute(
-            ["bash", "/workspace/.setup/setup.sh"],
-            environment=setup_env,
-            timeout_seconds=get_settings().setup_phase_timeout_seconds,
-        )
+        result = await _run_setup_script(ws, secrets, script, setup_env)
 
         if result.exit_code != 0:
             # Names the ADR-024 step, not "the setup phase": a workflow phase of
@@ -155,11 +138,80 @@ async def run_setup_phase(
             # Runs even if clear_secrets raised. Fail-closed: guarantee no codex
             # credential lingers under /workspace, or raise a security failure.
             if secrets.codex_auth_json:
-                await _assert_codex_credential_removed(ws)
+                await _assert_codex_credential_removed(ws, setup_result=result)
         logger.info(
             "Secret-injection setup complete, transient material cleared (workspace=%s)",
             ws.workspace_id,
         )
+
+
+#: One retry, and only of an exec whose status was LOST (no status, no output,
+#: no timeout - see `exec_status_lost`). The script is written to be re-run
+#: (every clone is `[ -d ]`-guarded, credential files are replaced, #1393),
+#: so a second run costs seconds, where giving up discarded the whole execution: four
+#: verify/reverify phases on 2026-10-06/07 ended this way while the script
+#: itself had very likely finished. A status that WAS reported - any exit
+#: code, a timeout - is an answer and is never retried.
+#:
+#: A timeout stays unretried on purpose (PC-126 weighed it): a clone killed
+#: mid-transfer leaves its destination behind, the re-run's `[ -d ]` guard
+#: skips it, and the phase would continue on a broken checkout. The caller
+#: records a timeout as a transient `ProvisionStepTimeoutError` instead, and a
+#: resume provisions a fresh workspace - the retry without that hazard.
+_SETUP_ATTEMPTS: Final = 2
+_SETUP_RETRY_BACKOFF_SECONDS: Final = 1.0
+
+
+async def _run_setup_script(
+    ws: ManagedWorkspace,
+    secrets: SetupPhaseSecrets,
+    script: str,
+    setup_env: dict[str, str],
+) -> ExecutionResult:
+    """Run the setup script, once more if the first run's status was lost."""
+    from syn_shared.settings import get_settings
+
+    for attempt in range(1, _SETUP_ATTEMPTS + 1):
+        if attempt > 1:
+            # Restage both: the first run may have got as far as relocating
+            # and removing the staged codex credential.
+            await ws.inject_files([(".setup/setup.sh", script.encode())], base_path="/workspace")
+        # Stage the codex auth file INSIDE the caller's try so its finally-block
+        # cleanup always runs even if this injection raises. The docker copy
+        # path IGNORES base_path (it always writes under the /workspace mount),
+        # so we cannot inject straight to ~/.codex; we stage it under .setup/
+        # and the setup script (SetupPhaseSecrets._append_codex_auth) relocates
+        # it to ~/.codex/auth.json (0600) and removes the staged copy. The
+        # secret contents never appear in the setup script text.
+        if secrets.codex_auth_json:
+            await ws.inject_files(
+                [(".setup/codex-auth.json", secrets.codex_auth_json.encode())],
+                base_path="/workspace",
+            )
+
+        logger.info(
+            "Running secret-injection setup script (workspace=%s, attempt=%d/%d)",
+            ws.workspace_id,
+            attempt,
+            _SETUP_ATTEMPTS,
+        )
+        result = await ws.execute(
+            ["bash", "/workspace/.setup/setup.sh"],
+            environment=setup_env,
+            timeout_seconds=get_settings().setup_phase_timeout_seconds,
+        )
+        if not is_status_lost(result) or attempt == _SETUP_ATTEMPTS:
+            return result
+        logger.warning(
+            "Secret-injection setup returned no status (workspace=%s, attempt=%d/%d); "
+            "re-running it: %s",
+            ws.workspace_id,
+            attempt,
+            _SETUP_ATTEMPTS,
+            result.stderr,
+        )
+        await asyncio.sleep(_SETUP_RETRY_BACKOFF_SECONDS)
+    raise AssertionError("unreachable: the last attempt always returns")
 
 
 _CODEX_STAGED_AUTH = "/workspace/.setup/codex-auth.json"
@@ -177,6 +229,9 @@ class _CredentialState(StrEnum):
     PRESENT = "present"
     ABSENT = "absent"
     UNVERIFIABLE = "unverifiable"
+    #: Unverifiable because the probe ran out of time (PC-126): retried like
+    #: UNVERIFIABLE, and the only kind whose exhaustion is a loaded host.
+    TIMED_OUT = "timed_out"
 
 
 #: Reported on stdout so presence is proven by OUTPUT, not by a status that
@@ -184,10 +239,16 @@ class _CredentialState(StrEnum):
 _PRESENT_MARKER = "STAGED_CREDENTIAL_PRESENT"
 _ABSENT_MARKER = "STAGED_CREDENTIAL_ABSENT"
 
-#: Long enough for a `[ -e ]` or an `rm` in a healthy container; short enough
-#: that a wedged one does not hold the setup phase open. Unchanged by #1293 -
-#: what changed is that ONE expiry of it no longer decides anything.
-_EXEC_TIMEOUT_SECONDS: Final = 5
+
+def _exec_timeout_seconds() -> int:
+    """The bound on one guard exec: ``CREDENTIAL_GUARD_EXEC_TIMEOUT_SECONDS`` (PC-126).
+
+    Long enough for a `[ -e ]` or an `rm` in a container on a loaded host;
+    short enough that a wedged one does not hold the setup phase open. ONE
+    expiry of it decides nothing (#1293); every expiry is a loaded host.
+    """
+    return get_settings().credential_guard_exec_timeout_seconds
+
 
 #: Waits BETWEEN attempts, so there is one more attempt than there are entries.
 #: An exec that did not answer has not established anything, and treating the
@@ -209,6 +270,9 @@ class _GuardOutcome(NamedTuple):
 
     succeeded: bool
     attempts: tuple[str, ...]
+    #: Every failed attempt ran out of time: the guard established nothing
+    #: either way, and a loaded host is the explanation (PC-126).
+    all_timed_out: bool = False
 
     def report(self) -> str:
         return (
@@ -216,6 +280,25 @@ class _GuardOutcome(NamedTuple):
             + ", ".join(f"#{i} {seen}" for i, seen in enumerate(self.attempts, 1))
             + "]"
         )
+
+
+#: Bound on the diagnosis quoted per attempt, so four attempts stay readable.
+_ATTEMPT_DETAIL_CHARS: Final = 400
+
+
+def _attempt_record(result: ExecutionResult) -> str:
+    """One attempt, as the operator reads it in the fail-closed error.
+
+    A lost status carries its diagnosis (container state, timing against the
+    deadline). Without it, four attempts read "exit=-1 (no exit status)" four
+    times and the run ended with nothing to act on (exec-ff7e0c990b00).
+    """
+    record = f"exit={format_exit_code(result.exit_code)}"
+    if result.timed_out:
+        return record + f" (timed out after {_exec_timeout_seconds()}s)"
+    if is_status_lost(result):
+        record += f" ({result.stderr[:_ATTEMPT_DETAIL_CHARS]})"
+    return record
 
 
 async def _wait_before_retry(attempt: int) -> None:
@@ -242,9 +325,15 @@ async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
             f"if [ -e {_CODEX_STAGED_AUTH} ]; then echo {_PRESENT_MARKER}; "
             f"else echo {_ABSENT_MARKER}; fi",
         ],
-        timeout_seconds=_EXEC_TIMEOUT_SECONDS,
+        timeout_seconds=_exec_timeout_seconds(),
     )
 
+    if probe.timed_out:
+        logger.error(
+            "SECURITY: staged codex credential probe timed out (workspace=%s)",
+            ws.workspace_id,
+        )
+        return _CredentialState.TIMED_OUT
     if probe.exit_code != 0:
         logger.error(
             "SECURITY: could not determine whether a staged codex credential "
@@ -282,12 +371,14 @@ async def _remove_staged_credential(ws: ManagedWorkspace) -> _GuardOutcome:
     moment, which is otherwise indistinguishable here from one that refused.
     """
     attempts: list[str] = []
+    timeouts = 0
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         removal = await ws.execute(
             ["rm", "-f", "--", _CODEX_STAGED_AUTH],
-            timeout_seconds=_EXEC_TIMEOUT_SECONDS,
+            timeout_seconds=_exec_timeout_seconds(),
         )
-        attempts.append(f"exit={format_exit_code(removal.exit_code)}")
+        attempts.append(_attempt_record(removal))
+        timeouts += 1 if removal.timed_out else 0
         if removal.exit_code == 0:
             return _GuardOutcome(succeeded=True, attempts=tuple(attempts))
         logger.warning(
@@ -301,7 +392,9 @@ async def _remove_staged_credential(ws: ManagedWorkspace) -> _GuardOutcome:
         )
         await _wait_before_retry(attempt)
 
-    return _GuardOutcome(succeeded=False, attempts=tuple(attempts))
+    return _GuardOutcome(
+        succeeded=False, attempts=tuple(attempts), all_timed_out=timeouts == len(attempts)
+    )
 
 
 async def _recheck_staged_credential_gone(ws: ManagedWorkspace) -> _GuardOutcome:
@@ -326,7 +419,7 @@ async def _recheck_staged_credential_gone(ws: ManagedWorkspace) -> _GuardOutcome
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         state = await _staged_credential_state(ws)
         attempts.append(state.value)
-        if state is not _CredentialState.UNVERIFIABLE:
+        if state not in (_CredentialState.UNVERIFIABLE, _CredentialState.TIMED_OUT):
             return _GuardOutcome(
                 succeeded=state is _CredentialState.ABSENT,
                 attempts=tuple(attempts),
@@ -340,10 +433,41 @@ async def _recheck_staged_credential_gone(ws: ManagedWorkspace) -> _GuardOutcome
         )
         await _wait_before_retry(attempt)
 
-    return _GuardOutcome(succeeded=False, attempts=tuple(attempts))
+    timed_out = _CredentialState.TIMED_OUT.value
+    return _GuardOutcome(
+        succeeded=False,
+        attempts=tuple(attempts),
+        all_timed_out=all(seen == timed_out for seen in attempts),
+    )
 
 
-async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
+def _guard_failure(
+    message: str, outcome: _GuardOutcome, setup_result: ExecutionResult | None
+) -> Exception:
+    """The fail-closed error, transient only when every attempt timed out (PC-126).
+
+    Either way the agent is NOT launched: this only decides how the run is
+    recorded. A confirmed presence or a refusal is a fault, not a loaded host,
+    so it stays a plain `RuntimeError`. The setup script's own outcome is
+    quoted, because this error replaces it on the way out of `finally`.
+    """
+    if setup_result is not None and setup_result.exit_code != 0:
+        how = "timed out" if setup_result.timed_out else format_exit_code(setup_result.exit_code)
+        message += f"; the setup script itself had already failed first ({how})"
+    if not outcome.all_timed_out:
+        return RuntimeError(message)
+    return ProvisionStepTimeoutError(
+        ProvisionStep.SECRET_INJECTION,
+        subject="staged codex credential cleanup",
+        timeout_seconds=_exec_timeout_seconds(),
+        attempts=len(outcome.attempts),
+        detail=message,
+    )
+
+
+async def _assert_codex_credential_removed(
+    ws: ManagedWorkspace, *, setup_result: ExecutionResult | None = None
+) -> None:
     """Guarantee no staged codex credential lingers under /workspace, or raise.
 
     ``clear_secrets`` removes /workspace/.setup, but if that cleanup failed the
@@ -377,7 +501,7 @@ async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
             f"{_CODEX_STAGED_AUTH} (workspace={ws.workspace_id}, "
             f"{removal.report()})"
         )
-        raise RuntimeError(msg)
+        raise _guard_failure(msg, removal, setup_result)
 
     recheck = await _recheck_staged_credential_gone(ws)
     if not recheck.succeeded:
@@ -391,7 +515,7 @@ async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
             f"{_CODEX_STAGED_AUTH} (workspace={ws.workspace_id}, "
             f"{recheck.report()})"
         )
-        raise RuntimeError(msg)
+        raise _guard_failure(msg, recheck, setup_result)
 
 
 async def clear_secrets(workspace: object) -> None:
@@ -433,7 +557,7 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
     )
     cleanup = await ws.execute(
         ["bash", "/workspace/.cleanup/clear.sh"],
-        timeout_seconds=10,
+        timeout_seconds=2 * _exec_timeout_seconds(),
     )
     if cleanup.exit_code != 0:
         logger.warning(
@@ -446,5 +570,5 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
     # Clean up the cleanup script too
     await ws.execute(
         ["rm", "-rf", "/workspace/.cleanup"],
-        timeout_seconds=5,
+        timeout_seconds=_exec_timeout_seconds(),
     )

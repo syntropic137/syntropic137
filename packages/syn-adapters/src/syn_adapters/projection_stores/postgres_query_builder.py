@@ -84,9 +84,15 @@ def _build_order_clause(order_by: str | None) -> str:
     That is issue #920: artifacts created before ArtifactCreated v4 carry a null
     ``created_at``, and ``-created_at`` sorted them above every artifact created
     since. Rows that cannot answer the sort must not outrank rows that can.
+
+    ``id`` LAST, as the tie-break (E2). Rows with an equal sort key used to come
+    back in whatever order the sort left them, so which of two tied rows landed
+    on a page could differ between two reads of the same data - including the
+    full read and the field scan (syn_domain.projection_scan), which must agree
+    row for row. The id is the primary key, so the order is now total.
     """
     if not order_by:
-        return " ORDER BY updated_at DESC"
+        return " ORDER BY updated_at DESC, id"
     descending = order_by.startswith("-")
     field = order_by[1:] if descending else order_by
     # The field is interpolated into SQL, not bound as a parameter -- a JSON key
@@ -97,7 +103,7 @@ def _build_order_clause(order_by: str | None) -> str:
         msg = f"unsafe order_by field {field!r}: expected a plain identifier"
         raise ValueError(msg)
     direction = "DESC" if descending else "ASC"
-    return f" ORDER BY data->>'{field}' {direction} NULLS LAST"
+    return f" ORDER BY data->>'{field}' {direction} NULLS LAST, id"
 
 
 def build_query(

@@ -349,6 +349,44 @@ class TestTheLoaderAcceptsWhatWeEmit:
 
         assert list(loaded.tags) == ["eval-a", "nightly"]
 
+    @pytest.mark.parametrize("eval_id", ["eval-planning", "eval:2026-10", "1.5", "true"])
+    def test_default_eval_survives_export_and_reinstall(self, eval_id: str) -> None:
+        """An exported workflow re-installs with its default eval (#967).
+
+        `1.5` and `true` are valid eval ids that bare YAML would read back as a
+        float and a bool; the export must quote them.
+        """
+        import tempfile
+
+        from syn_api.routes.workflows.queries import _build_package_files
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        detail = _valid_workflow_detail().model_copy(update={"default_eval_id": eval_id})
+        files: dict[str, str] = {}
+        _build_package_files(detail, files)
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            for rel, content in files.items():
+                target = root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+
+            loaded = WorkflowDefinition.from_file(root / "workflow.yaml")
+
+        assert loaded.default_eval_id is not None
+        assert str(loaded.default_eval_id) == eval_id
+
+    def test_no_default_eval_exports_no_key(self) -> None:
+        from syn_api.routes.workflows.queries import _build_package_files
+
+        files: dict[str, str] = {}
+        _build_package_files(_valid_workflow_detail(), files)
+
+        assert "default_eval_id" not in files["workflow.yaml"]
+
     def test_a_bare_phase_validates(self) -> None:
         assert self._validate(PhaseDefinitionResponse(phase_id="p", name="P", order=1)) is not None
 

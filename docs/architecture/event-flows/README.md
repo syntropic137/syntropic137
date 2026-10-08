@@ -1,6 +1,6 @@
 # Event Flow Summary
 
-🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
+🤖 **Auto-generated from VSA manifest** - Run `just docs-regen` to update
 
 ---
 
@@ -10,21 +10,21 @@ This table shows the most important event flows in Syn137 (events that feed the 
 
 | Command | Event | Projections | Count |
 |---------|-------|-------------|-------|
-| ? | workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 7 |
-| ? | workflow_execution_started | RepoCorrelationProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 7 |
-| ? | workflow_completed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
-| ? | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
-| ? | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
-| ? | workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
+| ? | workflow_execution_started | DashboardMetricsProjection, ExecutionTodoProjection, RepoCorrelationProjection... | 7 |
+| ? | workflow_failed | DashboardMetricsProjection, ExecutionTodoProjection, RepoCostProjection... | 7 |
+| ? | workflow_completed | DashboardMetricsProjection, ExecutionTodoProjection, RepoCostProjection... | 6 |
+| ? | execution_cancelled | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
+| ? | phase_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
+| ? | workflow_interrupted | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
+| ? | next_phase_ready | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
+| ? | phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection | 3 |
 | ? | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
-| ? | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
-| ? | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| ? | session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
-| ? | agent_observation | SessionCostProjection, ExecutionCostProjection | 2 |
-| ? | session_completed | SessionListProjection, DashboardMetricsProjection | 2 |
-| ? | workflow_template_updated | WorkflowDetailProjection, WorkflowListProjection | 2 |
-| ? | session_started | SessionListProjection, DashboardMetricsProjection | 2 |
-| ? | session_cost_finalized | SessionCostProjection, ExecutionCostProjection | 2 |
+| ? | workflow_template_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
+| ? | agent_execution_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection | 2 |
+| ? | agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
+| ? | artifact_created | ArtifactListProjection, DashboardMetricsProjection | 2 |
+| ? | execution_tags_added | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | execution_tags_removed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
 
 ---
 
@@ -46,5 +46,5 @@ This table shows the most important event flows in Syn137 (events that feed the 
 🤖 **This file is auto-generated** - Do not edit manually. To regenerate:
 
 ```bash
-just docs-gen
+just docs-regen
 ```

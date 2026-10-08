@@ -12,6 +12,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     INHERITED_PHASE_OWNERS,
     AbandonedBranch,
     ContinuedBranch,
+    EvalBaselinePin,
     ExecutablePhase,
     ResumeOrigin,
     SourceCommit,
@@ -31,7 +32,17 @@ TASK_INPUT_KEY = "task"
 
 
 #: Fields a release before #1513 does not know: omitted when None.
-_WRITTEN_ONLY_WHEN_SET = frozenset({"continued_branches", "abandoned_branches"})
+_WRITTEN_ONLY_WHEN_SET = frozenset(
+    {
+        "continued_branches",
+        "abandoned_branches",
+        "inherited_skipped_phase_ids",
+        "eval_id",
+        "eval_selection",
+        "eval_baseline",
+        "workflow_version",
+    }
+)
 
 
 @event("WorkflowExecutionStarted", "v1")
@@ -79,6 +90,31 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: not written at all when empty -- see the serializer below.
     tags: list[str] = Field(default_factory=list)
 
+    #: The eval this run was launched into (evals plan, #967), decided at
+    #: dispatch: ``association_kind=launched``. A launch record, never
+    #: rewritten - a later detach is its own event. None for a run launched
+    #: into no eval, and on events written before the field existed.
+    eval_id: str | None = None
+
+    #: How the launch chose: ``explicit``, ``workflow_default`` or
+    #: ``ordinary`` (the default was suppressed). None when there was no
+    #: choice to make. Both fields are written only when set, like the
+    #: #1513 fields below, so an ordinary start reads as it always did.
+    eval_selection: str | None = None
+
+    #: The eval's frozen baseline as this run was admitted to it (#967): every
+    #: repository, the ref asked for and the commit it pinned. Empty for an
+    #: eval with no repositories; None for a run in no eval and on events
+    #: written before the field existed. Written only when set.
+    eval_baseline: list[EvalBaselinePin] | None = None
+
+    #: The installed version of the workflow this run launched from (Evals v2):
+    #: the template's package version, or its source digest when it has no
+    #: version. A launch snapshot - a later install changes future runs only.
+    #: A resume carries its parent's, from the parent's start pins. None for a
+    #: template with neither and before the field existed. Written only when set.
+    workflow_version: str | None = None
+
     #: Set only on a resume: the parent, what it inherited and where it resumes
     #: (ADR-014 s7). The child's own record of "what was this a resume of".
     resumed_from: ResumeOrigin | None = None
@@ -93,6 +129,12 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: Set only on a resume (#1513): branches it could have continued and
     #: started fresh instead, each with why - the recorded warning.
     abandoned_branches: list[AbandonedBranch] | None = None
+
+    #: Set only on a resume (#1681): the phases before `resumed_from`'s resume
+    #: phase that a certified review in the parent skipped, in phase order.
+    #: Top-level for the same reason as `continued_branches`. None on a fresh
+    #: run, on a resume with none, and before the field existed.
+    inherited_skipped_phase_ids: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod

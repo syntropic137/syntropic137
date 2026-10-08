@@ -12,8 +12,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort
@@ -42,18 +40,11 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.orchestration import StartResumeHandler
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        ExecutablePhase,
-    )
     from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
         GlobalClaudePluginRegistryAggregate,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
-        ExecuteWorkflowHandler,
     )
     from syn_domain.contexts.orchestration.slices.list_claude_plugins import (
         ListClaudePluginsHandler,
@@ -103,22 +94,22 @@ from syn_adapters.storage import (
 )
 from syn_adapters.storage.artifact_storage import get_artifact_storage
 from syn_adapters.storage.repositories import (
+    get_eval_repository,
+    get_execution_request_repository,
     get_trigger_repository,
     get_workflow_execution_repository,
 )
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_api._wiring_admission import (
     BackgroundWorkflowDispatcher,
+    admitted_launch_eval,
     get_admission_gate,
-    get_maintenance_port,
+    get_execution_budget,
 )
+from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
+from syn_api._wiring_launch import _build_resume_handler, get_execute_workflow_handler
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
-from syn_shared.agents import (
-    AgentProvider,
-    UnsupportedAgentProviderError,
-    require_executable_provider,
-)
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -235,11 +226,12 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     conversation_storage = await get_conversation_storage()
 
     manager = get_projection_manager()
-    artifact_query = ArtifactQueryService(manager.artifact_list)
+    artifact_query = ArtifactQueryService(manager.artifact_list, content_storage=artifact_storage)
 
     from syn_adapters.github.client import get_github_client
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.projection_stores import get_projection_store
+    from syn_adapters.session_inventory.phase_delegations import ChildJournalDelegations
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
@@ -254,7 +246,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     # The workspace service is the Docker headless path: claude -p and
     # codex exec both run there, keeping the stream-json pipeline, Envoy
     # token accounting, and telemetry.
-    ws_config = WorkspaceServiceConfig(image=ws_settings.docker_image)
+    ws_config = WorkspaceServiceConfig.from_settings(ws_settings)
 
     # WHY (issue #726, PR2): the materializer turns ResolvedClaudePlugin
     # entries on each phase into workspace files; the processor passes it
@@ -316,229 +308,25 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         # #1513: records which PR is open from each branch a failing phase
         # left, so a resume continues that PR and never one opened since.
         remote_branches=GitHubRemoteBranchReader(get_github_client),
+        owed_cancelled_work=get_projection_store(),  # #1547: refused landed refs, until appended
+        # #894: a declared delegation completes only on a delegate its child journal shows succeeded.
+        delegation_evidence=ChildJournalDelegations(),
     )
-
-
-def _build_claude_command(
-    phase: ExecutablePhase,
-    prompt: str,
-) -> list[str]:
-    """Build the Claude CLI command for agent execution."""
-    # `AgentConfiguration.model` is typed `str | None`, but a claude-provider
-    # phase always resolves a concrete model (the persisted template default,
-    # else syn_shared.agents.DEFAULT_CLAUDE_MODEL), so `None` here would
-    # indicate a construction bug elsewhere, not a real "unset" case worth
-    # silently tolerating - fail loudly instead of forwarding `--model None`.
-    model = phase.agent_config.model
-    if model is None:
-        msg = (
-            f"Claude phase '{phase.phase_id}' resolved to a None model - "
-            "AgentConfiguration.model should always default to a claude "
-            "alias for provider='claude'."
-        )
-        raise ValueError(msg)
-    cmd = [
-        "claude",
-        "--model",
-        model,
-        "--verbose",
-        "--output-format",
-        "stream-json",
-        "--dangerously-skip-permissions",
-        "-p",
-        prompt,
-    ]
-
-    # `--tools` is AVAILABILITY; `--allowedTools` is auto-approval. We emitted
-    # the second while the field is named and documented as the first, and the
-    # command already carries --dangerously-skip-permissions, so auto-approving
-    # was a no-op twice over: a phase declaring three tools could use all of
-    # them (issue #964). Verified against claude 2.1.251:
-    #   --tools <tools...>  Specify the list of available tools from the
-    #                       built-in set. Use "" to disable all tools ...
-    #
-    # ONE flag with a comma-joined list, not the flag repeated. `--tools` is
-    # VARIADIC (`<tools...>`), which has two consequences:
-    #
-    #   1. Repeating it keeps only the last occurrence, so the flag-per-tool
-    #      form would have restricted every phase to its last-declared tool.
-    #   2. It is GREEDY - it swallows any positional that follows it. Verified
-    #      against claude 2.1.251:
-    #        $ claude -p --tools Bash,Read "say ok"
-    #        Error: Input must be provided either through stdin or as a prompt
-    #               argument when using --print
-    #      The prompt was eaten as a tool name.
-    #
-    # ORDERING IS THEREFORE LOAD-BEARING: `-p <prompt>` must come BEFORE
-    # `--tools`. Moving this extend() earlier breaks every claude phase, with
-    # an error that names stdin rather than argument order. Pinned by
-    # test_the_prompt_must_precede_the_variadic_tools_flag.
-    if phase.agent_config.allowed_tools:
-        cmd.extend(["--tools", ",".join(phase.agent_config.allowed_tools)])
-
-    return cmd
-
-
-from syn_api._codex_command import (  # noqa: E402
-    UnsupportedToolPolicyError,
-    _build_codex_command,
-    _resolve_sandbox,
-    apply_tool_policy_to_prompt,
-)
-
-
-def _build_agent_command(
-    phase: ExecutablePhase,
-    prompt: str,
-) -> list[str]:
-    """Build the command selected by the phase provider.
-
-    Exhaustive on purpose: every known provider is named, and anything else
-    raises. The previous ``return _build_claude_command(...)`` fall-through
-    meant an unknown or removed provider - a stored ``claude-interactive``
-    template rehydrated from history, say - quietly ran as headless Claude and
-    reported success.
-    """
-    provider = require_executable_provider(
-        phase.agent_config.provider,
-        phase_id=phase.phase_id,
-    )
-    # Every harness carries the grant in the prompt; only claude can also
-    # enforce it on the command line.
-    scoped_prompt = apply_tool_policy_to_prompt(prompt, phase.agent_config.allowed_tools)
-    if provider is AgentProvider.CODEX:
-        if phase.agent_config.allowed_tools:
-            raise UnsupportedToolPolicyError(
-                provider=str(provider),
-                phase_id=phase.phase_id,
-                declared=list(phase.agent_config.allowed_tools),
-            )
-        return _build_codex_command(
-            scoped_prompt,
-            phase.agent_config.model,
-            _resolve_sandbox(phase.agent_config.sandbox, phase_id=phase.phase_id),
-        )
-    if provider is AgentProvider.CLAUDE:
-        return _build_claude_command(phase, scoped_prompt)
-    raise UnsupportedAgentProviderError(provider, phase_id=phase.phase_id)
-
-
-def _owner_repo_from_url(url: str | None) -> str:
-    """Extract owner/repo from a GitHub HTTPS URL. Empty string if not a github URL."""
-    if not url:
-        return ""
-    stripped = url.rstrip("/").removesuffix(".git")
-    parts = stripped.split("/")
-    if len(parts) >= 5 and parts[2] == "github.com":
-        return f"{parts[3]}/{parts[4]}"
-    return ""
-
-
-def _substitute_builtins(
-    template: str,
-    execution_id: str,
-    workflow_id: str,
-    repo_url: str | None,
-) -> str:
-    """Layer 1: Replace built-in variables in the prompt template."""
-    result = template.replace("{{execution_id}}", execution_id)
-    result = result.replace("{{workflow_id}}", workflow_id)
-    result = result.replace("{{repo_url}}", repo_url or "")
-    # {{repository}} is a deprecated single-repo convenience -- derived from the
-    # primary repo's URL as owner/repo. Tracked for removal in #715.
-    # Multi-repo workflows should use {{repos}} (CSV of HTTPS URLs) or discover
-    # repos from /workspace/repos/ at runtime instead.
-    if "{{repository}}" in result:
-        logger.warning(
-            "Workflow %s uses deprecated {{repository}} template variable. "
-            "It will be removed in a future release. Migrate to /workspace/repos/ "
-            "discovery (single-repo) or {{repos}} (multi-repo). "
-            "Track: https://github.com/syntropic137/syntropic137/issues/715",
-            workflow_id,
-        )
-        result = result.replace("{{repository}}", _owner_repo_from_url(repo_url))
-    return result
-
-
-def _substitute_inputs(
-    template: str,
-    phase: ExecutablePhase,
-    inputs: Mapping[str, object] | None,
-    phase_outputs: dict[str, str],
-) -> str:
-    """Layers 2a-2d: Replace workflow inputs, phase inputs, outputs, and $ARGUMENTS."""
-    result = template
-
-    # Layer 2a: Workflow inputs
-    if inputs:
-        for key, value in inputs.items():
-            result = result.replace(f"{{{{{key}}}}}", str(value))
-
-    # Layer 2b: Phase-level static inputs
-    for phase_input in phase.inputs:
-        if phase_input.value is not None:
-            result = result.replace(f"{{{{{phase_input.name}}}}}", phase_input.value)
-
-    # Layer 2c: Phase outputs inline
-    for pid, content in phase_outputs.items():
-        result = result.replace(f"{{{{{pid}}}}}", content[:2000])
-
-    # Layer 2d: $ARGUMENTS substitution (ISS-211 CC command pattern)
-    task = (inputs or {}).get("task", "")
-    result = result.replace("$ARGUMENTS", str(task))
-
-    return result
-
-
-def _build_context_appendix(phase_outputs: dict[str, str]) -> str:
-    """Layer 3: Build the context appendix from previous phase outputs."""
-    parts = ["\n## Context from Previous Phases"]
-    for pid, content in phase_outputs.items():
-        parts.append(f"\n### Phase {pid}\n{content[:2000]}")
-    return "\n".join(parts)
-
-
-async def _build_workspace_prompt(
-    phase: ExecutablePhase,
-    execution_id: str,
-    workflow_id: str,
-    repo_url: str | None,
-    phase_outputs: dict[str, str],
-    inputs: Mapping[str, object] | None = None,
-) -> str:
-    """Build the workspace prompt for a phase.
-
-    Substitution layers (in order):
-    1. Built-in variables: {{execution_id}}, {{workflow_id}}, {{repo_url}}
-    2a. Workflow inputs: {{key}} → value from inputs dict
-    2b. Phase-level static inputs: {{name}} → value from phase definition
-    2c. Phase outputs: {{phase-id}} → previous phase artifact content (inline)
-    2d. $ARGUMENTS → task string from inputs["task"]
-    3. Context appendix: previous phase outputs appended as fallback section
-    """
-    from syn_domain.contexts.orchestration import render_workspace_prompt
-
-    phase_prompt = _substitute_builtins(phase.prompt_template, execution_id, workflow_id, repo_url)
-    phase_prompt = _substitute_inputs(phase_prompt, phase, inputs, phase_outputs)
-
-    # The preamble describes the workspace this phase actually got, so it is
-    # rendered per phase rather than shared: `clone_repos: false` means no
-    # checkout, and telling that agent the repository is on disk is what made
-    # the merged gate unusable (#1187).
-    prompt_parts = [
-        render_workspace_prompt(clone_repos=phase.clone_repos),
-        f"\n## Task\n{phase_prompt}",
-    ]
-
-    if phase_outputs:
-        prompt_parts.append(_build_context_appendix(phase_outputs))
-
-    return "\n".join(prompt_parts)
 
 
 def get_workflow_repo():
     """Return the workflow template repository."""
     return get_workflow_repository()
+
+
+def get_execution_repo():
+    """Return the workflow execution repository."""
+    return get_workflow_execution_repository()
+
+
+def get_eval_repo():
+    """Return the eval repository (#967)."""
+    return get_eval_repository()
 
 
 def get_session_repo():
@@ -895,73 +683,20 @@ def get_controller() -> ExecutionController:
 logger = logging.getLogger(__name__)
 
 
-async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
-    """Single composition root for ExecuteWorkflowHandler.
-
-    Both the synchronous POST /workflows/{id}/execute route and the
-    background dispatcher path go through this. Keeping the construction
-    in one place prevents drift like #726's missed phase_plugin_resolver
-    wiring, where one path materialized claude plugins into workspaces and
-    the other silently skipped them.
-
-    WHY (issue #726): bind the resolution service's per-phase resolver so
-    ``ExecuteWorkflowHandler`` populates ``ExecutablePhase.claude_plugins``
-    with lock-resolved entries before dispatch reaches the processor.
-
-    WHY (issue #772): mirrors the claude plugin wiring for skills -- binds
-    ``SkillResolutionService.resolve_for_phase`` so
-    ``ExecutablePhase.skills`` is populated the same way.
-    """
-    from syn_adapters.github.client import get_github_client
-    from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
-    from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
-
-    processor = await get_execution_processor()
-    resolution_service = await get_claude_plugin_resolution_service()
-    skill_resolution_service = await get_skill_resolution_service()
-    return ExecuteWorkflowHandler(
-        processor=processor,
-        workflow_repository=get_workflow_repository(),
-        phase_plugin_resolver=resolution_service.resolve_for_phase,
-        phase_skill_resolver=skill_resolution_service.resolve_for_phase,
-        # #1387: the backstop. Both admission paths refuse earlier and more
-        # informatively than this, but a path added later that only knows about
-        # the handler is still refused rather than silently admitted.
-        maintenance=get_maintenance_port(),
-        # #1457: every start records the commit each repository was at, so a
-        # resume of it can name the code its parent ran against.
-        commit_resolver=GitHubSourceCommitResolver(get_github_client),
-    )
-
-
-async def _build_resume_handler() -> StartResumeHandler:
-    """The resume start handler, built when a resume is first requested."""
-    from syn_adapters.github.client import get_github_client
-    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
-    from syn_domain.contexts.orchestration import StartResumeHandler
-
-    return StartResumeHandler(
-        await get_execution_processor(),
-        get_workflow_execution_repository(),
-        maintenance=get_maintenance_port(),
-        # #1513: confirms the branch the parent pushed is still where it was
-        # left, and finds the PR open from it, before the child continues it.
-        remote_branches=GitHubRemoteBranchReader(get_github_client),
-    )
-
-
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
     handler = await get_execute_workflow_handler()
-    from syn_shared.settings import get_settings
-
-    max_concurrent = get_settings().polling.max_concurrent_dispatches
     return BackgroundWorkflowDispatcher(
         handler,
-        max_concurrent=max_concurrent,
+        # #1557: the ONE budget `POST /execute` also claims from, so trigger,
+        # resume and direct starts share SYN_EXECUTION_MAX_CONCURRENT.
+        budget=get_execution_budget(),
+        # #1557: the durable record of each admitted direct start, which the
+        # execution request ProcessManager starts from after a restart.
+        requests=get_execution_request_repository(),
         maintenance=get_admission_gate(),
         # ADR-014 s7: the child of an admitted resume starts through this same
-        # gate and semaphore, reading everything it runs from its parent.
+        # gate and budget, reading everything it runs from its parent.
         #
         # Passed as a FACTORY, not a handler. Building it here would need the
         # execution processor and repository - and so the observability event
@@ -969,6 +704,7 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         # SYN_OBSERVABILITY_DB_URL break dispatcher construction for every
         # deployment, resuming or not.
         resume_handler=_build_resume_handler,
+        launch_eval_for_workflow=admitted_launch_eval,
     )
 
 

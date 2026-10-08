@@ -30,6 +30,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
 )
 from syn_shared.control import ControlSignalType
 
+pytestmark = pytest.mark.unit
+
 
 async def _lines_to_stream(*lines: str) -> AsyncIterator[str]:
     for line in lines:

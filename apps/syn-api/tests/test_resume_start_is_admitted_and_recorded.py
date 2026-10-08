@@ -40,6 +40,7 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
     ExecutionResumedEvent,
 )
 from syn_domain.contexts.orchestration.slices.start_resume import (
+    ResumeChild,
     ResumeStartProcessManager,
     ResumeStartRecord,
 )
@@ -49,11 +50,9 @@ pytestmark = pytest.mark.unit
 
 PARENT = "exec-parent-1454"
 
-#: The process manager's MODULE. The package re-exports the class under the
-#: same name, so an ordinary import of this path yields the class instead.
-_pm_module = importlib.import_module(
-    "syn_domain.contexts.orchestration.slices.start_resume.ResumeStartProcessManager"
-)
+#: The start to-do list module, where DISPATCH_GRACE is read (#1557).
+#: Imported by path so the module, not a re-exported name, is patched.
+_pm_module = importlib.import_module("syn_domain.contexts.orchestration._shared.start_todo")
 _PROJECTION = ResumeStartProcessManager.PROJECTION_NAME
 
 
@@ -69,10 +68,10 @@ class _ResumeHandler:
         self.attempted = 0
         self.started: list[str] = []
 
-    async def validate(self, parent_execution_id: str) -> None:
-        del parent_execution_id
+    async def validate(self, parent_execution_id: str) -> ResumeChild:
         if self.refusal is not None:
             raise ValueError(self.refusal)
+        return ResumeChild(execution_id=f"{parent_execution_id}-child", workflow_id="wf-1")
 
     async def handle(
         self, parent_execution_id: str, *, admitted: AdmissionTicket | None = None

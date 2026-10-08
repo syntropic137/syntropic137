@@ -19,6 +19,10 @@ if TYPE_CHECKING:
     import asyncpg
     from event_sourcing import ProjectionStore
 
+    from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+        ExecutionCostsForIds,
+    )
+
 from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_shared.observed_model import split_observation_model
@@ -298,32 +302,33 @@ class ExecutionCostProjection:
         query = TimescaleExecutionCostQuery(self._pool)
         return await query.calculate(execution_id)
 
-    async def list_costs_for_ids(self, execution_ids: list[str]) -> dict[str, ExecutionCost]:
-        """Batch cost lookup for multiple executions, keyed by execution id.
+    async def list_costs_for_ids(self, execution_ids: list[str]) -> ExecutionCostsForIds:
+        """Batch cost and tool-call lookup for multiple executions.
 
         Issues a small fixed number of TimescaleDB queries for the whole
-        list via ``ExecutionCostQueryService.list_for_ids``, instead of the
+        list via ``ExecutionCostQueryService.read_for_ids``, instead of the
         ~6 sequential round trips per id that calling ``get_execution_cost``
         in a loop costs (issue #1077). Falls back to the legacy per-id path
         when no TimescaleDB pool is configured (offline/test environments).
         """
+        from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+            ExecutionCostQueryService,
+            ExecutionCostsForIds,
+        )
+
         if not execution_ids:
-            return {}
+            return ExecutionCostsForIds(costs=[], tool_calls={})
         if self._pool is not None:
-            from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
-                ExecutionCostQueryService,
-            )
+            return await ExecutionCostQueryService(self._pool).read_for_ids(execution_ids)
 
-            query_svc = ExecutionCostQueryService(self._pool)
-            costs = await query_svc.list_for_ids(execution_ids)
-            return {c.execution_id: c for c in costs}
-
-        results: dict[str, ExecutionCost] = {}
+        results: list[ExecutionCost] = []
         for execution_id in execution_ids:
             cost = await self.get_execution_cost(execution_id)
             if cost is not None:
-                results[execution_id] = cost
-        return results
+                results.append(cost)
+        return ExecutionCostsForIds(
+            costs=results, tool_calls={c.execution_id: c.tool_calls for c in results}
+        )
 
     async def get_all(self) -> list[ExecutionCost]:
         """Get all execution costs.

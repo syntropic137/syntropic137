@@ -3,6 +3,7 @@ import { cancelExecution } from '../api/client'
 
 export type ExecutionState =
   | 'pending'
+  | 'queued' // accepted, waiting for a slot: cancelling withdraws it (#1650)
   | 'running'
   | 'cancelled'
   | 'cancelling' // UI-only: cancel sent, waiting for projection to confirm
@@ -81,6 +82,6 @@ export function useExecutionControl(
     error,
     loading,
     cancel,
-    canCancel: state === 'running' && !loading,
+    canCancel: (state === 'running' || state === 'queued') && !loading,
   }
 }

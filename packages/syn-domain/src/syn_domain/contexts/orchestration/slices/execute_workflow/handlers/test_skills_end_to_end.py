@@ -60,6 +60,7 @@ from syn_domain.contexts.orchestration.slices.register_skill.projection import (
 from syn_domain.contexts.orchestration.slices.register_skill.RegisterSkillHandler import (
     RegisterSkillHandler,
 )
+from syn_shared.settings import get_settings
 
 _SKILL_MD = b"""---
 name: code-review
@@ -283,7 +284,7 @@ async def test_skills_pipeline_end_to_end_registration_to_install() -> None:
     # timeout and working directory stay exact - that is what is being tested.
     workspace.execute.assert_any_await(
         ["skills", "add", "/workspace/.syn-skills/code-review", "--agent", "codex", "-y"],
-        timeout_seconds=120,
+        timeout_seconds=get_settings().skill_install_timeout_seconds,
         working_directory="/workspace",
     )
 

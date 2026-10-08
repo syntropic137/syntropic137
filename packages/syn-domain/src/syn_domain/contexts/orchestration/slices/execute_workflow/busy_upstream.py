@@ -16,8 +16,9 @@ Three ways to get this wrong, and they pull in different directions:
   - Retry too much. A second attempt at a login that is not valid, a prompt the
     provider refused, or a quota that resets next month will fail exactly the
     same way, having spent the phase's budget again. One loss becomes several.
-    So a reason qualifies only by being, IN FULL, one of the fixed strings the
-    stream processors normalise a busy upstream into - never by containing one.
+    So a reason qualifies only when `UpstreamFailureReader` names it a
+    TRANSIENT kind (capacity, rate limited) - never auth, never unrecognised,
+    and never by merely containing a busy-sounding phrase.
     `Rate limit reached; quota resets next month` contains "rate limit" and is
     permanent; `Invalid request: rate_limit must be positive` contains it and
     is about the request. Substring matching cannot tell any of them apart, and
@@ -45,47 +46,17 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
-    codex_fault_reason,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-    ApiErrorType,
-    api_error_label,
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UPSTREAM_FAILURES,
+    UpstreamFailureKind,
+    UpstreamFailureReader,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-
-#: The claude-side busy faults, each paired with the HTTP status the provider
-#: sends it with. Not spelled out as prose: `api_error_label` is where a fault
-#: gets its human wording, so asking it for the wording is the only way this
-#: list cannot disagree with the string a stream processor actually produced.
-_BUSY_API_ERRORS: tuple[tuple[ApiErrorType, str], ...] = (
-    (ApiErrorType.OVERLOADED, "529"),
-    (ApiErrorType.RATE_LIMIT, "429"),
-)
-
-#: The one sentence codex says about its own capacity.
-#:
-#: Unlike claude's, this is NOT normalised by the codex adapter: that adapter
-#: forwards whatever the CLI put in the event verbatim, through
-#: `codex_fault_reason`, and has no label registry to ask. So this literal is
-#: the sentence observed in #1303 and nothing stronger - codex does not promise
-#: to keep saying it. That makes the list narrow rather than loose, which is
-#: the right way for it to be wrong: a phrasing not on it fails on attempt one,
-#: exactly as every phase did before this module existed.
-_CODEX_AT_CAPACITY = "Selected model is at capacity. Please try a different model."
-
-#: Every reason that IS an upstream reporting its own capacity, spelled exactly
-#: as the stream processors spell it. Membership is by equality, not by
-#: containment - see the module docstring for what containment let through.
-_BUSY_UPSTREAM_REASONS: frozenset[str] = frozenset(
-    [api_error_label(error_type) for error_type, _ in _BUSY_API_ERRORS]
-    + [api_error_label(error_type, status) for error_type, status in _BUSY_API_ERRORS]
-    + [codex_fault_reason(_CODEX_AT_CAPACITY)]
-)
 
 #: The least time an attempt may be given and still be worth starting. Below
 #: this, launching the container and starting the harness is all the budget
@@ -107,10 +78,11 @@ _MIN_USEFUL_ATTEMPT_SECONDS: float = 30.0
 #: phase was configured with - see `PhaseAttempts.first_attempt`.
 _MIN_MEANINGFUL_TIMEOUT_SECONDS: int = 1
 
-
-def _upstream_was_busy(reason: str | None) -> bool:
-    """Whether ``reason`` is, in full, the upstream reporting its own capacity."""
-    return reason in _BUSY_UPSTREAM_REASONS
+#: The upstream faults that hand a phase to its declared fallback agent (PC-83):
+#: the primary's provider could not serve the request at all.
+_FALLBACK_KINDS: frozenset[UpstreamFailureKind] = frozenset(
+    {UpstreamFailureKind.CAPACITY, UpstreamFailureKind.QUOTA}
+)
 
 
 @dataclass(frozen=True)
@@ -153,6 +125,11 @@ class AttemptClock:
 
     monotonic: Callable[[], float] = time.monotonic
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    #: The calendar reading, for the one consumer that cannot use a monotonic
+    #: one: the agent, which is told its deadline as a wall-clock time (#1546).
+    #: Read at the same moment as `monotonic` when the phase begins, so the
+    #: deadline it is told is the deadline it is held to.
+    wall: Callable[[], datetime] = lambda: datetime.now(UTC)
 
 
 class PhaseAttempts:
@@ -176,7 +153,23 @@ class PhaseAttempts:
         self._policy = policy
         self._clock = clock
         self._deadline = clock.monotonic() + timeout_seconds
+        self._wall_deadline = clock.wall() + timedelta(seconds=timeout_seconds)
+        self._timeout_seconds = timeout_seconds
         self._attempt = 1
+
+    @property
+    def deadline(self) -> datetime:
+        """When the phase's last attempt is killed, as a UTC wall-clock time.
+
+        Fixed with the monotonic deadline and never extended, so it holds for
+        every attempt: a retry does not move it.
+        """
+        return self._wall_deadline
+
+    @property
+    def timeout_seconds(self) -> float:
+        """The whole budget the phase began with, not what is left of it."""
+        return self._timeout_seconds
 
     @property
     def seconds_left(self) -> float:
@@ -259,6 +252,29 @@ class PhaseAttempts:
         self._attempt += 1
         return AttemptGrant(timeout_seconds=_meaningful_timeout(remaining))
 
+    def fallback_attempt(self, *, reason: str | None, work_done: bool) -> AttemptGrant | None:
+        """Grant the phase's declared fallback agent its one attempt, or refuse it (PC-83).
+
+        Asked only once the primary is FINAL - `wait_before_retry` has already
+        refused it - so a capacity fault reaching here has outlived every retry.
+        Granted for exactly the two kinds that say the primary's provider could
+        not serve the request at all, CAPACITY and QUOTA: any other failure is
+        the phase's answer and a different model does not get to second-guess
+        it. Refused for an attempt that got somewhere, for the reason a retry
+        is: the rerun would redo that work over a tree it already changed.
+
+        Drawn from the SAME deadline as every attempt before it, so declaring a
+        fallback never buys a phase more time than it was configured for.
+        """
+        if work_done:
+            return None
+        if self._policy.upstream.kind_of(reason) not in _FALLBACK_KINDS:
+            return None
+        remaining = self.seconds_left
+        if not self._affords_an_attempt(remaining):
+            return None
+        return AttemptGrant(timeout_seconds=_meaningful_timeout(remaining))
+
     def _may_retry(self, *, reason: str | None, work_done: bool, delay: float) -> bool:
         """Whether another attempt is both allowed and affordable."""
         if work_done:
@@ -267,7 +283,11 @@ class PhaseAttempts:
             return False
         if self._attempt >= self._policy.max_attempts:
             return False
-        if not _upstream_was_busy(reason):
+        # Asked of the port, which owns recognising a busy upstream from a
+        # harness's words; what this module owns is that only a TRANSIENT kind
+        # is worth another attempt. Auth and anything unrecognised are final.
+        kind = self._policy.upstream.kind_of(reason)
+        if kind is None or not kind.is_transient:
             return False
         # The backoff is spent from the same deadline, so an attempt is only
         # affordable if paying for the wait still leaves it room to run.
@@ -308,6 +328,9 @@ class UpstreamRetryPolicy:
     #: tests, which is the only way to assert a 3600-second budget in
     #: milliseconds.
     clock: AttemptClock = AttemptClock()
+    #: What kind of upstream fault a failed attempt reported. The port, so the
+    #: recognising lives with the harness and not here (#1605).
+    upstream: UpstreamFailureReader = UPSTREAM_FAILURES
 
     def begin(self, *, timeout_seconds: float) -> PhaseAttempts:
         """Start this phase's clock. Call once, before the first attempt.

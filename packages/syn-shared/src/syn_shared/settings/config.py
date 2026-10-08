@@ -28,6 +28,8 @@ from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
     from syn_shared.settings.dev_tooling import DevToolingSettings
+    from syn_shared.settings.disk import DiskSettings
+    from syn_shared.settings.execution import ExecutionSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.polling import PollingSettings
@@ -138,20 +140,6 @@ class Settings(BaseSettings):
         ),
     ] = None
 
-    database_pool_size: int = Field(
-        default=5,
-        ge=1,
-        le=100,
-        description="Database connection pool size. Increase for high-traffic production.",
-    )
-
-    database_pool_overflow: int = Field(
-        default=10,
-        ge=0,
-        le=50,
-        description="Max overflow connections beyond pool_size for burst traffic.",
-    )
-
     # =========================================================================
     # EVENT STORE (gRPC) - See ADR-007: Event Store Integration
     # =========================================================================
@@ -245,6 +233,16 @@ class Settings(BaseSettings):
         description=(
             "Log output format: 'json' for structured logs (production), "
             "'console' for human-readable (development)."
+        ),
+    )
+
+    slow_request_log_threshold_ms: int = Field(
+        default=1000,
+        ge=1,
+        description=(
+            "API requests whose response takes at least this many milliseconds are "
+            "logged with method, route template, status, duration and DB-pool wait "
+            "(#1583). Faster requests are not logged individually."
         ),
     )
 
@@ -364,7 +362,7 @@ class Settings(BaseSettings):
         description=(
             "Model a codex phase gets when its workflow declares no `model:`. "
             "Same persistence rule as SYN_DEFAULT_CLAUDE_MODEL. A platform "
-            "codex alias (gpt-sol -> gpt-6-sol) or a concrete codex model slug. "
+            "codex alias (gpt-sol -> gpt-6.1-sol) or a concrete codex model slug. "
             "Claude aliases are rejected: codex cannot run them."
         ),
     )
@@ -422,15 +420,98 @@ class Settings(BaseSettings):
         description="Default max tokens for agent responses.",
     )
 
+    # Provision-step deadlines (PC-126). The old fixed bounds (120s setup,
+    # 120s skill install, 60s probe) failed runs at 10 concurrent executions
+    # (host load ~27 on 16 cores). Calibrated against the selfhost VPS on
+    # 2026-10-08 (16 cores), measured while it was as loaded as the failure
+    # window (node_load1 21-33 vs 18-30 at 19:00-22:00Z on 10-07):
+    #
+    #   API log, 01:45-04:26Z, load 21-33:            n    p50    p95    max
+    #   setup script, clone included                   83  22.1s  39.9s  61.4s
+    #   workspace create -> setup start, mint included 84   5.0s   8.8s  10.8s
+    #   setup end -> 3-5 skills installed, checkout
+    #     verification included                        69   5.2s   8.1s  41.2s
+    #   docker exec events, 04:33-04:56Z, load 14-20:
+    #   one `skills add`                               63   0.5s   0.7s   0.8s
+    #   credential guard probe / rm -f              12/24   0.2s   0.4s   0.6s
+    #
+    # Both failures ran past 120s. For the skill install that is ~3x the worst
+    # observed block of 3-5 installs (41.2s) and ~15x its p95 (8.1s); for the
+    # setup script ~2x the worst (61.4s) and ~3x p95 (39.9s). Our reading, a
+    # hypothesis since the failure window's own logs are gone: stalls, not a
+    # host uniformly slower by a load factor. So a step that is retried gets a
+    # deadline of ~2x the worst observed (the retry is the stall remedy, and a
+    # shorter deadline reaches it sooner; skill install 90s = 2.2x); a step
+    # that is NOT retried in place (the setup script) keeps ~4x (240s = 3.9x).
+    # The codex sandbox probe and checkout verification ran no isolated sample
+    # in the window; they keep their derived 2x-the-old-bound values.
     setup_phase_timeout_seconds: int = Field(
-        default=120,
+        default=240,
         ge=10,
         le=3600,
         description=(
             "Timeout for the workspace setup phase in seconds. "
             "The setup phase runs the setup script that configures credentials "
             "and clones repositories before the agent starts. "
-            "Increase for workflows with large repositories."
+            "Measured under load (16 cores, load 21-33): p95 40s, worst 61s; not "
+            "retried in place, so 240s keeps ~4x the worst case. "
+            "Increase for workflows with large repositories, or on a loaded host."
+        ),
+    )
+
+    skill_install_timeout_seconds: int = Field(
+        default=90,
+        ge=10,
+        le=3600,
+        description=(
+            "Timeout in seconds for one `skills add` while provisioning a workspace. "
+            "A timed-out install is retried once. Measured: p95 0.7s per install (load "
+            "14-20 on 16 cores); worst 41s for a phase's 3-5 installs together (load "
+            "21-33). 90s is ~2x that worst case. Increase on a loaded host."
+        ),
+    )
+
+    codex_sandbox_probe_timeout_seconds: int = Field(
+        default=120,
+        ge=10,
+        le=3600,
+        description=(
+            "Timeout in seconds for the codex sandbox probe run before a sandboxed "
+            "codex phase. A timed-out probe is retried once. Increase on a loaded host."
+        ),
+    )
+
+    credential_guard_exec_timeout_seconds: int = Field(
+        default=15,
+        ge=1,
+        le=600,
+        description=(
+            "Timeout in seconds for each exec of the staged-credential cleanup guard "
+            "(a `[ -e ]` probe or an `rm -f`) after the setup phase. Each is retried; "
+            "exhausting every attempt on timeouts alone fails the run as transient. "
+            "Measured worst 0.6s under load, so 15s is ample. Increase on a loaded host."
+        ),
+    )
+
+    checkout_verification_timeout_seconds: int = Field(
+        default=60,
+        ge=5,
+        le=3600,
+        description=(
+            "Timeout in seconds for each read-only git read that verifies a cloned "
+            "repository's HEAD while provisioning. A timed-out verification is "
+            "retried once. Increase on a loaded host."
+        ),
+    )
+
+    github_api_request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=600,
+        description=(
+            "Timeout in seconds for ONE GitHub API request, token mint included. "
+            "Retried mints are still bounded as a whole by 3/4 of "
+            "SETUP_PHASE_TIMEOUT_SECONDS, which caps each attempt to the time left."
         ),
     )
 
@@ -763,6 +844,28 @@ class Settings(BaseSettings):
         from syn_shared.settings.polling import PollingSettings
 
         return PollingSettings()
+
+    # =========================================================================
+    # EXECUTION (#1557) - one concurrency budget for every start path
+    # =========================================================================
+
+    @property
+    def execution(self) -> ExecutionSettings:
+        """How many workflow executions this process runs at once (#1557)."""
+        from syn_shared.settings.execution import ExecutionSettings
+
+        return ExecutionSettings()
+
+    # =========================================================================
+    # DISK (#1560) - free space on the workspace volume
+    # =========================================================================
+
+    @property
+    def disk(self) -> DiskSettings:
+        """When low free space degrades /health and when it refuses admission."""
+        from syn_shared.settings.disk import DiskSettings
+
+        return DiskSettings()
 
 
 @lru_cache

@@ -22,7 +22,9 @@ if TYPE_CHECKING:
 
 #: The values `subscription.status` can take. "healthy" is the absence of every
 #: signal below, so it is not a signal itself and has no row in the table.
-_ReadPathStatus = Literal["healthy", "degraded", "stalled", "catching_up"]
+_ReadPathStatus = Literal[
+    "healthy", "degraded", "halted", "dropped_events", "held", "stalled", "catching_up"
+]
 
 
 @dataclass(frozen=True)
@@ -48,7 +50,14 @@ class _ReadPathVerdict:
     degraded_reasons: tuple[DegradedReason, ...]
 
 
-def _judge_read_path(*, running: bool, lag: ReadModelLag | None) -> _ReadPathVerdict:
+def _judge_read_path(
+    *,
+    running: bool,
+    lag: ReadModelLag | None,
+    dropped_events: bool = False,
+    held: bool = False,
+    halted: bool = False,
+) -> _ReadPathVerdict:
     """Turn the subscription's facts into the verdict /health publishes.
 
     ADDING A THIRD SIGNAL? Add a row. It is deliberately impossible to add one
@@ -68,12 +77,40 @@ def _judge_read_path(*, running: bool, lag: ReadModelLag | None) -> _ReadPathVer
     `lag is None` means the subscription is not up yet, which is a different
     answer from "not behind": it fires no lag signal of its own, and `running`
     is what reports it.
+
+    `dropped_events` ranks just below a dead coordinator: a projection that
+    passed an event without applying it (#1545) is wrong, not late, and no
+    amount of waiting fixes it. See `syn_adapters.subscriptions.unapplied_starts`.
+
+    `halted` and `held` are the coordinator's own reports since ESP v0.17.0.
+    `halted`: the subscription stopped at a stored event it cannot decode, so
+    EVERY projection below it is stuck until an operator repairs it (ADR-026);
+    it ranks just below a dead coordinator. `held`: one projection failed to
+    apply an event and is retried below it instead of skipping it (#391). It
+    ranks below `dropped_events` (that one already lost data; a hold has not)
+    and above `stalled`, which a long hold also raises: the hold names the
+    cause, the stall only the symptom.
     """
     signals = (
         _ReadPathSignal(
             fires=not running,
             reason=DegradedReason.SUBSCRIPTION_COORDINATOR,
             status="degraded",
+        ),
+        _ReadPathSignal(
+            fires=halted,
+            reason=DegradedReason.SUBSCRIPTION_HALTED,
+            status="halted",
+        ),
+        _ReadPathSignal(
+            fires=dropped_events,
+            reason=DegradedReason.PROJECTION_DROPPED_EVENT,
+            status="dropped_events",
+        ),
+        _ReadPathSignal(
+            fires=held,
+            reason=DegradedReason.PROJECTION_HELD,
+            status="held",
         ),
         _ReadPathSignal(
             fires=lag is not None and lag.is_stalled,

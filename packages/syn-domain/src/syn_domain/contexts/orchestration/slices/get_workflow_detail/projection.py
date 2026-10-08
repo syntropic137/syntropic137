@@ -15,12 +15,17 @@ if TYPE_CHECKING:
 
     from event_sourcing import ProjectionStore
 
-from event_sourcing import AutoDispatchProjection
-
+from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    stored_fallback_agent,
+)
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+    WorkflowDefaultEvalSetEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
     WorkflowTagsAddedEvent,
@@ -75,7 +80,7 @@ def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> No
             phase[phase_key] = event_data[event_key]
 
 
-class WorkflowDetailProjection(AutoDispatchProjection):
+class WorkflowDetailProjection(RecordedTimeProjection):
     """Builds workflow TEMPLATE detail read model from events.
 
     Templates don't have execution status. They only track:
@@ -84,7 +89,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
 
     For execution status, see WorkflowExecutionDetailProjection.
 
-    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    Uses AutoDispatchProjection (via RecordedTimeProjection): define on_<snake_case_event> methods to
     subscribe and handle events — no separate subscription set needed.
     """
 
@@ -117,7 +122,14 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # v10 is the v9 case again (#967): a row written before tags existed has no
     # `tags` key, and `from_dict` would report "no tags" for a workflow that
     # has them -- and the export would then drop them on the way out.
-    VERSION = 10  # v10: tags (#967)
+    #
+    # v11 is the same case for `default_eval_id` (#967): a v10 row would report
+    # no default for a workflow that has one, and the export would drop it.
+    #
+    # v12 (#959): `created_at` was read from a payload that never carried it,
+    # so every row has None. It now comes from the envelope's recorded time,
+    # and only a replay can supply that for existing rows.
+    VERSION = 12  # v12: created_at from the envelope's recorded time (#959)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -153,6 +165,12 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Check both new and old field names for backwards compatibility
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE) or p.get("prompt_template_id"),
                 timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
+                # #1376. Same sibling-site rule as #1429 below: `from_dict` in
+                # read_models/workflow_detail.py reads it, and omitting it here
+                # made `GET /workflows/{id}` report no limit for a phase that
+                # runs under one. No VERSION bump: no event written before
+                # #1376 can carry the key, so no stored row is wrong.
+                max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
@@ -160,11 +178,16 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                require_delegation=bool(p.get("require_delegation", False)),
+                # PC-83. The sibling site in read_models/workflow_detail.py
+                # reads it too, through the same function.
+                fallback_agent=stored_fallback_agent(p.get("fallback_agent")),
                 # #1429. The sibling site in read_models/workflow_detail.py
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                requires_verdict=bool(p.get("requires_verdict", False)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),
                 skills=_refs(p.get("skills")),
@@ -196,12 +219,14 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             description=event_data.get("description"),
             phases=phases,
             input_declarations=input_decls,
-            created_at=event_data.get("created_at"),
+            created_at=self.recorded_at,
             runs_count=0,
             repository_url=event_data.get("repository_url"),
             repos=tuple(event_data.get("repos", [])),
             requires_repos=event_data.get("requires_repos", True),
             tags=TagSet.recorded(event_data.get("tags") or []).values,
+            default_eval_id=event_data.get("default_eval_id"),
+            package_name=event_data.get("package_name"),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 
@@ -240,6 +265,14 @@ class WorkflowDetailProjection(AutoDispatchProjection):
         if existing:
             existing["runs_count"] = existing.get("runs_count", 0) + 1
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+
+    async def on_workflow_default_eval_set(self, event_data: WorkflowDefaultEvalSetEvent) -> None:
+        """Handle WorkflowDefaultEvalSet (#967)."""
+        event = WorkflowDefaultEvalSetEvent.model_validate(event_data)
+        existing = await self._store.get(self.PROJECTION_NAME, event.workflow_id)
+        if existing:
+            existing["default_eval_id"] = event.eval_id
+            await self._store.save(self.PROJECTION_NAME, event.workflow_id, existing)
 
     async def on_workflow_tags_added(self, event_data: WorkflowTagsAddedEvent) -> None:
         """Handle WorkflowTagsAdded (#967)."""

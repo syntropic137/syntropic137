@@ -163,6 +163,10 @@ class TestAnInfrastructureBlipDoesNotDiscardAnAdmittedResume:
 class _Starter:
     raising: Exception
 
+    def holds_start(self, parent_execution_id: str) -> bool:
+        del parent_execution_id
+        return False
+
     async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
     ) -> None:
@@ -382,6 +386,10 @@ class _Reporting:
 
     on_failure: StartFailureReporter | None = None
 
+    def holds_start(self, parent_execution_id: str) -> bool:
+        del parent_execution_id
+        return False
+
     async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
     ) -> None:
@@ -391,6 +399,10 @@ class _Reporting:
 
 class _Spawning:
     """A starter that returns without producing a child, as the real one does."""
+
+    def holds_start(self, parent_execution_id: str) -> bool:
+        del parent_execution_id
+        return False
 
     async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter
@@ -749,6 +761,10 @@ class TestTwoPassesOfferingTheSameRecord:
         later = ResumeStartProcessManager(resume_starter=_Spawning(), store=store)
 
         class _RaisingAfterALaterDispatch:
+            def holds_start(self, parent_execution_id: str) -> bool:
+                del parent_execution_id
+                return False
+
             async def start_resume(
                 self, parent_execution_id: str, *, on_failure: StartFailureReporter
             ) -> None:
@@ -791,6 +807,10 @@ class _ReportingAll:
     """A starter that spawns, keeping every reporter it was handed, in order."""
 
     reports: list[StartFailureReporter] = field(default_factory=list)
+
+    def holds_start(self, parent_execution_id: str) -> bool:
+        del parent_execution_id
+        return False
 
     async def start_resume(
         self, parent_execution_id: str, *, on_failure: StartFailureReporter

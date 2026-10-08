@@ -14,6 +14,8 @@ from syn_shared.settings.op_resolver import (
     vault_name_for_env,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def clear_resolver_cache() -> None:
