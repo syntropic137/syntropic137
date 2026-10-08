@@ -26,6 +26,7 @@ from scripts.check_workflow_definitions import (
     grant_violations,
     hardcoded_gates,
     main,
+    skill_grant_notices,
     stale_phase_references,
     validate_file,
 )
@@ -1314,6 +1315,52 @@ class TestARenameMustNotLeaveANameBehind:
         assert stale_phase_references(path, phase_library_dir=lib) == [], (
             "the phase library became unusable"
         )
+
+
+class TestSkillGrantIsAnnounced:
+    """Validation says when the platform widens a grant with `Skill` (#1269)."""
+
+    _SKILL = "syntropic137/software-leverage-points/architecture@7e48aad"
+
+    def _notices(
+        self, tmp_path: Path, tools: list[str], skills: list[str], provider: str = "claude"
+    ) -> list[str]:
+        phase: dict[str, object] = {
+            "id": "the-phase",
+            "name": "The phase",
+            "order": 1,
+            "prompt_template": "Do the thing.",
+            "allowed_tools": tools,
+            "skills": skills,
+            "agent": {"provider": provider},
+        }
+        path = _write(
+            tmp_path,
+            {"id": "pair", "name": "Pair", "requires_repos": False, "phases": [phase]},
+        )
+        return skill_grant_notices(path)
+
+    def test_a_scoped_claude_phase_with_skills_is_told_skill_is_added(self, tmp_path: Path) -> None:
+        (notice,) = self._notices(tmp_path, ["Read", "Bash"], [self._SKILL])
+        assert "'the-phase'" in notice
+        assert "adds Skill automatically" in notice
+
+    def test_no_notice_when_skill_is_already_granted(self, tmp_path: Path) -> None:
+        assert self._notices(tmp_path, ["Read", "Skill"], [self._SKILL]) == []
+
+    def test_no_notice_without_skills(self, tmp_path: Path) -> None:
+        assert self._notices(tmp_path, ["Read", "Bash"], []) == []
+
+    def test_no_notice_for_an_unrestricted_phase(self, tmp_path: Path) -> None:
+        assert self._notices(tmp_path, [], [self._SKILL]) == []
+
+    def test_main_prints_the_notice_for_the_shipped_implement_v3(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main() == 0
+        out = capsys.readouterr().out
+        assert "NOTE workflows/sdlc/implement-v3/workflow.yaml" in out
+        assert "adds Skill automatically" in out
 
 
 class TestGatesComeFromTheTargetRepository:

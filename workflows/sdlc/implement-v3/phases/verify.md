@@ -2,6 +2,8 @@
 
 $ARGUMENTS
 
+**Skills:** `testing`, `error-handling`, `architecture` and `software-complexity` are installed in this workspace as context, because codex has no Skill tool. Read and apply them when you judge the tests, the failure paths, the boundaries and the complexity of the change.
+
 The implementation report is at `artifacts/input/implement.md`. Your job is to
 find out whether that change is actually correct, not to confirm that it is.
 
