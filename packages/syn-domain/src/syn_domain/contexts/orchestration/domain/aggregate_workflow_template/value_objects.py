@@ -210,7 +210,6 @@ class PhaseDefinition(BaseModel):
         require_satisfiable_isolation(
             self.isolation,
             delivers_repo_changes=self.delivers_repo_changes,
-            clone_repos=self.clone_repos,
             phase_id=self.phase_id,
         )
         return self

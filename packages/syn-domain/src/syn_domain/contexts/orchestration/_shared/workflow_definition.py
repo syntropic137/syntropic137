@@ -586,11 +586,10 @@ class PhaseYamlDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_pinned_isolation_is_satisfiable(self) -> PhaseYamlDefinition:
-        """Refuse a pinned phase that needs what the seal takes away (#1725)."""
+        """Refuse a pinned phase that would have to push (#1725)."""
         require_satisfiable_isolation(
             self.isolation,
             delivers_repo_changes=self.delivers_repo_changes,
-            clone_repos=self.clone_repos,
             phase_id=self.id,
         )
         return self

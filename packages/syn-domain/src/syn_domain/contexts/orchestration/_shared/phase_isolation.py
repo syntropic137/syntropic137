@@ -12,7 +12,7 @@ class PhaseIsolation(StrEnum):
     tag, and a GitHub credential that outlives setup so the agent can push.
 
     PINNED is for an evaluation, where any commit after the pin may be the
-    answer. Every repository must be pinned; each is sealed at its pin - no
+    answer. Every cloned repository must be pinned; each is sealed at its pin - no
     later commit, ref, tag or remote - and the workspace keeps no GitHub
     credential after setup. A pinned phase therefore cannot push, and
     declares ``delivers_repo_changes: false``.
@@ -23,25 +23,22 @@ class PhaseIsolation(StrEnum):
 
 
 def require_satisfiable_isolation(
-    isolation: PhaseIsolation, *, delivers_repo_changes: bool, clone_repos: bool, phase_id: str
+    isolation: PhaseIsolation, *, delivers_repo_changes: bool, phase_id: str
 ) -> None:
-    """Refuse a pinned phase that needs what the seal takes away, when it is written.
+    """Refuse a pinned phase that would have to push, when it is written.
 
     A sealed workspace keeps no GitHub credential, so a phase that delivers
-    repository changes could never push them, and one that skips the clone
-    has nothing to seal. Both would install cleanly and then fail, or seal
-    nothing, at run time.
+    repository changes could never push them: it would install cleanly and
+    then fail the unpushed-work gate at run time, after it was paid for.
 
     Raises:
         ValueError: ``isolation`` is PINNED and the phase delivers repository
-            changes or skips the clone.
+            changes.
     """
-    if isolation is not PhaseIsolation.PINNED:
-        return
-    if delivers_repo_changes or not clone_repos:
+    if isolation is PhaseIsolation.PINNED and delivers_repo_changes:
         msg = (
             f"Phase '{phase_id}': isolation 'pinned' removes every GitHub credential"
-            " after the clone, so the phase must declare"
-            " 'delivers_repo_changes: false' and must not declare 'clone_repos: false'"
+            " after the clone, so the phase can never push and must declare"
+            " 'delivers_repo_changes: false'"
         )
         raise ValueError(msg)

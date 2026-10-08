@@ -288,7 +288,7 @@ on the Phase as `isolation`. `standard` is every Phase's default: the full
 clone, every branch and tag, and a GitHub credential kept so the agent can
 push. `pinned` is for an evaluation, where the commits after a Pin may be the
 answer: the workspace is a Sealed Workspace. A `pinned` Phase must declare
-`delivers_repo_changes: false` and must clone, or it is refused when written.
+`delivers_repo_changes: false`, or it is refused when written.
 (#1725, ADR-073.)
 
 ## Sealed Workspace

@@ -163,3 +163,16 @@ class TestAWorkspaceThatCannotBeSealedIsRefused:
 
         assert secrets.gh_token is None
         assert "hosts.yml" not in secrets.build_setup_script().split("# Seal")[0]
+
+    def test_without_a_clone_there_is_nothing_to_seal_and_still_no_credential(self) -> None:
+        secrets = SetupPhaseSecrets.for_testing(
+            repositories=[f"https://github.com/{REPO}"],
+            repo_tokens={f"https://github.com/{REPO}": "tok"},
+            clone_repos=False,
+            sealed_at_pin=True,
+        )
+        script = secrets.build_setup_script()
+
+        assert "git remote remove" not in script
+        assert "oauth_token:" not in script
+        assert "rm -f ~/.git-credentials ~/.config/gh/hosts.yml" in script

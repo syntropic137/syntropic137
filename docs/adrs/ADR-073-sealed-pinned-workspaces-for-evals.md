@@ -91,8 +91,9 @@ It travels the same hops as `delivers_repo_changes`: YAML -> `PhaseDefinition`
 create path, read models and YAML export carry it too.
 
 A pinned phase is refused at authoring unless it declares
-`delivers_repo_changes: false` and clones: it could never push, and a phase
-with no clone has nothing to seal. `ManagedWorkspace` records no credential
+`delivers_repo_changes: false`: it could never push. One with
+`clone_repos: false` has nothing to seal and is simply left without a GitHub
+credential. `ManagedWorkspace` records no credential
 source for a sealed workspace, so credential renewal (#1393) has nothing to
 re-install.
 

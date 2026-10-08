@@ -565,9 +565,11 @@ class SetupPhaseSecrets:
     never given one. What the agent is left with is the pinned tree and its
     ancestry, no remote, and nothing that authenticates it to GitHub.
 
-    Every repository must be pinned and cloned, and none continues a branch:
-    a sealed workspace on a default branch's head would be sealed at
-    whatever happened to be newest, which seals nothing."""
+    Every cloned repository must be pinned, and none continues a branch: a
+    sealed workspace on a default branch's head would be sealed at whatever
+    happened to be newest, which seals nothing. With ``clone_repos`` False
+    there is nothing to seal, and the workspace is simply left without a
+    GitHub credential."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -585,14 +587,12 @@ class SetupPhaseSecrets:
             self._refuse_an_unsealable_workspace()
 
     def _refuse_an_unsealable_workspace(self) -> None:
-        unpinned = [
-            url for url in self.repositories if _repo_full_name(url) not in self.pinned_commits
-        ]
-        if not self.clone_repos or unpinned or self.continued_branches:
+        cloned = self.repositories if self.clone_repos else []
+        unpinned = [url for url in cloned if _repo_full_name(url) not in self.pinned_commits]
+        if unpinned or self.continued_branches:
             msg = (
-                "A workspace sealed at its pins needs every repository cloned and pinned,"
+                "A workspace sealed at its pins needs every cloned repository pinned,"
                 f" and none continuing a branch (unpinned: {unpinned},"
-                f" clone_repos: {self.clone_repos},"
                 f" continued: {sorted(self.continued_branches)})"
             )
             raise ValueError(msg)
@@ -780,7 +780,7 @@ class SetupPhaseSecrets:
         lines.append(
             "# Seal each repository at its pin: no later commit, no remote (#1725, ADR-073)"
         )
-        for url, dest in _clone_destinations(self.repositories):
+        for url, dest in _clone_destinations(self.repositories if self.clone_repos else []):
             append_seal_at_pin(lines, dest=dest, sha=self.pinned_commits[_repo_full_name(url)])
         lines.append("rm -f ~/.git-credentials ~/.config/gh/hosts.yml")
         lines.append("git config --global --unset-all credential.helper || true")
