@@ -27,11 +27,12 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from syn_adapters.workspace_backends.stale_dirs import (
         WorkspaceContainer,
         WorkspaceDirListing,
