@@ -208,8 +208,16 @@ class TestTheSetupPhase:
 
 
 class TestTheCredentialGuard:
-    async def test_it_still_fails_closed_and_now_says_why(self) -> None:
-        """exec-ff7e0c990b00: every removal attempt lost its status."""
+    async def test_it_still_fails_closed_and_now_says_why(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """exec-ff7e0c990b00: every removal attempt lost its status.
+
+        Pinned to the 5s guard bound that incident ran under (configurable
+        since PC-126), so 7.2s is still past its deadline.
+        """
+        monkeypatch.setenv("CREDENTIAL_GUARD_EXEC_TIMEOUT_SECONDS", "5")
+        reset_settings()
         docker = _Docker(setup=[_ok()], removal=[_lost(7_200.0)] * 4)
 
         with pytest.raises(RuntimeError) as raised:
