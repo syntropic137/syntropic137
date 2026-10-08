@@ -1,6 +1,7 @@
 <!-- Meter (MeterContract). CompDisplay "meter": "Codex delegates to Claude · 26 runs" over its bar. -->
 <script lang="ts">
   import type { MeterProps } from './types'
+  import { METER_TONE } from './variants'
 
   let {
     value,
@@ -29,7 +30,7 @@
   })
 </script>
 
-<div {...rest} class="sky-meter" data-tone={resolvedTone} data-series={series}>
+<div {...rest} class="sky-meter" data-tone={METER_TONE[resolvedTone]} data-series={series}>
   {#if label || valueText}
     <span class="sky-meter__head">
       {#if label}<span class="sky-meter__label" id={`${uid}-label`}>{label}</span>{/if}

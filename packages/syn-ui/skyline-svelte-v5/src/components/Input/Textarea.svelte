@@ -2,6 +2,7 @@
 <script lang="ts">
   import FieldMessage from './FieldMessage.svelte'
   import type { TextareaProps } from './types'
+  import { FIELD_SIZE } from './variants'
 
   let {
     value = $bindable(),
@@ -30,7 +31,7 @@
     class="sky-textarea"
     id={fieldId}
     {rows}
-    data-size={size}
+    data-size={FIELD_SIZE[size]}
     data-invalid={isInvalid || undefined}
     aria-invalid={isInvalid || undefined}
     aria-describedby={describedByAll}

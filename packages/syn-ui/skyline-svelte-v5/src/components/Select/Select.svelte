@@ -3,6 +3,7 @@
   import { untrack } from 'svelte'
   import Glyph from '../_internal/Glyph.svelte'
   import type { SelectProps } from './types'
+  import { SELECT_SIZE } from './variants'
 
   let {
     options,
@@ -34,7 +35,7 @@
   }
 </script>
 
-<span class="sky-select" data-size={size} data-invalid={invalid || undefined} data-disabled={disabled || undefined}>
+<span class="sky-select" data-size={SELECT_SIZE[size]} data-invalid={invalid || undefined} data-disabled={disabled || undefined}>
   {#if label}<label class="sky-select__prefix" for={selectId}>{label}</label>{/if}
   <select
     {...rest}

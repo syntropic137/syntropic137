@@ -10,6 +10,7 @@
   import type { HTMLAnchorAttributes } from 'svelte/elements'
   import Spinner from './Spinner.svelte'
   import type { ButtonProps } from './types'
+  import { BUTTON_SIZE, BUTTON_TONE, BUTTON_VARIANT, BUTTON_VARIANT_TONE } from './variants'
 
   let {
     variant = 'outline',
@@ -28,9 +29,9 @@
   }: ButtonProps = $props()
 
   // Upstream variant names map onto Skyline's: primary = solid accent,
-  // secondary = outline, danger = outline danger.
-  const resolvedVariant = $derived(variant === 'primary' ? 'solid' : variant === 'secondary' || variant === 'danger' ? 'outline' : variant)
-  const resolvedTone = $derived(tone ?? (variant === 'danger' ? 'danger' : resolvedVariant === 'solid' ? 'accent' : 'neutral'))
+  // secondary = outline, danger = outline danger. Exhaustive lookups (variants.ts).
+  const resolvedVariant = $derived(BUTTON_VARIANT[variant])
+  const resolvedTone = $derived(BUTTON_TONE[tone ?? BUTTON_VARIANT_TONE[variant]])
   const iconOnly = $derived(!children && !!(icon || loading))
 
   function handleClick(e: MouseEvent & { currentTarget: EventTarget & HTMLButtonElement }) {
@@ -49,7 +50,7 @@
     {href}
     data-variant={resolvedVariant}
     data-tone={resolvedTone}
-    data-size={size}
+    data-size={BUTTON_SIZE[size]}
     data-icon-only={iconOnly || undefined}
     data-block={block || undefined}
     aria-busy={loading || undefined}
@@ -71,7 +72,7 @@
     {disabled}
     data-variant={resolvedVariant}
     data-tone={resolvedTone}
-    data-size={size}
+    data-size={BUTTON_SIZE[size]}
     data-icon-only={iconOnly || undefined}
     data-block={block || undefined}
     aria-busy={loading || undefined}

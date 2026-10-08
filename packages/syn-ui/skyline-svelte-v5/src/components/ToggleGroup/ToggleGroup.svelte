@@ -7,6 +7,7 @@
   import { untrack } from 'svelte'
   import { listMoveForKey, moveIndex, toggleValue } from '@syn137/skyline-core/state'
   import type { ToggleGroupProps } from './types'
+  import { TOGGLE_GROUP_ORIENTATION, TOGGLE_GROUP_SIZE } from './variants'
 
   let {
     type,
@@ -67,11 +68,11 @@
   {...rest}
   class="sky-toggle-group"
   role={single ? 'radiogroup' : 'group'}
-  aria-orientation={orientation}
+  aria-orientation={TOGGLE_GROUP_ORIENTATION[orientation]}
   aria-disabled={disabled || undefined}
   data-variant={variant}
-  data-size={size}
-  data-orientation={orientation}
+  data-size={TOGGLE_GROUP_SIZE[size]}
+  data-orientation={TOGGLE_GROUP_ORIENTATION[orientation]}
   data-mono={mono || undefined}
 >
   {#each items as item, i (item.value)}

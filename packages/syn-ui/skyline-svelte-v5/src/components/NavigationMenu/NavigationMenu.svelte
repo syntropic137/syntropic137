@@ -8,6 +8,7 @@
   import DropdownMenu from '../DropdownMenu/DropdownMenu.svelte'
   import type { MenuItem } from '../DropdownMenu/types'
   import type { NavigationMenuItem, NavigationMenuProps } from './types'
+  import { NAV_ORIENTATION } from './variants'
 
   let {
     items,
@@ -31,7 +32,7 @@
   )
 </script>
 
-<nav {...rest} class="sky-nav" data-variant={variant} data-orientation={orientation} aria-label={ariaLabel}>
+<nav {...rest} class="sky-nav" data-variant={variant} data-orientation={NAV_ORIENTATION[orientation]} aria-label={ariaLabel}>
   <ul class="sky-nav__list" data-count={items.length + (variant === 'dock' && more.length ? 1 : 0)}>
     {#each items as item (item.value)}
       <li class="sky-nav__cell">

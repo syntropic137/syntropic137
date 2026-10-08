@@ -6,6 +6,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import type { ToggleProps } from './types'
+  import { TOGGLE_SIZE } from './variants'
 
   let {
     pressed = $bindable(),
@@ -39,7 +40,7 @@
   {disabled}
   aria-pressed={isPressed}
   data-state={isPressed ? 'on' : 'off'}
-  data-size={size}
+  data-size={TOGGLE_SIZE[size]}
   data-icon-only={!children || undefined}
   onclick={toggle}
 >

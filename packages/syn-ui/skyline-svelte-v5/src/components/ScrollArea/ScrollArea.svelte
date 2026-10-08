@@ -1,6 +1,7 @@
 <!-- Scroll Area (ScrollAreaContract): content scrolls in its own box, never the page. -->
 <script lang="ts">
   import type { ScrollAreaProps } from './types'
+  import { SCROLL_AREA_ORIENTATION } from './variants'
 
   let { orientation = 'horizontal', maxHeight, hideScrollbar = false, 'aria-label': ariaLabel, children, ...rest }: ScrollAreaProps = $props()
 
@@ -40,7 +41,7 @@
   role={ariaLabel ? 'region' : undefined}
   aria-label={ariaLabel}
   tabindex={scrollable ? 0 : undefined}
-  data-orientation={orientation}
+  data-orientation={SCROLL_AREA_ORIENTATION[orientation]}
   data-hide-scrollbar={hideScrollbar || undefined}
   data-fade-start={edges.start || undefined}
   data-fade-end={edges.end || undefined}

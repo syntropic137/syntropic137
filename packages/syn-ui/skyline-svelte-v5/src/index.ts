@@ -98,6 +98,8 @@ export type { TagProps, TagVariant, TagAgent } from './components/Tag/types'
 export type { TriggerProps } from './components/_internal/trigger'
 
 // ---- Upstream conformance: the required contracts, type-checked ----
+// Every rendered contract union equals the contract's (src/contract-unions.ts).
+export type { SvelteV5UnionConformance } from './contract-unions'
 import type { RequiredComponentAdapter, RequiredComponentContracts } from '@syn137/skyline-core/contracts'
 import BadgeComponent from './components/Badge/Badge.svelte'
 import ButtonComponent from './components/Button/Button.svelte'

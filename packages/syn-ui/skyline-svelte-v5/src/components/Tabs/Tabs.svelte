@@ -7,6 +7,7 @@
   import { untrack } from 'svelte'
   import { listMoveForKey, moveIndex } from '@syn137/skyline-core/state'
   import type { TabsProps } from './types'
+  import { TABS_ORIENTATION } from './variants'
 
   let {
     items,
@@ -49,9 +50,9 @@
   }
 </script>
 
-<div {...rest} class="sky-tabs" data-orientation={orientation}>
+<div {...rest} class="sky-tabs" data-orientation={TABS_ORIENTATION[orientation]}>
   <div class="sky-tabs__row">
-    <div class="sky-tabs__list" role="tablist" aria-label={label} aria-orientation={orientation} data-mono={mono || undefined}>
+    <div class="sky-tabs__list" role="tablist" aria-label={label} aria-orientation={TABS_ORIENTATION[orientation]} data-mono={mono || undefined}>
       {#each items as item, i (item.value)}
         {@const selected = item.value === active}
         <button

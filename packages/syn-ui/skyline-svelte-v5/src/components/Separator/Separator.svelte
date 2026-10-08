@@ -1,6 +1,7 @@
 <!-- Separator (SeparatorContract). CompDisplay "separator": a 1px hairline. -->
 <script lang="ts">
   import type { SeparatorProps } from './types'
+  import { SEPARATOR_ORIENTATION } from './variants'
 
   let { orientation = 'horizontal', decorative = true, weight = 'border', ...rest }: SeparatorProps = $props()
 </script>
@@ -10,7 +11,7 @@
   class="sky-separator"
   role={decorative ? 'none' : 'separator'}
   aria-orientation={!decorative && orientation === 'vertical' ? 'vertical' : undefined}
-  data-orientation={orientation}
+  data-orientation={SEPARATOR_ORIENTATION[orientation]}
   data-weight={weight}
 ></div>
 

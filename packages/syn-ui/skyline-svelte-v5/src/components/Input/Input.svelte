@@ -6,6 +6,7 @@
   import Glyph from '../_internal/Glyph.svelte'
   import FieldMessage from './FieldMessage.svelte'
   import type { InputProps } from './types'
+  import { FIELD_SIZE } from './variants'
 
   let {
     value = $bindable(),
@@ -30,7 +31,7 @@
 </script>
 
 <div class="sky-field">
-  <div class="sky-input" data-size={size} data-invalid={isInvalid || undefined} data-disabled={rest.disabled || undefined}>
+  <div class="sky-input" data-size={FIELD_SIZE[size]} data-invalid={isInvalid || undefined} data-disabled={rest.disabled || undefined}>
     {#if leading}
       <span class="sky-input__adornment">{@render leading()}</span>
     {:else if type === 'search'}

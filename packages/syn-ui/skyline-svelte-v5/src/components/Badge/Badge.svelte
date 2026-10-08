@@ -6,11 +6,12 @@
 -->
 <script lang="ts">
   import type { BadgeProps } from './types'
+  import { BADGE_SIZE, BADGE_TONE, BADGE_VARIANT } from './variants'
 
   let { variant = 'soft', tone = 'neutral', size = 'md', icon, dot = false, children, ...rest }: BadgeProps = $props()
 </script>
 
-<span {...rest} class="sky-badge" data-variant={variant} data-tone={tone} data-size={size} data-has-icon={icon || dot ? '' : undefined}>
+<span {...rest} class="sky-badge" data-variant={BADGE_VARIANT[variant]} data-tone={BADGE_TONE[tone]} data-size={BADGE_SIZE[size]} data-has-icon={icon || dot ? '' : undefined}>
   {#if dot}
     <span class="sky-badge__dot" aria-hidden="true"></span>
   {:else if icon}

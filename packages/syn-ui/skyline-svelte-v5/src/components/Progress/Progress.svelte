@@ -1,6 +1,7 @@
 <!-- Progress (ProgressContract). CompDisplay "progress · phase 2 of 3": blocks filled in the accent. -->
 <script lang="ts">
   import type { ProgressProps } from './types'
+  import { PROGRESS_TONE } from './variants'
 
   let { value, max, tone = 'accent', segments, valueText, 'aria-label': ariaLabel, ...rest }: ProgressProps = $props()
 
@@ -24,7 +25,7 @@
   aria-valuemax={indeterminate ? undefined : total}
   aria-valuenow={indeterminate ? undefined : (value as number)}
   aria-valuetext={valueText}
-  data-tone={tone}
+  data-tone={PROGRESS_TONE[tone]}
   data-state={indeterminate ? 'indeterminate' : (value as number) >= total ? 'complete' : 'loading'}
 >
   {#each fills as fill, i (i)}
