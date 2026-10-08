@@ -158,28 +158,25 @@ class WorkflowDetailProjection(RecordedTimeProjection):
             await self._store.delete_all(self.PROJECTION_NAME)
             await self._store.delete_all(self.CHANGES)
 
-    async def on_workflow_template_created(self, event_data: dict) -> None:
-        """Handle WorkflowTemplateCreated event - create template detail."""
-        await self._save_template(event_data)
-        await self._record_change(event_data, DefinitionChangeKind.CREATED)
-
-    async def _record_change(self, event_data: dict, kind: DefinitionChangeKind) -> None:
+    async def _record_change(
+        self, workflow_id: str, version: str | None, kind: DefinitionChangeKind
+    ) -> None:
         """Append a definition change, dated by the envelope (#1788).
 
         A phase edit carries no version, so it keeps the one current when it
-        was recorded. Without an envelope (a handler called directly) there is
-        no date, so nothing is recorded.
+        was recorded. A create is recorded only as a workflow's FIRST change:
+        a reinstall rebuilds the detail through the create handler and records
+        itself as an update. Without an envelope (a handler called directly)
+        there is no date, so nothing is recorded.
         """
-        workflow_id = event_data.get("workflow_id", "")
         recorded_at = self.recorded_at
         if not workflow_id or recorded_at is None:
             return
         history = await self.definition_history(workflow_id)
-        version = (
-            history.version_at(recorded_at)
-            if kind is DefinitionChangeKind.PHASE_UPDATED
-            else event_data.get("version") or event_data.get("source_digest")
-        )
+        if kind is DefinitionChangeKind.CREATED and history.changes:
+            return
+        if kind is DefinitionChangeKind.PHASE_UPDATED:
+            version = history.version_at(recorded_at)
         change = WorkflowDefinitionChange(
             definition_version=version,
             changed_at=recorded_at.isoformat(),
@@ -196,7 +193,8 @@ class WorkflowDetailProjection(RecordedTimeProjection):
             return WorkflowDefinitionHistory(workflow_id=workflow_id)
         return WorkflowDefinitionHistory.model_validate(document)
 
-    async def _save_template(self, event_data: dict) -> None:
+    async def on_workflow_template_created(self, event_data: dict) -> None:
+        """Handle WorkflowTemplateCreated event - create template detail."""
         workflow_id = event_data.get("workflow_id", "")
 
         # Convert phase data to PhaseDefinitionDetail format
@@ -276,6 +274,11 @@ class WorkflowDetailProjection(RecordedTimeProjection):
             package_name=event_data.get("package_name"),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
+        await self._record_change(
+            workflow_id,
+            event_data.get("version") or event_data.get("source_digest"),
+            DefinitionChangeKind.CREATED,
+        )
 
     async def on_workflow_template_updated(self, event_data: dict) -> None:
         """Handle WorkflowTemplateUpdated - rebuild the detail in place (issue #822).
@@ -289,8 +292,12 @@ class WorkflowDetailProjection(RecordedTimeProjection):
             return
 
         existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
-        await self._save_template(event_data)
-        await self._record_change(event_data, DefinitionChangeKind.UPDATED)
+        await self.on_workflow_template_created(event_data)
+        await self._record_change(
+            workflow_id,
+            event_data.get("version") or event_data.get("source_digest"),
+            DefinitionChangeKind.UPDATED,
+        )
 
         if not existing:
             return
@@ -358,7 +365,7 @@ class WorkflowDetailProjection(RecordedTimeProjection):
             _apply_phase_fields(phase, event_data)
 
         await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
-        await self._record_change(event_data, DefinitionChangeKind.PHASE_UPDATED)
+        await self._record_change(workflow_id, None, DefinitionChangeKind.PHASE_UPDATED)
 
     async def get_by_id(self, workflow_id: str) -> WorkflowDetail | None:
         """Get a workflow template by ID."""

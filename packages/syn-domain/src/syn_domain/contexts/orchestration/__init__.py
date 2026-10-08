@@ -189,6 +189,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEve
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_plan import PlannedPhase
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
+from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
+    DefinitionChangeKind,
+)
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
 )
@@ -361,6 +364,7 @@ __all__ = [
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
     "CredentialRenewalFailedError",
+    "DefinitionChangeKind",
     "DelegationAttempt",
     "DelegationFailure",
     "DelegationFailureReason",

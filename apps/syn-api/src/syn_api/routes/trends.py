@@ -28,10 +28,7 @@ from syn_api.types import (
     WorkflowTrendPointResponse,
     WorkflowTrendResponse,
 )
-from syn_domain.contexts.orchestration import ExecutionListReads
-from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
-    DefinitionChangeKind,
-)
+from syn_domain.contexts.orchestration import DefinitionChangeKind, ExecutionListReads
 from syn_shared.display.formatters import format_cost
 
 if TYPE_CHECKING:

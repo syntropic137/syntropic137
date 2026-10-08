@@ -84,6 +84,7 @@ from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelI
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    DefinitionChangeKind,
     DelegationFailure,
     EvalId,
     FailureClassification,
@@ -95,9 +96,6 @@ from syn_domain.contexts.orchestration import (
     SideEffectStatus,
     TagSet,
     Verdict,
-)
-from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
-    DefinitionChangeKind,  # noqa: TC001 - Pydantic field type, needed at runtime
 )
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
