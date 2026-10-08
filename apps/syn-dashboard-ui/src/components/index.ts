@@ -34,7 +34,12 @@ export {
   type ResourceCardListProps,
   type ResourceTableProps,
 } from './ResourceTable'
-export { ResourceFilterBar, type ResourceFilterBarProps } from './ResourceFilterBar'
+export {
+  DEFAULT_STATUSES,
+  ResourceFilterBar,
+  type ResourceFilterBarProps,
+  type StatusChip,
+} from './ResourceFilterBar'
 export { SelectionActionBar, type SelectionActionBarProps } from './SelectionActionBar'
 export { SelectionCheckbox } from './SelectionCheckbox'
 export { SessionCostCard } from './SessionCostCard'

@@ -21,9 +21,16 @@ export interface ResourceFilterBarProps {
   reset: () => void
   /** When false (defaults are active), the Reset button is hidden. */
   isDefault: boolean
+  /** The status chips, in order. Defaults to the statuses every list shares. */
+  statuses?: readonly StatusChip[]
 }
 
-const STATUSES: { value: string; label: string }[] = [
+export interface StatusChip {
+  value: string
+  label: string
+}
+
+export const DEFAULT_STATUSES: readonly StatusChip[] = [
   { value: 'pending', label: 'Pending' },
   { value: 'running', label: 'Running' },
   { value: 'completed', label: 'Completed' },
@@ -39,11 +46,12 @@ export function ResourceFilterBar({
   setTimeWindow,
   reset,
   isDefault,
+  statuses = DEFAULT_STATUSES,
 }: ResourceFilterBarProps) {
   return (
     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div className="flex flex-wrap items-center gap-2">
-        {STATUSES.map((s) => (
+        {statuses.map((s) => (
           <FilterChip
             key={s.value}
             label={s.label}
