@@ -338,6 +338,11 @@
           "title": "Delivers Repo Changes",
           "type": "boolean"
         },
+        "requires_verdict": {
+          "default": false,
+          "title": "Requires Verdict",
+          "type": "boolean"
+        },
         "argument_hint": {
           "anyOf": [
             {
