@@ -792,7 +792,7 @@ async def list_workflows_endpoint(
             name=s.name,
             workflow_type=s.workflow_type,
             phase_count=s.phase_count,
-            created_at=str(s.created_at) if s.created_at else None,
+            created_at=s.created_at.isoformat() if s.created_at else None,
             runs_count=s.runs_count,
             is_archived=s.is_archived,
             # WHY (#955): omitting this let WorkflowSummaryResponse's `= True`
@@ -871,7 +871,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
             )
             for d in detail.input_declarations
         ],
-        created_at=str(detail.created_at) if detail.created_at else None,
+        created_at=detail.created_at.isoformat() if detail.created_at else None,
         runs_count=detail.runs_count,
         runs_link=f"/api/workflows/{detail.id}/runs",
         repository_url=detail.repository_url,
