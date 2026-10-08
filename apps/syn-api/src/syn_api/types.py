@@ -629,7 +629,7 @@ class PhaseProgressInfo(BaseModel):
     percent: int
     """Completed as a share of ``possible``, 0-100. A completed run is 100."""
     display: str
-    """E.g. ``6 of 6 (4 phases not needed)``, ``phase 3 of up to 10``."""
+    """E.g. ``6 of 6 (2 phases not needed)``, ``phase 3 of up to 8``."""
 
     @classmethod
     def of(cls, progress: PhaseProgress) -> PhaseProgressInfo:

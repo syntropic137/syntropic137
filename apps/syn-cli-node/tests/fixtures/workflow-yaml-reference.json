@@ -557,25 +557,13 @@
           "prompt_file": "phases/reverify_2.md"
         },
         {
-          "id": "fix_3",
-          "order": 8,
-          "model": null,
-          "prompt_file": "phases/fix_3.md"
-        },
-        {
-          "id": "reverify_3",
-          "order": 9,
-          "model": null,
-          "prompt_file": "phases/reverify_3.md"
-        },
-        {
           "id": "finalize_pr",
-          "order": 10,
+          "order": 8,
           "model": null,
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "8f8b86514f7e43d605dacb12a93cb6bb764c8f4e54362b43106beae0430437a8"
+      "document_sha256": "e57605a82bdef04a278703ec3aaff8c982e23d807ce238c334e92b43a9795d8b"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [
@@ -825,25 +813,13 @@
           "prompt_file": "phases/reverify_2.md"
         },
         {
-          "id": "fix_3",
-          "order": 7,
-          "model": null,
-          "prompt_file": "phases/fix_3.md"
-        },
-        {
-          "id": "reverify_3",
-          "order": 8,
-          "model": null,
-          "prompt_file": "phases/reverify_3.md"
-        },
-        {
           "id": "finalize_pr",
-          "order": 9,
+          "order": 7,
           "model": null,
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "ff99a70b6dc348662c8180758df2602a5aa19e9bd746c18a5925dbfa35443fd5"
+      "document_sha256": "d59d8a193403cb5ef56b2c049da38a79d1fd4ca623bae04cfd016b60d466309b"
     },
     "workflows/triggers/ci-fix.yaml": {
       "phases": [
