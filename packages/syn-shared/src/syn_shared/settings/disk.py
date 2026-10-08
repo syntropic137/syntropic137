@@ -65,6 +65,15 @@ class DiskSettings(BaseSettings):
         description="How often stale workspace directories are looked for (PC-130).",
     )
 
+    page_webhook_url: str = Field(
+        default="",
+        description=(
+            "Every change of the disk verdict (ok, low, critical) is POSTed here as "
+            "JSON, once, so crossing the degraded threshold pages someone (PC-130). "
+            "Empty disables paging."
+        ),
+    )
+
     @model_validator(mode="after")
     def _floor_below_threshold(self) -> DiskSettings:
         # A floor above the warning threshold would refuse work while /health

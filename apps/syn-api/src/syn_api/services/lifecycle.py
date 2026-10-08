@@ -50,6 +50,7 @@ from syn_api.services.reconciliation import (
 )
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health
+from syn_api.services.disk_pager import start_disk_pager, stop_disk_pager
 from syn_api.services.workspace_dir_reclaim import (
     start_workspace_reclaim,
     stop_workspace_reclaim,
@@ -749,12 +750,15 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     start_disk_recovery_watch()
     # PC-130: and a directory whose container is gone is reclaimed on a clock too.
     start_workspace_reclaim(lambda: coordinator.is_live)
+    # PC-130: and a low disk pages someone rather than waiting to be looked at.
+    start_disk_pager()
 
 
 async def _shutdown_subscriptions(state: LifecycleState) -> None:
     """Stop subscription coordinator and workflow dispatcher."""
     await stop_disk_recovery_watch()
     await stop_workspace_reclaim()
+    await stop_disk_pager()
     await inventory_lifecycle.stop_session_inventory()
     if state.workflow_dispatcher is not None:
         await state.workflow_dispatcher.shutdown()
