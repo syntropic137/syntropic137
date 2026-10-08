@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import time
@@ -59,7 +60,8 @@ def fake_pg(tmp_path: Path):
     _stub(
         bin_dir,
         "pg_dump",
-        'for a in "$@"; do case $a in --file=*) echo archive > "${a#--file=}";; esac; done',
+        'for a in "$@"; do case $a in'
+        ' --file=*) echo "${DUMP_PAYLOAD:-archive}" > "${a#--file=}";; esac; done',
     )
 
     def configure(listing: str | None) -> dict[str, str]:
@@ -120,6 +122,48 @@ class TestBackup:
         result = _run("backup", str(tmp_path / "absent"), env=fake_pg(_LISTING_WITH_DATA))
         assert result.returncode != 0
         assert "does not exist" in result.stderr
+
+
+    def test_same_second_backups_each_keep_their_own_archive(self, tmp_path, fake_pg):
+        out = tmp_path / "backups"
+        out.mkdir()
+        bin_dir = tmp_path / "bin"
+        # Freeze the clock: both backups get the same second.
+        _stub(bin_dir, "date", 'echo 20261008T030000Z')
+        env = fake_pg(_LISTING_WITH_DATA)
+
+        first = _run("backup", str(out), env={**env, "DUMP_PAYLOAD": "first-archive"})
+        second = _run("backup", str(out), env={**env, "DUMP_PAYLOAD": "second-archive"})
+
+        assert first.returncode == 0, first.stderr
+        assert second.returncode == 0, second.stderr
+        first_path = first.stdout.split("backup ok: ")[1].split(" (")[0]
+        second_path = second.stdout.split("backup ok: ")[1].split(" (")[0]
+        assert first_path != second_path
+        assert Path(first_path).read_text() == "first-archive\n"
+        assert Path(second_path).read_text() == "second-archive\n"
+        assert sorted(p.name for p in out.iterdir()) == [
+            "syn-20261008T030000Z-1.dump",
+            "syn-20261008T030000Z.dump",
+        ]
+
+    def test_simultaneous_backups_each_keep_their_own_archive(self, tmp_path, fake_pg):
+        out = tmp_path / "backups"
+        out.mkdir()
+        _stub(tmp_path / "bin", "date", 'echo 20261008T030000Z')
+        env = fake_pg(_LISTING_WITH_DATA)
+        procs = [
+            subprocess.Popen(
+                ["sh", str(_SCRIPT), "backup", str(out)],
+                env={**env, "DUMP_PAYLOAD": f"archive-{i}"},
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            for i in range(4)
+        ]
+        assert [p.wait(timeout=30) for p in procs] == [0, 0, 0, 0]
+        payloads = sorted(p.read_text() for p in out.iterdir())
+        assert payloads == [f"archive-{i}\n" for i in range(4)]
 
 
 class TestPrune:
@@ -194,6 +238,28 @@ class TestCronMatch:
         assert result.returncode == 2
         assert "invalid cron expression" in result.stderr
 
+    @pytest.mark.parametrize(
+        "expr", ["0,60 3 * * *", "0 0 * * 0,MON", "0 0 31-1 * *", "0 5-3 * * *"]
+    )
+    @pytest.mark.parametrize("now", ["0 3 1 1 1", "0 0 1 1 0", "17 9 15 6 3"])
+    def test_invalid_anywhere_is_invalid_at_any_time(self, expr, now):
+        # A valid first list element, or a time that happens to match it, must
+        # not hide an invalid tail or a range that can never match.
+        result = _run("cron-match", expr, now)
+        assert result.returncode == 2, (expr, now, result.stderr)
+
+    @pytest.mark.parametrize("expr", ["0,60 3 * * *", "0 0 31-1 * *"])
+    def test_schedule_refuses_to_start_on_an_invalid_tail_or_range(self, tmp_path, expr):
+        result = subprocess.run(
+            ["sh", str(_SCRIPT), "schedule", str(tmp_path), expr, "7"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "BACKUP_SCHEDULE" in result.stderr
+
     def test_schedule_refuses_to_start_on_an_invalid_expression(self, tmp_path):
         result = subprocess.run(
             ["sh", str(_SCRIPT), "schedule", str(tmp_path), "0 3 * * MON", "7"],
@@ -259,3 +325,22 @@ class TestJustRecipes:
         writers = re.search(r'writers="([a-z -]+)"', self._recipe("selfhost-restore"))
         assert writers
         assert set(writers.group(1).split()) == set(stopped.group(1).split())
+
+    @pytest.mark.skipif(shutil.which("just") is None, reason="just is not installed")
+    @pytest.mark.parametrize(
+        "name", ['literal-$(touch {sentinel}).dump', 'a "quoted" `touch {sentinel}` b.dump']
+    )
+    def test_restore_file_name_is_data_not_shell(self, tmp_path, name):
+        sentinel = tmp_path / "substituted"
+        backup = tmp_path / name.format(sentinel=sentinel)
+        result = subprocess.run(
+            ["just", "selfhost-restore", str(backup)],
+            cwd=_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert f"No such backup: {backup}" in result.stdout
+        assert not sentinel.exists(), "the file name was run as a command"

@@ -47,16 +47,26 @@ require_days() {
 backup() {
     dir=$1
     [ -d "$dir" ] || fail "backup directory $dir does not exist"
-    name="syn-$(date -u +%Y%m%dT%H%M%SZ).dump"
-    # Written under a name prune never matches, and renamed only once
-    # verified: a dump that dies half way never looks like a backup.
-    partial="$dir/.$name.partial"
-    trap 'rm -f "$partial"' EXIT
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
     umask 077
+    # Written under a unique name prune never matches, and published only once
+    # verified: a dump that dies half way never looks like a backup, and two
+    # backups in the same second (schedule + manual) never share a file.
+    partial=$(mktemp "$dir/.syn-$stamp-XXXXXX.dump.partial") ||
+        fail "cannot create a file in $dir"
+    trap 'rm -f "$partial"' EXIT
     pg_dump --format=custom --file="$partial"
     tables=$(table_data_count "$partial")
     [ "$tables" -gt 0 ] || fail "archive lists no table data; refusing to keep it"
-    mv "$partial" "$dir/$name"
+    # ln refuses an existing name, so publishing never replaces another
+    # backup: a same-second collision takes the next free -N suffix.
+    name="syn-$stamp.dump" n=0
+    until ln "$partial" "$dir/$name" 2>/dev/null; do
+        n=$((n + 1))
+        [ "$n" -le 99 ] || fail "no free name for a $stamp backup in $dir"
+        name="syn-$stamp-$n.dump"
+    done
+    rm -f "$partial"
     trap - EXIT
     size=$(du -h "$dir/$name" | cut -f1)
     echo "backup ok: $dir/$name ($size, $tables tables)"
@@ -83,8 +93,11 @@ cron_match() {
         if (s + 0 < lo || s + 0 > hi) invalid(s " is outside " lo "-" hi)
         return s + 0
     }
-    function field_ok(spec, v, lo, hi,    n, parts, i, p, step, r, a, b) {
+    # Every list element and range is checked before anything matches, so
+    # validity never depends on the time it is asked at.
+    function field_ok(spec, v, lo, hi,    n, parts, i, p, step, r, a, b, hit) {
         n = split(spec, parts, ",")
+        hit = 0
         for (i = 1; i <= n; i++) {
             p = parts[i]; step = 1
             if (index(p, "/")) {
@@ -95,11 +108,12 @@ cron_match() {
             else if (index(p, "-")) {
                 if (split(p, r, "-") != 2) invalid("bad range in \"" p "\"")
                 a = num(r[1], lo, hi); b = num(r[2], lo, hi)
+                if (a > b) invalid("descending range \"" p "\"")
             }
             else { a = num(p, lo, hi); b = (step > 1 ? hi : a) }
-            if (v >= a && v <= b && (v - a) % step == 0) return 1
+            if (v >= a && v <= b && (v - a) % step == 0) hit = 1
         }
-        return 0
+        return hit
     }
     {
         if (split(expr, f, " ") != 5) invalid("need 5 fields")
@@ -107,7 +121,8 @@ cron_match() {
         hour = field_ok(f[2], $2 + 0, 0, 23)
         dom = field_ok(f[3], $3 + 0, 1, 31)
         mon = field_ok(f[4], $4 + 0, 1, 12)
-        dow = field_ok(f[5], $5 + 0, 0, 7) || ($5 + 0 == 0 && field_ok(f[5], 7, 0, 7))
+        dow = field_ok(f[5], $5 + 0, 0, 7)
+        if ($5 + 0 == 0 && field_ok(f[5], 7, 0, 7)) dow = 1
         if (f[3] != "*" && f[5] != "*") day = dom || dow
         else day = dom && dow
         matched = min && hour && mon && day
@@ -180,9 +195,9 @@ restore() {
     # Recreate rather than restore over: tables the api created on startup
     # would otherwise collide with the archive's own CREATE TABLEs.
     echo "recreating database '$db'"
-    psql -X -q -v ON_ERROR_STOP=1 -d postgres \
-        -c "drop database if exists \"$db\" with (force)" \
-        -c "create database \"$db\""
+    # :"db" quotes the name as an identifier, whatever it contains.
+    printf '%s\n' 'drop database if exists :"db" with (force);' 'create database :"db";' |
+        psql -X -q -v ON_ERROR_STOP=1 -d postgres -v db="$db"
     # Hypertables restore only between pre_restore and post_restore, and only
     # serially (no -j): docs/deployment/timescaledb-2.29-upgrade.md.
     psql -X -q -v ON_ERROR_STOP=1 -d "$db" \

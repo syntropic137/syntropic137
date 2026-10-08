@@ -1704,10 +1704,18 @@ selfhost-backup:
     set -euo pipefail
     # Same command the scheduled db-backup service runs: docker/db-backup/.
     source infra/scripts/selfhost-env.sh
-    {{compose_selfhost}} run --rm --no-TTY db-backup backup /backups \
+    # The database's identity comes from the running container, not from
+    # infra/.env, which can have changed since the container was created.
+    # Only these two values are read; nothing else from its env is printed.
+    db_user=$({{compose_selfhost}} exec -T timescaledb printenv POSTGRES_USER) \
+        || { echo "❌ timescaledb is not running"; exit 1; }
+    db_name=$({{compose_selfhost}} exec -T timescaledb printenv POSTGRES_DB)
+    db_identity=(-e "PGUSER=$db_user" -e "PGDATABASE=$db_name")
+    {{compose_selfhost}} run --rm --no-TTY "${db_identity[@]}" db-backup backup /backups \
         | sed "s|/backups/|${BACKUP_DIR:-/var/backups/syn}/|"
 
 # Replace the syn database with a backup (refuses a populated DB without --force)
+[positional-arguments]
 selfhost-restore file *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1716,20 +1724,29 @@ selfhost-restore file *args:
     # because they reconnect and write the moment Postgres is reachable. Starts
     # them again afterwards, unless the restore itself failed. --force is also
     # passed to the in-flight execution check: a restore discards running
-    # executions too.
+    # executions too. Arguments arrive as "$1" "$@", never as recipe text, so a
+    # file name is only ever data.
     source infra/scripts/selfhost-env.sh
-    [ -f "{{file}}" ] || { echo "❌ No such backup: {{file}}"; exit 1; }
-    file="$(cd "$(dirname "{{file}}")" && pwd)/$(basename "{{file}}")"
-    uv run python infra/scripts/predeploy_check.py {{args}}
-    force=""
-    for a in {{args}}; do [ "$a" = --force ] && force=--force; done
+    [ -f "$1" ] || { echo "❌ No such backup: $1"; exit 1; }
+    file="$(cd "$(dirname -- "$1")" && pwd)/$(basename -- "$1")"
+    shift
+    uv run python infra/scripts/predeploy_check.py "$@"
+    force=()
+    for a in "$@"; do [ "$a" = --force ] && force=(--force); done
+    # The database's identity comes from the running container, not from
+    # infra/.env, which can have changed since the container was created.
+    # Only these two values are read; nothing else from its env is printed.
+    db_user=$({{compose_selfhost}} exec -T timescaledb printenv POSTGRES_USER) \
+        || { echo "❌ timescaledb is not running"; exit 1; }
+    db_name=$({{compose_selfhost}} exec -T timescaledb printenv POSTGRES_DB)
+    db_identity=(-e "PGUSER=$db_user" -e "PGDATABASE=$db_name")
     writers="api collector event-store gateway"
     echo "Stopping writers: $writers"
     {{compose_selfhost}} stop $writers
     rc=0
-    {{compose_selfhost}} run --rm --no-TTY \
-        -v "$(dirname "$file"):/restore:ro" \
-        db-backup restore "/restore/$(basename "$file")" $force || rc=$?
+    {{compose_selfhost}} run --rm --no-TTY "${db_identity[@]}" \
+        -v "$(dirname -- "$file"):/restore:ro" \
+        db-backup restore "/restore/$(basename -- "$file")" "${force[@]}" || rc=$?
     if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
         echo "❌ Restore failed (exit $rc). Writers left STOPPED: inspect the database, then"
         echo "   {{compose_selfhost}} start $writers"
