@@ -48,8 +48,8 @@ git submodule update --init --recursive
 Paste the output of each. Never rebase and never force push: this repository
 merges main into feature branches, in that direction, always.
 
-**Why the merge.** The gates verify runs (`just preflight-agent` and the unit
-suite) live in `main`'s justfile. A head that predates them is not verifiable,
+**Why the merge.** The gates verify runs are the repository's own, declared on
+`main` (its `AGENTS.md` `## Verification gates` section). A head that predates them is not verifiable,
 and a verify phase that checks out such a head refuses it - on a change that
 may well be correct.
 

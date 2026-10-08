@@ -77,8 +77,9 @@ not moving the goalposts: it is the same check, read where it actually ran.
 
 ## A check this workspace cannot run is settled by CI on the same head SHA
 
-Some checks cannot run here at all: today the docker-backed fitness tests,
-which `preflight-agent` skips as `NOT RUN`. "Not run here" is not a pass, and
+Some checks cannot run here at all: a gate that needs a binary this workspace
+lacks, or a test the gate itself reports as `NOT RUN` (in syntropic137,
+today, the docker-backed fitness tests). "Not run here" is not a pass, and
 on its own it is not a blocker either. It is a question CI answers for the same
 commit, so read CI's answer instead of holding the PR in draft. PRs #1562 and
 #1576 each sat BLOCKED on exactly this while CI's Architectural Fitness job had
