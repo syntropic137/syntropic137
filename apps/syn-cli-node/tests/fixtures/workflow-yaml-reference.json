@@ -118,7 +118,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "a3c49aebb7c922c7509113b87030e217e2c401196beca2e2e069440f29ac8e5a"
+      "document_sha256": "464d030481bab482b6ecd784017e9c6a6726ad8e4a4118b1342376ff1012f418"
     },
     "workflows/evals/verify-pinned-sdlc-lean/workflow.yaml": {
       "phases": [
@@ -129,7 +129,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "8c07d643bca8f9a29da5f0ec201047fb374b2fe4ca87b2c077d19665a63e2314"
+      "document_sha256": "7e46ef760c2924a2b1f9e716efc3dd87182aa5e8beede1778540c14ae18c0ca3"
     },
     "workflows/evals/verify-pinned-sonnet/workflow.yaml": {
       "phases": [

@@ -413,6 +413,7 @@
         ],
         "timeout_seconds": 3600,
         "delivers_repo_changes": false,
+        "prewarm": true,
         "agent": {
           "provider": "codex",
           "model": "gpt-sol",
@@ -448,6 +449,7 @@
         ],
         "timeout_seconds": 3600,
         "delivers_repo_changes": false,
+        "prewarm": true,
         "agent": {
           "provider": "codex",
           "model": "gpt-sol",
