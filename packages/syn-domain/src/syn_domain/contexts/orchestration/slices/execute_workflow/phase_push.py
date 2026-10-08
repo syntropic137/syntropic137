@@ -97,7 +97,7 @@ class _PushContext(BaseModel):
     git: _Push
 
 
-class _HookEvent(BaseModel):
+class _HookLine(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     event_type: str
@@ -112,7 +112,7 @@ async def observe_push(embedded: object, on_push: PushObserver | None) -> None:
     if on_push is None:
         return
     try:
-        event = _HookEvent.model_validate(embedded)
+        event = _HookLine.model_validate(embedded)
     except ValidationError:
         return
     if event.event_type != GIT_PUSH or event.context is None:
