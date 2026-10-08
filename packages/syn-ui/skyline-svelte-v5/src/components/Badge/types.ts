@@ -1,6 +1,6 @@
 import type { Snippet } from 'svelte'
 import type { HTMLAttributes } from 'svelte/elements'
-import type { BadgeContract } from '@syn137/skyline-core/contracts'
+import type { BadgeContract, ContractSize } from '@syn137/skyline-core/contracts'
 
 /**
  * Badge (CompDisplay board). Status and verdict pills.
@@ -10,6 +10,8 @@ import type { BadgeContract } from '@syn137/skyline-core/contracts'
  * Failed soft + danger, Cancelled outline + neutral.
  */
 export interface BadgeProps extends BadgeContract, Omit<HTMLAttributes<HTMLSpanElement>, keyof BadgeContract | 'children'> {
+  /** Skyline: upstream BadgeContract has no size. */
+  size?: Exclude<ContractSize, 'lg'>
   children?: Snippet
   /** Leading glyph (12px), e.g. the status check or cross. */
   icon?: Snippet

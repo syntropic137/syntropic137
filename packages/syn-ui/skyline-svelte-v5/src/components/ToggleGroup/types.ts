@@ -1,5 +1,5 @@
 import type { HTMLAttributes } from 'svelte/elements'
-import type { ToggleGroupContract, ToggleGroupItemContract } from '@syn137/skyline-core/contracts'
+import type { ContractSize, ToggleGroupItemContract, ToggleGroupMultipleContract } from '@syn137/skyline-core/contracts'
 
 export interface ToggleGroupItem extends ToggleGroupItemContract {
   label: string
@@ -17,9 +17,14 @@ export interface ToggleGroupItem extends ToggleGroupItemContract {
  * `type="single"` is a radio group: arrows move the choice. By default a
  * single group always keeps one item (`allowEmpty` false). `type="multiple"`
  * is a set of pressed buttons: arrows move focus, Space/Enter toggles.
- * The value is always a string array (upstream contract).
+ * The value is always a string array. Upstream ToggleGroupContract is a
+ * union whose `single` arm takes a plain string; Skyline keeps the array for
+ * both types, so it extends the `multiple` arm with `type` widened.
  */
-export interface ToggleGroupProps extends ToggleGroupContract, Omit<HTMLAttributes<HTMLDivElement>, keyof ToggleGroupContract | 'children'> {
+export interface ToggleGroupProps extends Omit<ToggleGroupMultipleContract, 'type'>, Omit<HTMLAttributes<HTMLDivElement>, keyof ToggleGroupMultipleContract | 'children'> {
+  type: 'single' | 'multiple'
+  /** Skyline: upstream has no size. */
+  size?: ContractSize
   items: ToggleGroupItem[]
   variant?: 'segmented' | 'chips'
   /** Mono labels (16w / Year). */

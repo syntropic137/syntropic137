@@ -16,6 +16,9 @@ import type { TriggerProps } from '../_internal/trigger'
 export type DialogSize = 'sm' | 'md' | 'lg' | 'full'
 
 export interface DialogProps extends DialogRootContract {
+  /** Skyline: upstream DialogRootContract has no modal flag. */
+  modal?: boolean
+  'aria-label'?: string
   title?: string
   /** Mono suffix after the title ("2fd5ec12"). */
   titleId?: string

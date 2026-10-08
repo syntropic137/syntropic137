@@ -101,6 +101,15 @@ describe('Tooltip', () => {
     await userEvent.keyboard('{Escape}')
     expect(tip.hidden).toBe(true)
   })
+
+  it('never opens when disabled (upstream TooltipRootContract.disabled)', async () => {
+    render(TooltipHarness, { disabled: true })
+    const trigger = screen.getByRole('button', { name: '66e14f23' })
+    const tip = document.getElementById(trigger.getAttribute('aria-describedby')!)!
+    trigger.focus()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(tip.hidden).toBe(true)
+  })
 })
 
 describe('Dialog', () => {

@@ -1,6 +1,6 @@
 import type { Snippet } from 'svelte'
 import type { HTMLAttributes } from 'svelte/elements'
-import type { ScrollAreaContract } from '@syn137/skyline-core/contracts'
+import type { ContractOrientation, ScrollAreaContract } from '@syn137/skyline-core/contracts'
 
 /**
  * Scroll Area (ScrollAreaContract): wide content that scrolls inside its own
@@ -10,6 +10,8 @@ import type { ScrollAreaContract } from '@syn137/skyline-core/contracts'
  * so that focus stop has a name.
  */
 export interface ScrollAreaProps extends ScrollAreaContract, Omit<HTMLAttributes<HTMLDivElement>, keyof ScrollAreaContract | 'children'> {
+  /** Skyline: upstream ScrollAreaContract has no orientation. */
+  orientation?: ContractOrientation | 'both'
   /** CSS max-height for vertical scrolling, e.g. "20rem". */
   maxHeight?: string
   /** Hide the scrollbar (chip rows); fades still show. */

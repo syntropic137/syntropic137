@@ -19,6 +19,16 @@ describe('Button', () => {
     expect(screen.getByRole('button').dataset.tone).toBe('accent')
   })
 
+  it.each([
+    ['primary', 'solid', 'accent'],
+    ['secondary', 'outline', 'neutral'],
+    ['ghost', 'ghost', 'neutral'],
+    ['danger', 'outline', 'danger'],
+  ] as const)('maps the upstream %s variant onto Skyline (%s, %s)', (variant, drawn, tone) => {
+    render(Button, { variant, children: text('Go') })
+    expect(screen.getByRole('button').dataset).toMatchObject({ variant: drawn, tone })
+  })
+
   it('calls onclick and passes native attributes through', async () => {
     const onclick = vi.fn()
     render(Button, { onclick, title: 'hello', 'data-testid': 'b', children: text('Go') })

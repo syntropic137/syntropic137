@@ -1,6 +1,6 @@
 import type { Snippet } from 'svelte'
 import type { HTMLAttributes } from 'svelte/elements'
-import type { AccordionContract } from '@syn137/skyline-core/contracts'
+import type { AccordionMultipleContract } from '@syn137/skyline-core/contracts'
 
 export interface AccordionItem {
   value: string
@@ -16,8 +16,14 @@ export interface AccordionItem {
  * between headers. `type="single"` keeps one open (`collapsible` lets it
  * close again); `type="multiple"` any number. Content comes from the
  * `children` snippet, called with the item.
+ *
+ * Upstream AccordionContract is a union whose `single` arm takes a plain
+ * string; Skyline keeps a string array for both types (like Toggle Group).
  */
-export interface AccordionProps extends AccordionContract, Omit<HTMLAttributes<HTMLDivElement>, keyof AccordionContract | 'children'> {
+export interface AccordionProps extends Omit<AccordionMultipleContract, 'type'>, Omit<HTMLAttributes<HTMLDivElement>, keyof AccordionMultipleContract | 'children'> {
+  type: 'single' | 'multiple'
+  /** Skyline: with `single`, whether the open item can be closed again. */
+  collapsible?: boolean
   items: AccordionItem[]
   /** Heading level wrapping each header button. */
   level?: 2 | 3 | 4 | 5 | 6

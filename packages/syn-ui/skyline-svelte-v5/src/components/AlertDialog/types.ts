@@ -12,6 +12,7 @@ import type { TriggerProps } from '../_internal/trigger'
  * and shows the error message.
  */
 export interface AlertDialogProps extends AlertDialogRootContract {
+  'aria-label'?: string
   title: string
   /** Plain-text description; use `children` for rich text. */
   description?: string

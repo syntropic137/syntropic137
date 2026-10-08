@@ -15,11 +15,9 @@
  * Skyline-only components (no contract yet):
  *   Card, Tag, Input, Breadcrumbs, Stat, Callout, Empty State, Skeleton.
  *
- * Once Button, Badge and Toggle exist, add the conformance entry:
- *
- *   import type { RequiredComponentAdapter } from '@syn137/skyline-core/contracts'
- *   export const svelteV5ContractAdapter = { Button, Badge, Toggle } satisfies
- *     RequiredComponentAdapter<Component<any>>
+ * Conformance: `svelteV5ContractAdapter` (bottom of this file) covers every
+ * upstream required contract, and `SvelteV5ContractConformance` checks that
+ * each of those components accepts its contract's props.
  *
  * Patterns (App Shell, Skyline, Run Row, ...) export from './patterns'.
  */
@@ -100,11 +98,26 @@ export type { TagProps, TagVariant, TagAgent } from './components/Tag/types'
 export type { TriggerProps } from './components/_internal/trigger'
 
 // ---- Upstream conformance: the required contracts, type-checked ----
-import type { Component } from 'svelte'
-import type { RequiredComponentAdapter } from '@syn137/skyline-core/contracts'
+import type { RequiredComponentAdapter, RequiredComponentContracts } from '@syn137/skyline-core/contracts'
 import BadgeComponent from './components/Badge/Badge.svelte'
 import ButtonComponent from './components/Button/Button.svelte'
 import ToggleComponent from './components/Toggle/Toggle.svelte'
-// Props interfaces extend their contracts (ButtonProps extends ButtonContract, ...), so TS
-// enforces prop conformance; this entry checks the adapter covers every required contract.
-export const svelteV5ContractAdapter = { Button: ButtonComponent, Badge: BadgeComponent, Toggle: ToggleComponent } satisfies RequiredComponentAdapter<Component<any>>
+import type { BadgeProps as BadgeComponentProps } from './components/Badge/types'
+import type { ButtonProps as ButtonComponentProps } from './components/Button/types'
+import type { ToggleProps as ToggleComponentProps } from './components/Toggle/types'
+// The adapter covers every required contract (upstream keys: button, badge, toggle).
+export const svelteV5ContractAdapter = { button: ButtonComponent, badge: BadgeComponent, toggle: ToggleComponent } satisfies RequiredComponentAdapter
+// Each required component accepts every prop of its contract. Checked this way round because
+// Skyline props are a superset (Button also takes Skyline's solid/outline variants and a tone).
+// Per key, because Svelte's HTML attribute types carry a symbol index signature (attachments).
+type AcceptsContract<Props, Contract> = {
+  [K in keyof Contract]-?: K extends keyof Props ? ([Contract[K]] extends [Props[K]] ? true : false) : false
+}[keyof Contract] extends true
+  ? true
+  : false
+type AssertTrue<T extends true> = T
+export type SvelteV5ContractConformance = [
+  AssertTrue<AcceptsContract<ButtonComponentProps, RequiredComponentContracts['button']>>,
+  AssertTrue<AcceptsContract<BadgeComponentProps, RequiredComponentContracts['badge']>>,
+  AssertTrue<AcceptsContract<ToggleComponentProps, RequiredComponentContracts['toggle']>>,
+]

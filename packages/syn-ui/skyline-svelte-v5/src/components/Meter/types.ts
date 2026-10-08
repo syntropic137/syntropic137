@@ -15,6 +15,10 @@ export type MeterSeries = 'data-1' | 'data-2' | 'data-3' | 'data-4' | 'claude' |
 export interface MeterProps extends MeterContract, Omit<HTMLAttributes<HTMLDivElement>, keyof MeterContract | 'children'> {
   /** Visible name on the left; also the accessible name. */
   label?: string
+  /** Skyline: HTML <meter> regions (upstream MeterContract has none). */
+  low?: number
+  high?: number
+  optimum?: number
   /** Figure on the right, e.g. "26 runs". Also used as aria-valuetext. */
   valueText?: string
   series?: MeterSeries

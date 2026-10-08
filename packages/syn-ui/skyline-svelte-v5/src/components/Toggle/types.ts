@@ -1,6 +1,6 @@
 import type { Snippet } from 'svelte'
 import type { HTMLButtonAttributes } from 'svelte/elements'
-import type { ToggleContract } from '@syn137/skyline-core/contracts'
+import type { ContractSize, ToggleContract } from '@syn137/skyline-core/contracts'
 
 /**
  * Toggle (CompActions board): a lone pressed chip such as "Expand all".
@@ -10,6 +10,8 @@ import type { ToggleContract } from '@syn137/skyline-core/contracts'
  * uncontrolled with `defaultPressed`.
  */
 export interface ToggleProps extends ToggleContract, Omit<HTMLButtonAttributes, keyof ToggleContract | 'children' | 'type'> {
+  /** Skyline: upstream ToggleContract has no size. */
+  size?: ContractSize
   children?: Snippet
   icon?: Snippet
 }

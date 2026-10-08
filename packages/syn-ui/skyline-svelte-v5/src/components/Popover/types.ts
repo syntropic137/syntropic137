@@ -1,5 +1,5 @@
 import type { Snippet } from 'svelte'
-import type { PopoverRootContract } from '@syn137/skyline-core/contracts'
+import type { PopoverContentContract, PopoverRootContract } from '@syn137/skyline-core/contracts'
 import type { TriggerProps } from '../_internal/trigger'
 
 /**
@@ -15,7 +15,7 @@ import type { TriggerProps } from '../_internal/trigger'
  *     {#snippet children({ close })}...{/snippet}
  *   </Popover>
  */
-export interface PopoverProps extends PopoverRootContract {
+export interface PopoverProps extends PopoverRootContract, Pick<PopoverContentContract, 'side'> {
   /** Accessible name of the panel. */
   label: string
   /** Mono caps heading inside the panel ("STATUS"). */

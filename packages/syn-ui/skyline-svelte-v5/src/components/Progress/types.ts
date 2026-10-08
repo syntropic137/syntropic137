@@ -1,5 +1,5 @@
 import type { HTMLAttributes } from 'svelte/elements'
-import type { ProgressContract } from '@syn137/skyline-core/contracts'
+import type { ContractTone, ProgressContract } from '@syn137/skyline-core/contracts'
 
 /**
  * Progress (ProgressContract): a running execution. CompDisplay draws it as
@@ -8,6 +8,8 @@ import type { ProgressContract } from '@syn137/skyline-core/contracts'
  * indeterminate and shimmers unless the user prefers reduced motion.
  */
 export interface ProgressProps extends ProgressContract, Omit<HTMLAttributes<HTMLDivElement>, keyof ProgressContract | 'children'> {
+  /** Skyline: upstream ProgressContract has no tone. */
+  tone?: ContractTone
   /** Draw as this many blocks (phases). `max` defaults to it. */
   segments?: number
   /** e.g. "phase 2 of 3"; becomes aria-valuetext. */

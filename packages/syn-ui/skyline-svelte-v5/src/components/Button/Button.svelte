@@ -27,7 +27,10 @@
     ...rest
   }: ButtonProps = $props()
 
-  const resolvedTone = $derived(tone ?? (variant === 'solid' ? 'accent' : 'neutral'))
+  // Upstream variant names map onto Skyline's: primary = solid accent,
+  // secondary = outline, danger = outline danger.
+  const resolvedVariant = $derived(variant === 'primary' ? 'solid' : variant === 'secondary' || variant === 'danger' ? 'outline' : variant)
+  const resolvedTone = $derived(tone ?? (variant === 'danger' ? 'danger' : resolvedVariant === 'solid' ? 'accent' : 'neutral'))
   const iconOnly = $derived(!children && !!(icon || loading))
 
   function handleClick(e: MouseEvent & { currentTarget: EventTarget & HTMLButtonElement }) {
@@ -44,7 +47,7 @@
     {...rest as HTMLAnchorAttributes}
     class="sky-button"
     {href}
-    data-variant={variant}
+    data-variant={resolvedVariant}
     data-tone={resolvedTone}
     data-size={size}
     data-icon-only={iconOnly || undefined}
@@ -66,7 +69,7 @@
     class="sky-button"
     {type}
     {disabled}
-    data-variant={variant}
+    data-variant={resolvedVariant}
     data-tone={resolvedTone}
     data-size={size}
     data-icon-only={iconOnly || undefined}

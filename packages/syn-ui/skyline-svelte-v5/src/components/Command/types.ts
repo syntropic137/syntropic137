@@ -32,6 +32,13 @@ export interface CommandGroup {
  */
 export interface CommandProps extends CommandRootContract, Omit<HTMLAttributes<HTMLDivElement>, keyof CommandRootContract | 'children'> {
   groups: CommandGroup[]
+  /** Skyline: upstream has no initial value. */
+  defaultValue?: string
+  /** Skyline: current search text (upstream puts it on CommandInputContract). */
+  search?: string
+  onSearchChange?: (search: string) => void
+  /** Skyline: client-side filtering; false when results come from a server. */
+  shouldFilter?: boolean
   placeholder?: string
   /** Text when nothing matches. */
   empty?: string

@@ -16,6 +16,8 @@ export interface TabsItem extends TabsTriggerContract {
  */
 export interface TabsProps extends TabsRootContract, Omit<HTMLAttributes<HTMLDivElement>, keyof TabsRootContract | 'children'> {
   items: TabsItem[]
+  /** Skyline: `automatic` selects on focus; `manual` on activation. */
+  activationMode?: 'automatic' | 'manual'
   /** Accessible name for the tab list. */
   label?: string
   mono?: boolean

@@ -3,6 +3,11 @@ import type { HTMLAttributes } from 'svelte/elements'
 import type { NavigationMenuItemContract, NavigationMenuRootContract } from '@syn137/skyline-core/contracts'
 
 export interface NavigationMenuItem extends NavigationMenuItemContract {
+  /** Skyline: required here (optional upstream). */
+  value: string
+  label: string
+  href: string
+  current?: boolean
   icon?: Snippet
   /** Mono figure shown in the More menu ("65"). */
   meta?: string
@@ -21,6 +26,8 @@ export interface NavigationMenuItem extends NavigationMenuItemContract {
  */
 export interface NavigationMenuProps extends NavigationMenuRootContract, Omit<HTMLAttributes<HTMLElement>, keyof NavigationMenuRootContract | 'children'> {
   items: NavigationMenuItem[]
+  /** Skyline: upstream NavigationMenuRootContract has no defaultValue. */
+  defaultValue?: string
   variant?: 'capsule' | 'dock'
   /** Dock only: sections behind the More button. */
   more?: NavigationMenuItem[]

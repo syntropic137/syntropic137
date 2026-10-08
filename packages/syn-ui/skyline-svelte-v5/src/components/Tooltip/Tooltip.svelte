@@ -9,7 +9,9 @@
     open = $bindable(),
     defaultOpen = false,
     onOpenChange,
-    delayDuration = 400,
+    openDelay = 400,
+    closeDelay = 0,
+    disabled = false,
     side = 'top',
     align = 'center',
     content,
@@ -29,6 +31,7 @@
 
   function set(next: boolean) {
     clearTimeout(timer)
+    if (next && disabled) return
     if (next === isOpen) return
     internal = next
     if (open !== undefined) open = next
@@ -36,7 +39,12 @@
   }
   function openLater() {
     clearTimeout(timer)
-    timer = setTimeout(() => set(true), delayDuration)
+    timer = setTimeout(() => set(true), openDelay)
+  }
+  function closeLater() {
+    clearTimeout(timer)
+    if (closeDelay > 0) timer = setTimeout(() => set(false), closeDelay)
+    else set(false)
   }
 
   $effect(() => {
@@ -61,7 +69,7 @@
     onpointerenter: (e: PointerEvent) => {
       if (e.pointerType !== 'touch') openLater()
     },
-    onpointerleave: () => set(false),
+    onpointerleave: () => closeLater(),
     onfocus: () => set(true),
     onblur: () => set(false),
   })
