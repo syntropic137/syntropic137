@@ -10,12 +10,20 @@ from syn_shared.settings.disk import DiskSettings
 pytestmark = pytest.mark.unit
 
 
-def test_defaults_degrade_at_ten_and_refuse_at_five(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SYN_DISK_DEGRADED_BELOW_PERCENT", raising=False)
-    monkeypatch.delenv("SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT", raising=False)
+def test_defaults_degrade_at_fifteen_refuse_at_five_reclaim_after_six_hours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in (
+        "SYN_DISK_DEGRADED_BELOW_PERCENT",
+        "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT",
+        "SYN_DISK_RECLAIM_GRACE_HOURS",
+    ):
+        monkeypatch.delenv(name, raising=False)
     settings = DiskSettings(_env_file=None)
-    assert settings.degraded_below_percent == 10.0
+    # PC-130: 10% paged too late to reclaim by hand before admission closed.
+    assert settings.degraded_below_percent == 15.0
     assert settings.refuse_admission_below_percent == 5.0
+    assert settings.reclaim_grace_hours == 6.0
 
 
 def test_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
