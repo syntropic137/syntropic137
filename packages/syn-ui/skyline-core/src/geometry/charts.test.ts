@@ -23,6 +23,11 @@ import {
   yearRange,
   type SkylineDay,
 } from './index'
+import { SKYLINE_BOARD_ELEVATION } from './skyline'
+
+// The board numbers below were drawn at the board camera; the shipped default looks down more (skylineView.test.ts).
+const BOARD_YEAR = { ...SKYLINE_YEAR, elevation: SKYLINE_BOARD_ELEVATION }
+const BOARD_WEEKS = { ...SKYLINE_WEEKS, elevation: SKYLINE_BOARD_ELEVATION }
 
 // The Overview board's eleven active days: date, sessions, executions, cost, input, output, cache write, cache read.
 const RAW: [string, number, number, number, number, number, number, number][] = [
@@ -61,7 +66,7 @@ describe('skyline ranges', () => {
 })
 
 describe('layoutSkyline, year (Main board)', () => {
-  const sky = layoutSkyline({ days: DAYS, range: yearRange(2026), today: TODAY, dims: SKYLINE_YEAR })
+  const sky = layoutSkyline({ days: DAYS, range: yearRange(2026), today: TODAY, dims: BOARD_YEAR })
 
   it('draws one bar per active day, oldest first', () => {
     expect(sky.bars).toHaveLength(11)
@@ -113,7 +118,7 @@ describe('layoutSkyline, year (Main board)', () => {
 })
 
 describe('layoutSkyline, 16 weeks (PhoneOverview board)', () => {
-  const sky = layoutSkyline({ days: DAYS, range: recentWeeksRange(TODAY), today: TODAY, dims: SKYLINE_WEEKS })
+  const sky = layoutSkyline({ days: DAYS, range: recentWeeksRange(TODAY), today: TODAY, dims: BOARD_WEEKS })
   it('keeps the global height scale and the board month labels', () => {
     expect(sky.bars).toHaveLength(11)
     expect(sky.bars[10]!.height).toBe(72)
@@ -122,7 +127,7 @@ describe('layoutSkyline, 16 weeks (PhoneOverview board)', () => {
     expect(sky.future.split('Z').length - 1).toBe(3)
   })
   it('ignores days outside the range for drawing but not for scale', () => {
-    const only = layoutSkyline({ days: DAYS, range: { start: '2026-07-01', end: '2026-07-31' }, today: TODAY, dims: SKYLINE_WEEKS })
+    const only = layoutSkyline({ days: DAYS, range: { start: '2026-07-01', end: '2026-07-31' }, today: TODAY, dims: BOARD_WEEKS })
     expect(only.bars).toHaveLength(2)
     expect(only.maxSessions).toBe(43)
   })

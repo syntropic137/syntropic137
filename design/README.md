@@ -61,6 +61,7 @@ Small changes made in code after the owner reviewed the demo. Where a board disa
 
 - **Wordmark** (TopNav, PhoneTop): the original Syntropic137 "S" mark (`apps/syn-ui/public/logo_syntropic137.png`) with Orbitron type replaces the cube drawn on the boards. The cube's extrude recipe stays in skyline-core for the charts.
 - **Status colours** (Executions, Execution, Sessions, Session, Overview, Workflow runs): each state has its own `--sky-status-*` token, chosen once by `statusSemantics()`. Completed is green with a check (the boards draw it accent blue), failed red with a cross, running accent with a spinning partial ring and a pulsing badge, pending and queued muted with a clock, cancelled grey with a dash, interrupted amber with a pause. Phase segments, the outcome ring and the list split use the same tokens.
+- **Skyline** (Main, PhoneOverview): the camera looks down more, `dims.elevation` 60 degrees against the boards' 30 (`SKYLINE_ELEVATION`, chosen as the lowest angle at which every bar of the fixtures year and 16 weeks keeps part of its top face in view). Bars are coloured by `skylineTone()`: outcome mix (pass, mixed, fail, none) from the status tokens when a day has outcome counts, otherwise a four-step accent ramp by sessions, with a legend under the chart. The pointer picks bars by their silhouettes, front row first (`pickSkylineBar()`), so a short bar beside a tall one picks itself.
 
 ## For agents
 

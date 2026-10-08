@@ -7,7 +7,10 @@
   future part of the chart and a leader line to the picked bar (beside the
   chart instead when bars would sit under it). Narrow containers show the
   last 16 weeks with a Year toggle and the readout as a card underneath.
-  All geometry comes from layoutSkyline() in skyline-core.
+  All geometry comes from layoutSkyline() in skyline-core. The pointer is
+  hit-tested by pickSkylineBar() against each bar's silhouette, front row
+  first, so the face under the pointer is the day the readout shows. Top
+  faces are coloured by skylineTone() (outcome mix, or a count ramp).
 -->
 <script lang="ts">
   import { tick } from 'svelte'
@@ -18,9 +21,12 @@
     describeSkyline,
     hitStyle,
     layoutSkyline,
+    pickSkylineBar,
     recentWeeksRange,
+    skylineLegend,
     skylineLeadPath,
     yearRange,
+    type SkylineBar,
     type SkylineDay,
   } from '@syn137/skyline-core/geometry'
   import { GLYPH } from '@syn137/skyline-core/patterns'
@@ -47,6 +53,8 @@
   let dockWidth = $state(0)
   let phoneView = $state<'weeks' | 'year'>('weeks')
   let chartBox: HTMLDivElement | undefined = $state()
+  let svgEl: SVGSVGElement | undefined = $state()
+  let pointing = $state(false)
 
   const shownYear = $derived(year ?? Number(today.slice(0, 4)))
   // Before the first measurement, assume desktop so a server or test render shows the year.
@@ -56,6 +64,12 @@
   const range = $derived(mode === 'weeks' ? recentWeeksRange(today) : yearRange(shownYear))
   const layout = $derived(layoutSkyline({ days, range, today, dims }))
   const bars = $derived(layout.bars)
+  const barsByRow = $derived.by(() => {
+    const rows: SkylineBar[][] = [[], [], [], [], [], [], []]
+    for (const b of bars) rows[b.row]?.push(b)
+    return rows
+  })
+  const legend = $derived(skylineLegend(days))
   const current = $derived.by(() => {
     if (bars.length === 0) return null
     const i = selected ? bars.findIndex((b) => b.date === selected) : -1
@@ -66,13 +80,15 @@
   const rangeLabel = $derived(mode === 'weeks' ? 'the last 16 weeks' : String(shownYear))
 
   // Docked readout geometry (wide only), in viewBox units.
-  const vb = $derived(dims.viewBox)
+  // The projected dims (camera tilt applied) drive the view box, lead line and focus targets.
+  const drawn = $derived(layout.dims)
+  const vb = $derived(drawn.viewBox)
   const scale = $derived(chartWidth > 0 ? chartWidth / vb.width : 1)
   const dockGapPx = 8
   const overlapX = $derived(vb.x + (chartWidth - dockGapPx - (dockWidth || 244)) / scale)
   const overlap = $derived(wide && chartWidth > 0 && bars.every((b) => b.hit.x + b.hit.width < overlapX))
   const leadTarget = $derived(overlap ? overlapX : vb.x + vb.width)
-  const lead = $derived(wide && bar ? skylineLeadPath(bar, leadTarget, dims) : null)
+  const lead = $derived(wide && bar ? skylineLeadPath(bar, leadTarget, drawn) : null)
 
   async function send(event: DayStepperEvent, focus = false) {
     const next = dayStepper({ index: current, count: bars.length }, event)
@@ -87,6 +103,20 @@
       await tick()
       chartBox?.querySelector<HTMLButtonElement>(`[data-date="${b.date}"]`)?.focus()
     }
+  }
+
+  /** The bar under the pointer, in viewBox units, front faces first. */
+  function barAt(e: PointerEvent | MouseEvent): SkylineBar | null {
+    const m = svgEl?.getScreenCTM()
+    if (!svgEl || !m) return null
+    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse())
+    return pickSkylineBar(layout, p.x, p.y)
+  }
+
+  function onpoint(e: PointerEvent | MouseEvent) {
+    const b = barAt(e)
+    pointing = b !== null
+    if (b && b.index !== current) void send({ type: 'pick', index: b.index })
   }
 
   function onkey(e: KeyboardEvent) {
@@ -134,57 +164,80 @@
   </div>
 
   <div class="sky-skyline__stage" data-overlap={overlap || undefined}>
-    <div class="sky-skyline__chart" bind:this={chartBox} bind:clientWidth={chartWidth}>
-      <svg class="sky-skyline__svg" viewBox={layout.viewBox} role="img" aria-label={describeSkyline(layout, rangeLabel)}>
-        <path class="sky-skyline__floor" d={layout.floor} />
-        <path class="sky-skyline__future" d={layout.future} />
-        {#each [6, 5, 4, 3, 2, 1, 0] as j (j)}
-          {@const row = layout.rows[j]}
-          {#if row}
-            <path class="sky-skyline__side" d={row.side} />
-            <path class="sky-skyline__front" d={row.front} />
-            <path class="sky-skyline__top" d={row.top} />
-          {/if}
-        {/each}
-        {#if bar}
-          <g class="sky-skyline__picked">
-            <path class="sky-skyline__picked-side" d={bar.paths.side} />
-            <path class="sky-skyline__picked-front" d={bar.paths.front} />
-            <path class="sky-skyline__picked-top" d={bar.paths.top} />
-          </g>
-          {#if lead}
-            <path class="sky-skyline__lead" d={lead} />
-            <circle class="sky-skyline__dot" cx={bar.anchor.x} cy={bar.anchor.y} r="2.5" />
-          {/if}
-        {/if}
-        <g class="sky-skyline__months" aria-hidden="true">
-          {#each layout.months as m (m.label + m.x)}
-            <text x={m.x} y={m.y}>{m.label}</text>
+    <!-- Pointer picking is a mouse convenience; the day buttons below carry keyboard and screen reader access. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+    <div
+      class="sky-skyline__chart"
+      data-pointing={pointing || undefined}
+      bind:this={chartBox}
+      bind:clientWidth={chartWidth}
+      onpointermove={onpoint}
+      onpointerleave={() => (pointing = false)}
+      onclick={onpoint}
+    >
+      <div class="sky-skyline__plot">
+        <svg class="sky-skyline__svg" bind:this={svgEl} viewBox={layout.viewBox} role="img" aria-label={describeSkyline(layout, rangeLabel)}>
+          <path class="sky-skyline__floor" d={layout.floor} />
+          <path class="sky-skyline__future" d={layout.future} />
+          {#each [6, 5, 4, 3, 2, 1, 0] as j (j)}
+            {#if barsByRow[j]?.length}
+              {#each barsByRow[j] ?? [] as b (b.date)}
+                <g data-tone={b.tone}>
+                  <path d={b.paths.side} style:fill={b.faces.side} />
+                  <path d={b.paths.front} style:fill={b.faces.front} />
+                  <path d={b.paths.top} style:fill={b.faces.top} />
+                </g>
+              {/each}
+            {/if}
           {/each}
-        </g>
-      </svg>
-      <div class="sky-skyline__hits" role="group" aria-label="Active days">
-        {#each bars as b (b.date)}
-          {@const css = hitStyle(b.hit, dims)}
-          <button
-            class="sky-skyline__hit"
-            type="button"
-            data-date={b.date}
-            aria-label={b.label}
-            aria-pressed={b.index === current}
-            tabindex={b.index === current ? 0 : -1}
-            style:left={css.left}
-            style:top={css.top}
-            style:width={css.width}
-            style:height={css.height}
-            style:z-index={b.hit.z}
-            onmouseenter={() => send({ type: 'pick', index: b.index })}
-            onfocus={() => send({ type: 'pick', index: b.index })}
-            onclick={() => send({ type: 'pick', index: b.index })}
-            onkeydown={onkey}
-          ></button>
-        {/each}
+          {#if bar}
+            <g class="sky-skyline__picked">
+              <path class="sky-skyline__picked-side" d={bar.paths.side} />
+              <path class="sky-skyline__picked-front" d={bar.paths.front} />
+              <path class="sky-skyline__picked-top" d={bar.paths.top} />
+            </g>
+            {#if lead}
+              <path class="sky-skyline__lead" d={lead} />
+              <circle class="sky-skyline__dot" cx={bar.anchor.x} cy={bar.anchor.y} r="2.5" />
+            {/if}
+          {/if}
+          <g class="sky-skyline__months" aria-hidden="true">
+            {#each layout.months as m (m.label + m.x)}
+              <text x={m.x} y={m.y}>{m.label}</text>
+            {/each}
+          </g>
+        </svg>
+        <div class="sky-skyline__hits" role="group" aria-label="Active days">
+          {#each bars as b (b.date)}
+            {@const css = hitStyle(b.hit, drawn)}
+            <button
+              class="sky-skyline__hit"
+              type="button"
+              data-date={b.date}
+              aria-label={b.label}
+              aria-pressed={b.index === current}
+              tabindex={b.index === current ? 0 : -1}
+              style:left={css.left}
+              style:top={css.top}
+              style:width={css.width}
+              style:height={css.height}
+              style:z-index={b.hit.z}
+              onfocus={() => send({ type: 'pick', index: b.index })}
+              onkeydown={onkey}
+            ></button>
+          {/each}
+        </div>
       </div>
+      <ul class="sky-skyline__legend" aria-label={legend.kind === 'outcome' ? 'Bar colour: outcome of the day' : 'Bar colour: sessions that day'}>
+        {#if legend.kind === 'ramp'}<li class="sky-skyline__legend-word">Fewer</li>{/if}
+        {#each legend.items as item (item.tone)}
+          <li class="sky-skyline__legend-item">
+            <span class="sky-skyline__swatch" style:background={item.fill} aria-hidden="true"></span>
+            {#if legend.kind === 'outcome'}{item.label}{:else}<span class="sky-visually-hidden">{item.tone}</span>{/if}
+          </li>
+        {/each}
+        {#if legend.kind === 'ramp'}<li class="sky-skyline__legend-word">More sessions</li>{/if}
+      </ul>
     </div>
     {#if wide}
       <div class="sky-skyline__dock" bind:clientWidth={dockWidth}>
@@ -192,6 +245,7 @@
       </div>
     {/if}
   </div>
+
 
   {#if !wide}
     <DayReadout
@@ -321,6 +375,9 @@
     position: relative;
     min-width: 0;
   }
+  .sky-skyline__plot {
+    position: relative;
+  }
   .sky-skyline__svg {
     display: block;
     width: 100%;
@@ -332,15 +389,6 @@
   }
   .sky-skyline__future {
     fill: var(--sky-color-track);
-  }
-  .sky-skyline__side {
-    fill: var(--sky-face-side);
-  }
-  .sky-skyline__front {
-    fill: var(--sky-face-front);
-  }
-  .sky-skyline__top {
-    fill: var(--sky-face-top);
   }
   .sky-skyline__picked path {
     stroke: var(--ds-color-fg);
@@ -376,14 +424,42 @@
     inset: 0;
     pointer-events: none;
   }
+  .sky-skyline__chart[data-pointing] {
+    cursor: pointer;
+  }
+  /* Focus targets only; the pointer is picked from the bar silhouettes. */
   .sky-skyline__hit {
     position: absolute;
     padding: 0;
     border: 0;
     border-radius: var(--ds-radius-xs);
     background: transparent;
-    cursor: pointer;
-    pointer-events: auto;
+    pointer-events: none;
+  }
+  .sky-skyline__legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ds-space-1-5) var(--ds-space-3);
+    margin: var(--ds-space-2) 0 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    color: var(--ds-color-text-subtle);
+  }
+  .sky-skyline__legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ds-space-1-5);
+  }
+  .sky-skyline__legend:has(.sky-skyline__legend-word) {
+    gap: var(--ds-space-1);
+  }
+  .sky-skyline__swatch {
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 2px;
   }
   @media (pointer: coarse) {
     .sky-skyline__step,
