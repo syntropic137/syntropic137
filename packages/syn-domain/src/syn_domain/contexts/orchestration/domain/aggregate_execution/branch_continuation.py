@@ -186,7 +186,8 @@ def branches_left_by(
     """
     slugs = repository_slugs_by_name(repositories)
     own = _pushed_shas_by_branch(pushed, slugs)
-    owned = {(c.repository, c.branch) for c in continued} | own.keys()
+    continuing = {(c.repository, c.branch) for c in continued}
+    owned = continuing | own.keys()
     left = {(c.repository, c.branch): c for c in continued}
     for (slug, branch), shas in own.items():
         # A run continuing a branch keeps what its predecessors pushed there:
@@ -201,7 +202,7 @@ def branches_left_by(
             pushed_shas=[*inherited, *(s for s in shas if s not in inherited)],
         )
     for raw in observed or ():
-        branch = _left_branch(_observation(raw), slugs, owned, left)
+        branch = _left_branch(_observation(raw), slugs, owned, left, continuing)
         if branch is not None:
             left[branch.repository, branch.branch] = branch
     return list(left.values())
@@ -235,8 +236,13 @@ def _left_branch(
     slugs: dict[str, str],
     owned: set[tuple[str, str]],
     left: dict[tuple[str, str], ContinuedBranch],
+    continuing: set[tuple[str, str]],
 ) -> ContinuedBranch | None:
-    """The branch ``obs`` says the phase left and owned, or None."""
+    """The branch ``obs`` says the phase left and owned, or None.
+
+    None also when the observation would overwrite the phase's own pushes
+    with a head that is none of them (see `_own_pushes_kept`).
+    """
     slug = slugs.get(obs.repo) if obs is not None else None
     if obs is None or obs.remote_commit is None or slug is None:
         return None
@@ -246,14 +252,35 @@ def _left_branch(
     # A PR the forge could not be asked about at failure is still the one the
     # run was continuing, if it was continuing one.
     earlier = left.get(key)
+    pushed_shas = earlier.pushed_shas if earlier is not None else []
+    if pushed_shas and obs.remote_commit not in pushed_shas:
+        if _own_pushes_kept(obs, key, continuing):
+            return None
+        pushed_shas = []
     earlier_pr = earlier.pull_request if earlier is not None else None
     return ContinuedBranch(
         repository=slug,
         branch=obs.branch,
         head_sha=obs.remote_commit,
         pull_request=obs.pull_request if obs.pull_request is not None else earlier_pr,
-        pushed_shas=earlier.pushed_shas if earlier is not None else [],
+        pushed_shas=pushed_shas,
     )
+
+
+def _own_pushes_kept(
+    obs: BranchObservation, key: tuple[str, str], continuing: set[tuple[str, str]]
+) -> bool:
+    """Whether a branch observed at a head none of the phase's pushes made keeps those pushes.
+
+    Someone else moved it after the phase's last push and before the failure
+    was observed, and the observation says nothing about who. A branch the
+    phase owns only BECAUSE it pushed there (it existed at phase start and was
+    not being continued) stays at its own pushes, so a resume finds the moved
+    head foreign and abandons it. A branch owned without its pushes - created
+    by the phase, or continued - keeps the pre-PC-128 rule: the observed head,
+    with no SHA claimed as the run's own push (PC-128).
+    """
+    return obs.remote_commit_at_phase_start is not None and key not in continuing
 
 
 def _observation(raw: object) -> BranchObservation | None:

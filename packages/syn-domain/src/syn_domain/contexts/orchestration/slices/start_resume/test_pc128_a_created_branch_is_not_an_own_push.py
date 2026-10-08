@@ -65,6 +65,7 @@ print(json.dumps({{
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
         "sha": git("rev-parse", "HEAD"),
         "repo": "widgets",
+        "remote_url": sys.argv[2],
         "commits_count": 1,
     }}}},
     "metadata": None,
@@ -77,7 +78,7 @@ class _Clone:
 
     def __init__(self, root: Path) -> None:
         self.dir = root / "work"
-        remote = root / "widgets.git"
+        remote = self.remote = root / "widgets.git"
         self._env = {
             **os.environ,
             "HOME": str(root),
@@ -145,6 +146,7 @@ class TestAHooklessCreationAfterAQuietPushClaimsNothing:
             "branch": BRANCH,
             "sha": foreign,
             "repo": "widgets",
+            "remote_url": str(clone.remote),
             "commits_count": 1,
         }
         assert f"* [new branch]      HEAD -> {BRANCH}" in tool_result
@@ -158,6 +160,37 @@ class TestAHooklessCreationAfterAQuietPushClaimsNothing:
         assert pins.continued_branches == []
         assert REPO not in checkout.branches
         assert checkout.commits[REPO] == VERIFIED
+        assert OWN_UNVERIFIED_PUSH not in _told(pins)
+
+
+class TestAnUpdateOfAForkClaimsNothingOnOrigin:
+    async def test_a_hookless_fork_update_after_a_quiet_origin_push_is_not_recorded(
+        self, tmp_path: Path
+    ) -> None:
+        """The fork's repository is also `widgets`: only its URL tells it from origin."""
+        clone = _Clone(tmp_path)
+        fork = tmp_path / "fork" / "widgets.git"
+        fork.parent.mkdir()
+        subprocess.run(["git", "init", "-q", "--bare", str(fork)], check=True)
+        clone.shell(
+            f"git remote add fork {fork} && git checkout -q -b {BRANCH} && "
+            f"git push -q --no-verify fork HEAD:refs/heads/{BRANCH}"
+        )
+        foreign = clone.commit("foreign")
+
+        tool_result = clone.shell(
+            "git push -q origin HEAD:refs/heads/unrelated; "
+            f"git push --no-verify fork HEAD:refs/heads/{BRANCH}"
+        )
+        assert f"..{foreign[:7]}  HEAD -> {BRANCH}" in tool_result
+
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=(tool_result,))
+
+        assert foreign not in _recorded(store)
+        pins = await _resume(store, forge_head=foreign)
+        assert pins.continued_branches == []
+        assert pins.checkout_for("fix").commits[REPO] == VERIFIED
         assert OWN_UNVERIFIED_PUSH not in _told(pins)
 
 

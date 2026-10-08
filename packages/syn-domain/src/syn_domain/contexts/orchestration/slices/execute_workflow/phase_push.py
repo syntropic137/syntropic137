@@ -23,13 +23,23 @@ prints exactly what one hooked creation prints. A creation therefore
 establishes no ownership; the phase's next push to the branch, an update,
 does. Until then a resume refuses the branch, the pre-PC-128 behaviour.
 
+A forced update (`+ <old>...<new>`) confirms nothing either: git prints a
+tag as its short name, so `git push --force origin HEAD:refs/tags/<branch>`
+prints the row a forced branch update would, and a tag can only ever be
+updated by force.
+
 That status line must belong to the same push as the hook. One tool result
 can hold several pushes, and git's accepted line for one confirms nothing
 about another's hook. A push's hook writes its line to stderr before git
 writes `To <url>` and the status table there, so a hook's push is the output
 after its line and before the next push's hook: it is confirmed only when
-that span holds exactly one `To` block, for the hook's repository. Anything
-else is ambiguous and establishes nothing.
+that span holds exactly one `To` block, for the hook's remote URL - the URL
+itself, not the repository name, which a fork shares. Anything else is
+ambiguous and establishes nothing.
+
+What this cannot see: `git push --dry-run` runs the hook and prints the
+accepted row without sending anything. Closing that needs a confirmation the
+harness emits after git updates the remote-tracking ref (#1768).
 
 Recording is best effort and never raises into the stream: a push the run
 fails to record leaves a resume exactly where it was before PC-128, refusing
@@ -116,6 +126,8 @@ class _Push(BaseModel):
     branch: str = ""
     sha: str = ""
     repo: str = ""
+    #: The URL git was handed for the push (the hook's second argument).
+    remote_url: str = ""
 
 
 class _PushContext(BaseModel):
@@ -131,14 +143,13 @@ class _HookLine(BaseModel):
     context: _PushContext | None = None
 
 
-#: git's per-ref status line for an accepted update of an existing ref
-#: (git-push(1), OUTPUT): ` <old>..<new> <from> -> <to>` or
-#: `+ <old>...<new> <from> -> <to>`. Creations (`* [new branch]`) name no
-#: commit and are deliberately not matched (see the module docstring), nor are
-#: rejections (`!`), deletions (`-`) and `[up to date]` (`=`).
+#: git's per-ref status line for an accepted fast-forward of an existing ref
+#: (git-push(1), OUTPUT): ` <old>..<new> <from> -> <to>`. Creations
+#: (`* [new branch]`) and forced updates (`+ <old>...<new>`) are deliberately
+#: not matched (see the module docstring), nor are rejections (`!`),
+#: deletions (`-`) and `[up to date]` (`=`).
 _ACCEPTED_UPDATE = re.compile(
-    r"^(?:\+\s+)?"
-    r"[0-9a-f]{4,40}\.\.\.?(?P<new>[0-9a-f]{4,40})"
+    r"^[0-9a-f]{4,40}\.\.(?P<new>[0-9a-f]{4,40})"
     r"\s+(?P<source>\S+)\s+->\s+(?P<destination>\S+)(?:\s+\(.*\))?$"
 )
 _HEADS = "refs/heads/"
@@ -150,9 +161,13 @@ def _branch_name(ref: str) -> str:
     return ref.removeprefix(_HEADS)
 
 
-def _repository_of(url: str) -> str:
-    """A remote URL's repository name, derived as the pre-push hook derives ``repo``."""
-    return url.rstrip("/").rsplit("/", 1)[-1].replace(".git", "")
+#: `scheme://user[:password]@`, the credentials git leaves out of `To <url>`.
+_URL_USERINFO = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@")
+
+
+def _as_git_prints(url: str) -> str:
+    """``url`` as git prints it after `To`: credentials of a `scheme://` URL removed."""
+    return _URL_USERINFO.sub(r"\g<scheme>", url.strip())
 
 
 def _is_status(line: str) -> bool:
@@ -160,14 +175,19 @@ def _is_status(line: str) -> bool:
     return line.startswith(" ") and " -> " in line
 
 
-def _status_table(push_output: Sequence[str], repository: str) -> list[str]:
-    """The status rows of the one push ``push_output`` reports to ``repository``.
+def _status_table(push_output: Sequence[str], remote_url: str) -> list[str]:
+    """The status rows of the one push ``push_output`` reports to ``remote_url``.
 
     Empty unless exactly one `To <url>` names it: two mean two pushes, and a
-    status row there cannot be told apart from the hook's own.
+    status row there cannot be told apart from the hook's own. A hook that
+    reported no URL is matched by none.
     """
     to = [i for i, line in enumerate(push_output) if line.startswith(_TO)]
-    if len(to) != 1 or _repository_of(push_output[to[0]][len(_TO) :].strip()) != repository:
+    if (
+        len(to) != 1
+        or not remote_url
+        or push_output[to[0]][len(_TO) :].strip() != _as_git_prints(remote_url)
+    ):
         return []
     rows: list[str] = []
     for line in push_output[to[0] + 1 :]:
@@ -186,7 +206,7 @@ def git_accepted(push_output: Sequence[str], push: _Push) -> bool:
     confirms nothing: which push's HEAD it created the branch at is exactly
     what positional output cannot tell.
     """
-    for row in _status_table(push_output, push.repo):
+    for row in _status_table(push_output, push.remote_url):
         update = _ACCEPTED_UPDATE.match(row)
         if (
             update is not None

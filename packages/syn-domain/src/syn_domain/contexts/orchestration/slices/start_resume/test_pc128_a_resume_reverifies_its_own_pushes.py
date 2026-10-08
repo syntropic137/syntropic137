@@ -102,6 +102,8 @@ LAST_PUSH = "c128c128c128c128c128c128c128c128c128c128"
 FOREIGN = "f128f128f128f128f128f128f128f128f128f128"
 #: A ref the phase pushed that is not the branch under review.
 UNRELATED = "unrelated"
+#: origin's URL as the hook is handed it, and as git prints it after `To`.
+ORIGIN_URL = "github.com:acme/widgets.git"
 
 
 class _Store:
@@ -175,7 +177,7 @@ def _phases() -> list[ExecutablePhase]:
     ]
 
 
-def _hook_line(sha: str) -> str:
+def _hook_line(sha: str, remote_url: str = ORIGIN_URL) -> str:
     """What the workspace's pre-push hook prints into the tool result."""
     return json.dumps(
         {
@@ -190,6 +192,7 @@ def _hook_line(sha: str) -> str:
                     "branch": BRANCH,
                     "sha": sha,
                     "repo": "widgets",
+                    "remote_url": remote_url,
                     "commits_count": 1,
                 }
             },
@@ -416,6 +419,39 @@ class TestOnlyAPushGitAcceptedToTheBranchIsTheRuns:
 
         self._refused(pins)
 
+    async def test_a_forced_update_establishes_nothing(self) -> None:
+        """git prints a tag by its short name: this is also `HEAD:refs/tags/BRANCH` forced."""
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" + {VERIFIED[:7]}...{FOREIGN[:7]} HEAD -> {BRANCH} (forced update)\n"
+        )
+
+        self._refused(pins)
+
+    async def test_a_hook_that_names_no_remote_url_establishes_nothing(self) -> None:
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN, remote_url='')}\nTo github.com:acme/widgets.git\n"
+            f"   {VERIFIED[:7]}..{FOREIGN[:7]}  {BRANCH} -> {BRANCH}\n"
+        )
+
+        self._refused(pins)
+
+    async def test_credentials_git_leaves_out_of_the_to_line_still_match(self) -> None:
+        url = "https://github.com/acme/widgets.git"
+        store = _Store()
+        await _orphaned_mid_fix(
+            store,
+            outputs=(
+                f"{_hook_line(LAST_PUSH, 'https://x-access-token:tok@github.com/acme/widgets.git')}"
+                f"\nTo {url}\n   {VERIFIED[:7]}..{LAST_PUSH[:7]}  {BRANCH} -> {BRANCH}\n",
+            ),
+        )
+
+        pins = await _resume(store, forge_head=LAST_PUSH)
+
+        assert pins.checkout_for("fix").commits[REPO] == LAST_PUSH
+        assert OWN_UNVERIFIED_PUSH in _told(pins)
+
     async def test_creating_the_branch_names_no_commit_so_establishes_nothing(self) -> None:
         """A quiet push's hook then a hookless creation print exactly this (round 3).
 
@@ -516,6 +552,82 @@ class TestNoPushIsUnchanged:
         assert pins.abandoned_branches == []
         assert pins.checkout_for("fix").commits[REPO] == VERIFIED
         assert _told(pins) == ""
+
+
+class TestAnObservationDoesNotOverwriteOwnPushes:
+    """Someone moved the branch after the phase's last push, before failure was observed."""
+
+    @staticmethod
+    def _observed_at(head: str, *, at_phase_start: str | None) -> object:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            BranchObservation,
+        )
+
+        return BranchObservation(
+            repo="widgets",
+            branch=BRANCH,
+            remote="origin",
+            remote_commit=head,
+            remote_commit_at_phase_start=at_phase_start,
+            unpushed_commits=0,
+            pull_request=PR,
+        )
+
+    def test_a_branch_owned_only_by_its_pushes_stays_at_them(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+            PushedCommit,
+            branches_left_by,
+        )
+
+        [left] = branches_left_by(
+            [self._observed_at(FOREIGN, at_phase_start=VERIFIED)],
+            repositories=[REPO],
+            continued=[],
+            pushed=[
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=FIRST_PUSH)
+            ],
+        )
+
+        assert left.head_sha == FIRST_PUSH
+        assert left.pushed_shas == [FIRST_PUSH]
+
+    def test_a_continued_branch_takes_the_observed_head_but_claims_no_push(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+            ContinuedBranch,
+            PushedCommit,
+            branches_left_by,
+        )
+
+        [left] = branches_left_by(
+            [self._observed_at(FOREIGN, at_phase_start=VERIFIED)],
+            repositories=[REPO],
+            continued=[ContinuedBranch(repository=REPO, branch=BRANCH, head_sha=VERIFIED)],
+            pushed=[
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=FIRST_PUSH)
+            ],
+        )
+
+        assert left.head_sha == FOREIGN
+        assert not left.is_own_unverified_push
+
+    def test_an_observed_head_the_phase_pushed_keeps_its_pushes(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+            PushedCommit,
+            branches_left_by,
+        )
+
+        [left] = branches_left_by(
+            [self._observed_at(LAST_PUSH, at_phase_start=VERIFIED)],
+            repositories=[REPO],
+            continued=[],
+            pushed=[
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=FIRST_PUSH),
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=LAST_PUSH),
+            ],
+        )
+
+        assert left.head_sha == LAST_PUSH
+        assert left.is_own_unverified_push
 
 
 class TestAResumeOfAResumeKeepsEveryOwnPush:
