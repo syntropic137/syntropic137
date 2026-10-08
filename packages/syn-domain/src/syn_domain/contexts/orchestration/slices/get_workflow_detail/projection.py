@@ -20,6 +20,7 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     stored_fallback_agent,
+    stored_platform_access,
 )
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
@@ -184,6 +185,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # so patching one is patching half.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                platform_access=stored_platform_access(p.get("platform_access")),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),
                 skills=_refs(p.get("skills")),

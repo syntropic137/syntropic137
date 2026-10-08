@@ -33,6 +33,7 @@ from syn_domain.contexts.orchestration import (
 )
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, resolve_definition_model
 from syn_shared.display import format_phase_model_definition
+from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
@@ -222,6 +223,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         ),
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
+        platform_access=p.platform_access,
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
         skills=[_ref_response(r) for r in p.skills],
@@ -627,6 +629,8 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
         lines.append("    clone_repos: false")
     if not phase.delivers_repo_changes:
         lines.append("    delivers_repo_changes: false")
+    if phase.platform_access is not PlatformScope.READ:
+        lines.append(f"    platform_access: {phase.platform_access.value}")
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))

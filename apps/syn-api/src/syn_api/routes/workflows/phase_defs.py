@@ -16,6 +16,7 @@ from syn_shared.agents import (
     require_enforceable_cost_limit,
     require_runnable_sandbox,
 )
+from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -168,6 +169,9 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 delivers_repo_changes=_as_bool(
                     p.get("delivers_repo_changes", True), "delivers_repo_changes"
                 ),
+                # Dropping this downgrades a declared `eval` phase to `read`:
+                # the safe direction, and still a silent lie (#1744).
+                platform_access=PlatformScope(p.get("platform_access", PlatformScope.READ)),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as

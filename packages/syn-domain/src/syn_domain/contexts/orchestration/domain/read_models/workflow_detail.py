@@ -11,6 +11,7 @@ from datetime import datetime
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     FallbackAgent,
     stored_fallback_agent,
+    stored_platform_access,
 )
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
@@ -18,6 +19,7 @@ from syn_domain.contexts.orchestration.domain.constants import (
     WorkflowFields,
 )
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX
+from syn_shared.platform_access import PlatformScope
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,10 @@ class PhaseDefinitionDetail:
     delivers_repo_changes: bool = True
     """Whether repository changes are part of this phase's deliverable (#1308)."""
 
+    platform_access: PlatformScope = PlatformScope.READ
+    """The scope of this phase's platform token (ADR-072, #1744). Security-relevant,
+    so readable: ``eval`` lets the phase start executions."""
+
     sandbox: str = DEFAULT_PHASE_SANDBOX
     """The agent sandbox level this phase declares (``agent.sandbox``).
 
@@ -294,6 +300,7 @@ class WorkflowDetail:
                 # half the path broken while the tests passed.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                platform_access=stored_platform_access(p.get("platform_access")),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_stored_refs(p.get("claude_plugins")),
                 skills=_stored_refs(p.get("skills")),
@@ -381,6 +388,7 @@ class WorkflowDetail:
                 # LESS restricted than the phase actually runs.
                 "clone_repos": p.clone_repos,
                 "delivers_repo_changes": p.delivers_repo_changes,
+                "platform_access": p.platform_access.value,
                 "sandbox": p.sandbox,
                 "claude_plugins": [r.to_dict() for r in p.claude_plugins],
                 "skills": [r.to_dict() for r in p.skills],

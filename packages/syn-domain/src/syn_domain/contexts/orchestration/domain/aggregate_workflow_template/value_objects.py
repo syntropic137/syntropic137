@@ -129,6 +129,11 @@ def stored_fallback_agent(stored: object) -> FallbackAgent | None:
     return FallbackAgent.model_validate(stored)
 
 
+def stored_platform_access(stored: object) -> PlatformScope:
+    """A phase's platform access as a projection stored it; READ when it predates #1744."""
+    return PlatformScope.READ if stored is None else PlatformScope(str(stored))
+
+
 class PhaseDefinition(BaseModel):
     """Definition of a workflow phase.
 

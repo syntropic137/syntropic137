@@ -5832,6 +5832,8 @@ export interface components {
              * @default true
              */
             delivers_repo_changes: boolean;
+            /** @default read */
+            platform_access: components["schemas"]["PlatformScope"];
             /**
              * Sandbox
              * @default full-access
@@ -6097,6 +6099,18 @@ export interface components {
             /** Status Display */
             status_display: string;
         };
+        /**
+         * PlatformScope
+         * @description The one scope a workspace's platform token carries.
+         *
+         *     ``READ`` is every phase's default: GET/HEAD on the read-only resources.
+         *     ``EVAL`` is READ plus exactly two writes - launching a workflow run INTO a
+         *     named eval, and scoring a run of an eval - and only a phase that declares
+         *     ``platform_access: eval`` is given it. ADR-072 is the authority for what
+         *     each scope reaches; ``syn_adapters.platform_access`` is the enforcement.
+         * @enum {string}
+         */
+        PlatformScope: "read" | "eval";
         /**
          * Priority
          * @description Feedback priority level.

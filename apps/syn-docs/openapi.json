@@ -15588,6 +15588,10 @@
             "title": "Delivers Repo Changes",
             "default": true
           },
+          "platform_access": {
+            "$ref": "#/components/schemas/PlatformScope",
+            "default": "read"
+          },
           "sandbox": {
             "type": "string",
             "title": "Sandbox",
@@ -16254,6 +16258,15 @@
         ],
         "title": "PlannedPhaseInfo",
         "description": "One phase the run declared, and where it stands (feedback cee46909).\n\n``ExecutionDetail.phase_plan`` lists every declared phase, so a client\nshows what is left as well as what ran. Clients render ``status_display``\nand style by ``status``; they never work the status out themselves."
+      },
+      "PlatformScope": {
+        "type": "string",
+        "enum": [
+          "read",
+          "eval"
+        ],
+        "title": "PlatformScope",
+        "description": "The one scope a workspace's platform token carries.\n\n``READ`` is every phase's default: GET/HEAD on the read-only resources.\n``EVAL`` is READ plus exactly two writes - launching a workflow run INTO a\nnamed eval, and scoring a run of an eval - and only a phase that declares\n``platform_access: eval`` is given it. ADR-072 is the authority for what\neach scope reaches; ``syn_adapters.platform_access`` is the enforcement."
       },
       "Priority": {
         "type": "string",

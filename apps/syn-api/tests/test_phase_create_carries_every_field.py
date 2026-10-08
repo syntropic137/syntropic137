@@ -75,6 +75,9 @@ _EVERY_FIELD: Mapping[str, object] = {
     # turns the unpushed-work gate's reading of an uncommitted change from
     # "unsaved deliverable" into "build-tool side effect" (#1308).
     "delivers_repo_changes": False,
+    # NOT the default ("read"). Dropping the mapping downgrades a declared eval
+    # phase to read-only (#1744), which only this value can tell apart.
+    "platform_access": "eval",
     "argument_hint": "[task]",
     "model": "claude-opus-5-5",
     # NOT the default (None). Claude, not codex: a codex phase cannot carry

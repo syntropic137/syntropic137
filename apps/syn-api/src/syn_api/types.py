@@ -105,6 +105,7 @@ from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
 from syn_shared.display.formatters import EM_DASH
 from syn_shared.observed_model import format_observed_model
+from syn_shared.platform_access import PlatformScope
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -570,6 +571,9 @@ class PhaseDefinitionResponse(BaseModel):
     fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
+    platform_access: PlatformScope = PlatformScope.READ
+    """What this phase's workspace may do against the API (ADR-072). ``eval``
+    can launch runs into a named eval and score them."""
     sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)
