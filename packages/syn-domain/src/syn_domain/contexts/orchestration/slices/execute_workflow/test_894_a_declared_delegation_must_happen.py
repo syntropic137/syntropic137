@@ -75,7 +75,6 @@ async def test_a_delegate_that_failed_fails_the_phase_and_is_named() -> None:
         _WORKSPACE,
         phase_id="implement",
         required_delegate="codex",
-        requires_verdict=False,
     )
     assert failure is not None
     assert failure.delegation_failure.reason is DelegationFailureReason.FAILED
@@ -115,7 +114,6 @@ async def test_a_successful_delegate_to_the_wrong_harness_does_not_satisfy_the_g
         _WORKSPACE,
         phase_id="implement",
         required_delegate="codex",
-        requires_verdict=False,
     )
     assert failure is not None
     assert failure.delegation_failure.reason is DelegationFailureReason.NOT_ATTEMPTED
