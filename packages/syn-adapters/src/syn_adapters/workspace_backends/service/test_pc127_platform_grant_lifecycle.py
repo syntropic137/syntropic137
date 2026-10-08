@@ -16,9 +16,14 @@ from unittest.mock import patch
 
 import pytest
 
-from syn_adapters.platform_access import InMemoryPlatformTokenStore, PlatformTokenService
+from syn_adapters.platform_access import (
+    Denial,
+    InMemoryPlatformTokenStore,
+    PlatformTokenService,
+)
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE
+from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -134,3 +139,99 @@ async def test_a_later_deadline_never_extends_a_grant() -> None:
     await tokens.bound_to_deadline(token, clock.now + timedelta(hours=2))
     clock.now += timedelta(seconds=61)
     assert await tokens.authorize(f"Bearer {token}", "GET", "/executions") is not None
+
+
+_SCORE = "/evals/ev-1/runs/exec-other/score"
+
+
+async def _no_body() -> bytes:
+    return b""
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_declared_eval_is_launched_with_an_eval_token() -> None:
+    """#1744: the declared scope reaches the token the AGENT is launched with."""
+    tokens = PlatformTokenService(InMemoryPlatformTokenStore(), max_ttl_seconds=600)
+    service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY, platform_tokens=tokens)
+    seen: list[Denial | None] = []
+
+    async def checking_stream(
+        handle: object, command: list[str], **kwargs: object
+    ) -> AsyncIterator[str]:
+        environment = kwargs["environment"]
+        assert isinstance(environment, dict)
+        bearer = f"Bearer {environment['SYN_API_TOKEN']}"
+        seen.append(await tokens.authorize(bearer, "POST", _SCORE, _no_body))
+        yield "{}"
+
+    service._event_stream.stream = checking_stream  # type: ignore[method-assign]
+    async with service.create_workspace(
+        execution_id="exec-1744", platform_access=PlatformScope.EVAL
+    ) as workspace:
+        async for _ in workspace.stream(["claude"], environment={}):
+            pass
+    assert seen == [None]
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_workspace_gets_a_read_only_token() -> None:
+    tokens = PlatformTokenService(InMemoryPlatformTokenStore(), max_ttl_seconds=600)
+    service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY, platform_tokens=tokens)
+    seen: list[Denial | None] = []
+
+    async def checking_stream(
+        handle: object, command: list[str], **kwargs: object
+    ) -> AsyncIterator[str]:
+        environment = kwargs["environment"]
+        assert isinstance(environment, dict)
+        bearer = f"Bearer {environment['SYN_API_TOKEN']}"
+        seen.append(await tokens.authorize(bearer, "GET", "/executions"))
+        seen.append(await tokens.authorize(bearer, "POST", _SCORE, _no_body))
+        yield "{}"
+
+    service._event_stream.stream = checking_stream  # type: ignore[method-assign]
+    async with service.create_workspace(execution_id="exec-1744") as workspace:
+        async for _ in workspace.stream(["claude"], environment={}):
+            pass
+    read, score = seen
+    assert read is None
+    assert score is not None
+    assert score.status == 403
+
+
+@pytest.mark.asyncio
+async def test_an_eval_grant_dies_at_the_phase_deadline_even_when_revocation_fails() -> None:
+    clock = _Clock()
+    tokens = PlatformTokenService(InMemoryPlatformTokenStore(), max_ttl_seconds=3600, now=clock)
+    service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY, platform_tokens=tokens)
+    launched: list[dict[str, str]] = []
+
+    async def capturing_stream(
+        handle: object, command: list[str], **kwargs: object
+    ) -> AsyncIterator[str]:
+        environment = kwargs["environment"]
+        assert isinstance(environment, dict)
+        launched.append(environment)
+        yield "{}"
+
+    service._event_stream.stream = capturing_stream  # type: ignore[method-assign]
+    deadline = clock.now + timedelta(seconds=60)
+    phase_env = {ENV_SYN_PHASE_DEADLINE: deadline.isoformat(timespec="seconds")}
+
+    async def unreachable(token: str) -> None:
+        raise ConnectionError("redis down")
+
+    tokens.revoke = unreachable  # type: ignore[method-assign]
+    async with service.create_workspace(
+        execution_id="exec-1744", platform_access=PlatformScope.EVAL
+    ) as workspace:
+        async for _ in workspace.stream(["claude"], environment=dict(phase_env)):
+            pass
+    bearer = f"Bearer {launched[0]['SYN_API_TOKEN']}"
+
+    clock.now = deadline - timedelta(seconds=1)
+    assert await tokens.authorize(bearer, "POST", _SCORE, _no_body) is None
+    clock.now = deadline + timedelta(seconds=1)
+    denial = await tokens.authorize(bearer, "POST", _SCORE, _no_body)
+    assert denial is not None
+    assert denial.status == 401
