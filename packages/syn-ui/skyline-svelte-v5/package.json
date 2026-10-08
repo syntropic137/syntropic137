@@ -27,6 +27,7 @@
   "scripts": {
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && node ../scripts/check-css.mjs src",
     "build": "pnpm run check",
+    "build:ce": "vite build --config vite.ce.config.ts",
     "test": "vitest run --passWithNoTests"
   },
   "peerDependencies": {

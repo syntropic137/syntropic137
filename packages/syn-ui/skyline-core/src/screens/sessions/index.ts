@@ -329,3 +329,30 @@ export function revealCount(current: number, total: number, chunk = 40): number 
 }
 
 export type { OperationStatus }
+
+export interface SessionRowInput {
+  id: string
+  workflow_name?: string | null
+  workflow_id?: string | null
+  phase_display?: string | null
+  phase_id?: string | null
+  agent_provider?: string | null
+  agent_model_display?: string | null
+  repos_display?: string | null
+  status: string
+  total_tokens_display?: string | null
+  total_cost_display?: string | null
+  duration_display?: string | null
+}
+
+/** "build-and-delegate · Codex · gpt-5.6-sol · syntropic137/syntropic137" (mono line under a list row). */
+export function sessionRowSub(s: SessionRowInput): string {
+  return [s.phase_display || s.phase_id || null, agentLabel(s.agent_provider, s.agent_model_display), s.repos_display || null].filter((x) => x && x !== UNKNOWN).join(' · ')
+}
+
+/** Markdown an agent can act on: one bullet per session with its id, workflow, phase, status and spend. */
+export function sessionsForAgent(rows: readonly SessionRowInput[]): string {
+  return rows
+    .map((s) => `- session ${s.id}: ${s.workflow_name ?? s.workflow_id ?? 'unknown workflow'} / ${s.phase_display ?? s.phase_id ?? 'no phase'} · ${s.status} · ${s.total_tokens_display ?? UNKNOWN} tokens · ${s.total_cost_display ?? UNKNOWN} · ${s.duration_display ?? UNKNOWN}`)
+    .join('\n')
+}

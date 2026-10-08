@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { configureClient } from '../client'
 import { ApiError } from '../client/errors'
 import {
+  getSessionInventory,
   getArtifact,
   getContributionHeatmap,
   getEval,
@@ -11,8 +12,10 @@ import {
   getWorkflow,
   listArtifacts,
   listEvals,
+  listEvalRuns,
   listExecutions,
   listRepos,
+  lookUpAppAccess,
   listSessions,
   listTriggers,
   listWorkflowRuns,
@@ -61,6 +64,17 @@ describe('every screen has data in fixtures mode', () => {
     expect(detail.workflow_name).toBe(first.workflow_name)
     expect(detail.phases.length).toBe(first.total_phases)
   })
+  it('execution board run, time window and session inventory', async () => {
+    const board = await getExecution(RUNS[2]!.id)
+    expect(board.task).toBe('one sentence on sorting')
+    expect(board.phases.map((p) => p.name)).toEqual(['Discovery Phase', 'Deep Dive Analysis', 'Synthesis & Documentation'])
+    expect(board.total_cache_read_tokens).toBe(313_560)
+    const recent = await listExecutions({ page: 1, page_size: 50, started_after: new Date(Date.UTC(2026, 9, 7)).toISOString() })
+    expect(recent.total).toBeLessThan(RUNS.length)
+    const inv = await getSessionInventory(RUNS[2]!.id)
+    expect(inv.summary.platform_sessions).toBe(3)
+    expect(inv.summary.complete).toBe(false)
+  })
   it('sessions link back to their execution', async () => {
     const list = await listSessions({ page: 1, page_size: 10 })
     const s = await getSession(list.sessions![0]!.id)
@@ -72,12 +86,17 @@ describe('every screen has data in fixtures mode', () => {
     const evals = await listEvals()
     expect(evals.total).toBe(24)
     expect((await getEval(evals.evals[0]!.eval_id)).tags.some((t) => t.startsWith('case:'))).toBe(true)
+    expect((await listEvals({ tag: 'case:codex-cost-limit' })).total).toBe(4)
+    const opus = await listEvalRuns('eval-shared-esp-stream-1')
+    expect(opus.total).toBe(5)
+    expect(new Set(opus.items.map((r) => r.workflow_version))).toEqual(new Set(['v1', 'v2']))
     const arts = await listArtifacts({ page: 1, page_size: 10 })
     expect(arts.artifacts.length).toBeGreaterThan(0)
     expect((await getArtifact(arts.artifacts[0]!.id, true)).content).toContain('#')
     const triggers = await listTriggers()
     expect((await getTrigger(triggers.triggers[0]!.trigger_id)).conditions).toBeTruthy()
-    expect((await listRepos()).length).toBe(2)
+    expect((await listRepos()).length).toBe(4)
+    expect((await lookUpAppAccess()).repos.map((r) => r.fullName)).toContain('syntropic137/homelab-infra')
     const heat = await getContributionHeatmap()
     expect(heat.days?.find((d) => d.date === '2026-08-28')?.count).toBe(43)
     expect((await getMetrics()).total_workflows).toBeGreaterThan(0)

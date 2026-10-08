@@ -52,7 +52,8 @@ export function phaseTokenSplit(p: PhaseLike): string {
 
 /** Seconds as the timeline writes them: "24.3s", "118.9s". */
 export function phaseSeconds(seconds: number | null | undefined): string {
-  return formatDurationPrecise(seconds === null || seconds === undefined ? null : seconds * 1000)
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return formatDurationPrecise(null)
+  return `${(Math.round(seconds * 10) / 10).toFixed(1)}s`
 }
 
 /** Under a block: full "118.9s · 143.9K tokens · $0.0798", short "24.3s". */

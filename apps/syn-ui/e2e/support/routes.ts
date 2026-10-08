@@ -165,7 +165,8 @@ export const ROUTES: RouteCase[] = [
     nav: 'Sessions',
     heading: /\S/,
     fixtureText: ['claude-sonnet-4-5', 'Research'],
-    crumbs: [crumb('Sessions', '/sessions')],
+    // React files a session under its workflow and execution; Skyline may do the same.
+    crumbs: [{ label: /^(Sessions|Execution)\b/, href: /\/(sessions|executions\/[^/]+)$/ }],
   },
   {
     name: 'artifacts list',

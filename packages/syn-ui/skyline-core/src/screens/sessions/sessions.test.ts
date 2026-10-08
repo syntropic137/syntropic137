@@ -148,3 +148,16 @@ describe('windowRange', () => {
     expect(revealCount(80, 100)).toBe(100)
   })
 })
+
+describe('list rows', () => {
+  const row = { id: 's1', workflow_name: 'Codex delegates to Claude', phase_display: 'Delegate', agent_provider: 'codex', agent_model_display: 'gpt-5.6-sol', repos_display: 'a/b', status: 'completed', total_tokens_display: '176.0K', total_cost_display: '$0.2162', duration_display: '57s' }
+  it('builds the sub line', async () => {
+    const { sessionRowSub } = await import('./index')
+    expect(sessionRowSub(row)).toBe('Delegate · Codex · gpt-5.6-sol · a/b')
+    expect(sessionRowSub({ id: 'x', status: 'running' })).toBe('')
+  })
+  it('formats sessions for an agent', async () => {
+    const { sessionsForAgent } = await import('./index')
+    expect(sessionsForAgent([row])).toBe('- session s1: Codex delegates to Claude / Delegate · completed · 176.0K tokens · $0.2162 · 57s')
+  })
+})

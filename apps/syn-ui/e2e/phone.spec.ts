@@ -98,6 +98,9 @@ test.describe('breadcrumbs on a phone', () => {
   test('a deep trail collapses behind the ellipsis', async ({ page }) => {
     const runs = ROUTES.find((r) => r.name === 'workflow runs')!
     await open(page, await pathFor(page, runs))
+    // The page refines its crumbs once data arrives, which collapses the trail again; let it settle.
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 10_000 })
+    await page.waitForTimeout(500)
     const trail = page.getByRole('navigation', { name: 'Breadcrumb' })
     await expect(trail).toBeVisible()
     const expand = trail.getByRole('button', { name: 'Show the full path' })
