@@ -87,4 +87,22 @@ describe('EvalList', () => {
     expect(screen.getByText(/eval_suite\.py launch/)).toBeInTheDocument()
     expect(screen.getByText(/POST \/evals/)).toBeInTheDocument()
   })
+
+  it('pages past the first 50 evals, so the oldest stay reachable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://x')
+      const page = Number(url.searchParams.get('page') ?? '1')
+      const only = evalSummary({ eval_id: `eval-p${page}`, name: `Eval on page ${page}`, run_count: 0 })
+      return json({ evals: [only], total: 51, page, page_size: 50, status_counts: { active: 51 } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderAt()
+
+    await screen.findByRole('link', { name: 'Eval on page 1' })
+    await userEvent.click(screen.getByRole('button', { name: /Next/ }))
+
+    expect(await screen.findByRole('link', { name: 'Eval on page 2' })).toHaveAttribute('href', '/evals/eval-p2')
+    const pages = fetchMock.mock.calls.map(([u]) => new URL(String(u), 'http://x').searchParams.get('page'))
+    expect(pages).toContain('2')
+  })
 })

@@ -8,7 +8,7 @@
 import { FlaskConical, X } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { Card, EmptyState, PageLoader } from '../../components'
+import { Card, EmptyState, ListPagination, PageLoader } from '../../components'
 import { EvalVariantsStrip, VerdictSparkline } from '../../components/evals'
 import { useEvalList, type EvalListRow } from '../../hooks/useEvalList'
 import { formatRelativeTime } from '../../utils/dateFormatters'
@@ -65,8 +65,17 @@ function EvalRow({ row, onTag }: { row: EvalListRow; onTag: (tag: string) => voi
 export function EvalList() {
   const [params, setParams] = useSearchParams()
   const tag = params.get('tag')
-  const state = useEvalList(tag)
+  const requested = Number(params.get('page') ?? '1')
+  const page = Number.isInteger(requested) && requested > 0 ? requested : 1
+  const state = useEvalList(tag, page)
+  // A new tag starts again at page 1.
   const setTag = (next: string | null) => setParams(next ? { tag: next } : {})
+  const setPage = (next: number) => {
+    const updated = new URLSearchParams(params)
+    if (next > 1) updated.set('page', String(next))
+    else updated.delete('page')
+    setParams(updated)
+  }
 
   return (
     <div className="space-y-6">
@@ -116,6 +125,13 @@ export function EvalList() {
               <EvalRow key={row.eval.eval_id} row={row} onTag={setTag} />
             ))}
           </ul>
+          <ListPagination
+            page={state.page}
+            pageSize={state.pageSize}
+            total={state.total}
+            onPageChange={setPage}
+            itemLabel="eval"
+          />
         </Card>
       )}
     </div>

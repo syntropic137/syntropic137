@@ -14,7 +14,7 @@ export interface EvalListRow {
 export type EvalListState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; rows: EvalListRow[]; total: number }
+  | { kind: 'ready'; rows: EvalListRow[]; total: number; page: number; pageSize: number }
 
 async function loadRow(summary: EvalSummary): Promise<EvalListRow> {
   if (summary.run_count === 0) return { eval: summary, recentVerdicts: [] }
@@ -39,27 +39,36 @@ function errorMessage(err: unknown): string {
  * to load keeps its summary and draws no sparkline, rather than failing the
  * whole list over a decoration.
  */
-export function useEvalList(tag: string | null): EvalListState {
-  // Keyed by the tag it was loaded for, so a new tag reads as loading without
-  // a synchronous reset inside the effect.
-  const [loaded, setLoaded] = useState<{ tag: string | null; state: EvalListState } | null>(null)
+export function useEvalList(tag: string | null, page = 1): EvalListState {
+  // Keyed by the query it was loaded for, so a new tag or page reads as
+  // loading without a synchronous reset inside the effect.
+  const key = `${tag ?? ''}|${page}`
+  const [loaded, setLoaded] = useState<{ key: string; state: EvalListState } | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    const forKey = `${tag ?? ''}|${page}`
 
-    listEvals({ tag: tag ?? undefined })
-      .then(async (page) => {
-        const rows = await Promise.all(page.evals.map(loadRow))
-        if (!cancelled) setLoaded({ tag, state: { kind: 'ready', rows, total: page.total } })
+    listEvals({ tag: tag ?? undefined, page })
+      .then(async (result) => {
+        const rows = await Promise.all(result.evals.map(loadRow))
+        const state: EvalListState = {
+          kind: 'ready',
+          rows,
+          total: result.total,
+          page: result.page,
+          pageSize: result.page_size,
+        }
+        if (!cancelled) setLoaded({ key: forKey, state })
       })
       .catch((err: unknown) => {
-        if (!cancelled) setLoaded({ tag, state: { kind: 'error', message: errorMessage(err) } })
+        if (!cancelled) setLoaded({ key: forKey, state: { kind: 'error', message: errorMessage(err) } })
       })
 
     return () => {
       cancelled = true
     }
-  }, [tag])
+  }, [tag, page])
 
-  return loaded && loaded.tag === tag ? loaded.state : { kind: 'loading' }
+  return loaded && loaded.key === key ? loaded.state : { kind: 'loading' }
 }

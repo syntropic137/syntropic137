@@ -34,9 +34,12 @@ export type EvalRunListResponse = Schemas['EvalRunListResponse']
 /** The eval an execution is a current run of, and that run's verdict (`GET /executions/{id}`'s `eval`). */
 export type ExecutionEvalRun = Schemas['ExecutionEvalRunResponse']
 
-export async function listEvals(params: { tag?: string; page_size?: number } = {}): Promise<EvalListResponse> {
+export async function listEvals(
+  params: { tag?: string; page?: number; page_size?: number } = {},
+): Promise<EvalListResponse> {
   const search = new URLSearchParams()
   if (params.tag) search.set('tag', params.tag)
+  if (params.page && params.page > 1) search.set('page', String(params.page))
   if (params.page_size) search.set('page_size', String(params.page_size))
   const query = search.toString()
   return fetchJSON(`${API_BASE}/evals${query ? `?${query}` : ''}`)
