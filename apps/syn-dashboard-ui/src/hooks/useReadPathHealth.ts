@@ -8,9 +8,9 @@
  * read models are rebuilding (ordinary live lag excluded), how far along, and
  * the words to show - so nothing here computes a percentage.
  *
- * It asks once on mount, then polls only while there is something to show,
- * and stops as soon as the read path is healthy again. A failed fetch keeps
- * the last answer.
+ * It asks on mount, then polls while there is something to show or while it
+ * has no measured answer yet, and stops as soon as the read path is measured
+ * healthy. A failed fetch keeps the last answer.
  */
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
@@ -43,6 +43,16 @@ export function readPathHealthOf(health: HealthResponse | null): ReadPathHealth 
   }
 }
 
+/**
+ * True until `/health` has measured the subscription. No answer yet, a failed
+ * first fetch, and the startup gate's `starting` response (which carries no
+ * subscription) all say nothing about the read path - and the startup window
+ * right after a deploy is exactly when a rebuild begins.
+ */
+export function readPathUnmeasured(health: HealthResponse | null): boolean {
+  return !health?.subscription
+}
+
 /** True when anything is on screen that a later answer could clear. */
 export function readPathNeedsWatching(health: ReadPathHealth): boolean {
   return health.rebuilding.length > 0 || health.held.length > 0 || health.haltedAt !== null
@@ -59,7 +69,8 @@ export function useReadPathHealth(): ReadPathHealth {
   const readPath = readPathHealthOf(health)
   const { refetch } = useSerialRefresh({
     fetch: fetchHealth,
-    pollIntervalMs: readPathNeedsWatching(readPath) ? READ_PATH_POLL_INTERVAL_MS : null,
+    pollIntervalMs:
+      readPathUnmeasured(health) || readPathNeedsWatching(readPath) ? READ_PATH_POLL_INTERVAL_MS : null,
   })
 
   useEffect(() => {

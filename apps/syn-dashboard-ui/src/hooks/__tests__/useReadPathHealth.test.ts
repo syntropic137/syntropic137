@@ -53,6 +53,48 @@ describe('useReadPathHealth', () => {
     expect(mockGetHealth).toHaveBeenCalledTimes(3)
   })
 
+  it('keeps asking after the startup gate answers without a subscription, then stops once healthy', async () => {
+    mockGetHealth
+      .mockResolvedValueOnce({ ...HEALTHY, status: 'starting', mode: 'degraded', subscription: null })
+      .mockResolvedValueOnce(CATCHING_UP)
+      .mockResolvedValue(HEALTHY)
+
+    const { result } = renderHook(() => useReadPathHealth())
+    await vi.waitFor(() => expect(mockGetHealth).toHaveBeenCalledTimes(1))
+
+    await vi.advanceTimersByTimeAsync(READ_PATH_POLL_INTERVAL_MS)
+    expect(mockGetHealth).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(result.current.rebuilding).toEqual([REBUILDING_EXECUTIONS]))
+
+    await vi.advanceTimersByTimeAsync(READ_PATH_POLL_INTERVAL_MS)
+    expect(mockGetHealth).toHaveBeenCalledTimes(3)
+    await vi.waitFor(() => expect(result.current.rebuilding).toEqual([]))
+
+    await vi.advanceTimersByTimeAsync(READ_PATH_POLL_INTERVAL_MS * 5)
+    expect(mockGetHealth).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries a failed first fetch, then stops once healthy', async () => {
+    mockGetHealth
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(CATCHING_UP)
+      .mockResolvedValue(HEALTHY)
+
+    const { result } = renderHook(() => useReadPathHealth())
+    await vi.waitFor(() => expect(mockGetHealth).toHaveBeenCalledTimes(1))
+
+    await vi.advanceTimersByTimeAsync(READ_PATH_POLL_INTERVAL_MS)
+    expect(mockGetHealth).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(result.current.rebuilding).toEqual([REBUILDING_EXECUTIONS]))
+
+    await vi.advanceTimersByTimeAsync(READ_PATH_POLL_INTERVAL_MS)
+    expect(mockGetHealth).toHaveBeenCalledTimes(3)
+    await vi.waitFor(() => expect(result.current.rebuilding).toEqual([]))
+
+    await vi.advanceTimersByTimeAsync(READ_PATH_POLL_INTERVAL_MS * 5)
+    expect(mockGetHealth).toHaveBeenCalledTimes(3)
+  })
+
   it('keeps polling while a projection is held, even with nothing rebuilding', async () => {
     mockGetHealth.mockResolvedValue(
       makeHealth({
