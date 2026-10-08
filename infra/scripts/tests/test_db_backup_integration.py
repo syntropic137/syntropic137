@@ -3,7 +3,9 @@
 Runs the real ``docker/db-backup/syn-db-backup.sh`` inside the same image the
 self-host ``db-backup`` service uses, against a database shaped like the real
 one: the event store tables, a projection table with its checkpoint, and
-``agent_events`` as a hypertable spread over several chunks.
+``agent_events`` built by the production ``EventStoreSchema.ensure_schema()``
+- hypertable, compression settings, rollup tables and their triggers - with
+its older chunks actually compressed.
 
 Listing the archive is not enough. A hypertable restored without
 ``timescaledb_pre_restore()`` / ``timescaledb_post_restore()`` can come back as
@@ -13,6 +15,7 @@ every table's row count, and then writes and reads the hypertable.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,15 +34,19 @@ _IMAGE = yaml.safe_load((_ROOT / "docker" / "docker-compose.yaml").read_text())[
 ]["image"]
 
 _PASSWORD = "backup-test"
-_TABLES = (
+#: Seeded below; the comparison itself covers every user table in the database.
+_SEEDED_TABLES = (
     "public.events",
     "public.aggregates",
     "public.idempotency",
     "event_store.events",
     "public.agent_events",
+    "public.agent_event_day_rollup",
     "public.workflow_summaries",
     "public.projection_checkpoints",
 )
+#: agent_events chunks before this are compressed after seeding.
+_COMPRESS_BEFORE = "2026-10-04"
 
 _SEED = """
 create extension if not exists timescaledb;
@@ -50,9 +57,6 @@ create table public.events (
 create table public.aggregates (aggregate_id text primary key, last_nonce bigint not null);
 create table public.idempotency (key text primary key, created_at timestamptz not null default now());
 create table event_store.events (id bigserial primary key, event_type text not null);
-create table public.agent_events (
-    time timestamptz not null, session_id text not null, event_type text not null, data jsonb);
-select create_hypertable('public.agent_events', 'time', chunk_time_interval => interval '1 day');
 create table public.workflow_summaries (workflow_id text primary key, runs int not null);
 create table public.projection_checkpoints (projection text primary key, position bigint not null);
 
@@ -62,12 +66,40 @@ insert into public.events (aggregate_id, aggregate_nonce, event_type, payload)
 insert into public.aggregates select 'wf-' || g, g from generate_series(0, 6) g;
 insert into public.idempotency (key) select 'k' || g from generate_series(1, 11) g;
 insert into event_store.events (event_type) select 'legacy' from generate_series(1, 5);
-insert into public.agent_events
-    select timestamptz '2026-10-01' + g * interval '1 hour', 's' || (g % 3), 'tool_use', '{}'
-    from generate_series(0, 119) g;
 insert into public.workflow_summaries select 'wf-' || g, g from generate_series(0, 6) g;
 insert into public.projection_checkpoints values ('workflow_summaries', 250);
 """
+
+#: Written after the production schema exists, so its rollup triggers fire.
+_AGENT_EVENTS = f"""
+insert into public.agent_events (time, event_type, session_id, execution_id, phase_id, data)
+    select timestamptz '2026-10-01' + g * interval '1 hour', 'tool_use', 's' || (g % 3),
+           'exec-' || (g % 2), 'phase-1', '{{}}'
+    from generate_series(0, 119) g;
+select compress_chunk(c)
+    from show_chunks('public.agent_events', older_than => timestamptz '{_COMPRESS_BEFORE}') c;
+"""
+
+_USER_TABLES = """
+select format('%I.%I', table_schema, table_name) from information_schema.tables
+where table_type = 'BASE TABLE'
+  and table_schema not in ('pg_catalog', 'information_schema')
+  and table_schema not like '\\_timescaledb%' and table_schema not like 'timescaledb\\_%'
+order by 1
+"""
+
+
+async def _production_schema(dsn: str) -> None:
+    """Exactly what the api runs at startup to create agent_events."""
+    import asyncpg
+
+    from syn_adapters.events.schema import EventStoreSchema
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await EventStoreSchema().ensure_schema(conn)
+    finally:
+        await conn.close()
 
 
 @pytest.fixture(scope="module")
@@ -77,6 +109,11 @@ def timescaledb() -> Iterator[object]:
     container = PostgresContainer(_IMAGE, username="syn", password=_PASSWORD, dbname="syn")
     container.with_volume_mapping(str(_SCRIPT_DIR), "/opt/db-backup", "ro")
     with container:
+        dsn = (
+            f"postgresql://syn:{_PASSWORD}@{container.get_container_host_ip()}:"
+            f"{container.get_exposed_port(5432)}/syn"
+        )
+        asyncio.run(_production_schema(dsn))
         yield container.get_wrapped_container()
 
 
@@ -106,14 +143,29 @@ def _sql(container, sql: str, database: str = "syn") -> str:
 
 
 def _counts(container, database: str) -> dict[str, int]:
-    return {t: int(_sql(container, f"select count(*) from {t}", database)) for t in _TABLES}
+    """Row count of every user table in DATABASE, keyed by qualified name."""
+    tables = _sql(container, _USER_TABLES, database).splitlines()
+    return {t: int(_sql(container, f"select count(*) from {t}", database)) for t in tables}
+
+
+def _compressed_chunks(container, database: str) -> int:
+    return int(
+        _sql(
+            container,
+            "select count(*) from timescaledb_information.chunks"
+            " where hypertable_name = 'agent_events' and is_compressed",
+            database,
+        )
+    )
 
 
 @pytest.fixture(scope="module")
 def backup_file(timescaledb) -> str:
-    code, out = _sh(timescaledb, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c", _SEED)
-    assert code == 0, out
+    for sql in (_SEED, _AGENT_EVENTS):
+        code, out = _sh(timescaledb, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c", sql)
+        assert code == 0, out
     assert int(_sql(timescaledb, "select count(*) from timescaledb_information.chunks")) > 1
+    assert _compressed_chunks(timescaledb, "syn") >= 3
 
     assert _sh(timescaledb, "mkdir", "-p", "/tmp/backups")[0] == 0
     code, out = _script(timescaledb, "backup", "/tmp/backups")
@@ -134,7 +186,7 @@ class TestRoundTrip:
         _restore(timescaledb, backup_file, "syn_restored")
 
         source = _counts(timescaledb, "syn")
-        assert all(n > 0 for n in source.values()), source
+        assert all(source[t] > 0 for t in _SEEDED_TABLES), source
         assert _counts(timescaledb, "syn_restored") == source
 
     def test_restored_hypertable_still_routes_and_queries_by_time(self, timescaledb, backup_file):
@@ -161,6 +213,9 @@ class TestRoundTrip:
             db,
         )
         assert one_day == "24"
+        # That day lives in a compressed chunk: it came back compressed, and
+        # decompresses on read.
+        assert _compressed_chunks(timescaledb, db) == _compressed_chunks(timescaledb, "syn")
         newest = _sql(
             timescaledb,
             "select session_id from public.agent_events where time > timestamptz '2026-12-01'",
