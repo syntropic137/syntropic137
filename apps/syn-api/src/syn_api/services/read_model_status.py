@@ -7,13 +7,14 @@ explain it are in ``ReadModelLag``; this module turns them into a verdict for
 ONE read model, with every number the UI shows computed here rather than by
 the client.
 
-WHAT COUNTS AS REBUILDING. A projection is rebuilding when it is behind the
-head AND either the coordinator is replaying (``is_catching_up``) or it is more
-than ``LIVE_LAG_THRESHOLD`` events behind. The first catches a replay early,
-when the count is still small; the second catches a projection replaying on its
-own rebuild track (#1318) while the coordinator as a whole is live. Ordinary
-live lag - a checkpoint a few events short mid-dispatch - is neither, so a page
-does not flash a banner on every write burst.
+WHAT COUNTS AS REBUILDING. A projection is rebuilding when it is more than
+``LIVE_LAG_THRESHOLD`` events behind the head, whether the coordinator as a
+whole is replaying or it replays on its own rebuild track (#1318). The
+coordinator's ``is_catching_up`` is deliberately not used: it is true while ANY
+track replays, so it would call a peer on ordinary live lag rebuilding too.
+Ordinary live lag - a checkpoint a few events short mid-dispatch - is never a
+rebuild, so a page does not flash a banner on every write burst. The cost is
+that a replay's last few hundred events read as caught up.
 """
 
 from __future__ import annotations
@@ -68,8 +69,14 @@ def _judge(entry: ProjectionLag, head_position: int) -> ReadModelStatus:
     )
 
 
-def _is_rebuilding(entry: ProjectionLag, lag: ReadModelLag) -> bool:
-    return lag.is_catching_up or entry.lag > LIVE_LAG_THRESHOLD
+def _is_rebuilding(entry: ProjectionLag) -> bool:
+    """Far enough behind that its page is visibly incomplete.
+
+    Distance alone, not the coordinator's `is_catching_up`: that is true while
+    ANY track replays, so a peer a few events behind on ordinary live lag
+    would be called rebuilding beside the one projection that is.
+    """
+    return entry.lag > LIVE_LAG_THRESHOLD
 
 
 def rebuilding_read_models(lag: ReadModelLag) -> list[ReadModelStatus]:
@@ -77,7 +84,7 @@ def rebuilding_read_models(lag: ReadModelLag) -> list[ReadModelStatus]:
     return [
         _judge(entry, lag.head_position)
         for entry in lag.lagging_projections
-        if _is_rebuilding(entry, lag)
+        if _is_rebuilding(entry)
     ]
 
 
@@ -85,7 +92,7 @@ def judge_read_model_status(lag: ReadModelLag | None, projection: str) -> ReadMo
     """Whether ``projection`` is rebuilding, given a lag snapshot (None: unknown)."""
     if lag is not None:
         for entry in lag.lagging_projections:
-            if entry.projection == projection and _is_rebuilding(entry, lag):
+            if entry.projection == projection and _is_rebuilding(entry):
                 return _judge(entry, lag.head_position)
     return ReadModelStatus(
         rebuilding=False, projection=projection, label_display=_label(projection)

@@ -1234,9 +1234,9 @@ class ReadModelStatus(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     rebuilding: bool = Field(
-        description="True while this read model is replaying history: the coordinator is "
-        "catching up with it behind the head, or it is more than the live-lag threshold "
-        "(500 events) behind. A few events of ordinary live lag is NOT rebuilding.",
+        description="True while this read model is replaying history: it is more than the "
+        "live-lag threshold (500 events) behind the head. A few events of ordinary live lag "
+        "is NOT rebuilding, even while another read model replays.",
     )
     projection: str = Field(description="Projection name, as in projection_checkpoints.")
     label_display: str = Field(

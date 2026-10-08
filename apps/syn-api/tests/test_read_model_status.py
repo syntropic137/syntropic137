@@ -45,9 +45,9 @@ EVALS = "evals"
 DETAILS = "workflow_execution_details"
 
 
-def _lag(positions: dict[str, int], *, replaying: bool) -> ReadModelLag:
+def _lag(positions: dict[str, int], *, replaying: bool, head: int = HEAD) -> ReadModelLag:
     return measure_read_model_lag(
-        head_position=HEAD,
+        head_position=head,
         checkpoints={
             name: CheckpointState(position=pos, updated_at=NOW) for name, pos in positions.items()
         },
@@ -88,6 +88,14 @@ class TestJudgement:
         assert lag.lagging_projections  # it IS behind; the verdict is what filters it
         assert judge_read_model_status(lag, EXECUTIONS).rebuilding is False
 
+    def test_live_lag_beside_another_projections_replay_is_not_a_rebuild(self) -> None:
+        """`is_catching_up` is true while ANY track replays; it says nothing of this one."""
+        lag = _lag({EXECUTIONS: HEAD - 29_476, EVALS: HEAD - 3}, replaying=True)
+
+        assert lag.is_catching_up is True
+        assert judge_read_model_status(lag, EXECUTIONS).rebuilding is True
+        assert judge_read_model_status(lag, EVALS).rebuilding is False
+
     def test_far_behind_on_its_own_rebuild_track_is_a_rebuild(self) -> None:
         """#1318: one projection replays on its own track while the coordinator is live."""
         lag = _lag({EXECUTIONS: HEAD - LIVE_LAG_THRESHOLD - 1}, replaying=False)
@@ -101,7 +109,8 @@ class TestJudgement:
         assert judge_read_model_status(lag, EXECUTIONS).rebuilding is False
 
     def test_never_reads_100_percent_while_behind(self) -> None:
-        lag = _lag({EXECUTIONS: HEAD - 1}, replaying=True)
+        head = 200_000
+        lag = _lag({EXECUTIONS: head - LIVE_LAG_THRESHOLD - 1}, replaying=True, head=head)
 
         assert judge_read_model_status(lag, EXECUTIONS).progress_display == "99%"
 
