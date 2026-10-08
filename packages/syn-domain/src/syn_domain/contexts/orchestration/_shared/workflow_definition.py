@@ -433,6 +433,20 @@ class PhaseYamlDefinition(BaseModel):
     or verify phase - one whose deliverable is a report - and leave it alone
     anywhere a branch is the point."""
 
+    requires_verdict: bool = False
+    """Whether this phase MUST report a ``review_verdict`` in its TASK_RESULT (PC-116).
+
+    The verdict steers the review rounds: ``certified`` ends them, and
+    anything else advances by order. "No verdict" advances by order on
+    purpose, which is right for every phase that is not a review - and wrong
+    for one that is, because a verify phase that forgot to say what it found
+    then reads exactly like one that found something. True turns that silence
+    into a failed, resumable phase instead.
+
+    DEFAULTS TO FALSE because the verdict is meaningless outside a review: a
+    phase that never judges anything cannot be asked to report a judgement.
+    Declare it on every verify and reverify phase."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -669,6 +683,7 @@ class PhaseYamlDefinition(BaseModel):
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
             delivers_repo_changes=self.delivers_repo_changes,
+            requires_verdict=self.requires_verdict,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,

@@ -119,6 +119,11 @@ is no verdict - it never skips anything.
 Not `success`. A Phase that finished a review that blocks the change
 succeeded; its verdict is `blocked`.
 
+A Phase that declares `requires_verdict` MUST report one (PC-116): with no
+verdict it fails ("verify produced no verdict") instead of advancing by
+`order`, because for a review, silence and `blocked` would otherwise look the
+same. A Phase without the declaration keeps the rule above.
+
 ## Skipped Phase
 
 A Phase the Execution decided will never run, because a Review Verdict made it
