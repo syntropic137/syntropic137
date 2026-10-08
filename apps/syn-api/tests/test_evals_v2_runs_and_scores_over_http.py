@@ -577,7 +577,7 @@ class TestExecutionListCarriesItsEval:
         assert evals_only.json()["total"] == 5
         assert [r["workflow_execution_id"] for r in hide_evals.json()["executions"]] == ["ordinary"]
         assert hide_evals.json()["total"] == 1
-        assert len((await self._rows(client))) == 6
+        assert len(await self._rows(client)) == 6
 
     async def test_a_page_of_eval_runs_reads_the_eval_model_twice_not_per_row(
         self, client: AsyncClient, lane2: _Lane2, monkeypatch: pytest.MonkeyPatch
@@ -589,11 +589,11 @@ class TestExecutionListCarriesItsEval:
         reads: list[str] = []
         real_get, real_query = store.get, store.query
 
-        async def get(projection: str, key: str):  # noqa: ANN202 - mirrors the store
+        async def get(projection: str, key: str):
             reads.append(projection)
             return await real_get(projection, key)
 
-        async def query(projection: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        async def query(projection: str, *args, **kwargs):
             reads.append(projection)
             return await real_query(projection, *args, **kwargs)
 
