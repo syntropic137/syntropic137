@@ -99,6 +99,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/latest-outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Latest Outputs Endpoint
+         * @description Each phase's latest output: its newest primary deliverable across all runs.
+         */
+        get: operations["get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}/history": {
         parameters: {
             query?: never;
@@ -5992,6 +6012,17 @@ export interface components {
             readonly model_display: string;
         };
         /**
+         * PhaseLatestOutputResponse
+         * @description One phase of a workflow and the output it last produced.
+         */
+        PhaseLatestOutputResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            artifact?: components["schemas"]["ArtifactSummaryResponse"] | null;
+        };
+        /**
          * PhaseMetrics
          * @description Metrics for a single phase.
          */
@@ -8946,6 +8977,19 @@ export interface components {
             /** Default Eval Id */
             default_eval_id: string | null;
         };
+        /**
+         * WorkflowLatestOutputsResponse
+         * @description Every phase of a workflow, in phase order, with its latest output.
+         *
+         *     One request for the whole workflow detail page instead of one artifact
+         *     query per phase.
+         */
+        WorkflowLatestOutputsResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Phases */
+            phases: components["schemas"]["PhaseLatestOutputResponse"][];
+        };
         /** WorkflowListResponse */
         WorkflowListResponse: {
             /** Workflows */
@@ -9324,6 +9368,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionRunListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowLatestOutputsResponse"];
                 };
             };
             /** @description Validation Error */

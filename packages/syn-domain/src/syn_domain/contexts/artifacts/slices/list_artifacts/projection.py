@@ -32,6 +32,12 @@ _PAGE_SHAPE = ListShape(
 )
 
 
+#: Rows ``latest_deliverable`` reads per round trip. A phase's newest primary
+#: is almost always among its newest few rows; a run that wrote many supporting
+#: files just costs another window.
+_LATEST_SCAN_WINDOW = 10
+
+
 class ArtifactListProjection(AutoDispatchProjection):
     """Builds artifact list read model from events.
 
@@ -177,6 +183,40 @@ class ArtifactListProjection(AutoDispatchProjection):
             filters={"execution_id": execution_id, "phase_id": phase_id},
         )
         return [ArtifactSummary.from_dict(d) for d in data]
+
+    async def latest_deliverable(self, workflow_id: str, phase_id: str) -> ArtifactSummary | None:
+        """The newest primary deliverable a workflow's phase produced, or None.
+
+        "What did this phase last produce", asked of the WORKFLOW rather than
+        of one execution: the workflow detail page shows it per phase. A run
+        writes one primary deliverable per phase (#997), so the newest primary
+        row is the last run's output; supporting files never stand in for it.
+
+        Scanned newest-first in small windows rather than fetched whole: rows
+        carry their content, and the answer is almost always in the first
+        window. An undated row is never the answer, because nothing says it is
+        newer than anything else; the store orders those last (#920) and the
+        scan stops before them.
+        """
+        filters = {"workflow_id": workflow_id, "phase_id": phase_id}
+        offset = 0
+        while True:
+            rows = await self._store.query(
+                self.PROJECTION_NAME,
+                filters=filters,
+                order_by="-created_at",
+                limit=_LATEST_SCAN_WINDOW,
+                offset=offset,
+            )
+            for row in rows:
+                summary = ArtifactSummary.from_dict(row)
+                if summary.created_at is None:
+                    return None
+                if summary.is_primary_deliverable:
+                    return summary
+            if len(rows) < _LATEST_SCAN_WINDOW:
+                return None
+            offset += _LATEST_SCAN_WINDOW
 
     async def on_artifact_creation_time_recovered(self, event_data: dict) -> None:
         """Handle ArtifactCreationTimeRecovered event (#1215).

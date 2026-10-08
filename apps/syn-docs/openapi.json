@@ -377,6 +377,49 @@
         }
       }
     },
+    "/workflows/{workflow_id}/latest-outputs": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Get Workflow Latest Outputs Endpoint",
+        "description": "Each phase's latest output: its newest primary deliverable across all runs.",
+        "operationId": "get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowLatestOutputsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workflows/{workflow_id}/history": {
       "get": {
         "tags": [
@@ -15991,6 +16034,35 @@
         ],
         "title": "PhaseExecutionInfo"
       },
+      "PhaseLatestOutputResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "phase_name": {
+            "type": "string",
+            "title": "Phase Name"
+          },
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "phase_id",
+          "phase_name"
+        ],
+        "title": "PhaseLatestOutputResponse",
+        "description": "One phase of a workflow and the output it last produced."
+      },
       "PhaseMetrics": {
         "properties": {
           "phase_id": {
@@ -21368,6 +21440,28 @@
         ],
         "title": "WorkflowDefaultEvalResponse",
         "description": "A workflow's default eval after an edit, read from the aggregate (#967)."
+      },
+      "WorkflowLatestOutputsResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseLatestOutputResponse"
+            },
+            "type": "array",
+            "title": "Phases"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "phases"
+        ],
+        "title": "WorkflowLatestOutputsResponse",
+        "description": "Every phase of a workflow, in phase order, with its latest output.\n\nOne request for the whole workflow detail page instead of one artifact\nquery per phase."
       },
       "WorkflowListResponse": {
         "properties": {
