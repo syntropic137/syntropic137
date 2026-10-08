@@ -208,6 +208,15 @@
       "title": "PhaseExecutionType",
       "type": "string"
     },
+    "PhaseIsolation": {
+      "description": "How much of the repositories' history and of GitHub a phase can reach.\n\nSTANDARD is every phase until ADR-073: a full clone with every branch and\ntag, and a GitHub credential that outlives setup so the agent can push.\n\nPINNED is for an evaluation, where any commit after the pin may be the\nanswer. Every cloned repository must be pinned; each is sealed at its pin - no\nlater commit, ref, tag or remote - and the workspace keeps no GitHub\ncredential after setup. A pinned phase therefore cannot push, and\ndeclares ``delivers_repo_changes: false``.",
+      "enum": [
+        "standard",
+        "pinned"
+      ],
+      "title": "PhaseIsolation",
+      "type": "string"
+    },
     "PhaseYamlDefinition": {
       "additionalProperties": false,
       "description": "Phase definition as parsed from YAML.\n\nConverts YAML snake_case to domain PhaseDefinition.",
@@ -332,6 +341,10 @@
           "default": true,
           "title": "Clone Repos",
           "type": "boolean"
+        },
+        "isolation": {
+          "$ref": "#/$defs/PhaseIsolation",
+          "default": "standard"
         },
         "delivers_repo_changes": {
           "default": true,

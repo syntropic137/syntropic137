@@ -5833,6 +5833,11 @@ export interface components {
              */
             delivers_repo_changes: boolean;
             /**
+             * Isolation
+             * @default standard
+             */
+            isolation: string;
+            /**
              * Sandbox
              * @default full-access
              */
