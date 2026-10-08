@@ -31,7 +31,7 @@ Commands and queries are strictly separated. Commands modify state through aggre
 
 **Events (90):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
 
-**Projections (30):** Pre-computed read models subscribed to domain events, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
+**Projections (31):** Pre-computed read models subscribed to domain events, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
 
 <CQRSFlow />
 

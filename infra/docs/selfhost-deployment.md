@@ -16,7 +16,7 @@ This deployment provides:
 
 ### Hardware
 - Mac Mini, Linux server, or any Docker-capable machine
-- Minimum 4GB RAM, 20GB storage
+- Minimum 8GB RAM (16GB recommended), 20GB storage. API and event store default to 2g memory limits each (#1552, #1553), so the control plane alone can reach about 6GB.
 - Stable internet connection
 
 ### Software
