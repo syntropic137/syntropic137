@@ -26,6 +26,12 @@ allowBuilds:
   esbuild: true
   sharp: true
 
+# First-party design-system packages (syntropic137/cross-framework-ui-design-system),
+# published with provenance; exempt from the release-age cooldown so Skyline can
+# pin a release the day it ships.
+minimumReleaseAgeExclude:
+  - '@syntropic137/design-contracts@0.1.0'
+
 overrides:
   '@babel/core@<7.29.6': '>=7.29.6 <8'
   '@humanfs/node@<0.16.8': '>=0.16.8 <0.17'

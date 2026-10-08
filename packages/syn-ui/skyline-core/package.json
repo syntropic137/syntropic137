@@ -26,5 +26,8 @@
   "devDependencies": {
     "typescript": "5.9.3",
     "vitest": "4.1.11"
+  },
+  "dependencies": {
+    "@syntropic137/design-contracts": "0.1.0"
   }
 }
