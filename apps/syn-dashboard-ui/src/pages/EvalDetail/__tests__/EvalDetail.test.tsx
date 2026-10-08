@@ -90,15 +90,39 @@ describe('EvalDetail', () => {
     expect(within(runs).getByText('FAIL')).toBeInTheDocument()
     expect(within(runs).getByText('Unscored')).toBeInTheDocument()
     expect(within(runs).getByText('0.25')).toBeInTheDocument()
-    expect(within(runs).getByText(/wf-verifier @ sha256:abc/)).toBeInTheDocument()
-    expect(within(runs).getAllByText('$0.41 est.').length).toBeGreaterThan(0)
+    const [, failed] = within(runs).getAllByRole('row')
+    expect(failed).toHaveTextContent('wf-verifier @ sha256:abc')
+    // Duration, cost and scorer are columns of their own, rendered at every width.
+    expect(within(failed).getByText('20m 0s')).toBeInTheDocument()
+    expect(within(failed).getByText('$0.41 est.')).toBeInTheDocument()
+    expect(within(failed).getByText('eval_suite v2')).toBeInTheDocument()
+    expect(within(failed).getByText('20m 0s').closest('td')).not.toHaveClass('hidden')
 
-    const evidence = within(runs).getByText(/Evidence · eval_suite/)
-    await userEvent.click(evidence)
-    expect(within(runs).getByText(/All 14 checkout tests passed/)).toBeVisible()
+    const [summary] = within(failed).getAllByText(/All 14 checkout tests passed/)
+    await userEvent.click(summary)
+    expect(summary.closest('details')).toHaveAttribute('open')
+    expect(screen.getByText('Runs 1–50 of 120, newest first')).toBeInTheDocument()
 
     // The server's total, not the rows on this page.
     expect(screen.getByText('Showing 1-50 of 120 runs')).toBeInTheDocument()
+  })
+
+  it('summarises the whole eval from the server, not from the page of runs it shows', async () => {
+    // One run on this page; the eval has 120. Every figure in the strip is
+    // the eval-level display string, which the page could not have derived
+    // from the runs it holds.
+    serve(evalSummary({ run_count: 120, scored_count: 97, pass_rate_display: '41% judged' }), runPage([evalRun()], 120))
+    renderDetail()
+    const strip = await screen.findByRole('region', { name: 'Summary' })
+
+    expect(within(strip).getByText('41% judged')).toBeInTheDocument()
+    expect(within(strip).getByText(/ERROR and unscored excluded/)).toBeInTheDocument()
+    expect(within(strip).getByText('97 / 120')).toBeInTheDocument()
+    expect(within(strip).getByText('over all 120 runs')).toBeInTheDocument()
+    expect(within(strip).getByText('18m all')).toBeInTheDocument()
+    expect(within(strip).getByText('$0.39 all')).toBeInTheDocument()
+    expect(within(strip).getByText('$0.58 all')).toBeInTheDocument()
+    expect(screen.getByText('Workflow × version × models, over all 120 runs')).toBeInTheDocument()
   })
 
   it('keeps every run on the timeline, older than the first page included, while the table pages', async () => {

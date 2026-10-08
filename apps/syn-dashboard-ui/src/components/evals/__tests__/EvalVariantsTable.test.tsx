@@ -1,15 +1,68 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
-import { LONG_MODEL, variant } from '../../../test/evalFixtures'
+import { LONG_MODEL, stats, variant } from '../../../test/evalFixtures'
 import { EvalVariantsStrip, EvalVariantsTable } from '../EvalVariantsTable'
 
 describe('EvalVariantsTable (Compare)', () => {
   it('prints the server display strings verbatim, not a client reformat of the numbers', () => {
     render(<EvalVariantsTable variants={[variant()]} />)
     expect(screen.getByText('66.7% (2/3)')).toBeInTheDocument()
-    expect(screen.getByText('$0.41 est.')).toBeInTheDocument()
+    expect(screen.getByText('20m med.')).toBeInTheDocument()
+    expect(screen.getByText('$0.41 med.')).toBeInTheDocument()
+    expect(screen.getByText('>=$0.62 (partial) / PASS')).toBeInTheDocument()
     expect(screen.queryByText('$0.4123')).toBeNull()
+  })
+
+  it("shows the variant's last verdict, and its run count without an ERROR-inflated pass denominator", () => {
+    render(<EvalVariantsTable variants={[variant({ run_count: 5, pass_count: 2, last_verdict: 'ERROR' })]} />)
+    const [, row] = screen.getAllByRole('row')
+    expect(within(row).getByText('ERROR')).toHaveAttribute('data-verdict', 'ERROR')
+    expect(within(row).getByText('5')).toBeInTheDocument()
+    expect(within(row).queryByText('2/5')).toBeNull()
+  })
+
+  it('marks the best variant: highest pass rate, ERROR-only (no rate) never wins', () => {
+    render(
+      <EvalVariantsTable
+        variants={[
+          variant({ workflow_id: 'wf-errors', pass_rate: null, pass_rate_display: '—', last_verdict: 'ERROR' }),
+          variant({ workflow_id: 'wf-low', pass_rate: 0.25, pass_rate_display: '25%' }),
+          variant({ workflow_id: 'wf-high', pass_rate: 0.9, pass_rate_display: '90%' }),
+        ]}
+      />,
+    )
+    const best = document.querySelectorAll('tr[data-best]')
+    expect(best).toHaveLength(1)
+    expect(best[0]).toHaveTextContent('wf-high')
+    expect(within(best[0] as HTMLElement).getByText('Best')).toBeInTheDocument()
+  })
+
+  it('sorts by a column on click, flipping on a second click, with a missing figure always last', async () => {
+    render(
+      <EvalVariantsTable
+        variants={[
+          variant({ workflow_id: 'wf-mid', stats: stats({ median_cost_usd: '0.50' }) }),
+          variant({ workflow_id: 'wf-unknown', stats: stats({ median_cost_usd: null }) }),
+          variant({ workflow_id: 'wf-cheap', stats: stats({ median_cost_usd: '0.10' }) }),
+        ]}
+      />,
+    )
+    const order = () => screen.getAllByRole('row').slice(1).map((r) => r.textContent?.match(/wf-[a-z]+/)?.[0])
+    const header = screen.getByRole('button', { name: /Median cost/ })
+
+    await userEvent.click(header)
+    expect(order()).toEqual(['wf-cheap', 'wf-mid', 'wf-unknown'])
+    expect(header.closest('th')).toHaveAttribute('aria-sort', 'ascending')
+    await userEvent.click(header)
+    expect(order()).toEqual(['wf-mid', 'wf-cheap', 'wf-unknown'])
+  })
+
+  it('scrolls inside its own container on a narrow screen instead of dropping columns', () => {
+    render(<EvalVariantsTable variants={[variant()]} />)
+    expect(screen.getByTestId('variants-scroll')).toHaveClass('overflow-x-auto')
+    expect(screen.getByText('$0.41 med.').closest('td')).not.toHaveClass('hidden')
   })
 
   it('shows one row per variant with its workflow and observed models', () => {

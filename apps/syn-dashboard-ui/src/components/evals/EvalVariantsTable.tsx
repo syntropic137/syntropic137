@@ -1,61 +1,112 @@
+import { clsx } from 'clsx'
+import { useState } from 'react'
+
 import type { EvalVariant } from '../../api/evals'
 import { formatRelativeTime } from '../../utils/dateFormatters'
+import {
+  bestVariantKey,
+  sortVariants,
+  variantKey,
+  type VariantSortDir,
+  type VariantSortKey,
+} from '../../utils/evalVariants'
+import { VerdictPill } from './VerdictPill'
 
-/** The server's grouping key, so two versions of one workflow never share a React key. */
-function variantKey(v: EvalVariant): string {
-  return `${v.workflow_id}|${v.workflow_version ?? ''}|${v.models.join(',')}`
+const COLUMNS: { key: VariantSortKey; label: string; firstDir: VariantSortDir }[] = [
+  { key: 'runs', label: 'Runs', firstDir: 'desc' },
+  { key: 'pass_rate', label: 'Pass rate', firstDir: 'desc' },
+  { key: 'duration', label: 'Median duration', firstDir: 'asc' },
+  { key: 'cost', label: 'Median cost', firstDir: 'asc' },
+  { key: 'last_run', label: 'Last run', firstDir: 'desc' },
+]
+
+interface Sort {
+  key: VariantSortKey
+  dir: VariantSortDir
+}
+
+function SortHeader({ column, sort, onSort }: { column: (typeof COLUMNS)[number]; sort: Sort; onSort: (s: Sort) => void }) {
+  const active = sort.key === column.key
+  const flipped: VariantSortDir = sort.dir === 'asc' ? 'desc' : 'asc'
+  return (
+    <th
+      className="px-3 py-2 text-right font-medium"
+      aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        className={clsx('whitespace-nowrap hover:text-[var(--color-text-primary)]', active && 'text-[var(--color-text-primary)]')}
+        onClick={() => onSort({ key: column.key, dir: active ? flipped : column.firstDir })}
+      >
+        {column.label}
+        {active ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+      </button>
+    </th>
+  )
+}
+
+function VariantRow({ v, best }: { v: EvalVariant; best: boolean }) {
+  const cell = 'px-3 py-2 text-right tabular-nums text-[var(--color-text-secondary)]'
+  return (
+    <tr
+      data-best={best || undefined}
+      className={clsx('border-b border-[var(--color-border)] last:border-0', best && 'bg-emerald-500/5 shadow-[inset_3px_0_0_#10b981]')}
+    >
+      <td className="break-all px-3 py-2">
+        <div className="text-[var(--color-text-primary)]">
+          {v.workflow_id}
+          {v.workflow_version && <span className="text-[var(--color-text-muted)]"> @ {v.workflow_version}</span>}
+          {best && <span className="ml-2 whitespace-nowrap rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">Best</span>}
+        </div>
+        <div className="text-xs text-[var(--color-text-muted)]">{v.models.length ? v.models.join(', ') : 'no model reported'}</div>
+        <div className="mt-1">
+          <VerdictPill verdict={v.last_verdict} />
+        </div>
+      </td>
+      <td className={cell}>{v.run_count}</td>
+      <td className={clsx(cell, 'text-[var(--color-text-primary)]')}>{v.pass_rate_display}</td>
+      <td className={cell}>{v.stats.median_duration_display}</td>
+      <td className={cell} title={`Cost per PASS ${v.stats.cost_per_pass_display}`}>
+        {v.stats.median_cost_display}
+        <div className="text-[11px] text-[var(--color-text-muted)]">{v.stats.cost_per_pass_display} / PASS</div>
+      </td>
+      <td className={cell} title={v.last_run_at ?? undefined}>
+        {formatRelativeTime(v.last_run_at)}
+      </td>
+    </tr>
+  )
 }
 
 /**
  * The Compare table: one row per (workflow, workflow version, observed models)
- * variant, so the same eval run by different workflows, versions and models can
- * be read side by side. Two versions of one workflow are two rows: the server
- * groups them apart because an edit between runs is a different treatment.
+ * variant, sortable, with the best one marked. Every figure is the server's,
+ * over all of the eval's runs. On a narrow screen the table scrolls inside its
+ * own container, never the page.
  */
 export function EvalVariantsTable({ variants }: { variants: readonly EvalVariant[] }) {
+  const [sort, setSort] = useState<Sort>({ key: 'pass_rate', dir: 'desc' })
   if (variants.length === 0) {
     return <p className="p-4 text-sm text-[var(--color-text-muted)]">No runs yet, so nothing to compare.</p>
   }
+  const best = bestVariantKey(variants)
   return (
-    <table className="w-full table-fixed text-sm">
-      <thead>
-        <tr className="border-b border-[var(--color-border)] text-left text-xs text-[var(--color-text-muted)]">
-          <th className="w-[45%] px-3 py-2 font-medium sm:w-auto">Workflow · version · models</th>
-          <th className="px-3 py-2 text-right font-medium">Runs</th>
-          <th className="px-3 py-2 text-right font-medium">Pass rate</th>
-          <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Avg cost</th>
-          <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Last run</th>
-        </tr>
-      </thead>
-      <tbody>
-        {variants.map((v) => (
-          <tr key={variantKey(v)} className="border-b border-[var(--color-border)] last:border-0">
-            <td className="break-all px-3 py-2">
-              <div className="text-[var(--color-text-primary)]">
-                {v.workflow_id}
-                {v.workflow_version && <span className="text-[var(--color-text-muted)]"> @ {v.workflow_version}</span>}
-              </div>
-              <div className="text-xs text-[var(--color-text-muted)]">
-                {v.models.length ? v.models.join(', ') : 'no model reported'}
-              </div>
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums text-[var(--color-text-secondary)]">
-              {v.pass_count}/{v.run_count}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums text-[var(--color-text-primary)]">{v.pass_rate_display}</td>
-            <td className="hidden px-3 py-2 text-right tabular-nums text-[var(--color-text-secondary)] sm:table-cell">
-              {v.avg_cost_display}
-            </td>
-            <td
-              className="hidden px-3 py-2 text-right text-[var(--color-text-secondary)] sm:table-cell"
-              title={v.last_run_at ?? undefined}
-            >
-              {formatRelativeTime(v.last_run_at)}
-            </td>
+    <div className="overflow-x-auto" data-testid="variants-scroll">
+      <table className="w-full min-w-[40rem] table-fixed text-sm">
+        <thead>
+          <tr className="border-b border-[var(--color-border)] text-left text-xs text-[var(--color-text-muted)]">
+            <th className="w-[34%] px-3 py-2 font-medium">Variant · last verdict</th>
+            {COLUMNS.map((c) => (
+              <SortHeader key={c.key} column={c} sort={sort} onSort={setSort} />
+            ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {sortVariants(variants, sort.key, sort.dir).map((v) => (
+            <VariantRow key={variantKey(v)} v={v} best={variantKey(v) === best} />
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

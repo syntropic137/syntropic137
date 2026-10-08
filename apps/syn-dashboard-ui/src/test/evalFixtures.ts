@@ -8,6 +8,21 @@
 
 import type { EvalRun, EvalRunListResponse, EvalSummary, EvalVariant } from '../api/evals'
 
+type EvalRunStats = EvalVariant['stats']
+
+export function stats(overrides: Partial<EvalRunStats> = {}): EvalRunStats {
+  return {
+    median_duration_seconds: 1200,
+    median_duration_display: '20m med.',
+    median_cost_usd: '0.4123',
+    median_cost_display: '$0.41 med.',
+    cost_per_pass_usd: '0.6185',
+    cost_per_pass_display: '>=$0.62 (partial)',
+    ...overrides,
+  }
+}
+
+
 export const LONG_MODEL = 'claude-opus-5-5-20261001-with-a-very-long-observed-model-identifier'
 
 export function variant(overrides: Partial<EvalVariant> = {}): EvalVariant {
@@ -22,6 +37,8 @@ export function variant(overrides: Partial<EvalVariant> = {}): EvalVariant {
     avg_cost_usd: '0.4123',
     avg_cost_display: '$0.41 est.',
     last_run_at: '2026-10-06T12:00:00Z',
+    last_verdict: 'FAIL',
+    stats: stats(),
     ...overrides,
   }
 }
@@ -48,6 +65,7 @@ export function evalSummary(overrides: Partial<EvalSummary> = {}): EvalSummary {
     last_run_at: '2026-10-06T12:00:00Z',
     last_verdict: 'PASS',
     variants: [variant()],
+    stats: stats({ median_duration_display: '18m all', median_cost_display: '$0.39 all', cost_per_pass_display: '$0.58 all' }),
     ...overrides,
   }
 }
