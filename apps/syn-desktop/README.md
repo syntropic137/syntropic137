@@ -35,22 +35,8 @@ node --experimental-strip-types --test ../bridge/index.test.ts
 
 `tauri::generate_context!` reads `apps/syn-ui/dist` at compile time. Build syn-ui once before running `cargo check` on a fresh checkout.
 
-## Wiring the web app (not done yet)
+## Wiring the web app
 
-`apps/syn-ui` does not import the bridge yet. To wire it up, add `apps/syn-desktop` to `pnpm-workspace.yaml`, add `"syn-desktop": "workspace:*"` to syn-ui, and call this from `main.ts` before the first request:
-
-```ts
-import { startDesktop, setLiveState } from 'syn-desktop/bridge'
-import { configureClient, API_BASE } from '@syn137/syn-ui-data'
-
-await startDesktop({
-  navigate: (path) => router.go(path),
-  openCommandPalette: () => palette.open(),
-  openSettings: () => router.go('/settings'),
-  configureApi: (baseUrl) => configureClient({ baseUrl: baseUrl ?? API_BASE }),
-})
-// wherever live state changes:
-void setLiveState(live.state)
-```
+`apps/syn-ui/src/main.ts` checks for `window.__TAURI__` and only then lazy-imports `apps/syn-ui/src/lib/desktop.svelte.ts`, which imports `bridge/index.ts` by relative path (no workspace dependency, no lockfile change) and calls `startDesktop` before the app mounts. The plain browser build ships only that check; the bridge is a separate chunk it never loads. The tray dot follows `live.state` through `setLiveState`. Settings is not wired yet because syn-ui has no Settings route. The gateway image copies `bridge/` into its Skyline build stage for the same reason.
 
 When no URL is saved, the packaged app uses the selfhost gateway, `http://localhost:8137/api/v1`, the same address the CLI uses. The API must then allow the app's origin through CORS: `tauri://localhost` on macOS and Linux, `http://tauri.localhost` on Windows. `apps/syn-api` currently allows only `localhost:5173` and `localhost:3000`.
