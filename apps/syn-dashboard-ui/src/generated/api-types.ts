@@ -5439,6 +5439,16 @@ export interface components {
             coverage: components["schemas"]["InventoryCoverage"];
             counts: components["schemas"]["InventoryCounts"];
         };
+        /**
+         * InvokedSkillInfo
+         * @description One skill the agent invoked through the Skill tool, and how often (#1269).
+         */
+        InvokedSkillInfo: {
+            /** Name */
+            name: string;
+            /** Count */
+            count: number;
+        };
         /** LineageEdge */
         LineageEdge: {
             parent: components["schemas"]["InventoryNodeRef"];
@@ -5987,6 +5997,7 @@ export interface components {
              * @enum {string}
              */
             start_pins_status: "recorded" | "not_recorded" | "unavailable";
+            skill_use?: components["schemas"]["PhaseSkillUseInfo"];
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
@@ -6109,6 +6120,30 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * PhaseSkillUseInfo
+         * @description Which declared skills this phase actually used (#1269).
+         *
+         *     Declaring a skill installs it; only an invocation shows the agent reached
+         *     for it. This is the fact that tells the two apart, per phase.
+         */
+        PhaseSkillUseInfo: {
+            /**
+             * Status
+             * @default unavailable
+             * @enum {string}
+             */
+            status: "observed" | "not_observable" | "unavailable";
+            /** Declared */
+            declared?: string[];
+            /** Invoked */
+            invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /**
+             * Declared Not Invoked
+             * @description Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.
+             */
+            readonly declared_not_invoked: string[];
         };
         /**
          * PhaseStartConfig
