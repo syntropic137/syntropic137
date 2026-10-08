@@ -36,9 +36,8 @@ class _Settings:
 @dataclass
 class _Network:
     failures: dict[str, list[int]] = field(default_factory=dict)
-    pull: dict[str, object] = field(
-        default_factory=lambda: {"state": "closed", "merged_at": _MERGED_AT}
-    )
+    pull_state: str = "closed"
+    pull_merged_at: str | None = _MERGED_AT
     sent: list[str] = field(default_factory=list)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -56,7 +55,9 @@ class _Network:
             )
         assert path == _PULL
         assert request.headers["authorization"].endswith("ghs_minted")
-        return httpx.Response(200, json=self.pull)
+        return httpx.Response(
+            200, json={"state": self.pull_state, "merged_at": self.pull_merged_at}
+        )
 
 
 @pytest.fixture
@@ -84,7 +85,7 @@ async def test_a_mint_that_failed_once_is_retried_and_the_merge_is_read(
 
 
 async def test_a_closed_unmerged_pr_is_closed_and_not_merged(network: _Network) -> None:
-    network.pull = {"state": "closed", "merged_at": None}
+    network.pull_merged_at = None
 
     state = await _reader(network).read_merge(_REPO, 7)
 
