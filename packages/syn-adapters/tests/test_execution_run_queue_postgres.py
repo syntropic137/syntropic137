@@ -113,14 +113,7 @@ async def test_budget_two_across_four_pools_admits_exactly_two_and_never_more(
                 samples += 1
                 await asyncio.sleep(0)
 
-    sampler = asyncio.create_task(sample())
-    first = await asyncio.gather(*(queues[i % 4].claim("small-host") for i in range(20)))
-    winners = [c for c in first if c is not None]
-    assert len(winners) == 2
-    assert len({w.execution_id for w in winners}) == 2
-
-    # Churn: every pool keeps claiming while winners release, sampled throughout.
-    held: list[ClaimedRun] = list(winners)
+    held: list[ClaimedRun] = []
 
     async def worker(queue: PostgresExecutionRunQueue) -> None:
         for _ in range(15):
@@ -130,9 +123,20 @@ async def test_budget_two_across_four_pools_admits_exactly_two_and_never_more(
             if held:
                 await queue.close(held.pop(0))
 
-    await asyncio.gather(*(worker(q) for q in queues))
-    sampling = False
-    await sampler
+    sampler = asyncio.create_task(sample())
+    try:
+        first = await asyncio.gather(*(queues[i % 4].claim("small-host") for i in range(20)))
+        winners = [c for c in first if c is not None]
+        assert len(winners) == 2
+        assert len({w.execution_id for w in winners}) == 2
+
+        # Churn: every pool keeps claiming while winners release, sampled throughout.
+        held.extend(winners)
+        await asyncio.gather(*(worker(q) for q in queues))
+    finally:
+        # The sampler holds a pool connection; the fixture cannot close the pool under it.
+        sampling = False
+        await sampler
 
     assert samples > 0
     assert peak <= 2

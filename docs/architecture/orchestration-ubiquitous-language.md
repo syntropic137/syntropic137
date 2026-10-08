@@ -484,7 +484,9 @@ runs it beside the API in one process). It Claims admitted Executions from the
 Run Queue and runs each to a terminal status. The API process admits
 Executions and never runs one. Implemented by `ExecutionHost`. One host has a
 `host_id` and a generation (its image tag), recorded in `executor_hosts` and
-on every container it creates (`syn.host_id`, `syn.host_generation`).
+on every container it creates (`syn.host_id`, `syn.host_generation`). The
+Run Queue's value for a registered host is `ExecutorHost`: its `host_id`,
+container, generation and Event Epoch.
 Specified in ADR-072.
 
 An Executor is a host, not an Execution: nothing about an Execution's stream
@@ -506,7 +508,10 @@ or a later sweep that finds the stream, promotes it to `admitted`. An expired
 Lease goes `claimed` -> `fencing` -> `reaped` -> `interrupted` (see Fencing). A
 resume whose inherited artifacts cannot yet be read is deferred back to
 `admitted` with a `retry_at`, releasing its slot (see Claim). `RunCounts` is the
-number of rows in each state.
+number of rows in each state. The sweep reads each stream through an
+`ExecutionStreamProbe`, whose answer is a `StreamPresence`: present, absent or
+**unknown**, and unknown is never read as absent. One sweep turn reports what it
+resolved as an `OpeningSweep`.
 
 A run row is not an Execution and its states are not Execution statuses.
 
