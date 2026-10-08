@@ -15,12 +15,13 @@ import { describe, expect, it } from 'vitest'
 import { UNATTRIBUTED_MODEL_KEY, UNATTRIBUTED_MODEL_LABEL } from '../../../constants/models'
 import type { ExecutionDetailResponse } from '../../../types'
 import { PhaseTimeline } from '../PhaseTimeline'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
 function phase(overrides: Partial<Phase>): Phase {
   return {
-    workflow_phase_id: 'p1',
+    phase_id: 'p1',
     name: 'Phase',
     status: 'completed',
     session_id: null,
@@ -63,7 +64,7 @@ function renderPhases(phases: Phase[]) {
   } as unknown as ExecutionDetailResponse
   return render(
     <MemoryRouter>
-      <PhaseTimeline execution={execution} now={Date.now()} />
+      <PhaseTimeline execution={withPlanOfPhases(execution)} now={Date.now()} />
     </MemoryRouter>,
   )
 }
@@ -127,7 +128,7 @@ describe('Phase Pipeline model label', () => {
     renderPhases(
       aliases.map((alias, i) =>
         phase({
-          workflow_phase_id: `p${i}`,
+          phase_id: `p${i}`,
           model: null,
           requested_model: alias,
           model_display: `unknown (requested: ${alias})`,

@@ -1,0 +1,17 @@
+id: clean-api-shape-silent-absence
+polarity: clean
+# A control, not a defect: PR #1010, merged 2026-08-30. Chosen by the v5 rule
+# (README.md): no later fix or revert names the PR, no issue or fix PR refers
+# to it (searched on GitHub), and no mainline commit has touched a function it
+# changed in scripts/api_shape.py since it merged, through clean_through.
+source_pr: 1010
+commit: 11c0f3c28acf153d87eeaa9c6b92db2d7fd65c8f
+merge_commit: 1f5795dad61f8545f9d5e46314060435ae2a382b
+clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
+task: >
+  The change under review reworks the developer script that prints the shape
+  of an API response and searches it for a field or value, so that it never
+  reports a field absent without having looked everywhere it could be.
+  Review whether its output and exit status can still claim an absence, or a
+  presence, that is not true of the payload.
+split: train

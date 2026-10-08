@@ -217,6 +217,13 @@ class ExecutionBudget:
                 return self.position(entry.claim.execution_id)
         return None
 
+    def queued(self) -> list[StartPosition]:
+        """Every start waiting for a slot, next to start first."""
+        return [
+            self._at(entry.claim, index)
+            for index, entry in enumerate(self._waiting.values(), start=1)
+        ]
+
     def matching(self, prefix: str) -> list[StartPosition]:
         """Every place whose execution id starts with ``prefix``, for id lookup."""
         ids = [key for key in (*self._running, *self._waiting) if key.startswith(prefix)]

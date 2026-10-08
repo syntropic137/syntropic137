@@ -10,7 +10,7 @@ npx @syntropic137/setup init
 
 This handles Docker prerequisites, secret generation, GitHub App creation, and stack
 provisioning in a single command. See the
-[NPX setup repo](https://github.com/syntropic137/syntropic137-npx) for full documentation.
+[Syntropic137 Setup repo](https://github.com/syntropic137/syntropic137-setup) for full documentation.
 
 **The rest of this document** covers advanced deployment topics: compose overlays,
 1Password integration, Cloudflare tunnels, resource tuning, and operational tooling

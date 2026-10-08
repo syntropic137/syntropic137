@@ -51,6 +51,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DelegationFailedError,
+    PhaseReportedNoVerdictError,
 )
 
 if TYPE_CHECKING:
@@ -118,13 +119,32 @@ async def completion_failure(
     evidence: DelegationEvidencePort | None,
     workspace: ManagedWorkspace | None,
     required_delegate: str | None,
+    requires_verdict: bool,
 ) -> Exception | None:
     """What ends this phase instead of completing it, or None.
 
-    The run's own outcome first (`phase_failure`); the required delegate is
-    asked only once the run itself may complete, so it never relabels a
-    failure the run already had.
+    The run's own outcome first (`phase_failure`); the phase's declared
+    obligations - a verdict, a delegate - are asked only once the run itself
+    may complete, so neither relabels a failure the run already had.
     """
-    return phase_failure(result, phase_id=phase_id) or await delegation_failure(
-        evidence, workspace, phase_id=phase_id, required_delegate=required_delegate
+    return (
+        phase_failure(result, phase_id=phase_id)
+        or verdict_failure(result, phase_id=phase_id, requires_verdict=requires_verdict)
+        or await delegation_failure(
+            evidence, workspace, phase_id=phase_id, required_delegate=required_delegate
+        )
     )
+
+
+def verdict_failure(
+    result: AgentExecutionResult, *, phase_id: str, requires_verdict: bool
+) -> PhaseReportedNoVerdictError | None:
+    """The exception that fails a review phase for reporting no verdict, or None (PC-116).
+
+    Only a phase that DECLARED ``requires_verdict`` is asked. For every other
+    phase no verdict still advances by order, exactly as `ReviewVerdict`
+    documents; this narrows nothing for them.
+    """
+    if requires_verdict and result.stream_result.verdict.reported_review_verdict is None:
+        return PhaseReportedNoVerdictError(phase_id=phase_id)
+    return None

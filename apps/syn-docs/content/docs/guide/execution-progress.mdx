@@ -1,0 +1,129 @@
+---
+title: Phase Plan, Progress and Repair Rounds
+description: How an execution shows every declared phase, how review verdicts skip repair rounds, how progress is counted when phases are skipped, and how a run with unresolved findings ends
+---
+
+An execution declares its phases when it starts. Some of them may never run,
+because a review made them unnecessary. This page explains how that is decided
+and how to read it from the API, the CLI and the dashboard.
+
+## Review verdicts decide what runs next
+
+A reviewing phase adds `review_verdict` to its `TASK_RESULT` block:
+
+```text
+TASK_RESULT: {"success": true, "review_verdict": "certified", "side_effects": "none", "comments": "Re-verified at the new head; nothing blocks the change"}
+TASK_RESULT_END
+```
+
+| `review_verdict` | What the execution does next |
+| --- | --- |
+| `certified` | Skips every remaining phase **before the workflow's final phase** and runs the final phase next |
+| `blocked` | Runs the next phase by `order` (the next repair round, or the final phase if the rounds are spent) |
+| missing, or any other word | Same as `blocked`: the next phase by `order`. Never skips anything |
+
+Rules:
+
+- The execution, not the prompt, decides. The phase only reports.
+- The final phase is never skipped. A verdict reported by the final phase
+  changes nothing.
+- `review_verdict` is not `success`. A review that finished and found a blocker
+  is a successful phase: `"success": true, "review_verdict": "blocked"`.
+- Skipped phases are recorded on the `NextPhaseReady` event as
+  `skipped_phase_ids`. They are never started and never billed.
+
+This is a platform rule, so any workflow can use it. There is no loop
+construct: a workflow writes a bounded repair loop as ordinary phases in
+sequence, and a certification jumps over the rounds it made unnecessary.
+
+## Repair rounds in `sdlc-implement-v3`
+
+`sdlc-implement-v3` makes **at most two** fix/re-verify rounds:
+
+| Order | Phase id | Role |
+| --- | --- | --- |
+| 1 | `premise` | Check the task's premise |
+| 2 | `implement` | Make the change, open a draft PR |
+| 3 | `verify` | Independent verification |
+| 4, 5 | `fix`, `reverify` | Round 1 |
+| 6, 7 | `fix_2`, `reverify_2` | Round 2 |
+| 8 | `finalize_pr` | Final phase: mark the PR ready, or leave it a draft with the blocker written on it |
+
+- If `verify` certified, `fix` makes no edits and `reverify` confirms the head
+  is unchanged and certifies. Round 2 is then skipped.
+- A `reverify*` that certifies skips the remaining rounds; `finalize_pr` runs.
+- The PR is marked ready if and only if the last round that ran certified.
+- `sdlc-reverify-pr-v1` uses the same rounds on an existing PR head:
+  `syn workflow run sdlc-reverify-pr-v1 -t "#1234"`.
+- Executions started while a server still had the earlier three-round
+  definition installed (`fix_3`, `reverify_3`, then `finalize_pr` at order 10)
+  keep that definition. The cutover is when the workflow is reinstalled on that
+  server, not a calendar date: progress and the phase plan are read from each run's own start
+  event, never from the currently installed workflow.
+
+## Unresolved findings
+
+If `reverify_2` still reports `blocked`, the execution **completes** (it does
+not fail) with `review_verdict: blocked` on the execution detail. That is a
+run with unresolved findings: every phase did its job and the workflow's bound
+was reached.
+
+| Execution `status` | `review_verdict` | Read it as |
+| --- | --- | --- |
+| `completed` | `certified` | The change was certified |
+| `completed` | `blocked` | Unresolved findings. Resumable at the repair point (see below) |
+| `completed` | `null` | Nothing reviewed it |
+
+Such a run can be resumed: the resume starts at the **repair point**, the fix
+phase of the last round (`fix_2`), and re-runs that round and `finalize_pr`.
+Because `fix_2` already ran and may have pushed, the resume needs
+`--acknowledge-external-effects`. See
+[Resuming Executions](/docs/guide/resuming-executions#resuming-a-run-with-unresolved-findings).
+
+## Progress: `phase_progress`
+
+`total_phases` counts every declared phase, so `completed_phases/total_phases`
+reads "6/8" for a run that finished after certifying early. Use
+`phase_progress` instead. It is on every item of `GET /executions` and on
+`GET /executions/{id}`:
+
+| Field | Meaning |
+| --- | --- |
+| `completed` | Phases that ran to completion |
+| `skipped` | Phases a review verdict made unnecessary; they will never run |
+| `possible` | The most phases this run can complete: declared, less skipped |
+| `remaining_possible` | Phases that could still run. `0` once the run has ended |
+| `percent` | `completed` as a share of `possible`, 0-100. A completed run is `100` |
+| `display` | Human text, for example `6 of 6 (2 phases not needed)` or `phase 3 of up to 8` |
+
+Render `display` and draw `percent`. Do not divide the raw counts yourself.
+`syn execution list` prints `display`.
+
+Skips are carried across a resume: phases the parent skipped before the resume
+phase are inherited as skipped (`inherited_skipped_phase_ids`) and are neither
+re-run nor counted as work still to do.
+
+## Every declared phase: `phase_plan`
+
+`phases` on `GET /executions/{id}` lists only phases that started in this
+execution. `phase_plan` lists **every declared phase**, in order, so a client
+can show what is left as well as what ran. The dashboard's execution page
+renders it.
+
+Each entry:
+
+| Field | Meaning |
+| --- | --- |
+| `phase_id` | The phase id from the workflow |
+| `name` | The phase name |
+| `status` | `pending`, `skipped`, `inherited`, or the status the phase ran to here (`running`, `completed`, `failed`, ...) |
+| `status_display` | Label to show, for example `Pending`, `Skipped (not needed)`, `Inherited (completed earlier)` |
+
+Style by `status`; show `status_display`.
+
+## Limits
+
+- An execution started before phase definitions were recorded on its start
+  event has no declared phases, so its `phase_plan` is empty.
+- `skipped` is decided only by a `certified` review verdict. Nothing else skips
+  a phase; a failed phase fails the execution.

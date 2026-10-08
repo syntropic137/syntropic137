@@ -479,9 +479,8 @@ class ExecuteWorkflowHandler:
             self._resolve_repos(command, merged_inputs, workflow) if workflow.requires_repos else []
         )
 
-        # #967: the launch snapshot. Read from the template NOW, so a later
-        # edit to the workflow's tags changes future runs and never this one.
-        # Raises (a ValueError) if the union exceeds the tag limit.
+        # #967: the launch snapshot, read from the template NOW, so a later tag
+        # edit changes future runs only. Raises (ValueError) over the tag limit.
         tags = workflow.tags.union(command.tags)
 
         # #967: also a launch snapshot, taken by the dispatcher and carried on
@@ -522,6 +521,7 @@ class ExecuteWorkflowHandler:
                 ),
                 tags=tags,
                 launch_eval=launch_eval,
+                workflow_version=self._installed_version(workflow),
             )
         except StreamAlreadyExistsError:
             logger.warning(
@@ -529,6 +529,12 @@ class ExecuteWorkflowHandler:
                 execution_id,
             )
             raise DuplicateExecutionError(execution_id) from None
+
+    @staticmethod
+    def _installed_version(workflow: WorkflowTemplateAggregate) -> str | None:
+        """What the run records as its workflow version (Evals v2): the package
+        version, or the source digest when the template has none."""
+        return workflow.package_version or workflow.source_digest
 
     @staticmethod
     def _launch_eval(
@@ -682,6 +688,7 @@ class ExecuteWorkflowHandler:
                     # that is judged strictly rather than one that is not
                     # judged at all.
                     delivers_repo_changes=phase.delivers_repo_changes,
+                    requires_verdict=phase.requires_verdict,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

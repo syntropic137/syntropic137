@@ -1,0 +1,25 @@
+id: clean-github-token-installation-routing
+polarity: clean
+# A control, not a defect: PR #1130, merged 2026-09-03. A verifier passes it only by
+# certifying. clean_through is main when the history after the merge was read
+# (`check` re-reads it): no later fix or revert names the PR, and no later
+# commit to its files fixes what it changed.
+source_pr: 1130
+commit: ed665ccdebe13fde23e2360027f47faad2dd8c9b
+merge_commit: 35e68c18a92fe611d6648e2e9f99385a222d7a17
+clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
+task: >
+  The change under review routes the GITHUB_TOKEN injected into a workspace
+  to the GitHub App installation that owns the repository under work, asking
+  GitHub which installation owns each repo instead of matching account
+  logins. Review the token routing for every repository shape a workflow can
+  run against.
+split: holdout
+# Not clean: both strong verifiers blocked it. The token routing it adds hands
+# the first owning repo's installation token to the whole workspace, so a
+# second repo under another installation gets the wrong token. That routing was
+# moved, not fixed, by ca367a88b (PR #1448) into
+# setup_phase_secrets._gh_token_for_repo_under_work and is still on main,
+# documented as deliberate, so no fix commit exists to cut a defect case from.
+# It scores in v3 as it ran.
+retired: v5 - not clean; first-repo token routing still unfixed on main, so no defect case

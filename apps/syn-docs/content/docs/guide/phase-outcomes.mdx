@@ -31,6 +31,7 @@ TASK_RESULT_END
 | `failure_reason` | one word | When `success` is `false`, what kind of failure it was. |
 | `side_effects` | one word | What happened to the external writes the phase attempted, such as a push or a PR comment. |
 | `comments` | string | A specific, human-readable explanation. Shown to operators. |
+| `review_verdict` | `certified` or `blocked` | Optional. Only reviewing phases write it. The execution reads it to decide whether to skip the remaining repair rounds; see [Phase Plan, Progress and Repair Rounds](/docs/guide/execution-progress). Never changes whether this phase succeeded. |
 
 ### `success` is the outcome, and it must be a boolean
 
@@ -151,13 +152,13 @@ words apart:
 | Field | Meaning |
 | --- | --- |
 | `status` | `running`, `completed`, `failed`, `cancelled`, `interrupted` |
-| `failure_classification` | What the platform concluded about a failure: `platform`, `correct_refusal`, `unclassified` |
+| `failure_classification` | What the platform concluded about a failure: `platform`, `correct_refusal`, `unclassified`. (`task` is a reserved value that nothing sets today.) |
 | `reported_failure_reason` | What the failing phase's agent wrote as `failure_reason`, or `null` |
 | `deliverable_produced` | `true` when an artifact is linked to the execution or to one of its phases, **whatever `status` says** (see the limitation below) |
 | `reported_side_effects` | The most severe `side_effects` any phase reported, or `null` if none did |
 | `phases[].deliverable_recovered` | `true` when this phase's deliverable was recovered from its last message (see below) |
 | `phases[].reported_side_effects` | What this phase's agent reported, or `null` |
-| `phases[].error_message` | Why this phase failed, in the platform's words, or `null` if it did not fail. For a failed phase it is the same text as the execution's `error_message`. When the agent's harness reported an upstream fault, the text ends with what it asks of you: `capacity` and `rate_limited` are transient and the phase is resumable; `auth` needs an operator to fix the credentials |
+| `phases[].error_message` | Why this phase failed, in the platform's words, or `null` if it did not fail. For a failed phase it is the same text as the execution's `error_message`. When the agent's harness reported an upstream fault, the text ends with `Upstream failure: <kind> - ...` and what it asks of you: `capacity`, `rate_limited` and `unavailable` are transient and the phase is resumable; `auth` needs an operator to fix the credentials; `quota` is not retried and clears only at the provider's named reset (or on a different agent); `unknown` was not recognised. These upstream kinds are a different list from `failure_classification` |
 | `phases[].failure_classification` | What the platform concluded about this phase's failure, from the same values as the execution's `failure_classification`. `null` on a phase that did not fail; `unclassified` on a failed phase recorded before the field existed |
 | `phases[].reported_failure_reason` | What this phase's agent wrote as `failure_reason`, or `null`. A quotation, never a classification |
 
