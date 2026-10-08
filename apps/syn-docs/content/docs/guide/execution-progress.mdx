@@ -55,9 +55,10 @@ sequence, and a certification jumps over the rounds it made unnecessary.
 - The PR is marked ready if and only if the last round that ran certified.
 - `sdlc-reverify-pr-v1` uses the same rounds on an existing PR head:
   `syn workflow run sdlc-reverify-pr-v1 -t "#1234"`.
-- Executions started before 2026-10-08 ran under a three-round definition
-  (`fix_3`, `reverify_3`, then `finalize_pr` at order 10). They keep that
-  definition: progress and the phase plan are read from each run's own start
+- Executions started while a server still had the earlier three-round
+  definition installed (`fix_3`, `reverify_3`, then `finalize_pr` at order 10)
+  keep that definition. The cutover is when the workflow is reinstalled on that
+  server, not a calendar date: progress and the phase plan are read from each run's own start
   event, never from the currently installed workflow.
 
 ## Unresolved findings

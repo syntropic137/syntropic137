@@ -167,8 +167,8 @@ phases:
     prompt_file: phases/reverify.md
 
   # BOUNDED REPAIR ROUNDS, as in implement-v3 (PC-63): two fix/reverify
-  # pairs, never more (owner decision 2026-10-07; a third pair existed until
-  # then). A round whose predecessor CERTIFIED never runs - the
+  # pairs, never more (owner decision 2026-10-07; a third pair was removed,
+  # and a server runs it until this definition is reinstalled). A round whose predecessor CERTIFIED never runs - the
   # execution aggregate skips to the last phase on a `certified` review_verdict
   # - so `finalize_pr` must stay the LAST phase.
   - id: fix_2

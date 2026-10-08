@@ -237,10 +237,11 @@ phases:
   # `reverify/`.
   #
   # TWO ROUNDS, NOT THREE (owner decision 2026-10-07). A third round
-  # (`fix_3`/`reverify_3`) existed until then and was removed to bound token
-  # spend: a blocker two rounds cannot close goes to a person, not to a third
-  # agent pass. Executions recorded before the change still carry those phase
-  # ids in their start event and replay unchanged; nothing reads ids from this
+  # (`fix_3`/`reverify_3`) was removed to bound token spend: a blocker two
+  # rounds cannot close goes to a person, not to a third agent pass. A server
+  # keeps running three rounds until this definition is reinstalled on it, so
+  # the cutover is the reinstall, not a date. Executions started under the
+  # three-round definition carry those phase ids in their start event and replay unchanged; nothing reads ids from this
   # file to render history. Adding a round
   # means a pair here, two prompt files, and a line in phases/finalize_pr.md;
   # scripts/tests/test_implement_v3_repair_rounds.py fails if they disagree.
