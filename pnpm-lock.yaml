@@ -376,8 +376,8 @@ importers:
   packages/syn-ui/skyline-core:
     dependencies:
       '@syntropic137/design-contracts':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.1.1
+        version: 0.1.1
     devDependencies:
       typescript:
         specifier: 5.9.3
@@ -432,8 +432,8 @@ importers:
   packages/syn-ui/themes:
     dependencies:
       '@syntropic137/design-tokens':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.1.1
+        version: 0.1.1
 
 packages:
 
@@ -2203,13 +2203,13 @@ packages:
   '@swc/helpers@0.5.23':
     resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
 
-  '@syntropic137/design-contracts@0.1.0':
-    resolution: {integrity: sha512-oWFGAz63nM/vR5Ut64KdW81xL2wNcIcuYj9mzhHV8UoM/kGuRqPM+/hSVZrLBWvm53cjA8llanQp9qw9eYtfLA==}
+  '@syntropic137/design-contracts@0.1.1':
+    resolution: {integrity: sha512-s9ZFAiQoZtiTS2AiboTJWQFeI6jQ2vK3PMjC6FkaZI73/9zbje98Jsuz4niqrl1Fsi9eXcKEuDmATBjFPvA8JQ==}
     engines: {node: '>=18.18.0'}
     hasBin: true
 
-  '@syntropic137/design-tokens@0.1.0':
-    resolution: {integrity: sha512-xdHrmCLKzLOUmcT9X9/cxlfw6ag/g5gck0Zwjm/aa9A9JuS5u9uyyheKH3QvGZ31ZCincInxPDhl+FC519JFFg==}
+  '@syntropic137/design-tokens@0.1.1':
+    resolution: {integrity: sha512-ndaDf+sOaM96I4/bNdb6xxTQNFMLoQOBZEwH+5WYyM4g08B2q4qeASke99nJmwyNJnoTv+MHVaPGpAieSkWJzw==}
     engines: {node: '>=18.18.0'}
 
   '@tailwindcss/node@4.1.0':
@@ -7573,9 +7573,9 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@syntropic137/design-contracts@0.1.0': {}
+  '@syntropic137/design-contracts@0.1.1': {}
 
-  '@syntropic137/design-tokens@0.1.0': {}
+  '@syntropic137/design-tokens@0.1.1': {}
 
   '@tailwindcss/node@4.1.0':
     dependencies:

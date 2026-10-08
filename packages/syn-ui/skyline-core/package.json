@@ -29,6 +29,6 @@
     "vitest": "4.1.11"
   },
   "dependencies": {
-    "@syntropic137/design-contracts": "0.1.0"
+    "@syntropic137/design-contracts": "0.1.1"
   }
 }
