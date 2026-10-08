@@ -44,8 +44,8 @@ skyline-e2e *args:
     for _ in $(seq 1 60); do curl -sf --noproxy '*' -o /dev/null "$base" && break; sleep 0.5; done
     E2E_BASE_URL="$base" E2E_DATA=fixtures node "$pw" test {{args}}
 
-# The suite's default mode: Playwright starts the fixtures dev server itself
-skyline-e2e-dev *args:
+# The suite's own server at / (fixtures preview build; E2E_DEV=1 for the dev server)
+skyline-e2e-root *args:
     cd apps/syn-ui && node node_modules/@playwright/test/cli.js test {{args}}
 
 # Mirror of syn-ui.yml `gateway`: build the gateway image, assert React at / and Skyline at /next

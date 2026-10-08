@@ -95,6 +95,11 @@ RUNNABLE_BUT_EXCLUDED: Final[dict[str, str]] = {
     "ci.yml:osv-scan": "network round-trip to the OSV database; `just deps-audit-npm`",
     "ci.yml:pip-audit": "network round-trip to the PyPI advisory database; `just deps-audit-py`",
     "e2e-container.yml:docker-build": "builds a multi-gigabyte image; `just workspace-build`",
+    # Skyline (apps/syn-ui) runs only on PRs touching its paths, and is outside
+    # qa-ci while it is built out at /next. Each job has a mirror recipe.
+    "syn-ui.yml:qa": "path-filtered to Skyline; `just skyline-ci`",
+    "syn-ui.yml:e2e": "path-filtered to Skyline, needs a Playwright browser; `just skyline-e2e`",
+    "syn-ui.yml:gateway": "path-filtered, builds the gateway image; `just skyline-gateway-smoke`",
 }
 
 

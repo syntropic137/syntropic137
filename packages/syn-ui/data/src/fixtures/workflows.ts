@@ -7,11 +7,15 @@ import type {
   WorkflowSummary,
 } from '../types'
 import { type CatalogRun, type CatalogWorkflow, RUNS, WORKFLOWS, phaseRuns, workflowOf } from './catalog'
+import { EXTRA_WORKFLOWS, PHASE_DETAILS } from './workflowDetails'
 import { type FixtureRoute, notFound, route } from './define'
 import { FIXTURE_NOW, paginate } from './seed'
 
 const runsOf = (workflowId: string) => RUNS.filter((r) => r.workflowId === workflowId)
-const createdAt = (w: CatalogWorkflow) => new Date(FIXTURE_NOW - (WORKFLOWS.indexOf(w) + 8) * 7 * 86_400_000).toISOString()
+/** Catalog workflows (with runs) plus the board's never-run definitions. */
+const ALL_WORKFLOWS: CatalogWorkflow[] = [...WORKFLOWS, ...EXTRA_WORKFLOWS]
+const findWorkflow = (id: string) => ALL_WORKFLOWS.find((w) => w.id === id)
+const createdAt = (w: CatalogWorkflow) => new Date(FIXTURE_NOW - (ALL_WORKFLOWS.indexOf(w) + 8) * 7 * 86_400_000).toISOString()
 
 export function workflowSummary(w: CatalogWorkflow): WorkflowSummary {
   return { id: w.id, name: w.name, workflow_type: w.type, phase_count: w.phases.length, created_at: createdAt(w), runs_count: runsOf(w.id).length }
@@ -19,22 +23,23 @@ export function workflowSummary(w: CatalogWorkflow): WorkflowSummary {
 
 function phaseDefinition(w: CatalogWorkflow, index: number): PhaseDefinition {
   const p = w.phases[index]!
+  const extra = PHASE_DETAILS[`${w.id}/${p.id}`] ?? {}
   return {
     phase_id: p.id,
     name: p.name,
     order: index + 1,
-    description: null,
+    description: extra.description ?? null,
     agent_type: p.provider,
-    prompt_template: `You are the ${p.name} phase of ${w.name}.\n\nTask: {{task}}`,
-    timeout_seconds: 1800,
-    allowed_tools: ['Read', 'Write', 'Bash', 'Grep'],
+    prompt_template: extra.prompt ?? `You are the ${p.name} phase of ${w.name}.\n\n## Your Task\n$ARGUMENTS\n\n## How to Approach This\n- Read the inputs from the previous phase\n- Keep notes short and concrete\n\nWrite your result to the phase artifact.`,
+    timeout_seconds: extra.timeout ?? 1800,
+    allowed_tools: extra.tools ?? [],
     argument_hint: null,
     model: p.model,
     resolved_model: null,
-    resolution_basis: null,
-    model_display: p.model,
+    resolution_basis: p.provider === 'codex' ? 'translated' : 'expected',
+    model_display: extra.modelDisplay ?? p.model,
     provider: p.provider,
-    skills: [],
+    skills: (extra.skills ?? []).map((s) => ({ name: s.name, source_url: s.source, version: s.ref, name_overridden: false })),
   }
 }
 
@@ -97,20 +102,20 @@ export const workflowRoutes: FixtureRoute[] = [
   route('GET', '/workflows', ({ query }) => {
     const search = query.get('search')?.toLowerCase() ?? ''
     const type = query.get('workflow_type')
-    const rows = WORKFLOWS.filter((w) => (!search || w.name.toLowerCase().includes(search)) && (!type || w.type === type)).map(workflowSummary)
+    const rows = ALL_WORKFLOWS.filter((w) => (!search || w.name.toLowerCase().includes(search) || w.id.includes(search)) && (!type || w.type === type)).map(workflowSummary)
     const page = paginate(rows, query, 20)
     return { workflows: page.rows, total: page.total, page: page.page, page_size: page.page_size }
   }),
   route('GET', '/workflows/:workflowId', ({ params }) => {
-    const w = workflowOf(params.workflowId!) ?? notFound('Workflow')
+    const w = findWorkflow(params.workflowId!) ?? notFound('Workflow')
     return workflowDetail(w)
   }),
   route('GET', '/workflows/:workflowId/runs', ({ params }) => {
-    workflowOf(params.workflowId!) ?? notFound('Workflow')
+    findWorkflow(params.workflowId!) ?? notFound('Workflow')
     return { runs: runsOf(params.workflowId!).map(runSummary) }
   }),
   route('GET', '/workflows/:workflowId/history', ({ params }): ExecutionHistoryResponse => {
-    const w = workflowOf(params.workflowId!) ?? notFound('Workflow')
+    const w = findWorkflow(params.workflowId!) ?? notFound('Workflow')
     const runs = runsOf(w.id)
     return {
       workflow_id: w.id,
@@ -129,7 +134,7 @@ export const workflowRoutes: FixtureRoute[] = [
     }
   }),
   route('POST', '/workflows/:workflowId/execute', ({ params }) => {
-    const w = workflowOf(params.workflowId!) ?? notFound('Workflow')
+    const w = findWorkflow(params.workflowId!) ?? notFound('Workflow')
     return { execution_id: 'fixture-new-run', workflow_id: w.id, status: 'queued', message: 'Fixtures mode: nothing was started.' }
   }),
   route('PUT', '/workflows/:workflowId/phases/:phaseId', ({ params }) => ({
