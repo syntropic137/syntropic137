@@ -69,6 +69,28 @@ The act of starting a Workflow because a Trigger Rule fired, completed by
 A Fire is the decision; a Dispatch is the consequence. They are separate events
 because either can happen without the other succeeding.
 
+### Dispatch record status
+
+Each Fire leaves a dispatch record, the to-do item `WorkflowDispatchProjection`
+works from. Its `status` says how far the Dispatch got:
+
+| Status | Means | Offered again? |
+|---|---|---|
+| `pending` | Fired, not yet offered to the dispatcher | Yes |
+| `paused` | Admission refused it - a deploy, a full disk (#1387, #1560) | Yes, once admission re-opens |
+| `queued` | Handed to the dispatcher, which has not yet said its execution is durable (#1707) | Yes, unless this process still holds the start |
+| `dispatched` | The dispatcher confirmed the execution exists | No |
+| `failed` | It cannot start: no workflow, over budget, or the start raised before its execution existed | No |
+
+**`queued` is not `dispatched`.** A queued start waits in the dispatcher's
+memory for an execution slot, so a restart or a crash takes it with it. A
+record that said `dispatched` at that point was a trigger nothing would ever
+run. A re-offer of a `queued` start that did become durable is refused by the
+execution stream's NoStream write, and that refusal counts as started.
+
+`paused` here is a dispatch record status, not the Trigger Rule's `PAUSED`
+above: a paused record is one Fire held back, not a rule that stopped firing.
+
 ## Normalized Event
 
 A GitHub event reduced to the shape the pipeline acts on, whatever source it
