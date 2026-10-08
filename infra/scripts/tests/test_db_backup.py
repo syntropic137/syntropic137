@@ -239,3 +239,23 @@ class TestComposeService:
         source = backup["volumes"][0].split(":")[0]
         assert (_SELFHOST.parent / source).resolve() == _SCRIPT
         assert backup["entrypoint"] == ["sh", "/usr/local/bin/syn-db-backup"]
+
+
+class TestJustRecipes:
+    @staticmethod
+    def _recipe(name: str) -> str:
+        text = (_ROOT / "justfile").read_text()
+        match = re.search(rf"^{name}\b.*?:\n((?:    .*\n|\n)+)", text, re.MULTILINE)
+        assert match, f"no {name} recipe"
+        return match.group(1)
+
+    def test_manual_backup_runs_the_scheduled_command(self):
+        assert "db-backup backup /backups" in self._recipe("selfhost-backup")
+
+    def test_restore_stops_the_writers_the_upgrade_runbook_stops(self):
+        runbook = (_ROOT / "docs" / "deployment" / "timescaledb-2.29-upgrade.md").read_text()
+        stopped = re.search(r'docker compose -f "\$CF" stop ([a-z -]+)\n', runbook)
+        assert stopped
+        writers = re.search(r'writers="([a-z -]+)"', self._recipe("selfhost-restore"))
+        assert writers
+        assert set(writers.group(1).split()) == set(stopped.group(1).split())

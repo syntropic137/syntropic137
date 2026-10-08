@@ -122,26 +122,31 @@ def backup_file(timescaledb) -> str:
     return line.removeprefix("backup ok: ").split(" ")[0]
 
 
+def _restore(container, backup: str, database: str, *flags: str) -> None:
+    code, out = _script(container, "restore", backup, *flags, database=database)
+    assert code == 0, out
+
+
 class TestRoundTrip:
+    """Each test restores into its own database, so they hold under xdist."""
+
     def test_restore_into_an_empty_database_reproduces_every_table(self, timescaledb, backup_file):
-        code, out = _script(timescaledb, "restore", backup_file, database="syn_restored")
-        assert code == 0, out
+        _restore(timescaledb, backup_file, "syn_restored")
 
         source = _counts(timescaledb, "syn")
         assert all(n > 0 for n in source.values()), source
         assert _counts(timescaledb, "syn_restored") == source
 
     def test_restored_hypertable_still_routes_and_queries_by_time(self, timescaledb, backup_file):
-        db = "syn_restored"
-        assert (
-            _sql(
-                timescaledb,
-                "select count(*) from timescaledb_information.hypertables"
-                " where hypertable_name = 'agent_events'",
-                db,
-            )
-            == "1"
+        db = "syn_hypertable"
+        _restore(timescaledb, backup_file, db)
+        hypertables = _sql(
+            timescaledb,
+            "select count(*) from timescaledb_information.hypertables"
+            " where hypertable_name = 'agent_events'",
+            db,
         )
+        assert hypertables == "1"
         # A time that no restored chunk covers: the insert needs a new chunk.
         _sql(
             timescaledb,
@@ -149,48 +154,41 @@ class TestRoundTrip:
             " (timestamptz '2026-12-25 12:00', 'after-restore', 'tool_use', '{}')",
             db,
         )
-        assert (
-            _sql(
-                timescaledb,
-                "select count(*) from public.agent_events"
-                " where time >= timestamptz '2026-10-02' and time < timestamptz '2026-10-03'",
-                db,
-            )
-            == "24"
+        one_day = _sql(
+            timescaledb,
+            "select count(*) from public.agent_events"
+            " where time >= timestamptz '2026-10-02' and time < timestamptz '2026-10-03'",
+            db,
         )
-        assert (
-            _sql(
-                timescaledb,
-                "select session_id from public.agent_events where time > timestamptz '2026-12-01'",
-                db,
-            )
-            == "after-restore"
+        assert one_day == "24"
+        newest = _sql(
+            timescaledb,
+            "select session_id from public.agent_events where time > timestamptz '2026-12-01'",
+            db,
         )
+        assert newest == "after-restore"
         # post_restore must have run: the database is no longer in restore mode.
         assert _sql(timescaledb, "show timescaledb.restoring", db) == "off"
 
     def test_refuses_a_populated_database_and_changes_nothing(self, timescaledb, backup_file):
-        _sql(
-            timescaledb,
-            "insert into public.idempotency (key) values ('only-in-target')",
-            "syn_restored",
-        )
+        db = "syn_refuse"
+        _restore(timescaledb, backup_file, db)
+        _sql(timescaledb, "insert into public.idempotency (key) values ('only-in-target')", db)
 
-        code, out = _script(timescaledb, "restore", backup_file, database="syn_restored")
+        code, out = _script(timescaledb, "restore", backup_file, database=db)
 
         assert code == 3, out
         assert "public.events" in out
-        assert (
-            _sql(
-                timescaledb,
-                "select count(*) from public.idempotency where key = 'only-in-target'",
-                "syn_restored",
-            )
-            == "1"
-        )
+        marker = "select count(*) from public.idempotency where key = 'only-in-target'"
+        assert _sql(timescaledb, marker, db) == "1"
 
     def test_force_replaces_a_populated_database(self, timescaledb, backup_file):
-        code, out = _script(timescaledb, "restore", backup_file, "--force", database="syn_restored")
+        db = "syn_force"
+        _restore(timescaledb, backup_file, db)
+        _sql(timescaledb, "insert into public.idempotency (key) values ('only-in-target')", db)
 
-        assert code == 0, out
-        assert _counts(timescaledb, "syn_restored") == _counts(timescaledb, "syn")
+        _restore(timescaledb, backup_file, db, "--force")
+
+        marker = "select count(*) from public.idempotency where key = 'only-in-target'"
+        assert _sql(timescaledb, marker, db) == "0"
+        assert _counts(timescaledb, db) == _counts(timescaledb, "syn")

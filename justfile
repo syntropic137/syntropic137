@@ -1718,7 +1718,8 @@ selfhost-restore file *args:
     # passed to the in-flight execution check: a restore discards running
     # executions too.
     source infra/scripts/selfhost-env.sh
-    file="$(realpath -e "{{file}}")"
+    [ -f "{{file}}" ] || { echo "❌ No such backup: {{file}}"; exit 1; }
+    file="$(cd "$(dirname "{{file}}")" && pwd)/$(basename "{{file}}")"
     uv run python infra/scripts/predeploy_check.py {{args}}
     force=""
     for a in {{args}}; do [ "$a" = --force ] && force=--force; done
