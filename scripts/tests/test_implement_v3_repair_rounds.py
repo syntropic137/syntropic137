@@ -91,7 +91,14 @@ def installed(request: pytest.FixtureRequest) -> tuple[list[PhaseDefinition], di
 
 
 def _run(phases: list[PhaseDefinition], reports: dict[str, str]) -> list[str]:
-    """Drive the aggregate phase by phase; return the phase ids it ran.
+    """Drive the aggregate phase by phase; return the phase ids it ran."""
+    return _drive(phases, reports)[0]
+
+
+def _drive(
+    phases: list[PhaseDefinition], reports: dict[str, str]
+) -> tuple[list[str], WorkflowExecutionAggregate]:
+    """Drive the aggregate phase by phase; return the phase ids it ran, and it.
 
     Each phase "produces" `reports[phase_id]` as its artifact preview, and its
     agent reports the report's first line as its `review_verdict` through the
@@ -139,7 +146,7 @@ def _run(phases: list[PhaseDefinition], reports: dict[str, str]) -> list[str]:
             if isinstance(e.event, NextPhaseReadyEvent)
         ]
         if not nxt:
-            return ran
+            return ran, agg
         assert len(ran) <= len(phases), "the run did not terminate"
         ran.append(nxt[0].next_phase_id)
 
@@ -353,6 +360,20 @@ class TestTheRepairIsBounded:
         assert verdict == "BLOCKED"
         assert "comment" in actions, "a blocked run must say why on the PR"
         assert not actions & {"ready", "close", "merge"}, "a blocked PR stays an open draft"
+
+    def test_a_run_blocked_at_the_bound_resumes_at_the_last_fix_round(
+        self, installed: tuple[list[PhaseDefinition], dict[str, str]]
+    ) -> None:
+        # The repair point is the phase before the review that blocked last,
+        # read from the run's own definitions: fix_2 now, where a run started
+        # under the three-round definition still resumes at fix_3.
+        phases, _ = installed
+        reports = {
+            phase: _round_report("BLOCKED", n) for n, phase in enumerate(_REVERIFIES, start=1)
+        }
+        _, agg = _drive(phases, reports)
+
+        assert agg._reviews.repair_point(phases) == _LAST_FIX == "fix_2"
 
     def test_the_final_round_must_say_the_bound_was_reached(
         self, installed: tuple[list[PhaseDefinition], dict[str, str]]
