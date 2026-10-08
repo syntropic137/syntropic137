@@ -10,7 +10,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { Card, EmptyState, ListPagination, PageLoader } from '../../components'
 import { EvalVariantsStrip, VerdictSparkline } from '../../components/evals'
-import { useEvalList, type EvalListRow } from '../../hooks/useEvalList'
+import { useEvalList, type EvalListRow, type EvalListState } from '../../hooks/useEvalList'
 import { formatRelativeTime } from '../../utils/dateFormatters'
 
 function TagButton({ tag, onSelect }: { tag: string; onSelect: (tag: string) => void }) {
@@ -62,12 +62,12 @@ function EvalRow({ row, onTag }: { row: EvalListRow; onTag: (tag: string) => voi
   )
 }
 
-export function EvalList() {
+/** The list's query lives in the URL: `?tag=` filters, `?page=` pages. */
+function useEvalListQuery() {
   const [params, setParams] = useSearchParams()
   const tag = params.get('tag')
   const requested = Number(params.get('page') ?? '1')
   const page = Number.isInteger(requested) && requested > 0 ? requested : 1
-  const state = useEvalList(tag, page)
   // A new tag starts again at page 1.
   const setTag = (next: string | null) => setParams(next ? { tag: next } : {})
   const setPage = (next: number) => {
@@ -76,6 +76,78 @@ export function EvalList() {
     else updated.delete('page')
     setParams(updated)
   }
+  return { tag, page, setTag, setPage }
+}
+
+function TagFilter({ tag, onClear }: { tag: string; onClear: () => void }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+      Tagged
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label={`Clear tag filter ${tag}`}
+        className="inline-flex max-w-full items-center gap-1 break-all rounded-full bg-[var(--color-accent)]/10 px-2 py-0.5 text-xs text-[var(--color-accent)]"
+      >
+        {tag}
+        <X className="h-3 w-3 shrink-0" />
+      </button>
+    </div>
+  )
+}
+
+function EvalListBody({
+  state,
+  tag,
+  onTag,
+  onPage,
+}: {
+  state: EvalListState
+  tag: string | null
+  onTag: (tag: string) => void
+  onPage: (page: number) => void
+}) {
+  if (state.kind === 'loading') return <PageLoader />
+  if (state.kind === 'error') {
+    return (
+      <Card>
+        <EmptyState icon={FlaskConical} title="Could not load evals" description={state.message} />
+      </Card>
+    )
+  }
+  if (state.rows.length === 0) {
+    return (
+      <Card>
+        <EmptyState
+          icon={FlaskConical}
+          title={tag ? `No evals tagged ${tag}` : 'No evals yet'}
+          description="Create one with `scripts/eval_suite.py launch`, or POST /evals with a goal and a pinned baseline repo. Each execution launched into it becomes a run here."
+        />
+      </Card>
+    )
+  }
+  return (
+    <Card>
+      <ul>
+        {state.rows.map((row) => (
+          <EvalRow key={row.eval.eval_id} row={row} onTag={onTag} />
+        ))}
+      </ul>
+      <ListPagination
+        page={state.page}
+        pageSize={state.pageSize}
+        total={state.total}
+        onPageChange={onPage}
+        itemLabel="eval"
+      />
+    </Card>
+  )
+}
+
+export function EvalList() {
+  const { tag, page, setTag, setPage } = useEvalListQuery()
+  const state = useEvalList(tag, page)
+  const total = state.kind === 'ready' ? state.total : 0
 
   return (
     <div className="space-y-6">
@@ -83,57 +155,11 @@ export function EvalList() {
         <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Evals</h1>
         <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
           Stable cases run again and again, so the same goal can be compared across workflows and models over time
-          {state.kind === 'ready' && state.total > 0 && (
-            <span className="text-[var(--color-text-muted)]"> · {state.total} evals</span>
-          )}
+          {total > 0 && <span className="text-[var(--color-text-muted)]"> · {total} evals</span>}
         </p>
       </div>
-
-      {tag && (
-        <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-          Tagged
-          <button
-            type="button"
-            onClick={() => setTag(null)}
-            aria-label={`Clear tag filter ${tag}`}
-            className="inline-flex max-w-full items-center gap-1 break-all rounded-full bg-[var(--color-accent)]/10 px-2 py-0.5 text-xs text-[var(--color-accent)]"
-          >
-            {tag}
-            <X className="h-3 w-3 shrink-0" />
-          </button>
-        </div>
-      )}
-
-      {state.kind === 'loading' ? (
-        <PageLoader />
-      ) : state.kind === 'error' ? (
-        <Card>
-          <EmptyState icon={FlaskConical} title="Could not load evals" description={state.message} />
-        </Card>
-      ) : state.rows.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={FlaskConical}
-            title={tag ? `No evals tagged ${tag}` : 'No evals yet'}
-            description="Create one with `scripts/eval_suite.py launch`, or POST /evals with a goal and a pinned baseline repo. Each execution launched into it becomes a run here."
-          />
-        </Card>
-      ) : (
-        <Card>
-          <ul>
-            {state.rows.map((row) => (
-              <EvalRow key={row.eval.eval_id} row={row} onTag={setTag} />
-            ))}
-          </ul>
-          <ListPagination
-            page={state.page}
-            pageSize={state.pageSize}
-            total={state.total}
-            onPageChange={setPage}
-            itemLabel="eval"
-          />
-        </Card>
-      )}
+      {tag && <TagFilter tag={tag} onClear={() => setTag(null)} />}
+      <EvalListBody state={state} tag={tag} onTag={setTag} onPage={setPage} />
     </div>
   )
 }
