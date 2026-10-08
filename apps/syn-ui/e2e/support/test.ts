@@ -134,31 +134,39 @@ export async function horizontalOverflow(page: Page): Promise<number> {
   })
 }
 
+/** overflow-x values that contain a wide descendant (it scrolls or clips on its own). */
+const CONTAINING_OVERFLOW = ['auto', 'scroll', 'hidden', 'clip']
+
+/** An element sticking out past the viewport, with its ancestors' overflow-x up to <body>. */
+interface OverflowCandidate {
+  tag: string
+  className: string
+  right: number
+  ancestorOverflowX: string[]
+}
+
 /** Elements wider than the viewport, for a readable failure message. */
 export async function overflowingElements(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const w = document.documentElement.clientWidth
-    const out: string[] = []
-    for (const el of Array.from(document.body.querySelectorAll<HTMLElement>('*'))) {
-      const r = el.getBoundingClientRect()
-      if (r.right > w + 1 && r.width > 0) {
-        // Skip descendants of an element that scrolls on its own.
-        let p: HTMLElement | null = el.parentElement
-        let contained = false
-        while (p && p !== document.body) {
-          const ox = getComputedStyle(p).overflowX
-          if (ox === 'auto' || ox === 'scroll' || ox === 'hidden' || ox === 'clip') {
-            contained = true
-            break
-          }
-          p = p.parentElement
-        }
-        if (!contained) out.push(`${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : ''} right=${Math.round(r.right)}`)
-      }
-      if (out.length >= 5) break
-    }
-    return out
-  })
+  const candidates = await page.evaluate(overflowCandidates)
+  // Skip descendants of an element that scrolls on its own.
+  return candidates
+    .filter((c) => !c.ancestorOverflowX.some((ox) => CONTAINING_OVERFLOW.includes(ox)))
+    .slice(0, 5)
+    .map((c) => `${c.tag}${c.className ? '.' + c.className.split(' ')[0] : ''} right=${Math.round(c.right)}`)
+}
+
+/** Runs in the browser (serialised by page.evaluate), so it must be self-contained. */
+function overflowCandidates(): OverflowCandidate[] {
+  const w = document.documentElement.clientWidth
+  const out: OverflowCandidate[] = []
+  for (const el of Array.from(document.body.querySelectorAll<HTMLElement>('*'))) {
+    const r = el.getBoundingClientRect()
+    if (r.right <= w + 1 || r.width <= 0) continue
+    const ancestorOverflowX: string[] = []
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) ancestorOverflowX.push(getComputedStyle(p).overflowX)
+    out.push({ tag: el.tagName.toLowerCase(), className: typeof el.className === 'string' ? el.className : '', right: r.right, ancestorOverflowX })
+  }
+  return out
 }
 
 /** Mark the window so a later check can prove navigation stayed client-side. */

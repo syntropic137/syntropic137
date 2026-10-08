@@ -79,22 +79,13 @@ class Router {
       this.path = stripBase(location.pathname, BASE)
       this.search = location.search
     }
-    const linkFrom = (e: Event): HTMLAnchorElement | null => {
-      const a = (e.target as Element | null)?.closest?.('a')
-      if (!a || !a.href || a.target || a.hasAttribute('download') || a.dataset.skyReload !== undefined) return null
-      const url = new URL(a.href)
-      if (url.origin !== location.origin) return null
-      const base = BASE.endsWith('/') ? BASE : BASE + '/'
-      if (!(url.pathname + '/').startsWith(base)) return null
-      return a
-    }
     const onClick = (e: MouseEvent) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      if (!isPlainClick(e)) return
       const a = linkFrom(e)
       if (!a) return
       const url = new URL(a.href)
       // Same-page hash links keep native behaviour.
-      if (url.pathname === location.pathname && url.search === location.search && url.hash) return
+      if (isSamePageHash(url)) return
       e.preventDefault()
       this.navigate(url.pathname + url.search + url.hash)
     }
@@ -114,6 +105,31 @@ class Router {
       this.started = false
     }
   }
+}
+
+/** An unmodified primary-button click nobody has handled yet. */
+function isPlainClick(e: MouseEvent): boolean {
+  return !(e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+}
+
+function isSamePageHash(url: URL): boolean {
+  return url.pathname === location.pathname && url.search === location.search && url.hash !== ''
+}
+
+/** Anchors the router may take over: not targeted, not downloads, not opted out. */
+function isRoutableAnchor(a: HTMLAnchorElement): boolean {
+  return !!a.href && !a.target && !a.hasAttribute('download') && a.dataset.skyReload === undefined
+}
+
+/** The same-origin, in-base anchor an event came from, or null. */
+function linkFrom(e: Event): HTMLAnchorElement | null {
+  const a = (e.target as Element | null)?.closest?.('a')
+  if (!a || !isRoutableAnchor(a)) return null
+  const url = new URL(a.href)
+  if (url.origin !== location.origin) return null
+  const base = BASE.endsWith('/') ? BASE : BASE + '/'
+  if (!(url.pathname + '/').startsWith(base)) return null
+  return a
 }
 
 export const router = new Router()
