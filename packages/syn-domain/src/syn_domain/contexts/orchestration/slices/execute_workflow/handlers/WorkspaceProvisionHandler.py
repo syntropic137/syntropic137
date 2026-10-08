@@ -31,6 +31,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.checkout_verifica
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
     PinnedCommitUnreachableError,
+    ProvisionStep,
+    ProvisionStepTimeoutError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
     require_codex_sandbox,
@@ -116,8 +118,6 @@ _SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
     "codex": "codex",
     "gemini": "gemini-cli",
 }
-
-_SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
 # Baked delegation skills live in the agentic-workspace image under this root
 # (claude-cli manifest plugins.include: delegation). A delegation-enabled phase
@@ -530,6 +530,18 @@ class WorkspaceProvisionHandler:
             ledger=workspace.issuance_ledger,
         )
         setup_result = await workspace.run_setup_phase(secrets)
+        if setup_result.timed_out:
+            # Not retried in place (see `_run_setup_script`): a killed clone
+            # leaves a directory its `[ -d ]` guard would then skip. A resume
+            # provisions a fresh workspace, which is the safe retry (PC-126).
+            from syn_shared.settings import get_settings
+
+            raise ProvisionStepTimeoutError(
+                ProvisionStep.SECRET_INJECTION,
+                subject=f"phase '{phase_name}'",
+                timeout_seconds=get_settings().setup_phase_timeout_seconds,
+                attempts=1,
+            )
         if setup_result.exit_code != 0:
             detail = describe_process_failure(
                 f"Secret-injection setup for phase '{phase_name}'",

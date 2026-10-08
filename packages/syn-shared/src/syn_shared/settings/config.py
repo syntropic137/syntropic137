@@ -420,15 +420,41 @@ class Settings(BaseSettings):
         description="Default max tokens for agent responses.",
     )
 
+    # Provision-step deadlines (PC-126). The old fixed bounds (120s setup,
+    # 120s skill install, 60s probe) were sized on an idle host; at 10
+    # concurrent runs the host sits at load ~27 on 16 cores, so a runnable
+    # step gets ~16/27 = 0.6 of a core and takes ~1.7x as long. Each bound is
+    # doubled (2x > 1.7x, with margin) rather than fitted to measured step
+    # durations, which were not available when this was set.
     setup_phase_timeout_seconds: int = Field(
-        default=120,
+        default=240,
         ge=10,
         le=3600,
         description=(
             "Timeout for the workspace setup phase in seconds. "
             "The setup phase runs the setup script that configures credentials "
             "and clones repositories before the agent starts. "
-            "Increase for workflows with large repositories."
+            "Increase for workflows with large repositories, or on a loaded host."
+        ),
+    )
+
+    skill_install_timeout_seconds: int = Field(
+        default=240,
+        ge=10,
+        le=3600,
+        description=(
+            "Timeout in seconds for one `skills add` while provisioning a workspace. "
+            "A timed-out install is retried once. Increase on a loaded host."
+        ),
+    )
+
+    codex_sandbox_probe_timeout_seconds: int = Field(
+        default=120,
+        ge=10,
+        le=3600,
+        description=(
+            "Timeout in seconds for the codex sandbox probe run before a sandboxed "
+            "codex phase. A timed-out probe is retried once. Increase on a loaded host."
         ),
     )
 

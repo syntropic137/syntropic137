@@ -149,6 +149,12 @@ async def run_setup_phase(
 #: verify/reverify phases on 2026-10-06/07 ended this way while the script
 #: itself had very likely finished. A status that WAS reported - any exit
 #: code, a timeout - is an answer and is never retried.
+#:
+#: A timeout stays unretried on purpose (PC-126 weighed it): a clone killed
+#: mid-transfer leaves its destination behind, the re-run's `[ -d ]` guard
+#: skips it, and the phase would continue on a broken checkout. The caller
+#: records a timeout as a transient `ProvisionStepTimeoutError` instead, and a
+#: resume provisions a fresh workspace - the retry without that hazard.
 _SETUP_ATTEMPTS: Final = 2
 _SETUP_RETRY_BACKOFF_SECONDS: Final = 1.0
 
