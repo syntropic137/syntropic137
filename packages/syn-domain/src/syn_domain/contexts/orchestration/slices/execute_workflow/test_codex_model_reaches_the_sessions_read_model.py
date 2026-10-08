@@ -15,15 +15,26 @@ The only doubles are the two edges this package cannot own. One is the
 rollout port, which serves the captured document. The other is the
 observability writer, which hands each row to the projection in the shape the
 subscription delivers it.
+
+COMPOSITE FIXTURE. The stdout recording and the rollout are two independent
+real captures: the recording announces thread `019f8f89-...`, the rollout was
+written by a different codex session. No matching pair has been captured. So
+this proves the model is carried from the port to the read model, not that a
+real workspace files this rollout under this id. The port double is bound to
+the id the recording announces and serves nothing for any other id, so the
+processor must still ask for the right one; the production lookup by that id
+is pinned separately (`test_the_rollout_is_asked_for_by_the_id_codex_announced`
+here, and agentic-workspace's `codex_rollout` for the file itself).
 """
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
 )
@@ -40,7 +51,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_announced_mo
     CODEX_ANNOUNCED,
     REQUESTED_BY_A_CODEX_PHASE,
     _real_rollout,
-    _RolloutOnDisk,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_codex_stream_processor import (
     _FIXTURES_DIR,
@@ -52,12 +62,51 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_event_stream
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
 )
-from syn_shared.events import SESSION_SUMMARY
-from syn_shared.observed_model import OBSERVED_MODEL_KEY, format_observed_model
+from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
+from syn_shared.observed_model import (
+    OBSERVED_MODEL_KEY,
+    REQUESTED_MODEL_KEY,
+    format_observed_model,
+)
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+        ObservationType,
+    )
+    from syn_domain.contexts.orchestration.ports.CodexRolloutPort import RolloutDocument
 
 pytestmark = pytest.mark.unit
 
 SESSION_ID = "sess-codex-1"
+
+_RECORDING = _FIXTURES_DIR / "codex_exec_recording.jsonl"
+
+
+def _announced_thread_id() -> str:
+    """The id the real recording's `thread.started` announces."""
+    for line in _RECORDING.read_text().splitlines():
+        if line.startswith("{"):
+            record = json.loads(line)
+            if record.get("type") == "thread.started":
+                return str(record["thread_id"])
+    raise AssertionError(f"{_RECORDING} announces no thread")
+
+
+#: The native id the rollout double is bound to. The platform's SESSION_ID is
+#: deliberately different, so a lookup by the wrong one is served nothing.
+NATIVE_ID = _announced_thread_id()
+
+
+class _RolloutForTheAnnouncedThread:
+    """A `CodexRolloutPort` holding one rollout, filed under `NATIVE_ID` only."""
+
+    def __init__(self, document: RolloutDocument | None) -> None:
+        self._document = document
+        self.asked_for: list[str] = []
+
+    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
+        self.asked_for.append(native_session_id)
+        return self._document if native_session_id == NATIVE_ID else None
 
 
 class _ObservationsToProjection:
@@ -71,8 +120,8 @@ class _ObservationsToProjection:
 
     def __init__(self, projection: SessionCostProjection) -> None:
         self._projection = projection
-        #: The `model` each row was written with, by observation type.
-        self.models: list[tuple[str, object]] = []
+        #: Every row as the collector wrote it, by observation type.
+        self.rows: list[tuple[str, dict[str, object]]] = []
 
     async def record_observation(
         self,
@@ -85,7 +134,7 @@ class _ObservationsToProjection:
     ) -> None:
         assert isinstance(data, dict)
         kind = str(getattr(observation_type, "value", observation_type))
-        self.models.append((kind, data.get(OBSERVED_MODEL_KEY)))
+        self.rows.append((kind, dict(data)))
         deliver = (
             self._projection.on_session_summary
             if kind == SESSION_SUMMARY
@@ -105,7 +154,7 @@ class _ObservationsToProjection:
 
 
 async def _run_the_recording(
-    rollout: _RolloutOnDisk,
+    rollout: _RolloutForTheAnnouncedThread,
 ) -> tuple[SessionCostProjection, _ObservationsToProjection]:
     projection = SessionCostProjection(MockProjectionStore())
     writer = _ObservationsToProjection(projection)
@@ -127,9 +176,8 @@ async def _run_the_recording(
         agent_model=REQUESTED_BY_A_CODEX_PHASE,
         rollout=rollout,
     )
-    await processor.process_stream(
-        _lines(_FIXTURES_DIR / "codex_exec_recording.jsonl"), MockWorkspace()
-    )
+    await processor.process_stream(_lines(_RECORDING), MockWorkspace())
+    assert rollout.asked_for == [NATIVE_ID]
     return projection, writer
 
 
@@ -141,7 +189,9 @@ class TestTheSessionsReadModelNamesTheModelCodexRan:
         model, so the read model can only hold this value if it was carried
         all the way through.
         """
-        projection, writer = await _run_the_recording(_RolloutOnDisk(_real_rollout()))
+        projection, writer = await _run_the_recording(
+            _RolloutForTheAnnouncedThread(_real_rollout())
+        )
 
         cost = await projection.get_session_cost(SESSION_ID)
 
@@ -155,16 +205,25 @@ class TestTheSessionsReadModelNamesTheModelCodexRan:
         # Each hop carries the model, not just the summary. A replay that stops
         # before the summary, or a live view between turns, reads the
         # per-turn rows.
-        usage_models = {
-            model for kind, model in writer.models if kind == ObservationType.TOKEN_USAGE.value
-        }
-        assert usage_models == {CODEX_ANNOUNCED}
+        usage_rows = [data for kind, data in writer.rows if kind == TOKEN_USAGE]
+        assert usage_rows
+        for data in usage_rows:
+            assert data[OBSERVED_MODEL_KEY] == CODEX_ANNOUNCED
 
     async def test_with_no_rollout_the_read_model_says_unknown_not_the_request(self) -> None:
         """The counterweight to the case above. When the rollout cannot be
         read, the session is honestly unknown, and the requested alias is
         never promoted to the model that ran."""
-        projection, _ = await _run_the_recording(_RolloutOnDisk(None))
+        projection, writer = await _run_the_recording(_RolloutForTheAnnouncedThread(None))
+
+        # At the source, before any projection could demote an alias: every
+        # row that carries a model says none was observed, and the request
+        # travels in its own field.
+        model_rows = [data for kind, data in writer.rows if kind in (TOKEN_USAGE, SESSION_SUMMARY)]
+        assert {kind for kind, _ in writer.rows} >= {TOKEN_USAGE, SESSION_SUMMARY}
+        for data in model_rows:
+            assert data.get(OBSERVED_MODEL_KEY) is None
+            assert data[REQUESTED_MODEL_KEY] == REQUESTED_BY_A_CODEX_PHASE
 
         cost = await projection.get_session_cost(SESSION_ID)
 
