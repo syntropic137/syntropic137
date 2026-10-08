@@ -13,6 +13,7 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX
+from syn_shared.platform_access import PlatformScope
 
 
 class WorkflowType(StrEnum):
@@ -193,6 +194,13 @@ class PhaseDefinition(BaseModel):
     deliverable that was never saved, or a build tool's side effect. See
     ``PhaseYamlDefinition.delivers_repo_changes`` for why the gate cannot work
     this out for itself."""
+
+    platform_access: PlatformScope = PlatformScope.READ
+    """The scope of this phase's platform token (ADR-072, #1744).
+
+    Sourced from the workflow YAML ``platform_access`` field; see
+    ``PhaseYamlDefinition.platform_access``. READ unless the phase declared
+    otherwise, which is also what every template stored before #1744 replays as."""
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None

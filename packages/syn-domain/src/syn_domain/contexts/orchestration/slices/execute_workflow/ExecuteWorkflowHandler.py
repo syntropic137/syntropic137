@@ -688,6 +688,7 @@ class ExecuteWorkflowHandler:
                     # that is judged strictly rather than one that is not
                     # judged at all.
                     delivers_repo_changes=phase.delivers_repo_changes,
+                    platform_access=phase.platform_access,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

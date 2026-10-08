@@ -438,6 +438,7 @@ class WorkspaceProvisionHandler:
             with_sidecar=True,
             inject_tokens=True,
             capture_session_id=session_id,
+            platform_access=phase.platform_access,
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
