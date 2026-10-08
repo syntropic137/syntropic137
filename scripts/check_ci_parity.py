@@ -100,6 +100,7 @@ RUNNABLE_BUT_EXCLUDED: Final[dict[str, str]] = {
     "syn-ui.yml:qa": "path-filtered to Skyline; `just skyline-ci`",
     "syn-ui.yml:e2e": "path-filtered to Skyline, needs a Playwright browser; `just skyline-e2e`",
     "syn-ui.yml:gateway": "path-filtered, builds the gateway image; `just skyline-gateway-smoke`",
+    "syn-ui.yml:desktop": "path-filtered, needs Tauri system libraries (webkit2gtk); `pnpm --dir apps/syn-desktop test`",
 }
 
 

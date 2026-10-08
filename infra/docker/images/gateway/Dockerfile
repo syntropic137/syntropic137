@@ -65,6 +65,8 @@ RUN pnpm install --frozen-lockfile --filter 'syn-ui...'
 
 COPY packages/syn-ui/ ./packages/syn-ui/
 COPY apps/syn-ui/ ./apps/syn-ui/
+# The desktop bridge (zero deps) is lazy-imported by apps/syn-ui/src/main.ts.
+COPY apps/syn-desktop/bridge/ ./apps/syn-desktop/bridge/
 
 # SYN_UI_BASE sets Vite's base, so asset URLs and the router live under /next/.
 # API calls stay absolute (/api/v1), served by the same locations as the React

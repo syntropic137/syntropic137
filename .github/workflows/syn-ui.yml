@@ -14,6 +14,8 @@ on:
     paths:
       - 'packages/syn-ui/**'
       - 'apps/syn-ui/**'
+      # The desktop shell, and the bridge syn-ui imports from it.
+      - 'apps/syn-desktop/**'
       # Install inputs: a lockfile or workspace change can break the build
       # without touching a Skyline file.
       - 'pnpm-lock.yaml'
@@ -29,9 +31,13 @@ on:
     paths:
       - 'packages/syn-ui/**'
       - 'apps/syn-ui/**'
+      - 'apps/syn-desktop/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'infra/docker/images/gateway/**'
+      - 'infra/scripts/check_gateway_next.py'
+      - 'just/skyline.just'
+      - 'just/skyline-serve.just'
       - '.github/workflows/syn-ui.yml'
   workflow_dispatch:
 
@@ -175,3 +181,52 @@ jobs:
       # caching and headers with infra/scripts/check_gateway_next.py.
       - name: Build gateway and smoke-test routing
         run: just skyline-gateway-smoke
+
+  #############################################################################
+  # DESKTOP - the Tauri shell (apps/syn-desktop): bridge tests + cargo
+  #############################################################################
+
+  desktop:
+    name: Desktop shell (Tauri)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter 'syn-ui...'
+
+      # tauri::generate_context! embeds build.frontendDist (../../syn-ui/dist)
+      # at compile time, so the web build must exist before any cargo command.
+      - name: Build syn-ui (frontendDist)
+        run: pnpm --filter syn-ui run build
+
+      # Zero-dependency bridge that syn-ui imports; Node strips the types.
+      - name: Bridge tests
+        working-directory: apps/syn-desktop
+        run: node --experimental-strip-types --no-warnings --test bridge/index.test.ts
+
+      - name: Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+
+      # ISS-259: pinned to a commit, same pin as ci.yml.
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - name: Cargo test
+        working-directory: apps/syn-desktop/src-tauri
+        run: cargo test --locked
