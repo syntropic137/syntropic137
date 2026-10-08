@@ -3323,6 +3323,36 @@ export interface components {
             waiting: number;
         };
         /**
+         * DeclaredSkillResponse
+         * @description A skill a workflow declares, once, and where it declares it.
+         *
+         *     On the workflow LIST so a card can draw its skill chips without one detail
+         *     request per workflow. Same ref shape as a phase's ``skills`` entry, so a
+         *     client matches a chip to a phase by comparing the ref fields.
+         */
+        DeclaredSkillResponse: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Name Overridden
+             * @default false
+             */
+            name_overridden: boolean;
+            /** Raw */
+            raw?: string | null;
+            /** Phase Ids */
+            phase_ids?: string[];
+            /**
+             * Workflow Scope
+             * @default false
+             */
+            workflow_scope: boolean;
+        };
+        /**
          * DegradedReason
          * @description Reasons the API may enter degraded mode.
          *
@@ -8997,6 +9027,8 @@ export interface components {
             requires_repos: boolean;
             /** Tags */
             tags?: string[];
+            /** Skills */
+            skills?: components["schemas"]["DeclaredSkillResponse"][];
         };
         /**
          * WorkflowTagsResponse

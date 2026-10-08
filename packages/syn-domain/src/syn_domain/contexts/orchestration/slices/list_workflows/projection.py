@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent im
     WorkflowTagsRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models import WorkflowSummary
+from syn_domain.contexts.orchestration.domain.read_models.workflow_summary import declared_skills
 from syn_domain.pagination import matches_search
 
 
@@ -39,7 +40,11 @@ class WorkflowListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_summaries"
-    VERSION = 5  # v5: tags (#967)
+    # v6 is the same case v5 was: a row written before the summary carried
+    # skills has no `skills` key, and `from_dict` would then report "declares
+    # no skills" for a workflow that declares several. A stale row would assert
+    # a wrong value rather than omit one, so the rebuild is worth its cost.
+    VERSION = 6  # v6: declared skills on the summary (Skyline workflow cards)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -76,6 +81,7 @@ class WorkflowListProjection(AutoDispatchProjection):
             is_archived=False,
             requires_repos=event_data.get("requires_repos", True),
             tags=TagSet.recorded(event_data.get("tags") or []).values,
+            skills=declared_skills(event_data.get("phases") or [], event_data.get("skills") or []),
         )
         await self._store.save(
             self.PROJECTION_NAME,
@@ -108,6 +114,7 @@ class WorkflowListProjection(AutoDispatchProjection):
             requires_repos=event_data.get("requires_repos", True),
             # A reinstall replaces the template's tags wholesale, as the aggregate does.
             tags=TagSet.recorded(event_data.get("tags") or []).values,
+            skills=declared_skills(event_data.get("phases") or [], event_data.get("skills") or []),
         )
         await self._store.save(self.PROJECTION_NAME, summary.id, summary.to_dict())
 

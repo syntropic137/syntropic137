@@ -494,6 +494,8 @@ class WorkflowSummary(BaseModel):
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+    skills: list[DeclaredSkillResponse] = Field(default_factory=list)
+    """Every distinct skill the workflow's phases declare, first-declared first."""
 
 
 class InputDeclarationResponse(BaseModel):
@@ -517,6 +519,19 @@ class PhaseRefResponse(BaseModel):
     name_overridden: bool = False
     raw: str | None = None
     """The shorthand spelling when the stored row held a bare string."""
+
+
+class DeclaredSkillResponse(PhaseRefResponse):
+    """A skill a workflow declares, once, and where it declares it.
+
+    On the workflow LIST so a card can draw its skill chips without one detail
+    request per workflow. Same ref shape as a phase's ``skills`` entry, so a
+    client matches a chip to a phase by comparing the ref fields."""
+
+    phase_ids: list[str] = Field(default_factory=list)
+    """Phases that declare this skill themselves, in phase order."""
+    workflow_scope: bool = False
+    """Declared at workflow scope, so every phase gets it; not listed per phase."""
 
 
 class FallbackAgentResponse(BaseModel):
