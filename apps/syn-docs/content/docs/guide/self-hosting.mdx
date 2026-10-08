@@ -213,6 +213,40 @@ written, with a detail naming the percent free, the path and both thresholds.
 Recover by freeing space (old workspace directories on the workspace volume,
 unused Docker images) and retry.
 
+## Backup and Restore
+
+From a repository checkout (the `just selfhost-*` stack), one command backs up
+the whole `syn` database: the event store, every projection, and the
+`agent_events` hypertable.
+
+```bash
+just selfhost-backup
+just selfhost-restore /var/backups/syn/syn-20261008T030000Z.dump
+```
+
+`selfhost-backup` writes a compressed `pg_dump` custom-format archive into
+`BACKUP_DIR` and reports success only after reading it back. The `db-backup`
+service also takes one on a schedule and prunes old ones:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `BACKUP_SCHEDULE` | `0 3 * * *` | Five-field cron, in UTC |
+| `BACKUP_RETENTION_DAYS` | `7` | Backups older than this are deleted after each successful backup |
+| `BACKUP_DIR` | `/var/backups/syn` | Host directory for the archives |
+
+`selfhost-restore` stops `api`, `collector`, `event-store` and `gateway`,
+recreates the database with TimescaleDB's restore mode around `pg_restore`,
+and starts them again. It refuses to replace a database that already holds
+rows unless you pass `--force`.
+
+**Take a backup before an upgrade** that bumps the event store or
+event-sourcing-platform, changes the PostgreSQL or TimescaleDB image, or runs a
+script that writes events. A normal application upgrade does not need one: the
+event store is append-only and projections are rebuilt from it.
+
+The `npx @syntropic137/setup` installation does not include the backup service
+yet ([#1791](https://github.com/syntropic137/syntropic137/issues/1791)).
+
 ## Tunnels (Optional)
 
 For secure external access and GitHub Actions webhook delivery, set up a tunnel. Syntropic137 includes built-in Cloudflare Tunnel support via a Docker Compose profile.
