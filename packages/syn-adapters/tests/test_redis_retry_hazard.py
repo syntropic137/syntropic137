@@ -8,9 +8,10 @@ out or by dropping the connection, and check what the adapter's caller sees.
 
 The fake runs the signal claim script as a Python mirror of
 ``_CLAIM_SCRIPT`` (there is no Lua interpreter here), so these tests pin the
-protocol the adapter relies on, not the Lua text. The mirror is keyed by that
-text: change the script and the fake refuses to load it until the mirror is
-updated to match.
+protocol the adapter relies on, not the Lua itself: a broken script passes
+them. ``test_redis_retry_hazard_integration.py`` runs the real script on a real
+Redis. The mirror is pinned to the script's SHA1: change the script and the
+fake refuses to load it until the mirror and the pin are updated together.
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ from typing import TYPE_CHECKING, Literal
 
 import pytest
 
-from syn_adapters.control.adapters import redis_adapter
 from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
 from syn_adapters.control.commands import ControlSignal, ControlSignalType
 from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
@@ -39,6 +39,9 @@ Store = dict[bytes, bytes]
 ScriptImpl = Callable[[Store, list[bytes], list[bytes]], bytes | None]
 
 _CLIENT_TIMEOUT = 0.2
+
+# SHA1 of the ``_CLAIM_SCRIPT`` that ``_mirror_claim_script`` mirrors.
+_MIRRORED_SCRIPT_SHA1 = "70c6649b09a99ec7e123226c7e5b50567032d323"
 
 
 def _mirror_claim_script(store: Store, keys: list[bytes], _args: list[bytes]) -> bytes | None:
@@ -69,7 +72,7 @@ class FakeRedis:
     store: Store = field(default_factory=dict)
     applied: list[str] = field(default_factory=list)
     scripts: dict[str, ScriptImpl] = field(
-        default_factory=lambda: {redis_adapter._CLAIM_SCRIPT: _mirror_claim_script}
+        default_factory=lambda: {_MIRRORED_SCRIPT_SHA1: _mirror_claim_script}
     )
     _loaded: dict[str, ScriptImpl] = field(default_factory=dict)
 
@@ -114,9 +117,10 @@ class FakeRedis:
             self.applied.append(name)
             return b":%d\r\n" % sum(self.store.pop(k, None) is not None for k in args)
         if name == "SCRIPT" and args[0].upper() == b"LOAD":
-            source = args[1].decode()
             sha = hashlib.sha1(args[1]).hexdigest()
-            self._loaded[sha] = self.scripts[source]
+            if sha not in self.scripts:
+                return b"-ERR no mirror for this script; update the mirror and its pin\r\n"
+            self._loaded[sha] = self.scripts[sha]
             return _bulk(sha.encode())
         if name == "EVALSHA":
             impl = self._loaded.get(args[0].decode())
