@@ -152,6 +152,62 @@ def _repos_from_slug(repo_slug: object) -> list[RepositoryRef]:
         return []
 
 
+class _StartReports:
+    """What the dispatcher reports about one start, written over its record.
+
+    #1617: the reports run on the dispatcher's task, so one could land first
+    and be overwritten by the `queued` save while that is still in flight - a
+    start that never ran, never re-offered, or one that ran and is offered
+    again. So a report that arrives before :meth:`landed` is parked and written
+    after it. No check and update here has an await between them, so on the
+    one event loop they cannot interleave. Each write is a copy of the record,
+    so the one being saved as `queued` is not mutated under it.
+    """
+
+    def __init__(
+        self,
+        store: ProjectionStore,
+        projection: str,
+        execution_id: str,
+        record: dict[str, str | int | float | bool | None],
+    ) -> None:
+        self._store = store
+        self._projection = projection
+        self._execution_id = execution_id
+        self._record = record
+        self._landed = False
+        self._late: dict[str, str] | None = None
+
+    async def held(self, exc: Exception) -> None:
+        """Did not start. #1617: refused at its slot, so `paused` again and the
+        re-open re-offers it. #1707: anything else is a failure, recorded as
+        one - `queued` would offer it again forever."""
+        if isinstance(exc, AdmissionRefusedError):
+            await self._settle(status=_PAUSED, status_reason=exc.hold_reason)
+        else:
+            await self._settle(status="failed", status_reason="start_exception")
+
+    async def started(self) -> None:
+        """The execution is durable (#1707)."""
+        await self._settle(status=_DISPATCHED)
+
+    async def landed(self) -> None:
+        """The hand-off write is done: write whatever was parked behind it."""
+        self._landed = True
+        if self._late is not None:
+            await self._write(self._late)
+
+    async def _settle(self, **change: str) -> None:
+        if self._landed:
+            await self._write(change)
+        else:
+            self._late = change
+
+    async def _write(self, change: dict[str, str]) -> None:
+        if self._execution_id:
+            await self._store.save(self._projection, self._execution_id, {**self._record, **change})
+
+
 class WorkflowDispatchProjection(ProcessManager):
     """Dispatches workflow executions when triggers fire.
 
@@ -374,49 +430,15 @@ class WorkflowDispatchProjection(ProcessManager):
         #
         # `None` means this dispatcher was built without a gate, which only
         # happens in fixtures; the timestamp falls back to now.
-        store = self._store
-        # #1617: the dispatcher's reports run on its own task, so one could
-        # land first and be overwritten by the `queued` save below while that
-        # is still in flight - a start that never ran, never re-offered, or one
-        # that ran and is offered again. So a report that arrives before the
-        # `queued` write has landed is parked here and written after it. Each
-        # check and update below has no await between them, so on the one
-        # event loop they cannot interleave.
-        recorded = False
-        late: dict[str, str] | None = None
-
-        async def settle(**change: str) -> None:
-            # Applied to a copy of the record, so the one this method saves as
-            # `queued` is not mutated under it.
-            nonlocal late
-            if not execution_id:
-                return
-            if recorded:
-                await store.save(self.PROJECTION_NAME, execution_id, {**record, **change})
-            else:
-                late = change
-
-        async def hold_again(exc: Exception) -> None:
-            # #1617: queued for a slot when a pause closed the gate, so it did
-            # not start. `paused` again, so the re-open re-offers it. #1707:
-            # anything else that stopped it before its execution existed is a
-            # failure, recorded as one - `queued` would offer it again forever.
-            if isinstance(exc, AdmissionRefusedError):
-                await settle(status=_PAUSED, status_reason=exc.hold_reason)
-            else:
-                await settle(status="failed", status_reason="start_exception")
-
-        async def started() -> None:
-            await settle(status=_DISPATCHED)
-
+        reports = _StartReports(self._store, self.PROJECTION_NAME, execution_id, record)
         try:
             ticket = await self._execution_service.run_workflow(
                 workflow_id=workflow_id,
                 inputs=str_inputs,
                 execution_id=execution_id,
                 repos=repos,
-                on_held=hold_again,
-                on_started=started,
+                on_held=reports.held,
+                on_started=reports.started,
             )
 
             record["status"] = _QUEUED
@@ -426,9 +448,7 @@ class WorkflowDispatchProjection(ProcessManager):
             if execution_id:
                 await self._store.save(self.PROJECTION_NAME, execution_id, record)
         finally:
-            recorded = True
-            if late is not None and execution_id:
-                await store.save(self.PROJECTION_NAME, execution_id, {**record, **late})
+            await reports.landed()
 
         self._record_dispatch_timestamp()
 
