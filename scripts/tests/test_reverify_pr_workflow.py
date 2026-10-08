@@ -35,7 +35,7 @@ _REVERIFY = _SDLC / "reverify-pr" / "workflow.yaml"
 _IMPLEMENT = _SDLC / "implement-v3" / "workflow.yaml"
 
 #: The phases that certify or block, and so carry the verifier model.
-_VERIFIERS = ("verify", "reverify", "reverify_2", "reverify_3")
+_VERIFIERS = ("verify", "reverify", "reverify_2")
 
 #: The only text verify.md may differ by: which earlier phase's report it reads.
 _READS_IMPLEMENT = "`artifacts/input/implement.md`"
@@ -62,7 +62,7 @@ def test_prepare_replaces_premise_and_implement(reverify: dict[str, dict[str, ob
     by_order = sorted(reverify, key=lambda pid: int(str(reverify[pid]["order"])))
     assert by_order == [
         "prepare", "verify",
-        "fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3",
+        "fix", "reverify", "fix_2", "reverify_2",
         "finalize_pr",
     ]  # fmt: skip
 
@@ -100,8 +100,8 @@ def test_verify_reads_prepare_and_nothing_of_implement_v3s_first_half(
 
 
 def test_every_verifier_runs_on_the_same_model(reverify: dict[str, dict[str, object]]) -> None:
-    # Switching the verifier is one edit made four times; a switch that missed
-    # a round would certify round 1 on one model and round 3 on another.
+    # Switching the verifier is one edit made three times; a switch that missed
+    # a round would certify round 1 on one model and round 2 on another.
     agents = {(reverify[p]["provider"], reverify[p]["model"]) for p in _VERIFIERS}
     assert len(agents) == 1, agents
 

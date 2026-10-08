@@ -33,20 +33,20 @@ def test_fixture_is_what_pyyaml_reads_today() -> None:
     )
 
 
-def test_implement_v3_has_ten_phases_through_its_merge_keys() -> None:
+def test_implement_v3_has_eight_phases_through_its_merge_keys() -> None:
     phases = _COMMITTED.files["workflows/sdlc/implement-v3/workflow.yaml"].phases
     assert [p.id for p in phases] == [
         "premise", "implement", "verify",
-        "fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3",
+        "fix", "reverify", "fix_2", "reverify_2",
         "finalize_pr",
     ]  # fmt: skip
 
 
-def test_reverify_pr_has_nine_phases_without_merge_keys() -> None:
+def test_reverify_pr_has_seven_phases_without_merge_keys() -> None:
     phases = _COMMITTED.files["workflows/sdlc/reverify-pr/workflow.yaml"].phases
     assert [p.id for p in phases] == [
         "prepare", "verify",
-        "fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3",
+        "fix", "reverify", "fix_2", "reverify_2",
         "finalize_pr",
     ]  # fmt: skip
-    assert [p.order for p in phases] == list(range(1, 10))
+    assert [p.order for p in phases] == list(range(1, 8))

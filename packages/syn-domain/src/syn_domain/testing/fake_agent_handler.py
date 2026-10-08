@@ -46,6 +46,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
         PhaseCostLimit,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         AgentHandlerProtocol,
         Runner,
@@ -158,6 +161,8 @@ class FakeAgentExecutionHandler:
         self._attempts = tuple(attempts)
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
+        #: What each attempt was told to report pushes to (PC-128).
+        self.push_observers: list[PushObserver | None] = []
 
     # ------------------------------------------------------------------
     # Protocol-required method
@@ -176,10 +181,12 @@ class FakeAgentExecutionHandler:
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
         cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         self.calls.append(todo)
         self.cost_limits.append(cost_limit)
         self.runners.append(runner)
+        self.push_observers.append(on_push)
         if self._attempts:
             # The script decides this attempt; the outer double stays the one
             # the test inspects, so `call_count` counts attempts across all of

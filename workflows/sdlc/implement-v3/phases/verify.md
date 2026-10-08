@@ -38,7 +38,7 @@ certified.
 successful phase: write `"success": true, "review_verdict": "blocked"`.
 
 Your report's first line is exactly `CERTIFIED` or `BLOCKED`, and its second
-line is exactly `Round: 0 of 3`: no repair round has run yet. `finalize_pr`
+line is exactly `Round: 0 of 2`: no repair round has run yet. `finalize_pr`
 reads this report as the final one when you certify, and refuses a report
 whose first two lines are anything else.
 
@@ -433,7 +433,7 @@ most valuable one.
 
 The verdict, the gate output, the mutation results, and the exact head you verified.
 A verdict: is the change correct and complete, or not. The first two lines are
-the verdict and `Round: 0 of 3`, as the verdict section at the top says. Which
+the verdict and `Round: 0 of 2`, as the verdict section at the top says. Which
 gates you ran, where each came from (declared, found, or none), and their output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.

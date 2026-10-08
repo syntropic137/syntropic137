@@ -6,11 +6,11 @@ $ARGUMENTS
 
 ## Which round this is
 
-**Round 2 of 3.** This prompt re-verifies after each of up to three fix
+**Round 2 of 2.** **This is the final round**: there is no third. This prompt re-verifies after each of up to two fix
 rounds. This round's fix report is **`artifacts/input/fix_2/fix.md`** (flat
 alias `artifacts/input/fix_2.md`); the verdict that fix round acted on is
 `artifacts/input/reverify/reverify.md`. Read the fix report first. It says what the previous phase did about
-the defects still open. Write `Round: 2 of 3` as your report's second line.
+the defects still open. Write `Round: 2 of 2` as your report's second line.
 
 ## Check out the candidate you will certify
 
@@ -186,7 +186,7 @@ your report, not `verify.md`, and carries that section into the PR body.
 
 ## Be specific about what would make it deliverable
 
-If you find a blocking defect, the next fix round - or, in round 3, whoever
+If you find a blocking defect, the next fix round - or, in round 2, whoever
 picks up the draft - has only your report to work from. So write it as an
 instruction rather than an observation:
 
@@ -216,8 +216,8 @@ should have caught Y".
 under `artifacts/output/` FAILS.** Write the file before you finish.
 
 1. **CERTIFIED** or **BLOCKED**, as the first line, in one word.
-   Then `Round: N of 3` on the second line. If round 3 is BLOCKED, the third
-   line is `Repair bound reached: 3 of 3 rounds used, findings still open.` -
+   Then `Round: N of 2` on the second line. If round 2 is BLOCKED, the third
+   line is `Repair bound reached: 2 of 2 rounds used, findings still open.` -
    the run stops here and must not read as though it ran out of anything else.
 2. **The branch and the full commit SHA you certified** - or, if BLOCKED, the
    one you checked out and refused - with the `git rev-parse origin/<branch>`

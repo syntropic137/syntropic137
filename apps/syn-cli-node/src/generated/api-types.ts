@@ -7031,7 +7031,7 @@ export interface components {
          *
          *     * ``certified`` ends the repair loop. Every phase before the workflow's
          *       final phase is skipped, so a run that certifies in round 1 does not pay
-         *       for rounds 2 and 3.
+         *       for the rounds after it.
          *     * ``blocked`` - or no verdict at all - advances by order, which is the
          *       next repair round, or the final phase once the rounds are spent.
          *

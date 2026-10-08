@@ -23,9 +23,9 @@ verification might have said edits a certified branch at nobody's request.
 
 ## Which round this is
 
-**Round 1 of 3.** This workflow repairs in up to three rounds (`fix`, `fix_2`,
-`fix_3`, each followed by its own re-verification). In round 1 the verdict you
-act on is `artifacts/input/verify/verify.md`, as above. Write `Round: 1 of 3` as
+**Round 1 of 2.** This workflow repairs in up to two rounds (`fix` and
+`fix_2`, each followed by its own re-verification). In round 1 the verdict you
+act on is `artifacts/input/verify/verify.md`, as above. Write `Round: 1 of 2` as
 the first line of your report.
 
 ## If verification certified the change, stop
@@ -63,6 +63,18 @@ report. If the remote branch has moved, or either value is missing or different,
 **do not edit and do not push**: report the mismatch in `fix.md` and stop.
 Something pushed over the branch after it was reviewed, and repairing a tree
 nobody verified produces a diff no pass in this run has ever seen.
+
+**The one exception: your own unverified commits (PC-128).** When the resume
+note in your context says `OWN UNVERIFIED COMMITS` for this branch, this
+execution's own earlier attempt at this phase pushed that head and was
+interrupted before anything verified it. The platform recorded those pushes as
+they happened and has already confirmed origin's head is one of them. Then
+the verified SHA above is replaced by the head SHA that note names: run the
+same commands with it, and both `rev-parse` results must equal it. Before you
+change anything, re-run the verification `verify.md` describes against that
+head and report its result in `fix.md`, naming that head as the verified SHA;
+fix only what that verification finds. Without that note, a moved branch is
+someone else's push, and the rule above stands.
 
 After committing, push normally. **Never force-push** - the remote head is the
 verified head, so a fast-forward is the only push that can be correct here, and
@@ -157,7 +169,7 @@ becomes remote red.
 under `artifacts/output/` FAILS.** Write the file before you finish, including
 when the answer is "nothing to do".
 
-1. **`Round: N of 3`** as the first line, from the section above, and which
+1. **`Round: N of 2`** as the first line, from the section above, and which
    report you took as the latest verdict.
 2. **What verification found** - one line per defect.
 3. **What you changed** for each, with `file:line`, or why you did not.
