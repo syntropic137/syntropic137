@@ -14,9 +14,12 @@ THE SEED IS NEVER SHARED WRITABLY. #1310 rejected a shared writable cache: one
 agent could plant a poisoned wheel that every later run installs. So:
 
 - a seed is produced only by the platform's own download-only command
-  (`WARM_COMMANDS`), run in a fresh checkout BEFORE any agent has run in that
-  workspace, and published from the cache that command alone wrote. A
-  workspace's cache is never read back into the store once an agent has run;
+  (`WARM_COMMANDS`), run BEFORE any agent has run in that workspace, in a
+  scratch directory the platform fills with the lockfile and nothing of the
+  checkout's but `WARM_MANIFESTS`, and published from the cache that command
+  alone wrote. No other file of the checkout (a `.venv`, a `uv.toml`, a
+  pnpmfile, an `.npmrc`) is present to be run or read. A workspace's cache is
+  never read back into the store once an agent has run;
 - a workspace never sees the store. `seed` COPIES a seed into the workspace's
   own writable cache from the host side, through the workspace directory the
   host bind-mounts at `/workspace`, so the agent can corrupt its own copy and
@@ -60,21 +63,32 @@ logger = logging.getLogger(__name__)
 #: `agentic.adapter._WORKSPACE_CACHE_ENV` points that tool.
 SEEDED_TOOLS: Final[dict[str, str]] = {"uv": "uv.lock", "pnpm": "pnpm-lock.yaml"}
 
-#: How the platform builds each tool's seed from a fresh checkout.
+#: The checkout's files, besides the lockfile, a warm cannot do without. Only
+#: these are copied into the scratch directory a warm runs in.
 #:
 #: THE CHECKOUT IS NOT TRUSTED. A verify phase checks out what an implement
 #: phase's agent pushed, so every file in it but the lockfile's hashes may be
-#: an agent's. Any command that runs repository code - a workspace member's
-#: build hook, an npm lifecycle script - could write into the cache it is
-#: building, and that cache would be served to every later run with the same
-#: lockfile, including runs on main. So each command downloads only what the
-#: lockfile pins, verified against the lockfile's hashes, and runs nothing:
+#: an agent's. A warm run IN the checkout runs that agent's code: uv executes
+#: the checkout's `.venv/bin/python` and reads its `uv.toml`, and pnpm runs its
+#: `.pnpmfile.*` (both reproduced in #1802's verification). That code could
+#: write into the cache being built, which would be served to every later run
+#: with the same lockfile, including runs on main.
+#:
+#: uv needs the root `pyproject.toml` to find the project; it is read as data,
+#: and with `--frozen` what is downloaded, and its hashes, come from the lock.
+#: `pnpm fetch` is built to run from the lockfile alone.
+WARM_MANIFESTS: Final[dict[str, tuple[str, ...]]] = {"uv": ("pyproject.toml",), "pnpm": ()}
+
+#: How the platform builds each tool's seed, in that scratch directory. Each
+#: command downloads only what the lockfile pins, verified against the
+#: lockfile's hashes, and runs nothing:
 #:
 #: - `uv sync --no-install-workspace --no-install-local` builds no project of
 #:   the repository's own, and `--no-build` builds no sdist at all, so no build
 #:   backend runs. A lockfile that needs an sdist fails to warm and the run
 #:   goes on cold;
-#: - `pnpm fetch` reads only the lockfile and runs no lifecycle scripts.
+#: - `pnpm fetch` runs no lifecycle scripts, and `--ignore-pnpmfile` keeps it
+#:   from loading a pnpmfile even if one were present.
 #:
 #: A malicious lockfile is not a way in: its seed is keyed by its own hash, so
 #: it reaches only runs that would install that lockfile anyway.
@@ -89,8 +103,13 @@ WARM_COMMANDS: Final[dict[str, tuple[str, ...]]] = {
     ),
     # No `--frozen-lockfile`: `fetch` only ever reads the lockfile, and pnpm 12
     # rejects the flag there.
-    "pnpm": ("pnpm", "fetch"),
+    "pnpm": ("pnpm", "fetch", "--ignore-pnpmfile"),
 }
+
+#: Set for every warm. `UV_NO_CONFIG` ignores any `uv.toml` above the scratch
+#: directory; the scratch directory's own `.venv` is named explicitly so uv
+#: can never pick up an environment the checkout shipped.
+_WARM_ENVIRONMENT: Final[dict[str, str]] = {"UV_NO_CONFIG": "1"}
 
 #: A warm that has not finished by then is abandoned and the run goes on cold.
 _WARM_TIMEOUT_SECONDS: Final = 900
@@ -183,8 +202,8 @@ class DependencySeedStore:
         have been built at the same in-container path a workspace uses
         (`/workspace/.cache/<tool>`): uv's cache holds absolute symlinks.
 
-        ``built_cache`` is moved, not copied, and the move is a rename within
-        the store, so a reader sees either no seed or the whole of one.
+        ``built_cache`` is copied into a staging directory, which is then
+        renamed into place, so a reader sees either no seed or the whole of one.
         """
         target = self._root / key.relative_path
         staging = target.parent / f".staging-{uuid.uuid4().hex}"
@@ -320,12 +339,22 @@ async def seed_dependency_caches(
 async def _warm(
     store: DependencySeedStore, workspace: SeedableWorkspace, key: SeedKey, clone_dir: Path
 ) -> None:
-    in_container = Path("/workspace") / clone_dir.relative_to(workspace.path)
-    result = await workspace.execute(
-        list(WARM_COMMANDS[key.tool]),
-        timeout_seconds=_WARM_TIMEOUT_SECONDS,
-        working_directory=str(in_container),
-    )
+    scratch = await asyncio.to_thread(_warm_inputs, workspace.path, key.tool, clone_dir)
+    in_container = Path("/workspace") / scratch.relative_to(workspace.path)
+    try:
+        result = await workspace.execute(
+            list(WARM_COMMANDS[key.tool]),
+            timeout_seconds=_WARM_TIMEOUT_SECONDS,
+            working_directory=str(in_container),
+            environment={
+                **_WARM_ENVIRONMENT,
+                "UV_PROJECT_ENVIRONMENT": str(in_container / ".venv"),
+            },
+        )
+    finally:
+        # Best effort: the tool may leave files the host user cannot remove,
+        # and a leftover scratch directory in a workspace harms nothing.
+        await asyncio.to_thread(shutil.rmtree, scratch, True)
     if result.exit_code != 0:
         # Not published: a half-built cache is not a seed. The workspace
         # keeps what it built, so this run is no colder than before.
@@ -337,6 +366,28 @@ async def _warm(
         )
         return
     await asyncio.to_thread(store.publish, key, workspace.path / ".cache" / key.tool)
+
+
+def _warm_inputs(workspace_dir: Path, tool: str, clone_dir: Path) -> Path:
+    """A fresh scratch directory holding only what ``tool``'s warm reads of ``clone_dir``.
+
+    Outside the checkout and outside every cache, so nothing the checkout
+    ships is there to run. Regular files only, as in `seed_keys`.
+    """
+    scratch = workspace_dir / f".seed-warm-{uuid.uuid4().hex}"
+    scratch.mkdir()
+    # Opened to the container's agent user, as `_copy_writable` does: the
+    # tool writes its lock state and uv its `.venv` here.
+    scratch.chmod(0o777)
+    for name in (SEEDED_TOOLS[tool], *WARM_MANIFESTS[tool]):
+        path = clone_dir / name
+        try:
+            if not stat.S_ISREG(path.lstat().st_mode):
+                continue
+        except FileNotFoundError:
+            continue
+        (scratch / name).write_bytes(path.read_bytes())
+    return scratch
 
 
 def _label(key: SeedKey) -> str:
