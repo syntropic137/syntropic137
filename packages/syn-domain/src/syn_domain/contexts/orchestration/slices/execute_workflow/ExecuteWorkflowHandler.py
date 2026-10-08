@@ -38,6 +38,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.source_commits im
 )
 from syn_shared.agents import (
     AgentProvider,
+    require_enforceable_cost_limit,
     require_executable_provider,
     require_runnable_sandbox,
 )
@@ -274,6 +275,35 @@ def _grant_skill_invocation(
     return replace(config, allowed_tools=(*config.allowed_tools, ToolName.SKILL))
 
 
+def _fallback_agent_config(phase: object, primary: AgentConfiguration) -> AgentConfiguration | None:
+    """The phase's declared `fallback_agent`, resolved like its primary (PC-83).
+
+    The primary's configuration with only WHO runs it changed: the same tools,
+    sandbox and delegation, so a fallback run cannot do anything the phase was
+    not already allowed to do. A None model resolves to the fallback
+    provider's own default in `AgentConfiguration`, never to the primary's.
+
+    The same execution-boundary refusals as the primary, for the same reason:
+    a stored template never saw the YAML validator that also refuses these.
+    """
+    declared = getattr(phase, "fallback_agent", None)
+    if declared is None:
+        return None
+    phase_id: str | None = getattr(phase, "phase_id", None)
+    provider = require_executable_provider(declared.provider, phase_id=phase_id)
+    if provider is AgentProvider.CODEX and primary.allowed_tools:
+        raise UnsupportedToolPolicyForProviderError(
+            provider=str(provider), phase_id=phase_id, declared=list(primary.allowed_tools)
+        )
+    # The phase's cost limit binds whichever agent runs it, and codex cannot
+    # stop at one (#1376). Refused here, before any workspace is paid for,
+    # rather than discovered when the primary fails over.
+    require_enforceable_cost_limit(
+        provider, getattr(phase, "max_cost_usd", None), phase_id=phase_id
+    )
+    return replace(primary, provider=declared.provider, model=declared.model)
+
+
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
@@ -449,9 +479,8 @@ class ExecuteWorkflowHandler:
             self._resolve_repos(command, merged_inputs, workflow) if workflow.requires_repos else []
         )
 
-        # #967: the launch snapshot. Read from the template NOW, so a later
-        # edit to the workflow's tags changes future runs and never this one.
-        # Raises (a ValueError) if the union exceeds the tag limit.
+        # #967: the launch snapshot, read from the template NOW, so a later tag
+        # edit changes future runs only. Raises (ValueError) over the tag limit.
         tags = workflow.tags.union(command.tags)
 
         # #967: also a launch snapshot, taken by the dispatcher and carried on
@@ -492,6 +521,7 @@ class ExecuteWorkflowHandler:
                 ),
                 tags=tags,
                 launch_eval=launch_eval,
+                workflow_version=self._installed_version(workflow),
             )
         except StreamAlreadyExistsError:
             logger.warning(
@@ -499,6 +529,12 @@ class ExecuteWorkflowHandler:
                 execution_id,
             )
             raise DuplicateExecutionError(execution_id) from None
+
+    @staticmethod
+    def _installed_version(workflow: WorkflowTemplateAggregate) -> str | None:
+        """What the run records as its workflow version (Evals v2): the package
+        version, or the source digest when the template has none."""
+        return workflow.package_version or workflow.source_digest
 
     @staticmethod
     def _launch_eval(
@@ -632,6 +668,9 @@ class ExecuteWorkflowHandler:
                     order=phase.order,
                     description=phase.description,
                     agent_config=agent_config,
+                    # Resolved from the FINAL primary config, after the skill
+                    # grant, so the fallback runs under exactly its tools.
+                    fallback_agent=_fallback_agent_config(phase, agent_config),
                     prompt_template=phase.prompt_template or "",
                     # Passed through whole. Collapsing to `[0] or "text"` here
                     # is what erased the difference between a phase that
@@ -649,6 +688,7 @@ class ExecuteWorkflowHandler:
                     # that is judged strictly rather than one that is not
                     # judged at all.
                     delivers_repo_changes=phase.delivers_repo_changes,
+                    requires_verdict=phase.requires_verdict,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

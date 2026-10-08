@@ -1,0 +1,52 @@
+/* Declared phases that did not run here (feedback cee46909). Vanilla CSS on
+   the theme's custom properties: muted, so the eye goes to the phases that ran. */
+.phase-planned {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 200px;
+  border: 1px dashed var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  color: var(--color-text-muted);
+  opacity: 0.75;
+}
+
+.phase-planned__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.phase-planned__icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.phase-planned__name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.phase-planned__status {
+  font-size: 0.75rem;
+}
+
+/* Will never run: struck through, so it does not read as work still to do. */
+.phase-planned--skipped .phase-planned__name {
+  text-decoration: line-through;
+}
+
+/* Done, just not here: solid and tinted like a completed phase, still muted. */
+.phase-planned--inherited {
+  border-style: solid;
+  border-color: rgb(16 185 129 / 0.3);
+  background: rgb(16 185 129 / 0.05);
+}
+
+.phase-planned--inherited .phase-planned__icon {
+  color: rgb(52 211 153);
+}

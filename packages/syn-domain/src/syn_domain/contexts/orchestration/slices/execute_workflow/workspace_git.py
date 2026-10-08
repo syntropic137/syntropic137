@@ -377,12 +377,14 @@ async def git(
     *args: str,
     index: str | None = None,
     identity: bool = False,
+    timeout_seconds: int | None = None,
 ) -> str:
     """Stdout of one git command in ``repo``, or raise if it failed."""
     return await checked(
         workspace,
         git_argv(repo, *args, index=index, identity=identity),
         doing=f"running 'git {args[0]}' in {repo}",
+        timeout_seconds=timeout_seconds,
     )
 
 

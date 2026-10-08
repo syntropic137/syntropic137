@@ -56,9 +56,12 @@ of the image, not of the task, and they are the same on every run:
 - The image ships `just`, `uv`, `node` and `gh`. It does **not** ship `pnpm`,
   `vsa`, or a Docker CLI - the last deliberately - and it ships `rustup` with
   no toolchain installed, so `cargo` does not run until something installs one
-  (`just preflight-agent` does, for fitness: #1498).
-- Consequently `just preflight-agent` is the gate that runs here, not
-  `just qa-ci`.
+  (syntropic137's agent gate does, for fitness: #1498).
+- Consequently a repository gate that needs anything else cannot run here.
+  The gates verification runs are the target repository's own: its
+  `AGENTS.md` `## Verification gates` section, or, failing that, what its CI
+  and task runner treat as the gate. Say which gates the target declares, or
+  that it declares none.
 
 **If any of that turns out to be false, that is a finding worth reporting** -
 the image changed and these instructions are stale. Report the deviation and

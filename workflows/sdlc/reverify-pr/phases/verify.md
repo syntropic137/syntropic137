@@ -19,6 +19,29 @@ This phase exists because a phase that makes a change and then checks it will
 shortchange the checking: the change feels like the deliverable, and the check
 feels like paperwork. You did not write this code. Treat it as suspect.
 
+## Report the verdict to the engine, not only in prose
+
+Read this before you run anything long: it is the one part of this phase the
+engine reads, and a run that ends before you reach the bottom of this prompt
+must still have obeyed it.
+
+Your `TASK_RESULT` block MUST carry `"review_verdict"`, exactly `"certified"`
+or `"blocked"`, matching the first line of your report. The engine reads that
+key, and only that key, to decide what runs next: `certified` skips every
+repair round and goes straight to `finalize_pr`; `blocked` runs the first
+repair round (`fix`, then `reverify`). This phase declares `requires_verdict`,
+so a missing or misspelled verdict FAILS the phase ("verify produced no
+verdict") and the review you did is not acted on; it is never read as
+certified.
+
+`review_verdict` is not `success`. A BLOCKED review you completed is a
+successful phase: write `"success": true, "review_verdict": "blocked"`.
+
+Your report's first line is exactly `CERTIFIED` or `BLOCKED`, and its second
+line is exactly `Round: 0 of 3`: no repair round has run yet. `finalize_pr`
+reads this report as the final one when you certify, and refuses a report
+whose first two lines are anything else.
+
 ## First: check out the code you are verifying
 
 **You are in a fresh workspace with a fresh clone of the default branch.** The
@@ -37,17 +60,39 @@ like proof.
 
 ## Run the gates
 
-Run the gate as:
+**The gates belong to the repository you are verifying, not to this prompt.**
+This workflow runs against any repository, and a command that is the gate in
+one of them does not exist in another: a run on a repository with no
+`justfile` could not certify anything while this prompt named one (PC-129).
+So find the gates in this order, and stop at the first that answers:
+
+1. **Declared.** The repository's `AGENTS.md` (or `CLAUDE.md`, if it has no
+   `AGENTS.md`) has a `## Verification gates` section. Its first fenced code
+   block lists the gate commands, one per line, run from the repository root.
+   Run every one of them, in order. Read the rest of the section too: it is
+   where the repository says what its gates cannot do in this workspace.
+2. **Not declared.** Find what the repository itself treats as its gate and
+   run that: the commands its pull-request CI runs (`.github/workflows/`),
+   then its task runner (`justfile`, `Makefile`, `package.json` scripts), then
+   any test command its `AGENTS.md`, `CLAUDE.md` or `README` names in prose.
+   Run the narrowest set that covers what this change touches.
+3. **None found.** Say so. A repository with no gate has nothing to be green
+   against; that is a fact to report, not a failure to invent and not a pass
+   to claim. Run the tests the change itself added or touched.
+
+Whichever case applied, your report names it, and names the file and line
+each command came from. A gate whose provenance is not written down cannot be
+checked by the next phase.
+
+Run them with the workspace's write locations redirected first:
 
 ```
 mkdir -p /workspace/.tmp /workspace/.cache
 export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv
-just preflight-agent
-uv run pytest -m unit -q
 ```
 
-Paste the final lines of each. If either is not green, that is the finding and
-you should stop and report it rather than working around it.
+Paste the final lines of each gate. If any is not green, that is the finding
+and you should stop and report it rather than working around it.
 
 **The `TMPDIR=` prefix is a temporary workaround, not decoration.** This
 workspace mounts `/tmp` `noexec` (deliberate hardening), and `just` materialises
@@ -80,27 +125,16 @@ on #1120. Do not "fix" a Permission denied here by editing the justfile or
 running the recipes by hand: that hides the one condition this prefix exists to
 compensate for.
 
-**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv`, `node`
-and `rustup` and nothing else, so seven of the gates in `just preflight` cannot
-run here at all: `vsa-validate` (no `vsa`), `codegen-check` (no `pnpm`),
-`check-submodules`, `check-compose-overlays`, `check-default-workspace-image`,
-`check-pinned-image-channels` and `check-compose-images-public`. Attempting
-`qa-ci` here fails on the missing binary, not on the change. CI runs those
-seven; passing here does not promise a green CI, and if CI fails on one of them
-that is a real failure to fix, not an exception to claim.
-
-`preflight-agent` DOES run all of `fitness`: `fitness-check`, CI's thresholds
-unchanged (#1498), and `fitness-invariants`, the `pytest ci/fitness` suite CI
-runs. The first run in a workspace installs stable Rust and builds `aps` (~6
-minutes); later runs reuse both. A `FITNESS NOT RUN:` line means the gate did
-not run, which is not a pass: report it, never certify around it. The pytest
-summary lists each test skipped as `NOT RUN` for a binary this image lacks
-(today, the docker-backed `test_gateway_bind.py`); CI still runs those, and
-how to read its result is the section after this one.
+**A gate that needs a binary this workspace lacks did not run.** The image
+ships `just`, `uv`, `node`, `gh` and `rustup`, and nothing else. A gate that
+fails on a missing binary has told you nothing about the change: report it as
+not run, never as passed, and never swap in a command the repository did not
+choose. A line the gate itself prints as `NOT RUN` is the same thing. CI on the
+same head SHA settles it, as the section after this one says.
 
 **Run the whole gate, not the sub-commands you think it contains.** A change can
 pass every test, typecheck and build and still fail on something none of them
-touch. A CLI flag added in this repository drifted a generated docs page and
+touch. A CLI flag added in syntropic137 drifted a generated docs page and
 failed `codegen-check`, a real PR-gating job, while every direct test passed.
 
 Run `git status --porcelain` before and after. Verification commands in this
@@ -108,8 +142,9 @@ repository have mutated tracked files; if the tree changed, report it.
 
 ## A check this workspace cannot run is settled by CI on the same head SHA
 
-Some checks cannot run here at all: today the docker-backed fitness tests,
-which `preflight-agent` skips as `NOT RUN`. "Not run here" is not a pass, and
+Some checks cannot run here at all: a gate that needs a binary this workspace
+lacks, or a test the gate itself reports as `NOT RUN` (in syntropic137,
+today, the docker-backed fitness tests). "Not run here" is not a pass, and
 on its own it is not a blocker either. It is a question CI answers for the same
 commit, so read CI's answer instead of holding the PR in draft. PRs #1562 and
 #1576 each sat BLOCKED on exactly this while CI's Architectural Fitness job had
@@ -397,8 +432,9 @@ if the outcome was a refusal: a refusal is a deliverable and is often the
 most valuable one.
 
 The verdict, the gate output, the mutation results, and the exact head you verified.
-A verdict: is the change correct and complete, or not. The `preflight-agent` and
-unit-test output, each
+A verdict: is the change correct and complete, or not. The first two lines are
+the verdict and `Round: 0 of 3`, as the verdict section at the top says. Which
+gates you ran, where each came from (declared, found, or none), and their output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.
 
@@ -486,8 +522,9 @@ everything you call blocking as required work.
 
 Your task in this phase is to deliver an honest verification report, not to
 make the candidate pass. If you can identify the candidate and write
-`artifacts/output/verify.md`, end with `TASK_RESULT success=true` even when the
-candidate is BLOCKED.
+`artifacts/output/verify.md`, end with `TASK_RESULT success=true` and the
+`review_verdict` the section at the top requires, even when the candidate is
+BLOCKED.
 
 This includes a normal code, test, or design defect; a failing gate; and an
 environment limitation that prevents only part of verification, such as an

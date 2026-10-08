@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        FallbackAgent,
         InputDeclaration,
         PhaseDefinition,
         WorkflowClassification,
@@ -127,6 +128,15 @@ def _runnable_sandbox(declared: object, phase_id: object) -> str:
     return str(declared) if declared else DEFAULT_PHASE_SANDBOX
 
 
+def _fallback_agent(declared: object) -> FallbackAgent | None:
+    """The phase's ``fallback_agent``, held to the YAML's rules, or None (PC-83)."""
+    from syn_domain.contexts.orchestration import FallbackAgentYamlDefinition
+
+    if declared is None:
+        return None
+    return FallbackAgentYamlDefinition.model_validate(declared).to_domain()
+
+
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
     from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
@@ -158,6 +168,9 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 delivers_repo_changes=_as_bool(
                     p.get("delivers_repo_changes", True), "delivers_repo_changes"
                 ),
+                # Dropping this lets a review phase that names no verdict
+                # advance by order as if it had found something (PC-116).
+                requires_verdict=_as_bool(p.get("requires_verdict", False), "requires_verdict"),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as
@@ -178,6 +191,9 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # can write the code it certifies (#1161). Caught by the
                 # roundtrip assertion in test_phase_create_carries_every_field.
                 sandbox=_runnable_sandbox(_agent_field(p, "sandbox"), p.get("phase_id")),
+                # Validated by the same model the YAML uses (PC-83), so the API
+                # cannot store a fallback the YAML would refuse.
+                fallback_agent=_fallback_agent(p.get("fallback_agent")),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=_expand_skills(p.get("skills")),
             )
@@ -186,6 +202,10 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
         # The YAML refuses this too; a phase created here never passes it (#1376).
         for d in defs:
             require_enforceable_cost_limit(d.provider, d.max_cost_usd, phase_id=d.phase_id)
+            if d.fallback_agent is not None:
+                require_enforceable_cost_limit(
+                    d.fallback_agent.provider, d.max_cost_usd, phase_id=d.phase_id
+                )
         return defs
     return [
         PhaseDefinition(

@@ -44,8 +44,8 @@ export function useHoverHighlight(isFeedbackMode: boolean): HoverHighlight | nul
       return;
     }
 
-    const handleMouseMove = (e: MouseEvent) => {
-      const target = findBestElement(e.clientX, e.clientY);
+    const highlightAt = (x: number, y: number) => {
+      const target = findBestElement(x, y);
 
       if (!target) {
         setHoverHighlight(null);
@@ -57,13 +57,21 @@ export function useHoverHighlight(isFeedbackMode: boolean): HoverHighlight | nul
       setHoverHighlight({ rect, componentName });
     };
 
+    const handleMouseMove = (e: MouseEvent) => highlightAt(e.clientX, e.clientY);
+    // Touch has no hover: highlight the candidate while the finger is down.
+    const handleTouchStart = (e: TouchEvent) => {
+      const t = e.changedTouches[0];
+      if (t) highlightAt(t.clientX, t.clientY);
+    };
     const handleMouseLeave = () => setHoverHighlight(null);
 
     document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('touchstart', handleTouchStart, { passive: true });
     document.addEventListener('mouseleave', handleMouseLeave);
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('touchstart', handleTouchStart);
       document.removeEventListener('mouseleave', handleMouseLeave);
       setHoverHighlight(null);
     };

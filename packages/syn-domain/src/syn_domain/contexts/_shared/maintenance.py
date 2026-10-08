@@ -43,7 +43,7 @@ from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.disk_space import InsufficientDiskSpaceError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Iterator
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
     from syn_domain.contexts._shared.disk_space import DiskSpaceGuard
 
@@ -91,6 +91,26 @@ class MaintenancePausedError(AdmissionRefusedError):
     def __init__(self, mode: MaintenanceMode) -> None:
         super().__init__(mode.refusal_detail)
         self.mode = mode
+
+
+class AdmissionDrainTimeoutError(Exception):
+    """Closing the gate gave up waiting for admitted work to become visible (#1617).
+
+    Only starts that hold a slot and have not yet written their start event are
+    waited for, and only for a bound. Running out of it means one of those is
+    stuck, and the flag was NOT written: admission is still open, so nothing was
+    lost, and the operator can retry or investigate. Returning success instead
+    would be the #1387 loss - a pause over an execution that exists nowhere.
+    """
+
+    def __init__(self, unsettled: int, timeout_seconds: float) -> None:
+        super().__init__(
+            f"Admission was not paused: {unsettled} admitted start(s) did not write "
+            f"their start event within {timeout_seconds:g}s. Admission is still open; "
+            "retry the pause (#1617)."
+        )
+        self.unsettled = unsettled
+        self.timeout_seconds = timeout_seconds
 
 
 class AdmissionAnnouncementFailedError(Exception):
@@ -211,9 +231,9 @@ class AdmissionTicket:
         *,
         granted_at: datetime,
         mode: MaintenanceMode,
-        on_settled: Callable[[], None] | None = None,
+        gate: AdmissionGate | None = None,
     ) -> None:
-        """``on_settled`` is how the gate learns the lease ended.
+        """``gate`` is the gate that issued the ticket, and learns when it ends.
 
         Optional so a test can build a ticket to stand for "this was admitted"
         without a gate behind it. A ticket built that way leases nothing and
@@ -221,8 +241,32 @@ class AdmissionTicket:
         """
         self.granted_at = granted_at
         self.mode = mode
-        self._on_settled = on_settled
+        self._gate = gate
+        self._holds_slot = False
         self._settled = False
+        self._on_durable: Callable[[], Awaitable[None]] | None = None
+
+    async def enter_slot(self) -> None:
+        """The start now holds its execution slot: re-check the gate, then lease.
+
+        Called once, at the moment the work stops being queued (#1617). Until
+        then the ticket only reserves a place in the queue, and a pause does
+        not wait for it - the queued start is durable elsewhere and is re-offered
+        after the gate re-opens. From here until :meth:`mark_visible` the work
+        is admitted but invisible, and the next pause waits for it.
+
+        Raises :class:`MaintenancePausedError`, with the ticket settled, when
+        the gate closed while this start was queued: it must stay queued, not
+        start behind a pause that has already returned.
+        """
+        if self._gate is None or self._settled:
+            return
+        try:
+            await self._gate._enter_slot()
+        except BaseException:
+            self._settle()
+            raise
+        self._holds_slot = True
 
     @property
     def is_settled(self) -> bool:
@@ -236,6 +280,21 @@ class AdmissionTicket:
         the lease ends where the guarantee actually becomes true.
         """
         self._settle()
+
+    def on_durable(self, report: Callable[[], Awaitable[None]]) -> None:
+        """Have ``report`` awaited at the durable write, before anything after it (#1707).
+
+        Whoever queued the work cannot learn when it became durable from the
+        handler returning: that is the end of the run, and an exception after
+        the write is not a failure to start.
+        """
+        self._on_durable = report
+
+    async def mark_durable(self) -> None:
+        """The start event is durably written: :meth:`mark_visible`, then tell ``on_durable``."""
+        self.mark_visible()
+        if self._on_durable is not None:
+            await self._on_durable()
 
     def abort(self) -> None:
         """This admission produced no execution and never will.
@@ -251,8 +310,8 @@ class AdmissionTicket:
         if self._settled:
             return
         self._settled = True
-        if self._on_settled is not None:
-            self._on_settled()
+        if self._holds_slot and self._gate is not None:
+            self._gate._lease_ended()
 
 
 @contextmanager
@@ -319,6 +378,12 @@ def guarantee_settled(ticket: AdmissionTicket | None, work: object) -> None:
     weakref.finalize(work, ticket.abort)
 
 
+#: How long closing the gate waits for granted starts to write their start
+#: event (#1617). That write follows the slot grant directly, so seconds is
+#: generous; it is a bound on a stuck write, not on queue depth.
+DEFAULT_DRAIN_TIMEOUT_SECONDS = 10.0
+
+
 class AdmissionGate:
     """Serialises admission against the maintenance transition.
 
@@ -347,11 +412,18 @@ class AdmissionGate:
 
     The wait is on the work becoming VISIBLE, not on it finishing: a lease ends
     at ``journal.open()``, so the execution the deploy must not lose is one the
-    drain then counts and waits out. It is unbounded by design. An execution
-    queued behind the dispatcher semaphore holds its lease until the one ahead
-    of it finishes, and that is the honest answer - the alternative is
-    returning from ``PUT /maintenance`` over work that exists nowhere, which is
-    the bug. The drain that follows would have waited for it anyway.
+    drain then counts and waits out.
+
+    Only a start that HOLDS an execution slot is waited for (#1617). A ticket
+    whose start is still queued for a slot leases nothing yet: it re-checks the
+    gate when its slot arrives (:meth:`AdmissionTicket.enter_slot`) and, if the
+    gate closed meanwhile, stays queued in its durable record and is re-offered
+    after the re-open. Waiting for queued work instead made the pause wait for
+    running executions to finish - with every slot busy it never returned. The
+    wait that remains is bounded by ``drain_timeout``; running out of it raises
+    :class:`AdmissionDrainTimeoutError` WITHOUT writing the flag, because a
+    granted start that has not yet written its start event is exactly the
+    execution #1387 must not lose.
 
     In-process only, deliberately. It linearises the API container that owns
     both the HTTP route and the trigger-dispatch projection, which is the
@@ -366,8 +438,10 @@ class AdmissionGate:
         port: MaintenancePort,
         announcer: AdmissionAnnouncer | None = None,
         disk: DiskSpaceGuard | None = None,
+        drain_timeout: float = DEFAULT_DRAIN_TIMEOUT_SECONDS,
     ) -> None:
         self._port = port
+        self._drain_timeout = drain_timeout
         self._announcer = announcer
         # #1560: a nearly-full workspace volume refuses here, before anything
         # is written, rather than letting the execution reach Postgres and
@@ -388,6 +462,20 @@ class AdmissionGate:
         self._outstanding -= 1
         if self._outstanding == 0:
             self._idle.set()
+
+    async def _enter_slot(self) -> None:
+        """A queued ticket's start got its slot: lease it, or refuse if closed.
+
+        Under the transition lock, like :meth:`admitting`, so a pause either
+        completes first and this refuses, or this leases first and the pause
+        waits for it. Never both and never neither.
+        """
+        async with self._transition:
+            mode = await self._port.current()
+            if mode.active:
+                raise MaintenancePausedError(mode)
+            self._outstanding += 1
+            self._idle.clear()
 
     async def current(self) -> MaintenanceMode:
         """The durable state, read through. No lock: this only reports."""
@@ -471,25 +559,20 @@ class AdmissionGate:
         reads and preflight belong outside; holding the gate across them would
         let a slow request stall a deploy.
 
-        Leaving the body does NOT end the lease, and that asymmetry is the
-        point: the body only queues the work, so releasing there would let a
-        deploy declare the system quiet over an execution that has not started.
-        The ticket is handed to whoever runs the work, and the lease ends when
-        that work calls :meth:`AdmissionTicket.mark_visible` or
-        :meth:`AdmissionTicket.abort` - see :func:`carrying`, which is how both
-        entrances guarantee one of the two. A body that RAISES has queued
-        nothing, so the lease is ended here.
+        The ticket yielded is QUEUED: it leases nothing until its start gets
+        an execution slot and calls :meth:`AdmissionTicket.enter_slot`, which
+        re-checks the gate (#1617). From then the lease ends only when that
+        work calls :meth:`AdmissionTicket.mark_visible` or
+        :meth:`AdmissionTicket.abort` - see :func:`carrying`, which is how every
+        entrance guarantees one of the two. A body that RAISES has queued
+        nothing, so the ticket is settled here.
         """
         self._refuse_if_disk_full()
         async with self._transition:
             mode = await self._port.current()
             if mode.active:
                 raise MaintenancePausedError(mode)
-            self._outstanding += 1
-            self._idle.clear()
-        ticket = AdmissionTicket(
-            granted_at=datetime.now(UTC), mode=mode, on_settled=self._lease_ended
-        )
+        ticket = AdmissionTicket(granted_at=datetime.now(UTC), mode=mode, gate=self)
         try:
             yield ticket
         except BaseException:
@@ -502,11 +585,12 @@ class AdmissionGate:
         Every admission path must set the flag through here rather than through
         the port, or the exclusion above is decoration.
 
-        Closing waits for the outstanding leases; re-opening does not. Waiting
-        is what makes closing a gate rather than an observation - there is
-        something the deploy must not overtake. Re-opening overtakes nothing,
-        and blocking it behind executions that are merely queued would hold a
-        deploy's final step for as long as the work it just released.
+        Closing waits for the outstanding leases - starts that hold a slot and
+        have not written their start event - for at most ``drain_timeout``;
+        re-opening does not wait. Waiting is what makes closing a gate rather
+        than an observation - there is something the deploy must not overtake.
+        Starts still queued for a slot are not waited for (#1617): they re-check
+        the gate when their slot arrives and stay queued if it is shut.
 
         Re-opening announces (#1387). Work refused during the deploy is parked,
         not discarded, and nothing re-offers it on its own: a flag that stops
@@ -514,6 +598,8 @@ class AdmissionGate:
         what turns "admission is open again" into something that arrives.
 
         Raises:
+            AdmissionDrainTimeoutError: closing timed out waiting for a granted
+                start to become visible. The flag was not written.
             AdmissionAnnouncementFailedError: re-opening stored the flag but
                 could not announce it. The clear did not finish, so it does not
                 return a value the caller can read as success; the flag is open
@@ -521,7 +607,12 @@ class AdmissionGate:
         """
         async with self._transition:
             if active:
-                await self._idle.wait()
+                try:
+                    await asyncio.wait_for(self._idle.wait(), self._drain_timeout)
+                except TimeoutError:
+                    raise AdmissionDrainTimeoutError(
+                        self._outstanding, self._drain_timeout
+                    ) from None
             mode = await self._port.set_mode(active=active, reason=reason, actor=actor)
 
         if not active:

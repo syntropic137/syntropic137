@@ -43,6 +43,7 @@ _ALIASES = sorted({*ModelAlias, *CodexModelAlias})
 _DEFINITION_FIELDS: frozenset[tuple[str, str]] = frozenset(
     {
         ("PhaseDefinitionResponse", "model"),
+        ("FallbackAgentResponse", "model"),
         ("UpdatePhasePromptRequest", "model"),
     }
 )
@@ -80,8 +81,7 @@ def _is_guarded(tp: object) -> bool:
     if origin in (dict, typing.Mapping) and args:
         return _is_guarded(args[0])
     if origin in (list, tuple, set, frozenset) and args:
-        inner = args[0]
-        return isinstance(inner, type) and issubclass(inner, BaseModel)
+        return _is_guarded(args[0])
     return isinstance(tp, type) and issubclass(tp, BaseModel)
 
 
@@ -136,3 +136,36 @@ def test_explicit_ids_and_unknown_key_pass() -> None:
         cost_by_model={"gpt-6-sol": "1", "unattributed-model": "2"},
     )
     assert probe.model == "claude-opus-5-5"
+
+
+class _ListProbe(BaseModel):
+    models: list[ObservedModelId]
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_model_list_rejects_an_alias_after_a_valid_id(alias: str) -> None:
+    with pytest.raises(ValidationError):
+        _ListProbe(models=["gpt-6-sol", alias])
+
+
+def test_eval_run_surfaces_reject_aliases_and_keep_concrete_ids() -> None:
+    from syn_api.types import EvalRunModelResponse, EvalVariantResponse
+
+    variant = EvalVariantResponse(
+        workflow_id="wf",
+        models=["gpt-6-sol", "gpt-6.1-sol"],
+        run_count=1,
+        pass_count=0,
+        pass_rate=None,
+        pass_rate_display="—",
+        avg_cost_usd=None,
+        avg_cost_display="—",
+        last_run_at=None,
+    )
+    assert variant.model_dump()["models"] == ["gpt-6-sol", "gpt-6.1-sol"]
+    with pytest.raises(ValidationError):
+        EvalVariantResponse.model_validate(
+            {**variant.model_dump(), "models": ["gpt-6-sol", "opus"]}
+        )
+    with pytest.raises(ValidationError):
+        EvalRunModelResponse(phase_id="verify", model="opus")

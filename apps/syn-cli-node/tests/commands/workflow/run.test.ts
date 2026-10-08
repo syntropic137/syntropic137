@@ -1038,6 +1038,14 @@ describe("workflow run commands", () => {
                 status: "completed",
                 completed_phases: 3,
                 total_phases: 3,
+                phase_progress: {
+                  completed: 3,
+                  skipped: 0,
+                  possible: 3,
+                  remaining_possible: 0,
+                  percent: 100,
+                  display: "3 of 3",
+                },
                 total_tokens: 15000,
                 total_cost_usd: "0.25",
               },
@@ -1054,6 +1062,7 @@ describe("workflow run commands", () => {
       expect(out).toContain("Status WF");
       expect(out).toContain("completed");
       expect(out).toContain("Executions");
+      expect(out).toContain("3 of 3");
     });
 
     it("shows empty message when no executions", async () => {

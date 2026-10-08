@@ -1,0 +1,20 @@
+id: workflow-run-task-undeliverable
+polarity: defect
+source_pr: 1296
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `-t` is passed as `task: task ?? null` (line 195) with no check that any
+# phase prompt uses `$ARGUMENTS` or `{{task}}`.
+commit: c8a67374ec3e15ad2e1e75ad7cc3acc1834cf144
+fix_commit: 79b1628b40af7a9e0ef208dc19d455968e481574
+first_fix_commit: ddc6d14ca2192f5a579a46290e81591c1eb2a680
+task: >
+  Review `syn workflow run`, which starts a workflow execution with an
+  optional task (-t) and inputs, and reports what it started.
+expected:
+  files:
+    - apps/syn-cli-node/src/commands/workflow/run.ts
+  keywords:
+    - ["task", "arguments", "{{task}}"]
+    - ["no phase", "not consumed", "unconsumed", "never used", "unused", "ignored", "dropped", "discarded", "no prompt", "nowhere", "silently", "undeliverable", "not referenced"]
+split: train

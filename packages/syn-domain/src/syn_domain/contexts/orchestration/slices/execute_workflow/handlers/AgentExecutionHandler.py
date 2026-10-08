@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from syn_domain.contexts.artifacts import ContentType
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
@@ -147,7 +148,14 @@ _OUTPUT_ARTIFACT_GLOB: Final[str] = "artifacts/output/**/*"
 
 
 async def _produced_deliverable(workspace: ManagedWorkspace, phase_id: str) -> bool:
-    """Whether the phase left any non-empty file in artifacts/output/.
+    """Whether the phase left a non-empty TEXT file in artifacts/output/.
+
+    A binary file does not count. A screenshot is evidence a report cites, not
+    the report: since #1648 a verify phase writes its PNGs BEFORE its report,
+    so "any file exists" completed a codex stream that died between the two
+    and handed the next phase pictures with no verdict (exec-8fb041217a15).
+    The test is the one `primary_text` applies when it picks what stands for a
+    phase's output, judged by the same `ContentType.of`.
 
     Fails CLOSED: if the workspace cannot be read, the answer is "no", so a
     phase is never completed on the strength of a check that did not run.
@@ -161,7 +169,9 @@ async def _produced_deliverable(workspace: ManagedWorkspace, phase_id: str) -> b
             phase_id,
         )
         return False
-    return any(content for _, content in collected)
+    return any(
+        content and not ContentType.of(content, path).is_binary for path, content in collected
+    )
 
 
 async def _exit_code_after_codex_verdict(
@@ -291,6 +301,7 @@ class AgentExecutionResult:
         "command",
         "exit_code",
         "launch_failed",
+        "primary_failure",
         "stream_result",
         "subagents",
         "tokens",
@@ -318,6 +329,9 @@ class AgentExecutionResult:
         self.exit_code = command.exit_code if command is not None else exit_code
         self.usage = usage if usage is not None else FinalUsage.resolve(stream_result, tokens)
         self.launch_failed = launch_failed
+        #: Set only on a FALLBACK run that failed too (PC-83): who failed
+        #: first and why, so the phase's error carries both failures.
+        self.primary_failure: str | None = None
 
 
 class AgentExecutionHandler:

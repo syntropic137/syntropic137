@@ -1,0 +1,6 @@
+name: record-eval-run-score
+type: command
+aggregate: Eval
+emits:
+  - EvalRunScoredEvent
+returns: HandlerResult

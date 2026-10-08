@@ -281,9 +281,13 @@ class TestExecutionSurfacesUnpriced:
             _build_execution_summary_response,
             _ExecutionEnrichment,
         )
-        from syn_api.types import ExecutionSummary
+        from syn_api.types import ExecutionSummary, PhaseProgressInfo
+        from syn_domain.contexts.orchestration import PhaseProgress
 
         summary = ExecutionSummary(
+            phase_progress=PhaseProgressInfo.of(
+                PhaseProgress(status="completed", completed=0, skipped=0, defined=0)
+            ),
             workflow_execution_id="exec-890",
             workflow_id="wf-890",
             workflow_name="partly-priced",
@@ -302,9 +306,13 @@ class TestExecutionSurfacesUnpriced:
     def test_summary_response_without_enrichment_carries_the_domain_count(self) -> None:
         """No Lane 2 record: the domain summary's own coverage must survive."""
         from syn_api.routes.executions.queries import _build_execution_summary_response
-        from syn_api.types import ExecutionSummary
+        from syn_api.types import ExecutionSummary, PhaseProgressInfo
+        from syn_domain.contexts.orchestration import PhaseProgress
 
         summary = ExecutionSummary(
+            phase_progress=PhaseProgressInfo.of(
+                PhaseProgress(status="completed", completed=0, skipped=0, defined=0)
+            ),
             workflow_execution_id="exec-890",
             workflow_id="wf-890",
             workflow_name="unpriced",

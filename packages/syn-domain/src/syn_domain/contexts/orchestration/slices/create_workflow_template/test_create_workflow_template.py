@@ -1057,3 +1057,107 @@ class TestNoOpCannotBeForged:
         restored = await repository.get_by_id("code-review")
         assert restored is not None
         assert restored.phases[0].prompt_template != "locally edited"
+
+
+@pytest.mark.unit
+class TestArchivedTemplateKeepsItsProvenance:
+    """Archiving retires a template, not its provenance (#1705).
+
+    Found in codex review of #1705: the archived exemption returned before the
+    digest comparison, so republishing an archived version under a different
+    digest installed cleanly. Restoring with the archived provenance, or
+    installing a new version, must still work without --force.
+    """
+
+    @staticmethod
+    async def _archived(repository: InMemoryWorkflowRepository) -> CreateWorkflowTemplateHandler:
+        from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
+            ArchiveWorkflowTemplateCommand,
+        )
+
+        handler = CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=PhaseModelDefaults()
+        )
+        await handler.handle(
+            create_test_command(aggregate_id="code-review", version="2.0.0", source_digest="aaa111")
+        )
+        archived = await repository.get_by_id("code-review")
+        assert archived is not None
+        archived.archive_workflow(ArchiveWorkflowTemplateCommand(workflow_id="code-review"))
+        await repository.save(archived)
+        return handler
+
+    @pytest.mark.asyncio
+    async def test_same_version_with_a_different_digest_is_refused(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateDigestMismatchError,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = await self._archived(repository)
+
+        with pytest.raises(WorkflowTemplateDigestMismatchError, match="different source"):
+            await handler.handle(
+                create_test_command(
+                    aggregate_id="code-review",
+                    name="Edited",
+                    version="2.0.0",
+                    source_digest="bbb222",
+                )
+            )
+
+        stored = await repository.get_by_id("code-review")
+        assert stored is not None
+        assert stored.is_archived is True
+        assert stored.name == "Test Workflow"
+        assert stored.source_digest == "aaa111"
+
+    @pytest.mark.asyncio
+    async def test_force_still_overwrites_a_republished_archived_version(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        handler = await self._archived(repository)
+
+        outcome = await handler.handle(
+            create_test_command(
+                aggregate_id="code-review", version="2.0.0", source_digest="bbb222", force=True
+            )
+        )
+
+        assert outcome.changed is True
+        stored = await repository.get_by_id("code-review")
+        assert stored is not None
+        assert stored.is_archived is False
+        assert stored.source_digest == "bbb222"
+
+    @pytest.mark.asyncio
+    async def test_same_version_and_digest_restores_it(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        handler = await self._archived(repository)
+
+        outcome = await handler.handle(
+            create_test_command(aggregate_id="code-review", version="2.0.0", source_digest="aaa111")
+        )
+
+        assert outcome.changed is True
+        stored = await repository.get_by_id("code-review")
+        assert stored is not None
+        assert stored.is_archived is False
+        assert stored.source_digest == "aaa111"
+
+    @pytest.mark.asyncio
+    async def test_a_new_version_is_accepted(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        handler = await self._archived(repository)
+
+        outcome = await handler.handle(
+            create_test_command(
+                aggregate_id="code-review", name="Next", version="3.0.0", source_digest="bbb222"
+            )
+        )
+
+        assert outcome.changed is True
+        stored = await repository.get_by_id("code-review")
+        assert stored is not None
+        assert stored.is_archived is False
+        assert stored.package_version == "3.0.0"
+        assert stored.name == "Next"

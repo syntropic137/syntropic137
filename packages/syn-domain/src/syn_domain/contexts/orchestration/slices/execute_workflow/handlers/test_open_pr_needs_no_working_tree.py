@@ -138,6 +138,7 @@ class _CapturingProcessor:
         source_commits: list[SourceCommit] | None = None,
         tags: object = None,
         launch_eval: object = None,
+        workflow_version: str | None = None,
     ) -> WorkflowExecutionResult:
         del workflow_name, inputs, repos, admitted
         self.phases = list(phases)
@@ -250,6 +251,8 @@ async def _provision(phase: ExecutablePhase, *, completed: dict[str, str]) -> _P
     workspace.workspace_id = "ws-1187"
     workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
     workspace.inject_files = AsyncMock()
+    # Every command succeeds, so a cloned repo's instruction files read as present.
+    workspace.execute = AsyncMock(return_value=MagicMock(exit_code=0, stdout="# Instructions\n"))
 
     workspace_cm = AsyncMock()
     workspace_cm.__aenter__ = AsyncMock(return_value=workspace)

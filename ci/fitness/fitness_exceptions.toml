@@ -464,7 +464,6 @@ allowed_prefixes = [
 # tool count that reads 0 because agent_events was unreachable. Both render as
 # a real number on the executions page.
 "apps/syn-api/src/syn_api/routes/executions/queries.py:_load_execution_enrichment" = { issue = "#1341" }
-"apps/syn-api/src/syn_api/routes/executions/queries.py:_fetch_tool_counts" = { issue = "#1341" }
 "apps/syn-api/src/syn_api/routes/sessions.py:_load_session_costs" = { issue = "#1341" }
 # The same defect as _load_phase_operations above, duplicated: sessions.py has
 # its own copy of the tool-operations loader, so #1332 fixing one leaves this

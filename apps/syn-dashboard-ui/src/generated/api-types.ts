@@ -715,14 +715,36 @@ export interface paths {
         };
         /**
          * List Eval Runs Endpoint
-         * @description The executions currently in an eval: the execution list, filtered by eval.
+         * @description The executions currently in an eval, newest first, each with what it ran and its score.
          *
-         *     An eval with no runs, or one the read model has not caught up with, is an
-         *     empty page rather than a 404.
+         *     The eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an id
+         *     matching no eval is a 404. An eval with no runs is an empty page.
          */
         get: operations["list_eval_runs_endpoint_evals__eval_id__runs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/runs/{execution_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Score Eval Run Endpoint
+         * @description Record a verdict on one run. Re-scoring replaces the run's current score.
+         *
+         *     Allowed on frozen and archived evals: judging a run is not editing the eval.
+         */
+        post: operations["score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1429,11 +1451,12 @@ export interface paths {
          * List Accessible Repos Endpoint
          * @description List repositories accessible to the GitHub App.
          *
-         *     Queries all active installations and aggregates results when no
-         *     installation_id is provided. The installation list is cached locally with
-         *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
-         *     GitHub API without requiring a webhook URL. Stale data is kept as a
-         *     fallback if the GitHub API is unreachable during refresh.
+         *     With no installation_id, aggregates every installation. The last complete
+         *     listing is cached and served as ``complete`` while under a minute old;
+         *     otherwise GitHub is asked live, and an older listing is served as
+         *     ``partial`` only if GitHub cannot be asked. The GitHub App's
+         *     ``installation`` and ``installation_repositories`` webhooks invalidate the
+         *     cache at once. A single installation_id is always asked live.
          *
          *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
          *     the App's reach (``complete``) or merely went unseen because GitHub failed.
@@ -2179,6 +2202,11 @@ export interface paths {
          *     still asleep and nothing else will re-offer them, so reporting success here
          *     would close the deploy over work that never runs. Repeating the clear
          *     re-announces, which is why this is a retryable status and not a 500.
+         *
+         *     Pausing waits only for starts that already hold an execution slot and have
+         *     not written their start event, and only for a bound (#1617). Starts queued
+         *     for a slot stay queued and start after the clear. A pause that runs out of
+         *     that bound answers 503 with the flag NOT set: admission is still open.
          */
         put: operations["set_maintenance_mode_maintenance_put"];
         post?: never;
@@ -3301,7 +3329,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -3457,6 +3485,60 @@ export interface components {
             tags: string[];
         };
         /**
+         * EvalDetailResponse
+         * @description One eval, as `GET /evals/{eval_id}` returns it.
+         *
+         *     The row model plus whether the evals read model is rebuilding, so a
+         *     missing or stale eval can say why. Kept off `EvalResponse` so every list
+         *     row does not repeat the list's own status.
+         */
+        EvalDetailResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+            /** Frozen */
+            frozen: boolean;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Run Count */
+            run_count: number;
+            /** Run Status Counts */
+            run_status_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+        };
+        /**
          * EvalId
          * @description The identity of one eval, and the id of its stream.
          */
@@ -3478,6 +3560,7 @@ export interface components {
             status_counts: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /**
          * EvalResponse
@@ -3510,6 +3593,154 @@ export interface components {
             run_status_counts: {
                 [key: string]: number;
             };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+        };
+        /**
+         * EvalRunListResponse
+         * @description One page of an eval's current runs, newest first (Evals v2).
+         */
+        EvalRunListResponse: {
+            /** Items */
+            items: components["schemas"]["EvalRunResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /**
+         * EvalRunModelResponse
+         * @description The model one phase of a run ACTUALLY ran, as its harness reported it.
+         */
+        EvalRunModelResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Model */
+            model: string;
+        };
+        /**
+         * EvalRunResponse
+         * @description One run of an eval: one data point of how the eval changes over time (Evals v2).
+         */
+        EvalRunResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Status */
+            status: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version?: string | null;
+            /** Models */
+            models: components["schemas"]["EvalRunModelResponse"][];
+            /** Total Cost Usd */
+            total_cost_usd: string | null;
+            /** Total Cost Display */
+            total_cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Display */
+            duration_display: string;
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Score */
+            score: number | null;
+            /** Evidence Excerpt */
+            evidence_excerpt: string | null;
+            /** Scorer */
+            scorer: string | null;
+            /** Scorer Version */
+            scorer_version: string | null;
+            /** Scored At */
+            scored_at: string | null;
+        };
+        /**
+         * EvalRunScoreRequest
+         * @description A scorer's verdict on one run of an eval. Re-scoring replaces the current score.
+         */
+        EvalRunScoreRequest: {
+            verdict: components["schemas"]["Verdict"];
+            /** Score */
+            score?: number | null;
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
+            /** Scorer */
+            scorer: string;
+            /** Scorer Version */
+            scorer_version: string;
+        };
+        /**
+         * EvalRunScoreResponse
+         * @description The run's score as recorded (Evals v2).
+         */
+        EvalRunScoreResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Execution Id */
+            execution_id: string;
+            verdict: components["schemas"]["Verdict"];
+            /** Score */
+            score: number | null;
+            /** Evidence */
+            evidence: string;
+            /** Scorer */
+            scorer: string;
+            /** Scorer Version */
+            scorer_version: string;
+            /** Scored At */
+            scored_at: string;
+        };
+        /**
+         * EvalVariantResponse
+         * @description Every run of an eval with the same workflow, workflow version and OBSERVED models.
+         *
+         *     (Evals v2.) Two versions of one workflow are two variants: an edit between
+         *     runs is a different treatment, and pooling them would hide its effect.
+         */
+        EvalVariantResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version?: string | null;
+            /** Models */
+            models: string[];
+            /** Run Count */
+            run_count: number;
+            /** Pass Count */
+            pass_count: number;
+            /** Pass Rate */
+            pass_rate: number | null;
+            /** Pass Rate Display */
+            pass_rate_display: string;
+            /** Avg Cost Usd */
+            avg_cost_usd: string | null;
+            /** Avg Cost Display */
+            avg_cost_display: string;
+            /** Last Run At */
+            last_run_at: string | null;
         };
         /**
          * EventListResponse
@@ -3645,6 +3876,29 @@ export interface components {
             message: string;
         };
         /**
+         * ExecutionBudgetInfo
+         * @description How full the execution budget is right now, for the app bar (PC-124).
+         *
+         *     ``running`` and ``limit`` are this API process's budget. ``queued`` is
+         *     every start the list reports as ``queued``: waiting here for a slot, or
+         *     recorded durably and not yet picked up by any process.
+         */
+        ExecutionBudgetInfo: {
+            /** Running */
+            running: number;
+            /** Queued */
+            queued: number;
+            /** Limit */
+            limit: number;
+            /** Admission Paused */
+            admission_paused: boolean | null;
+            /**
+             * Display
+             * @description e.g. '2 running / 3 queued / cap 4'.
+             */
+            readonly display: string;
+        };
+        /**
          * ExecutionCostResponse
          * @description Aggregated cost for a workflow execution.
          */
@@ -3772,6 +4026,9 @@ export interface components {
              * @default 0
              */
             completed_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
+            /** Phase Plan */
+            phase_plan: components["schemas"]["PlannedPhaseInfo"][];
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */
@@ -3830,8 +4087,10 @@ export interface components {
             inputs?: {
                 [key: string]: string;
             };
+            eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /**
          * ExecutionEvalResponse
@@ -3846,6 +4105,29 @@ export interface components {
             association_kind: ("launched" | "attached") | null;
             /** Launched Eval Id */
             launched_eval_id: string | null;
+        };
+        /**
+         * ExecutionEvalRunResponse
+         * @description The eval an execution is a run of, and that run's current verdict (Evals v2).
+         *
+         *     Carried on ``GET /executions/{id}`` so an execution page can link to its eval
+         *     and show how the run was judged without a second request.
+         */
+        ExecutionEvalRunResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Eval Name */
+            eval_name: string | null;
+            /**
+             * Association Kind
+             * @enum {string}
+             */
+            association_kind: "launched" | "attached";
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Score */
+            score: number | null;
+            /** Scored At */
+            scored_at: string | null;
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -3884,10 +4166,12 @@ export interface components {
              * @default 0
              */
             excluded_undated: number;
+            budget?: components["schemas"]["ExecutionBudgetInfo"] | null;
             /** Status Counts */
             status_counts?: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /** ExecutionRunListResponse */
         ExecutionRunListResponse: {
@@ -3924,6 +4208,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /**
              * Total Tokens
              * @default 0
@@ -3978,6 +4263,11 @@ export interface components {
              * @description Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.
              */
             readonly position_display: string;
+            /**
+             * Reason Display
+             * @description Why it has not started: 'slots full 4/4', 'admission paused', 'starting' or 'awaiting pickup (<status>)' (PC-124).
+             */
+            readonly reason_display: string;
         };
         /**
          * ExecutionStatusCounts
@@ -4044,6 +4334,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -4084,6 +4375,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Total Tokens */
             total_tokens: number;
             /**
@@ -4137,6 +4429,8 @@ export interface components {
             tags?: string[];
             /** Repos Display */
             repos_display?: string | null;
+            eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /**
          * ExecutionTagsResponse
@@ -4262,6 +4556,16 @@ export interface components {
              * @default
              */
             last_seen: string;
+        };
+        /**
+         * FallbackAgentResponse
+         * @description The agent a phase is re-run on when its own provider cannot serve it (PC-83).
+         */
+        FallbackAgentResponse: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
         };
         /**
          * FeatureDisabledDetail
@@ -4931,6 +5235,31 @@ export interface components {
             };
         };
         /**
+         * HeldProjectionHealth
+         * @description A projection held below an event it failed to apply (ESP #391).
+         *
+         *     It is retried there with backoff and never checkpointed past it, so it is
+         *     behind and stays behind until the handler is fixed or the projection is
+         *     rebuilt. Every other projection keeps consuming.
+         */
+        HeldProjectionHealth: {
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Event Type
+             * @description Type of the event it failed to apply.
+             */
+            event_type: string;
+            /**
+             * Global Nonce
+             * @description Global nonce of the event it is held at.
+             */
+            global_nonce: number;
+        };
+        /**
          * IdentityBinding
          * @description A platform session or registered invocation represents native transcript work.
          */
@@ -5560,6 +5889,7 @@ export interface components {
              * @default false
              */
             require_delegation: boolean;
+            fallback_agent?: components["schemas"]["FallbackAgentResponse"] | null;
             /**
              * Clone Repos
              * @default true
@@ -5570,6 +5900,11 @@ export interface components {
              * @default true
              */
             delivers_repo_changes: boolean;
+            /**
+             * Requires Verdict
+             * @default false
+             */
+            requires_verdict: boolean;
             /**
              * Sandbox
              * @default full-access
@@ -5643,6 +5978,8 @@ export interface components {
             model?: string | null;
             /** Requested Model */
             requested_model: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -5740,6 +6077,29 @@ export interface components {
             error_message?: string | null;
         };
         /**
+         * PhaseProgressInfo
+         * @description How far through its phases an execution is, skipped phases accounted for.
+         *
+         *     ``total_phases`` is what the workflow defines, and a review that certifies
+         *     skips the repair rounds after it (PC-63), so ``completed/total`` read
+         *     "6/10" for a run that finished. Clients render ``display`` and draw
+         *     ``percent``; they never divide the raw counts themselves.
+         */
+        PhaseProgressInfo: {
+            /** Completed */
+            completed: number;
+            /** Skipped */
+            skipped: number;
+            /** Possible */
+            possible: number;
+            /** Remaining Possible */
+            remaining_possible: number;
+            /** Percent */
+            percent: number;
+            /** Display */
+            display: string;
+        };
+        /**
          * PhaseRefResponse
          * @description A plugin or skill reference. Structured, never a joined string.
          *
@@ -5816,6 +6176,24 @@ export interface components {
             resolved_sha: string;
             /** Source Url */
             source_url: string;
+        };
+        /**
+         * PlannedPhaseInfo
+         * @description One phase the run declared, and where it stands (feedback cee46909).
+         *
+         *     ``ExecutionDetail.phase_plan`` lists every declared phase, so a client
+         *     shows what is left as well as what ran. Clients render ``status_display``
+         *     and style by ``status``; they never work the status out themselves.
+         */
+        PlannedPhaseInfo: {
+            /** Phase Id */
+            phase_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Status Display */
+            status_display: string;
         };
         /**
          * Priority
@@ -5906,6 +6284,59 @@ export interface components {
             pull_request?: number | null;
             /** Diffstat */
             diffstat?: string | null;
+        };
+        /**
+         * ReadModelStatus
+         * @description Whether one read model is rebuilding, and how far it has got.
+         *
+         *     Carried on the list and detail responses a read model serves, so a page can
+         *     say "this list is incomplete because it is being rebuilt" instead of
+         *     looking broken, and listed on ``/health`` for every read model that is
+         *     rebuilding. Judged by ``services.read_model_status``; every number is
+         *     exact (checkpoint position against store head), never estimated.
+         */
+        ReadModelStatus: {
+            /**
+             * Rebuilding
+             * @description True while this read model is replaying history: it is more than the live-lag threshold (500 events) behind the head. A few events of ordinary live lag is NOT rebuilding, even while another read model replays.
+             */
+            rebuilding: boolean;
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Label Display
+             * @description What the read model holds, for a sentence, e.g. 'execution history'.
+             */
+            label_display: string;
+            /**
+             * Progress Pct
+             * @description Checkpoint position as a whole percentage of the store head, 0-99 while rebuilding. Null when not rebuilding.
+             */
+            progress_pct?: number | null;
+            /**
+             * Progress Display
+             * @description progress_pct as '72%'.
+             */
+            progress_display?: string | null;
+            /**
+             * Events Behind
+             * @description Events between the checkpoint and the store head.
+             * @default 0
+             */
+            events_behind: number;
+            /**
+             * Events Behind Display
+             * @description events_behind as '29,476 events behind'.
+             */
+            events_behind_display?: string | null;
+            /**
+             * Summary Display
+             * @description One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding.
+             */
+            summary_display?: string | null;
         };
         /**
          * RegisterClaudePluginRequest
@@ -7555,13 +7986,17 @@ export interface components {
          *     runbook already read. The fields from ``running`` down are
          *     ``CoordinatorSubscriptionService.get_status()``; the ones from
          *     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
-         *     ``lifecycle._describe_subscription_health``.
+         *     ``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).
          *
          *     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
          *     rather than a default: ``lag is None`` means the coordinator is not up yet,
          *     so there is nothing whose progress could be measured — which is not the same
-         *     as "not behind", and must not serialize as ``lag: 0``. When the probe itself
-         *     fails, ``status`` is "unknown" and nothing else is known at all.
+         *     as "not behind", and must not serialize as ``lag: 0``. When the lag or
+         *     dropped-start probe fails, the lag fields are absent but what the
+         *     coordinator itself knows (``running``, ``held_projections``, ``halted_at``)
+         *     is still published, and still sets ``status``: a halt at an undecodable
+         *     head event is exactly when the lag probe fails too. ``status`` is "unknown"
+         *     only when none of those fires.
          *
          *     ``ReadModelLag``'s fields are restated here because the block is flat on the
          *     wire and a generated client has to be able to see them. That restatement is
@@ -7571,10 +8006,10 @@ export interface components {
         SubscriptionHealth: {
             /**
              * Status
-             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed.
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed.
              * @enum {string}
              */
-            status: "healthy" | "degraded" | "dropped_events" | "stalled" | "catching_up" | "unknown";
+            status: "healthy" | "degraded" | "halted" | "dropped_events" | "held" | "stalled" | "catching_up" | "unknown";
             /**
              * Running
              * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
@@ -7590,6 +8025,16 @@ export interface components {
              * @description Whether a realtime (SSE) projection is attached.
              */
             realtime_enabled?: boolean | null;
+            /**
+             * Held Projections
+             * @description Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed.
+             */
+            held_projections?: components["schemas"]["HeldProjectionHealth"][] | null;
+            /**
+             * Halted At
+             * @description Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted.
+             */
+            halted_at?: number | null;
             /**
              * Is Catching Up
              * @description True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable.
@@ -7620,6 +8065,11 @@ export interface components {
              * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
              */
             lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
+            /**
+             * Rebuilding Read Models
+             * @description Every read model that is rebuilding, furthest behind first, with display strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable.
+             */
+            rebuilding_read_models?: components["schemas"]["ReadModelStatus"][] | null;
             /**
              * Unapplied Starts
              * @description Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured.
@@ -8575,6 +9025,16 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * Verdict
+         * @description What a scorer concluded about one run of an eval.
+         *
+         *     ``ERROR`` is the scorer's own failure to reach a conclusion (the run left
+         *     nothing to judge, or the scorer broke), never a judgement that the run
+         *     failed. It counts as scored, and not as passed.
+         * @enum {string}
+         */
+        Verdict: "PASS" | "FAIL" | "ERROR";
+        /**
          * WorkflowDefaultEvalResponse
          * @description A workflow's default eval after an edit, read from the aggregate (#967).
          */
@@ -9126,6 +9586,8 @@ export interface operations {
                 tag?: string[] | null;
                 /** @description Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix. */
                 eval_id?: string | null;
+                /** @description true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both. */
+                in_eval?: boolean | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -10195,7 +10657,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EvalResponse"];
+                    "application/json": components["schemas"]["EvalDetailResponse"];
                 };
             };
             /** @description No eval has this id in the eval read model (it may still be catching up) */
@@ -10236,11 +10698,59 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExecutionListResponse"];
+                    "application/json": components["schemas"]["EvalRunListResponse"];
                 };
             };
             /** @description No eval has this id in the eval read model (it may still be catching up) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunScoreRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunScoreResponse"];
+                };
+            };
+            /** @description No eval has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The execution is not currently a run of this eval */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

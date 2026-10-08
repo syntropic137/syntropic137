@@ -13,6 +13,7 @@ import { DispatchedTask } from '../provenance/DispatchedTask'
 import { PhaseStartPins } from '../provenance/PhaseStartPins'
 import { PhaseTimeline } from '../../pages/ExecutionDetail/PhaseTimeline'
 import type { ExecutionDetailResponse, PhaseStartConfig, StartPinsStatus } from '../../types'
+import { withPlanOfPhases } from '../../test/phasePlanFixtures'
 
 /**
  * Leading and trailing whitespace, indentation, a blank line and trailing
@@ -65,6 +66,8 @@ describe('DispatchedTask', () => {
   })
 })
 
+const DIGEST = '3b1f9c0de4a7e5f2b8d6c4a2e0f8d6b4c2a0e8f6d4b2a0c8e6f4d2b0a8c6e4f2'
+
 const PINS: PhaseStartConfig = {
   provider: 'claude',
   requested_model: 'claude-opus-5-5',
@@ -73,7 +76,9 @@ const PINS: PhaseStartConfig = {
     {
       name: 'architecture',
       version: 'v2.3.1',
-      resolved_sha: '9f1c0de4',
+      // What `_compute_tree_sha` produces: SHA-256 over the skill's files,
+      // not a commit, so it must never become a GitHub ref.
+      resolved_sha: DIGEST,
       source_url: 'https://github.com/syntropic137/software-leverage-points',
     },
   ],
@@ -87,12 +92,30 @@ describe('PhaseStartPins', () => {
     expect(text).toContain('Bash(git log:*)')
     expect(text).toContain('architecture')
     expect(text).toContain('v2.3.1')
-    expect(text).not.toContain('not recorded')
+    expect(text).not.toContain('Start config: not recorded')
+  })
+
+  it('links the declared version, and shows the content digest unlinked', () => {
+    render(<PhaseStartPins pins={PINS} status="recorded" />)
+    const skill = screen.getByTestId('skill-ref')
+    expect(skill.textContent).toContain('syntropic137/software-leverage-points')
+    expect(skill.textContent).toContain('v2.3.1')
+    expect(skill.textContent).toContain(`sha256:${DIGEST.slice(0, 7)}`)
+    const links = screen.getAllByRole('link', { hidden: true })
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      'https://github.com/syntropic137/software-leverage-points/tree/v2.3.1',
+    ])
+  })
+
+  it('says skill use is not recorded yet, never that a declared skill went unused', () => {
+    const { container } = render(<PhaseStartPins pins={PINS} status="recorded" />)
+    expect(container.textContent).toContain('use not recorded yet')
+    expect(container.textContent).not.toMatch(/not used|unused|invoked/i)
   })
 
   it('says "not recorded" for a run from before #1454, and guesses nothing', () => {
     const { container } = render(<PhaseStartPins pins={null} status="not_recorded" />)
-    expect(container.textContent).toBe('Start config: not recorded')
+    expect(container.textContent).toBe('Start config: not recorded · skill use not recorded yet')
   })
 
   it.each([
@@ -100,7 +123,7 @@ describe('PhaseStartPins', () => {
     ['the server sent no status at all', undefined],
   ])('never calls it "not recorded" when %s', (_why, status) => {
     const { container } = render(<PhaseStartPins pins={null} status={status} />)
-    expect(container.textContent).toBe('Start config: unavailable')
+    expect(container.textContent).toBe('Start config: unavailable · skill use not recorded yet')
   })
 
   it('does not read an empty tool list as "no tools"', () => {
@@ -118,7 +141,7 @@ describe('PhaseTimeline carries each phase its own pins', () => {
     status: StartPinsStatus,
   ): ExecutionDetailResponse['phases'][number] {
     return {
-      workflow_phase_id: id,
+      phase_id: id,
       name: id,
       status: 'completed',
       session_id: null,
@@ -155,6 +178,7 @@ describe('PhaseTimeline carries each phase its own pins', () => {
       ],
       total_phases: 3,
       completed_phases: 3,
+      phase_progress: { completed: 3, skipped: 0, possible: 3, remaining_possible: 0, percent: 100, display: '3 of 3' },
       total_input_tokens: 0,
       total_output_tokens: 0,
       total_cache_creation_tokens: 0,
@@ -166,7 +190,7 @@ describe('PhaseTimeline carries each phase its own pins', () => {
     } as unknown as ExecutionDetailResponse // test fixture: only the fields the timeline reads
     const { container } = render(
       <MemoryRouter>
-        <PhaseTimeline execution={execution} now={0} />
+        <PhaseTimeline execution={withPlanOfPhases(execution)} now={0} />
       </MemoryRouter>,
     )
     const text = container.textContent ?? ''

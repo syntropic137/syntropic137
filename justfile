@@ -38,7 +38,7 @@ help:
 
 # Self-host onboarding: use the NPX CLI — zero-clone, zero-dep, interactive wizard
 # npx @syntropic137/setup init
-# See https://github.com/syntropic137/syntropic137-npx for full documentation.
+# See https://github.com/syntropic137/syntropic137-setup for full documentation.
 
 # Dev onboarding: submodules → .env → deps → webhook URL → GitHub App → stack
 # GitHub App setup runs by default (use --skip-github to skip).
@@ -542,7 +542,7 @@ cli-node-qa: cli-node-typecheck cli-node-test cli-node-build
 # Loads .env for database connection and API keys
 api-backend:
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    uv run uvicorn syn_api.main:app --host 0.0.0.0 --port 8000 --reload
+    uv run uvicorn syn_api.main:app --host 0.0.0.0 --port 8000 --reload --loop asyncio
 
 # --- Dashboard & Frontend ---
 
@@ -2117,7 +2117,7 @@ github-reconfigure:
     @echo ""
     @echo "  npx @syntropic137/setup init --skip-docker"
     @echo ""
-    @echo "See https://github.com/syntropic137/syntropic137-npx for documentation."
+    @echo "See https://github.com/syntropic137/syntropic137-setup for documentation."
 
 # --- Security & Audit ---
 
@@ -2444,11 +2444,32 @@ bump-version version:
     uv sync --quiet
     just codegen
     echo ""
+    # The release PR carries the changelog: everything merged since the last
+    # tag moves from Unreleased into this version's section. A prerelease
+    # version is left under Unreleased (scripts/changelog.py).
+    echo "Regenerating CHANGELOG.md..."
+    just changelog --release {{version}}
+    echo ""
     python3 scripts/workflows/bump_version.py --check
 
 # Validate every version-carrying file has the same version
 check-version:
     python3 scripts/workflows/bump_version.py --check
+
+# Pull requests never edit CHANGELOG.md; see scripts/changelog.py for why.
+#   just changelog                  # Unreleased = everything since the last vX.Y.Z tag
+#   just changelog --offline        # git only, no gh
+#   just changelog --release 0.34.0 # what bump-version runs
+# Regenerate CHANGELOG.md from merged PRs (git; gh adds release-notes bullets)
+changelog *args:
+    uv run scripts/changelog.py {{args}}
+
+# Deliberately NOT in preflight or CI: every merge to main makes it stale,
+# which would fail unrelated PRs. Not the same thing as CI's release-gate
+# `changelog-check` job, which only checks the release PR body.
+# Fail (with a diff) if CHANGELOG.md is stale
+changelog-check *args:
+    uv run scripts/changelog.py --check {{args}}
 
 # Image build, push, retag and release-asset recipes live in just/release.just
 # (imported at the top of this file), so they can be owner-reviewed without
@@ -2461,6 +2482,8 @@ check-version:
 #   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
 #   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
 #   just pit-stop 0.29.1-beta.5 --skip-probe    # EMERGENCIES ONLY: no proof a run starts
+# The drain gives up after SYN_PIT_DRAIN_TIMEOUT seconds (default 2700) and lists
+# what is still running; it never cancels anything.
 [positional-arguments]
 pit-stop version *flags:
     #!/usr/bin/env bash

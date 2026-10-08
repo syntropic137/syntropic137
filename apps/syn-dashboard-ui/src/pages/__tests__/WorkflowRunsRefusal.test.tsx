@@ -44,6 +44,7 @@ function failedRun(
     started_at: '2026-09-18T00:00:00Z',
     completed_at: '2026-09-18T00:05:00Z',
     completed_phases: 1,
+    phase_progress: { completed: 1, skipped: 0, possible: 1, remaining_possible: 0, percent: 100, display: '1 of 1' },
     total_phases: 2,
     total_tokens: 100,
     total_cost_usd: 0,

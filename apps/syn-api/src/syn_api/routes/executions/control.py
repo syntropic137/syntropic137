@@ -25,15 +25,62 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["control"])
 
 
+class ExecutionReadModelRebuilding(HTTPException):
+    """409: a prefix the execution read model cannot expand while it is rebuilt (#1555).
+
+    Not a 404, because the execution may well exist: the read model that maps
+    prefixes to ids has not replayed it yet. The full id does not need that read
+    model, so the detail says to use it.
+    """
+
+    def __init__(self, partial_id: str) -> None:
+        super().__init__(
+            status_code=409,
+            detail=(
+                f"Cannot resolve execution id prefix '{partial_id}': the execution read "
+                "model is rebuilding and has not replayed every execution yet. Retry once "
+                "it catches up (see /health), or pass the full execution id, which is "
+                "resolved from the event store."
+            ),
+        )
+
+
 async def _resolve_execution_id(execution_id: str) -> str:
-    """Resolve a (possibly partial) execution ID via prefix matching."""
-    from syn_api._wiring import get_projection_mgr
+    """The full id of the execution a command names, or raise why there is none.
+
+    A full id is answered by the event store, which is authoritative, so a
+    command keeps working while `workflow_execution_details` is being rebuilt
+    (#1555). Only a prefix needs that read model, to expand it; a prefix it
+    cannot find while rebuilding is `ExecutionReadModelRebuilding`, not 404.
+    """
+    from syn_api._wiring import get_projection_mgr, get_workflow_execution_repository
     from syn_api.prefix_resolver import resolve_or_raise
 
-    mgr = get_projection_mgr()
-    return await resolve_or_raise(
-        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    if await get_workflow_execution_repository().exists(execution_id):
+        return execution_id
+    try:
+        return await resolve_or_raise(
+            get_projection_mgr().store, "workflow_execution_details", execution_id, "Execution"
+        )
+    except HTTPException as miss:
+        if miss.status_code == 404 and await _execution_read_model_rebuilding():
+            raise ExecutionReadModelRebuilding(execution_id) from miss
+        raise
+
+
+async def _execution_read_model_rebuilding() -> bool:
+    """Whether `workflow_execution_details` is replaying history right now.
+
+    False when that cannot be told, so a miss stays the 404 it was before this
+    question was asked. See `services.read_model_status` for what counts.
+    """
+    from syn_api.services.read_model_status import read_model_status
+    from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
+        WorkflowExecutionDetailProjection,
     )
+
+    status = await read_model_status(WorkflowExecutionDetailProjection.PROJECTION_NAME)
+    return status.rebuilding
 
 
 # =============================================================================
@@ -203,7 +250,9 @@ async def cancel_execution_endpoint(
     try:
         resolved = await _resolve_execution_id(execution_id)
     except HTTPException as not_found:
-        if not_found.status_code != 404:
+        # A rebuild hides queued starts' executions no more than started ones,
+        # so a prefix it could not expand is still offered to the withdrawal.
+        if not_found.status_code != 404 and not isinstance(not_found, ExecutionReadModelRebuilding):
             raise
         withdrawn = await _withdraw_queued(execution_id, reason)
         if withdrawn is None:
@@ -254,13 +303,23 @@ async def inject_context_endpoint(
 @router.get("/executions/{execution_id}/state", response_model=StateResponse)
 async def get_execution_state_endpoint(execution_id: str) -> StateResponse:
     """Get current execution state."""
-    from syn_api._wiring import get_projection_mgr
-    from syn_api.prefix_resolver import resolve_or_raise
-
-    mgr = get_projection_mgr()
-    execution_id = await resolve_or_raise(
-        mgr.store, "workflow_execution_details", execution_id, "Execution"
-    )
+    try:
+        execution_id = await _resolve_execution_id(execution_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Resolution asks the event store first (#1555), so an outage now
+        # surfaces here rather than in get_state() below. It is the same
+        # failure to answer, and keeps the same 503.
+        logger.warning("could not resolve execution %s", execution_id, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Could not resolve execution {execution_id}: the event store could not "
+                f"be read ({type(exc).__name__}). This is not a statement that the "
+                "execution is absent."
+            ),
+        ) from exc
     result = await get_state(execution_id)
 
     if isinstance(result, Err):

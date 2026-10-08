@@ -665,6 +665,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             last_agent_message=command.last_agent_message,
             reported_side_effects=command.reported_side_effects,
             reported_review_verdict=command.reported_review_verdict,
+            agent_provider=command.agent_provider,
+            agent_model=command.agent_model,
         )
         self._apply(event)
 
@@ -809,6 +811,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             started_phase_ids=self._phase_attempts,
             command=command,
             repair_point=self._reviews.repair_point(self._phase_definitions),
+            skipped_phase_ids=self._reviews.skipped,
         )
         if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
@@ -830,6 +833,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._eval = EvalMembership.launched_into(evt(event, "eval_id"))
         if self._pins.resumed_from is not None:
             self._inherit(self._pins.resumed_from)
+            self._reviews.skipped.update(self._pins.inherited_skipped_phase_ids)
 
     def _inherit(self, origin: ResumeOrigin) -> None:
         """Take over the parent's completed prefix as this run's own.
@@ -966,8 +970,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._reviews.collect(phase_id)
 
     @event_sourcing_handler("NextPhaseReady")
-    def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:
-        """Apply NextPhaseReadyEvent — to-do list projection reacts, not aggregate."""
+    def on_next_phase_ready(self, event: NextPhaseReadyEvent) -> None:
+        """Apply NextPhaseReadyEvent: the to-do list reacts; this keeps only its skips."""
+        self._reviews.skipped.update(evt(event, "skipped_phase_ids") or [])
 
     @event_sourcing_handler("ExecutionCancelled")
     def on_execution_cancelled(self, event: ExecutionCancelledEvent) -> None:

@@ -9,8 +9,10 @@
  */
 
 import { StatusBadge } from '../../components'
+import { ExecutionEvalBadge } from '../../components/evals'
 import type { ExecutionListItem } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
+import { queueLabel } from './queueLabel'
 
 const EM_DASH = '—'
 
@@ -47,11 +49,14 @@ export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
           className="text-xs text-[var(--color-text-muted)]"
           title={formatTimestampLocale(exec.started_at) ?? undefined}
         >
-          {formatRelativeTime(exec.started_at)}
-          {exec.total_phases > 0 && (
-            <> &middot; {exec.completed_phases}/{exec.total_phases} phases</>
-          )}
+          {exec.start_queue ? queueLabel(exec.start_queue) : formatRelativeTime(exec.started_at)}
+          {exec.total_phases > 0 && <> &middot; {exec.phase_progress.display}</>}
         </div>
+        {exec.eval && (
+          <div className="flex min-w-0">
+            <ExecutionEvalBadge evalRun={exec.eval} />
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3">
         <MetricCell label="Repos" value={exec.repos_display ?? EM_DASH} />

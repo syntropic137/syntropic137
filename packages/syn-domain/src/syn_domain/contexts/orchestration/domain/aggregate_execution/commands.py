@@ -56,6 +56,7 @@ class StartExecutionCommand:
         source_commits: list[SourceCommit] | None = None,
         tags: TagSet | None = None,
         launch_eval: LaunchEval | None = None,
+        workflow_version: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -70,6 +71,8 @@ class StartExecutionCommand:
         self.tags = tags or TagSet()
         # The eval this launch joins, resolved at dispatch (#967).
         self.launch_eval = launch_eval or LaunchEval(None, EvalSelection.NONE)
+        # The template's installed version or digest at launch (Evals v2).
+        self.workflow_version = workflow_version
 
 
 class StartResumeCommand:
@@ -91,17 +94,24 @@ class StartResumeCommand:
         source_commits: list[SourceCommit],
         resumed_from: ResumeOrigin,
         continuation_candidates: list[ContinuedBranch] | None = None,
+        inherited_skipped_phase_ids: list[str] | None = None,
+        workflow_version: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
         self.workflow_name = workflow_name
         self.inputs = inputs
         self.pinned_phases = pinned_phases
+        #: The parent's installed workflow version, from its start pins (Evals v2).
+        self.workflow_version = workflow_version
         self.source_commits = source_commits
         self.resumed_from = resumed_from
         #: The branches the parent's failing attempt at the resumed phase left
         #: on origin (#1513). Read back from the parent's stream.
         self.continuation_candidates = continuation_candidates or []
+        #: Phases the parent's certified review skipped before the resume
+        #: phase (#1681), as its `ExecutionResumed` fixed them.
+        self.inherited_skipped_phase_ids = inherited_skipped_phase_ids or []
         #: What the forge says about each candidate now. Filled in by
         #: `StartResumeHandler` before the start; the aggregate decides from it
         #: (`branch_continuation.decide_continuation`).
@@ -401,11 +411,16 @@ class AgentExecutionCompletedCommand:
         last_agent_message: str | None = None,
         reported_side_effects: SideEffectStatus | None = None,
         reported_review_verdict: ReviewVerdict | None = None,
+        agent_provider: str | None = None,
+        agent_model: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.session_id = session_id
         self.exit_code = exit_code
+        self.agent_provider = agent_provider
+        self.agent_model = agent_model
+
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.cache_creation_tokens = cache_creation_tokens
@@ -413,6 +428,16 @@ class AgentExecutionCompletedCommand:
         self.last_agent_message = last_agent_message
         self.reported_side_effects = reported_side_effects
         self.reported_review_verdict = reported_review_verdict
+
+    def produced_by(self, *, provider: str, model: str | None) -> None:
+        """Name the agent that produced this result (PC-83).
+
+        Set by the one frame that knows - `run_phase_agent`, which chose
+        between the phase's agent and its fallback - rather than by the
+        handler, which runs whatever command it is given.
+        """
+        self.agent_provider = provider
+        self.agent_model = model
 
 
 class ArtifactsCollectedCommand:

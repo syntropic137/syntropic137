@@ -71,11 +71,18 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # something - and dropping it is not inert, it silently restores the
     # failure the field exists to stop.
     "delivers_repo_changes": ("ExecutablePhase", "delivers_repo_changes"),
+    # PC-116: read by `completion_failure`, which fails a declared review phase
+    # that reports no verdict.
+    "requires_verdict": ("ExecutablePhase", "requires_verdict"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),
     "model": ("AgentConfiguration", "model"),
     "agent": ("AgentConfiguration", "provider"),
+    # Resolved against the phase's final agent config and run by
+    # `run_phase_agent` when the primary's provider is at capacity past its
+    # retries or out of quota (PC-83).
+    "fallback_agent": ("ExecutablePhase", "fallback_agent"),
 }
 
 #: Fields refused at authoring time, with WHY. Each must have a validator in

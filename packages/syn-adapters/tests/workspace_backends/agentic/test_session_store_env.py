@@ -12,6 +12,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agentic_isolation.providers.base import ExecuteResult
 from pydantic import SecretStr
 
 from syn_adapters.workspace_backends.agentic.adapter import (
@@ -19,6 +20,7 @@ from syn_adapters.workspace_backends.agentic.adapter import (
     _WORKSPACE_CACHE_ENV,
     AgenticIsolationAdapter,
 )
+from syn_adapters.workspace_backends.agentic.cpu_hints import cpu_concurrency_env
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     DEPLOYMENT_SEPARATOR,
     apply_session_store_env,
@@ -339,6 +341,7 @@ def _mock_provider() -> MagicMock:
     workspace.metadata = {"workspace_dir": "/tmp/x"}
     provider = MagicMock()
     provider.create = AsyncMock(return_value=workspace)
+    provider.execute = AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr=""))
     return provider
 
 
@@ -428,8 +431,12 @@ class TestAdapterIntegration:
             # recipe without it (#1042).
             # The caches: $HOME is a 128 MB tmpfs and every tool caches there
             # by default, which exhausted it mid-gate (#1133).
+            # The CPU hints: `--cpus` leaves nproc at the host core count, so
+            # tools oversubscribe the quota without them. 2.0 is the default
+            # SecurityPolicy limit this config carries.
             "TMPDIR": _EXECUTABLE_TMPDIR,
             **_WORKSPACE_CACHE_ENV,
+            **cpu_concurrency_env(2.0),
         }
         assert not (set(SESSION_STORE_CONTRACT_ENV_VARS) & set(ws_config.environment))
         assert ws_config.labels == {
@@ -504,6 +511,7 @@ class TestReservedKeys:
             # trip this assertion rather than slip through a subset check.
             "TMPDIR": _EXECUTABLE_TMPDIR,
             **_WORKSPACE_CACHE_ENV,
+            **cpu_concurrency_env(2.0),
         }
         assert not (set(SESSION_STORE_CONTRACT_ENV_VARS) & set(ws_config.environment))
 

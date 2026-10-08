@@ -57,6 +57,9 @@ _ALTERNATIVE_RESOLVERS: set[str] = {
     # GET /executions/{id} calls resolve_or_raise inside it, and falls back to
     # the execution budget for an accepted start that has no record yet (#1557).
     "_detail_or_queued",
+    # GET /executions/{id}/state: a full id is answered by the event store, a
+    # prefix by resolve_or_raise inside it (#1555).
+    "_resolve_execution_id",
 }
 
 

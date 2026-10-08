@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
     UPSTREAM_FAILURES,
+    UpstreamFailureKind,
     UpstreamFailureReader,
 )
 
@@ -76,6 +77,12 @@ _MIN_USEFUL_ATTEMPT_SECONDS: float = 30.0
 #: arithmetic right, and attempt one is dispatched on whatever budget the
 #: phase was configured with - see `PhaseAttempts.first_attempt`.
 _MIN_MEANINGFUL_TIMEOUT_SECONDS: int = 1
+
+#: The upstream faults that hand a phase to its declared fallback agent (PC-83):
+#: the primary's provider could not serve the request at all.
+_FALLBACK_KINDS: frozenset[UpstreamFailureKind] = frozenset(
+    {UpstreamFailureKind.CAPACITY, UpstreamFailureKind.QUOTA}
+)
 
 
 @dataclass(frozen=True)
@@ -243,6 +250,29 @@ class PhaseAttempts:
         if not self._affords_an_attempt(remaining):
             return None
         self._attempt += 1
+        return AttemptGrant(timeout_seconds=_meaningful_timeout(remaining))
+
+    def fallback_attempt(self, *, reason: str | None, work_done: bool) -> AttemptGrant | None:
+        """Grant the phase's declared fallback agent its one attempt, or refuse it (PC-83).
+
+        Asked only once the primary is FINAL - `wait_before_retry` has already
+        refused it - so a capacity fault reaching here has outlived every retry.
+        Granted for exactly the two kinds that say the primary's provider could
+        not serve the request at all, CAPACITY and QUOTA: any other failure is
+        the phase's answer and a different model does not get to second-guess
+        it. Refused for an attempt that got somewhere, for the reason a retry
+        is: the rerun would redo that work over a tree it already changed.
+
+        Drawn from the SAME deadline as every attempt before it, so declaring a
+        fallback never buys a phase more time than it was configured for.
+        """
+        if work_done:
+            return None
+        if self._policy.upstream.kind_of(reason) not in _FALLBACK_KINDS:
+            return None
+        remaining = self.seconds_left
+        if not self._affords_an_attempt(remaining):
+            return None
         return AttemptGrant(timeout_seconds=_meaningful_timeout(remaining))
 
     def _may_retry(self, *, reason: str | None, work_done: bool, delay: float) -> bool:

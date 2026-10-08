@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    stored_fallback_agent,
+)
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
@@ -173,11 +176,15 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
                 require_delegation=bool(p.get("require_delegation", False)),
+                # PC-83. The sibling site in read_models/workflow_detail.py
+                # reads it too, through the same function.
+                fallback_agent=stored_fallback_agent(p.get("fallback_agent")),
                 # #1429. The sibling site in read_models/workflow_detail.py
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                requires_verdict=bool(p.get("requires_verdict", False)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),
                 skills=_refs(p.get("skills")),
