@@ -203,19 +203,28 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
         return recorded
 
     async def _settle(self, pr: PullRequestContributors) -> int:
-        assert self._merges is not None and self._recorder is not None
         if pr.status == "merged" and not pr.unrecorded:
             return 0
-        if pr.merged_at is None:
-            state = await self._merges.read_merge(pr.repository, pr.pull_request)
-            if not state.readable:
-                return 0  # asked again on the next pass
-            if state.merged_at is None:
-                if state.closed:
-                    await self._save_pull_request(pr.model_copy(update={"status": "closed"}))
-                return 0
-            pr = pr.model_copy(update={"status": "merged", "merged_at": state.merged_at})
-            await self._save_pull_request(pr)
+        merged = pr if pr.merged_at is not None else await self._ask_forge(pr)
+        return 0 if merged is None else await self._record_contributors(merged)
+
+    async def _ask_forge(self, pr: PullRequestContributors) -> PullRequestContributors | None:
+        """The PR marked merged when the forge says so; None while it is not, or unreadable."""
+        assert self._merges is not None
+        state = await self._merges.read_merge(pr.repository, pr.pull_request)
+        if not state.readable:
+            return None  # asked again on the next pass
+        if state.merged_at is None:
+            if state.closed:
+                await self._save_pull_request(pr.model_copy(update={"status": "closed"}))
+            return None
+        merged = pr.model_copy(update={"status": "merged", "merged_at": state.merged_at})
+        await self._save_pull_request(merged)
+        return merged
+
+    async def _record_contributors(self, pr: PullRequestContributors) -> int:
+        """Record the merge on each contributor not yet recorded; the number recorded."""
+        assert self._recorder is not None
         merged_at = pr.merged_at
         assert merged_at is not None
         recorded = 0
