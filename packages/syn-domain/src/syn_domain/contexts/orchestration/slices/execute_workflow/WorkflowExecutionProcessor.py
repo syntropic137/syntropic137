@@ -64,6 +64,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome imp
     completed_phase,
     failed_phase_outcome,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import push_recorder
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_retry import (
     retry_lost_terminal_attempt,
 )
@@ -773,6 +774,7 @@ class WorkflowExecutionProcessor:
                 session_id=session_id,
                 observability=self._observability_writer,
                 retry_policy=self._retry_policy,
+                on_push=push_recorder(aggregate, self._journal, todo.phase_id),
             )
             said = result.stream_result.last_agent_message
 

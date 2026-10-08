@@ -56,6 +56,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
         PhaseCostLimit,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +362,7 @@ class AgentExecutionHandler:
         runner: AgentRunner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
         cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         """Run agent in workspace and stream output.
 
@@ -368,6 +372,9 @@ class AgentExecutionHandler:
         ``on_launch`` is notified once the agent process is known to exist -
         from here, not from the caller, because this is the first frame that
         can tell the difference (#1047, #1065).
+
+        ``on_push`` is told of each push the agent's workspace reports
+        (PC-128); claude streams only - codex's stream carries no hook output.
         """
         assert todo.phase_id is not None
 
@@ -388,6 +395,7 @@ class AgentExecutionHandler:
             subagents=subagents,
             on_launch=on_launch,
             cost_limit=cost_limit,
+            on_push=on_push,
         )
 
     def _select_stream_processor(
@@ -402,6 +410,7 @@ class AgentExecutionHandler:
         agent_model: str | None,
         collector: ObservabilityCollector | None,
         cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> EventStreamProcessor | CodexStreamProcessor:
         """Pick the codex or claude stream processor for a headless phase."""
         assert todo.phase_id is not None
@@ -436,6 +445,7 @@ class AgentExecutionHandler:
             agent_model=agent_model,
             collector=collector,
             cost_limit=cost_limit,
+            on_push=on_push,
         )
 
     async def _run_headless(
@@ -454,6 +464,7 @@ class AgentExecutionHandler:
         subagents: SubagentTracker,
         on_launch: AgentLaunchObserver | None,
         cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         """Stream a headless (claude -p / codex exec) phase and build its result."""
         assert todo.phase_id is not None
@@ -467,6 +478,7 @@ class AgentExecutionHandler:
             agent_model=agent_model,
             collector=collector,
             cost_limit=cost_limit,
+            on_push=on_push,
         )
 
         # The launch fact is settled AFTER the stream, not while it runs: the

@@ -75,6 +75,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
         AgentExecutionResult,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import (
         PhaseLaunch,
     )
@@ -165,6 +168,7 @@ async def run_phase_agent(
     session_id: str,
     observability: ObservabilityRecorder | None,
     retry_policy: UpstreamRetryPolicy,
+    on_push: PushObserver | None = None,
 ) -> AgentExecutionResult:
     """Run this phase's agent and return the result it ends on.
 
@@ -197,6 +201,7 @@ async def run_phase_agent(
         observability=observability,
         attempts=attempts,
         cost_limit=cost_limit,
+        on_push=on_push,
     )
     primary = await run.until_final(
         phase.agent_config,
@@ -263,6 +268,7 @@ class _AgentRun:
         observability: ObservabilityRecorder | None,
         attempts: PhaseAttempts,
         cost_limit: PhaseCostLimit | None,
+        on_push: PushObserver | None = None,
     ) -> None:
         self._handler = handler
         self._todo = todo
@@ -271,6 +277,7 @@ class _AgentRun:
         self._observability = observability
         self._attempts = attempts
         self._cost_limit = cost_limit
+        self._on_push = on_push
 
     async def until_final(
         self,
@@ -371,6 +378,7 @@ class _AgentRun:
                 runner=runner,
                 on_launch=observer_for(session_manager),
                 cost_limit=self._cost_limit,
+                on_push=self._on_push,
             )
         if session_manager is not None:
             await session_manager.finish_invocation(

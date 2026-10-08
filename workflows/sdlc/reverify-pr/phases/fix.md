@@ -62,6 +62,18 @@ report. If the remote branch has moved, or either value is missing or different,
 Something pushed over the branch after it was reviewed, and repairing a tree
 nobody verified produces a diff no pass in this run has ever seen.
 
+**The one exception: your own unverified commits (PC-128).** When the resume
+note in your context says `OWN UNVERIFIED COMMITS` for this branch, this
+execution's own earlier attempt at this phase pushed that head and was
+interrupted before anything verified it. The platform recorded those pushes as
+they happened and has already confirmed origin's head is one of them. Then
+the verified SHA above is replaced by the head SHA that note names: run the
+same commands with it, and both `rev-parse` results must equal it. Before you
+change anything, re-run the verification `verify.md` describes against that
+head and report its result in `fix.md`, naming that head as the verified SHA;
+fix only what that verification finds. Without that note, a moved branch is
+someone else's push, and the rule above stands.
+
 After committing, push normally. **Never force-push** - the remote head is the
 verified head, so a fast-forward is the only push that can be correct here, and
 one that is not fast-forward means the check above should have stopped you.
