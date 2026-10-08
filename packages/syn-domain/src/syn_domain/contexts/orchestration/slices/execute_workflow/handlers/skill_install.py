@@ -42,17 +42,33 @@ _NO_STATUS_SENTINEL: Final = -1
 #: Attempts a timed-out install gets in total (PC-126).
 _TIMEOUT_ATTEMPTS: Final = 2
 
+#: Every signal retry plus every timeout attempt, plus the final attempt: the
+#: finite bound on `skills add` calls for one skill.
+_MAX_ATTEMPTS: Final = len(_SKILL_INSTALL_RETRY_BACKOFF_SECONDS) + _TIMEOUT_ATTEMPTS + 1
+
+
+def _backoff(attempt: int) -> float:
+    """The wait after the ``attempt``-th call, holding at the longest once they run out."""
+    waits = _SKILL_INSTALL_RETRY_BACKOFF_SECONDS
+    return waits[min(attempt, len(waits)) - 1]
+
 
 def _is_local_signal_death(exit_code: int, timed_out: bool) -> bool:
     """True when the API's spawned child was killed by a signal (#1046)."""
     return exit_code < 0 and exit_code != _NO_STATUS_SENTINEL and not timed_out
 
 
-def _is_retryable(result: ExecutionResult, timeouts: int) -> bool:
-    """A signal death always is; a timeout only until it has used its retry (PC-126)."""
+def _is_retryable(result: ExecutionResult, timeouts: int, signal_deaths: int) -> bool:
+    """Whether this failure still has a retry left in ITS OWN allowance (PC-126).
+
+    The two allowances are separate so that signal deaths spent before a
+    timeout cannot use up the timeout's one retry, and the reverse.
+    """
     if result.timed_out:
         return timeouts < _TIMEOUT_ATTEMPTS
-    return _is_local_signal_death(result.exit_code, result.timed_out)
+    if _is_local_signal_death(result.exit_code, result.timed_out):
+        return signal_deaths <= len(_SKILL_INSTALL_RETRY_BACKOFF_SECONDS)
+    return False
 
 
 def _failure(
@@ -90,7 +106,8 @@ async def install_skill(
     """
     timeout_seconds = get_settings().skill_install_timeout_seconds
     timeouts = 0
-    for attempt, backoff in enumerate((*_SKILL_INSTALL_RETRY_BACKOFF_SECONDS, None), start=1):
+    signal_deaths = 0
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
         result = await workspace.execute(
             ["skills", "add", source, "--agent", agent_key, "-y"],
             timeout_seconds=timeout_seconds,
@@ -99,7 +116,8 @@ async def install_skill(
         if result.exit_code == 0:
             return
         timeouts += 1 if result.timed_out else 0
-        if backoff is None or not _is_retryable(result, timeouts):
+        signal_deaths += 0 if result.timed_out else 1
+        if not _is_retryable(result, timeouts, signal_deaths):
             raise _failure(result, skill_name, agent_key, timeout_seconds, timeouts)
         logger.warning(
             "installing skill %r: %s (exit %d), retry %d/%d (#1046, PC-126)",
@@ -107,6 +125,7 @@ async def install_skill(
             f"timed out after {timeout_seconds}s" if result.timed_out else "spawned child died",
             result.exit_code,
             attempt,
-            len(_SKILL_INSTALL_RETRY_BACKOFF_SECONDS),
+            _MAX_ATTEMPTS - 1,
         )
-        await asyncio.sleep(backoff)
+        await asyncio.sleep(_backoff(attempt))
+    raise AssertionError("unreachable: every allowance is exhausted within _MAX_ATTEMPTS")

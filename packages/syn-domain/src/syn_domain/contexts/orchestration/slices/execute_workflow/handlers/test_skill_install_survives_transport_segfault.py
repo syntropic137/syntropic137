@@ -130,3 +130,23 @@ async def test_timeouts_are_counted_across_segfault_retries() -> None:
         await module.install_skill(workspace, "review", "/src", "claude-code")
 
     assert workspace.execute.await_count == 3
+
+
+@pytest.mark.parametrize("signal_deaths", [0, 1, 2, 3])
+async def test_a_late_first_timeout_still_gets_its_retry(signal_deaths: int) -> None:
+    """Signal retries spent first must not use up the timeout's one retry (PC-126)."""
+    workspace = _workspace(*[SEGFAULT] * signal_deaths, TIMED_OUT, OK)
+
+    await module.install_skill(workspace, "review", "/src", "claude-code")
+
+    assert workspace.execute.await_count == signal_deaths + 2
+
+
+async def test_two_timeouts_after_every_signal_retry_still_terminate() -> None:
+    workspace = _workspace(SEGFAULT, SEGFAULT, SEGFAULT, TIMED_OUT, TIMED_OUT, OK)
+
+    with pytest.raises(ProvisionStepTimeoutError) as raised:
+        await module.install_skill(workspace, "review", "/src", "claude-code")
+
+    assert workspace.execute.await_count == 5
+    assert raised.value.attempts == 2
