@@ -7,9 +7,11 @@ _skyline := "pnpm --filter syn-ui --filter './packages/syn-ui/*'"
 skyline-install:
     pnpm install
 
-# Type-check every Skyline package and the app (tsc / svelte-check, CSS token gate)
+# Type-check every Skyline package and the app (tsc / svelte-check, CSS token gate,
+# theme parity, token usage), then the plain typecheck the build runs first
 skyline-check:
     {{_skyline}} --workspace-concurrency=1 run check
+    {{_skyline}} run typecheck
 
 # Run Skyline unit tests (skyline-core, syn-ui-data, app router)
 skyline-test:

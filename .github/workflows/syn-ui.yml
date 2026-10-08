@@ -88,6 +88,11 @@ jobs:
       - name: Check
         run: pnpm --filter syn-ui --filter './packages/syn-ui/*' --workspace-concurrency=1 run check
 
+      # svelte-check --threshold error / tsc --noEmit per package. `build`
+      # runs this too, so a type error can never reach a bundle.
+      - name: Typecheck
+        run: pnpm --filter syn-ui --filter './packages/syn-ui/*' run typecheck
+
       - name: Test
         run: pnpm --filter syn-ui --filter './packages/syn-ui/*' run test
 

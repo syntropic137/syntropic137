@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "vite",
     "dev:fixtures": "VITE_SYN_FIXTURES=1 vite",
-    "build": "vite build && node scripts/size-budget.mjs",
-    "build:fixtures": "VITE_SYN_FIXTURES=1 vite build && node scripts/size-budget.mjs",
+    "build": "pnpm --filter 'syn-ui...' run typecheck && vite build && node scripts/size-budget.mjs",
+    "build:fixtures": "pnpm --filter 'syn-ui...' run typecheck && VITE_SYN_FIXTURES=1 vite build && node scripts/size-budget.mjs",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json --threshold error",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && node ../../packages/syn-ui/scripts/check-css.mjs src",
     "test": "vitest run",
