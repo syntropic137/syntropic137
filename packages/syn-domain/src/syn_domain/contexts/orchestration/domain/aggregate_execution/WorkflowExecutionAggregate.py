@@ -55,6 +55,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_even
     failed_event,
     started_event,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.own_pushes import (
+    push_event,
+    read_pushed_commit,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
     evt,
     parse_phase_definitions,
@@ -285,7 +289,6 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._pins = StartPins()
         #: The branches the phase this run failed in left on origin (#1513).
         self._left_branches = LeftBranches()
-        #: Every commit a phase's own workspace pushed, in order (PC-128).
         self._pushed: list[PushedCommit] = []
         #: The tags it launched with and the tags it carries now (#967).
         self._tags = ExecutionTags()
@@ -593,27 +596,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
     @command_handler("RecordPhasePushCommand")
     def record_phase_push(self, command: RecordPhasePushCommand) -> None:
-        """Handle RecordPhasePushCommand - the running phase's workspace pushed (PC-128).
-
-        Refused for any phase but the running one: a push is only this run's
-        when the workspace that made it was running this run's phase.
-        """
-        from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
-            PhaseCommitPushedEvent,
-        )
-
-        if self._status != ExecutionStatus.RUNNING or self._running_phase_id != command.phase_id:
-            msg = f"Cannot record a push for {command.phase_id}: it is not the running phase"
-            raise ValueError(msg)
+        """Handle RecordPhasePushCommand - the running phase's workspace pushed (PC-128)."""
         self._apply(
-            PhaseCommitPushedEvent(
-                workflow_id=self._workflow_id or "",
-                execution_id=command.aggregate_id,
-                phase_id=command.phase_id,
-                repository=command.repository,
-                branch=command.branch,
-                sha=command.sha,
-                pushed_at=datetime.now(UTC),
+            push_event(
+                command,
+                status=self._status,
+                running_phase_id=self._running_phase_id,
+                workflow_id=self._workflow_id,
             )
         )
 
@@ -941,14 +930,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @event_sourcing_handler("PhaseCommitPushed")
     def on_phase_commit_pushed(self, event: PhaseCommitPushedEvent) -> None:
         """Apply PhaseCommitPushedEvent."""
-        self._pushed.append(
-            PushedCommit(
-                phase_id=evt(event, "phase_id"),
-                repository=evt(event, "repository"),
-                branch=evt(event, "branch"),
-                sha=evt(event, "sha"),
-            )
-        )
+        self._pushed.append(read_pushed_commit(event))
 
     @event_sourcing_handler("PhaseRetryScheduled")
     def on_phase_retry_scheduled(self, event: PhaseRetryScheduledEvent) -> None:
