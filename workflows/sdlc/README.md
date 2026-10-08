@@ -83,7 +83,7 @@ it.
 ## Re-verifying an existing PR: `reverify-pr`
 
 `sdlc-reverify-pr-v1` runs the verification half of `sdlc-implement-v3` -
-verify, up to three fix/re-verify rounds, `finalize_pr` - against a pull request
+verify, up to two fix/re-verify rounds, `finalize_pr` - against a pull request
 that already exists. Use it when an implement-v3 run finished `implement` and
 then died in verify: resuming re-runs the same dead phase, and dispatching
 implement-v3 again re-runs `implement` on a PR it rightly refuses to redo.
@@ -106,10 +106,10 @@ copy it to `reverify-pr/phases/`.**
 ### Switching the verifier model
 
 The verifier is a property of the workflow YAML, never of a prompt. In
-`reverify-pr/workflow.yaml` it is the `agent:` block of four phases: `verify`,
-`reverify`, `reverify_2` and `reverify_3`. Today it is codex `gpt-sol`. To run
+`reverify-pr/workflow.yaml` it is the `agent:` block of three phases: `verify`,
+`reverify` and `reverify_2`. Today it is codex `gpt-sol`. To run
 verification on Opus instead - for example while codex quota is exhausted -
-change all four to:
+change all three to:
 
 ```yaml
     agent:
@@ -120,8 +120,8 @@ change all four to:
 and re-install (`syn workflow install ./workflows/sdlc/reverify-pr`). Do not
 add `allowed_tools` to them: a claude phase without a list holds every tool,
 which is what a verifier that must run the gates needs. The test above fails if
-the four disagree, so a switch that misses a round cannot certify round 1 on one
-model and round 3 on another. Remember a verifier on the same model as the fix
+the three disagree, so a switch that misses a round cannot certify round 1 on one
+model and round 2 on another. Remember a verifier on the same model as the fix
 phases (`opus`) is no longer a cross-model review; say so when you rely on it.
 
 ## Verification gates
@@ -222,7 +222,7 @@ to `false`.
 
 Because the first `verify` now reports a verdict too, a run whose first pass
 certifies skips every repair round. In that case `finalize_pr` reads the
-first `verify` report as round 0 (`Round: 0 of 3`).
+first `verify` report as round 0 (`Round: 0 of 2`).
 
 ## `delivers_repo_changes`: which phases own a branch
 

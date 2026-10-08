@@ -49,6 +49,9 @@
 #     GitHub token one has no fix to cut a case from. Two replacement controls
 #     chosen by the quiet-window rule (README.md); four more v3/v4 controls
 #     retired because they are under its 30 days. 31 defects, 2 controls.
+#     Three codex verifiers pinned to cheaper GPT slugs (gpt-6-luna,
+#     gpt-5.6-luna, gpt-5.6-terra) were added later under v5: new workflows,
+#     no existing table.
 # v6: four clean controls added by the same rule (#1774), each passing `check`
 #     and quiet by `git log -L` on every hunk it changed through main
 #     23edd9c0b: the API, syn-shared, syn-adapters and the fitness scripts. No
@@ -87,6 +90,25 @@ workflows:
     path: workflows/evals/verify-pinned-sonnet/workflow.yaml
     models:
       verify: sonnet
+  # Is there a GPT verifier cheaper per run than gpt-6.1-sol that still
+  # catches every case? Each names an explicit codex slug, never an alias, so
+  # no retargeting can change what was measured. Per MTok (in / out), from
+  # syn_shared.pricing: gpt-6-luna 0.10 / 0.50, gpt-5.6-luna 0.20 / 1.20,
+  # gpt-5.6-terra 2.00 / 12.00 against gpt-6.1-sol's 2.00 / 10.00 - Terra
+  # is cheaper only if it spends fewer tokens. Added under v5: new workflows,
+  # no existing table.
+  - id: eval-verify-pinned-codex-gpt-6-luna-v1
+    path: workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml
+    models:
+      verify: gpt-6-luna
+  - id: eval-verify-pinned-codex-gpt-5-6-luna-v1
+    path: workflows/evals/verify-pinned-codex-gpt-5-6-luna/workflow.yaml
+    models:
+      verify: gpt-5.6-luna
+  - id: eval-verify-pinned-codex-gpt-5-6-terra-v1
+    path: workflows/evals/verify-pinned-codex-gpt-5-6-terra/workflow.yaml
+    models:
+      verify: gpt-5.6-terra
 history:
   # v1 predates the workflow suffix in the tag.
   - version: 1

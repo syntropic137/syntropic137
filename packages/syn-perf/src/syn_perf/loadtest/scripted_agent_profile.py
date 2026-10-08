@@ -64,9 +64,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_perf.loadtest.handoff import FULL_SHA
 from syn_perf.loadtest.implement_v3_artifacts import (
-    IMPLEMENT_V3_ARTIFACTS,
     IMPLEMENT_V3_REVIEW_VERDICTS,
     ReviewVerdictName,
+    implement_v3_artifacts,
 )
 
 if TYPE_CHECKING:
@@ -426,7 +426,7 @@ class ScriptedAgentProfile(_Contract):
         fixture_repo: str,
         streams: Mapping[str, ScriptedStream],
         workload: NoWorkload | SyntheticWorkload | GatesWorkload,
-        artifacts: Mapping[str, str] = IMPLEMENT_V3_ARTIFACTS,
+        artifacts: Mapping[str, str] | None = None,
         review_verdicts: Mapping[str, ReviewVerdictName] = IMPLEMENT_V3_REVIEW_VERDICTS,
     ) -> ScriptedAgentProfile:
         """Build the profile for every phase of ``workflow``.
@@ -442,8 +442,11 @@ class ScriptedAgentProfile(_Contract):
         missing one is an error, never a default, and a leftover one is a stub
         for a phase the workflow no longer has. ``review_verdicts`` names the
         phases that report one; the PR is marked ready only if the run they
-        produce ends certified, and otherwise stays a draft.
+        produce ends certified, and otherwise stays a draft. ``artifacts``
+        defaults to the implement-v3 stubs built for ``workflow`` itself.
         """
+        if artifacts is None:
+            artifacts = implement_v3_artifacts(workflow)
         ids = {p.id for p in workflow.phases}
         mismatched = {
             name: {"missing": sorted(ids - set(given)), "extra": sorted(set(given) - ids)}
