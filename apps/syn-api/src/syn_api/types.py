@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
-from typing import Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
 from pydantic import (
     AliasChoices,
@@ -103,8 +103,14 @@ from syn_domain.contexts.orchestration import (
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
-from syn_shared.display.formatters import EM_DASH
+from syn_shared.display.formatters import EM_DASH, format_cost, format_tokens
 from syn_shared.observed_model import format_observed_model
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.slices.phase_profiles import (
+        Percentiles,
+        PhaseProfiles,
+    )
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -3749,3 +3755,209 @@ class FeatureDisabledResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     detail: FeatureDisabledDetail
+
+
+# =============================================================================
+# Phase profiles (#1716) - capacity sizing from what phases actually used
+# =============================================================================
+
+INSUFFICIENT = "insufficient"
+"""Rendered for a percentile computed over fewer phases than it needs."""
+
+
+def _format_bytes(n: float) -> str:
+    for unit, size in (("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)):
+        if n >= size:
+            return f"{n / size:.1f} {unit}"
+    return f"{n:.0f} B"
+
+
+def _display(
+    value: float | None, kind: Literal["tokens", "cost", "ratio", "seconds", "bytes"]
+) -> str:
+    if value is None:
+        return INSUFFICIENT
+    if kind == "tokens":
+        return format_tokens(round(value))
+    if kind == "cost":
+        return format_cost(Decimal(str(value)))
+    if kind == "bytes":
+        return _format_bytes(value)
+    if kind == "seconds":
+        return f"{value:.1f}s"
+    return f"{value:.2f}"
+
+
+class TokenPercentilesResponse(BaseModel):
+    """p50/p90 of one measure over ``n`` phases; null below ten phases."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    n: int
+    p50: float | None
+    p90: float | None
+    p50_display: str
+    """``"insufficient"`` when ``n < 10``."""
+    p90_display: str
+
+    @classmethod
+    def of(cls, stat: Percentiles, kind: Literal["tokens", "cost"]) -> TokenPercentilesResponse:
+        return cls(
+            n=stat.n,
+            p50=stat.p50,
+            p90=stat.p90,
+            p50_display=_display(stat.p50, kind),
+            p90_display=_display(stat.p90, kind),
+        )
+
+
+class ResourcePercentilesResponse(BaseModel):
+    """p50/p95 of one measure over ``n`` measured phases; null below ten."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    n: int
+    p50: float | None
+    p95: float | None
+    p50_display: str
+    """``"insufficient"`` when ``n < 10``."""
+    p95_display: str
+
+    @classmethod
+    def of(
+        cls, stat: Percentiles, kind: Literal["ratio", "seconds", "bytes"]
+    ) -> ResourcePercentilesResponse:
+        return cls(
+            n=stat.n,
+            p50=stat.p50,
+            p95=stat.p95,
+            p50_display=_display(stat.p50, kind),
+            p95_display=_display(stat.p95, kind),
+        )
+
+
+class PhaseTokenProfileResponse(BaseModel):
+    """One (phase type, model). A sample is one execution's phase on that model.
+
+    A phase that fell back to another model mid-phase is a sample under BOTH
+    models, each holding only the tokens that model consumed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    model: CostModelKey
+    """The model the harness reported running; the unknown bucket when it reported none."""
+    input_tokens: TokenPercentilesResponse
+    output_tokens: TokenPercentilesResponse
+    cache_creation_tokens: TokenPercentilesResponse
+    cache_read_tokens: TokenPercentilesResponse
+    cost_usd: TokenPercentilesResponse
+    unpriced_phases: int
+    """Samples whose cost omits tokens no rate could price: those costs are floors."""
+
+
+class ResourceCoverageResponse(BaseModel):
+    """What the resource percentiles stand on. Every count is over the whole window."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phases: int
+    """Phases of this type with any telemetry in the window."""
+    phases_without_usage_row: int
+    """Phases whose teardown recorded no ``workspace_resource_usage`` row."""
+    cpu_usage_seconds_missing: int
+    cpu_throttled_seconds_missing: int
+    memory_peak_bytes_missing: int
+    disk_bytes_at_teardown_missing: int
+    wall_seconds_missing: int
+    """Usage rows recording no workspace lifetime, so CPU per wall-second is undefined."""
+    coverage_display: str
+    """e.g. ``"0/42 phases measured"``."""
+
+
+class PhaseResourceProfileResponse(BaseModel):
+    """One phase type's workspace resource use at teardown (cgroup counters)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    cpu_seconds_per_wall_second: ResourcePercentilesResponse
+    """CPU-seconds over the workspace lifetime recorded with them, creation to termination."""
+    cpu_throttled_seconds: ResourcePercentilesResponse
+    memory_peak_bytes: ResourcePercentilesResponse
+    disk_bytes_at_teardown: ResourcePercentilesResponse
+    coverage: ResourceCoverageResponse
+
+
+class PhaseProfilesResponse(BaseModel):
+    """Per-phase-type usage profiles for one workflow over a window (#1716).
+
+    Percentiles are over EVERY phase of the workflow with telemetry in
+    ``[since, until)`` - nothing is paged.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    workflow_id: str
+    since: datetime
+    until: datetime
+    window_days: int
+    executions: int
+    """Executions of the workflow considered; phases are filtered to the window."""
+    tokens: list[PhaseTokenProfileResponse]
+    resources: list[PhaseResourceProfileResponse]
+
+    @classmethod
+    def from_profiles(cls, profiles: PhaseProfiles, window_days: int) -> PhaseProfilesResponse:
+        return cls(
+            workflow_id=profiles.workflow_id,
+            since=profiles.since,
+            until=profiles.until,
+            window_days=window_days,
+            executions=profiles.executions,
+            tokens=[
+                PhaseTokenProfileResponse(
+                    phase_id=t.phase_id,
+                    model=t.model,
+                    input_tokens=TokenPercentilesResponse.of(t.input_tokens, "tokens"),
+                    output_tokens=TokenPercentilesResponse.of(t.output_tokens, "tokens"),
+                    cache_creation_tokens=TokenPercentilesResponse.of(
+                        t.cache_creation_tokens, "tokens"
+                    ),
+                    cache_read_tokens=TokenPercentilesResponse.of(t.cache_read_tokens, "tokens"),
+                    cost_usd=TokenPercentilesResponse.of(t.cost_usd, "cost"),
+                    unpriced_phases=t.unpriced_phases,
+                )
+                for t in profiles.tokens
+            ],
+            resources=[
+                PhaseResourceProfileResponse(
+                    phase_id=r.phase_id,
+                    cpu_seconds_per_wall_second=ResourcePercentilesResponse.of(
+                        r.cpu_seconds_per_wall_second, "ratio"
+                    ),
+                    cpu_throttled_seconds=ResourcePercentilesResponse.of(
+                        r.cpu_throttled_seconds, "seconds"
+                    ),
+                    memory_peak_bytes=ResourcePercentilesResponse.of(r.memory_peak_bytes, "bytes"),
+                    disk_bytes_at_teardown=ResourcePercentilesResponse.of(
+                        r.disk_bytes_at_teardown, "bytes"
+                    ),
+                    coverage=ResourceCoverageResponse(
+                        phases=r.coverage.phases,
+                        phases_without_usage_row=r.coverage.phases_without_usage_row,
+                        cpu_usage_seconds_missing=r.coverage.cpu_usage_seconds_missing,
+                        cpu_throttled_seconds_missing=r.coverage.cpu_throttled_seconds_missing,
+                        memory_peak_bytes_missing=r.coverage.memory_peak_bytes_missing,
+                        disk_bytes_at_teardown_missing=r.coverage.disk_bytes_at_teardown_missing,
+                        wall_seconds_missing=r.coverage.wall_seconds_missing,
+                        coverage_display=(
+                            f"{r.coverage.phases - r.coverage.phases_without_usage_row}"
+                            f"/{r.coverage.phases} phases measured"
+                        ),
+                    ),
+                )
+                for r in profiles.resources
+            ],
+        )
