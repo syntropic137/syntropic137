@@ -310,6 +310,7 @@ class WorkflowExecutionProcessor:
         source_commits: list[SourceCommit] | None = None,
         tags: TagSet | None = None,
         launch_eval: LaunchEval | None = None,
+        workflow_version: str | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern.
 
@@ -338,6 +339,7 @@ class WorkflowExecutionProcessor:
             source_commits=source_commits,
             tags=tags,
             launch_eval=launch_eval,
+            workflow_version=workflow_version,
         )
         aggregate.start_execution(start_cmd)
         return await self._run_started(aggregate, workflow_id, phases, inputs, repos, admitted)

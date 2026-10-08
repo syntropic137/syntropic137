@@ -84,9 +84,9 @@ The agent (provider and model) a Phase declares under `fallback_agent`, to be
 re-run on once when its own agent's upstream could not serve it: capacity that
 outlived every retry, or a Quota Exhaustion (PC-83). The Phase's tools, budget
 and sandbox bind the fallback too, so the provider rules that refuse an `agent`
-refuse a `fallback_agent` at install. **Unclear:** declared, validated, stored
-and served, but not yet acted on at execution: the re-run itself is the
-outstanding half of PC-83.
+refuse a `fallback_agent` at install. Acted on at execution (#1663): one
+attempt, only when the primary's failed attempt got nowhere, drawn from the
+same phase deadline as every attempt before it.
 
 ## Review Verdict
 
@@ -215,6 +215,25 @@ A Phase a resumed Execution does not re-run, because the Execution it came from
 completed it. Carries the artifact ids that Phase produced, and the id of the
 Execution that actually produced them - which may be an ancestor further up a
 chain of Resumes, not the immediate predecessor.
+
+## Declared Phase
+
+A Phase an Execution set out to do, as its `WorkflowExecutionStarted` stated
+it in `phase_definitions`. The same list `total_phases` counts. An Execution
+started before those definitions were recorded (ISS-196) has none.
+
+## Phase Plan
+
+Every Declared Phase of an Execution, in order, each with where it stands:
+the status it ran to here, `inherited`, `skipped`, or `pending`. Served on the
+execution detail API as `phase_plan` (feedback cee46909). Not `phases`, which
+holds only the Phases that started in this Execution.
+
+## Pending Phase
+
+A Declared Phase that has not started, is not an Inherited Phase and is not a
+Skipped Phase: work still to come. Only ever a Phase Plan status; a Phase that
+starts reports its own.
 
 ## Resume Phase
 
@@ -387,6 +406,67 @@ An Eval does not list its runs. An Execution records which Eval it belongs to,
 so attaching a run is one write to the Execution and the Eval's stream does not
 grow with every run. (Evals plan, #967.)
 
+An Eval is long-lived: the same experiment is run again and again, under
+different workflows and models, and every run adds a data point to the same
+Eval. Its summary (run count, scored count, Pass Rate, last run and last
+Verdict, Variants) is derived at read time and never stored on it.
+
+## Run
+
+An Execution that is a member of an Eval, seen from the Eval: one data point.
+Membership is the Execution's (`eval_membership`), never the Eval's. A Run
+carries what the dashboard compares: its Workflow, the models its phases
+OBSERVED (the model that ran, as recorded on the session, never the alias a
+phase declared - `opus` is not a model), its cost and duration, and its Score
+if it has one. A Run's workflow version is the one it LAUNCHED from: the
+template's installed package version, or its source digest when it has none,
+written on the Execution's start event. Never the template's current version,
+which is wrong for every Run that started before an update. A Run started
+before this was recorded, or a resume, reports none rather than guess.
+
+## Score
+
+A judgement of one Run, recorded on the Eval: a Verdict, an optional number
+from 0 to 1, Evidence (markdown: why), the scorer that produced it and its
+version, and when. `RecordEvalRunScore` -> `EvalRunScored`. Only a member Run
+can be scored (409 otherwise). Scoring is allowed on a Frozen or Archived Eval:
+judging a run is not editing what the Eval measures. Re-scoring REPLACES the
+Run's current Score; the earlier Scores stay in the Eval's events. Unlike
+membership, Scores do grow the Eval's stream, one event per judgement.
+
+## Verdict
+
+`PASS`, `FAIL` or `ERROR` (`Verdict`, a StrEnum). `ERROR` means the Run could
+not be judged (it did not finish, or produced nothing to judge): it counts as
+scored, and is left out of the Pass Rate entirely: an unjudged Run is
+neither a pass nor a fail. Not the same word as a Review Verdict, which is a
+phase's own `certified` / `blocked` about a change; a scorer reads the Review
+Verdict and records a Verdict about the Run.
+
+## Pass Rate
+
+`PASS` Runs divided by `PASS` + `FAIL` Runs. `ERROR` Runs are excluded, so a
+provision failure never counts as a `FAIL`. None (shown as an em dash) when no
+Run is judged `PASS` or `FAIL`: no data is not 0%.
+
+## Variant
+
+The Runs of one Eval that share a Workflow, the workflow version they launched
+from, and the same sorted, unique set of observed models. Each Variant has its
+own run count, pass count, Pass Rate, average cost (over Runs whose cost is
+known) and last run. Two workflows under two models make four Variants of one
+Eval; editing a workflow between Runs makes a fifth, because a different
+version is a different treatment and pooling them would hide its effect. Runs
+with no recorded version group together. Derived at read time from each Run's
+execution detail (the observed models and cost are Lane 2 facts), never stored.
+
+## Suite
+
+A tag on Evals, not a record: `suite:<name>` plus `case:<case id>` names one
+case's Eval, and that Eval is reused by every version of the suite and every
+verifier (`scripts/eval_suite.py`). What differs between Runs goes on the Run
+as tags: `suite-version:<n>` and `verifier:<workflow id>`.
+
 ## Goal
 
 What an Eval sets out to measure, in a sentence or a paragraph. Trimmed, never
@@ -543,6 +623,9 @@ The workspace image that carries a Scripted Agent is still called the stub
 image in agentic-workspace; that names the image, not these models.
 
 ## Words we do not use
+
+- **Suite** (as a record or an aggregate). A suite is a tag on Evals. There is
+  no Suite stream, and a second aggregate for it was rejected (evals v2).
 
 - **Lock** (an Eval). The word is Freeze. "Lock" already means the skill and
   plugin lock files here, and an Eval is not locked against reading or

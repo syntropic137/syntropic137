@@ -18,6 +18,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ExecutionDetailResponse } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 const useExecutionData = vi.fn()
 
@@ -42,7 +43,7 @@ function midPhaseExecution(
     completed_at: null,
     phases: [
       {
-        workflow_phase_id: 'phase-1',
+        phase_id: 'phase-1',
         name: 'implement',
         status: 'running',
         session_id: 'sess-1',
@@ -81,7 +82,7 @@ function renderExecution(
   hookOverrides: { error?: string | null; loading?: boolean; isConnected?: boolean } = {},
 ) {
   useExecutionData.mockReturnValue({
-    execution,
+    execution: execution && withPlanOfPhases(execution),
     artifactDetails: {},
     loading: false,
     error: null,

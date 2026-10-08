@@ -13,9 +13,11 @@ from syn_api.execution_budget import StartPath  # noqa: TC001
 from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
+    ExecutionEvalRunResponse,
     PhaseActivityInfo,
     PhaseProgressInfo,
     PhaseStartConfig,
+    PlannedPhaseInfo,
     StartPinsStatus,
 )
 from syn_domain.contexts.orchestration import (
@@ -297,6 +299,14 @@ class ExecutionDetailResponse(BaseModel):
     """Phases that finished. Same field, same meaning, as on the list view."""
     phase_progress: PhaseProgressInfo
     """Progress with skipped repair rounds accounted for; what clients render."""
+    phase_plan: list[PlannedPhaseInfo]
+    """Every phase the run declared, in order, with where each stands: ran here,
+    ``pending``, ``skipped`` or ``inherited`` (feedback cee46909).
+
+    Read off the same start event as ``total_phases``, so a run with declared
+    phases lists exactly that many. Draw the timeline from this, not from
+    ``phases``, which holds only the phases that started.
+    """
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
@@ -399,6 +409,8 @@ class ExecutionDetailResponse(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    eval: ExecutionEvalRunResponse | None = None
+    """The eval this execution is a current run of, with its verdict. Null in no eval."""
     resume_start: ResumeStartInfo | None = None
     """The start of the child this execution admitted when it was resumed.
 

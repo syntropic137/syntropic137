@@ -5,10 +5,14 @@ A suite lives in ``evals/<suite-id>/``: ``suite.yaml`` names the workflow and
 the models it declares, and ``cases/*.yaml`` holds one case each - a commit
 that carries a known bug and what a report must say to have found it.
 
-ONE EVAL PER CASE. A run's commit comes from its eval's Baseline, which holds
-one SHA per repository and is fixed at create. The cases are one repository at
-different commits, so each case is its own eval, and the suite is the set of
-evals carrying the suite's tag.
+ONE STABLE EVAL PER CASE. A run's commit comes from its eval's Baseline, which
+holds one SHA per repository and is fixed at create. The cases are one
+repository at different commits, so each case is its own eval, and the suite
+is a tag on evals: ``suite:<eval_suite>`` plus ``case:<case id>`` names the
+case's eval. ``launch`` finds it and creates it only when it is missing, so
+every version and every verifier adds runs to the same eval - the eval's run
+list is the case's history. What differs between runs goes on the RUN as tags:
+``suite-version:<n>`` and ``verifier:<workflow id>``.
 
     uv run python scripts/eval_suite.py check  [--suite DIR]   # offline dry run
     uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--api-url URL]
@@ -29,8 +33,11 @@ ran - each version's runs against its own case set, never another's - and
 
 ``check`` needs only git. ``launch`` installs the suite's workflow from the
 checked-in file (refusing to go on unless the server then holds exactly that
-definition), creates the evals and starts real agent runs, which cost money:
-never run it from CI. ``score`` only reads.
+definition), creates any missing case eval and starts real agent runs, which
+cost money: never run it from CI. ``score`` reads every run, then records each
+verdict on its eval (``POST /evals/{id}/runs/{run}/score``, scorer
+``eval_suite.py``, scorer_version the suite version); re-scoring replaces the
+eval's current score and the history stays in its events.
 
 INSTALL PROVENANCE. ``launch`` installs with ``version`` = the suite version
 (``<n>.0.0``) and ``source_digest`` = sha256 of the exact YAML document it
@@ -116,6 +123,15 @@ class Suite(_Frozen):
     """The verifiers the same cases run under. The first is the default."""
     history: tuple[PastVersion, ...] = ()
     """Earlier versions, so their recorded runs still score against their own cases."""
+    eval_suite: str | None = Field(default=None, pattern=r"^[a-z0-9._-]+$")
+    """The stable name its case evals are tagged with, ``suite:<eval_suite>``; default `id`.
+
+    Unlike `id` it never carries a version: every version runs into the same evals.
+    """
+
+    @property
+    def suite_tag(self) -> str:
+        return f"suite:{self.eval_suite or self.id}"
 
     @property
     def current_tag_prefix(self) -> str:
@@ -197,6 +213,11 @@ class LoadedSuite(_Frozen):
     @property
     def is_current(self) -> bool:
         return self.version == self.suite.version
+
+    @property
+    def run_tags(self) -> list[str]:
+        """What `launch` tags each run with: the eval is shared, so the run says what it was."""
+        return [f"suite-version:{self.version}", f"verifier:{self.workflow.id}"]
 
 
 def versions_run(suite: Suite, workflow: str) -> list[int]:
@@ -399,6 +420,9 @@ def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 Verdict = Literal["certified", "blocked"]
+RunVerdict = Literal["PASS", "FAIL", "ERROR"]
+"""What `score` records on the eval: the API's verdict, not the review's."""
+SCORER = "eval_suite.py"
 
 
 class Score(_Frozen):
@@ -601,11 +625,12 @@ class _EvalList(_Read):
 
 
 class _RunSummary(_Read):
-    workflow_execution_id: str
+    execution_id: str
 
 
 class _RunList(_Read):
-    executions: list[_RunSummary]
+    items: list[_RunSummary]
+    total: int
 
 
 class _Phase(_Read):
@@ -753,8 +778,9 @@ def _launch_problem(
     """Why the server no longer backs this ledger line, or None when it does."""
     if launch.run_id not in member_ids:
         return f"not in eval {ev.eval_id} any more"
-    if not {loaded.tag, case.tag} <= set(ev.tags):
-        return f"eval {ev.eval_id} is not tagged {loaded.tag} {case.tag}"
+    # A run not yet moved by the duplicate migration is still in its per-version eval.
+    if case.tag not in ev.tags or not {loaded.suite.suite_tag, loaded.tag} & set(ev.tags):
+        return f"eval {ev.eval_id} is not tagged {loaded.suite.suite_tag} {case.tag}"
     pinned = [(b.repository, b.commit_sha) for b in ev.baseline_repos]
     if pinned != [(loaded.suite.repository, case.commit)]:
         return f"eval {ev.eval_id} pins {pinned}, the case pins {case.commit[:12]}"
@@ -778,18 +804,17 @@ def score_suite(
         mine = [x for x in launches if x.suite == loaded.tag and x.case == case.id]
         if not mine:
             rows.append(_row(case.id, "-", None, "not launched"))
+        stable = _case_evals(client, loaded, case)
         for launch in mine:
-            ev = _get(client, _Eval, f"/evals/{launch.eval_id}")
-            runs = _get(client, _RunList, f"/evals/{ev.eval_id}/runs", page_size=200).executions
+            ev, runs = _eval_holding(client, launch, stable)
             run = _get(client, _Execution, f"/executions/{launch.run_id}")
             scored_ids.add(launch.run_id)
-            problem = _launch_problem(
-                loaded, case, launch, ev, {r.workflow_execution_id for r in runs}, run
-            )
+            problem = _launch_problem(loaded, case, launch, ev, {r.execution_id for r in runs}, run)
             if problem:
                 rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
                 continue
             score = score_report(case.expected, run.review_verdict, _report_of(client, run))
+            _record_score(client, loaded, case, ev.eval_id, run, score)
             rows.append(
                 ScoredRun(
                     case=case.id,
@@ -804,17 +829,108 @@ def score_suite(
                 )
             )
 
+    # The case evals are shared by every version and verifier: a run another
+    # ledger line names belongs to another table, not to "unrecorded".
+    ledgered = {x.run_id for x in launches}
     unrecorded: list[str] = []
-    for ev in _get(client, _EvalList, "/evals", tag=loaded.tag, page_size=200).evals:
-        for summary in _get(
-            client, _RunList, f"/evals/{ev.eval_id}/runs", page_size=200
-        ).executions:
-            if summary.workflow_execution_id not in scored_ids:
-                unrecorded.append(
-                    f"{summary.workflow_execution_id} in eval {ev.eval_id}: "
-                    "not in the launch ledger, not scored"
-                )
+    for case in loaded.cases:
+        for ev in _case_evals(client, loaded, case):
+            for summary in _member_runs(client, ev.eval_id):
+                if summary.execution_id not in scored_ids | ledgered:
+                    unrecorded.append(
+                        f"{summary.execution_id} in eval {ev.eval_id}: "
+                        "not in the launch ledger, not scored"
+                    )
     return rows, tuple(unrecorded)
+
+
+def _eval_holding(
+    client: httpx.Client, launch: Launch, stable: list[_Eval]
+) -> tuple[_Eval, list[_RunSummary]]:
+    """The eval a ledgered run is in now: the case's stable eval, else the one it launched into.
+
+    A run launched before evals were stable is moved into the stable eval by
+    scripts/migrate_eval_suite_duplicates.py; its ledger line still names the
+    archived duplicate, and is never edited.
+    """
+    if len(stable) == 1:
+        runs = _member_runs(client, stable[0].eval_id)
+        if launch.run_id in {r.execution_id for r in runs}:
+            return stable[0], runs
+    ev = _get(client, _Eval, f"/evals/{launch.eval_id}")
+    return ev, _member_runs(client, ev.eval_id)
+
+
+def _member_runs(client: httpx.Client, eval_id: str) -> list[_RunSummary]:
+    """Every run of the eval, across pages: `total` is the count at any page size."""
+    runs: list[_RunSummary] = []
+    page = 1
+    while True:
+        batch = _get(client, _RunList, f"/evals/{eval_id}/runs", page=page, page_size=200)
+        runs.extend(batch.items)
+        if not batch.items or len(runs) >= batch.total:
+            return runs
+        page += 1
+
+
+def _case_evals(client: httpx.Client, loaded: LoadedSuite, case: Case) -> list[_Eval]:
+    """The case's stable eval: tagged with the suite and the case (repeated `tag` is AND)."""
+    params = httpx.QueryParams(
+        [("tag", loaded.suite.suite_tag), ("tag", case.tag), ("page_size", 200)]
+    )
+    response = client.get("/evals", params=params)
+    response.raise_for_status()
+    return _EvalList.model_validate(response.json()).evals
+
+
+def run_verdict(run: _Execution, score: Score) -> RunVerdict:
+    """The verdict recorded on the eval. ERROR: the run never finished, so it was not judged."""
+    if run.status != "completed":
+        return "ERROR"
+    return "PASS" if score.passed else "FAIL"
+
+
+def evidence_of(case: Case, run: _Execution, score: Score) -> str:
+    """Why the verdict, as markdown: what the scorer looked for and what it found."""
+    missing = "; ".join("/".join(g) for g in score.missing_keywords) or "none"
+    return "\n".join(
+        [
+            f"## {case.id}",
+            "",
+            f"- run status: `{run.status}`",
+            f"- review verdict: `{score.verdict or 'none'}` (a pass needs `blocked`)",
+            f"- blocking findings: {score.findings}",
+            f"- expected file named: {f'`{score.named_file}`' if score.named_file else 'no'}"
+            f" (one of {', '.join(f'`{f}`' for f in case.expected.files)})",
+            f"- keyword groups missing: {missing}",
+            f"- models: {_models_of(run) or '-'}",
+        ]
+    )
+
+
+def _record_score(
+    client: httpx.Client,
+    loaded: LoadedSuite,
+    case: Case,
+    eval_id: str,
+    run: _Execution,
+    score: Score,
+) -> None:
+    response = client.post(
+        f"/evals/{eval_id}/runs/{run.workflow_execution_id}/score",
+        json={
+            "verdict": run_verdict(run, score),
+            "score": 1.0 if score.passed else 0.0,
+            "evidence": evidence_of(case, run, score),
+            "scorer": SCORER,
+            "scorer_version": str(loaded.version),
+        },
+    )
+    if response.is_error:
+        raise RuntimeError(
+            f"scoring {run.workflow_execution_id} in eval {eval_id}: "
+            f"{response.status_code} {_detail(response)}"
+        )
 
 
 def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ...] = ()) -> str:
@@ -994,40 +1110,61 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
     )
 
 
-def launch_suite(
-    loaded: LoadedSuite, client: httpx.Client, ledger: Path, root: Path = ROOT
-) -> list[str]:
-    """Install the workflow, then create one pinned eval per case and start its run.
+def stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> _Created:
+    """The case's one eval: found by `suite:` + `case:` tags, created once if missing.
 
-    Each started run is appended to `ledger` as it starts, so a launch that
-    dies part way still records the runs it began.
+    Refuses to go on when two evals carry the tags (run the duplicate
+    migration first) or when the one found pins another commit.
     """
-    s, w = loaded.suite, loaded.workflow
-    out = [install_workflow(loaded, client, root)]
-    for case in loaded.cases:
+    s = loaded.suite
+    found = _case_evals(client, loaded, case)
+    if len(found) > 1:
+        raise RuntimeError(
+            f"{case.id}: {len(found)} evals tagged {s.suite_tag} {case.tag} "
+            f"({', '.join(e.eval_id for e in found)}); run scripts/migrate_eval_suite_duplicates.py"
+        )
+    if found:
+        created = _Created(eval_id=found[0].eval_id, baseline_repos=found[0].baseline_repos)
+    else:
         response = client.post(
             "/evals",
             json={
-                "name": f"{s.id} v{s.version}: {case.id}",
+                "name": f"{s.eval_suite or s.id}: {case.id}",
                 "goal": s.goal,
-                "starting_workflow_id": w.id,
                 "baseline_repos": [{"repository": s.repository, "requested_ref": case.commit}],
-                "tags": [loaded.tag, case.tag, f"workflow:{w.id}"],
+                "tags": [s.suite_tag, case.tag],
             },
         )
         response.raise_for_status()
         created = _Created.model_validate(response.json())
-        pinned = [b.commit_sha for b in created.baseline_repos]
-        if pinned != [case.commit]:
-            raise RuntimeError(
-                f"{case.id}: eval {created.eval_id} pinned {pinned}, expected {case.commit}"
-            )
+    pinned = [b.commit_sha for b in created.baseline_repos]
+    if pinned != [case.commit]:
+        raise RuntimeError(
+            f"{case.id}: eval {created.eval_id} pinned {pinned}, expected {case.commit}"
+        )
+    return created
+
+
+def launch_suite(
+    loaded: LoadedSuite, client: httpx.Client, ledger: Path, root: Path = ROOT
+) -> list[str]:
+    """Install the workflow, then start one run per case in the case's stable eval.
+
+    The eval is found by its tags and created only when missing. Each started
+    run is appended to `ledger` as it starts, so a launch that dies part way
+    still records the runs it began.
+    """
+    s, w = loaded.suite, loaded.workflow
+    out = [install_workflow(loaded, client, root)]
+    for case in loaded.cases:
+        created = stable_eval(loaded, case, client)
         response = client.post(
             f"/workflows/{w.id}/execute",
             json={
                 "task": case.task,
                 "repos": [s.repository],
                 "eval_id": created.eval_id,
+                "tags": loaded.run_tags,
             },
         )
         response.raise_for_status()
@@ -1060,8 +1197,9 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
         f"{loaded.suite.version}.0.0 with its sha256 digest, then "
         f"GET /workflows/{w.id} must match its phases, prompts and models {w.models}",
     ] + [
-        f"{c.id}: POST /evals baseline {s.repository}@{c.commit} tags [{loaded.tag}, {c.tag}]; "
-        f"then POST /workflows/{w.id}/execute with that eval_id; run recorded in launches.jsonl"
+        f"{c.id}: GET /evals?tag={s.suite_tag}&tag={c.tag}, else POST /evals baseline "
+        f"{s.repository}@{c.commit} with those tags; then POST /workflows/{w.id}/execute "
+        f"with that eval_id and tags {loaded.run_tags}; run recorded in launches.jsonl"
         for c in loaded.cases
     ]
 
