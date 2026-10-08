@@ -567,6 +567,19 @@ def _yaml_ref_lines(key: str, refs: list[PhaseRefResponse]) -> list[str]:
     return [f"    {key}:", *entries] if entries else []
 
 
+def _yaml_workspace_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """What the phase's workspace contains and may reach, where it differs from the default."""
+    lines: list[str] = []
+    if not phase.clone_repos:
+        lines.append("    clone_repos: false")
+    if not phase.delivers_repo_changes:
+        lines.append("    delivers_repo_changes: false")
+    # #1725. Dropped, an exported eval phase reinstalls with the fix in reach.
+    if phase.isolation != "standard":
+        lines.append(f"    isolation: {phase.isolation}")
+    return lines
+
+
 def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     """Build the phase entry lines for a single phase in workflow.yaml."""
     pid = _validate_phase_id(phase.phase_id)
@@ -624,12 +637,7 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # truthy-only test would drop an explicit `false` and reinstall it as
     # `true`, which is the same laundering in the opposite direction. So the
     # guard compares against the default.
-    if not phase.clone_repos:
-        lines.append("    clone_repos: false")
-    if not phase.delivers_repo_changes:
-        lines.append("    delivers_repo_changes: false")
-    if phase.isolation != "standard":
-        lines.append(f"    isolation: {phase.isolation}")
+    lines.extend(_yaml_workspace_lines(phase))
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))

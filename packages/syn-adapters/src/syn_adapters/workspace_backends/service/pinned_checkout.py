@@ -20,7 +20,10 @@ from __future__ import annotations
 
 import re
 import shlex
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 #: The setup script's exit status when a repository cannot be checked out at
 #: the commit it was pinned to (#1458). sysexits' EX_DATAERR - the input named
@@ -150,6 +153,43 @@ def _append_branch_checkout(
     )
     lines.append(f"git -C {repo} checkout --quiet -B {name} {remote}")
     lines.append(f"git -C {repo} branch --quiet --set-upstream-to=origin/{branch} {name}")
+
+
+def require_sealable(
+    cloned: list[str], *, pinned: Mapping[str, str], continued: Mapping[str, str]
+) -> None:
+    """Refuse a workspace that cannot be sealed at its pins (#1725).
+
+    Every cloned repository (``owner/name``) must be pinned, and none may
+    continue a branch: a repository on a default branch's or a branch's head
+    would be sealed at whatever happened to be newest, which seals nothing.
+    A workspace that clones nothing has nothing to seal and passes.
+
+    Raises:
+        ValueError: a cloned repository is unpinned, or a branch is continued.
+    """
+    unpinned = [repo for repo in cloned if repo not in pinned]
+    if unpinned or continued:
+        msg = (
+            "A workspace sealed at its pins needs every cloned repository pinned,"
+            f" and none continuing a branch (unpinned: {unpinned},"
+            f" continued: {sorted(continued)})"
+        )
+        raise ValueError(msg)
+
+
+def append_seal(lines: list[str], pins: Mapping[str, str]) -> None:
+    """Seal each clone directory in ``pins`` at its commit, then delete the GitHub credential.
+
+    The credential is deleted even when ``pins`` is empty: a sealed workspace
+    that cloned nothing is still one the agent must not reach GitHub from.
+    """
+    lines.append("")
+    lines.append("# Seal each repository at its pin: no later commit, no remote (#1725, ADR-073)")
+    for dest, sha in pins.items():
+        append_seal_at_pin(lines, dest=dest, sha=sha)
+    lines.append("rm -f ~/.git-credentials ~/.config/gh/hosts.yml")
+    lines.append("git config --global --unset-all credential.helper || true")
 
 
 def append_seal_at_pin(lines: list[str], *, dest: str, sha: str) -> None:
