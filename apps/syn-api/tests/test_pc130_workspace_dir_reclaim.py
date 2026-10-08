@@ -321,8 +321,10 @@ async def test_ignored_files_are_archived_and_proven_caches_are_not(
     app = ws / "repos" / "app"
     (app / ".git" / "info" / "exclude").write_text("secret-notes.txt\nnode_modules/\n")
     (app / "secret-notes.txt").write_text("unique\n")
+    (app / "package.json").write_text("{}\n")
     (app / "node_modules" / "pkg").mkdir(parents=True)
     (app / "node_modules" / "pkg" / "index.js").write_text("cache\n")
+    (ws / "package.json").write_text("{}\n")
     (ws / "node_modules" / "pkg").mkdir(parents=True)
     (ws / "node_modules" / "pkg" / "index.js").write_text("cache outside a repo\n")
     archive = _Archive()
@@ -332,6 +334,35 @@ async def test_ignored_files_are_archived_and_proven_caches_are_not(
     names = _tar_names(tarball)
     assert "repos/app/secret-notes.txt" in names
     assert not any("node_modules" in n for n in names)
+
+
+async def test_a_cache_name_alone_does_not_make_authored_files_disposable(
+    base: Path, tmp_path: Path
+) -> None:
+    ws = _workspace(base, "ws-named", tmp_path)
+    authored = {
+        "target/only-copy.md": b"authored output, nowhere else\n",
+        ".cache/notes.txt": b"also authored\n",
+        "node_modules/orphan.js": b"no package.json reinstalls this\n",
+    }
+    for name, content in authored.items():
+        (ws / name).parent.mkdir(parents=True, exist_ok=True)
+        (ws / name).write_bytes(content)
+    tagged = ws / "repos" / "app" / "target"
+    tagged.mkdir()
+    (tagged / "CACHEDIR.TAG").write_bytes(b"Signature: 8a477f597d28d172789f06886806bc55\n# cargo\n")
+    (tagged / "build.o").write_bytes(b"regenerable\n")
+    (ws / "repos" / "app" / ".git" / "info" / "exclude").write_text("target/\n")
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive).run_once()
+    assert result.reclaimed == ("ws-named",)
+    [tarball] = archive.files
+    with tarfile.open(fileobj=io.BytesIO(tarball), mode="r:gz") as tar:
+        for name, content in authored.items():
+            member = tar.extractfile(name)
+            assert member is not None
+            assert member.read() == content
+        assert not any("build.o" in n for n in tar.getnames())
 
 
 async def test_bare_repository_with_an_unpushed_branch_keeps_the_dir(
