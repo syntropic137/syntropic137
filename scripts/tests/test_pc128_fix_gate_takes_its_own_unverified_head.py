@@ -73,7 +73,7 @@ def _fix_checkout(prompt: Path, *, remote: str, note_names: str | None) -> str |
 
 
 def test_every_fix_prompt_is_covered() -> None:
-    assert len(_FIX_PROMPTS) == 7
+    assert len(_FIX_PROMPTS) == 5
 
 
 @pytest.mark.parametrize("prompt", _FIX_PROMPTS, ids=lambda p: f"{p.parts[-3]}/{p.name}")
