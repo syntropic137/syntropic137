@@ -1,20 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { stats } from '../../test/evalFixtures'
-import { judgedCount, runsSubtitle, verdictBreakdown } from '../evalSummary'
-
-describe('verdictBreakdown', () => {
-  it('names every population separately, ERROR and unscored included', () => {
-    const s = stats({ pass_count: 2, fail_count: 3, error_count: 1, unscored_count: 6 })
-    expect(verdictBreakdown(s)).toBe('2 PASS · 3 FAIL · 1 ERROR · 6 unscored')
-  })
-})
-
-describe('judgedCount', () => {
-  it('is PASS + FAIL only: an ERROR or unscored run is not a judgement', () => {
-    expect(judgedCount(stats({ pass_count: 1, fail_count: 2, error_count: 7, unscored_count: 9 }))).toBe(3)
-  })
-})
+import { runsSubtitle } from '../evalSummary'
 
 describe('runsSubtitle', () => {
   it('says "all" when there are no runs or they fit on one page', () => {

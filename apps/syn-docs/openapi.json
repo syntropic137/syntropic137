@@ -10875,22 +10875,6 @@
           "cost_per_pass_display": {
             "type": "string",
             "title": "Cost Per Pass Display"
-          },
-          "pass_count": {
-            "type": "integer",
-            "title": "Pass Count"
-          },
-          "fail_count": {
-            "type": "integer",
-            "title": "Fail Count"
-          },
-          "error_count": {
-            "type": "integer",
-            "title": "Error Count"
-          },
-          "unscored_count": {
-            "type": "integer",
-            "title": "Unscored Count"
           }
         },
         "type": "object",
@@ -10902,11 +10886,7 @@
           "median_cost_display",
           "incomplete_cost_count",
           "cost_per_pass_usd",
-          "cost_per_pass_display",
-          "pass_count",
-          "fail_count",
-          "error_count",
-          "unscored_count"
+          "cost_per_pass_display"
         ],
         "title": "EvalRunStatsResponse",
         "description": "How long a set of an eval's runs took and what it cost, over EVERY run in the set.\n\nMedians, not means: one runaway run should not make a variant look slow."

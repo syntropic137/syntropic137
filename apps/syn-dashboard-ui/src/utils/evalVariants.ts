@@ -6,13 +6,13 @@
  */
 
 import type { EvalVariant } from '../api/evals'
-import { judgedCount } from './evalSummary'
+import type { VerdictCounts } from './evalVerdictCounts'
 
 export type VariantSortKey = 'pass_rate' | 'runs' | 'duration' | 'cost' | 'last_run'
 export type VariantSortDir = 'asc' | 'desc'
 
 /** The server's grouping key, so two versions of one workflow never share a React key. */
-export function variantKey(v: EvalVariant): string {
+export function variantKey(v: Pick<EvalVariant, 'workflow_id' | 'workflow_version' | 'models'>): string {
   return `${v.workflow_id}|${v.workflow_version ?? ''}|${v.models.join(',')}`
 }
 
@@ -42,17 +42,24 @@ export function sortVariants(variants: readonly EvalVariant[], key: VariantSortK
 /** Fewer PASS + FAIL runs than this and a pass rate is an anecdote, not a winner. */
 export const MIN_JUDGED_FOR_BEST = 3
 
-/** PASS + FAIL behind a variant's pass rate; null when the API sent no stats. */
-export function variantJudged(v: EvalVariant): number | null {
-  return v.stats ? judgedCount(v.stats) : null
+/** Each variant's verdict counts by `variantKey`; null when the run history does not cover the eval. */
+export type VariantCounts = ReadonlyMap<string, VerdictCounts> | null
+
+/** PASS + FAIL behind a variant's pass rate (ERROR and unscored are not judgements); null when the counts are unavailable. */
+export function variantJudged(v: EvalVariant, counts: VariantCounts): number | null {
+  const c = counts?.get(variantKey(v))
+  return c ? c.pass + c.fail : null
 }
 
 /** Shown in place of a stats figure when the API sent none (an API older than #1772). */
 export const STATS_UNAVAILABLE = 'stats unavailable'
 
-/** The judged sample behind a variant's pass rate, e.g. "4 judged"; null without stats. */
-export function judgedLabel(v: EvalVariant): string | null {
-  const judged = variantJudged(v)
+/** Shown in place of a judged count when the run history does not cover every run. */
+export const JUDGED_UNAVAILABLE = 'judged count unavailable'
+
+/** The judged sample behind a variant's pass rate, e.g. "4 judged"; null when unknown. */
+export function judgedLabel(v: EvalVariant, counts: VariantCounts): string | null {
+  const judged = variantJudged(v, counts)
   return judged === null ? null : `${judged} judged`
 }
 
@@ -60,10 +67,11 @@ export function judgedLabel(v: EvalVariant): string | null {
  * The variant to beat: highest pass rate, then the cheaper median run, then
  * more judged runs behind the figure. Only variants with at least
  * MIN_JUDGED_FOR_BEST judged runs compete, so one lucky cheap run cannot win.
- * Null unless at least two compete - "best" of one is not a comparison.
+ * Null unless at least two compete - "best" of one is not a comparison - and
+ * null when the judged counts are unavailable: no sample size, no winner.
  */
-export function bestVariantKey(variants: readonly EvalVariant[]): string | null {
-  const judged = (v: EvalVariant) => variantJudged(v) ?? 0
+export function bestVariantKey(variants: readonly EvalVariant[], counts: VariantCounts): string | null {
+  const judged = (v: EvalVariant) => variantJudged(v, counts) ?? 0
   const eligible = variants.filter((v) => v.pass_rate !== null && judged(v) >= MIN_JUDGED_FOR_BEST)
   if (eligible.length < 2) return null
   const cost = (v: EvalVariant) => (v.stats?.median_cost_usd == null ? Infinity : Number(v.stats.median_cost_usd))

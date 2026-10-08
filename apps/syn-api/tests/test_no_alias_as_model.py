@@ -171,10 +171,6 @@ def test_eval_run_surfaces_reject_aliases_and_keep_concrete_ids() -> None:
             incomplete_cost_count=0,
             cost_per_pass_usd=None,
             cost_per_pass_display="—",
-            pass_count=0,
-            fail_count=0,
-            error_count=0,
-            unscored_count=1,
         ),
     )
     assert variant.model_dump()["models"] == ["gpt-6-sol", "gpt-6.1-sol"]

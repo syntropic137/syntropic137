@@ -1107,12 +1107,6 @@ class EvalRunStatsResponse(BaseModel):
     passed or no cost is known."""
     cost_per_pass_display: str
     """Says it is a lower bound when some scored run's cost is unknown or incomplete."""
-    pass_count: int
-    fail_count: int
-    error_count: int
-    """Scored, but the scorer could not judge: out of the pass rate, in cost per PASS."""
-    unscored_count: int
-    """No verdict yet: out of the pass rate and out of cost per PASS."""
 
 
 class EvalVariantResponse(BaseModel):

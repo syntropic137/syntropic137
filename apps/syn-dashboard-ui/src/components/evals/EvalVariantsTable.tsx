@@ -6,12 +6,14 @@ import { useIsMobile } from '../../hooks/useMediaQuery'
 import { formatRelativeTime } from '../../utils/dateFormatters'
 import {
   bestVariantKey,
+  JUDGED_UNAVAILABLE,
   judgedLabel,
   sortVariants,
   STATS_UNAVAILABLE,
   variantKey,
   type VariantSortDir,
   type VariantSortKey,
+  type VariantCounts,
 } from '../../utils/evalVariants'
 import { EvalVariantCards } from './EvalVariantCards'
 import { EvalVariantLabel } from './EvalVariantLabel'
@@ -49,7 +51,7 @@ function SortHeader({ column, sort, onSort }: { column: (typeof COLUMNS)[number]
   )
 }
 
-function VariantRow({ v, best }: { v: EvalVariant; best: boolean }) {
+function VariantRow({ v, best, counts }: { v: EvalVariant; best: boolean; counts: VariantCounts }) {
   const cell = 'px-3 py-2 text-right tabular-nums text-[var(--color-text-secondary)]'
   const s = v.stats
   return (
@@ -58,12 +60,12 @@ function VariantRow({ v, best }: { v: EvalVariant; best: boolean }) {
       className={clsx('border-b border-[var(--color-border)] last:border-0', best && 'bg-emerald-500/5 shadow-[inset_3px_0_0_#10b981]')}
     >
       <td className="break-all px-3 py-2">
-        <EvalVariantLabel v={v} best={best} />
+        <EvalVariantLabel v={v} best={best} counts={counts} />
       </td>
       <td className={cell}>{v.run_count}</td>
       <td className={clsx(cell, 'text-[var(--color-text-primary)]')}>
         {v.pass_rate_display}
-        <div className="text-[11px] text-[var(--color-text-muted)]">{judgedLabel(v) ?? STATS_UNAVAILABLE}</div>
+        <div className="text-[11px] text-[var(--color-text-muted)]">{judgedLabel(v, counts) ?? JUDGED_UNAVAILABLE}</div>
       </td>
       <td className={cell}>{s?.median_duration_display ?? STATS_UNAVAILABLE}</td>
       <td className={cell}>
@@ -77,7 +79,7 @@ function VariantRow({ v, best }: { v: EvalVariant; best: boolean }) {
   )
 }
 
-function VariantsTable({ variants, best }: { variants: readonly EvalVariant[]; best: string | null }) {
+function VariantsTable({ variants, best, counts }: { variants: readonly EvalVariant[]; best: string | null; counts: VariantCounts }) {
   const [sort, setSort] = useState<Sort>({ key: 'pass_rate', dir: 'desc' })
   return (
     <div className="overflow-x-auto" data-testid="variants-scroll">
@@ -92,7 +94,7 @@ function VariantsTable({ variants, best }: { variants: readonly EvalVariant[]; b
         </thead>
         <tbody>
           {sortVariants(variants, sort.key, sort.dir).map((v) => (
-            <VariantRow key={variantKey(v)} v={v} best={variantKey(v) === best} />
+            <VariantRow key={variantKey(v)} v={v} best={variantKey(v) === best} counts={counts} />
           ))}
         </tbody>
       </table>
@@ -105,15 +107,17 @@ function VariantsTable({ variants, best }: { variants: readonly EvalVariant[]; b
  * models) variant, with the best one marked. Every figure is the server's,
  * over all of the eval's runs. A sortable table on a wide screen; on a phone,
  * one card per variant (by pass rate), so no figure hides behind a swipe.
+ * `counts` (from the run history) backs the judged counts and the Best badge;
+ * null hides both.
  */
-export function EvalVariantsTable({ variants }: { variants: readonly EvalVariant[] }) {
+export function EvalVariantsTable({ variants, counts }: { variants: readonly EvalVariant[]; counts: VariantCounts }) {
   const isMobile = useIsMobile()
   if (variants.length === 0) {
     return <p className="p-4 text-sm text-[var(--color-text-muted)]">No runs yet, so nothing to compare.</p>
   }
-  const best = bestVariantKey(variants)
-  if (isMobile) return <EvalVariantCards variants={sortVariants(variants, 'pass_rate', 'desc')} best={best} />
-  return <VariantsTable variants={variants} best={best} />
+  const best = bestVariantKey(variants, counts)
+  if (isMobile) return <EvalVariantCards variants={sortVariants(variants, 'pass_rate', 'desc')} best={best} counts={counts} />
+  return <VariantsTable variants={variants} best={best} counts={counts} />
 }
 
 /** The same comparison squeezed into one line per variant, for the eval list. */

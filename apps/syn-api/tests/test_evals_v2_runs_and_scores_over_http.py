@@ -471,8 +471,6 @@ class TestSummary:
         assert shown["stats"]["median_cost_display"] == "$1.00"
         assert Decimal(shown["stats"]["cost_per_pass_usd"]) == Decimal("3.25")
         assert shown["stats"]["cost_per_pass_display"] == "$3.25"
-        counts = ("pass_count", "fail_count", "error_count", "unscored_count")
-        assert [shown["stats"][k] for k in counts] == [2, 1, 1, 1]
 
     async def test_a_lower_bound_is_never_shown_as_a_whole_cost_or_duration(
         self, client: AsyncClient, lane2: _Lane2

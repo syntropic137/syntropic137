@@ -12,6 +12,7 @@ import { EvalHeader, EvalRunsChart, EvalRunsTable, EvalSummaryStrip, EvalVariant
 import { useEvalDetail } from '../../hooks/useEvalDetail'
 import { useEvalTimeline, type EvalTimelineState } from '../../hooks/useEvalTimeline'
 import { runsSubtitle } from '../../utils/evalSummary'
+import { evalVerdictCounts } from '../../utils/evalVerdictCounts'
 
 function timelineSubtitle(timeline: EvalTimelineState): string {
   if (timeline.kind !== 'ready') return 'Every run, by variant'
@@ -48,14 +49,15 @@ export function EvalDetail() {
   }
 
   const e = state.eval
+  const counts = evalVerdictCounts(timeline, e)
   return (
     <div className="min-w-0 space-y-6">
       <Breadcrumbs items={[{ label: 'Evals', href: '/evals' }, { label: e.name }]} />
       <EvalHeader e={e} />
-      <EvalSummaryStrip e={e} />
+      <EvalSummaryStrip e={e} counts={counts.eval} />
       <Card>
         <CardHeader title="Compare variants" subtitle={`Workflow × version × models, over all ${e.run_count} runs`} />
-        <EvalVariantsTable variants={e.variants ?? []} />
+        <EvalVariantsTable variants={e.variants ?? []} counts={counts.byVariant} />
       </Card>
       <TimelineCard timeline={timeline} />
       <Card>

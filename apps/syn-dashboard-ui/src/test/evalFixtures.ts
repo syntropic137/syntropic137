@@ -7,6 +7,8 @@
  */
 
 import type { EvalRun, EvalRunListResponse, EvalRunStats, EvalSummary, EvalVariant } from '../api/evals'
+import { variantKey } from '../utils/evalVariants'
+import type { VerdictCounts } from '../utils/evalVerdictCounts'
 
 export function stats(overrides: Partial<EvalRunStats> = {}): EvalRunStats {
   return {
@@ -18,10 +20,6 @@ export function stats(overrides: Partial<EvalRunStats> = {}): EvalRunStats {
     incomplete_cost_count: 1,
     cost_per_pass_usd: '0.6185',
     cost_per_pass_display: '>=$0.62 (partial)',
-    pass_count: 2,
-    fail_count: 1,
-    error_count: 0,
-    unscored_count: 0,
     ...overrides,
   }
 }
@@ -104,6 +102,19 @@ export function evalRun(overrides: Partial<EvalRun> = {}): EvalRun {
     scored_at: '2026-10-06T12:30:00Z',
     ...overrides,
   }
+}
+
+/** Defaults to the default variant's runs: 2 PASS and 1 FAIL, 3 judged. */
+export function verdictCounts(overrides: Partial<VerdictCounts> = {}): VerdictCounts {
+  return { pass: 2, fail: 1, error: 0, unscored: 0, ...overrides }
+}
+
+/** Each variant's counts by `variantKey`, overridden per workflow id. */
+export function countsFor(
+  variants: readonly EvalVariant[],
+  by: Record<string, Partial<VerdictCounts>> = {},
+): ReadonlyMap<string, VerdictCounts> {
+  return new Map(variants.map((v) => [variantKey(v), verdictCounts(by[v.workflow_id])]))
 }
 
 export function runPage(items: EvalRun[], total = items.length): EvalRunListResponse {

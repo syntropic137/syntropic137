@@ -167,10 +167,6 @@ def stats_response(stats: EvalRunStats) -> EvalRunStatsResponse:
         incomplete_cost_count=stats.incomplete_cost_count,
         cost_per_pass_usd=stats.cost_per_pass_usd,
         cost_per_pass_display=format_cost(stats.cost_per_pass_usd, stats.incomplete_spend_count),
-        pass_count=stats.pass_count,
-        fail_count=stats.fail_count,
-        error_count=stats.error_count,
-        unscored_count=stats.unscored_count,
     )
 
 

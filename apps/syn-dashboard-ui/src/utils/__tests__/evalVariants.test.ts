@@ -1,23 +1,25 @@
 import { describe, expect, it } from 'vitest'
 
-import { stats, variant, withoutStats } from '../../test/evalFixtures'
+import { countsFor, stats, variant, withoutStats } from '../../test/evalFixtures'
 import { MIN_JUDGED_FOR_BEST, bestVariantKey, sortVariants, variantKey } from '../evalVariants'
 
 describe('bestVariantKey', () => {
   it('is null with fewer than two judged variants: best of one is not a comparison', () => {
-    expect(bestVariantKey([variant(), variant({ workflow_id: 'wf-err', pass_rate: null })])).toBeNull()
-    expect(bestVariantKey([])).toBeNull()
+    const vs = [variant(), variant({ workflow_id: 'wf-err', pass_rate: null })]
+    expect(bestVariantKey(vs, countsFor(vs))).toBeNull()
+    expect(bestVariantKey([], new Map())).toBeNull()
   })
 
   it('breaks a pass-rate tie on the cheaper median run, then on more judged runs', () => {
     const dear = variant({ workflow_id: 'wf-dear', pass_rate: 1, stats: stats({ median_cost_usd: '2.00' }) })
     const cheap = variant({ workflow_id: 'wf-cheap', pass_rate: 1, stats: stats({ median_cost_usd: '0.20' }) })
-    expect(bestVariantKey([dear, cheap])).toBe(variantKey(cheap))
+    expect(bestVariantKey([dear, cheap], countsFor([dear, cheap]))).toBe(variantKey(cheap))
 
     // run_count is the other way round: unscored and ERROR runs are not judgements.
-    const few = variant({ workflow_id: 'wf-few', pass_rate: 1, run_count: 40, stats: stats({ pass_count: 3, fail_count: 0 }) })
-    const many = variant({ workflow_id: 'wf-many', pass_rate: 1, run_count: 9, stats: stats({ pass_count: 9, fail_count: 0 }) })
-    expect(bestVariantKey([few, many])).toBe(variantKey(many))
+    const few = variant({ workflow_id: 'wf-few', pass_rate: 1, run_count: 40 })
+    const many = variant({ workflow_id: 'wf-many', pass_rate: 1, run_count: 9 })
+    const counts = countsFor([few, many], { 'wf-few': { pass: 3, fail: 0, unscored: 37 }, 'wf-many': { pass: 9, fail: 0 } })
+    expect(bestVariantKey([few, many], counts)).toBe(variantKey(many))
   })
 
   it('never crowns a variant judged fewer than MIN_JUDGED_FOR_BEST times, however cheap', () => {
@@ -26,20 +28,26 @@ describe('bestVariantKey', () => {
       workflow_id: 'wf-lucky',
       pass_rate: 1,
       run_count: 8,
-      stats: stats({ median_cost_usd: '0.10', pass_count: 1, fail_count: 0, error_count: 2, unscored_count: 5 }),
+      stats: stats({ median_cost_usd: '0.10' }),
     })
-    const proven = variant({ workflow_id: 'wf-proven', pass_rate: 0.75, stats: stats({ median_cost_usd: '0.90', pass_count: 3, fail_count: 1 }) })
-    const other = variant({ workflow_id: 'wf-other', pass_rate: 0.5, stats: stats({ pass_count: 2, fail_count: 2 }) })
+    const proven = variant({ workflow_id: 'wf-proven', pass_rate: 0.75, stats: stats({ median_cost_usd: '0.90' }) })
+    const other = variant({ workflow_id: 'wf-other', pass_rate: 0.5 })
+    const counts = countsFor([lucky, proven, other], {
+      'wf-lucky': { pass: 1, fail: 0, error: 2, unscored: 5 },
+      'wf-proven': { pass: 3, fail: 1 },
+      'wf-other': { pass: 2, fail: 2 },
+    })
     expect(MIN_JUDGED_FOR_BEST).toBe(3)
-    expect(bestVariantKey([lucky, proven, other])).toBe(variantKey(proven))
+    expect(bestVariantKey([lucky, proven, other], counts)).toBe(variantKey(proven))
     // With only one variant left that has enough judged runs, there is no comparison to win.
-    expect(bestVariantKey([lucky, proven])).toBeNull()
+    expect(bestVariantKey([lucky, proven], counts)).toBeNull()
   })
 
-  it('has no best when the API sent no stats: a judged count cannot be guessed from a rounded rate', () => {
-    const a = withoutStats(variant({ workflow_id: 'a', pass_rate: 1 }))
-    const b = withoutStats(variant({ workflow_id: 'b', pass_rate: 0.5 }))
-    expect(bestVariantKey([a, b])).toBeNull()
+  it('has no best when the judged counts are unavailable: a sample size cannot be guessed from a rounded rate', () => {
+    const a = variant({ workflow_id: 'a', pass_rate: 1 })
+    const b = variant({ workflow_id: 'b', pass_rate: 0.5 })
+    expect(bestVariantKey([a, b], countsFor([a, b]))).toBe(variantKey(a))
+    expect(bestVariantKey([a, b], null)).toBeNull()
   })
 })
 

@@ -111,20 +111,45 @@ describe('EvalDetail', () => {
     // One run on this page; the eval has 120. Every figure in the strip is
     // the eval-level display string, which the page could not have derived
     // from the runs it holds.
-    const counts = { pass_count: 37, fail_count: 53, error_count: 7, unscored_count: 23 }
-    const whole = evalSummary({ run_count: 120, scored_count: 97, pass_rate_display: '41% judged' })
-    serve({ ...whole, stats: { ...whole.stats!, ...counts } }, runPage([evalRun()], 120))
+    // The run history read is that one run too, so verdict counts are not
+    // claimed: one PASS out of 120 would be a lie.
+    serve(evalSummary({ run_count: 120, scored_count: 97, pass_rate_display: '41% judged' }), runPage([evalRun()], 120))
     renderDetail()
     const strip = await screen.findByRole('region', { name: 'Summary' })
 
     expect(within(strip).getByText('41% judged')).toBeInTheDocument()
     expect(within(strip).getByText(/ERROR and unscored excluded/)).toBeInTheDocument()
     expect(within(strip).getByText('97 / 120')).toBeInTheDocument()
-    expect(within(strip).getByText('37 PASS · 53 FAIL · 7 ERROR · 23 unscored')).toBeInTheDocument()
+    expect(await within(strip).findByText('verdict counts unavailable')).toBeInTheDocument()
+    expect(within(strip).queryByText(/PASS · /)).toBeNull()
+    expect(screen.getByText('judged count unavailable')).toBeInTheDocument()
+    expect(document.querySelector('[data-best]')).toBeNull()
     expect(within(strip).getByText('18m all')).toBeInTheDocument()
     expect(within(strip).getByText('$0.39 all')).toBeInTheDocument()
     expect(within(strip).getByText('$0.58 all')).toBeInTheDocument()
     expect(screen.getByText('Workflow × version × models, over all 120 runs')).toBeInTheDocument()
+  })
+
+  it('counts verdicts and crowns a best variant from a run history that covers every run', async () => {
+    const fast = { workflow_id: 'wf-fast', models: [{ phase_id: 'implement', model: 'claude-haiku-4-5' }] }
+    const verdicts = ['PASS', 'PASS', 'PASS', 'FAIL', 'ERROR', null] as const
+    const runs = [
+      ...verdicts.map((verdict, i) => evalRun({ execution_id: `exec-s${i}`, verdict })),
+      ...(['PASS', 'FAIL', 'FAIL'] as const).map((verdict, i) => evalRun({ execution_id: `exec-f${i}`, verdict, ...fast })),
+    ]
+    const variants = [
+      variant({ run_count: 6, pass_rate: 0.75 }),
+      variant({ workflow_id: 'wf-fast', models: ['claude-haiku-4-5'], run_count: 3, pass_rate: 0.3333 }),
+    ]
+    serve(evalSummary({ run_count: 9, scored_count: 8, variants }), runPage(runs))
+    renderDetail()
+    const strip = await screen.findByRole('region', { name: 'Summary' })
+
+    expect(await within(strip).findByText('4 PASS · 3 FAIL · 1 ERROR · 1 unscored')).toBeInTheDocument()
+    const [best] = document.querySelectorAll('tr[data-best]')
+    expect(best).toHaveTextContent('wf-verifier')
+    expect(within(best as HTMLElement).getByText('Best · 4 judged')).toBeInTheDocument()
+    expect(screen.getByText('3 judged')).toBeInTheDocument()
   })
 
   it('renders an API response with no stats (an API older than #1772) instead of crashing', async () => {

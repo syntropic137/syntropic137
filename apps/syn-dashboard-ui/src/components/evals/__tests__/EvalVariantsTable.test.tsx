@@ -2,12 +2,19 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { LONG_MODEL, stats, variant, withoutStats } from '../../../test/evalFixtures'
+import type { EvalVariant } from '../../../api/evals'
+import { LONG_MODEL, countsFor, stats, variant, withoutStats } from '../../../test/evalFixtures'
+import type { VerdictCounts } from '../../../utils/evalVerdictCounts'
 import { EvalVariantsStrip, EvalVariantsTable } from '../EvalVariantsTable'
+
+/** The table with counts from a complete run history (3 judged each unless `by` says otherwise); `by={null}` when incomplete. */
+function Compare({ variants, by = {} }: { variants: EvalVariant[]; by?: Record<string, Partial<VerdictCounts>> | null }) {
+  return <EvalVariantsTable variants={variants} counts={by === null ? null : countsFor(variants, by)} />
+}
 
 describe('EvalVariantsTable (Compare)', () => {
   it('prints the server display strings verbatim, not a client reformat of the numbers', () => {
-    render(<EvalVariantsTable variants={[variant()]} />)
+    render(<Compare variants={[variant()]} />)
     expect(screen.getByText('66.7% (2/3)')).toBeInTheDocument()
     expect(screen.getByText('20m med.')).toBeInTheDocument()
     expect(screen.getByText('$0.41 med.')).toBeInTheDocument()
@@ -16,7 +23,7 @@ describe('EvalVariantsTable (Compare)', () => {
   })
 
   it("shows the variant's last verdict, and its run count without an ERROR-inflated pass denominator", () => {
-    render(<EvalVariantsTable variants={[variant({ run_count: 5, pass_count: 2, last_verdict: 'ERROR' })]} />)
+    render(<Compare variants={[variant({ run_count: 5, pass_count: 2, last_verdict: 'ERROR' })]} />)
     const [, row] = screen.getAllByRole('row')
     expect(within(row).getByText('ERROR')).toHaveAttribute('data-verdict', 'ERROR')
     expect(within(row).getByText('5')).toBeInTheDocument()
@@ -25,7 +32,7 @@ describe('EvalVariantsTable (Compare)', () => {
 
   it('marks the best variant: highest pass rate, ERROR-only (no rate) never wins', () => {
     render(
-      <EvalVariantsTable
+      <Compare
         variants={[
           variant({ workflow_id: 'wf-errors', pass_rate: null, pass_rate_display: '—', last_verdict: 'ERROR' }),
           variant({ workflow_id: 'wf-low', pass_rate: 0.25, pass_rate_display: '25%' }),
@@ -41,11 +48,12 @@ describe('EvalVariantsTable (Compare)', () => {
 
   it('crowns no variant whose pass rate rests on fewer than three judged runs', () => {
     render(
-      <EvalVariantsTable
+      <Compare
         variants={[
-          variant({ workflow_id: 'wf-lucky', pass_rate: 1, stats: stats({ median_cost_usd: '0.10', pass_count: 1, fail_count: 0, unscored_count: 7 }) }),
-          variant({ workflow_id: 'wf-steady', pass_rate: 0.5, stats: stats({ pass_count: 2, fail_count: 2 }) }),
+          variant({ workflow_id: 'wf-lucky', pass_rate: 1, stats: stats({ median_cost_usd: '0.10' }) }),
+          variant({ workflow_id: 'wf-steady', pass_rate: 0.5 }),
         ]}
+        by={{ 'wf-lucky': { pass: 1, fail: 0, unscored: 7 }, 'wf-steady': { pass: 2, fail: 2 } }}
       />,
     )
     expect(document.querySelector('tr[data-best]')).toBeNull()
@@ -53,9 +61,17 @@ describe('EvalVariantsTable (Compare)', () => {
     expect(screen.getByText('4 judged')).toBeInTheDocument()
   })
 
+  it('says judged counts are unavailable and crowns no variant when the run history is incomplete', () => {
+    const vs = [variant({ workflow_id: 'wf-low', pass_rate: 0.25 }), variant({ workflow_id: 'wf-high', pass_rate: 0.9 })]
+    render(<Compare variants={vs} by={null} />)
+    expect(document.querySelector('tr[data-best]')).toBeNull()
+    expect(screen.getAllByText('judged count unavailable')).toHaveLength(2)
+    expect(screen.queryByText(/\d judged/)).toBeNull()
+  })
+
   it('renders variants with no stats (an older API): figures say unavailable and sorting still works', async () => {
     render(
-      <EvalVariantsTable
+      <Compare
         variants={[withoutStats(variant({ workflow_id: 'wf-old' })), variant({ workflow_id: 'wf-new', stats: stats({ median_cost_usd: '0.20' }) })]}
       />,
     )
@@ -63,12 +79,12 @@ describe('EvalVariantsTable (Compare)', () => {
     await userEvent.click(screen.getByRole('button', { name: /Median cost/ }))
     expect(order()).toEqual(['wf-new', 'wf-old'])
     const [, , oldRow] = screen.getAllByRole('row')
-    expect(within(oldRow).getAllByText('stats unavailable')).toHaveLength(3)
+    expect(within(oldRow).getAllByText('stats unavailable')).toHaveLength(2)
   })
 
   it('sorts by a column on click, flipping on a second click, with a missing figure always last', async () => {
     render(
-      <EvalVariantsTable
+      <Compare
         variants={[
           variant({ workflow_id: 'wf-mid', stats: stats({ median_cost_usd: '0.50' }) }),
           variant({ workflow_id: 'wf-unknown', stats: stats({ median_cost_usd: null }) }),
@@ -87,14 +103,14 @@ describe('EvalVariantsTable (Compare)', () => {
   })
 
   it('scrolls inside its own container on a narrow screen instead of dropping columns', () => {
-    render(<EvalVariantsTable variants={[variant()]} />)
+    render(<Compare variants={[variant()]} />)
     expect(screen.getByTestId('variants-scroll')).toHaveClass('overflow-x-auto')
     expect(screen.getByText('$0.41 med.').closest('td')).not.toHaveClass('hidden')
   })
 
   it('shows one row per variant with its workflow and observed models', () => {
     render(
-      <EvalVariantsTable
+      <Compare
         variants={[
           variant(),
           variant({ workflow_id: 'wf-fast', models: ['claude-haiku-4-5', LONG_MODEL], pass_rate_display: '0% (0/1)' }),
@@ -108,7 +124,7 @@ describe('EvalVariantsTable (Compare)', () => {
 
   it('shows two versions of one workflow as two rows, each naming its version', () => {
     render(
-      <EvalVariantsTable
+      <Compare
         variants={[
           variant({ workflow_version: '1.4.0', pass_rate_display: '100% (1/1)' }),
           variant({ workflow_version: '2.0.0', pass_rate_display: '0% (0/1)' }),
@@ -121,17 +137,17 @@ describe('EvalVariantsTable (Compare)', () => {
   })
 
   it('omits the version when the server recorded none', () => {
-    render(<EvalVariantsTable variants={[variant({ workflow_version: null })]} />)
+    render(<Compare variants={[variant({ workflow_version: null })]} />)
     expect(screen.queryByText('@', { exact: false })).toBeNull()
   })
 
   it('says there is nothing to compare when no variant has run', () => {
-    render(<EvalVariantsTable variants={[]} />)
+    render(<Compare variants={[]} />)
     expect(screen.getByText(/nothing to compare/)).toBeInTheDocument()
   })
 
   it('lets long workflow ids and model ids break instead of overflowing', () => {
-    render(<EvalVariantsTable variants={[variant({ models: [LONG_MODEL] })]} />)
+    render(<Compare variants={[variant({ models: [LONG_MODEL] })]} />)
     expect(screen.getByText(LONG_MODEL).closest('td')).toHaveClass('break-all')
     expect(screen.getByRole('table')).toHaveClass('table-fixed')
   })
@@ -151,7 +167,7 @@ describe('EvalVariantsTable on a phone', () => {
 
   it('shows one card per variant with every figure in view, no table to swipe', () => {
     phone()
-    render(<EvalVariantsTable variants={[variant()]} />)
+    render(<Compare variants={[variant()]} />)
     expect(screen.queryByRole('table')).toBeNull()
     const [card] = within(screen.getByRole('list', { name: 'Variants' })).getAllByRole('listitem')
     for (const [label, value] of [
@@ -168,7 +184,7 @@ describe('EvalVariantsTable on a phone', () => {
 
   it('marks the best card the same way the table marks the best row', () => {
     phone()
-    render(<EvalVariantsTable variants={[variant({ workflow_id: 'wf-low', pass_rate: 0.2 }), variant({ workflow_id: 'wf-high', pass_rate: 0.9 })]} />)
+    render(<Compare variants={[variant({ workflow_id: 'wf-low', pass_rate: 0.2 }), variant({ workflow_id: 'wf-high', pass_rate: 0.9 })]} />)
     const best = document.querySelectorAll('li[data-best]')
     expect(best).toHaveLength(1)
     expect(best[0]).toHaveTextContent('wf-high')
