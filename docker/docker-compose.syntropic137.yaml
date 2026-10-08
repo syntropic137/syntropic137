@@ -600,6 +600,8 @@ services:
     networks:
     - syn-internal
   envoy-proxy:
+    environment:
+      SYN_PLATFORM_ACCESS_ENABLED: ${SYN_PLATFORM_ACCESS_ENABLED:-false}
     networks:
     - syn-internal
     - agent-net

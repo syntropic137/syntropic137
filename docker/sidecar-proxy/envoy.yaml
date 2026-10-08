@@ -7,6 +7,19 @@
 # 3. Logs all requests for observability
 # 4. Enforces rate limits
 
+# The only runtime value this proxy reads from disk is the platform-access
+# switch, written by entrypoint.sh from SYN_PLATFORM_ACCESS_ENABLED (ADR-072).
+layered_runtime:
+  layers:
+    - name: static
+      static_layer: {}
+    - name: syn_platform_switch
+      disk_layer:
+        symlink_root: /var/lib/syn-envoy-runtime
+        subdirectory: envoy
+    - name: admin
+      admin_layer: {}
+
 admin:
   address:
     socket_address:
@@ -68,6 +81,14 @@ static_resources:
                         # the workspace's own Bearer token passes unchanged.
                         - match:
                             prefix: "/syn-platform/api/v1/"
+                            runtime_fraction:
+                              # OFF unless entrypoint.sh found
+                              # SYN_PLATFORM_ACCESS_ENABLED true: no route, so
+                              # nothing reaches the API (ADR-072).
+                              default_value:
+                                numerator: 0
+                                denominator: HUNDRED
+                              runtime_key: syn_platform.access_enabled
                           route:
                             cluster: syn_platform_api
                             timeout: 30s
@@ -83,6 +104,14 @@ static_resources:
                               disabled: true
                         - match:
                             path: "/syn-platform/health"
+                            runtime_fraction:
+                              # OFF unless entrypoint.sh found
+                              # SYN_PLATFORM_ACCESS_ENABLED true: no route, so
+                              # nothing reaches the API (ADR-072).
+                              default_value:
+                                numerator: 0
+                                denominator: HUNDRED
+                              runtime_key: syn_platform.access_enabled
                           route:
                             cluster: syn_platform_api
                             timeout: 10s
